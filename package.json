@@ -1,0 +1,15 @@
+{
+  "name": "root",
+  "private": true,
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.2.4",
+    "@tiptap/core": "^3.20.0",
+    "@tiptap/extension-image": "^3.20.0",
+    "@tiptap/starter-kit": "^3.20.0",
+    "lucide-react": "^1.14.0",
+    "tailwindcss": "^4.2.4"
+  }
+}

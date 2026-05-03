@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    @page { size: A4; margin: 14mm; }
+    body { font-family: DejaVu Sans, Arial, sans-serif; font-size: 11px; color: #0f172a; line-height: 1.45; }
+    h1 { font-size: 18px; margin: 0 0 10px 0; color: #1e293b; }
+    .meta { font-size: 10px; color: #64748b; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { background: #f1f5f9; font-weight: 600; }
+    .num { text-align: center; width: 44px; }
+    .comment { font-size: 10px; color: #334155; white-space: pre-wrap; }
+    h2 { font-size: 13px; margin: 18px 0 8px 0; color: #334155; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+    .ans { font-size: 10px; margin-bottom: 8px; padding: 6px 8px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+    .ans-num { font-weight: 700; color: #7c3aed; }
+    .ans-status-ok { color: #166534; font-weight: 700; }
+    .ans-status-bad { color: #991b1b; font-weight: 700; }
+    .ans-meta { color: #475569; margin-top: 2px; }
+    .ans-answer { margin-top: 2px; }
+    .ans-correct { margin-top: 2px; color: #334155; }
+    .ans-time { margin-top: 2px; color: #475569; }
+  </style>
+</head>
+<body>
+  <h1>Отчёт по уроку</h1>
+  <div class="meta">
+    Комната: {{ room_id|default:"—" }}<br/>
+    Вариант ID: {% if variant_id %}{{ variant_id }}{% else %}—{% endif %}<br/>
+    Сформировано: {{ generated_at }}
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Ученик</th>
+        <th class="num">Всего</th>
+        <th class="num">Верно</th>
+        <th class="num">Неверно</th>
+        <th class="num">Пусто</th>
+        <th>Комментарий учителя</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+      <tr>
+        <td>{{ r.student }}</td>
+        <td class="num">{{ r.total_tasks }}</td>
+        <td class="num">{{ r.correct_count }}</td>
+        <td class="num">{{ r.wrong_count }}</td>
+        <td class="num">{{ r.empty_count }}</td>
+        <td class="comment">{{ r.teacher_comment|default:"" }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6">Нет сохранённых результатов по этой комнате.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if answers_sections %}
+  <h2>Подробные результаты по ученикам</h2>
+  {% for sec in answers_sections %}
+  <h2 style="font-size:12px;margin-top:12px;">
+    {{ sec.student }}
+    {% if sec.total_elapsed_seconds != None %}
+      <span style="font-size:10px;color:#64748b;font-weight:400;">(время: {{ sec.total_elapsed_mmss }})</span>
+    {% endif %}
+  </h2>
+  {% if sec.wrong_rows %}
+  <div class="ans" style="background:#fff7ed;border-color:#fdba74;">
+    <div style="font-weight:700;color:#9a3412;margin-bottom:4px;">Ошибки по задачам</div>
+    {% for w in sec.wrong_rows %}
+      <div style="margin:2px 0;color:#7c2d12;">
+        №{{ w.task_number }}{% if w.subtopic_title %} — {{ w.subtopic_title }}{% endif %}
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% for a in sec.rows %}
+  <div class="ans">
+    <span class="ans-num">№{{ a.task_number }}</span>
+    —
+    {% if a.is_correct %}
+      <span class="ans-status-ok">верно</span>
+    {% else %}
+      <span class="ans-status-bad">неверно</span>
+    {% endif %}
+    {% if a.is_empty %}, пусто{% endif %}
+    {% if a.subtopic_title %}
+      <div class="ans-meta">Подтема: {{ a.subtopic_title }}</div>
+    {% endif %}
+    <div class="ans-answer">Ответ ученика: {{ a.answer|default:"—"|truncatechars:400 }}</div>
+    <div class="ans-correct">Правильный ответ: {{ a.correct_answer|default:"—"|truncatechars:400 }}</div>
+    {% if a.elapsed_seconds != None %}
+      <div class="ans-time">Время на момент ответа: {{ a.elapsed_mmss }}</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% endfor %}
+  {% endif %}
+</body>
+</html>

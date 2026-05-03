@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- soft shadow for inner tile -->
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <!-- background -->
+  <rect width="1024" height="1024" fill="#2F6FFF"/>
+
+  <!-- inner rounded square -->
+  <rect x="200" y="200" width="624" height="624" rx="140" fill="#5F8FFF" filter="url(#shadow)"/>
+
+  <!-- sigma (drawn as thick stroke for stable rendering) -->
+  <path
+    d="M660 340H420L560 512L420 684H660"
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-width="88"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

@@ -1,0 +1,388 @@
+@page {
+    size: A4 landscape;
+    margin: 7mm;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: "Times New Roman", Times, serif;
+    font-size: 11pt;
+    line-height: 1.3;
+    color: #000;
+}
+
+/* ===== Заголовок ===== */
+.header {
+    text-align: center;
+    margin-bottom: 18pt;
+}
+
+.header h2 {
+    font-size: 12.5pt;
+    font-weight: bold;
+}
+
+/* ===== Задание ===== */
+/* flex + align-items: flex-start — рамка номера не растягивается на всю высоту задания (в отличие от table-cell) */
+.task {
+    display: block;
+    width: 100%;
+    margin-bottom: 14pt;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    -webkit-column-break-inside: avoid;
+    border: none;
+}
+
+.task-main {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 6pt;
+    width: 100%;
+    border: none;
+}
+
+.task-with-answer {
+    border: none;
+}
+
+.task-number,
+.ta {
+    flex: 0 0 auto;
+    width: 30pt;
+    min-width: 30pt;
+    max-width: 30pt;
+    padding: 2pt 3pt;
+    box-sizing: border-box;
+    background-color: #fff;
+    border: 0.8pt solid #000;
+    text-align: center;
+    font-weight: bold;
+    font-size: 11pt;
+    line-height: 1.1;
+    align-self: flex-start;
+}
+
+.ta-inner {
+    border: none;
+    outline: none;
+    display: inline;
+}
+
+.task-body {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    padding-left: 0;
+}
+
+.task-body p {
+    margin-bottom: 4pt;
+    text-align: justify;
+}
+
+/* Ссылка на скачивание файла */
+.task-file-download {
+    margin: 6pt 0;
+}
+
+.pdf-file-link {
+    color: #0066cc;
+    text-decoration: none;
+    font-size: 9pt;
+    
+}
+
+/* Изображения — не шире колонки задания (как текст) */
+.task-body img {
+    width: auto !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: 200pt !important;
+    object-fit: contain !important;
+    display: block;
+    margin: 4pt auto;
+}
+
+.task-body figure,
+.task-body figure.image {
+    max-width: 100% !important;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* Таблицы внутри заданий (CKEditor) — компактно, чтобы влезали в колонку PDF */
+.task-body table {
+    border-collapse: collapse;
+    margin: 4pt 0;
+    color: #000;
+    background-color: #fff;
+    width: 100%;
+    max-width: 100%;
+    table-layout: fixed;
+    font-size: 5pt;
+    line-height: 1.12;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+.task-body th,
+.task-body td {
+    border: 0.6pt solid #000;
+    padding: 1.5pt 2pt;
+    color: #000;
+    background-color: #fff;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    font-size: 5pt;
+}
+.task-body th {
+    font-weight: bold;
+    text-align: center;
+}
+/* Запросы — по левому краю, числа — по правому (WeasyPrint: используем first-of-type вместо :not) */
+.task-body td {
+    text-align: right;
+}
+.task-body td:first-of-type {
+    text-align: left;
+}
+/* Figure/изображения — без чёрного фона при ошибке загрузки */
+.task-body figure {
+    margin: 6pt 0;
+    max-width: 100%;
+}
+.task-body figure,
+.task-body figure img {
+    background-color: transparent !important;
+}
+.task-body figure img {
+    width: auto !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: 200pt !important;
+    object-fit: contain !important;
+    display: block;
+    margin: 0 auto;
+}
+.task-body code,
+.task-body table code {
+    font-family: monospace;
+    font-size: 0.95em;
+    color: #000 !important;
+    background-color: #f5f5f5 !important;
+    padding: 0 2pt;
+}
+
+/* ===== Ответ ===== */
+.answer-line {
+    margin-top: 6pt;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    page-break-before: avoid;
+    break-before: avoid;
+}
+
+.answer-field {
+    border-bottom: 0.8pt solid #000;
+    display: inline-block;
+    width: 140pt;
+    height: 12pt;
+    vertical-align: bottom;
+}
+
+/* ===== Математика ===== */
+.math-block {
+    display: block;
+    text-align: center;
+    margin: 6pt 0;
+}
+
+.math-inline {
+    display: inline;
+}
+
+.latex-error {
+    color: #000;
+    font-size: 9pt;
+}
+
+/* ===== Таблица ответов ===== */
+.answers-page {
+    page-break-before: always;
+}
+
+.answers-title {
+    text-align: center;
+    font-size: 12pt;
+    font-weight: bold;
+    margin-bottom: 14pt;
+}
+
+.answers-table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 0.8pt solid #000;
+    table-layout: auto;
+}
+
+.answers-table th,
+.answers-table td {
+    border: 0.8pt solid #000;
+    padding: 5pt 4pt;
+    text-align: center;
+    font-size: 10pt;
+    color: #000;
+    background-color: #fff;
+    vertical-align: top;
+}
+
+.answers-table th {
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+/* Перенос длинных ответов на несколько строк */
+.answers-table td.answer-cell {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: normal;
+    word-break: break-word;
+    text-align: center;
+    min-width: 28pt;
+}
+
+.answers-page .answers-table {
+    margin-bottom: 12pt;
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
+
+.answers-page .answers-table:last-child {
+    margin-bottom: 0;
+}
+
+.answers-table thead,
+.answers-table tbody,
+.answers-table tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
+/* ===== Страница с инструкцией: инструкция слева, заметки справа ===== */
+.pdf-instruction-page {
+    display: flex;
+    gap: 20pt;
+    margin-bottom: 16pt;
+    page-break-after: always;
+}
+.pdf-instruction-column {
+    flex: 1;
+    min-width: 0;
+}
+.pdf-instruction-column .pdf-preview {
+    margin-bottom: 0;
+}
+.pdf-notes-column {
+    flex: 1;
+    min-width: 0;
+    min-height: 120pt;
+}
+
+/* ===== Инструкция (формат картинки 1) — без восклицательного знака ===== */
+.pdf-preview.pdf-instruction {
+    page-break-inside: avoid;
+}
+.pdf-instruction .instruction-title {
+    text-align: center;
+    font-size: 12.5pt;
+    font-weight: bold;
+    margin-bottom: 14pt;
+}
+.pdf-instruction .instruction-intro {
+    text-align: justify;
+    text-indent: 1.5em;
+    margin-bottom: 8pt;
+}
+.pdf-instruction .instruction-body {
+    text-align: justify;
+    line-height: 1.35;
+}
+.pdf-instruction .instruction-body p {
+    text-indent: 1.5em;
+    margin-bottom: 6pt;
+}
+.pdf-instruction .instruction-ending {
+    text-align: center;
+    font-size: 10pt;
+    font-weight: bold;
+    font-style: italic;
+    margin-top: 14pt;
+    margin-bottom: 0;
+}
+
+/* ===== Часть 2 — с новой страницы ===== */
+.pdf-start-new-page {
+    page-break-before: always;
+    break-before: page;
+}
+.tasks-wrapper .pdf-start-new-page {
+    column-span: all;
+}
+
+/* ===== Задачи в две колонки ===== */
+.tasks-wrapper {
+    column-count: 2;
+    column-gap: 20pt;
+    column-fill: balance;
+}
+
+/* ===== Напоминание в рамке (формат картинки 2) — с восклицательным знаком ===== */
+.pdf-preview.pdf-framed {
+    page-break-inside: avoid;
+    margin-bottom: 16pt;
+    column-span: all;
+}
+.pdf-framed .preview-reminder-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8pt;
+}
+.pdf-framed .preview-exclamation {
+    font-size: 18pt;
+    font-weight: bold;
+    flex-shrink: 0;
+    line-height: 1.35;
+}
+.pdf-framed .preview-reminder-content {
+    flex: 1;
+    min-width: 0;
+}
+.pdf-framed .preview-part-title {
+    text-align: center;
+    font-size: 11pt;
+    font-weight: bold;
+    margin-bottom: 6pt;
+}
+.pdf-framed .preview-box {
+    border: 0.8pt solid #000;
+    padding: 10pt 12pt;
+}
+.pdf-framed .preview-box-inner,
+.pdf-framed .preview-box-inner p {
+    font-style: italic;
+    text-align: justify;
+    font-size: 9.5pt;
+    line-height: 1.3;
+    margin-bottom: 4pt;
+}
+.pdf-framed .preview-box-inner p:last-child {
+    margin-bottom: 0;
+}
+.pdf-framed .preview-box-inner u {
+    text-decoration: underline;
+}

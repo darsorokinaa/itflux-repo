@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Board</title>
+
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f5f5f5;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+#toolbar {
+    background: white;
+    padding: 15px 20px;
+    border-bottom: 1px solid #e0e0e0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+button {
+    padding: 8px 16px;
+    border: 2px solid #e0e0e0;
+    border-radius: 6px;
+    background: white;
+    color: #333;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+button:hover {
+    border-color: #333;
+}
+
+button.active {
+    background: #333;
+    color: white;
+    border-color: #333;
+}
+
+.color-picker {
+    display: flex;
+    gap: 8px;
+}
+
+.color-btn {
+    width: 32px;
+    height: 32px;
+    border: 2px solid #e0e0e0;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.color-btn:hover {
+    transform: scale(1.1);
+}
+
+.color-btn.active {
+    border-color: #333;
+    border-width: 3px;
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.1);
+}
+
+#canvasContainer {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+
+canvas {
+    background: white;
+    border: 1px solid #e0e0e0;
+    cursor: crosshair;
+}
+
+.divider {
+    width: 1px;
+    height: 24px;
+    background: #e0e0e0;
+    margin: 0 5px;
+}
+</style>
+
+</head>
+<body>
+
+<div id="toolbar">
+    <button id="penBtn" onclick="setTool('pen')" class="active">Ручка</button>
+    <button id="eraserBtn" onclick="setTool('eraser')">Ластик</button>
+    
+    <div class="divider"></div>
+    
+    <div class="color-picker">
+        <div class="color-btn active" style="background: #000000;" onclick="setColor('#000000')"></div>
+        <div class="color-btn" style="background: #2196F3;" onclick="setColor('#2196F3')"></div>
+        <div class="color-btn" style="background: #F44336;" onclick="setColor('#F44336')"></div>
+    </div>
+</div>
+
+<div id="canvasContainer">
+    <canvas id="board" width="1200" height="700"></canvas>
+</div>
+
+<script>
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+
+let drawing = false;
+let tool = "pen";
+let currentLine = null;
+let objects = [];
+let currentColor = "#000000";
+let erasing = false;
+let erasedIndices = new Set();
+
+const penBtn = document.getElementById("penBtn");
+const eraserBtn = document.getElementById("eraserBtn");
+
+function setTool(t){
+    tool = t;
+    
+    penBtn.classList.remove('active');
+    eraserBtn.classList.remove('active');
+    
+    if(t === 'pen') {
+        penBtn.classList.add('active');
+        canvas.style.cursor = 'crosshair';
+    } else if(t === 'eraser') {
+        eraserBtn.classList.add('active');
+        canvas.style.cursor = 'pointer';
+    }
+}
+
+function setColor(color){
+    currentColor = color;
+    
+    document.querySelectorAll('.color-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    event.target.classList.add('active');
+    
+    if(tool !== 'pen'){
+        setTool('pen');
+    }
+}
+
+const protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
+const socket = new WebSocket(
+    protocol + window.location.host + "/ws/board/test/"
+);
+
+canvas.addEventListener("mousedown", (e) => {
+    const mouseX = e.offsetX;
+    const mouseY = e.offsetY;
+    
+    drawing = true;
+
+    if(tool === "pen"){
+        currentLine = {
+            type: "line",
+            color: currentColor,
+            width: 3,
+            points: [{x: mouseX, y: mouseY}]
+        };
+    }
+
+    if(tool === "eraser"){
+        erasing = true;
+        erasedIndices.clear();
+        eraseAt(mouseX, mouseY);
+    }
+});
+
+canvas.addEventListener("mouseup", () => {
+    if(currentLine){
+        objects.push(currentLine);
+        socket.send(JSON.stringify({
+            action: "add_object",
+            object: currentLine
+        }));
+        currentLine = null;
+    }
+    drawing = false;
+    erasing = false;
+    erasedIndices.clear();
+});
+
+canvas.addEventListener("mousemove", (e) => {
+    const mouseX = e.offsetX;
+    const mouseY = e.offsetY;
+    
+    if(!drawing) return;
+
+    if(tool === "pen" && currentLine){
+        currentLine.points.push({x: mouseX, y: mouseY});
+        redraw();
+    }
+
+    if(tool === "eraser" && erasing){
+        eraseAt(mouseX, mouseY);
+    }
+});
+
+socket.onmessage = function(e){
+    const data = JSON.parse(e.data);
+
+    if(data.action === "add_object"){
+        objects.push(data.object);
+        redraw();
+    }
+
+    if(data.action === "remove_object"){
+        objects = objects.filter((_, index) => index !== data.index);
+        redraw();
+    }
+};
+
+function drawSmoothLine(points, color, width) {
+    if (points.length < 2) return;
+    
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    
+    for (let i = 1; i < points.length - 1; i++) {
+        const xc = (points[i].x + points[i + 1].x) / 2;
+        const yc = (points[i].y + points[i + 1].y) / 2;
+        ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+    }
+    
+    if (points.length > 1) {
+        ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+    }
+    
+    ctx.stroke();
+}
+
+function redraw(){
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    objects.forEach((obj) => {
+        if(obj.type === "line"){
+            drawSmoothLine(obj.points, obj.color, obj.width);
+        }
+    });
+
+    if(currentLine){
+        drawSmoothLine(currentLine.points, currentLine.color, currentLine.width);
+    }
+}
+
+function eraseAt(x, y){
+    const radius = 8; // Уменьшен радиус с 15 до 8
+
+    for(let i = objects.length - 1; i >= 0; i--){
+        // Пропускаем уже удаленные в этом сеансе стирания
+        if(erasedIndices.has(i)) continue;
+        
+        const obj = objects[i];
+
+        if(obj.type === "line"){
+            // Проверяем только ближайшие точки
+            let foundMatch = false;
+            for(let point of obj.points){
+                const dx = point.x - x;
+                const dy = point.y - y;
+                const distance = Math.sqrt(dx*dx + dy*dy);
+                
+                if(distance < radius){
+                    foundMatch = true;
+                    break;
+                }
+            }
+            
+            if(foundMatch){
+                erasedIndices.add(i);
+                objects.splice(i, 1);
+                socket.send(JSON.stringify({
+                    action: "remove_object",
+                    index: i
+                }));
+                redraw();
+                return; // Удаляем только один объект за раз
+            }
+        }
+    }
+}
+</script>
+
+</body>
+</html>

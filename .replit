@@ -1,0 +1,79 @@
+modules = ["web", "nodejs-20", "python-3.11", "postgresql-16"]
+[agent]
+expertMode = true
+
+[nix]
+channel = "stable-25_05"
+packages = ["fontconfig", "ghostscript", "glib", "gobject-introspection", "harfbuzz", "pango"]
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Django Backend"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Frontend"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Sync from Prod"
+
+[[workflows.workflow]]
+name = "Django Backend"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python manage.py runserver 0.0.0.0:8000"
+waitForPort = 8000
+
+[[workflows.workflow]]
+name = "Frontend"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd frontend && npm run dev"
+waitForPort = 5000
+
+[[workflows.workflow]]
+name = "Sync from Prod"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python3 sync_from_prod.py"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 5001
+externalPort = 3000
+
+[[ports]]
+localPort = 8000
+externalPort = 8000
+
+[deployment]
+deploymentTarget = "autoscale"
+build = ["bash", "build.sh"]
+run = ["gunicorn", "--chdir", "/home/runner/workspace/Generator", "--bind=0.0.0.0:5000", "--reuse-port", "--workers=3", "--timeout=120", "Generator.wsgi:application"]

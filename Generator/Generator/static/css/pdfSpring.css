@@ -1,0 +1,11 @@
+@page {
+    size: A4 landscape;
+    margin: 7mm;
+     background-image: url("../img/summer.png");
+
+    @bottom-center {
+        content: counter(page) " / " counter(pages);
+        font-size: 9pt;
+        color: #000;
+    }
+}

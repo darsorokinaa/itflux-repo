@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+
+{% block title %}Выбор предмета{% endblock %}
+
+{% block header_title %}Выбор предмета{% endblock %}
+
+{% block content %}
+<div class="container">
+
+    <div class="hero">
+        <h1>Выбор предмета</h1>
+        <p>Выберите предмет для подготовки к экзамену. Мы предлагаем качественные материалы для эффективной подготовки.</p>
+    </div>
+
+    <div class="exam-grid">
+        
+        <a href="math" class="exam-card exam-card-math">
+            <div class="exam-icon exam-icon-math">🔢</div>
+            <h3 class="exam-title">Математика</h3>
+            <p class="exam-description">Алгебра, геометрия, теория вероятностей и математический анализ</p>
+            <div class="exam-footer">
+                <span class="exam-badge exam-badge-math">Все разделы</span>
+                <span class="exam-arrow">→</span>
+            </div>
+        </a>
+
+        <a href="inf" class="exam-card exam-card-inf">
+            <div class="exam-icon exam-icon-inf">💻</div>
+            <h3 class="exam-title">Информатика</h3>
+            <p class="exam-description">Алгоритмы, программирование, логика и компьютерные системы</p>
+            <div class="exam-footer">
+                <span class="exam-badge exam-badge-inf">Все темы</span>
+                <span class="exam-arrow">→</span>
+            </div>
+        </a>
+
+    </div>
+
+</div>
+{% endblock %}

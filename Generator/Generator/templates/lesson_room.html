@@ -1,0 +1,3876 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Урок</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;700&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    .lesson-modal-font { font-family: 'Montserrat', sans-serif; }
+    .lesson-modal-font h2, .lesson-modal-font h3 { font-family: 'Unbounded', sans-serif; }
+    /* Lesson UI: aligned with ExamPage look */
+    :root {
+      --lesson-ui-primary: #586fd7;
+      --lesson-ui-primary-2: #667eea;
+      --lesson-ui-primary-soft: #eef2ff;
+      --lesson-ui-text: #1e293b;
+      --lesson-ui-muted: #64748b;
+      --lesson-ui-border: #e2e8f0;
+      --lesson-ui-bg: #f8fafc;
+      --lesson-ui-danger: #dc2626;
+      --lesson-ui-success: #15803d;
+      --lesson-ui-shadow: 0 16px 44px rgba(15, 23, 42, 0.2);
+      --lesson-ui-radius: 16px;
+    }
+    .lesson-ui-btn {
+      border: 1px solid transparent;
+      border-radius: 12px;
+      padding: 10px 16px;
+      font-family: "Montserrat", sans-serif;
+      font-weight: 700;
+      font-size: 0.86rem;
+      cursor: pointer;
+      transition: transform .2s ease, box-shadow .2s ease, filter .2s ease, background-color .2s ease;
+    }
+    .lesson-ui-btn:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 18px rgba(88, 111, 215, .22);
+    }
+    .lesson-ui-btn:disabled {
+      opacity: .6;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+    .lesson-ui-btn--primary {
+      color: #fff;
+      background: linear-gradient(135deg, var(--lesson-ui-primary-2), var(--lesson-ui-primary));
+      border-color: rgba(88, 111, 215, .4);
+    }
+    .lesson-ui-btn--ghost {
+      color: #334155;
+      background: #fff;
+      border-color: var(--lesson-ui-border);
+    }
+    .lesson-ui-btn--danger {
+      color: #fff;
+      background: linear-gradient(135deg, #ef4444, var(--lesson-ui-danger));
+      border-color: rgba(220, 38, 38, .35);
+    }
+    .lesson-ui-fab {
+      display: none;
+      position: fixed;
+      right: 18px;
+      bottom: 88px;
+      z-index: 260;
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      padding: 0;
+      font-size: 1.8rem;
+      line-height: 1;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 10px 24px rgba(88, 111, 215, .35);
+    }
+    .lesson-modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, .52);
+      z-index: 500;
+      overflow: auto;
+      padding: 28px 16px;
+      box-sizing: border-box;
+    }
+    .lesson-modal-overlay.lesson-modal-overlay--centered {
+      align-items: flex-start;
+      justify-content: center;
+    }
+    .lesson-modal-card {
+      width: 100%;
+      max-width: 940px;
+      margin: 0 auto;
+      background: #fff;
+      border: 1px solid var(--lesson-ui-border);
+      border-radius: 22px;
+      overflow: hidden;
+      box-shadow: var(--lesson-ui-shadow);
+    }
+    .lesson-modal-card--finish { max-width: 760px; }
+    .lesson-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--lesson-ui-border);
+      background: linear-gradient(180deg, #f8fbff 0%, #f8fafc 100%);
+    }
+    .lesson-modal-title {
+      margin: 0;
+      font-family: "Unbounded", sans-serif;
+      font-size: 1rem;
+      color: #1e3a8a;
+      letter-spacing: -.01em;
+    }
+    .lesson-modal-close {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      border: 1px solid var(--lesson-ui-border);
+      background: #fff;
+      color: #64748b;
+      cursor: pointer;
+      font-size: 1.2rem;
+      line-height: 1;
+    }
+    .lesson-modal-layout {
+      display: flex;
+      min-height: min(68vh, 620px);
+      max-height: min(68vh, 620px);
+    }
+    .lesson-modal-slots {
+      width: 240px;
+      flex-shrink: 0;
+      border-right: 1px solid var(--lesson-ui-border);
+      padding: 12px 10px;
+      overflow-y: auto;
+      background: #fbfcff;
+    }
+    .lesson-modal-bank-wrap {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      flex: 1;
+    }
+    .lesson-modal-subtopic-bar {
+      display: none;
+      overflow-x: auto;
+      white-space: nowrap;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--lesson-ui-border);
+      background: var(--lesson-ui-bg);
+    }
+    .lesson-modal-bank {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      background: #fff;
+    }
+    .lesson-modal-placeholder {
+      color: var(--lesson-ui-muted);
+      padding: 10px;
+      font-size: .86rem;
+      font-family: "Montserrat", sans-serif;
+    }
+    .lesson-modal-placeholder--error { color: #b91c1c; }
+    .lesson-slot-header {
+      color: #94a3b8;
+      padding: 6px 8px 10px;
+      font-size: .7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-family: "Unbounded", sans-serif;
+    }
+    .lesson-slot-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      border-radius: 10px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: #334155;
+      padding: 9px 10px;
+      font-size: .82rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+      cursor: pointer;
+      font-family: "Montserrat", sans-serif;
+      transition: all .18s ease;
+    }
+    .lesson-slot-item:hover { background: #f8fafc; border-color: #dbe6ff; }
+    .lesson-slot-item.is-active {
+      background: var(--lesson-ui-primary-soft);
+      border-color: #c7d2fe;
+      color: #3730a3;
+    }
+    .lesson-slot-group {
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #eff6ff;
+    }
+    .lesson-slot-group-title {
+      font-size: .65rem;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      margin-bottom: 6px;
+      font-family: "Unbounded", sans-serif;
+    }
+    .lesson-slot-group-label {
+      font-family: "Unbounded", sans-serif;
+      font-size: .78rem;
+      color: #4f46e5;
+      margin-bottom: 6px;
+    }
+    .lesson-slot-group-meta {
+      font-size: .72rem;
+      color: #64748b;
+      line-height: 1.4;
+      font-weight: 600;
+    }
+    .lesson-slot-group-preview {
+      font-size: .7rem;
+      color: #94a3b8;
+      margin-top: 6px;
+      line-height: 1.35;
+      max-height: 3.9em;
+      overflow: hidden;
+    }
+    .lesson-subtopic-label {
+      font-size: .7rem;
+      font-weight: 700;
+      color: #94a3b8;
+      margin-right: 8px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      vertical-align: middle;
+      font-family: "Unbounded", sans-serif;
+    }
+    .lesson-subtopic-chip {
+      display: inline-block;
+      margin-right: 6px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      border: 1.5px solid var(--lesson-ui-border);
+      background: #fff;
+      color: #334155;
+      font-size: .75rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: "Montserrat", sans-serif;
+      transition: all .16s ease;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+    .lesson-subtopic-chip.is-active {
+      border-color: #586fd7;
+      background: #586fd7;
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(88, 111, 215, .22);
+    }
+    .lesson-bank-card {
+      border: 1px solid var(--lesson-ui-border);
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 4px 14px rgba(15, 23, 42, .06);
+      padding: 14px 16px;
+      margin-bottom: 12px;
+    }
+    .lesson-bank-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .lesson-bank-meta {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-width: 0;
+    }
+    .lesson-bank-badge {
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: .7rem;
+      font-weight: 700;
+      font-family: "Montserrat", sans-serif;
+      white-space: nowrap;
+    }
+    .lesson-bank-badge--num {
+      font-family: "Unbounded", sans-serif;
+      color: #4f46e5;
+      background: #eef2ff;
+    }
+    .lesson-bank-badge--part1 { color: #166534; background: #dcfce7; }
+    .lesson-bank-badge--part2 { color: #854d0e; background: #fef3c7; }
+    .lesson-bank-badge--subtopic {
+      color: #0369a1;
+      background: #e0f2fe;
+      max-width: 280px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .lesson-bank-task-text {
+      font-size: .86rem;
+      color: #0f172a;
+      line-height: 1.7;
+      max-height: 220px;
+      overflow: hidden;
+      font-family: "Montserrat", sans-serif;
+    }
+    .lesson-bank-group-title {
+      font-family: "Unbounded", sans-serif;
+      font-size: .82rem;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 4px;
+    }
+    .lesson-bank-group-subtitle {
+      font-size: .74rem;
+      color: #64748b;
+      font-family: "Montserrat", sans-serif;
+    }
+    .lesson-bank-group-items {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      border-top: 1px solid #eff6ff;
+      padding-top: 12px;
+    }
+    .lesson-bank-group-item {
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #f8fafc;
+      border: 1px solid var(--lesson-ui-border);
+    }
+    .lesson-bank-pagination {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 12px;
+    }
+    .lesson-page-btn {
+      border: 1.5px solid var(--lesson-ui-border);
+      border-radius: 8px;
+      background: #fff;
+      color: #334155;
+      font-size: .8rem;
+      font-weight: 600;
+      padding: 5px 12px;
+      cursor: pointer;
+      font-family: "Montserrat", sans-serif;
+    }
+    .lesson-page-btn.is-active {
+      background: #586fd7;
+      color: #fff;
+      border-color: #586fd7;
+    }
+    #lesson-teacher-ui {
+      display: none;
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 240;
+    }
+    #lesson-student-ui {
+      display: none;
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 240;
+    }
+    #lesson-student-results-body {
+      padding: 16px 20px;
+      max-height: min(70vh, 620px);
+      overflow-y: auto;
+    }
+    .lesson-student-results-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: .88rem;
+    }
+    .lesson-student-results-table th {
+      text-align: left;
+      color: #334155;
+      padding: 8px 10px;
+      border-bottom: 1px solid #e2e8f0;
+      background: #f8fafc;
+    }
+    .lesson-student-results-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #eef2f7;
+      color: #0f172a;
+    }
+    .lesson-student-results-badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: .74rem;
+      font-weight: 700;
+    }
+    .lesson-student-results-badge--ok { background: #dcfce7; color: #166534; }
+    .lesson-student-results-badge--bad { background: #fee2e2; color: #991b1b; }
+    .lesson-student-results-summary {
+      margin-top: 14px;
+      border: 1px solid #dbeafe;
+      background: #f8fbff;
+      border-radius: 12px;
+      padding: 10px 12px;
+      color: #1e3a8a;
+      font-size: .86rem;
+      line-height: 1.45;
+    }
+    .lesson-status-toast {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      top: 18px;
+      z-index: 620;
+      min-width: min(520px, calc(100vw - 24px));
+      max-width: min(680px, calc(100vw - 24px));
+      border-radius: 14px;
+      border: 1px solid #c7d2fe;
+      background: #eef2ff;
+      color: #1e3a8a;
+      box-shadow: 0 14px 32px rgba(30, 58, 138, .22);
+      padding: 10px 14px;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-family: "Montserrat", sans-serif;
+      font-size: .86rem;
+      font-weight: 600;
+    }
+    .lesson-status-toast.show { display: flex; }
+    .lesson-status-toast__close {
+      border: 1px solid #c7d2fe;
+      background: #fff;
+      color: #4338ca;
+      border-radius: 8px;
+      width: 28px;
+      height: 28px;
+      cursor: pointer;
+      line-height: 1;
+      font-size: 1rem;
+    }
+    #lesson-finish-modal-body .lesson-result-card {
+      margin-bottom: 14px;
+      border: 1px solid var(--lesson-ui-border);
+      border-radius: 14px;
+      padding: 14px 16px;
+      background: #fff;
+      box-shadow: 0 3px 10px rgba(15, 23, 42, .05);
+    }
+    .lesson-result-student {
+      font-weight: 700;
+      font-size: .95rem;
+      color: #0f172a;
+      margin-bottom: 4px;
+      font-family: "Unbounded", sans-serif;
+    }
+    .lesson-result-meta {
+      font-size: .8rem;
+      color: #64748b;
+      margin-bottom: 10px;
+      line-height: 1.45;
+    }
+    .lesson-result-label {
+      display: block;
+      font-size: .75rem;
+      font-weight: 600;
+      color: #475569;
+      margin-bottom: 6px;
+    }
+    .lesson-result-comment {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      font-size: .88rem;
+      font-family: "Montserrat", sans-serif;
+      resize: vertical;
+    }
+    .lesson-save-comment-btn {
+      margin-top: 8px;
+      padding: 8px 16px;
+      border-radius: 10px;
+      border: 1px solid var(--lesson-ui-border);
+      background: #f8fafc;
+      color: #0f172a;
+      font-weight: 600;
+      font-size: .82rem;
+      font-family: "Montserrat", sans-serif;
+      cursor: pointer;
+    }
+    .lesson-modal-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      padding: 16px 20px;
+      border-top: 1px solid var(--lesson-ui-border);
+      background: #f8fafc;
+    }
+  </style>
+  <script>
+    window.MathJax = {
+      tex: { inlineMath: [['$','$'],['\\(','\\)']], displayMath: [['$$','$$'],['\\[','\\]']] },
+      chtml: { scale: 1, mtextInheritFont: true, matchFontHeight: true },
+      startup: { typeset: false }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" async></script>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #fff; }
+    #lesson-page-root { display: flex; width: 100%; height: 100%; min-height: 0; }
+    #lesson-frame-wrapper { flex: 1; min-width: 0; min-height: 0; height: 100%; position: relative; overflow: hidden; }
+    #scale-wrapper { width: 100%; height: 100%; position: relative; margin: 0 auto; }
+    #variant-frame { width: 100%; height: 100%; border: 0; display: none; }
+    #fallback {
+      display: none; width: 100%; height: 100%; box-sizing: border-box; padding: 24px;
+      align-items: center; justify-content: center; text-align: center; color: #334155;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; line-height: 1.55;
+    }
+    #fallback.show { display: flex; }
+
+    /* Whiteboard UI */
+    :root {
+      --wb-blue: #378ADD;
+      --wb-blue-light: #E6F1FB;
+      --wb-border: #D3D1C7;
+      --wb-text-muted: #5F5E5A;
+      --wb-toolbar-bg: #FFFFFF;
+    }
+    #whiteboard-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 700;
+      overflow: hidden;
+    }
+    #whiteboard-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      touch-action: none;
+    }
+    #whiteboard-canvas.drawing-mode {
+      pointer-events: auto;
+    }
+    .wb-toolbar {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      height: 56px;
+      background: var(--wb-toolbar-bg);
+      border: 1px solid var(--wb-border);
+      border-radius: 12px;
+      padding: 0 12px;
+      display: flex;
+      flex-direction: row;
+      gap: 8px;
+      align-items: center;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      pointer-events: auto;
+      z-index: 701;
+      overflow-x: auto;
+      max-width: 90vw;
+    }
+    .wb-toolbar::-webkit-scrollbar { display: none; }
+    .wb-tool-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--wb-text-muted);
+      transition: all 0.1s;
+      flex-shrink: 0;
+    }
+    .wb-tool-btn svg {
+      width: 20px;
+      height: 20px;
+      stroke-width: 2;
+    }
+    .wb-tool-btn.active { border-color: var(--wb-blue); background: var(--wb-blue-light); color: var(--wb-blue); }
+    .wb-tool-btn:hover { background: #F5F5F5; }
+    .wb-tool-btn.active { border-color: var(--wb-blue); background: var(--wb-blue-light); }
+    .wb-divider { width: 1px; height: 32px; background: var(--wb-border); margin: 0 4px; flex-shrink: 0; }
+    .wb-color-swatch {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 1px solid rgba(0,0,0,0.15);
+      cursor: pointer;
+      position: relative;
+      transition: transform 0.1s;
+      flex-shrink: 0;
+    }
+    .wb-color-swatch:hover { transform: scale(1.1); }
+    .wb-color-swatch.active::after {
+      content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--swatch-color);
+    }
+    .wb-color-wrapper { position: relative; display: flex; align-items: center; }
+    .wb-color-picker-btn {
+      width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--wb-border);
+      cursor: pointer; transition: transform 0.1s;
+    }
+    .wb-color-picker-btn:hover { transform: scale(1.1); }
+    .wb-color-popover {
+      position: absolute; bottom: calc(100% + 16px); left: 50%; transform: translateX(-50%);
+      background: var(--wb-toolbar-bg); border: 1px solid var(--wb-border);
+      border-radius: 12px; padding: 10px; display: none; grid-template-columns: repeat(3, 1fr);
+      gap: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); z-index: 2147483647;
+    }
+    .wb-tool-wrapper { position: relative; display: flex; align-items: center; }
+    .wb-tool-popover {
+      position: absolute; bottom: calc(100% + 16px); left: 50%; transform: translateX(-50%);
+      background: var(--wb-toolbar-bg); border: 1px solid var(--wb-border);
+      border-radius: 12px; padding: 10px 16px; display: none; flex-direction: column; gap: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15); z-index: 2147483647; min-width: 120px;
+    }
+    .wb-tool-popover.show { display: flex; }
+    .wb-tool-popover::after {
+      content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+      border-width: 6px; border-style: solid; border-color: var(--wb-toolbar-bg) transparent transparent transparent;
+    }
+    .wb-tool-popover::before {
+      content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 1px;
+      border-width: 7px; border-style: solid; border-color: var(--wb-border) transparent transparent transparent; z-index: -1;
+    }
+    .wb-color-popover.show { display: grid; }
+    .wb-color-popover::after {
+      content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+      border-width: 6px; border-style: solid; border-color: var(--wb-toolbar-bg) transparent transparent transparent;
+    }
+    .wb-color-popover::before {
+      content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 1px;
+      border-width: 7px; border-style: solid; border-color: var(--wb-border) transparent transparent transparent; z-index: -1;
+    }
+    .wb-control-group { display: flex; flex-direction: column; gap: 2px; margin-left: 4px; flex-shrink: 0; }
+    .wb-control-label { font-size: 10px; color: var(--wb-text-muted); font-weight: 500; }
+    .wb-control-slider { width: 70px; cursor: pointer; }
+    .wb-text-btn {
+      background: transparent; border: 1px solid var(--wb-border); border-radius: 6px;
+      color: var(--wb-text-muted); font-size: 12px; font-weight: 500; cursor: pointer;
+      padding: 6px 12px; transition: all 0.1s; flex-shrink: 0;
+    }
+    .wb-text-btn:hover { background: #F5F5F5; color: #000; }
+    .wb-text-btn.danger:hover { background: #FEF2F2; color: #E24B4A; border-color: #E24B4A; }
+    .wb-text-input-overlay {
+      position: absolute; border: 1px solid var(--wb-blue); border-radius: 4px; padding: 4px 8px;
+      background: rgba(255,255,255,0.9); outline: none; display: none; z-index: 702; min-width: 100px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1); pointer-events: auto; font-family: sans-serif;
+    }
+
+  </style>
+</head>
+<body>
+  <!-- Teacher: Add extra task button (must be before <script> so getElementById works) -->
+  <button id="lesson-add-task-btn" class="lesson-ui-btn lesson-ui-btn--primary lesson-ui-fab" title="Добавить задание">＋</button>
+
+  <!-- Add task modal -->
+  <div id="lesson-add-task-modal" class="lesson-modal-overlay lesson-modal-overlay--centered lesson-modal-font">
+    <div class="lesson-modal-card">
+      <!-- Header -->
+      <div class="lesson-modal-header">
+        <h2 class="lesson-modal-title">Добавить задание</h2>
+        <button id="lesson-add-task-modal-close" class="lesson-modal-close">✕</button>
+      </div>
+      <!-- Body: slots + bank -->
+      <div class="lesson-modal-layout">
+        <!-- Left: task number slots -->
+        <div id="lesson-task-slots" class="lesson-modal-slots">
+          <div class="lesson-slot-header">Задание №</div>
+        </div>
+        <!-- Right: subtopic filter + task cards -->
+        <div class="lesson-modal-bank-wrap">
+          <div id="lesson-subtopic-bar" class="lesson-modal-subtopic-bar">
+            <span class="lesson-subtopic-label">Подтема:</span>
+          </div>
+          <div id="lesson-task-bank" class="lesson-modal-bank">
+            <div class="lesson-modal-placeholder">← Выберите номер задания</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Teacher: модалка итогов; кнопка завершения теперь только в меню iframe -->
+  <div id="lesson-student-ui">
+    <button type="button" id="lesson-student-results-top-btn" class="lesson-ui-btn lesson-ui-btn--primary" style="display:none;">Результаты</button>
+  </div>
+
+  <div id="lesson-finish-modal" class="lesson-modal-overlay lesson-modal-font">
+    <div class="lesson-modal-card lesson-modal-card--finish">
+      <div class="lesson-modal-header">
+        <h2 class="lesson-modal-title" style="font-size:1.12rem;color:#0f172a;">Итоги урока</h2>
+        <button type="button" id="lesson-finish-modal-close" class="lesson-modal-close">✕</button>
+      </div>
+      <div id="lesson-finish-modal-body" style="padding:16px 20px;max-height:min(70vh,620px);overflow-y:auto;"></div>
+      <div class="lesson-modal-actions">
+        <button type="button" id="lesson-finish-download-pdf" class="lesson-ui-btn lesson-ui-btn--primary">Сохранить PDF</button>
+        <button type="button" id="lesson-finish-close-session" class="lesson-ui-btn lesson-ui-btn--danger" style="margin-left:auto;">Закрыть урок для всех</button>
+      </div>
+    </div>
+  </div>
+  <div id="lesson-student-results-modal" class="lesson-modal-overlay lesson-modal-font">
+    <div class="lesson-modal-card lesson-modal-card--finish">
+      <div class="lesson-modal-header">
+        <h2 class="lesson-modal-title" style="font-size:1.08rem;color:#0f172a;">Результаты ученика</h2>
+        <button type="button" id="lesson-student-results-modal-close" class="lesson-modal-close">✕</button>
+      </div>
+      <div id="lesson-student-results-body"></div>
+    </div>
+  </div>
+  <div id="lesson-status-toast" class="lesson-status-toast" role="status" aria-live="polite">
+    <span id="lesson-status-toast-text"></span>
+    <button type="button" id="lesson-status-toast-close" class="lesson-status-toast__close" aria-label="Закрыть">✕</button>
+  </div>
+
+  <div id="lesson-page-root">
+    <div id="lesson-frame-wrapper">
+      <div id="scale-wrapper">
+        <iframe id="variant-frame" title="Вариант урока"></iframe>
+        <div id="whiteboard-layer">
+          <canvas id="whiteboard-canvas"></canvas>
+          <input type="text" id="wb-text-input" class="wb-text-input-overlay" placeholder="Введите текст...">
+        </div>
+      </div>
+      <div id="whiteboard-toolbar" class="wb-toolbar"></div>
+    </div>
+  </div>
+  <div id="fallback" role="status" aria-live="polite"></div>
+
+  <script>
+    (function () {
+      const qs = new URLSearchParams(window.location.search);
+      const roleFromServer = "{{ lesson_type|default:''|escapejs }}";
+      const role = String(qs.get("role") || roleFromServer || "").trim().toLowerCase();
+      let isTeacher = role === "teacher" || role === "tutor";
+
+      const roomId = "{{ room_id|default:''|escapejs }}";
+      const participantName = "{{ participant_name|default:''|escapejs }}";
+      const payloadRaw = "{{ lesson_payload_json|default:'{}'|escapejs }}";
+      const levelFromServer = "{{ lesson_level|default:''|escapejs }}";
+      const subjectFromServer = "{{ lesson_subject|default:''|escapejs }}";
+      const variantIdFromServer = "{{ lesson_variant_id|default:''|escapejs }}";
+      const variantUrlFromServer = "{{ lesson_variant_url|default:''|escapejs }}";
+
+      const frame = document.getElementById("variant-frame");
+      const fallback = document.getElementById("fallback");
+      if (!frame || !fallback) return;
+
+      let payload = {};
+      try { payload = JSON.parse(payloadRaw); } catch (_) { payload = {}; }
+
+      if (!isTeacher) {
+        const jr = String(
+          payload.lesson_type ||
+            payload.lessonType ||
+            payload.lesson_format ||
+            payload.lessonFormat ||
+            payload.role ||
+            payload.type ||
+            ""
+        )
+          .trim()
+          .toLowerCase();
+        if (
+          jr === "teacher" ||
+          jr === "tutor" ||
+          jr === "учитель" ||
+          jr.includes("teacher") ||
+          jr.includes("tutor") ||
+          jr.includes("учит")
+        ) {
+          isTeacher = true;
+        }
+      }
+
+      const lessonPageRoot = document.getElementById('lesson-page-root');
+
+      const lessonPageToken = "{{ lesson_token|default:''|escapejs }}" || String(qs.get('token') || '').trim();
+      const cabinetAssignmentFromServer = "{{ cabinet_assignment|default:''|escapejs }}".trim();
+      const cabinetSessionFromServer = "{{ cabinet_session|default:''|escapejs }}".trim();
+      const homeworkModeFromServer = "{{ homework_mode|yesno:'true,false' }}" === "true";
+      const isHomeworkSession = (() => {
+        const cabS = String(
+          cabinetSessionFromServer ||
+          qs.get("cabinet_session") ||
+          qs.get("cabinetSession") ||
+          ""
+        ).trim().toLowerCase();
+        const pSk = String(payload.session_kind || payload.sessionKind || "").trim().toLowerCase();
+        const pLf = String(payload.lesson_format || payload.lessonFormat || "").trim().toLowerCase();
+        return (
+          homeworkModeFromServer ||
+          cabS === "homework" ||
+          pSk === "homework" ||
+          pLf === "homework" ||
+          !!cabinetAssignmentFromServer
+        );
+      })();
+      const withLessonIframeParams = (urlStr) => {
+        const raw = String(urlStr || "").trim();
+        if (!raw) return raw;
+        if (/\/lesson\/join\/?/i.test(raw)) return raw;
+        const pickCab = (a, b) => (String(a || "").trim() || String(b || "").trim());
+        const cabA = pickCab(
+          cabinetAssignmentFromServer,
+          qs.get("cabinet_assignment") || qs.get("cabinetAssignment")
+        );
+        const cabS = pickCab(
+          cabinetSessionFromServer,
+          qs.get("cabinet_session") || qs.get("cabinetSession")
+        );
+        const pSk = payload.session_kind || payload.sessionKind || "";
+        const pLf = payload.lesson_format || payload.lessonFormat || "";
+        const hJwt =
+          String(pSk).toLowerCase() === "homework" ||
+          String(pLf).toLowerCase() === "homework";
+        const hUrl =
+          homeworkModeFromServer ||
+          cabS.toLowerCase() === "homework" ||
+          hJwt ||
+          !!String(cabA).trim();
+        try {
+          const u = new URL(raw, location.origin);
+          u.searchParams.delete("token");
+          if (lessonPageToken) {
+            u.searchParams.set("lesson_embed", "1");
+            u.searchParams.set("lesson_token", lessonPageToken);
+            u.searchParams.set("lesson_student", isTeacher ? "0" : "1");
+            if (participantName) u.searchParams.set("lesson_peer", participantName);
+          }
+          if (hUrl) u.searchParams.set("homework_mode", "1");
+          if (cabA) u.searchParams.set("cabinet_assignment", cabA);
+          if (cabS) u.searchParams.set("cabinet_session", cabS);
+          return u.pathname + u.search + u.hash;
+        } catch (_) {
+          return raw;
+        }
+      };
+
+      const pick = (...vals) => {
+        for (const v of vals) {
+          const s = String(v == null ? "" : v).trim();
+          if (s) return s;
+        }
+        return "";
+      };
+      const byPath = (obj, path) => {
+        let cur = obj;
+        for (const p of path) {
+          if (!cur || typeof cur !== "object") return "";
+          cur = cur[p];
+        }
+        return cur == null ? "" : String(cur).trim();
+      };
+
+      const level = pick(levelFromServer, qs.get("level"), payload.level, payload.exam_level, payload.lesson_level, byPath(payload, ["variant", "level"]))
+        .toLowerCase();
+      const subject = pick(subjectFromServer, qs.get("subject"), payload.subject, payload.subject_short, payload.exam_subject, payload.lesson_subject, byPath(payload, ["variant", "subject"]), byPath(payload, ["variant", "subject_short"]))
+        .toLowerCase();
+      const variantId = pick(variantIdFromServer, qs.get("variant_id"), qs.get("variant"), qs.get("vid"), payload.variant_id, payload.variantId, payload.lesson_variant_id, payload.test_variant_id, byPath(payload, ["variant", "id"]), byPath(payload, ["variant", "variant_id"]));
+      const directUrl = pick(variantUrlFromServer, qs.get("variant_url"), qs.get("url"), qs.get("link"), payload.variant_url, payload.variantUrl, payload.variant_link, payload.url, payload.link, byPath(payload, ["variant", "url"]), byPath(payload, ["variant", "link"]));
+
+      /** Главная страница ЛК (без /app или /dashboard) — для редиректа после завершения урока */
+      const lkHomeUrl = "{{ lk_home_url|default:''|escapejs }}".trim();
+      const buildLessonReportDownloadUrl = (format) => {
+        const p = new URLSearchParams();
+        if (lessonPageToken) {
+          p.set('token', lessonPageToken);
+          p.set('role', 'teacher');
+        } else {
+          p.set('room_id', roomId);
+        }
+        if (variantId) p.set('variant_id', String(variantId));
+        p.set('format', format);
+        return `/api/lesson/report/download/?${p.toString()}`;
+      };
+      /** После окончания урока: переход на главную ЛК. */
+      const redirectToLkAfterLessonEnd = () => {
+        const target = lkHomeUrl || '/';
+        setTimeout(() => { window.location.href = target; }, 450);
+      };
+
+      let src = (directUrl && !/\/lesson\/join\/?/i.test(directUrl))
+        ? directUrl
+        : (level && subject && variantId ? `/${level}/${subject}/variant/${variantId}/` : "");
+      if (src) src = withLessonIframeParams(src);
+
+      const waitingVariantForStudent = !src && !isTeacher;
+      if (!src && isTeacher) {
+        fallback.innerHTML =
+          "Не удалось определить ссылку варианта.<br>" +
+          `role=${role || "—"}, level=${level || "—"}, subject=${subject || "—"}, variant_id=${variantId || "—"}, variant_url=${directUrl || "—"}`;
+        fallback.classList.add("show");
+        return;
+      }
+      if (waitingVariantForStudent) {
+        fallback.innerHTML = "Ожидание варианта от учителя...";
+        fallback.classList.add("show");
+      }
+
+      const wsProto = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${wsProto}://${location.host}/ws/lesson/${encodeURIComponent(roomId)}/`);
+      const me = participantName || (isTeacher ? "Учитель" : "Ученик");
+      const participants = { [me]: isTeacher ? "teacher" : "student" };
+      const cursors = {}; // { name: {x, y, role} }
+      let cursorLayer = null;
+      let variantLoaded = false;
+      let wsReady = false;
+      let announcedVariantKey = "";
+      const sendWs = (payload) => {
+        if (!payload || ws.readyState !== WebSocket.OPEN) return false;
+        try {
+          ws.send(JSON.stringify(payload));
+          return true;
+        } catch (_) {
+          return false;
+        }
+      };
+      
+      // --- Whiteboard Logic ---
+      const WB_TOOLS = [
+        { id: 'pointer', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="M13 13l6 6"/></svg>', name: 'Указатель' },
+        { id: 'pen', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>', name: 'Перо' },
+        { id: 'eraser', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H7L3 16C2.5 15.5 2.5 14.5 3 14L13 4C13.5 3.5 14.5 3.5 15 4L20 9C20.5 9.5 20.5 10.5 20 11L11 20H20V20Z"/></svg>', name: 'Ластик' },
+        { id: 'line', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="19" x2="19" y2="5"/></svg>', name: 'Линия' },
+        { id: 'arrow', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="19" x2="19" y2="5"/><polyline points="12 5 19 5 19 12"/></svg>', name: 'Стрелка' },
+        { id: 'rect', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>', name: 'Прямоугольник' },
+        { id: 'ellipse', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg>', name: 'Круг' },
+        { id: 'triangle', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 21h20L12 3z"/></svg>', name: 'Треугольник' },
+        { id: 'text', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>', name: 'Текст' }
+      ];
+      const WB_COLORS = [
+        '#1E2A4A', '#E24B4A', '#378ADD', '#1D9E75', '#EF9F27', '#FFFFFF'
+      ];
+      const WbState = {
+        strokes: [],
+        undoneStrokes: [],
+        activeStroke: null,
+        tool: 'pointer',
+        color: '#E24B4A',
+        width: 3,
+        opacity: 1.0,
+        dirty: true,
+        renderPending: false,
+        emit() {
+          this.dirty = true;
+          if (!this.renderPending) {
+            this.renderPending = true;
+            requestAnimationFrame(() => {
+              renderWhiteboard();
+              this.renderPending = false;
+            });
+          }
+        }
+      };
+
+      const wbCanvas = document.getElementById('whiteboard-canvas');
+      const wbCtx = wbCanvas ? wbCanvas.getContext('2d', { alpha: true }) : null;
+      const wbTextInput = document.getElementById('wb-text-input');
+      const wbToolbar = document.getElementById('whiteboard-toolbar');
+      let wbIsDrawing = false;
+
+      let currentScale = 1;
+
+      const resizeWb = () => {
+        if (!wbCanvas || !wbCtx) return;
+        const rect = wbCanvas.parentElement.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        // Internal resolution should match the unscaled size (900px)
+        const unscaledWidth = wbCanvas.parentElement.offsetWidth;
+        const unscaledHeight = wbCanvas.parentElement.offsetHeight;
+        wbCanvas.width = unscaledWidth * dpr;
+        wbCanvas.height = unscaledHeight * dpr;
+        wbCtx.scale(dpr, dpr);
+        WbState.emit();
+      };
+      window.addEventListener('resize', resizeWb);
+
+      const buildWbToolbar = () => {
+        if (!wbToolbar) return;
+        wbToolbar.innerHTML = '';
+        
+        let activePopover = null;
+        const closePopovers = () => {
+          document.querySelectorAll('.wb-tool-popover, .wb-color-popover').forEach(p => p.classList.remove('show'));
+        };
+        document.addEventListener('click', closePopovers);
+
+        WB_TOOLS.forEach(t => {
+          const wrap = document.createElement('div'); wrap.className = 'wb-tool-wrapper';
+          const btn = document.createElement('button');
+          btn.className = 'wb-tool-btn' + (WbState.tool === t.id ? ' active' : '');
+          btn.innerHTML = t.icon;
+          btn.title = t.name;
+          btn.dataset.tool = t.id;
+          
+          let popover = null;
+          if (t.id !== 'pointer') {
+            popover = document.createElement('div'); popover.className = 'wb-tool-popover';
+            popover.innerHTML = `<span class="wb-control-label">Толщина</span><input type="range" class="wb-control-slider" min="1" max="20" step="1" value="${WbState.width}">`;
+            popover.querySelector('input').oninput = (e) => { WbState.width = parseInt(e.target.value); };
+            popover.onclick = (e) => e.stopPropagation();
+            wrap.appendChild(popover);
+          }
+
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            if (WbState.tool === t.id && popover) {
+              closePopovers();
+              popover.classList.toggle('show');
+            } else {
+              closePopovers();
+              WbState.tool = t.id;
+              wbCanvas.classList.toggle('drawing-mode', t.id !== 'pointer');
+              refreshWbToolbar();
+            }
+          };
+          
+          wrap.appendChild(btn);
+          wbToolbar.appendChild(wrap);
+        });
+        
+        const sep1 = document.createElement('div'); sep1.className = 'wb-divider'; wbToolbar.appendChild(sep1);
+        
+        const colorWrap = document.createElement('div'); colorWrap.className = 'wb-color-wrapper';
+        const colorBtn = document.createElement('div'); colorBtn.className = 'wb-color-picker-btn';
+        colorBtn.style.backgroundColor = WbState.color;
+        const colorPopover = document.createElement('div'); colorPopover.className = 'wb-color-popover';
+        colorPopover.onclick = (e) => e.stopPropagation();
+        
+        WB_COLORS.forEach(c => {
+          const sw = document.createElement('div');
+          sw.className = 'wb-color-swatch' + (WbState.color === c ? ' active' : '');
+          sw.style.backgroundColor = c;
+          sw.style.setProperty('--swatch-color', c);
+          sw.dataset.color = c;
+          sw.onclick = (e) => { 
+            e.stopPropagation();
+            WbState.color = c; 
+            colorBtn.style.backgroundColor = c;
+            closePopovers();
+            refreshWbToolbar(); 
+          };
+          colorPopover.appendChild(sw);
+        });
+        
+        colorBtn.onclick = (e) => {
+          e.stopPropagation();
+          const isShowing = colorPopover.classList.contains('show');
+          closePopovers();
+          if (!isShowing) colorPopover.classList.add('show');
+        };
+        
+        colorWrap.appendChild(colorBtn);
+        colorWrap.appendChild(colorPopover);
+        wbToolbar.appendChild(colorWrap);
+        
+        const sep2 = document.createElement('div'); sep2.className = 'wb-divider'; wbToolbar.appendChild(sep2);
+        
+        const undoBtn = document.createElement('button'); undoBtn.className = 'wb-tool-btn'; undoBtn.title = 'Отменить';
+        undoBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"/></svg>';
+        undoBtn.onclick = () => { 
+          for (let i = WbState.strokes.length - 1; i >= 0; i--) {
+            if (WbState.strokes[i].author === me) {
+              const removed = WbState.strokes.splice(i, 1)[0];
+              WbState.undoneStrokes.push(removed);
+              sendWs({ type: 'wb_undo', author: me, strokeId: removed.id });
+              WbState.emit();
+              break;
+            }
+          }
+        };
+        wbToolbar.appendChild(undoBtn);
+        
+        const redoBtn = document.createElement('button'); redoBtn.className = 'wb-tool-btn'; redoBtn.title = 'Вернуть';
+        redoBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 019-9 9 9 0 016 2.3l3 4.7"/></svg>';
+        redoBtn.onclick = () => {
+          if (WbState.undoneStrokes.length > 0) {
+            const s = WbState.undoneStrokes.pop();
+            WbState.strokes.push(s);
+            sendWs({ type: 'wb_stroke_add', stroke: s });
+            WbState.emit();
+          }
+        };
+        wbToolbar.appendChild(redoBtn);
+        
+        const clearBtn = document.createElement('button'); clearBtn.className = 'wb-tool-btn'; clearBtn.title = 'Очистить';
+        clearBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#E24B4A" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
+        clearBtn.onclick = () => { if(confirm('Очистить доску для всех?')) sendWs({ type: 'wb_clear_all' }); };
+        wbToolbar.appendChild(clearBtn);
+      };
+
+      const refreshWbToolbar = () => {
+        if (!wbToolbar) return;
+        wbToolbar.querySelectorAll('.wb-tool-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tool === WbState.tool));
+        wbToolbar.querySelectorAll('.wb-color-swatch').forEach(sw => sw.classList.toggle('active', sw.dataset.color === WbState.color));
+      };
+
+            const getWbMetrics = () => {
+        try {
+          const frame = document.getElementById('variant-frame');
+          const doc = frame.contentDocument;
+          if (!doc) return null;
+          const page = doc.querySelector('.page') || doc.querySelector('#main-wrapper') || doc.querySelector('.main-wrapper') || doc.body;
+          
+          const rect = page.getBoundingClientRect();
+          
+          return {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width || 1
+          };
+        } catch(e) {
+          return null;
+        }
+      };
+
+      const getWbNormCoords = (e) => {
+        let cx, cy;
+        if (e.touches && e.touches.length > 0) {
+          cx = e.touches[0].clientX; cy = e.touches[0].clientY;
+        } else {
+          cx = e.clientX; cy = e.clientY;
+        }
+        const canvasRect = wbCanvas.getBoundingClientRect();
+        const localX = cx - canvasRect.left;
+        const localY = cy - canvasRect.top;
+        
+        const m = getWbMetrics();
+        if (!m || m.width === 0) return { x: 0, y: 0 };
+        
+        const pt = {
+          x: (localX - m.left) / m.width,
+          y: (localY - m.top) / m.width
+        };
+
+        // Task-anchored Y: store which task and relative Y within it.
+        // This makes strokes stable across devices with different screen widths
+        // (where content reflow changes absolute Y positions).
+        try {
+          const iframeDoc = frame?.contentDocument;
+          if (iframeDoc) {
+            const tasks = iframeDoc.querySelectorAll('.task, section.task, .task-in-group');
+            for (const task of tasks) {
+              const tr = task.getBoundingClientRect(); // in iframe viewport (= canvas viewport)
+              if (localY >= tr.top && localY <= tr.bottom && tr.height > 0) {
+                const numEl = task.querySelector('.task-number');
+                if (numEl) {
+                  pt.taskNum = numEl.textContent.trim();
+                  pt.ty = (localY - tr.top) / tr.height; // 0..1 within this task's height
+                }
+                break;
+              }
+            }
+          }
+        } catch (_) {}
+
+        return pt;
+      };
+
+      const renderWhiteboard = () => {
+        if (!WbState.dirty || !wbCtx || !wbCanvas) return;
+        WbState.dirty = false;
+        wbCtx.clearRect(0, 0, wbCanvas.width, wbCanvas.height);
+        
+        const m = getWbMetrics();
+        if (!m) return;
+
+        const toAbsX = (nx) => nx * m.width + m.left;
+        const toAbsY = (ny) => ny * m.width + m.top;
+
+        // Build task-rect cache for task-anchored rendering
+        const taskRects = {};
+        try {
+          const iframeDoc = frame?.contentDocument;
+          if (iframeDoc) {
+            iframeDoc.querySelectorAll('.task, section.task, .task-in-group').forEach(task => {
+              const numEl = task.querySelector('.task-number');
+              if (numEl) taskRects[numEl.textContent.trim()] = task.getBoundingClientRect();
+            });
+          }
+        } catch (_) {}
+
+        // Resolve a point to absolute canvas coordinates.
+        // Prefers task-relative coords (taskNum + ty) for cross-device accuracy,
+        // falls back to page-width-normalized coords.
+        const resolvePoint = (pt) => {
+          if (pt && pt.taskNum && pt.ty != null && taskRects[pt.taskNum]) {
+            const tr = taskRects[pt.taskNum];
+            return { x: toAbsX(pt.x), y: tr.top + pt.ty * tr.height };
+          }
+          return { x: toAbsX(pt.x), y: toAbsY(pt.y) };
+        };
+        
+        const drawStroke = (s, isGhost) => {
+          if (!s) return;
+          wbCtx.save();
+          wbCtx.globalAlpha = isGhost ? s.opacity * 0.6 : s.opacity;
+          wbCtx.strokeStyle = s.color;
+          wbCtx.fillStyle = s.color;
+          wbCtx.lineWidth = s.width;
+          wbCtx.lineCap = 'round';
+          wbCtx.lineJoin = 'round';
+
+          if (s.tool === 'pen' && s.points && s.points.length > 0) {
+            const p0 = resolvePoint(s.points[0]);
+            wbCtx.beginPath();
+            wbCtx.moveTo(p0.x, p0.y);
+            for (let i = 1; i < s.points.length; i++) {
+              const p = resolvePoint(s.points[i]);
+              wbCtx.lineTo(p.x, p.y);
+            }
+            wbCtx.stroke();
+          } else if (s.startPoint && s.endPoint) {
+            const sp = resolvePoint(s.startPoint);
+            const ep = resolvePoint(s.endPoint);
+            const sx = sp.x, sy = sp.y, ex = ep.x, ey = ep.y;
+            if (s.tool === 'line' || s.tool === 'arrow') {
+              wbCtx.beginPath(); wbCtx.moveTo(sx, sy); wbCtx.lineTo(ex, ey); wbCtx.stroke();
+              if (s.tool === 'arrow') {
+                const angle = Math.atan2(ey - sy, ex - sx);
+                const dist = Math.hypot(ex - sx, ey - sy);
+                const headLen = Math.min(20, dist * 0.25);
+                wbCtx.beginPath();
+                wbCtx.moveTo(ex, ey);
+                wbCtx.lineTo(ex - headLen * Math.cos(angle - Math.PI / 7), ey - headLen * Math.sin(angle - Math.PI / 7));
+                wbCtx.moveTo(ex, ey);
+                wbCtx.lineTo(ex - headLen * Math.cos(angle + Math.PI / 7), ey - headLen * Math.sin(angle + Math.PI / 7));
+                wbCtx.stroke();
+              }
+            } else if (s.tool === 'rect') {
+              wbCtx.beginPath(); wbCtx.rect(sx, sy, ex - sx, ey - sy); wbCtx.stroke();
+            } else if (s.tool === 'ellipse') {
+              const cx = (sx + ex) / 2, cy = (sy + ey) / 2;
+              const rx = Math.abs(ex - sx) / 2, ry = Math.abs(ey - sy) / 2;
+              wbCtx.beginPath(); wbCtx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI); wbCtx.stroke();
+            } else if (s.tool === 'triangle') {
+              const cx = (sx + ex) / 2;
+              wbCtx.beginPath(); wbCtx.moveTo(cx, sy); wbCtx.lineTo(sx, ey); wbCtx.lineTo(ex, ey); wbCtx.closePath(); wbCtx.stroke();
+            }
+          } else if (s.tool === 'text' && s.text && s.startPoint) {
+            const sp = resolvePoint(s.startPoint);
+            wbCtx.font = `500 ${s.width * 6}px sans-serif`;
+            wbCtx.textBaseline = 'top';
+            wbCtx.fillText(s.text, sp.x, sp.y);
+          }
+          wbCtx.restore();
+        };
+
+        WbState.strokes.forEach(s => drawStroke(s));
+        if (WbState.activeStroke) drawStroke(WbState.activeStroke, true);
+      };
+
+      if (wbCanvas) {
+        const eraseAt = (pt) => {
+          const m = getWbMetrics();
+          const eraserRadiusNorm = m && m.width > 0 ? (WbState.width * 2) / m.width : WbState.width * 2;
+          const dist = (p1, p2) => Math.hypot(p1.x - p2.x, p1.y - p2.y);
+          const erasedIds = [];
+          
+          WbState.strokes = WbState.strokes.filter(s => {
+            if (s.tool === 'pen') {
+              if (s.points.some(p => dist(p, pt) < eraserRadiusNorm)) { erasedIds.push(s.id); return false; }
+            } else if (s.startPoint) {
+              const minX = Math.min(s.startPoint.x, s.endPoint?.x || s.startPoint.x);
+              const maxX = Math.max(s.startPoint.x, s.endPoint?.x || s.startPoint.x);
+              const minY = Math.min(s.startPoint.y, s.endPoint?.y || s.startPoint.y);
+              const maxY = Math.max(s.startPoint.y, s.endPoint?.y || s.startPoint.y);
+              const inBounds = pt.x >= minX - eraserRadiusNorm && pt.x <= maxX + eraserRadiusNorm &&
+                               pt.y >= minY - eraserRadiusNorm && pt.y <= maxY + eraserRadiusNorm;
+              if (inBounds) { erasedIds.push(s.id); return false; }
+            }
+            return true;
+          });
+          if (erasedIds.length > 0) {
+            sendWs({ type: 'wb_strokes_erase', ids: erasedIds });
+            WbState.emit();
+          }
+        };
+
+        const handleTextClick = (e) => {
+          const pt = getWbNormCoords(e);
+          const m = getWbMetrics();
+          if (!m) return;
+          
+          const unscaledX = pt.x * m.width + m.left;
+          const unscaledY = pt.y * m.width + m.top;
+
+          wbTextInput.style.display = 'block';
+          wbTextInput.style.left = `${unscaledX}px`;
+          wbTextInput.style.top = `${unscaledY - 10}px`;
+          wbTextInput.style.color = WbState.color;
+          wbTextInput.style.font = `500 ${WbState.width * 6}px sans-serif`;
+          wbTextInput.value = '';
+          wbTextInput.focus();
+
+          const commitText = () => {
+            if (wbTextInput.style.display === 'none') return;
+            const text = wbTextInput.value.trim();
+            wbTextInput.style.display = 'none';
+            if (text) {
+              const s = {
+                id: Date.now().toString(36) + Math.random().toString(36).substr(2),
+                tool: 'text', color: WbState.color, width: WbState.width, opacity: WbState.opacity,
+                text: text, startPoint: pt, author: me, timestamp: Date.now(),
+                taskId: pt.taskId, taskTopNorm: pt.taskTopNorm
+              };
+              WbState.strokes.push(s);
+              WbState.undoneStrokes = [];
+              sendWs({ type: 'wb_stroke_add', stroke: s });
+              WbState.emit();
+            }
+          };
+          wbTextInput.onblur = commitText;
+          wbTextInput.onkeydown = (k) => { if (k.key === 'Enter') commitText(); };
+        };
+
+        const onStart = (e) => {
+          if (e.target === wbTextInput || WbState.tool === 'pointer') return;
+          e.preventDefault();
+          if (WbState.tool === 'text') { handleTextClick(e); return; }
+          wbIsDrawing = true;
+          const pt = getWbNormCoords(e);
+          if (WbState.tool === 'eraser') { eraseAt(pt); return; }
+          const s = {
+            id: Date.now().toString(36) + Math.random().toString(36).substr(2),
+            tool: WbState.tool, color: WbState.color, width: WbState.width, opacity: WbState.opacity,
+            author: me, timestamp: Date.now(),
+            taskId: pt.taskId, taskTopNorm: pt.taskTopNorm
+          };
+          if (WbState.tool === 'pen') s.points = [pt];
+          else { s.startPoint = pt; s.endPoint = pt; }
+          WbState.activeStroke = s;
+          sendWs({ type: 'wb_stroke_active', stroke: s });
+          WbState.emit();
+        };
+
+        const onMove = (e) => {
+          if (e.target === wbTextInput || WbState.tool === 'pointer') return;
+          if (!wbIsDrawing) return;
+          e.preventDefault();
+          const pt = getWbNormCoords(e);
+          if (WbState.tool === 'eraser') { eraseAt(pt); return; }
+          if (WbState.activeStroke) {
+            const s = { ...WbState.activeStroke };
+            if (s.tool === 'pen') s.points = [...s.points, pt];
+            else s.endPoint = pt;
+            WbState.activeStroke = s;
+            sendWs({ type: 'wb_stroke_active', stroke: s });
+            WbState.emit();
+          }
+        };
+
+        const onEnd = (e) => {
+          if (e.target === wbTextInput || WbState.tool === 'pointer') return;
+          if (!wbIsDrawing) return;
+          wbIsDrawing = false;
+          if (WbState.tool !== 'eraser' && WbState.activeStroke) {
+            WbState.strokes.push(WbState.activeStroke);
+            WbState.undoneStrokes = [];
+            sendWs({ type: 'wb_stroke_add', stroke: WbState.activeStroke });
+            WbState.activeStroke = null;
+            sendWs({ type: 'wb_stroke_active', stroke: null });
+            WbState.emit();
+          }
+        };
+
+        wbCanvas.addEventListener('mousedown', onStart);
+        wbCanvas.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onEnd);
+        wbCanvas.addEventListener('touchstart', onStart, {passive: false});
+        wbCanvas.addEventListener('touchmove', onMove, {passive: false});
+        window.addEventListener('touchend', onEnd);
+      }
+
+      buildWbToolbar();
+      resizeWb();
+      // --- End Whiteboard Logic ---
+
+      const pendingBoardObjects = [];
+      const flushPendingBoardObjects = () => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        while (pendingBoardObjects.length) {
+          const payload = pendingBoardObjects.shift();
+          sendWs(payload);
+        }
+      };
+      const normalizeTaskNumber = (value) => {
+        const raw = String(value == null ? "" : value).trim();
+        if (!raw) return "";
+        const digitsOnly = raw.replace(/[^\d]+/g, "");
+        return digitsOnly || raw;
+      };
+      /** Ключ в answersByTask: по id задания варианта (Task.id) — устраняет склейку при одинаковых номерах в UI. */
+      const answerKeyFromStoredTaskNumber = (stored) => {
+        const s = String(stored == null ? "" : stored).trim();
+        if (s.length >= 2 && s[0] === "t" && /^\d+$/.test(s.slice(1))) return s;
+        return "n" + normalizeTaskNumber(s);
+      };
+      const answerKeyFromDomTask = (task) => {
+        if (!task) return "";
+        const tid = String(task.getAttribute("data-task-id") || "").trim();
+        if (tid && /^\d+$/.test(tid)) return "t" + tid;
+        const ne = task.querySelector(".task-left .task-number") || task.querySelector(".task-number");
+        return "n" + normalizeTaskNumber(ne ? ne.textContent : "");
+      };
+      /** Ключ для вложений (тот же смысл, что у ответов): t<id> или n<номер>. */
+      const attachmentKeyFromApiItem = (item) => {
+        if (!item) return "";
+        const raw = item.task_id != null ? String(item.task_id).trim() : "";
+        if (raw && /^\d+$/.test(raw)) return "t" + raw;
+        return answerKeyFromStoredTaskNumber(item.task_number);
+      };
+      const toFiniteOrNull = (value) => {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+      };
+
+      const buildVariantSrc = (url, lvl, subj, vId) => {
+        const direct = String(url || '').trim();
+        if (direct && !/\/lesson\/join\/?/i.test(direct)) return direct;
+        const levelSafe = String(lvl || '').trim().toLowerCase();
+        const subjectSafe = String(subj || '').trim().toLowerCase();
+        const idSafe = String(vId || '').trim();
+        if (levelSafe && subjectSafe && idSafe) return `/${levelSafe}/${subjectSafe}/variant/${idSafe}/`;
+        return "";
+      };
+      const openVariantIfReady = (candidateSrc) => {
+        const s = String(candidateSrc || '').trim();
+        if (!s || variantLoaded) return false;
+        const out = withLessonIframeParams(s);
+        src = out;
+        variantLoaded = true;
+        fallback.classList.remove("show");
+        frame.src = out;
+        frame.style.display = 'block';
+        return true;
+      };
+      const parseVariantMetaFromSrc = (candidateSrc) => {
+        try {
+          const path = new URL(String(candidateSrc || ''), location.origin).pathname;
+          const m = path.match(/^\/([^/]+)\/([^/]+)\/variant\/([0-9]+)\/?$/i);
+          if (!m) return null;
+          return {
+            level: String(m[1] || '').trim().toLowerCase(),
+            subject: String(m[2] || '').trim().toLowerCase(),
+            variant_id: Number(m[3]) || 0,
+          };
+        } catch (_) {
+          return null;
+        }
+      };
+      const announceVariant = () => {
+        if (!isTeacher || !wsReady) return;
+        const fromSrc = parseVariantMetaFromSrc(src);
+        const levelSafe = String((fromSrc && fromSrc.level) || level || '').trim().toLowerCase();
+        const subjectSafe = String((fromSrc && fromSrc.subject) || subject || '').trim().toLowerCase();
+        const variantIdNum = Number((fromSrc && fromSrc.variant_id) || variantId || 0);
+        if (!levelSafe || !subjectSafe || !variantIdNum) return;
+        const key = `${levelSafe}:${subjectSafe}:${variantIdNum}`;
+        if (key === announcedVariantKey) return;
+        announcedVariantKey = key;
+        sendWs({
+          type: 'variant',
+          level: levelSafe,
+          subject: subjectSafe,
+          variant_id: variantIdNum,
+        });
+      };
+
+      ws.onopen = () => {
+        wsReady = true;
+        sendWs({ type: "join", name: me, role: participants[me] });
+        flushPendingBoardObjects();
+        announceVariant();
+      };
+
+      const normalizeAnswer = (s) => String(s || "").toLowerCase().replace(/\s+/g, "").trim();
+      const stripHtml = (html) => {
+        const d = document.createElement("div");
+        d.innerHTML = String(html || "");
+        return d.textContent || d.innerText || "";
+      };
+
+      let answerByTaskNum = {};
+      let maxScoreByTaskNum = {};
+      let taskListIdByNum = {};
+      let lessonCriteriaCache = {};
+      let answersByTask = {};
+      let attachmentsByTask = {};
+      let teacherResultsPollTimer = null;
+      let taskObserver = null;
+      /** Пока правим DOM в iframe, отключаем MutationObserver — иначе patchTeacherView → мутация → снова observer → бесконечный цикл («страница не отвечает»). */
+      function withTeacherMutationsPaused(doc, fn) {
+        if (!doc) return;
+        const obs = taskObserver;
+        if (obs) {
+          try { obs.disconnect(); } catch (e) {}
+        }
+        try {
+          fn();
+        } finally {
+          if (obs && doc.body) {
+            try {
+              obs.observe(doc.body, { childList: true, subtree: true });
+            } catch (e) {}
+          }
+        }
+      }
+      let canvasObserver = null;
+      let canvasPollTimer = null;
+      const syncTimers = {};
+      const lastCanvasHash = {};
+      const submittedTaskNumbers = {}; // { "1": true, ... } — ученик уже отправил ответ
+
+      const getDoc = () => frame.contentDocument;
+
+      /** Та же логика, что boardCoordsFromClient в ExamPage: точка относительно #main-wrapper. */
+      const getLessonMainWrapper = (doc) => {
+        const d = doc || getDoc();
+        if (!d || !d.querySelector) return null;
+        return d.querySelector('.page') || d.querySelector('#main-wrapper') || d.querySelector('.main-wrapper');
+      };
+
+      const cursorNormFromClient = (doc, clientX, clientY) => {
+        const wrap = getLessonMainWrapper(doc);
+        if (!wrap) return null;
+        const mr = wrap.getBoundingClientRect();
+        const sw = Math.max(1, wrap.scrollWidth || 1);
+        const sh = Math.max(1, wrap.scrollHeight || 1);
+        if (!(mr.width > 0) || !(mr.height > 0)) return null;
+        const sx = sw / mr.width;
+        const sy = sh / mr.height;
+        const boardX = (Number(clientX) - mr.left) * sx;
+        const boardY = (Number(clientY) - mr.top) * sy;
+        return {
+          nx: boardX / sw,
+          ny: boardY / sh,
+        };
+      };
+
+      const cursorClientFromNorm = (doc, nx, ny) => {
+        const wrap = getLessonMainWrapper(doc);
+        if (wrap == null || nx == null || ny == null) return null;
+        const nxx = Number(nx);
+        const nyy = Number(ny);
+        if (!Number.isFinite(nxx) || !Number.isFinite(nyy)) return null;
+        const mr = wrap.getBoundingClientRect();
+        const sw = Math.max(1, wrap.scrollWidth || 1);
+        const sh = Math.max(1, wrap.scrollHeight || 1);
+        if (!(mr.width > 0) || !(mr.height > 0)) return null;
+        const sx = sw / mr.width;
+        const sy = sh / mr.height;
+        const boardX = nxx * sw;
+        const boardY = nyy * sh;
+        return {
+          x: mr.left + boardX / sx,
+          y: mr.top + boardY / sy,
+        };
+      };
+
+      let cursorRenderRaf = null;
+      const scheduleCursorRedraw = () => {
+        if (cursorRenderRaf != null) return;
+        cursorRenderRaf = requestAnimationFrame(() => {
+          cursorRenderRaf = null;
+          renderCursors();
+        });
+      };
+
+      const getDocMetrics = (doc) => {
+        const d = doc || getDoc();
+        if (!d) {
+          return {
+            viewportW: 1,
+            viewportH: 1,
+            contentW: 1,
+            contentH: 1,
+            scrollX: 0,
+            scrollY: 0,
+          };
+        }
+        const win = d.defaultView || window;
+        const root = d.documentElement || d.body;
+        const body = d.body || root;
+        const viewportW = Math.max(1, Number(win.innerWidth) || root.clientWidth || body.clientWidth || 1);
+        const viewportH = Math.max(1, Number(win.innerHeight) || root.clientHeight || body.clientHeight || 1);
+        const contentW = Math.max(viewportW, root.scrollWidth || 0, body.scrollWidth || 0);
+        const contentH = Math.max(viewportH, root.scrollHeight || 0, body.scrollHeight || 0);
+        const scrollX = Number(win.scrollX ?? root.scrollLeft ?? body.scrollLeft ?? 0) || 0;
+        const scrollY = Number(win.scrollY ?? root.scrollTop ?? body.scrollTop ?? 0) || 0;
+        return { viewportW, viewportH, contentW, contentH, scrollX, scrollY };
+      };
+
+      const ensureCursorLayer = (doc) => {
+        if (!doc) return null;
+        let layer = doc.getElementById('lesson-cursors-layer');
+        if (!layer) {
+          layer = doc.createElement('div');
+          layer.id = 'lesson-cursors-layer';
+          doc.body.appendChild(layer);
+        }
+        cursorLayer = layer;
+        return layer;
+      };
+
+      const cursorHueForName = (name) => {
+        let h = 0;
+        const s = String(name || '');
+        for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+        return Math.abs(h) % 360;
+      };
+
+      const renderCursors = () => {
+        const doc = getDoc();
+        if (!doc) return;
+        const layer = ensureCursorLayer(doc);
+        if (!layer) return;
+        const metrics = getDocMetrics(doc);
+        const rows = [];
+        for (const [name, cur] of Object.entries(cursors)) {
+          if (!cur) continue;
+          let x = toFiniteOrNull(cur.x);
+          let y = toFiniteOrNull(cur.y);
+          const nx = toFiniteOrNull(cur.nx);
+          const ny = toFiniteOrNull(cur.ny);
+          const rx = toFiniteOrNull(cur.rx);
+          const ry = toFiniteOrNull(cur.ry);
+          const vx = toFiniteOrNull(cur.vx);
+          const vy = toFiniteOrNull(cur.vy);
+          if (nx != null && ny != null) {
+            const p = cursorClientFromNorm(doc, nx, ny);
+            if (p) {
+              x = p.x;
+              y = p.y;
+            }
+          }
+          if ((x == null || y == null) && rx != null && ry != null) {
+            x = rx * metrics.contentW - metrics.scrollX;
+            y = ry * metrics.contentH - metrics.scrollY;
+          }
+          if ((x == null || y == null) && vx != null && vy != null) {
+            x = vx * metrics.viewportW;
+            y = vy * metrics.viewportH;
+          }
+          if (x == null || y == null) continue;
+          x = Math.max(-32, Math.min(metrics.viewportW + 32, x));
+          y = Math.max(-32, Math.min(metrics.viewportH + 32, y));
+          const safeName = String(name || 'Участник')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+          const roleVal = String(cur.role || participants[name] || '').toLowerCase();
+          const isTeacherCur = roleVal === 'teacher' || roleVal === 'tutor';
+          const cursorCls = isTeacherCur ? 'lesson-cursor lesson-cursor--teacher' : 'lesson-cursor lesson-cursor--student';
+          const dotBg = isTeacherCur
+            ? '#ea580c'
+            : `hsl(${cursorHueForName(name)}, 78%, 46%)`;
+          rows.push(
+            `<div class="${cursorCls}" style="left:${x}px;top:${y}px">` +
+            `<span class="lesson-cursor-dot" style="background:${dotBg}"></span>` +
+            `<span class="lesson-cursor-name">${safeName}</span>` +
+            `</div>`
+          );
+        }
+        layer.innerHTML = rows.join('');
+      };
+
+      const renderParticipants = () => {
+        const doc = getDoc();
+        if (!doc) return;
+        const heroRight = doc.querySelector('.variant-hero-right') || doc.querySelector('.variant-hero-content');
+        if (!heroRight) return;
+        const apply = () => {
+          let wrap = doc.getElementById('lesson-participants-wrap');
+          if (!wrap) {
+            wrap = doc.createElement('div');
+            wrap.id = 'lesson-participants-wrap';
+            heroRight.appendChild(wrap);
+          }
+          const names = Object.keys(participants).sort((a, b) => a.localeCompare(b, 'ru'));
+          wrap.innerHTML = `
+          <div class="lesson-participants-title">Участники онлайн: ${names.length}</div>
+          <div class="lesson-participants-list">${names.map((n) => `<span class="lesson-participant-chip">${n}</span>`).join('')}</div>
+        `;
+        };
+        if (isTeacher) withTeacherMutationsPaused(doc, apply);
+        else apply();
+      };
+
+      const safeHtml = (v) => String(v == null ? '' : v)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      const escAttr = (v) => String(v == null ? '' : v)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+      const removeLessonResultsPanel = (doc) => {
+        if (!doc) return;
+        doc.getElementById('lesson-results-panel')?.remove();
+      };
+
+      const mergeTaskAnswersFromApi = (rows) => {
+        if (!Array.isArray(rows) || !rows.length) return false;
+        let changed = false;
+        rows.forEach((row) => {
+          const taskKey = answerKeyFromStoredTaskNumber(row.task_number);
+          const displayNum = normalizeTaskNumber(row.task_number);
+          const studentName = String((row && row.student) || '').trim();
+          if (!taskKey || !studentName) return;
+          const answer = String(row.answer || '');
+          let ok = false;
+          if (typeof row.is_correct === 'boolean') {
+            ok = row.is_correct;
+          } else if (taskKey.startsWith('n')) {
+            ok = normalizeAnswer(answer) === normalizeAnswer(stripHtml(answerByTaskNum[displayNum] || ''));
+          } else {
+            ok = false;
+          }
+          const list = answersByTask[taskKey] || [];
+          const idx = list.findIndex((r) => r.name === studentName);
+          const newRow = { name: studentName, answer, ok };
+          if (idx >= 0) {
+            const prev = list[idx];
+            if (prev.answer !== newRow.answer || prev.ok !== newRow.ok) {
+              list[idx] = newRow;
+              changed = true;
+            }
+          } else {
+            list.push(newRow);
+            answersByTask[taskKey] = list;
+            changed = true;
+          }
+        });
+        return changed;
+      };
+
+      const mergeAttachmentsFromApiItems = (items) => {
+        if (!Array.isArray(items) || !items.length) return;
+        items.forEach((item) => {
+          const taskKey = attachmentKeyFromApiItem(item);
+          if (!taskKey || !item.url) return;
+          const row = {
+            name: String(item.student || 'Ученик').trim() || 'Ученик',
+            url: String(item.url || ''),
+            filename: String(item.filename || ''),
+          };
+          attachmentsByTask[taskKey] = attachmentsByTask[taskKey] || [];
+          if (!attachmentsByTask[taskKey].some((x) => x.url === row.url)) attachmentsByTask[taskKey].push(row);
+        });
+      };
+
+      const renderLessonAttachments = (doc) => {
+        if (!isTeacher || !doc) return;
+        const token = String(qs.get('token') || '').trim();
+        doc.querySelectorAll('.lesson-attachments-teacher').forEach((el) => el.remove());
+        doc.querySelectorAll('.task').forEach((task) => {
+          const numEl = task.querySelector('.task-number');
+          const taskNum = numEl ? normalizeTaskNumber(numEl.textContent) : '';
+          if (!taskNum) return;
+          const taskKey = answerKeyFromDomTask(task);
+          const taskIdAttr = String(task.getAttribute('data-task-id') || '').trim();
+          const rows = attachmentsByTask[taskKey] || [];
+          if (!rows.length) return;
+          
+          // Group by student
+          const byStudent = {};
+          rows.forEach(r => {
+             if (!byStudent[r.name]) byStudent[r.name] = [];
+             byStudent[r.name].push(r);
+          });
+
+          const wrap = doc.createElement('div');
+          wrap.className = 'lesson-attachments-teacher';
+          const maxScore = maxScoreByTaskNum[taskNum] || 1;
+          
+          let html = '<div class="lesson-attachments-title">Прикреплённые решения</div><div class="lesson-attachments-list" style="display:flex; flex-direction:column; gap:16px;">';
+          
+          for (const studentName in byStudent) {
+             const studentAttachments = byStudent[studentName];
+             
+             let currentScore = '';
+             const studentAnswers = answersByTask[taskKey] || [];
+             const sa = studentAnswers.find(a => a.name === studentName);
+             if (sa && sa.answer && sa.answer.startsWith('Оценка: ')) {
+                currentScore = sa.answer.replace('Оценка: ', '').split(' ')[0];
+             }
+             
+             let imagesHtml = '<div style="display:flex; flex-wrap:wrap; gap:8px;">';
+             studentAttachments.forEach(r => {
+                const imgUrl = token
+                  ? (r.url + (String(r.url).includes('?') ? '&' : '?') + 't=' + encodeURIComponent(token))
+                  : r.url;
+                const cap = r.filename ? safeHtml(r.filename) : '';
+                imagesHtml += `<a href="${String(imgUrl).replace(/"/g, '&quot;')}" target="_blank" style="display:block; width:120px; height:120px; border-radius:6px; overflow:hidden; border:1px solid #e2e8f0; position:relative;" title="${cap}">
+                  <img src="${String(imgUrl).replace(/"/g, '&quot;')}" style="width:100%; height:100%; object-fit:contain; background:#f8fafc;" alt=""/>
+                </a>`;
+             });
+             imagesHtml += '</div>';
+             
+             html += `
+               <div class="lesson-student-attachment-row" style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:12px; background:#fff; border-radius:8px; border:1px solid #e2e8f0;">
+                 <div style="flex:1; min-width:0;">
+                   <div style="font-weight:600; font-size:0.85rem; color:#334155; margin-bottom:8px;">${safeHtml(studentName)}</div>
+                   ${imagesHtml}
+                 </div>
+                 <div style="display:flex; align-items:center; gap:6px; background:#f8fafc; padding:6px 10px; border-radius:6px; border:1px solid #e2e8f0;">
+                   <span style="font-size:0.8rem; color:#64748b; font-weight:500;">Балл:</span>
+                   <input type="number" min="0" max="${maxScore}" value="${currentScore}" data-student="${safeHtml(studentName)}" data-task="${taskNum}" ${taskIdAttr ? `data-task-id="${escAttr(taskIdAttr)}"` : ''} class="lesson-score-input" style="width:48px; padding:4px; border:1px solid #cbd5e1; border-radius:4px; text-align:center; font-size:0.9rem; font-weight:600; color:#0f172a; outline:none;" />
+                   <span style="font-size:0.85rem; color:#64748b; font-weight:500;">/ ${maxScore}</span>
+                 </div>
+               </div>
+             `;
+          }
+          
+          html += '</div>';
+          wrap.innerHTML = html;
+          
+          const taskContent = task.querySelector('.task-content') || task;
+          taskContent.appendChild(wrap);
+        });
+      };
+
+      const refreshTeacherAnswerBlocks = (doc) => {
+        if (doc) {
+          withTeacherMutationsPaused(doc, () => {
+            patchTeacherView(doc);
+            renderLessonAttachments(doc);
+            removeLessonResultsPanel(doc);
+          });
+        }
+      };
+
+      const scheduleTeacherAnswerRefresh = (doc) => {
+        if (!doc) return;
+        const run = () => refreshTeacherAnswerBlocks(doc);
+        run();
+        requestAnimationFrame(() => run());
+        setTimeout(run, 60);
+        setTimeout(run, 220);
+      };
+
+      const fetchTeacherResults = async () => {
+        if (!isTeacher) return;
+        const token = String(qs.get('token') || lessonPageToken || '').trim();
+        const params = new URLSearchParams();
+        if (token) params.set('token', token);
+        else params.set('room_id', roomId);
+        if (variantId) params.set('variant_id', String(variantId));
+        try {
+          if (token) {
+            const p2 = new URLSearchParams(params);
+            p2.set('role', 'teacher');
+            const resTa = await fetch(`/api/lesson/task-answers/?${p2.toString()}`, { credentials: 'include' });
+            const ta = await resTa.json();
+            if (resTa.ok && ta && Array.isArray(ta.answers)) {
+              mergeTaskAnswersFromApi(ta.answers);
+            }
+            const resAtt = await fetch(
+              `/api/lesson/attachments/?token=${encodeURIComponent(token)}&role=teacher`,
+              { credentials: 'include' }
+            );
+            const att = await resAtt.json();
+            if (resAtt.ok && att && Array.isArray(att.items)) mergeAttachmentsFromApiItems(att.items);
+          }
+          const doc = getDoc();
+          if (doc) {
+            withTeacherMutationsPaused(doc, () => {
+              patchTeacherView(doc);
+              renderLessonAttachments(doc);
+              removeLessonResultsPanel(doc);
+            });
+          }
+        } catch (_) {}
+      };
+
+      const applyBoardSnapshot = (doc, msg) => {
+        const id = String(msg.canvas_id || '').trim();
+        const dataUrl = String(msg.data_url || '').trim();
+        if (!id || !dataUrl) return;
+        const canvas = doc.getElementById(id);
+        if (!canvas || canvas.tagName !== 'CANVAS') return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const img = new Image();
+        img.onload = () => {
+          const targetW = Number(canvas.width) || Number(msg.width) || img.naturalWidth || 0;
+          const targetH = Number(canvas.height) || Number(msg.height) || img.naturalHeight || 0;
+          if (!targetW || !targetH) return;
+          ctx.clearRect(0, 0, targetW, targetH);
+          ctx.drawImage(img, 0, 0, targetW, targetH);
+        };
+        img.src = dataUrl;
+      };
+
+      const queueCanvasSync = (canvas) => {
+        if (!canvas || !canvas.id) return;
+        if (canvas.dataset && canvas.dataset.lessonSkipRasterSync === '1') return;
+        const id = canvas.id;
+        if (syncTimers[id]) clearTimeout(syncTimers[id]);
+        syncTimers[id] = setTimeout(() => {
+          try {
+            const dataUrl = canvas.toDataURL('image/png');
+            const hash = `${canvas.width}x${canvas.height}:${dataUrl.length}:${dataUrl.slice(-64)}`;
+            if (lastCanvasHash[id] === hash) return;
+            lastCanvasHash[id] = hash;
+            sendWs({
+              type: 'board_sync',
+              name: me,
+              canvas_id: id,
+              data_url: dataUrl,
+              width: canvas.width,
+              height: canvas.height,
+            });
+          } catch (_) {}
+        }, 140);
+      };
+
+      const bindCanvasSync = (doc) => {
+        const bind = (canvas) => {
+          if (!canvas || canvas.dataset.lessonSyncBound === '1') return;
+          canvas.dataset.lessonSyncBound = '1';
+          const h = () => queueCanvasSync(canvas);
+          canvas.addEventListener('pointerup', h, true);
+          canvas.addEventListener('mouseup', h, true);
+          canvas.addEventListener('touchend', h, true);
+        };
+
+        doc.querySelectorAll('canvas').forEach(bind);
+        if (canvasObserver) canvasObserver.disconnect();
+        if (canvasPollTimer) clearInterval(canvasPollTimer);
+        canvasObserver = new MutationObserver((mutations) => {
+          for (const m of mutations) {
+            m.addedNodes.forEach((n) => {
+              if (!(n instanceof Element)) return;
+              if (n.tagName === 'CANVAS') bind(n);
+              n.querySelectorAll?.('canvas').forEach(bind);
+            });
+          }
+        });
+        canvasObserver.observe(doc.body, { childList: true, subtree: true });
+        // Фолбэк: некоторые инструменты рисуют без pointerup на canvas.
+        canvasPollTimer = setInterval(() => {
+          doc.querySelectorAll('canvas').forEach((c) => queueCanvasSync(c));
+        }, 900);
+      };
+
+      const getStudentScoreForTask = (taskKey, displayTaskNum, studentName) => {
+        const list = answersByTask[taskKey] || [];
+        const sa = list.find(r => r.name === studentName);
+        if (!sa) return null;
+        const maxM = maxScoreByTaskNum[taskKey] || maxScoreByTaskNum[displayTaskNum] || 1;
+        if (sa.answer && sa.answer.startsWith('Оценка: ')) {
+          const parts = sa.answer.replace('Оценка: ', '').split(' из ');
+          return { score: parseFloat(parts[0]) || 0, max: maxM, isManual: true };
+        }
+        return { score: sa.ok ? maxM : 0, max: maxM, isManual: false };
+      };
+
+      const patchTeacherView = (doc) => {
+        if (!isTeacher) return;
+        doc.querySelectorAll('.variant-score-block, .variant-score-row, .variant-score-label, .variant-score-val, .variant-score-total')
+          .forEach((el) => { el.style.display = 'none'; });
+        doc.querySelectorAll('#finish-btn, .exam-finish-section, .exam-finish-btn').forEach((el) => { el.style.display = 'none'; });
+
+        // Save which criteria panels are currently open before removing them
+        const openCriteriaTasks = new Set();
+        doc.querySelectorAll('.lesson-criteria-section').forEach((el) => {
+          if (el.closest('.lesson-extra-task')) return; // extra tasks keep their own state
+          const content = el.querySelector('.lesson-criteria-content');
+          if (content && content.style.display !== 'none') {
+            const btn = el.querySelector('.lesson-criteria-toggle');
+            if (btn && btn.dataset.task) openCriteriaTasks.add(btn.dataset.task);
+          }
+        });
+
+        // Remove injected blocks only from REGULAR tasks (not from extra tasks — they manage their own)
+        const notInExtra = (el) => !el.closest('.lesson-extra-task');
+        doc.querySelectorAll('.lesson-teacher-answer-block').forEach((el) => { if (notInExtra(el)) el.remove(); });
+        doc.querySelectorAll('.lesson-student-answers-block').forEach((el) => { if (notInExtra(el)) el.remove(); });
+        doc.querySelectorAll('.lesson-attachments-teacher').forEach((el) => { if (notInExtra(el)) el.remove(); });
+        doc.querySelectorAll('.lesson-criteria-section').forEach((el) => { if (notInExtra(el)) el.remove(); });
+        doc.getElementById('lesson-student-totals')?.remove();
+
+        const allTaskMeta = [];
+
+        doc.querySelectorAll('.task').forEach((task) => {
+          // Extra tasks manage their own blocks — skip them here
+          if (task.classList.contains('lesson-extra-task')) return;
+
+          task.querySelectorAll('.answer-input-row, .answer-table-wrap, .answer-actions, .answer-status, .correct-answer-display, .part2-answer-reveal').forEach((el) => el.remove());
+          
+          const numEl = task.querySelector('.task-number');
+          const taskNum = numEl ? normalizeTaskNumber(numEl.textContent) : '';
+          if (!taskNum) return;
+          const taskKey = answerKeyFromDomTask(task);
+          allTaskMeta.push({ key: taskKey, num: taskNum });
+          
+          const taskContent = task.querySelector('.task-content') || task;
+          
+          const correctAnswer = answerByTaskNum[taskKey] || answerByTaskNum[taskNum] || '';
+          const isPart1 = correctAnswer.trim() !== '';
+
+          const answerHtml = answerByTaskNum[taskKey] || answerByTaskNum[taskNum] || '—';
+          const block = doc.createElement('div');
+          block.className = 'lesson-teacher-answer-block';
+          block.innerHTML =
+            '<div class="lesson-teacher-answer-title">Эталонный ответ</div>' +
+            '<div class="lesson-teacher-answer-value">' + answerHtml + '</div>';
+          taskContent.appendChild(block);
+
+          const studentAnswers = answersByTask[taskKey] || [];
+          if (studentAnswers.length > 0) {
+            const maxScore = maxScoreByTaskNum[taskKey] || maxScoreByTaskNum[taskNum] || 1;
+            const studentsBlock = doc.createElement('div');
+            studentsBlock.className = 'lesson-student-answers-block';
+            let html = '<div class="lesson-student-answers-title">Ответы учеников</div>';
+            html += '<table class="lesson-student-answers-table">';
+            if (isPart1) {
+              html += `<thead><tr><th>Ученик</th><th>Ответ</th><th style="width:48px;text-align:center;">Итог</th></tr></thead>`;
+            } else {
+              html += `<thead><tr><th>Ученик</th><th style="width:110px;text-align:center;">Балл / ${maxScore}</th></tr></thead>`;
+            }
+            html += '<tbody>';
+            studentAnswers.forEach(sa => {
+              if (isPart1) {
+                const icon = sa.ok
+                  ? '<span style="color:#15803d;font-weight:bold;font-size:1rem;">✓</span>'
+                  : '<span style="color:#b91c1c;font-weight:bold;font-size:1rem;">✗</span>';
+                html += `<tr>
+                  <td><b>${safeHtml(sa.name)}</b></td>
+                  <td>${safeHtml(sa.answer)}</td>
+                  <td style="text-align:center;">${icon}</td>
+                </tr>`;
+              } else {
+                const scoreData = getStudentScoreForTask(taskKey, taskNum, sa.name);
+                const scoreStr = scoreData !== null
+                  ? `<span style="font-weight:700;color:${scoreData.score > 0 ? '#15803d' : '#b91c1c'}">${scoreData.score}</span> / ${scoreData.max}`
+                  : '—';
+                html += `<tr>
+                  <td><b>${safeHtml(sa.name)}</b></td>
+                  <td style="text-align:center;">${scoreStr}</td>
+                </tr>`;
+              }
+            });
+            html += '</tbody></table>';
+            studentsBlock.innerHTML = html;
+            taskContent.appendChild(studentsBlock);
+          }
+
+          if (!isPart1) {
+            const isOpen = openCriteriaTasks.has(taskNum);
+            const cachedCriteria = lessonCriteriaCache[taskNum];
+            const criteriaSection = doc.createElement('div');
+            criteriaSection.className = 'lesson-criteria-section';
+            criteriaSection.style.cssText = 'margin-top:10px;';
+            criteriaSection.innerHTML = `
+              <button class="lesson-criteria-toggle add-button" data-task="${taskNum}" style="width:100%;">${isOpen ? 'Скрыть критерии' : 'Критерии'}</button>
+              <div class="lesson-criteria-content" style="display:${isOpen ? 'block' : 'none'};margin-top:8px;"></div>
+            `;
+            taskContent.appendChild(criteriaSection);
+            // Restore cached criteria content if was open
+            if (isOpen && cachedCriteria) {
+              const content = criteriaSection.querySelector('.lesson-criteria-content');
+              if (content) {
+                const criteria = cachedCriteria.criteria || [];
+                const maxScore = cachedCriteria.max_score || 0;
+                if (criteria.length === 0) {
+                  content.innerHTML = '<div style="color:#64748b;font-size:0.85rem;padding:8px 0;">Критерии не заданы</div>';
+                } else {
+                  let html = '<table class="lesson-student-answers-table" style="margin-top:0;">';
+                  html += '<thead><tr><th>Содержание критерия</th><th style="width:60px;text-align:center;">Баллы</th></tr></thead><tbody>';
+                  criteria.forEach(c => {
+                    html += `<tr><td style="font-size:0.82rem;line-height:1.5;">${c.criteria_text || ''}</td><td style="text-align:center;font-weight:600;">${c.criteria_score ?? 0}</td></tr>`;
+                  });
+                  html += `</tbody><tfoot><tr>
+                    <td style="text-align:right;font-weight:700;color:#64748b;font-size:0.78rem;padding:6px 8px;">Максимальный балл</td>
+                    <td style="text-align:center;font-weight:700;padding:6px 8px;">${maxScore}</td>
+                  </tr></tfoot></table>`;
+                  content.innerHTML = html;
+                }
+              }
+            }
+          }
+        });
+
+        // Totals panel: sum scores per student across all tasks
+        const allStudents = new Set();
+        allTaskMeta.forEach(({ key }) => (answersByTask[key] || []).forEach(sa => allStudents.add(sa.name)));
+        if (allStudents.size > 0) {
+          const container = doc.querySelector('.main-wrapper, .exam-page, body') || doc.body;
+          const totalsDiv = doc.createElement('div');
+          totalsDiv.id = 'lesson-student-totals';
+          let totalMax = 0;
+          allTaskMeta.forEach(({ num }) => { totalMax += (maxScoreByTaskNum[num] || 1); });
+          let html = '<div class="lesson-student-answers-title" style="margin-bottom:8px;">Итоговые баллы учеников</div>';
+          html += '<table class="lesson-student-answers-table">';
+          html += `<thead><tr><th>Ученик</th><th style="width:120px;text-align:center;">Итого / ${totalMax}</th></tr></thead><tbody>`;
+          allStudents.forEach(name => {
+            let total = 0;
+            allTaskMeta.forEach(({ key, num }) => {
+              const sd = getStudentScoreForTask(key, num, name);
+              if (sd !== null) total += sd.score;
+            });
+            html += `<tr>
+              <td><b>${safeHtml(name)}</b></td>
+              <td style="text-align:center;"><span style="font-weight:700;font-size:1rem;color:${total > 0 ? '#15803d' : '#64748b'}">${total}</span> / ${totalMax}</td>
+            </tr>`;
+          });
+          html += '</tbody></table>';
+          totalsDiv.innerHTML = html;
+          totalsDiv.className = 'lesson-student-answers-block';
+          totalsDiv.style.cssText = 'margin:24px 0 16px;';
+          container.appendChild(totalsDiv);
+        }
+
+        // Render extra tasks added by teacher
+        renderExtraTasks(doc);
+
+        // Batch MathJax typeset for all newly injected lesson blocks
+        try {
+          const iframeWin = frame.contentWindow;
+          if (iframeWin?.MathJax?.typesetPromise) {
+            const blocks = Array.from(doc.querySelectorAll(
+              '.lesson-teacher-answer-block, .lesson-student-answers-block, .lesson-criteria-content, #lesson-student-totals'
+            ));
+            if (blocks.length) iframeWin.MathJax.typesetPromise(blocks);
+          }
+        } catch (_) {}
+      };
+
+      const setupTeacher = async () => {
+        if (!isTeacher || !level || !subject || !variantId) return;
+        try {
+          const res = await fetch(`/api/${level}/${subject}/variant/${variantId}/`, { credentials: 'include' });
+          const data = await res.json();
+          if (res.ok && data && Array.isArray(data.tasks)) {
+            answerByTaskNum = {};
+            maxScoreByTaskNum = {};
+            taskListIdByNum = {};
+            data.tasks.forEach((t) => {
+              const n = normalizeTaskNumber(t.number);
+              if (n) {
+                answerByTaskNum[n] = String(t.answer || '');
+                maxScoreByTaskNum[n] = t.max_score || 1;
+                if (t.task_list_id) taskListIdByNum[n] = t.task_list_id;
+              }
+              if (t.id) {
+                const tk = 't' + t.id;
+                answerByTaskNum[tk] = String(t.answer || '');
+                maxScoreByTaskNum[tk] = t.max_score || 1;
+                if (t.task_list_id) taskListIdByNum[tk] = t.task_list_id;
+              }
+            });
+          }
+        } catch (_) {}
+        const d = getDoc();
+        if (d) {
+          withTeacherMutationsPaused(d, () => {
+            patchTeacherView(d);
+            renderLessonAttachments(d);
+            removeLessonResultsPanel(d);
+            if (extraTasks.length) renderExtraTasks(d);
+          });
+          
+          if (!d._lessonScoreListenerAdded) {
+            d._lessonScoreListenerAdded = true;
+            d.addEventListener('change', (e) => {
+              if (e.target && e.target.classList.contains('lesson-score-input')) {
+                const student = e.target.dataset.student;
+                const taskNum = e.target.dataset.task;
+                const taskIdRaw = e.target.dataset.taskId;
+                const score = e.target.value;
+                const maxScore = maxScoreByTaskNum[taskNum] || 1;
+                if (score !== '') {
+                  const pl = {
+                    type: 'student_answer',
+                    task_number: taskNum,
+                    name: student,
+                    answer: 'Оценка: ' + score + ' из ' + maxScore
+                  };
+                  if (taskIdRaw && String(taskIdRaw).trim()) pl.task_id = String(taskIdRaw).trim();
+                  sendWs(pl);
+                }
+              }
+            });
+
+            d.addEventListener('click', async (e) => {
+              const btn = e.target.closest('.lesson-criteria-toggle');
+              if (!btn) return;
+              e.stopPropagation();
+              const taskNum = btn.dataset.task;
+              const section = btn.closest('.lesson-criteria-section');
+              const content = section?.querySelector('.lesson-criteria-content');
+              if (!content) return;
+              const isOpen = content.style.display !== 'none';
+              content.style.display = isOpen ? 'none' : 'block';
+              btn.textContent = isOpen ? 'Критерии' : 'Скрыть критерии';
+              if (!isOpen) {
+                const renderCriteriaContent = (cdata) => {
+                  const criteria = cdata.criteria || [];
+                  const maxScore = cdata.max_score || 0;
+                  if (criteria.length === 0) {
+                    content.innerHTML = '<div style="color:#64748b;font-size:0.85rem;padding:8px 0;">Критерии не заданы</div>';
+                    return;
+                  }
+                  let html = '<table class="lesson-student-answers-table" style="margin-top:0;">';
+                  html += '<thead><tr><th>Содержание критерия</th><th style="width:60px;text-align:center;">Баллы</th></tr></thead><tbody>';
+                  criteria.forEach(c => {
+                    html += `<tr><td style="font-size:0.82rem;line-height:1.5;">${c.criteria_text || ''}</td><td style="text-align:center;font-weight:600;">${c.criteria_score ?? 0}</td></tr>`;
+                  });
+                  html += `</tbody><tfoot><tr>
+                    <td style="text-align:right;font-weight:700;color:#64748b;font-size:0.78rem;padding:6px 8px;">Максимальный балл</td>
+                    <td style="text-align:center;font-weight:700;padding:6px 8px;">${maxScore}</td>
+                  </tr></tfoot></table>`;
+                  content.innerHTML = html;
+                  try {
+                    const iframeWin = frame.contentWindow;
+                    if (iframeWin?.MathJax?.typesetPromise) iframeWin.MathJax.typesetPromise([content]);
+                  } catch (_) {}
+                };
+                if (lessonCriteriaCache[taskNum]) {
+                  renderCriteriaContent(lessonCriteriaCache[taskNum]);
+                } else {
+                  content.innerHTML = '<div style="color:#64748b;font-size:0.85rem;padding:8px 0;">Загрузка…</div>';
+                  try {
+                    const params = new URLSearchParams();
+                    if (taskListIdByNum[taskNum]) params.set('task_list_id', String(taskListIdByNum[taskNum]));
+                    else params.set('task_number', taskNum);
+                    const res = await fetch(`/api/${level}/${subject}/criteria/?${params.toString()}`, { credentials: 'include' });
+                    const cdata = await res.json();
+                    lessonCriteriaCache[taskNum] = cdata;
+                    renderCriteriaContent(cdata);
+                  } catch (_) {
+                    content.innerHTML = '<div style="color:#ef4444;font-size:0.85rem;padding:8px 0;">Не удалось загрузить критерии</div>';
+                  }
+                }
+              }
+            });
+          }
+        }
+      };
+
+      const setupCursorBroadcast = () => {
+        // В режиме ДЗ не отправляем курсор ученика (не должен сохраняться/синхронизироваться).
+        if (!isTeacher && isHomeworkSession) return;
+        frame.addEventListener('load', () => {
+          const doc = getDoc();
+          if (!doc) return;
+          // Reset stored extra task element refs (from old document after reload)
+          _extraTaskSections.clear();
+          _extraTaskDivider = null;
+          if (_extraTaskReinsertObserver) { _extraTaskReinsertObserver.disconnect(); _extraTaskReinsertObserver = null; }
+          let lastCursorSentAt = 0;
+          const sendCursor = (x, y) => {
+            const now = Date.now();
+            if (now - lastCursorSentAt < 40) return;
+            lastCursorSentAt = now;
+            const metrics = getDocMetrics(doc);
+            const px = Number(x) || 0;
+            const py = Number(y) || 0;
+            const absX = metrics.scrollX + px;
+            const absY = metrics.scrollY + py;
+            const norm = cursorNormFromClient(doc, px, py);
+            const payload = {
+              type: 'cursor_move',
+              name: me,
+              role: participants[me] || (isTeacher ? 'teacher' : 'student'),
+              x: px,
+              y: py,
+              vx: px / metrics.viewportW,
+              vy: py / metrics.viewportH,
+              rx: absX / metrics.contentW,
+              ry: absY / metrics.contentH,
+            };
+            if (norm) {
+              payload.nx = norm.nx;
+              payload.ny = norm.ny;
+            }
+            sendWs(payload);
+          };
+          const onScrollOrResize = () => {
+            scheduleCursorRedraw();
+            if (typeof WbState !== 'undefined') WbState.emit();
+            if (typeof wbTextInput !== 'undefined' && wbTextInput.style.display === 'block') {
+              wbTextInput.blur(); // Commit text on scroll
+            }
+          };
+          doc.addEventListener('scroll', onScrollOrResize, { passive: true, capture: true });
+          const win = doc.defaultView;
+          if (win) {
+            win.addEventListener('scroll', onScrollOrResize, { passive: true });
+            win.addEventListener('resize', onScrollOrResize, { passive: true });
+          }
+          const bindCursorScrollTargets = () => {
+            const w = getLessonMainWrapper(doc);
+            if (w && w.dataset.lessonCursorScrollBound !== '1') {
+              w.dataset.lessonCursorScrollBound = '1';
+              w.addEventListener('scroll', onScrollOrResize, { passive: true });
+            }
+            const shell = doc.querySelector('.app-shell-content');
+            if (shell && shell.dataset.lessonCursorScrollBound !== '1') {
+              shell.dataset.lessonCursorScrollBound = '1';
+              shell.addEventListener('scroll', onScrollOrResize, { passive: true });
+            }
+          };
+          bindCursorScrollTargets();
+          const mo = new MutationObserver(() => bindCursorScrollTargets());
+          if (doc.body) mo.observe(doc.body, { childList: true, subtree: true });
+          doc.addEventListener('mousemove', (e) => sendCursor(e.clientX, e.clientY), { passive: true });
+          doc.addEventListener('touchmove', (e) => {
+            const t = e.touches && e.touches[0];
+            if (!t) return;
+            sendCursor(t.clientX, t.clientY);
+          }, { passive: true });
+        });
+      };
+
+      const setupStudent = () => {
+        if (isTeacher) return;
+        frame.addEventListener('load', () => {
+          const doc = getDoc();
+          if (!doc) return;
+          const lessonStudentStartedAt = Date.now();
+          const addElapsedToPayload = (pl) => {
+            if (!pl || typeof pl !== 'object') return;
+            const sec = Math.max(0, Math.round((Date.now() - lessonStudentStartedAt) / 1000));
+            pl.elapsed_seconds = sec;
+          };
+
+          const lockCheckButton = (task) => {
+            if (!task) return;
+            task.querySelectorAll('.answer-input, .answer-table-input').forEach((input) => {
+              input.disabled = true;
+              input.style.opacity = '0.8';
+              input.style.cursor = 'not-allowed';
+            });
+            const btns = task.querySelectorAll('button');
+            btns.forEach((btn) => {
+              if (!String(btn.textContent || '').toLowerCase().includes('проверить')) return;
+              btn.disabled = true;
+              btn.style.opacity = '0.6';
+              btn.style.cursor = 'not-allowed';
+              if (!String(btn.textContent || '').includes('Отправлено')) {
+                btn.textContent = 'Отправлено';
+              }
+            });
+          };
+
+          const lockAlreadySubmittedTasks = () => {
+            Object.keys(submittedTaskNumbers).forEach((taskKey) => {
+              const task = [...doc.querySelectorAll('.task')].find((el) => answerKeyFromDomTask(el) === taskKey);
+              if (task) lockCheckButton(task);
+            });
+          };
+          const readTaskAnswer = (task) => {
+            const tableInputs = [...task.querySelectorAll('.answer-table-input')];
+            if (tableInputs.length) return tableInputs.map((i) => i.value || '').join(' ').trim();
+            const input = task.querySelector('.answer-input');
+            return input ? String(input.value || '').trim() : '';
+          };
+          doc.addEventListener('click', (e) => {
+            const btn = e.target && e.target.closest ? e.target.closest('button') : null;
+            if (!btn) return;
+            if (!String(btn.textContent || '').toLowerCase().includes('проверить')) return;
+            const task = btn.closest('.task');
+            if (!task) return;
+            const numEl = task.querySelector('.task-number');
+            if (!numEl) return;
+            const taskNum = normalizeTaskNumber(numEl.textContent);
+            const taskKey = answerKeyFromDomTask(task);
+            if (submittedTaskNumbers[taskKey]) return;
+            const taskIdAttr = String(task.getAttribute('data-task-id') || '').trim();
+            const pl = {
+              type: 'student_answer',
+              task_number: taskNum,
+              answer: readTaskAnswer(task),
+              name: participantName || 'Ученик'
+            };
+            addElapsedToPayload(pl);
+            if (taskIdAttr) pl.task_id = taskIdAttr;
+            const sent = sendWs(pl);
+            if (!sent) return;
+            submittedTaskNumbers[taskKey] = true;
+            lockCheckButton(task);
+          }, true);
+
+          const publishTaskAnswer = (task) => {
+            if (!task) return;
+            const numEl = task.querySelector('.task-number');
+            if (!numEl) return;
+            const taskNum = normalizeTaskNumber(numEl.textContent);
+            if (!taskNum) return;
+            const taskKey = answerKeyFromDomTask(task);
+            if (submittedTaskNumbers[taskKey]) return;
+            const taskIdAttr = String(task.getAttribute('data-task-id') || '').trim();
+            const pl = {
+              type: 'student_answer',
+              task_number: taskNum,
+              answer: readTaskAnswer(task),
+              name: participantName || 'Ученик',
+            };
+            addElapsedToPayload(pl);
+            if (taskIdAttr) pl.task_id = taskIdAttr;
+            const sent = sendWs(pl);
+            if (!sent) return;
+            submittedTaskNumbers[taskKey] = true;
+            lockCheckButton(task);
+          };
+
+          doc.addEventListener('change', (e) => {
+            const t = e.target;
+            if (!(t instanceof Element)) return;
+            if (!t.matches('.answer-input, .answer-table-input')) return;
+            publishTaskAnswer(t.closest('.task'));
+          }, true);
+          doc.addEventListener('blur', (e) => {
+            const t = e.target;
+            if (!(t instanceof Element)) return;
+            if (!t.matches('.answer-input, .answer-table-input')) return;
+            publishTaskAnswer(t.closest('.task'));
+          }, true);
+
+          // React может перерисовать задачу и вернуть кнопку — повторно блокируем.
+          const submitObs = new MutationObserver(() => lockAlreadySubmittedTasks());
+          submitObs.observe(doc.body, { childList: true, subtree: true });
+          lockAlreadySubmittedTasks();
+          // Render any extra tasks already received before iframe loaded.
+          // Small delay so React finishes its initial mount first.
+          // Also reset stored element references (they're from the old document after reload).
+          if (extraTasks.length) setTimeout(() => {
+            _extraTaskSections.clear();
+            _extraTaskDivider = null;
+            if (_extraTaskReinsertObserver) { _extraTaskReinsertObserver.disconnect(); _extraTaskReinsertObserver = null; }
+            renderExtraTasks(doc);
+          }, 300);
+        });
+      };
+
+      ws.onmessage = (event) => {
+        let msg = {};
+        try { msg = JSON.parse(event.data || '{}'); } catch (_) { return; }
+
+        if (msg.type === 'lesson_ended') {
+          if (isTeacher) {
+            showLessonStatusToast('Работы сохранены. Показываю результаты учеников.');
+            openFinishModal();
+          } else {
+            const btn = document.getElementById('lesson-student-results-top-btn');
+            if (btn) btn.style.display = 'inline-flex';
+            showLessonStatusToast('Работа проверена. Нажмите «Результаты».');
+          }
+          return;
+        }
+
+        // Whiteboard handlers
+        if (msg.type === 'wb_stroke_add') {
+          WbState.strokes.push(msg.stroke);
+          if (WbState.strokes.length > 1000) WbState.strokes.splice(0, 100);
+          WbState.emit();
+          return;
+        }
+        if (msg.type === 'wb_stroke_active') {
+          WbState.activeStroke = msg.stroke || null;
+          WbState.emit();
+          return;
+        }
+        if (msg.type === 'wb_strokes_erase') {
+          const idSet = new Set(msg.ids);
+          WbState.strokes = WbState.strokes.filter(s => !idSet.has(s.id));
+          WbState.emit();
+          return;
+        }
+        if (msg.type === 'wb_clear_all') {
+          WbState.strokes = [];
+          WbState.activeStroke = null;
+          WbState.emit();
+          return;
+        }
+        if (msg.type === 'wb_undo') {
+          for (let i = WbState.strokes.length - 1; i >= 0; i--) {
+            if (WbState.strokes[i].author === msg.author && (!msg.strokeId || WbState.strokes[i].id === msg.strokeId)) {
+              WbState.strokes.splice(i, 1);
+              WbState.emit();
+              break;
+            }
+          }
+          return;
+        }
+        if (msg.type === 'wb_init') {
+          if (msg.to === me || !msg.to) {
+            WbState.strokes = msg.strokes;
+            WbState.emit();
+          }
+          return;
+        }
+
+        if (msg.type === 'join') {
+          const n = String(msg.name || '').trim();
+          if (n) participants[n] = String(msg.role || 'student');
+          const doc = getDoc();
+          if (doc) {
+            renderParticipants();
+            renderCursors();
+          }
+          
+          if (isTeacher && WbState.strokes.length > 0) {
+            sendWs({ type: 'wb_init', strokes: WbState.strokes, to: msg.name });
+          }
+          if (isTeacher && extraTasks.length > 0) {
+            extraTasks.forEach(task => sendWs({ type: 'lesson_extra_task', task }));
+          }
+          if (isTeacher) fetchTeacherResults();
+          return;
+        }
+        if (msg.type === 'lesson_extra_task') {
+          const task = msg.task;
+          if (task && task.id && !extraTasks.find(t => t.id === task.id)) {
+            extraTasks.push(task);
+            const doc = getDoc();
+            if (doc) renderExtraTasks(doc);
+          }
+          return;
+        }
+        if (msg.type === 'lesson_extra_answer' && isTeacher) {
+          const taskKey = answerKeyFromStoredTaskNumber(String(msg.taskNum || ''));
+          const name = String(msg.name || '').trim();
+          if (!taskKey || !name) return;
+          const list = answersByTask[taskKey] || [];
+          const entry = { name, answer: String(msg.answer || ''), ok: !!msg.ok };
+          const idx = list.findIndex(r => r.name === name);
+          if (idx >= 0) list[idx] = entry;
+          else { list.push(entry); answersByTask[taskKey] = list; }
+          const doc = getDoc();
+          if (doc) renderExtraTasks(doc);
+          return;
+        }
+        if (msg.type === 'leave') {
+          const n = String(msg.name || '').trim();
+          if (n) {
+            delete participants[n];
+            delete cursors[n];
+          }
+          const doc = getDoc();
+          if (doc) {
+            renderParticipants();
+            renderCursors();
+          }
+          
+          if (isTeacher && WbState.strokes.length > 0) {
+            sendWs({ type: 'wb_init', strokes: WbState.strokes, to: msg.name });
+          }
+          if (isTeacher) fetchTeacherResults();
+          return;
+        }
+        if (msg.type === 'cursor_move') {
+          const n = String(msg.name || '').trim();
+          if (!n) return;
+          cursors[n] = {
+            x: toFiniteOrNull(msg.x),
+            y: toFiniteOrNull(msg.y),
+            vx: toFiniteOrNull(msg.vx),
+            vy: toFiniteOrNull(msg.vy),
+            rx: toFiniteOrNull(msg.rx),
+            ry: toFiniteOrNull(msg.ry),
+            nx: toFiniteOrNull(msg.nx),
+            ny: toFiniteOrNull(msg.ny),
+            role: String(msg.role || ''),
+          };
+          scheduleCursorRedraw();
+          return;
+        }
+        if (msg.type === 'board_sync') {
+          if (String(msg.name || '') === me) return;
+          const doc = getDoc();
+          if (doc) {
+            const cid = String(msg.canvas_id || '').trim();
+            const c = cid ? doc.getElementById(cid) : null;
+            if (!(c && c.dataset && c.dataset.lessonSkipRasterSync === '1')) {
+              applyBoardSnapshot(doc, msg);
+            }
+          }
+          return;
+        }
+        if (msg.type === 'board_event') {
+          if (String(msg.from || '') === me) return;
+          const w = frame.contentWindow;
+          if (!w) return;
+          try {
+            w.postMessage({
+              source: 'exam-embedded-board',
+              type: msg.board_type,
+              stroke_id: msg.stroke_id || '',
+              object: msg.object,
+              index: msg.index
+            }, '*');
+          } catch (_) {}
+          return;
+        }
+        if (msg.type === 'variant') {
+          const nextSrc = buildVariantSrc(
+            msg.variant_url || msg.url || msg.link,
+            msg.level,
+            msg.subject,
+            msg.variant_id || msg.variantId || msg.id
+          );
+          if (openVariantIfReady(nextSrc)) return;
+        }
+        if (msg.type === 'student_answer' && isTeacher) {
+          const taskKey = (() => {
+            const tid = msg.task_id != null && String(msg.task_id).trim() !== '' ? String(msg.task_id).trim() : '';
+            if (tid && /^\d+$/.test(tid)) return 't' + tid;
+            return answerKeyFromStoredTaskNumber(msg.task_number || msg.task || msg.number);
+          })();
+          if (!taskKey) return;
+          const displayNum = normalizeTaskNumber(msg.task_number || msg.task || msg.number);
+          const studentAnswer = String(msg.answer || '');
+          const studentName = String(msg.name || 'Ученик');
+          let ok = false;
+          const expected = answerByTaskNum[taskKey] || answerByTaskNum[displayNum];
+          if (expected != null && expected.trim() !== '') {
+            ok = normalizeAnswer(studentAnswer) === normalizeAnswer(stripHtml(expected));
+          }
+          const list = answersByTask[taskKey] || [];
+          const idx = list.findIndex((r) => r.name === studentName);
+          const row = { name: studentName, answer: studentAnswer, ok };
+          if (idx >= 0) list[idx] = row; else list.push(row);
+          answersByTask[taskKey] = list;
+          const doc = getDoc();
+          if (doc) scheduleTeacherAnswerRefresh(doc);
+          fetchTeacherResults();
+          return;
+        }
+        if (msg.type === 'student_attachment' && isTeacher) {
+          const taskKey = (() => {
+            const tid = msg.task_id != null && String(msg.task_id).trim() !== '' ? String(msg.task_id).trim() : '';
+            if (tid && /^\d+$/.test(tid)) return 't' + tid;
+            return answerKeyFromStoredTaskNumber(msg.task_number || msg.task || msg.number);
+          })();
+          if (!taskKey || !msg.url) return;
+          const row = {
+            name: String(msg.name || 'Ученик').trim() || 'Ученик',
+            url: String(msg.url || ''),
+            filename: String(msg.filename || ''),
+          };
+          attachmentsByTask[taskKey] = attachmentsByTask[taskKey] || [];
+          if (!attachmentsByTask[taskKey].some((x) => x.url === row.url)) attachmentsByTask[taskKey].push(row);
+          const doc = getDoc();
+          if (doc) {
+            withTeacherMutationsPaused(doc, () => {
+              patchTeacherView(doc);
+              renderLessonAttachments(doc);
+              removeLessonResultsPanel(doc);
+            });
+          }
+          return;
+        }
+      };
+
+      window.addEventListener('message', (ev) => {
+        if (!frame || ev.source !== frame.contentWindow) return;
+        const d = ev.data;
+        if (d && d.source === 'exam-embedded-lesson' && d.type === 'lesson_finish_click') {
+          if (isTeacher) openFinishModal();
+          return;
+        }
+        if (!d || d.source !== 'exam-embedded-board') return;
+
+        if (d.type === 'board_add' || d.type === 'board_remove' || d.type === 'board_clear') {
+          const payload = {
+            type: 'board_event',
+            from: me,
+            board_type: d.type,
+            stroke_id: d.stroke_id || '',
+            object: d.object,
+            index: d.index
+          };
+          if (!ws || ws.readyState !== WebSocket.OPEN) {
+            if (pendingBoardObjects.length < 400) pendingBoardObjects.push(payload);
+            return;
+          }
+          sendWs(payload);
+        }
+      });
+
+      frame.addEventListener('load', () => {
+        const doc = getDoc();
+        if (!doc) return;
+
+        const style = doc.createElement('style');
+        style.textContent = `
+          .variant-btn-primary,.variant-btn-cosmos,.variant-btn-easter,.variant-btn-copy-link{display:none!important}
+          .variant-hero-actions{display:none!important}
+          #finish-btn,.exam-finish-section,.exam-finish-btn{display:none!important}
+          .lesson-participants-title{font-size:.78rem;font-weight:700;color:#334155;margin-bottom:6px;text-align:right}
+          .lesson-participants-list{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+          .lesson-participant-chip{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;font-size:.74rem;font-weight:600}
+          #lesson-cursors-layer{position:fixed;inset:0;pointer-events:none;z-index:2147483646}
+          .lesson-cursor{position:fixed;transform:translate(-2px,-2px)}
+          .lesson-cursor-dot{display:block;width:9px;height:9px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(2,6,23,.35)}
+          .lesson-cursor--teacher .lesson-cursor-name{background:rgba(154,52,18,.92)}
+          .lesson-cursor--student .lesson-cursor-name{background:rgba(30,58,138,.88)}
+          .lesson-cursor-name{display:inline-block;margin-top:2px;padding:2px 6px;border-radius:999px;background:rgba(15,23,42,.82);color:#fff;font-size:11px;line-height:1.2;white-space:nowrap}
+          .task:not(.lesson-extra-task) .answer-section,.task:not(.lesson-extra-task) .answer-input-row,.task:not(.lesson-extra-task) .answer-actions,.task:not(.lesson-extra-task) .answer-status{display:${isTeacher ? 'none' : 'revert'}!important}
+          .variant-score-block,.variant-score-row,.variant-score-label,.variant-score-val,.variant-score-total{display:${isTeacher ? 'none' : 'revert'}!important}
+          ${!isTeacher ? `
+          .correct-answer-display,.part2-answer-reveal,.task-report-error-wrap{display:none!important}
+          .lesson-extra-task .extra-task-correct-answer{display:none}
+          .part2-answer-criteria-buttons {display:none!important}
+          ` : `
+          .part2-answer-reveal {display:none!important}
+          .part2-answer-criteria-buttons { display: flex; flex-direction: column; width: 100%; gap: 8px; }
+          .part2-answer-criteria-buttons > .add-button { width: 100%; }
+          .part2-answer-criteria-buttons > .add-button:not(.criteria-btn) { display: none !important; }
+          `}
+          ${isTeacher ? `
+          .criteria-radio-input, .criteria-radio-check { display: none !important; }
+          .criteria-radio-label { cursor: default !important; gap: 0 !important; }
+          .criteria-row:hover { background: transparent !important; }
+          .lesson-teacher-answer-block{margin-top:10px;padding:10px 12px;border:1px solid #bfdbfe;background:#f0f9ff;border-radius:10px}
+          .lesson-teacher-answer-title{font-size:.72rem;font-weight:800;color:#1d4ed8;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+          .lesson-teacher-answer-value{font-size:.88rem;line-height:1.5;color:#0f172a;word-break:break-word}
+          .lesson-student-answers-block{margin-top:10px;padding:10px 12px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:10px}
+          .lesson-student-answers-title{font-size:.72rem;font-weight:800;color:#15803d;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+          .lesson-student-answers-table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.88rem}
+          .lesson-student-answers-table th{padding:6px 8px;color:#15803d;border-bottom:1px solid #bbf7d0;text-align:left}
+          .lesson-student-answers-table td{padding:6px 8px;color:#0f172a;border-bottom:1px solid #dcfce7;word-break:break-word}
+          .lesson-student-answers-table tr:last-child td{border-bottom:none}
+          .lesson-attachments-teacher{margin-top:10px;padding:10px 12px;border:1px solid #d8b4fe;background:#faf5ff;border-radius:10px}
+          .lesson-attachments-title{font-size:.72rem;font-weight:800;color:#7e22ce;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px}
+          .lesson-attachments-grid{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
+          .lesson-attachment-fig{margin:0;max-width:min(200px,100%)}
+          .lesson-attachment-fig img{display:block;max-width:100%;max-height:160px;object-fit:contain;border-radius:8px;border:1px solid #e9d5ff;background:#fff}
+          .lesson-attachment-fig figcaption{margin-top:4px;font-size:.72rem;color:#6b21a8;word-break:break-word}
+          ` : ''}
+          /* Hide the Open Board button inside the iframe */
+          #open-board-btn {
+            display: none !important;
+          }
+        `;
+        doc.head.appendChild(style);
+
+        const updateZoom = () => {
+          const win = frame.contentWindow;
+          if (!win || !doc.body) return;
+          const wrapper = document.getElementById('lesson-frame-wrapper');
+          const fw = wrapper.clientWidth;
+          const fh = wrapper.clientHeight;
+          
+          const scaleWrapper = document.getElementById('scale-wrapper');
+          currentScale = 1;
+          scaleWrapper.style.transform = 'none';
+          scaleWrapper.style.height = '100%';
+          
+          if (typeof resizeWb === 'function') resizeWb();
+          if (typeof WbState !== 'undefined') WbState.emit();
+                                                                                              };
+        updateZoom();
+        window.addEventListener('resize', updateZoom);
+
+        renderParticipants();
+        ensureCursorLayer(doc);
+        renderCursors();
+        bindCanvasSync(doc);
+
+        if (isTeacher) {
+          void setupTeacher();
+          withTeacherMutationsPaused(doc, () => {
+            patchTeacherView(doc);
+            renderLessonAttachments(doc);
+            removeLessonResultsPanel(doc);
+          });
+          if (taskObserver) taskObserver.disconnect();
+          taskObserver = new MutationObserver((mutations) => {
+            // Skip mutations caused by teacher UI / MathJax rendering inside lesson-injected blocks
+            const LESSON_SELECTORS = [
+              '.criteria-panel', '.criteria-table-wrap',
+              '.lesson-teacher-answer-block', '.lesson-student-answers-block',
+              '.lesson-attachments-teacher', '.lesson-criteria-section',
+              '#lesson-student-totals', '.lesson-solution-upload', '.lesson-solution-pending',
+              '.lesson-extra-task', '.lesson-extra-divider'
+            ];
+            const ignorable = mutations.every((m) => {
+              // Text nodes don't have .closest — use their parent
+              let tgt = m.target;
+              if (tgt && tgt.nodeType !== 1) tgt = tgt.parentElement;
+              if (!tgt || !tgt.closest) return false;
+              return LESSON_SELECTORS.some(sel => tgt.closest(sel));
+            });
+            if (ignorable) return;
+            withTeacherMutationsPaused(doc, () => {
+              patchTeacherView(doc);
+              renderLessonAttachments(doc);
+              removeLessonResultsPanel(doc);
+            });
+          });
+          taskObserver.observe(doc.body, { childList: true, subtree: true });
+          fetchTeacherResults();
+          if (teacherResultsPollTimer) clearInterval(teacherResultsPollTimer);
+          teacherResultsPollTimer = setInterval(() => fetchTeacherResults(), 3000);
+        }
+      });
+
+      // ===== EXTRA TASKS =====
+      let extraTasks = []; // { id, taskNum, taskTitle, text, answer, maxScore, isPart2 }
+
+      // Stored DOM element references — preserved across re-renders to keep state intact
+      const _extraTaskSections = new Map(); // taskId -> section element
+      let _extraTaskDivider = null;
+      let _extraTaskReinsertObserver = null;
+
+      // Normalize answer exactly like ExamPage.jsx
+      const _normAnswer = (str) => String(str ?? '')
+        .normalize('NFC').replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '')
+        .trim().toLowerCase().replace(/\s+/g, '');
+
+      const _htmlToText = (html, doc) => {
+        if (!html) return '';
+        try {
+          const tmp = doc.createElement('div');
+          tmp.innerHTML = html;
+          return (tmp.textContent || tmp.innerText || '').trim();
+        } catch (_) { return String(html).replace(/<[^>]*>/g, ''); }
+      };
+
+      const _buildStudentAnswersHtml = (taskKey, displayTaskNum, isPart2, maxScore) => {
+        const studentAnswers = answersByTask[taskKey] || [];
+        if (!studentAnswers.length) return '';
+        let html = '<div class="lesson-student-answers-title">Ответы учеников</div>';
+        html += '<table class="lesson-student-answers-table">';
+        if (!isPart2) {
+          html += `<thead><tr><th>Ученик</th><th>Ответ</th><th style="width:48px;text-align:center;">Итог</th></tr></thead>`;
+        } else {
+          html += `<thead><tr><th>Ученик</th><th style="width:110px;text-align:center;">Балл / ${maxScore}</th></tr></thead>`;
+        }
+        html += '<tbody>';
+        studentAnswers.forEach(sa => {
+          if (!isPart2) {
+            const icon = sa.ok
+              ? '<span style="color:#15803d;font-weight:bold;">✓</span>'
+              : '<span style="color:#b91c1c;font-weight:bold;">✗</span>';
+            html += `<tr><td><b>${safeHtml(sa.name)}</b></td><td>${safeHtml(sa.answer)}</td><td style="text-align:center;">${icon}</td></tr>`;
+          } else {
+            const sd = getStudentScoreForTask(taskKey, displayTaskNum, sa.name);
+            const scoreStr = sd !== null
+              ? `<span style="font-weight:700;color:${sd.score > 0 ? '#15803d' : '#b91c1c'}">${sd.score}</span> / ${sd.max}`
+              : '—';
+            html += `<tr><td><b>${safeHtml(sa.name)}</b></td><td style="text-align:center;">${scoreStr}</td></tr>`;
+          }
+        });
+        return html + '</tbody></table>';
+      };
+
+      const _getPage = (doc) => doc.querySelector('.page') || doc.querySelector('.exam-page-container') || doc.body;
+
+      const _getInsertionAnchor = (page) => page.querySelector('.exam-finish-section') || null;
+
+      const _ensureExtraTasksInserted = (doc) => {
+        if (!extraTasks.length) return;
+        const page = _getPage(doc);
+        if (!page) return;
+        const anchor = _getInsertionAnchor(page);
+        // Ensure divider
+        if (!_extraTaskDivider) {
+          _extraTaskDivider = doc.createElement('div');
+          _extraTaskDivider.className = 'part-divider part-divider-2 lesson-extra-divider';
+          _extraTaskDivider.innerHTML = '<h2>Дополнительные задания</h2><p>Задания добавлены учителем</p>';
+        }
+        if (!page.contains(_extraTaskDivider)) {
+          anchor ? page.insertBefore(_extraTaskDivider, anchor) : page.appendChild(_extraTaskDivider);
+        }
+        // Ensure each section
+        _extraTaskSections.forEach((section) => {
+          if (!page.contains(section)) {
+            anchor ? page.insertBefore(section, anchor) : page.appendChild(section);
+          }
+        });
+      };
+
+      /** Раньше внизу варианта в iframe показывали дублирующую кнопку «Завершить урок»; оставлена только верхняя. */
+      function injectTeacherFinishStrip(doc) {
+        if (!doc || !isTeacher) return;
+        doc.getElementById('lesson-teacher-finish-in-frame')?.remove();
+      }
+
+      const renderExtraTasks = (doc) => {
+        if (!doc) return;
+        if (!extraTasks.length) {
+          if (isTeacher) injectTeacherFinishStrip(doc);
+          return;
+        }
+
+        // Remember which task ids already existed before this call (for MathJax)
+        const _prevIds = new Set(_extraTaskSections.keys());
+
+        // Track open criteria panels before any DOM changes
+        const openExtraCriteria = new Set();
+        if (isTeacher) {
+          _extraTaskSections.forEach(section => {
+            section.querySelectorAll('.lesson-criteria-section').forEach(el => {
+              const content = el.querySelector('.lesson-criteria-content');
+              const btn = el.querySelector('.lesson-criteria-toggle');
+              if (content && content.style.display !== 'none' && btn?.dataset.task) {
+                openExtraCriteria.add(btn.dataset.task);
+              }
+            });
+          });
+        }
+
+        extraTasks.forEach(task => {
+          const taskNum = task.taskNum || '?';
+          const taskId = String(task.id || taskNum);
+          const isPart2 = !!task.isPart2;
+          if (task.taskListId && taskNum !== '?') taskListIdByNum[taskNum] = task.taskListId;
+
+          // ── UPDATE existing section in-place (teacher: refresh student answers; student: skip) ──
+          if (_extraTaskSections.has(taskId)) {
+            if (isTeacher) {
+              answerByTaskNum[taskNum] = task.answer || '';
+              maxScoreByTaskNum[taskNum] = task.maxScore || 1;
+              const section = _extraTaskSections.get(taskId);
+              const tc = section.querySelector('.task-content') || section;
+              tc.querySelector('.lesson-student-answers-block')?.remove();
+              const exKey = answerKeyFromStoredTaskNumber(String(taskNum));
+              const saHtml = _buildStudentAnswersHtml(exKey, String(taskNum), isPart2, task.maxScore || 1);
+              if (saHtml) {
+                const block = doc.createElement('div');
+                block.className = 'lesson-student-answers-block';
+                block.innerHTML = saHtml;
+                const criteriaSection = tc.querySelector('.lesson-criteria-section');
+                if (criteriaSection) tc.insertBefore(block, criteriaSection);
+                else tc.appendChild(block);
+              }
+            }
+            // student: nothing to update — state is preserved
+            return;
+          }
+
+          // ── CREATE new section ──
+          if (isTeacher) {
+            answerByTaskNum[taskNum] = task.answer || '';
+            maxScoreByTaskNum[taskNum] = task.maxScore || 1;
+          }
+
+          // ── ASIDE: task number + task id (same as regular tasks) ──
+          const aside = doc.createElement('aside');
+          aside.className = 'task-left';
+          aside.innerHTML = `
+            <div class="task-number">${safeHtml(String(taskNum))}</div>
+            <div class="task-id">${safeHtml(String(task.id || ''))}</div>`;
+
+          // ── ARTICLE content ──
+          const article = doc.createElement('article');
+          article.className = 'task-content';
+
+          // Task text
+          const textDiv = doc.createElement('div');
+          textDiv.className = 'task-text';
+          textDiv.innerHTML = task.text || '';
+          article.appendChild(textDiv);
+
+          if (isTeacher) {
+            // Эталонный ответ (part 1)
+            if (!isPart2 && task.answer) {
+              const ansBlock = doc.createElement('div');
+              ansBlock.className = 'lesson-teacher-answer-block';
+              ansBlock.innerHTML = `<div class="lesson-teacher-answer-title">Эталонный ответ</div><div class="lesson-teacher-answer-value">${task.answer}</div>`;
+              article.appendChild(ansBlock);
+            }
+            // Student answers table
+            const exKey2 = answerKeyFromStoredTaskNumber(String(taskNum));
+            const saHtml = _buildStudentAnswersHtml(exKey2, String(taskNum), isPart2, task.maxScore || 1);
+            if (saHtml) {
+              const saBlock = doc.createElement('div');
+              saBlock.className = 'lesson-student-answers-block';
+              saBlock.innerHTML = saHtml;
+              article.appendChild(saBlock);
+            }
+            // Criteria (part 2)
+            if (isPart2) {
+              const isOpen = openExtraCriteria.has(String(taskNum));
+              const crit = doc.createElement('div');
+              crit.className = 'lesson-criteria-section';
+              crit.style.marginTop = '10px';
+              crit.innerHTML = `<button class="lesson-criteria-toggle add-button" data-task="${escAttr(String(taskNum))}" style="width:100%;">${isOpen ? 'Скрыть критерии' : 'Критерии'}</button><div class="lesson-criteria-content" style="display:${isOpen ? 'block' : 'none'};margin-top:8px;"></div>`;
+              article.appendChild(crit);
+            }
+          } else {
+            // STUDENT
+            if (!isPart2) {
+              // Part 1: input + Проверить
+              const answerSection = doc.createElement('div');
+              answerSection.className = 'answer-section';
+              const row = doc.createElement('div');
+              row.className = 'answer-input-row';
+              row.style.cssText = 'display:flex;gap:8px;align-items:center;';
+
+              const input = doc.createElement('input');
+              input.type = 'text';
+              input.className = 'answer-input extra-task-answer-input';
+              input.placeholder = 'Введите ответ';
+              input.style.cssText = 'flex:1;min-width:0;';
+              // Store raw answer HTML as a JS property (not HTML attribute) to avoid quote issues
+              input._correctRawAnswer = task.answer || '';
+
+              const statusEl = doc.createElement('span');
+              statusEl.className = 'answer-status extra-task-answer-status';
+
+              const checkBtn = doc.createElement('button');
+              checkBtn.className = 'add-button extra-task-check-btn';
+              checkBtn.style.cssText = 'padding:0.6rem 1rem;font-size:0.85rem;white-space:nowrap;flex-shrink:0;';
+              checkBtn.textContent = 'Проверить';
+
+              row.appendChild(input);
+              row.appendChild(statusEl);
+              row.appendChild(checkBtn);
+              answerSection.appendChild(row);
+
+              // Correct answer reveal — empty initially, filled on wrong answer
+              const correctReveal = doc.createElement('div');
+              correctReveal.className = 'correct-answer-display extra-task-correct-answer';
+              correctReveal.style.cssText = 'display:none;margin-top:6px;';
+              correctReveal.innerHTML = '<span class="correct-answer-label">Правильный ответ: </span><span class="correct-answer-content"></span>';
+              answerSection.appendChild(correctReveal);
+
+              article.appendChild(answerSection);
+
+              // Wire check button
+              checkBtn.addEventListener('click', () => {
+                const correctRaw = input._correctRawAnswer || '';
+                const userVal = _normAnswer(input.value);
+                const correctVal = _normAnswer(_htmlToText(correctRaw, doc));
+                const isCorrect = userVal === correctVal;
+                input.classList.toggle('correct', isCorrect);
+                input.classList.toggle('incorrect', !isCorrect);
+                input.disabled = true;
+                statusEl.textContent = isCorrect ? '✓' : '✗';
+                statusEl.classList.toggle('correct', isCorrect);
+                statusEl.classList.toggle('incorrect', !isCorrect);
+                checkBtn.style.setProperty('display', 'none', 'important');
+                if (!isCorrect) {
+                  const contentSpan = correctReveal.querySelector('.correct-answer-content');
+                  if (contentSpan) contentSpan.textContent = _htmlToText(correctRaw, doc);
+                  correctReveal.style.setProperty('display', 'block', 'important');
+                }
+                const taskNumForWs = String(taskNum);
+                if (taskNumForWs) sendWs({ type: 'lesson_extra_answer', taskNum: taskNumForWs, name: me, answer: input.value, ok: isCorrect });
+              });
+            } else {
+              // Part 2: textarea
+              const answerSection = doc.createElement('div');
+              answerSection.className = 'answer-section';
+              const row = doc.createElement('div');
+              row.className = 'answer-input-row';
+              const ta = doc.createElement('textarea');
+              ta.className = 'answer-input';
+              ta.placeholder = 'Введите ответ...';
+              ta.style.cssText = 'width:100%;min-height:80px;resize:vertical;box-sizing:border-box;';
+              row.appendChild(ta);
+              answerSection.appendChild(row);
+              article.appendChild(answerSection);
+            }
+          }
+
+          // Error report button (same as regular tasks — hidden by teacher CSS)
+          const reportWrap = doc.createElement('div');
+          reportWrap.className = 'task-report-error-wrap';
+          article.appendChild(reportWrap);
+
+          const section = doc.createElement('section');
+          section.className = 'task lesson-extra-task';
+          section.dataset.taskNum = String(taskNum);
+          section.dataset.taskId = taskId;
+          section.appendChild(aside);
+          section.appendChild(article);
+
+          _extraTaskSections.set(taskId, section);
+        });
+
+        // Insert all sections (new + re-insert if React removed them)
+        _ensureExtraTasksInserted(doc);
+
+        // Re-insertion observer (student side) — if React removes nodes, put them back
+        if (!_extraTaskReinsertObserver) {
+          const page = _getPage(doc);
+          if (page) {
+            _extraTaskReinsertObserver = new MutationObserver(() => {
+              _ensureExtraTasksInserted(doc);
+            });
+            _extraTaskReinsertObserver.observe(page, { childList: true });
+          }
+        }
+
+        // MathJax on newly created sections only
+        try {
+          const iframeWin = frame.contentWindow;
+          if (iframeWin?.MathJax?.typesetPromise) {
+            const newSections = extraTasks
+              .map(t => _extraTaskSections.get(String(t.id || t.taskNum)))
+              .filter(el => el && !_prevIds.has(String(el.dataset.taskId)));
+            if (newSections.length) iframeWin.MathJax.typesetPromise(newSections);
+          }
+        } catch (_) {}
+        if (isTeacher) injectTeacherFinishStrip(doc);
+      };
+
+      // ===== ADD TASK MODAL =====
+      const addTaskModalEl = document.getElementById('lesson-add-task-modal');
+      const addTaskBtnEl = document.getElementById('lesson-add-task-btn');
+      if (isTeacher && addTaskBtnEl) addTaskBtnEl.style.display = 'flex';
+
+      let modalTaskItems = null; // built from /tasks/: singles + structured groups (not flattened)
+      let modalSelectedItem = null; // one of modalTaskItems
+      let modalBankPage = 1;
+      let modalBankTotal = 0;
+
+      const openAddTaskModal = async () => {
+        if (!addTaskModalEl) return;
+        addTaskModalEl.style.display = 'block';
+        addTaskModalEl.style.alignItems = 'flex-start';
+        addTaskModalEl.style.justifyContent = 'center';
+        document.body.style.overflow = 'hidden';
+        if (!modalTaskItems && level && subject) {
+          const slotsEl = document.getElementById('lesson-task-slots');
+          if (slotsEl) slotsEl.innerHTML = '<div class="lesson-modal-placeholder">Загрузка…</div>';
+          try {
+            const res = await fetch(`/api/${level}/${subject}/tasks/`, { credentials: 'include' });
+            const data = await res.json();
+            modalTaskItems = [];
+            (data.tasks || []).forEach(t => {
+              if (t.type === 'single') {
+                modalTaskItems.push({
+                  kind: 'single',
+                  key: `task_${t.id}`,
+                  taskListId: t.id,
+                  num: t.task_number,
+                  title: t.task_title,
+                });
+              } else if (t.type === 'group' || t.type === 'linked_group') {
+                const numsRaw = (t.task_numbers && t.task_numbers.length)
+                  ? [...t.task_numbers]
+                  : (t.tasks || []).map(x => x.task_number).filter(n => n != null && n !== '');
+                const numsSorted = [...new Set(numsRaw.map(n => Number(n)))].sort((a, b) => a - b);
+                const linkedKey = t.type === 'linked_group'
+                  ? String(t.linked_key || numsSorted.join('_'))
+                  : numsSorted.join('_');
+                const label = numsSorted.length
+                  ? (numsSorted.length === 1 ? `Группа · задание ${numsSorted[0]}` : `Группа ${numsSorted[0]}–${numsSorted[numsSorted.length - 1]}`)
+                  : 'Группа заданий';
+                modalTaskItems.push({
+                  kind: 'group',
+                  groupType: t.type,
+                  key: t.type === 'linked_group' ? `linked_${t.linked_key}` : `group_${t.group_id}`,
+                  linkedKey,
+                  taskNumbers: numsSorted,
+                  label,
+                  tasks: t.tasks || [],
+                  subtopics: t.subtopics || [],
+                });
+              }
+            });
+            if (modalTaskItems.length) {
+              modalSelectedItem = modalTaskItems[0];
+              modalSelectedSubtopic = null;
+              modalBankPage = 1;
+              renderSlots();
+              if (modalSelectedItem.kind === 'single') {
+                loadSubtopics(modalSelectedItem.taskListId);
+                loadTaskBank(modalSelectedItem.taskListId, 1);
+              } else {
+                loadSubtopicsForGroup(modalSelectedItem);
+                loadGroupBank(modalSelectedItem, 1);
+              }
+            } else {
+              renderSlots();
+            }
+          } catch (_) {
+            const slotsEl2 = document.getElementById('lesson-task-slots');
+            if (slotsEl2) slotsEl2.innerHTML = '<div class="lesson-modal-placeholder lesson-modal-placeholder--error">Ошибка загрузки</div>';
+          }
+        }
+      };
+
+      let modalSelectedSubtopic = null; // null = all subtopics
+
+      const isModalItemSelected = (item) => modalSelectedItem && modalSelectedItem.key === item.key;
+
+      const renderSlots = () => {
+        const slotsEl = document.getElementById('lesson-task-slots');
+        if (!slotsEl || !modalTaskItems) return;
+        slotsEl.innerHTML = '';
+        const hdr = document.createElement('div');
+        hdr.className = 'lesson-slot-header';
+        hdr.textContent = 'Задание №';
+        slotsEl.appendChild(hdr);
+        modalTaskItems.forEach(item => {
+          if (item.kind === 'single') {
+            const btn = document.createElement('button');
+            const sel = isModalItemSelected(item);
+            btn.className = `lesson-slot-item${sel ? ' is-active' : ''}`;
+            btn.textContent = `${item.num}. ${item.title}`;
+            btn.onclick = () => {
+              modalSelectedItem = item;
+              modalSelectedSubtopic = null;
+              modalBankPage = 1;
+              renderSlots();
+              loadSubtopics(item.taskListId);
+              loadTaskBank(item.taskListId, 1);
+            };
+            slotsEl.appendChild(btn);
+          } else {
+            const wrap = document.createElement('div');
+            wrap.className = 'lesson-slot-group';
+            const hdrG = document.createElement('div');
+            hdrG.textContent = item.groupType === 'linked_group' ? 'Связанная группа' : 'Группа';
+            hdrG.className = 'lesson-slot-group-title';
+            const btn = document.createElement('button');
+            const selG = isModalItemSelected(item);
+            btn.className = `lesson-slot-item${selG ? ' is-active' : ''}`;
+            const numsStr = item.taskNumbers.join(', ');
+            const titlesPreview = (item.tasks || []).map(x => x.task_title).filter(Boolean).join(' · ');
+            btn.innerHTML = `<div class="lesson-slot-group-label">${safeHtml(item.label)}</div><div class="lesson-slot-group-meta">Номера: ${safeHtml(numsStr)}</div>${titlesPreview ? `<div class="lesson-slot-group-preview">${safeHtml(titlesPreview.length > 180 ? titlesPreview.slice(0, 180) + '…' : titlesPreview)}</div>` : ''}`;
+            btn.onclick = () => {
+              modalSelectedItem = item;
+              modalSelectedSubtopic = null;
+              modalBankPage = 1;
+              renderSlots();
+              loadSubtopicsForGroup(item);
+              loadGroupBank(item, 1);
+            };
+            wrap.appendChild(hdrG);
+            wrap.appendChild(btn);
+            slotsEl.appendChild(wrap);
+          }
+        });
+      };
+
+      const loadSubtopics = async (taskListId) => {
+        const bar = document.getElementById('lesson-subtopic-bar');
+        if (!bar) return;
+        bar.style.display = 'none';
+        try {
+          const res2 = await fetch(`/api/${level}/${subject}/subtopics/`, { credentials: 'include' });
+          const data2 = await res2.json();
+          const entry = (data2.subtopics_by_task || []).find(e => String(e.task_list_id) === String(taskListId));
+          const subtopics = entry ? (entry.subtopics || []) : [];
+          if (!subtopics.length) return;
+          bar.innerHTML = '<span class="lesson-subtopic-label">Подтема:</span>';
+          const allChip = document.createElement('button');
+          allChip.textContent = 'Все';
+          allChip.dataset.stid = '';
+          allChip.className = `lesson-subtopic-chip${!modalSelectedSubtopic ? ' is-active' : ''}`;
+          allChip.onclick = () => { modalSelectedSubtopic = null; loadSubtopicChips(subtopics); loadTaskBank(taskListId); };
+          bar.appendChild(allChip);
+          subtopics.forEach(st => {
+            const chip = document.createElement('button');
+            chip.textContent = st.title;
+            chip.dataset.stid = st.id != null ? String(st.id) : '';
+            chip.className = `lesson-subtopic-chip${modalSelectedSubtopic === st.id ? ' is-active' : ''}`;
+            chip.onclick = () => { modalSelectedSubtopic = st.id; loadSubtopicChips(subtopics); loadTaskBank(taskListId, 1); };
+            bar.appendChild(chip);
+          });
+          bar.style.display = 'block';
+        } catch (_) {}
+      };
+
+      const loadSubtopicsForGroup = (item) => {
+        const bar = document.getElementById('lesson-subtopic-bar');
+        if (!bar) return;
+        bar.style.display = 'none';
+        bar.innerHTML = '';
+        const subtopics = item.subtopics || [];
+        if (!subtopics.length) return;
+        bar.innerHTML = '<span class="lesson-subtopic-label">Подтема:</span>';
+        const allChip = document.createElement('button');
+        allChip.textContent = 'Все';
+        allChip.dataset.stid = '';
+        allChip.className = `lesson-subtopic-chip${modalSelectedSubtopic == null ? ' is-active' : ''}`;
+        allChip.onclick = () => { modalSelectedSubtopic = null; loadSubtopicChips(subtopics); loadGroupBank(item, 1); };
+        bar.appendChild(allChip);
+        subtopics.forEach(st => {
+          const chip = document.createElement('button');
+          chip.textContent = st.title;
+          chip.dataset.stid = st.id != null ? String(st.id) : '';
+          const active = modalSelectedSubtopic === st.id;
+          chip.className = `lesson-subtopic-chip${active ? ' is-active' : ''}`;
+          chip.onclick = () => { modalSelectedSubtopic = st.id; loadSubtopicChips(subtopics); loadGroupBank(item, 1); };
+          bar.appendChild(chip);
+        });
+        bar.style.display = 'block';
+      };
+
+      const loadSubtopicChips = (subtopics) => {
+        const bar = document.getElementById('lesson-subtopic-bar');
+        if (!bar) return;
+        bar.querySelectorAll('button[data-stid]').forEach(chip => {
+          let active = false;
+          if (chip.dataset.stid === '') active = modalSelectedSubtopic == null;
+          else active = Number(chip.dataset.stid) === Number(modalSelectedSubtopic);
+          chip.classList.toggle('is-active', active);
+        });
+      };
+
+      const loadTaskBank = async (taskListId, page = 1) => {
+        const bankEl = document.getElementById('lesson-task-bank');
+        if (!bankEl) return;
+        bankEl.innerHTML = '<div class="lesson-modal-placeholder">Загрузка задач…</div>';
+        try {
+          let url = `/api/${level}/${subject}/task-bank/?task_list_id=${taskListId}&page=${page}&per_page=10`;
+          if (modalSelectedSubtopic) url += `&subtopic_id=${modalSelectedSubtopic}`;
+          const res = await fetch(url, { credentials: 'include' });
+          const data = await res.json();
+          modalBankTotal = data.total || 0;
+          const tasks = data.tasks || [];
+          if (!tasks.length) {
+            bankEl.innerHTML = '<div class="lesson-modal-placeholder">Задачи не найдены</div>';
+            return;
+          }
+          bankEl.innerHTML = '';
+          tasks.forEach(t => {
+            const card = document.createElement('div');
+            card.className = 'lesson-bank-card';
+
+            // Top row: subtopic chip + add button
+            const topRow = document.createElement('div');
+            topRow.className = 'lesson-bank-card-header';
+
+            const metaLeft = document.createElement('div');
+            metaLeft.className = 'lesson-bank-meta';
+
+            // Task number badge
+            const numBadge = document.createElement('span');
+            numBadge.className = 'lesson-bank-badge lesson-bank-badge--num';
+            numBadge.textContent = `Задание ${t.task_number}`;
+            metaLeft.appendChild(numBadge);
+
+            // Part badge
+            if (t.part_title) {
+              const partBadge = document.createElement('span');
+              const isPt2 = (t.max_score || 1) > 1 || (t.part_id != null && t.part_id !== 1);
+              partBadge.className = `lesson-bank-badge ${isPt2 ? 'lesson-bank-badge--part2' : 'lesson-bank-badge--part1'}`;
+              partBadge.textContent = t.part_title + (t.max_score > 1 ? ` · ${t.max_score} б.` : '');
+              metaLeft.appendChild(partBadge);
+            }
+
+            // Subtopic chip
+            if (t.subtopic) {
+              const stChip = document.createElement('span');
+              stChip.className = 'lesson-bank-badge lesson-bank-badge--subtopic';
+              stChip.title = t.subtopic;
+              stChip.textContent = t.subtopic;
+              metaLeft.appendChild(stChip);
+            }
+
+            const addBtn = document.createElement('button');
+            addBtn.dataset.tid = t.id;
+            addBtn.className = 'lesson-modal-add-btn lesson-ui-btn lesson-ui-btn--primary';
+            addBtn.textContent = 'Добавить';
+            addBtn.onclick = () => addExtraTask(t);
+
+            topRow.appendChild(metaLeft);
+            topRow.appendChild(addBtn);
+
+            // Task text
+            const textEl = document.createElement('div');
+            textEl.className = 'lesson-bank-task-text';
+            textEl.innerHTML = t.text || '';
+
+            card.appendChild(topRow);
+            card.appendChild(textEl);
+            bankEl.appendChild(card);
+          });
+
+          // Typeset MathJax in modal
+          if (window.MathJax?.typesetPromise) {
+            window.MathJax.typesetPromise([bankEl]).catch(() => {});
+          }
+
+          // Pagination
+          const totalPages = Math.ceil(modalBankTotal / 10);
+          if (totalPages > 1) {
+            const pag = document.createElement('div');
+            pag.className = 'lesson-bank-pagination';
+            for (let p = 1; p <= totalPages; p++) {
+              const pb = document.createElement('button');
+              pb.textContent = p;
+              pb.className = `lesson-page-btn${p === page ? ' is-active' : ''}`;
+              pb.onclick = () => loadTaskBank(taskListId, p);
+              pag.appendChild(pb);
+            }
+            bankEl.appendChild(pag);
+          }
+        } catch (_) {
+          const bankEl2 = document.getElementById('lesson-task-bank');
+          if (bankEl2) bankEl2.innerHTML = '<div class="lesson-modal-placeholder lesson-modal-placeholder--error">Ошибка загрузки задач</div>';
+        }
+      };
+
+      /** Полные экземпляры групп (как в «Составить вариант»): карточка = вся группа, внутри — все номера подряд. */
+      const loadGroupBank = async (item, page = 1) => {
+        const bankEl = document.getElementById('lesson-task-bank');
+        if (!bankEl || !item || item.kind !== 'group') return;
+        bankEl.innerHTML = '<div class="lesson-modal-placeholder">Загрузка групп…</div>';
+        try {
+          let url = `/api/${level}/${subject}/group-instances/?linked_key=${encodeURIComponent(item.linkedKey)}&page=${page}&per_page=10`;
+          if (modalSelectedSubtopic != null && modalSelectedSubtopic !== '') url += `&subtopic_id=${modalSelectedSubtopic}`;
+          const res = await fetch(url, { credentials: 'include' });
+          const data = await res.json();
+          modalBankTotal = data.total || 0;
+          const instances = data.instances || [];
+          if (!instances.length) {
+            bankEl.innerHTML = '<div class="lesson-modal-placeholder">Группы не найдены</div>';
+            return;
+          }
+          bankEl.innerHTML = '';
+          instances.forEach(inst => {
+            const card = document.createElement('div');
+            card.className = 'lesson-bank-card';
+            card.dataset.groupId = String(inst.group_id || '');
+
+            const topRow = document.createElement('div');
+            topRow.className = 'lesson-bank-card-header';
+
+            const titleCol = document.createElement('div');
+            titleCol.style.minWidth = '0';
+            titleCol.style.flex = '1';
+            const titleEl = document.createElement('div');
+            titleEl.className = 'lesson-bank-group-title';
+            titleEl.textContent = `Группа заданий · вариант #${inst.group_id}`;
+            const subEl = document.createElement('div');
+            subEl.className = 'lesson-bank-group-subtitle';
+            const nums = (inst.tasks || []).map(x => x.task_number).filter(Boolean).join(', ');
+            subEl.textContent = nums ? `Номера: ${nums}` : '';
+            titleCol.appendChild(titleEl);
+            if (nums) titleCol.appendChild(subEl);
+
+            const addBtn = document.createElement('button');
+            addBtn.className = 'lesson-modal-add-group-btn lesson-ui-btn lesson-ui-btn--primary';
+            addBtn.dataset.gid = String(inst.group_id || '');
+            addBtn.textContent = 'Добавить группу';
+            addBtn.onclick = () => addExtraGroup(inst, addBtn, card);
+
+            topRow.appendChild(titleCol);
+            topRow.appendChild(addBtn);
+            card.appendChild(topRow);
+
+            const tasksWrap = document.createElement('div');
+            tasksWrap.className = 'lesson-bank-group-items';
+            (inst.tasks || []).forEach((sub, idx) => {
+              const row = document.createElement('div');
+              row.className = 'lesson-bank-group-item';
+              const meta = document.createElement('div');
+              meta.className = 'lesson-bank-meta';
+              meta.style.marginBottom = '8px';
+              const nb = document.createElement('span');
+              nb.className = 'lesson-bank-badge lesson-bank-badge--num';
+              nb.textContent = `Задание ${sub.task_number}`;
+              meta.appendChild(nb);
+              if (sub.part_title) {
+                const pb = document.createElement('span');
+                const isPt2 = (sub.max_score || 1) > 1 || (sub.part_id != null && sub.part_id !== 1);
+                pb.className = `lesson-bank-badge ${isPt2 ? 'lesson-bank-badge--part2' : 'lesson-bank-badge--part1'}`;
+                pb.textContent = sub.part_title + (sub.max_score > 1 ? ` · ${sub.max_score} б.` : '');
+                meta.appendChild(pb);
+              }
+              row.appendChild(meta);
+              const textEl = document.createElement('div');
+              textEl.className = 'lesson-bank-task-text';
+              textEl.style.maxHeight = '200px';
+              textEl.style.overflow = 'auto';
+              textEl.innerHTML = sub.text || '';
+              row.appendChild(textEl);
+              tasksWrap.appendChild(row);
+            });
+            card.appendChild(tasksWrap);
+            bankEl.appendChild(card);
+          });
+
+          if (window.MathJax?.typesetPromise) {
+            window.MathJax.typesetPromise([bankEl]).catch(() => {});
+          }
+
+          const perPage = 10;
+          const totalPages = Math.ceil(modalBankTotal / perPage);
+          if (totalPages > 1) {
+            const pag = document.createElement('div');
+            pag.className = 'lesson-bank-pagination';
+            for (let p = 1; p <= totalPages; p++) {
+              const pb = document.createElement('button');
+              pb.textContent = p;
+              pb.className = `lesson-page-btn${p === page ? ' is-active' : ''}`;
+              pb.onclick = () => loadGroupBank(item, p);
+              pag.appendChild(pb);
+            }
+            bankEl.appendChild(pag);
+          }
+        } catch (_) {
+          const bankEl2 = document.getElementById('lesson-task-bank');
+          if (bankEl2) bankEl2.innerHTML = '<div class="lesson-modal-placeholder lesson-modal-placeholder--error">Ошибка загрузки групп</div>';
+        }
+      };
+
+      const addExtraGroup = (inst, btnEl, cardEl) => {
+        let added = 0;
+        (inst.tasks || []).forEach(t => {
+          if (!t.id || extraTasks.find(et => et.id === t.id)) return;
+          const maxScore = t.max_score || 1;
+          const isPart2 = maxScore > 1 || (t.part_id != null && t.part_id !== 1);
+          const task = {
+            id: t.id,
+            taskNum: t.task_number,
+            taskTitle: t.task_title || '',
+            text: t.text || '',
+            answer: t.answer || '',
+            maxScore,
+            isPart2,
+            taskListId: t.task_list_id || null,
+          };
+          extraTasks.push(task);
+          sendWs({ type: 'lesson_extra_task', task });
+          added++;
+        });
+        const doc = getDoc();
+        if (doc && added) renderExtraTasks(doc);
+        const allIn = (inst.tasks || []).every(t => !t.id || extraTasks.find(et => et.id === t.id));
+        if (btnEl && cardEl) {
+          if (allIn) {
+            btnEl.textContent = '✓ Группа добавлена';
+            btnEl.disabled = true;
+            btnEl.style.background = '#15803d';
+            cardEl.style.opacity = '0.92';
+          } else if (added > 0) {
+            btnEl.textContent = `Добавлено ${added} из ${(inst.tasks || []).length}`;
+          }
+        }
+      };
+
+      const addExtraTask = (t) => {
+        if (extraTasks.find(et => et.id === t.id)) return;
+        const maxScore = t.max_score || 1;
+        const isPart2 = maxScore > 1 || (t.part_id != null && t.part_id !== 1);
+        const task = { id: t.id, taskNum: t.task_number, taskTitle: t.task_title || '', text: t.text || '', answer: t.answer || '', maxScore, isPart2, taskListId: t.task_list_id || null };
+        extraTasks.push(task);
+        const doc = getDoc();
+        if (doc) renderExtraTasks(doc);
+        sendWs({ type: 'lesson_extra_task', task });
+        const bankEl = document.getElementById('lesson-task-bank');
+        if (bankEl) {
+          const added = bankEl.querySelector(`[data-tid="${t.id}"]`);
+          if (added) { added.textContent = '✓ Добавлено'; added.disabled = true; added.style.background = '#15803d'; }
+        }
+      };
+
+      const closeAddTaskModal = () => {
+        if (addTaskModalEl) addTaskModalEl.style.display = 'none';
+        document.body.style.overflow = '';
+      };
+
+      if (addTaskBtnEl) addTaskBtnEl.onclick = openAddTaskModal;
+      document.getElementById('lesson-add-task-modal-close')?.addEventListener('click', closeAddTaskModal);
+      addTaskModalEl?.addEventListener('click', (e) => { if (e.target === addTaskModalEl) closeAddTaskModal(); });
+
+      // —— Завершить урок: итоги, комментарии, PDF / CSV, закрытие сессии ——
+      const finishModalEl = document.getElementById('lesson-finish-modal');
+      const finishModalBody = document.getElementById('lesson-finish-modal-body');
+      const studentUiEl = document.getElementById('lesson-student-ui');
+      const studentResultsBtn = document.getElementById('lesson-student-results-top-btn');
+      const studentResultsModalEl = document.getElementById('lesson-student-results-modal');
+      const studentResultsModalBody = document.getElementById('lesson-student-results-body');
+      const statusToastEl = document.getElementById('lesson-status-toast');
+      const statusToastTextEl = document.getElementById('lesson-status-toast-text');
+
+      const showLessonStatusToast = (text) => {
+        if (!statusToastEl || !statusToastTextEl) return;
+        statusToastTextEl.textContent = String(text || '').trim() || 'Статус обновлён';
+        statusToastEl.classList.add('show');
+      };
+      const hideLessonStatusToast = () => {
+        statusToastEl?.classList.remove('show');
+      };
+      document.getElementById('lesson-status-toast-close')?.addEventListener('click', hideLessonStatusToast);
+
+      const resolveTaskLabel = (taskNumberRaw) => {
+        const raw = String(taskNumberRaw || '').trim();
+        if (!raw) return '—';
+        if (raw.startsWith('t') && /^\d+$/.test(raw.slice(1))) {
+          const tid = raw.slice(1);
+          const doc = getDoc();
+          const numEl = doc?.querySelector(`.task[data-task-id="${tid}"] .task-number`);
+          const n = normalizeTaskNumber(numEl ? numEl.textContent : "");
+          return n ? `Задание ${n}` : `Задание #${tid}`;
+        }
+        const n = normalizeTaskNumber(raw);
+        return n ? `Задание ${n}` : `Задание ${safeHtml(raw)}`;
+      };
+
+      const openStudentResultsModal = () => {
+        if (!studentResultsModalEl) return;
+        studentResultsModalEl.style.display = 'block';
+        studentResultsModalEl.style.alignItems = 'flex-start';
+        studentResultsModalEl.style.justifyContent = 'center';
+        document.body.style.overflow = 'hidden';
+      };
+      const closeStudentResultsModal = () => {
+        if (!studentResultsModalEl) return;
+        studentResultsModalEl.style.display = 'none';
+        document.body.style.overflow = '';
+      };
+
+      const hideStudentResultsButton = () => {
+        if (!studentResultsBtn) return;
+        studentResultsBtn.style.display = 'none';
+      };
+
+      const loadStudentResultsModal = async () => {
+        if (!studentResultsModalBody) return;
+        if (!lessonPageToken) {
+          studentResultsModalBody.innerHTML = '<p class="lesson-modal-placeholder lesson-modal-placeholder--error">Токен урока не найден.</p>';
+          return;
+        }
+        studentResultsModalBody.innerHTML = '<p class="lesson-modal-placeholder">Загрузка…</p>';
+        try {
+          const base = new URLSearchParams();
+          base.set('token', lessonPageToken);
+          base.set('role', 'student');
+          if (variantId) base.set('variant_id', String(variantId));
+
+          const [resSummary, resAnswers] = await Promise.all([
+            fetch(`/api/lesson/results/?${base.toString()}`, { credentials: 'include' }),
+            fetch(`/api/lesson/task-answers/?${base.toString()}`, { credentials: 'include' }),
+          ]);
+          const summaryData = await resSummary.json().catch(() => ({}));
+          const answersData = await resAnswers.json().catch(() => ({}));
+          if (!resSummary.ok || !summaryData.ok) {
+            throw new Error(summaryData.error || 'Не удалось загрузить сводные результаты');
+          }
+          if (!resAnswers.ok || !answersData.ok) {
+            throw new Error(answersData.error || 'Не удалось загрузить ответы');
+          }
+
+          const summary = Array.isArray(summaryData.results) ? summaryData.results[0] : null;
+          const answers = Array.isArray(answersData.answers) ? answersData.answers : [];
+
+          let html = '';
+          if (summary) {
+            html += `
+              <div class="lesson-student-results-summary">
+                <div><b>Всего задач:</b> ${summary.total_tasks ?? 0}</div>
+                <div><b>Верно:</b> ${summary.correct_count ?? 0} · <b>Неверно:</b> ${summary.wrong_count ?? 0} · <b>Пусто:</b> ${summary.empty_count ?? 0}</div>
+                ${summary.teacher_comment ? `<div style="margin-top:6px;"><b>Комментарий учителя:</b> ${safeHtml(summary.teacher_comment)}</div>` : ''}
+              </div>
+            `;
+          }
+          if (answers.length) {
+            html += `
+              <table class="lesson-student-results-table">
+                <thead>
+                  <tr>
+                    <th>Задание</th>
+                    <th>Ваш ответ</th>
+                    <th>Статус</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${answers.map((a) => {
+                    const status = a.is_correct
+                      ? '<span class="lesson-student-results-badge lesson-student-results-badge--ok">Правильно</span>'
+                      : '<span class="lesson-student-results-badge lesson-student-results-badge--bad">Неправильно</span>';
+                    return `<tr>
+                      <td>${resolveTaskLabel(a.task_number)}</td>
+                      <td>${safeHtml(a.answer || '—')}</td>
+                      <td>${status}</td>
+                    </tr>`;
+                  }).join('')}
+                </tbody>
+              </table>
+            `;
+          } else if (!summary) {
+            html = '<p class="lesson-modal-placeholder">Пока нет результатов.</p>';
+          }
+          studentResultsModalBody.innerHTML = html;
+        } catch (e) {
+          studentResultsModalBody.innerHTML = `<p class="lesson-modal-placeholder lesson-modal-placeholder--error">${safeHtml(e?.message || 'Ошибка сети')}</p>`;
+        }
+      };
+
+      const openFinishModal = () => {
+        if (!finishModalEl || !isTeacher) return;
+        finishModalEl.style.display = 'flex';
+        finishModalEl.style.alignItems = 'flex-start';
+        finishModalEl.style.justifyContent = 'center';
+        document.body.style.overflow = 'hidden';
+        loadLessonResultsModal();
+      };
+      const closeFinishModal = () => {
+        if (!finishModalEl) return;
+        finishModalEl.style.display = 'none';
+        document.body.style.overflow = '';
+      };
+
+      const loadLessonResultsModal = async () => {
+        if (!finishModalBody) return;
+        finishModalBody.innerHTML = '<p class="lesson-modal-placeholder">Загрузка…</p>';
+        const params = new URLSearchParams();
+        if (lessonPageToken) {
+          params.set('token', lessonPageToken);
+          params.set('role', 'teacher');
+        } else {
+          params.set('room_id', roomId);
+        }
+        if (variantId) params.set('variant_id', String(variantId));
+        try {
+          const res = await fetch(`/api/lesson/results/?${params.toString()}`, { credentials: 'include' });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            finishModalBody.innerHTML = `<p class="lesson-modal-placeholder lesson-modal-placeholder--error">${safeHtml(data.error || 'Не удалось загрузить результаты')}</p>`;
+            return;
+          }
+          const rows = data.results || [];
+          if (!rows.length) {
+            finishModalBody.innerHTML = '<p class="lesson-modal-placeholder">Пока нет записей в базе результатов. Они появятся после ответов учеников и синхронизации с сервером.</p>';
+            return;
+          }
+          finishModalBody.innerHTML = rows.map((r) => {
+            const st = String(r.student || '').trim();
+            return (
+              `<div class="lesson-result-card" data-student="${escAttr(st)}">` +
+                `<div class="lesson-result-student">${safeHtml(st)}</div>` +
+                `<div class="lesson-result-meta">` +
+                `Всего задач: <b>${r.total_tasks ?? '—'}</b> · верно: <b style="color:#15803d;">${r.correct_count ?? 0}</b> · неверно: <b style="color:#b91c1c;">${r.wrong_count ?? 0}</b> · пусто: <b>${r.empty_count ?? 0}</b>` +
+                `</div>` +
+                `<label class="lesson-result-label">Комментарий учителя</label>` +
+                `<textarea class="lesson-teacher-comment-ta lesson-result-comment" rows="3"></textarea>` +
+                `<button type="button" class="lesson-save-comment-btn">Сохранить комментарий</button>` +
+              `</div>`
+            );
+          }).join('');
+          const cards = finishModalBody.querySelectorAll('.lesson-result-card');
+          rows.forEach((r, i) => {
+            const ta = cards[i]?.querySelector('.lesson-teacher-comment-ta');
+            if (ta) ta.value = String(r.teacher_comment || '');
+          });
+          finishModalBody.querySelectorAll('.lesson-result-card').forEach((card) => {
+            const st = card.getAttribute('data-student') || '';
+            const btn = card.querySelector('.lesson-save-comment-btn');
+            const ta = card.querySelector('.lesson-teacher-comment-ta');
+            if (btn && ta) {
+              btn.addEventListener('click', async () => {
+                btn.disabled = true;
+                const prev = btn.textContent;
+                btn.textContent = '…';
+                try {
+                  const res = await fetch('/api/lesson/student-comment/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                      lesson_token: lessonPageToken,
+                      token: lessonPageToken,
+                      room_id: roomId,
+                      teacher: me,
+                      student: st,
+                      teacher_comment: ta.value,
+                      variant_id: variantId ? Number(variantId) : 0,
+                    }),
+                  });
+                  const j = await res.json();
+                  if (!res.ok || !j.ok) throw new Error(j.error || 'Ошибка');
+                  btn.textContent = 'Сохранено';
+                  setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1600);
+                } catch (_) {
+                  btn.textContent = 'Ошибка';
+                  btn.disabled = false;
+                  setTimeout(() => { btn.textContent = prev; }, 2000);
+                }
+              });
+            }
+          });
+        } catch (_) {
+          finishModalBody.innerHTML = '<p class="lesson-modal-placeholder lesson-modal-placeholder--error">Ошибка сети</p>';
+        }
+      };
+
+      const downloadLessonPdf = (preOpenedWindow = null) => {
+        const pdfUrl = buildLessonReportDownloadUrl('pdf');
+        if (preOpenedWindow && !preOpenedWindow.closed) {
+          preOpenedWindow.location.href = pdfUrl;
+          return;
+        }
+        window.open(pdfUrl, '_blank', 'noopener');
+      };
+
+      const closeLessonSession = async () => {
+        if (!lessonPageToken) {
+          alert('Нужен токен урока для закрытия комнаты.');
+          return;
+        }
+        if (!confirm('Закрыть урок для всех? Откроется PDF-отчёт, затем переход в личный кабинет. Повторный вход по той же ссылке будет недоступен.')) return;
+        const pendingPdfWindow = window.open('', '_blank');
+        if (pendingPdfWindow) pendingPdfWindow.opener = null;
+        try {
+          const res = await fetch('/api/lesson/finalize/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ token: lessonPageToken, role: 'teacher' }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            if (pendingPdfWindow && !pendingPdfWindow.closed) pendingPdfWindow.close();
+            alert(data.error || 'Не удалось закрыть урок');
+            return;
+          }
+          closeFinishModal();
+          showLessonStatusToast('Проверено. Результаты сохранены.');
+          openFinishModal();
+          try {
+            downloadLessonPdf(pendingPdfWindow);
+          } catch (_) {}
+          redirectToLkAfterLessonEnd();
+        } catch (_) {
+          if (pendingPdfWindow && !pendingPdfWindow.closed) pendingPdfWindow.close();
+          alert('Ошибка сети');
+        }
+      };
+
+      if (!isTeacher && studentUiEl) {
+        studentUiEl.style.display = 'block';
+      }
+      document.getElementById('lesson-finish-modal-close')?.addEventListener('click', closeFinishModal);
+      finishModalEl?.addEventListener('click', (e) => { if (e.target === finishModalEl) closeFinishModal(); });
+      document.getElementById('lesson-finish-download-pdf')?.addEventListener('click', downloadLessonPdf);
+      document.getElementById('lesson-finish-close-session')?.addEventListener('click', closeLessonSession);
+      studentResultsBtn?.addEventListener('click', async () => {
+        hideStudentResultsButton();
+        openStudentResultsModal();
+        await loadStudentResultsModal();
+      });
+      document.getElementById('lesson-student-results-modal-close')?.addEventListener('click', closeStudentResultsModal);
+      studentResultsModalEl?.addEventListener('click', (e) => { if (e.target === studentResultsModalEl) closeStudentResultsModal(); });
+
+      setupTeacher();
+      setupCursorBroadcast();
+      setupStudent();
+      openVariantIfReady(src);
+    })();
+  </script>
+</body>
+</html>

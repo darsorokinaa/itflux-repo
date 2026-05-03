@@ -1,0 +1,2724 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useLocation } from "react-router-dom";
+import MathContent from "../components/MathContent";
+import TaskFileAttachment from "../components/TaskFileAttachment";
+import ImageLightbox from "../components/ImageLightbox";
+import SupportInfoModal from "../components/SupportInfoModal";
+import ResultsModal from "../components/ResultsModal";
+import ReportErrorModal from "../components/ReportErrorModal";
+import ExamBoardOverlay from "../components/ExamBoardOverlay";
+import {
+  parseHomeworkFromSearchForExam,
+  getLkPublicBase,
+  fetchHomeworkAssignment,
+  pickHomeworkFields,
+  homeworkResultToUiState,
+  buildHomeworkResultPayload,
+  saveHomeworkDraft,
+  submitHomework,
+  homeworkApiUserMessage,
+  homeworkTaskNumberEditable,
+  homeworkIsReadonly,
+  homeworkShowSolutions,
+} from "../utils/cabinetHomework";
+
+const SUBJECT_NAMES = {
+  inf: "информатике",
+  history: "истории",
+};
+
+/** Подпись для шапки «Тестирование по …»: профиль/база только ЕГЭ, ОГЭ — просто «математике». */
+function examPageSubjectLabel(level, subjectKey) {
+  const lv = String(level || "").toLowerCase();
+  const sub = String(subjectKey || "").toLowerCase();
+  if (sub === "math") return lv === "ege" ? "профильной математике" : "математике";
+  if (sub === "math_base") return lv === "ege" ? "базовой математике" : "математике";
+  return SUBJECT_NAMES[subjectKey] || subjectKey;
+}
+
+function isMathLikeSubject(subject) {
+  const s = String(subject || "").toLowerCase();
+  return s === "math" || s === "math_base";
+}
+
+/** Подпись баллов для карточки критерия (1 балл / 2 балла / 5 баллов). */
+function formatRuBalls(n) {
+  const num = Math.trunc(Number(n));
+  const abs = Math.abs(num) % 100;
+  const d = abs % 10;
+  if (abs > 10 && abs < 20) return `${num} баллов`;
+  if (d > 1 && d < 5) return `${num} балла`;
+  if (d === 1) return `${num} балл`;
+  return `${num} баллов`;
+}
+
+function parseMaybeJsonObject(value) {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function pickFirstNonEmptyString(values) {
+  for (const v of values) {
+    const s = typeof v === "string" ? v.trim() : "";
+    if (s) return s;
+  }
+  return "";
+}
+
+function TaskReportErrorButton({ taskId, taskNumber, onClick }) {
+  return (
+    <button
+      type="button"
+      className="task-report-error-btn"
+      title="Сообщить об ошибке"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick?.(taskId, taskNumber);
+      }}
+      aria-label="Сообщить об ошибке"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18" aria-hidden="true">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 8v4" />
+        <path d="M12 16h.01" />
+      </svg>
+      <span className="task-report-error-label">Сообщить об ошибке</span>
+    </button>
+  );
+}
+
+/** Урок/ДЗ в iframe: ученик прикрепляет изображение решения (часть 2). */
+function LessonSolutionUpload({ taskNumber, taskId, lessonToken, assignmentId, homeworkMode, enabled }) {
+  const FILE_ACCEPT =
+    ".kum,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.ods,.ots,.numbers,.png,.jpg,.jpeg,.webp,.gif,.bmp,.heic,.heif,.txt,.pdf,.doc,.docx,.odt,.rtf,.zip,.7z,.rar";
+  const fileInputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const [sentPreviews, setSentPreviews] = useState([]);
+  
+  const [pendingFile, setPendingFile] = useState(null);
+  const [pendingPreview, setPendingPreview] = useState(null);
+
+  if (!enabled || !lessonToken) return null;
+
+  const onFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setErr(null);
+    setPendingFile(file);
+    setPendingPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+    });
+  };
+
+  const onCancel = (e) => {
+    e.stopPropagation();
+    setPendingFile(null);
+    if (pendingPreview) URL.revokeObjectURL(pendingPreview);
+    setPendingPreview(null);
+    setErr(null);
+  };
+
+  const onSend = async (e) => {
+    e.stopPropagation();
+    if (!pendingFile) return;
+    setBusy(true);
+    setErr(null);
+    const fd = new FormData();
+    fd.append("task_number", String(taskNumber));
+    if (!homeworkMode) {
+      fd.append("lesson_token", lessonToken);
+      if (taskId != null && String(taskId).trim() !== "") fd.append("task_id", String(taskId));
+    }
+    fd.append("file", pendingFile);
+    try {
+      const uploadUrl =
+        homeworkMode && assignmentId
+          ? `/api/lesson/homework/assignment/${encodeURIComponent(String(assignmentId))}/upload-answer/?${new URLSearchParams({ token: lessonToken }).toString()}`
+          : "/api/lesson/attachment/";
+      const res = await fetch(uploadUrl, {
+        method: "POST",
+        body: fd,
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || (Object.prototype.hasOwnProperty.call(data, "ok") && !data.ok)) {
+        throw new Error(data.error || "Не удалось загрузить файл");
+      }
+      const url = String(data.url || "");
+      const filename = String(data.filename || pendingFile.name);
+      setSentPreviews((prev) => [...prev, { url, filename, isImage: pendingFile.type.startsWith("image/") }]);
+      setPendingFile(null);
+      if (pendingPreview) URL.revokeObjectURL(pendingPreview);
+      setPendingPreview(null);
+    } catch (ex) {
+      setErr(ex.message || "Ошибка загрузки");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="lesson-solution-upload" onClick={(e) => e.stopPropagation()} style={{ width: "100%" }}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={FILE_ACCEPT}
+        className="lesson-solution-file-input"
+        tabIndex={-1}
+        onChange={onFileSelect}
+      />
+
+      <div className="lesson-solution-picker">
+        <button
+          type="button"
+          className="lesson-solution-picker-btn"
+          disabled={busy}
+          onClick={(e) => {
+            e.stopPropagation();
+            fileInputRef.current?.click();
+          }}
+        >
+          Выбрать файл
+        </button>
+        <span className={`lesson-solution-picker-name${pendingFile ? " is-selected" : ""}`}>
+          {pendingFile?.name || "Файл не выбран"}
+        </span>
+      </div>
+
+      {pendingFile ? (
+        <div className="lesson-solution-pending">
+          <div className="lesson-solution-pending-preview">
+            {pendingPreview ? (
+              <img
+                src={pendingPreview}
+                alt="Preview"
+                className="lesson-solution-pending-image"
+              />
+            ) : (
+              <div className="lesson-solution-pending-file">
+                <span className="lesson-solution-pending-file-icon" aria-hidden="true">📄</span>
+                <span className="lesson-solution-pending-file-name">{pendingFile.name}</span>
+              </div>
+            )}
+            <button
+              type="button"
+              className="lesson-solution-pending-remove"
+              onClick={onCancel}
+              aria-label="Убрать выбранный файл"
+            >
+              ✕
+            </button>
+          </div>
+          <button
+            type="button"
+            className="add-button lesson-solution-send-btn"
+            disabled={busy}
+            onClick={onSend}
+          >
+            {busy ? "Отправка…" : "Прикрепить решение"}
+          </button>
+        </div>
+      ) : null}
+
+      {err ? <span className="lesson-solution-upload-error" style={{ display: "block", marginTop: "8px" }}>{err}</span> : null}
+      
+      {sentPreviews.length > 0 ? (
+        <div className="lesson-solution-previews" style={{ marginTop: "12px" }}>
+          {sentPreviews.map((p, i) => {
+            const src = `${p.url}${p.url.includes("?") ? "&" : "?"}t=${encodeURIComponent(lessonToken)}`;
+            return (
+              <figure key={`${p.url}-${i}`} className="lesson-solution-preview-fig">
+                {p.isImage ? (
+                  <img src={src} alt="" className="lesson-solution-thumb" />
+                ) : (
+                  <a href={src} target="_blank" rel="noreferrer" className="lesson-solution-file-item">
+                    <span className="lesson-solution-file-item__icon" aria-hidden="true">📎</span>
+                    <span className="lesson-solution-file-item__name">{p.filename || "Файл"}</span>
+                  </a>
+                )}
+                {p.isImage && p.filename ? (
+                  <figcaption className="lesson-solution-preview-cap">{p.filename}</figcaption>
+                ) : null}
+              </figure>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const LEVEL_NAMES = {
+  ege: "ЕГЭ",
+  oge: "ОГЭ",
+};
+
+const EXAM_CORNER_POS_KEY = "exam_fixed_corner_pos";
+
+/** Эталон «a или b» — засчитывается любой вариант после нормализации */
+const SUBJECTS_WITH_OR_ALTERNATIVES = ["math", "math_base", "chem", "history"];
+
+function clampExamCornerToViewport(el, left, top) {
+  const margin = 8;
+  const w = el.offsetWidth || 1;
+  const h = el.offsetHeight || 1;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  return {
+    left: Math.min(Math.max(margin, left), Math.max(margin, vw - w - margin)),
+    top: Math.min(Math.max(margin, top), Math.max(margin, vh - h - margin)),
+  };
+}
+
+function ExamPage() {
+  const { level, subject, variant_id } = useParams();
+  const location = useLocation();
+  const lessonEmbedParams = useMemo(() => {
+    const sp = new URLSearchParams(location.search);
+    return {
+      embed: sp.get("lesson_embed") === "1",
+      token: (sp.get("lesson_token") || "").trim(),
+      student: sp.get("lesson_student") === "1",
+    };
+  }, [location.search]);
+  const homeworkQuery = useMemo(() => {
+    const sp = new URLSearchParams(location.search);
+    const embed = sp.get("lesson_embed") === "1";
+    return parseHomeworkFromSearchForExam(location.search, embed);
+  }, [location.search]);
+  const isHomework = homeworkQuery.isHomework;
+  /** Полноэкранный EdTech-макет с сайдбаром: не урок и не режим ДЗ из ЛК */
+  const showExamEducationShell = !lessonEmbedParams.embed && !isHomework;
+  const cabinetAssignmentId = homeworkQuery.cabinetAssignment;
+  const isTeacherHomeworkView =
+    isHomework && lessonEmbedParams.embed && !lessonEmbedParams.student;
+  const [hwApiRaw, setHwApiRaw] = useState(null);
+  const [hwLoading, setHwLoading] = useState(false);
+  const [hwError, setHwError] = useState(null);
+  const [hwActionBusy, setHwActionBusy] = useState(false);
+  const [hwNotice, setHwNotice] = useState("");
+  const hwHydrateKeyRef = useRef("");
+  const showLessonSolutionUpload =
+    lessonEmbedParams.embed && lessonEmbedParams.student && !!lessonEmbedParams.token;
+
+  /**
+   * Пока variant ещё null, рендер только «Загрузка…» без #main-wrapper — :has(#main-wrapper…) в CSS не срабатывает.
+   * Классы на html/body/#root сохраняют фон-сетку / лаванду те же, что после загрузки.
+   */
+  useEffect(() => {
+    const docEl = document.documentElement;
+    const bodyEl = document.body;
+    const appRoot = typeof document !== "undefined" ? document.getElementById("root") : null;
+    docEl.classList.add("exam-variant-view");
+    bodyEl.classList.add("exam-variant-view");
+    appRoot?.classList.add("exam-variant-view");
+    docEl.classList.toggle("exam-variant-view--edu", showExamEducationShell);
+    bodyEl.classList.toggle("exam-variant-view--edu", showExamEducationShell);
+    appRoot?.classList.toggle("exam-variant-view--edu", showExamEducationShell);
+
+    return () => {
+      docEl.classList.remove("exam-variant-view", "exam-variant-view--edu");
+      bodyEl.classList.remove("exam-variant-view", "exam-variant-view--edu");
+      appRoot?.classList.remove("exam-variant-view", "exam-variant-view--edu");
+    };
+  }, [showExamEducationShell]);
+
+  const mode = location.state?.mode || "variant";
+  const subjectLabel =
+    location.state?.subjectName || examPageSubjectLabel(level, subject);
+  const levelLabel =
+    LEVEL_NAMES[level] || (level != null && level !== "" ? String(level).toUpperCase() : "");
+  const testTaskLabels = location.state?.testTaskLabels || [];
+
+  const [variant, setVariant] = useState(null);
+  const [error, setError] = useState(null);
+
+  // Ответы части 1
+  const [userAnswers, setUserAnswers] = useState({}); // { taskId: "текст" }
+  const [checkedTasks, setCheckedTasks] = useState({}); // { taskId: true/false } — какие проверены
+
+  // Баллы части 2 — { taskId: число }
+  const [scores, setScores] = useState({});
+
+  // Показанные ответы части 2 — { taskId: true }
+  const [visibleAnswers, setVisibleAnswers] = useState({});
+
+  // Критерии части 2: панель открыта для taskId | null
+  const [criteriaOpenForTask, setCriteriaOpenForTask] = useState(null);
+  // Кэш критериев по task_list_id
+  const [criteriaByTaskList, setCriteriaByTaskList] = useState({});
+  // Выбранный критерий: { taskId: criterionId }
+  const [selectedCriterionByTask, setSelectedCriterionByTask] = useState({});
+
+  // Таймер варианта
+  const [timerSeconds, setTimerSeconds] = useState(0);
+  const [timerStatus, setTimerStatus] = useState("idle"); // "idle" | "running" | "paused"
+
+  /** Весь фиксированный блок (таймеры, баллы, справка): развёрнут / свёрнут в полоску */
+  const [examFixedPanelOpen, setExamFixedPanelOpen] = useState(true);
+
+  // Загрузка PDF
+  const [pdfLoading, setPdfLoading] = useState(null); // null | "default" | "cosmos" | "easter"
+
+  // Копирование ссылки на вариант
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  // Lightbox для увеличения изображений
+  const [lightbox, setLightbox] = useState({ open: false, src: "" });
+  const handleImageClick = useCallback((src) => setLightbox({ open: true, src }), []);
+  const mainRef = useRef(null);
+  const fixedCornerRef = useRef(null);
+  const cornerDragRef = useRef({
+    active: false,
+    pointerId: null,
+    startClientX: 0,
+    startClientY: 0,
+    startLeft: 0,
+    startTop: 0,
+  });
+  const pendingCornerPosRef = useRef(null);
+
+  /** Пользовательская позиция блока таймера (fixed px), null — как в CSS (правый верх) */
+  const [fixedCornerPos, setFixedCornerPos] = useState(null);
+  const fixedCornerPosRef = useRef(null);
+  useEffect(() => {
+    fixedCornerPosRef.current = fixedCornerPos;
+  }, [fixedCornerPos]);
+
+  // Справочная информация (items = массив {html})
+  const [supportInfo, setSupportInfo] = useState({ items: [], open: false });
+
+  // Результаты (всплывающее окно по кнопке «Завершить»)
+  const [resultsOpen, setResultsOpen] = useState(false);
+  const [resultsData, setResultsData] = useState(null);
+
+  // Сообщить об ошибке
+  const [reportErrorOpen, setReportErrorOpen] = useState(false);
+  const [reportErrorTask, setReportErrorTask] = useState(null);
+
+  // Время на каждое задание (секунды)
+  const taskTimesRef = useRef({});
+  const currentTaskIdRef = useRef(null);
+  /** Активная кнопка навигации по заданиям (десктопный сайдбар) */
+  const [examNavActiveId, setExamNavActiveId] = useState(null);
+  const startTimeRef = useRef(null);
+  const endTimeRef = useRef(null);
+
+  /* =========================
+     Загрузка варианта
+  ========================== */
+  useEffect(() => {
+    if (!level || !subject || !variant_id) {
+      setError("Некорректный адрес варианта");
+      setVariant(null);
+      return undefined;
+    }
+    setError(null);
+    const idWanted = String(variant_id);
+    const ac = new AbortController();
+    fetch(
+      `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/variant/${encodeURIComponent(String(variant_id))}/`,
+      { credentials: "same-origin", signal: ac.signal }
+    )
+      .then((res) => {
+        if (!res.ok) throw new Error(`Ошибка загрузки варианта (${res.status})`);
+        return res.json();
+      })
+      .then((data) => {
+        if (ac.signal.aborted) return;
+        if (!data || !Array.isArray(data.tasks)) {
+          throw new Error("Сервер вернул неполные данные варианта");
+        }
+        if (String(data.id) !== idWanted) return;
+        setVariant(data);
+      })
+      .catch((err) => {
+        if (err?.name === "AbortError") return;
+        setError(err.message || "Ошибка загрузки варианта");
+      });
+    return () => ac.abort();
+  }, [level, subject, variant_id]);
+
+  useEffect(() => {
+    if (!variant?.tasks?.length) return;
+    const sorted = [...variant.tasks].sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
+    const fid = sorted[0]?.id;
+    if (fid != null) setExamNavActiveId(fid);
+  }, [variant?.id]);
+
+  useEffect(() => {
+    if (!isHomework || !cabinetAssignmentId) {
+      setHwApiRaw(null);
+      setHwError(null);
+      setHwLoading(false);
+      return undefined;
+    }
+    if (!getLkPublicBase() && !lessonEmbedParams.token) {
+      setHwError("no_lk_env");
+      setHwLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setHwLoading(true);
+    setHwError(null);
+    const hwFetchOpts = lessonEmbedParams.token
+      ? { lessonToken: lessonEmbedParams.token }
+      : undefined;
+    fetchHomeworkAssignment(cabinetAssignmentId, hwFetchOpts)
+      .then((data) => {
+        if (!cancelled) setHwApiRaw(data);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          const code = /** @type {{ status?: number }} */ (err)?.status;
+          setHwError(code === 401 ? "unauthorized" : err?.message || "network");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setHwLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isHomework, cabinetAssignmentId, lessonEmbedParams.token]);
+
+  useEffect(() => {
+    if (!variant?.tasks || !hwApiRaw) return;
+    const cab = cabinetAssignmentId || "";
+    const picked = pickHomeworkFields(hwApiRaw, cab);
+    const key = `${cab}|${picked.status}|${JSON.stringify(picked.result)}`;
+    if (hwHydrateKeyRef.current === key) return;
+    hwHydrateKeyRef.current = key;
+    const m = new Map();
+    for (const t of variant.tasks) m.set(String(t.number), t);
+    const { userAnswers: ua, scores: sc, checkedTasks: ch } = homeworkResultToUiState(
+      picked.result,
+      m
+    );
+    setUserAnswers((p) => ({ ...p, ...ua }));
+    setScores((p) => ({ ...p, ...sc }));
+    if (ch && Object.keys(ch).length) setCheckedTasks((p) => ({ ...p, ...ch }));
+  }, [variant, hwApiRaw, cabinetAssignmentId]);
+
+  /* =========================
+     Справочная информация
+  ========================== */
+  useEffect(() => {
+    if (!level || !subject) return undefined;
+    const ac = new AbortController();
+    fetch(`/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/support-info/`, {
+      signal: ac.signal,
+    })
+      .then((res) => (res.ok ? res.json() : { items: [] }))
+      .then((data) => setSupportInfo((s) => ({ ...s, items: data.items || [] })))
+      .catch((err) => {
+        if (err?.name === "AbortError") return;
+        setSupportInfo((s) => ({ ...s, items: [] }));
+      });
+    return () => ac.abort();
+  }, [level, subject]);
+
+  /* =========================
+     Таймер
+  ========================== */
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(EXAM_CORNER_POS_KEY);
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (typeof p.left === "number" && typeof p.top === "number") {
+        setFixedCornerPos({ left: p.left, top: p.top });
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const cornerPlaced = fixedCornerPos != null;
+  useEffect(() => {
+    if (!cornerPlaced) return;
+    const onResize = () => {
+      const el = fixedCornerRef.current;
+      if (!el) return;
+      setFixedCornerPos((prev) => {
+        if (!prev) return prev;
+        const c = clampExamCornerToViewport(el, prev.left, prev.top);
+        try {
+          sessionStorage.setItem(EXAM_CORNER_POS_KEY, JSON.stringify(c));
+        } catch {
+          /* ignore */
+        }
+        return c;
+      });
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [cornerPlaced]);
+
+  const onFixedCornerDragStart = useCallback((e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    const el = fixedCornerRef.current;
+    if (!el) return;
+    e.preventDefault();
+    const rect = el.getBoundingClientRect();
+    const pos = fixedCornerPosRef.current;
+    const startLeft = pos?.left ?? rect.left;
+    const startTop = pos?.top ?? rect.top;
+    if (pos == null) {
+      setFixedCornerPos({ left: startLeft, top: startTop });
+    }
+    cornerDragRef.current = {
+      active: true,
+      pointerId: e.pointerId,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startLeft,
+      startTop,
+    };
+    pendingCornerPosRef.current = { left: startLeft, top: startTop };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const onFixedCornerDragMove = useCallback((e) => {
+    const d = cornerDragRef.current;
+    if (!d.active) return;
+    e.preventDefault();
+    const el = fixedCornerRef.current;
+    if (!el) return;
+    let left = d.startLeft + (e.clientX - d.startClientX);
+    let top = d.startTop + (e.clientY - d.startClientY);
+    const c = clampExamCornerToViewport(el, left, top);
+    pendingCornerPosRef.current = c;
+    setFixedCornerPos(c);
+  }, []);
+
+  const onFixedCornerDragEnd = useCallback((e) => {
+    const d = cornerDragRef.current;
+    if (!d.active) return;
+    d.active = false;
+    try {
+      if (d.pointerId != null) e.currentTarget.releasePointerCapture(d.pointerId);
+    } catch {
+      /* ignore */
+    }
+    const p = pendingCornerPosRef.current;
+    if (p) {
+      try {
+        sessionStorage.setItem(EXAM_CORNER_POS_KEY, JSON.stringify(p));
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (timerStatus !== "running") return;
+    const id = setInterval(() => setTimerSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [timerStatus]);
+
+  /* Время на каждое задание: каждую секунду добавляем к текущему заданию */
+  useEffect(() => {
+    if (timerStatus !== "running" || !variant) return;
+    const id = setInterval(() => {
+      const tid = currentTaskIdRef.current;
+      if (tid) {
+        taskTimesRef.current[tid] = (taskTimesRef.current[tid] || 0) + 1;
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [timerStatus, variant]);
+
+  /* Инициализация текущего задания при загрузке варианта */
+  useEffect(() => {
+    if (!variant?.tasks?.length) return;
+    const first = variant.tasks[0];
+    if (first && !currentTaskIdRef.current) currentTaskIdRef.current = first.id;
+  }, [variant]);
+
+  /* Автозапуск таймера при загрузке варианта — время решения считается с момента открытия */
+  useEffect(() => {
+    if (variant && timerStatus === "idle") {
+      startTimeRef.current = new Date().toISOString();
+      setTimerStatus("running");
+    }
+  }, [variant, timerStatus]);
+
+  function formatTimer(sec) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (h > 0)
+      return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
+
+  /* =========================
+     MathJax
+  ========================== */
+  useEffect(() => {
+    if (!variant) return;
+    let cancelled = false;
+    const tryTypeset = () => {
+      if (cancelled) return;
+      if (window.MathJax?.typesetPromise) {
+        try { window.MathJax.typesetPromise(); } catch (_) {}
+      } else {
+        setTimeout(tryTypeset, 100);
+      }
+    };
+    const delay = variant ? 50 : 0;
+    const timer = setTimeout(tryTypeset, delay);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [variant]);
+
+  /* Подсказка «листайте», если блок условия реально переполнен по ширине */
+  useEffect(() => {
+    const updateScrollHints = () => {
+      const nodes = document.querySelectorAll(".exam-page .task-text");
+      nodes.forEach((node) => {
+        const hasOverflow = node.scrollWidth - node.clientWidth > 4;
+        node.classList.toggle("task-text--has-overflow", hasOverflow);
+      });
+    };
+    updateScrollHints();
+    const t = setTimeout(updateScrollHints, 120);
+    window.addEventListener("resize", updateScrollHints);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("resize", updateScrollHints);
+    };
+  }, [variant]);
+
+  /* =========================
+     Лайтбокс: клик по картинке
+  ========================== */
+  useEffect(() => {
+    const handler = (e) => {
+      const img = e.target.closest("img");
+      if (!img) return;
+      const container = img.closest(".task-text, .correct-answer-content, .part2-answer-content, .task-content, .exam-page-container");
+      if (!container) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setLightbox({ open: true, src: img.src });
+    };
+    document.addEventListener("click", handler, true);
+    return () => document.removeEventListener("click", handler, true);
+  }, []);
+
+
+  /* =========================
+     Проверка ответов
+  ========================== */
+  // Для математики и информатики: убираем пробелы, нормализуем юникод, без учёта регистра
+  function normalize(str) {
+    return String(str ?? "")
+      .normalize("NFC")
+      .replace(/[\u200B-\u200D\uFEFF\u00AD]/g, "") // zero-width, BOM, soft hyphen
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "");
+  }
+
+  // Ответ из API может быть HTML (process_latex) — извлекаем текст для сравнения
+  function getTextFromHtml(html) {
+    if (!html || typeof html !== "string") return "";
+    try {
+      const div = document.createElement("div");
+      div.innerHTML = html;
+      return (div.textContent || div.innerText || "").trim();
+    } catch {
+      return String(html).replace(/<[^>]+>/g, "");
+    }
+  }
+
+  /** Строковые ответы-которые-совпадают-как-числа: запятая→точка, trim, parseFloat. */
+  function tryNumericAnswerEqual(rawUserValue, correctAnswerHtml) {
+    const correctText = getTextFromHtml(correctAnswerHtml || "");
+    if (/\sили\s/i.test(correctText)) return null;
+    const stripNum = (s) =>
+      String(s ?? "")
+        .normalize("NFC")
+        .replace(/[\u200B-\u200D\uFEFF\u00AD]/g, "")
+        .replace(/\u00a0/g, " ")
+        .trim()
+        .replace(/,/g, ".");
+    const uStr = stripNum(rawUserValue);
+    const cStr = stripNum(correctText);
+    if (!uStr || !cStr) return null;
+    const uNum = parseFloat(uStr);
+    const cNum = parseFloat(cStr);
+    if (!Number.isFinite(uNum) || !Number.isFinite(cNum)) return null;
+    const plainNum = (x) =>
+      /^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/i.test(String(x).replace(/\s/g, ""));
+    if (!plainNum(uStr) || !plainNum(cStr)) return null;
+    const tol = 1e-9 * Math.max(1, Math.abs(cNum));
+    return Math.abs(uNum - cNum) <= tol;
+  }
+
+  // Математика, химия, история: ответы вида "x или y" — несколько допустимых вариантов
+  function isUserAnswerCorrect(rawUserValue, correctAnswerHtml) {
+    const userNorm = normalize(rawUserValue);
+    const correctText = getTextFromHtml(correctAnswerHtml || "");
+    const correctNorm = normalize(correctText);
+
+    if (
+      SUBJECTS_WITH_OR_ALTERNATIVES.includes(subject) &&
+      /\sили\s/i.test(correctText)
+    ) {
+      const alternatives = correctText
+        .split(/\s+или\s+/i)
+        .map((part) => normalize(part))
+        .filter(Boolean);
+      if (alternatives.length > 0) {
+        return alternatives.includes(userNorm);
+      }
+    }
+
+    const numEq = tryNumericAnswerEqual(rawUserValue, correctAnswerHtml);
+    if (numEq !== null) return numEq;
+
+    return userNorm === correctNorm;
+  }
+
+  function checkTask(taskId, correctAnswer, userValue = null) {
+    const raw = userValue !== null ? userValue : userAnswers[taskId] || "";
+    const isCorrect = isUserAnswerCorrect(raw, correctAnswer);
+    setCheckedTasks((prev) => ({ ...prev, [taskId]: isCorrect }));
+  }
+
+  /** Вычислить правильность ответа без обновления state (для авто-проверки при завершении) */
+  function computeTaskCorrectness(task) {
+    const useTable = isTableAnswerTask(subject, task.number);
+    const userValue = useTable
+      ? getTableAnswerForCheck(task.id, INF_TABLE_ROWS, INF_TABLE_COLS)
+      : (userAnswers[task.id] || "");
+    return isUserAnswerCorrect(userValue, task.answer || "");
+  }
+
+  // Задания по информатике с таблицей ответов (18, 20, 25, 26, 27): 2 столбца, 7 строк
+  const INF_TABLE_TASK_NUMBERS = [18, 20, 25, 26, 27];
+  const INF_TABLE_ROWS = 7;
+  const INF_TABLE_COLS = 2;
+
+  function isTableAnswerTask(subj, num) {
+    return subj === "inf" && INF_TABLE_TASK_NUMBERS.includes(num);
+  }
+
+  function getTableAnswerString(taskId, rows, cols) {
+    const raw = userAnswers[taskId] || "";
+    const lines = raw.split(/\r?\n/);
+    const matrix = [];
+    for (let r = 0; r < rows; r++) {
+      const line = lines[r] || "";
+      matrix.push(line.split(/\t/).slice(0, cols));
+      while (matrix[r].length < cols) matrix[r].push("");
+    }
+    return matrix;
+  }
+
+  function setTableCell(taskId, row, col, value, rows, cols) {
+    const matrix = getTableAnswerString(taskId, rows, cols);
+    matrix[row][col] = value;
+    const str = matrix.map((rowArr) => rowArr.join("\t")).join("\n");
+    setUserAnswers((prev) => ({ ...prev, [taskId]: str }));
+  }
+
+  function getTableAnswerForCheck(taskId, rows, cols) {
+    const matrix = getTableAnswerString(taskId, rows, cols);
+    return matrix.map((rowArr) => rowArr.join("\t")).join("\n");
+  }
+
+  /** Парсинг эталонного ответа из HTML в матрицу rows×cols (таб/перенос строки). */
+  function parseCorrectTableAnswer(correctAnswerHtml, rows, cols) {
+    const text = getTextFromHtml(correctAnswerHtml || "");
+    const lines = text.split(/\r?\n/);
+    const matrix = [];
+    for (let r = 0; r < rows; r++) {
+      const line = lines[r] || "";
+      matrix.push(line.split(/\t/).slice(0, cols).map((s) => s.trim()));
+      while (matrix[r].length < cols) matrix[r].push("");
+    }
+    return matrix;
+  }
+
+  /** Информатика, задание 26: 2 ответа в одной строке. Оба верны → 2, один верный → 1, иначе 0. */
+  function getInfTask26Score(userMatrix, correctMatrix) {
+    const u = (userMatrix[0] || []).map((c) => normalize(c));
+    const c = (correctMatrix[0] || []).map((cell) => normalize(cell));
+    let match = 0;
+    if (u[0] === c[0]) match++;
+    if (u[1] === c[1]) match++;
+    return match === 2 ? 2 : match === 1 ? 1 : 0;
+  }
+
+  /** Информатика, задание 27: 4 числа в двух строках (2 столбца). Обе строки верны → 2, одна строка верна → 1, иначе 0. */
+  function getInfTask27Score(userMatrix, correctMatrix) {
+    const rowMatch = (r) => {
+      const u = (userMatrix[r] || []).map((cell) => normalize(cell));
+      const c = (correctMatrix[r] || []).map((cell) => normalize(cell));
+      return u[0] === c[0] && u[1] === c[1];
+    };
+    const r0 = rowMatch(0);
+    const r1 = rowMatch(1);
+    if (r0 && r1) return 2;
+    if (r0 || r1) return 1;
+    return 0;
+  }
+
+  /** Проверка задания 26 или 27 по информатике: выставляет баллы 0/1/2 и помечает задание проверенным. */
+  function checkInfTask26Or27(task, rows, cols) {
+    const userMatrix = getTableAnswerString(task.id, rows, cols);
+    const correctMatrix = parseCorrectTableAnswer(task.answer, rows, cols);
+    const score =
+      task.number === 26
+        ? getInfTask26Score(userMatrix, correctMatrix)
+        : task.number === 27
+          ? getInfTask27Score(userMatrix, correctMatrix)
+          : 0;
+    setScores((prev) => ({ ...prev, [task.id]: score }));
+    setCheckedTasks((prev) => ({ ...prev, [task.id]: score > 0 }));
+  }
+
+  function resetTask(taskId) {
+    setUserAnswers((prev) => {
+      const updated = { ...prev };
+      delete updated[taskId];
+      return updated;
+    });
+    setCheckedTasks((prev) => {
+      const updated = { ...prev };
+      delete updated[taskId];
+      return updated;
+    });
+  }
+
+  function togglePart2Answer(taskId) {
+    setVisibleAnswers((p) => ({ ...p, [taskId]: !p[taskId] }));
+  }
+
+  /** Ключ кэша критериев: task_list_id или "num_<task_number>" при поиске по номеру */
+  function getCriteriaCacheKey(task) {
+    if (task.task_list_id != null) return task.task_list_id;
+    if (task.number != null) return `num_${task.number}`;
+    return null;
+  }
+
+  function toggleCriteriaPanel(task) {
+    const tid = task.id;
+    const cacheKey = getCriteriaCacheKey(task);
+    if (criteriaOpenForTask === tid) {
+      setCriteriaOpenForTask(null);
+      return;
+    }
+    setCriteriaOpenForTask(tid);
+    if (cacheKey != null && !criteriaByTaskList[cacheKey]?.criteria) {
+      const params = new URLSearchParams();
+      if (task.task_list_id != null) params.set("task_list_id", task.task_list_id);
+      if (task.number != null) params.set("task_number", task.number);
+      fetch(`/api/${level}/${subject}/criteria/?${params.toString()}`)
+        .then((res) => (res.ok ? res.json() : { criteria: [], max_score: null }))
+        .then((data) => setCriteriaByTaskList((prev) => ({
+          ...prev,
+          [cacheKey]: {
+            criteria: data.criteria || [],
+            max_score: data.max_score != null ? data.max_score : (task.max_score ?? 3),
+          },
+        })))
+        .catch(() => setCriteriaByTaskList((prev) => ({ ...prev, [cacheKey]: { criteria: [], max_score: task.max_score ?? 3 } })));
+    }
+  }
+
+  function selectCriterion(taskId, criterion, maxScore) {
+    setSelectedCriterionByTask((prev) => ({ ...prev, [taskId]: criterion.id }));
+    const score = Math.min(criterion.criteria_score ?? 0, maxScore);
+    setScores((prev) => ({ ...prev, [taskId]: Math.max(0, score) }));
+  }
+
+  const homeworkLkOpts = useMemo(
+    () => (lessonEmbedParams.token ? { lessonToken: lessonEmbedParams.token } : undefined),
+    [lessonEmbedParams.token]
+  );
+
+  const runHomeworkSave = useCallback(async () => {
+    if (!isHomework || !cabinetAssignmentId || !variant) return;
+    setHwActionBusy(true);
+    setHwNotice("");
+    try {
+      const r = buildHomeworkResultPayload(variant.tasks, userAnswers, scores, checkedTasks);
+      await saveHomeworkDraft(cabinetAssignmentId, { result: r }, homeworkLkOpts);
+      setHwNotice("Черновик сохранён");
+      setTimeout(() => setHwNotice(""), 2400);
+    } catch (e) {
+      setHwNotice(homeworkApiUserMessage(e) || "Не удалось сохранить");
+    } finally {
+      setHwActionBusy(false);
+    }
+  }, [isHomework, cabinetAssignmentId, variant, userAnswers, scores, checkedTasks, homeworkLkOpts]);
+
+  const runHomeworkSubmit = useCallback(async () => {
+    if (!isHomework || !cabinetAssignmentId || !variant) return;
+    if (!window.confirm("Отправить работу на проверку? После отправки нельзя править, пока не вернут на доработку.")) {
+      return;
+    }
+    setHwActionBusy(true);
+    setHwNotice("");
+    try {
+      const r = buildHomeworkResultPayload(variant.tasks, userAnswers, scores, checkedTasks);
+      await saveHomeworkDraft(cabinetAssignmentId, { result: r }, homeworkLkOpts);
+      await submitHomework(cabinetAssignmentId, { result: r }, homeworkLkOpts);
+      setHwNotice("Отправлено на проверку");
+      const j = await fetchHomeworkAssignment(cabinetAssignmentId, homeworkLkOpts);
+      setHwApiRaw(j);
+    } catch (e) {
+      setHwNotice(homeworkApiUserMessage(e) || "Ошибка отправки");
+    } finally {
+      setHwActionBusy(false);
+    }
+  }, [isHomework, cabinetAssignmentId, variant, userAnswers, scores, checkedTasks, homeworkLkOpts]);
+
+  const goToExamTask = useCallback((taskId) => {
+    currentTaskIdRef.current = taskId;
+    setExamNavActiveId(taskId);
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-task-id="${String(taskId)}"]`);
+      el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, []);
+
+  if (error) return <div style={{ padding: 20 }}>Ошибка: {error}</div>;
+  if (!variant) return <div style={{ padding: 20 }}>Загрузка...</div>;
+  if (isHomework && !cabinetAssignmentId) {
+    return (
+      <div style={{ padding: 24, maxWidth: 520 }}>
+        <h2 style={{ fontFamily: "var(--font-heading), sans-serif", marginBottom: 8 }}>Домашнее задание</h2>
+        <p>Не передан id назначения. Откройте вариант из личного кабинета по ссылке с параметром cabinet_assignment=…</p>
+      </div>
+    );
+  }
+  if (isHomework && !getLkPublicBase() && !lessonEmbedParams.token) {
+    return (
+      <div style={{ padding: 24, maxWidth: 560 }}>
+        <h2 style={{ fontFamily: "var(--font-heading), sans-serif", marginBottom: 8 }}>Домашнее задание</h2>
+        <p>
+          Для связи с кабинетом задайте в сборке фронтенда переменную{" "}
+          <code style={{ background: "#f1f5f9", padding: "2px 6px", borderRadius: 6 }}>VITE_LK_PUBLIC_URL</code> — тот
+          же origin, что и у сессии ЛК (CORS + credentials). В уроке с токеном вариант использует прокси генератор → ЛК
+          (без CORS), если открыт из комнаты с <code>lesson_token</code>.
+        </p>
+      </div>
+    );
+  }
+
+  const tasksFilteredByAuthor = Array.isArray(variant.tasks) ? variant.tasks : [];
+  // Fallback: если part не задан, определяем по номеру (ОГЭ матем: 1–19 ч.1, 20+ ч.2; ЕГЭ матем: 1–11 ч.1; ОГЭ инф: 1–15 ч.1)
+  const inferPart = (t) => {
+    if (t.part === 1 || t.part === 2) return t.part;
+    const n = t.number;
+    if (level === "oge" && isMathLikeSubject(subject)) return n <= 19 ? 1 : 2;
+    if (level === "ege" && isMathLikeSubject(subject)) return n <= 11 ? 1 : 2;
+    if (level === "oge" && subject === "inf") return n <= 15 ? 1 : 2;
+    if (level === "ege" && subject === "inf") return n <= 27 ? 1 : 2;
+    return n <= 19 ? 1 : 2;
+  };
+  const part1Tasks = tasksFilteredByAuthor.filter((t) => inferPart(t) === 1);
+  const part2Tasks = tasksFilteredByAuthor.filter((t) => inferPart(t) === 2);
+
+  // Связанные задания 19–21 — только для ЕГЭ информатика; для математики всё как обычные задания
+  const LINKED_19_21 = [19, 20, 21];
+  const part2Linked1921 = part2Tasks.filter((t) => LINKED_19_21.includes(t.number));
+  const part2Rest = part2Tasks.filter((t) => !LINKED_19_21.includes(t.number));
+  const showLinkedGroup = subject === "inf" && part2Linked1921.length === 3;
+  // Для математики или если не все три — показываем 19/20/21 как обычные задания
+  const part2Regular = showLinkedGroup ? part2Rest : [...part2Linked1921, ...part2Rest].sort((a, b) => a.number - b.number);
+
+  const hwPicked = isHomework && hwApiRaw ? pickHomeworkFields(hwApiRaw, cabinetAssignmentId) : null;
+  const hwSt = hwPicked?.status || "unknown";
+  const hwRevisions = hwPicked?.revisionTaskIds || [];
+  const hRead = homeworkIsReadonly(hwSt, isTeacherHomeworkView);
+  const hSol = homeworkShowSolutions(hwSt);
+  const showHomeworkReviewedResults = isHomework && !isTeacherHomeworkView && hwSt === "reviewed";
+  const homeworkReviewData = (() => {
+    if (!showHomeworkReviewedResults || !variant?.tasks?.length) return null;
+    const rawObj = hwPicked?.raw && typeof hwPicked.raw === "object" ? hwPicked.raw : {};
+    const resultObj = parseMaybeJsonObject(hwPicked?.result);
+    const commentsByTaskId =
+      resultObj?.comments_by_task_id ||
+      resultObj?.commentsByTaskId ||
+      resultObj?.task_comments_by_id ||
+      rawObj.comments_by_task_id ||
+      rawObj.commentsByTaskId ||
+      {};
+    const commentsByNumber =
+      resultObj?.comments_by_number ||
+      resultObj?.commentsByNumber ||
+      resultObj?.task_comments_by_number ||
+      rawObj.comments_by_number ||
+      rawObj.commentsByNumber ||
+      {};
+    const normalizedTaskIdComments =
+      commentsByTaskId && typeof commentsByTaskId === "object" ? commentsByTaskId : {};
+    const normalizedNumberComments =
+      commentsByNumber && typeof commentsByNumber === "object" ? commentsByNumber : {};
+    const teacherComment = pickFirstNonEmptyString([
+      rawObj.teacher_comment,
+      rawObj.teacherComment,
+      rawObj.review_comment,
+      rawObj.reviewComment,
+      resultObj?.teacher_comment,
+      resultObj?.teacherComment,
+      resultObj?.review_comment,
+      resultObj?.reviewComment,
+      resultObj?.comment,
+      rawObj.comment,
+    ]);
+    const normalizeSimple = (s) =>
+      String(s || "")
+        .trim()
+        .replace(/\s+/g, "")
+        .toLowerCase();
+    const rows = [...variant.tasks]
+      .sort((a, b) => a.number - b.number)
+      .map((task) => {
+        const taskId = String(task.id);
+        const byIdComment = normalizedTaskIdComments[taskId];
+        const byNumComment =
+          normalizedNumberComments[String(task.number)] ??
+          normalizedNumberComments[String(Number(task.number))];
+        const taskComment = pickFirstNonEmptyString([byIdComment, byNumComment]);
+        const studentAnswer = String(userAnswers[task.id] ?? "").trim();
+        let isCorrect = typeof checkedTasks[task.id] === "boolean" ? checkedTasks[task.id] : null;
+        if (isCorrect == null && studentAnswer && task.answer) {
+          const expected = normalizeSimple(task.answer);
+          const actual = normalizeSimple(studentAnswer);
+          if (expected && actual) isCorrect = expected === actual;
+        }
+        return {
+          id: taskId,
+          number: task.number,
+          answer: studentAnswer,
+          isCorrect,
+          comment: taskComment,
+        };
+      });
+    return { teacherComment, rows };
+  })();
+  const numLocked = (n) =>
+    isHomework && !homeworkTaskNumberEditable(hwSt, hwRevisions, n, isTeacherHomeworkView);
+  const p1FieldDisabled = (task) => {
+    if (!isHomework) return checkedTasks[task.id] !== undefined;
+    if (hRead) return true;
+    return numLocked(task.number);
+  };
+  const showP1Check = !isHomework;
+  /** В ДЗ: вместо «Проверить» — «Сохранить» (черновик в ЛК), без отображения верно/неверно. */
+  const p1ShowHomeworkSave = (task) =>
+    isHomework &&
+    !isTeacherHomeworkView &&
+    !hRead &&
+    !hSol &&
+    !numLocked(task.number);
+  /** Блок «Правильный ответ» (пунктир): только в ДЗ при показе решений. В варианте после «Проверить» ответ уже в exam-result — не дублировать. */
+  const p1CorrectVisible = (task) => isHomework && hSol;
+  const lkBase = getLkPublicBase();
+  const showHomeworkBottomActions =
+    isHomework &&
+    !isTeacherHomeworkView &&
+    !hRead &&
+    (hwSt === "sent" || hwSt === "revision" || hwSt === "unknown");
+
+  const getTaskMaxScore = (task) => task.max_score ?? 3;
+  const part2ScoreSum = part2Tasks.reduce((sum, t) => sum + (scores[t.id] || 0), 0);
+  /** Не useMemo: эти вычисления ниже ранних return (variant null) — хуки здесь ломали порядок вызовов. */
+  const part2MaxAggregate = part2Tasks.reduce((sum, t) => {
+    const key = getCriteriaCacheKey(t);
+    const cached =
+      key != null && criteriaByTaskList[key]?.max_score != null
+        ? criteriaByTaskList[key].max_score
+        : null;
+    return sum + (cached ?? getTaskMaxScore(t));
+  }, 0);
+  const part2EvaluatedCount = part2Tasks.filter((t) => selectedCriterionByTask[t.id] != null).length;
+  const part2SummaryBarPct =
+    part2MaxAggregate > 0
+      ? Math.min(100, (part2ScoreSum / part2MaxAggregate) * 100)
+      : 0;
+  const examMetaClassLabel =
+    String(level || "").toLowerCase() === "ege"
+      ? "11 класс"
+      : String(level || "").toLowerCase() === "oge"
+        ? "9 класс"
+        : "—";
+  // ЕГЭ информатика: макс. первичный балл 29 (часть 1 + 26 и 27 по 2 балла и др.)
+  const maxScore =
+    String(subject).toLowerCase() === "inf" && String(level).toLowerCase() === "ege"
+      ? 29
+      : part1Tasks.length + part2Tasks.reduce((sum, t) => sum + getTaskMaxScore(t), 0);
+
+  /** При завершении: авто-проверка непроверенных заданий части 1, подсчёт эффективных баллов */
+  function getEffectiveResults() {
+    const effectiveCheckedTasks = {};
+    for (const task of part1Tasks) {
+      effectiveCheckedTasks[task.id] =
+        checkedTasks[task.id] !== undefined ? checkedTasks[task.id] : computeTaskCorrectness(task);
+    }
+    const correctCount = part1Tasks.filter((t) => effectiveCheckedTasks[t.id]).length;
+    const effectiveScores = {};
+    for (const task of variant.tasks) {
+      if (inferPart(task) === 2) {
+        effectiveScores[task.id] = scores[task.id] ?? 0;
+      } else {
+        effectiveScores[task.id] = effectiveCheckedTasks[task.id] ? 1 : 0;
+      }
+    }
+    const totalScore = correctCount + part2ScoreSum;
+    // Кол-во верно решённых задач геометрии (subdivision === "geom")
+    const geoCorrectCount =
+      Array.isArray(variant.tasks)
+        ? variant.tasks.filter((t) => t.subdivision === "geom" && (effectiveScores[t.id] || 0) > 0).length
+        : 0;
+    /** Полностью верные задания: ч.1 — верный ответ; ч.2 — набран максимум баллов по заданию */
+    const fullyCorrectTaskCount = variant.tasks.filter((task) => {
+      if (inferPart(task) === 1) {
+        const ok =
+          checkedTasks[task.id] !== undefined
+            ? checkedTasks[task.id]
+            : computeTaskCorrectness(task);
+        return !!ok;
+      }
+      return (scores[task.id] ?? 0) >= getTaskMaxScore(task);
+    }).length;
+    return {
+      effectiveCheckedTasks,
+      effectiveScores,
+      correctCount,
+      totalScore,
+      geoCorrectCount,
+      fullyCorrectTaskCount,
+    };
+  }
+
+  const { correctCount, totalScore, fullyCorrectTaskCount } = getEffectiveResults();
+  const taskCountTotal = variant.tasks.length;
+
+  const handleTaskFocus = (taskId) => {
+    currentTaskIdRef.current = taskId;
+    setExamNavActiveId(taskId);
+  };
+
+  const handleReportErrorClick = (taskId, taskNumber) => {
+    setReportErrorTask({ taskId, taskNumber });
+    setReportErrorOpen(true);
+  };
+
+  const handleReportErrorSubmit = async ({ errorType, comment }) => {
+    if (!reportErrorTask) return;
+    const res = await fetch(`/api/${level}/${subject}/report-error/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        taskId: reportErrorTask.taskId,
+        taskNumber: reportErrorTask.taskNumber,
+        variantId: variant?.id,
+        errorType,
+        comment: comment || "",
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || "Ошибка отправки");
+    }
+  };
+
+  const handleFinish = async () => {
+    setTimerStatus("paused");
+    endTimeRef.current = new Date().toISOString();
+    const totalTimeFormatted = formatTimer(timerSeconds);
+    const taskTimes = { ...taskTimesRef.current };
+    const {
+      effectiveCheckedTasks,
+      effectiveScores,
+      correctCount: effCorrectCount,
+      totalScore: effTotalScore,
+      geoCorrectCount,
+      fullyCorrectTaskCount: effFullyCorrect,
+    } = getEffectiveResults();
+
+    let scoreExam = null;
+    let scoreComment = null;
+    let markLevel = null;
+
+    // В режиме тренировки по номерам конвертация в баллы/оценку не нужна
+    if (mode !== "test") {
+      const isOgeMath =
+        String(level).toLowerCase() === "oge" && isMathLikeSubject(subject);
+      const geoParam = isOgeMath ? `&geo_correct=${geoCorrectCount}` : "";
+      try {
+        const res = await fetch(
+          `/api/${level}/${subject}/score-conversion/?score=${effTotalScore}${geoParam}`,
+          { credentials: "same-origin" }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          scoreExam = data.score_exam !== undefined ? data.score_exam : null;
+          scoreComment = data.comment ?? null;
+          markLevel = data.mark_level ?? null;
+        }
+      } catch (_) {}
+    }
+
+    // Для тренировки maxScore = кол-во задач в тесте (1 балл за задачу), для варианта — как обычно
+    const effectiveMaxScore = mode === "test" ? variant.tasks.length : maxScore;
+
+    setResultsData({
+      totalTimeFormatted,
+      taskTimes,
+      correctCount: effCorrectCount,
+      totalScore: effTotalScore,
+      maxScore: effectiveMaxScore,
+      scoreExam,
+      scoreComment,
+      markLevel,
+      tasks: variant.tasks,
+      startTime: startTimeRef.current,
+      endTime: endTimeRef.current,
+      checkedTasks: effectiveCheckedTasks,
+      scores: effectiveScores,
+      variantId: variant.id,
+      level,
+      subject,
+      examMode: mode,
+      fullyCorrectTaskCount: effFullyCorrect,
+      taskCountTotal: variant.tasks.length,
+    });
+    setResultsOpen(true);
+  };
+
+  const openPdf = async (variantId) => {
+    setPdfLoading("default");
+    const url = `/api/${level}/${subject}/variant/${variantId}/pdf/`;
+    try {
+      const res = await fetch(url, { credentials: "same-origin" });
+      if (!res.ok) throw new Error("Ошибка загрузки PDF");
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `variant-${variantId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    } catch (err) {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `variant-${variantId}.pdf`;
+      a.target = "_blank";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
+  const copyVariantLink = async () => {
+    const loc = window.location;
+    const pathWithQuery = `${loc.pathname}${loc.search}${loc.hash}`;
+    const isLocal =
+      loc.hostname === "localhost" ||
+      loc.hostname === "127.0.0.1" ||
+      loc.hostname === "[::1]";
+    const url = isLocal ? loc.href : `http://генурок.рф${pathWithQuery}`;
+    let ok = false;
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(url);
+        ok = true;
+      } catch { /* fallback below */ }
+    }
+    if (!ok) {
+      const ta = document.createElement("textarea");
+      ta.value = url;
+      ta.style.cssText = "position:fixed;opacity:0;left:-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      try { ok = document.execCommand("copy"); } catch { /* ignore */ }
+      ta.remove();
+    }
+    setLinkCopied(ok);
+    if (ok) setTimeout(() => setLinkCopied(false), 2000);
+  };
+
+  const heroMeta =
+    mode === "test"
+      ? `Тестирование · ${subjectLabel} · ${levelLabel}`
+      : `${subjectLabel} · ${levelLabel} · ${examMetaClassLabel}`;
+  const heroTitle =
+    isHomework && !isTeacherHomeworkView
+      ? "Домашнее задание"
+      : mode === "test"
+        ? (() => {
+            const labels =
+              testTaskLabels.length > 0
+                ? testTaskLabels
+                : [...new Set(variant.tasks.map((t) => t.number).filter(Boolean))]
+                    .sort((a, b) => a - b)
+                    .map(String);
+            if (labels.length === 0) return `Вариант № ${variant.id}`;
+            if (labels.length === 1) return `Задание ${labels[0]}`;
+            return `Задания ${labels.join(", ")}`;
+          })()
+        : mode === "part1"
+          ? `Вариант № ${variant.id} · Часть 1`
+          : mode === "part2"
+            ? `Вариант № ${variant.id} · Часть 2`
+            : `Вариант № ${variant.id}`;
+  const ruTasksWord = (n) => {
+    const k = n % 10;
+    const kk = n % 100;
+    if (kk >= 11 && kk <= 14) return "заданий";
+    if (k === 1) return "задание";
+    if (k >= 2 && k <= 4) return "задания";
+    return "заданий";
+  };
+  const heroLongDescription = `${variant.tasks.length} ${ruTasksWord(variant.tasks.length)} для подготовки к экзамену. Часть 1 — ${part1Tasks.length} ${ruTasksWord(part1Tasks.length)}, часть 2 — ${part2Tasks.length} ${ruTasksWord(part2Tasks.length)}. Решайте по порядку или переходите к нужному номеру.`;
+  const navTasksOrdered = [...tasksFilteredByAuthor].sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
+
+  function examP1PointsBadge(task) {
+    if (String(subject) === "inf" && (task.number === 26 || task.number === 27)) {
+      const s = scores[task.id] ?? 0;
+      if (s === 0) return "+0 баллов";
+      if (s === 1) return "+1 балл";
+      if (s >= 2 && s <= 4) return `+${s} балла`;
+      return `+${s} баллов`;
+    }
+    return "+1 балл";
+  }
+
+  function examNavBtnClass(task) {
+    let c = "exam-edu-nav-btn";
+    if (examNavActiveId === task.id) c += " is-active";
+    const p = inferPart(task);
+    const inf2627Ege =
+      subject === "inf" &&
+      String(level || "").toLowerCase() === "ege" &&
+      (task.number === 26 || task.number === 27);
+
+    if (p === 1) {
+      if (inf2627Ege) {
+        const scInf = scores[task.id];
+        if (scInf !== undefined && scInf !== null) {
+          if (scInf >= 2) c += " is-done";
+          else c += " is-wrong";
+        }
+      } else {
+        if (checkedTasks[task.id] === true) c += " is-done";
+        else if (checkedTasks[task.id] === false) c += " is-wrong";
+      }
+    }
+
+    if (p === 2) {
+      const maxSc = getTaskMaxScore(task);
+      const sc = scores[task.id] ?? 0;
+      const p2Evaluated = selectedCriterionByTask[task.id] != null;
+      if (p2Evaluated) {
+        if (sc >= maxSc) c += " is-done";
+        else c += " is-wrong";
+      }
+    }
+    return c;
+  }
+
+  function renderEv2CriteriaPanel(task) {
+    const cacheKey = getCriteriaCacheKey(task);
+    const criteriaList = (criteriaByTaskList[cacheKey]?.criteria) ?? [];
+    const maxSc = (criteriaByTaskList[cacheKey]?.max_score) ?? getTaskMaxScore(task);
+    if (criteriaList.length === 0) {
+      return <p className="ev2-criteria-empty">Критерии не заданы для этого задания</p>;
+    }
+    const taskScoreDisplay =
+      selectedCriterionByTask[task.id] != null ? scores[task.id] ?? 0 : null;
+    const radioName = `ev2-criteria-score-${task.id}`;
+    return (
+      <div className="ev2-criteria-panel">
+        <div className="ev2-criteria-cards" role="radiogroup" aria-label="Критерии оценки">
+          {criteriaList.map((c) => {
+            const sc = Number(c.criteria_score ?? 0);
+            return (
+              <label
+                key={c.id}
+                className="criterion-card"
+                data-score={sc === 0 ? "0" : undefined}
+              >
+                <input
+                  type="radio"
+                  name={radioName}
+                  value={String(c.id)}
+                  className="criterion-card__input"
+                  checked={selectedCriterionByTask[task.id] === c.id}
+                  disabled={isHomework && (hRead || numLocked(task.number))}
+                  onChange={() => {
+                    if (isHomework && (hRead || numLocked(task.number))) return;
+                    selectCriterion(task.id, c, maxSc);
+                  }}
+                />
+                <div className="criterion-score">{formatRuBalls(sc)}</div>
+                <div className="criterion-text">
+                  <MathContent
+                    html={c.criteria_text || ""}
+                    className="ev2-crit-math"
+                    onImageClick={(src) => setLightbox({ open: true, src })}
+                  />
+                </div>
+              </label>
+            );
+          })}
+        </div>
+        <div className="score-result">
+          Балл за задание:{" "}
+          <span id={`ev2-selected-score-${task.id}`} className="score-result__value">
+            {taskScoreDisplay != null ? taskScoreDisplay : "—"}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  function ev2Part2TableBlock(task, rowsHere, colsHere) {
+    const doneHere = checkedTasks[task.id] !== undefined;
+    return (
+      <>
+        <span className="exam-task-answer__label">Ответ</span>
+        <div className="answer-table-wrap exam-table-scroll">
+          <table className="answer-table">
+            <tbody>
+              {Array.from({ length: rowsHere }, (_, r) => (
+                <tr key={r}>
+                  {Array.from({ length: colsHere }, (_, c) => (
+                    <td key={c}>
+                      <input
+                        type="text"
+                        className={`answer-input answer-table-input ev2-table-input${
+                          !isHomework && doneHere
+                            ? checkedTasks[task.id]
+                              ? " correct"
+                              : " incorrect"
+                            : ""
+                        }`}
+                        placeholder=""
+                        value={getTableAnswerString(task.id, rowsHere, colsHere)[r][c] || ""}
+                        disabled={p1FieldDisabled(task)}
+                        onChange={(e) =>
+                          setTableCell(
+                            task.id,
+                            r,
+                            c,
+                            e.target.value.replace(/\t/g, " "),
+                            rowsHere,
+                            colsHere
+                          )
+                        }
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!isHomework && doneHere && (
+          <div
+            className={
+              checkedTasks[task.id] ? "exam-result exam-result--ok" : "exam-result exam-result--bad"
+            }
+          >
+            {checkedTasks[task.id] ? (
+              <>
+                <strong>Верно</strong>
+                <span className="exam-result__pts">{examP1PointsBadge(task)}</span>
+              </>
+            ) : (
+              <>
+                <strong>Неверно</strong>
+                <div className="exam-result__correct">
+                  Правильный ответ:{" "}
+                  <MathContent
+                    html={task.answer || ""}
+                    className="exam-result-answer-math"
+                    onImageClick={(src) => setLightbox({ open: true, src })}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        <div className={`exam-hw-solution${p1CorrectVisible(task) ? " is-visible" : ""}`}>
+          <span className="exam-hw-solution__label">Правильный ответ: </span>
+          <MathContent
+            html={task.answer || ""}
+            className="correct-answer-content"
+            onImageClick={(src) => setLightbox({ open: true, src })}
+          />
+        </div>
+        {showP1Check && !doneHere && (
+          <button
+            type="button"
+            className="exam-edu-btn exam-edu-btn--primary exam-edu-btn--full-mobile"
+            onClick={() =>
+              subject === "inf" && (task.number === 26 || task.number === 27)
+                ? checkInfTask26Or27(task, rowsHere, colsHere)
+                : checkTask(task.id, task.answer, getTableAnswerForCheck(task.id, rowsHere, colsHere))
+            }
+          >
+            Проверить
+          </button>
+        )}
+        {p1ShowHomeworkSave(task) && (
+          <button
+            type="button"
+            className="exam-edu-btn exam-edu-btn--outline"
+            disabled={hwActionBusy || hwLoading}
+            onClick={() => runHomeworkSave()}
+          >
+            Сохранить
+          </button>
+        )}
+      </>
+    );
+  }
+
+  function ev2Part2Main(task) {
+    const showSolBtn = (!isHomework || hSol) && task.answer != null && task.answer !== "";
+    const showCritBtn = task.task_list_id != null || task.number != null;
+    return (
+      <>
+        {(showSolBtn || showCritBtn) && (
+          <div className="ev2-p2-actions ev2-p2-actions--criteria">
+            {showSolBtn ? (
+              <button type="button" className="btn-outline" onClick={() => togglePart2Answer(task.id)}>
+                {visibleAnswers[task.id] ? "Скрыть решение" : "Показать решение"}
+              </button>
+            ) : null}
+            {showCritBtn ? (
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={isHomework && hRead}
+                onClick={() => {
+                  if (isHomework && hRead) return;
+                  toggleCriteriaPanel(task);
+                }}
+              >
+                {criteriaOpenForTask === task.id ? "Скрыть критерии" : "Критерии оценки"}
+              </button>
+            ) : null}
+          </div>
+        )}
+        {showSolBtn && visibleAnswers[task.id] ? (
+          <div className="ev2-p2-solution">
+            <div className="ev2-p2-solution__label">Решение</div>
+            <div className="ev2-p2-solution__body">
+              <MathContent
+                html={task.answer}
+                className="ev2-p2-solution__math"
+                onImageClick={(src) => setLightbox({ open: true, src })}
+              />
+            </div>
+          </div>
+        ) : null}
+        {criteriaOpenForTask === task.id ? renderEv2CriteriaPanel(task) : null}
+      </>
+    );
+  }
+
+  return (
+    <div
+      ref={mainRef}
+      className={`main-wrapper exam-page${isHomework ? " exam-page--homework" : ""}${showExamEducationShell ? " exam-page--edu" : ""}`}
+      id="main-wrapper"
+      data-level={level}
+      data-subject={subject}
+    >
+      {isHomework && (
+        <div className="exam-homework-bar" role="region" aria-label="Домашнее задание">
+          <div className="exam-homework-bar__inner">
+            <div className="exam-homework-bar__title">
+              <span className="exam-homework-bar__badge">Домашнее задание</span>
+              {hwLoading && <span className="exam-homework-bar__meta">загрузка статуса…</span>}
+              {!hwLoading && hwPicked && (
+                <span className="exam-homework-bar__meta">
+                  {hwSt === "sent" && "Черновик"}
+                  {hwSt === "submitted" && "На проверке"}
+                  {hwSt === "reviewing" && "Проверяется"}
+                  {hwSt === "revision" && "На доработке"}
+                  {hwSt === "reviewed" && "Проверено"}
+                  {hwSt === "unknown" && "Статус неизвестен"}
+                </span>
+              )}
+            </div>
+            {isTeacherHomeworkView && (
+              <div className="exam-homework-bar__actions">
+                <span className="exam-homework-bar__hint">Просмотр. Проверка и оценки — в личном кабинете.</span>
+                {lkBase ? (
+                  <a className="exam-homework-bar__link" href={lkBase} target="_blank" rel="noreferrer">
+                    Открыть кабинет
+                  </a>
+                ) : null}
+              </div>
+            )}
+            {!isTeacherHomeworkView && (
+              <div className="exam-homework-bar__actions exam-homework-bar__actions--meta">
+                {hwError && hwError !== "no_lk_env" && (
+                  <span className="exam-homework-bar__err" title={String(hwError)}>
+                    {hwError === "unauthorized"
+                      ? "Войдите в личный кабинет в этой вкладке или откройте задание из кабинета."
+                      : "Не удалось загрузить статус из кабинета (сеть или CORS)."}
+                    {lkBase ? (
+                      <>
+                        {" "}
+                        <a href={lkBase} target="_blank" rel="noreferrer">
+                          Перейти в кабинет
+                        </a>
+                      </>
+                    ) : null}
+                  </span>
+                )}
+                {hwNotice ? <span className="exam-homework-bar__notice">{hwNotice}</span> : null}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {/* Фиксированный блок — только урок/ДЗ; в обычном варианте таймер и метрики в сайдбаре */}
+      {(lessonEmbedParams.embed || isHomework) && (
+      <div
+        ref={fixedCornerRef}
+        className={`exam-fixed-corner${examFixedPanelOpen ? "" : " exam-fixed-corner--all-collapsed"}`}
+        style={
+          fixedCornerPos
+            ? { left: fixedCornerPos.left, top: fixedCornerPos.top, right: "auto" }
+            : undefined
+        }
+      >
+        <div className="exam-fixed-corner__header">
+          <button
+            type="button"
+            className="exam-fixed-corner__drag"
+            aria-label="Переместить блок с таймером"
+            title="Перетащить"
+            onPointerDown={onFixedCornerDragStart}
+            onPointerMove={onFixedCornerDragMove}
+            onPointerUp={onFixedCornerDragEnd}
+            onPointerCancel={onFixedCornerDragEnd}
+          >
+            <span className="exam-fixed-corner__drag-grip" aria-hidden />
+          </button>
+          {examFixedPanelOpen ? (
+            <button
+              type="button"
+              className="exam-fixed-corner__collapse-all"
+              onClick={() => setExamFixedPanelOpen(false)}
+              title="Свернуть панель"
+              aria-label="Свернуть панель с таймерами"
+            >
+              <span aria-hidden>−</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="exam-fixed-corner__expand-all"
+              onClick={() => setExamFixedPanelOpen(true)}
+              title="Показать таймеры"
+              aria-label="Показать панель с таймерами"
+            >
+              <span aria-hidden>⏱</span>
+            </button>
+          )}
+        </div>
+        {examFixedPanelOpen && (
+          <>
+        <div className="variant-timer exam-fixed-timer">
+          <div className="variant-timer-display">{formatTimer(timerSeconds)}</div>
+          <div className="variant-timer-actions">
+            {(timerStatus === "idle" || timerStatus === "paused") && (
+              <button
+                type="button"
+                className="variant-timer-btn variant-timer-btn-start"
+                onClick={() => setTimerStatus("running")}
+                title="Старт"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+              </button>
+            )}
+            {timerStatus === "running" && (
+              <button
+                type="button"
+                className="variant-timer-btn variant-timer-btn-pause"
+                onClick={() => setTimerStatus("paused")}
+                title="Пауза"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="6" y="4" width="4" height="16" />
+                  <rect x="14" y="4" width="4" height="16" />
+                </svg>
+              </button>
+            )}
+            <button
+              type="button"
+              className="variant-timer-btn variant-timer-btn-stop"
+              onClick={() => { setTimerStatus("idle"); setTimerSeconds(0); }}
+              title="Стоп"
+              disabled={timerStatus === "idle" && timerSeconds === 0}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="6" y="6" width="12" height="12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div className="variant-score-block">
+          <div className="variant-score-row">
+            <span className="variant-score-label">
+              {mode === "test"
+                ? "Верно"
+                : part2Tasks.length > 0
+                  ? "Баллов"
+                  : "Правильных"}
+            </span>
+            <span className="variant-score-val">
+              {mode === "test" ? (
+                <>
+                  {fullyCorrectTaskCount}{" "}
+                  <span className="variant-score-total">/ {taskCountTotal}</span>
+                </>
+              ) : (
+                <>
+                  {totalScore} <span className="variant-score-total">/ {maxScore}</span>
+                </>
+              )}
+            </span>
+          </div>
+        </div>
+        {supportInfo.items?.length > 0 && (
+          <button
+            id="support-info-btn"
+            className="exam-fixed-support-btn"
+            onClick={() => setSupportInfo((s) => ({ ...s, open: true }))}
+            title="Справочная информация"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 8v6M12 15.5v1" />
+            </svg>
+            <span>Справочная информация</span>
+          </button>
+        )}
+          </>
+        )}
+      </div>
+      )}
+      {pdfLoading && (
+        <div className="pdf-loading-overlay" role="status" aria-live="polite">
+          <div className="pdf-loading-toast">
+            <span className="pdf-loading-spinner" aria-hidden="true" />
+            <span>Подождите немного, файл создаётся…</span>
+          </div>
+        </div>
+      )}
+      <div className="content-area">
+        <div className="container exam-page-container exam-edu">
+          <div
+            className={`exam-edu-page exam-variant-v2 exam-variant-v2__page${showExamEducationShell ? " exam-edu-page--sidebar" : ""}`}
+          >
+            <div className={`exam-edu-layout${showExamEducationShell ? "" : " exam-edu-layout--single"}`}>
+              <div className="exam-edu-main">
+            <header className="exam-edu-hero">
+              <div className="exam-edu-hero__grid">
+                <div className="exam-edu-hero__content">
+                  <div className="exam-edu-hero__badge">
+                    <span className="exam-edu-hero__badge-dot" aria-hidden />
+                    {heroMeta}
+                  </div>
+                  <h1 className="exam-edu-hero__title">{heroTitle}</h1>
+                  <p className="exam-edu-hero__desc">{heroLongDescription}</p>
+                  {!(isHomework && !isTeacherHomeworkView) && (
+                    <div className="exam-edu-hero__actions">
+                      <button
+                        type="button"
+                        className="exam-edu-btn exam-edu-btn--outline"
+                        onClick={() => openPdf(variant.id)}
+                        disabled={!!pdfLoading}
+                      >
+                        Скачать PDF
+                      </button>
+                      <button
+                        type="button"
+                        className="exam-edu-btn exam-edu-btn--primary"
+                        onClick={copyVariantLink}
+                        title={linkCopied ? "Скопировано" : "Скопировать ссылку"}
+                        aria-label={linkCopied ? "Скопировано" : "Скопировать ссылку"}
+                      >
+                        {linkCopied ? "Скопировано" : "Скопировать ссылку"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="exam-edu-hero-visual" aria-hidden="true">
+                  <div className="exam-edu-hero-visual-inner">
+                    <span className="exam-edu-hero-deco exam-edu-hero-deco--g" />
+                    <span className="exam-edu-hero-deco exam-edu-hero-deco--p" />
+                    <span className="exam-edu-hero-deco exam-edu-hero-deco--stu" />
+                  </div>
+                </div>
+              </div>
+            </header>
+
+            {/* ===== ЧАСТЬ 1 ===== */}
+            {part1Tasks.length > 0 && (
+              <>
+                <div className="exam-edu-section-head">
+                  <h2 className="exam-edu-section-title">Часть 1</h2>
+                  <span className="exam-edu-section-chip">Краткий ответ</span>
+                </div>
+
+                {part1Tasks.map((task) => {
+              const useTable = isTableAnswerTask(subject, task.number);
+              const rows = useTable ? INF_TABLE_ROWS : 0;
+              const cols = useTable ? INF_TABLE_COLS : 0;
+              const p1Done = checkedTasks[task.id] !== undefined;
+
+              return (
+                <section
+                  key={task.id}
+                  data-task-id={task.id}
+                  className={`exam-task-card exam-task-card--p1${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                  onClick={() => handleTaskFocus(task.id)}
+                >
+                  <div className="exam-task-card__top">
+                    <div className="exam-task-card__title-block">
+                      <div className="exam-task-card__num">{task.number}</div>
+                      <div className="exam-task-card__title-text">
+                        <strong>Задание {task.number}</strong>
+                        <span>ID {task.id}</span>
+                      </div>
+                    </div>
+                    <span className="exam-task-card__chip">Краткий ответ</span>
+                  </div>
+                  <div className="exam-task-card__body">
+                  <MathContent html={task.text} className="exam-task-card__text task-text" onImageClick={(src) => setLightbox({ open: true, src })} />
+                  {task.file && <TaskFileAttachment href={task.file} />}
+                  {task.author && <div className="task-author">{task.author}</div>}
+
+                  <div className="exam-task-answer">
+                    {useTable && rows > 0 && cols > 0 ? (
+                      <>
+                        <span className="exam-task-answer__label">Ответ</span>
+                        <div className="answer-table-wrap exam-table-scroll">
+                          <table className="answer-table">
+                            <tbody>
+                              {Array.from({ length: rows }, (_, r) => (
+                                <tr key={r}>
+                                  {Array.from({ length: cols }, (_, c) => (
+                                    <td key={c}>
+                                      <input
+                                        type="text"
+                                        className={`answer-input answer-table-input ev2-table-input${
+                                          !isHomework && p1Done
+                                            ? checkedTasks[task.id]
+                                              ? " correct"
+                                              : " incorrect"
+                                            : ""
+                                        }`}
+                                        placeholder=""
+                                        value={getTableAnswerString(task.id, rows, cols)[r][c] || ""}
+                                        disabled={p1FieldDisabled(task)}
+                                        onChange={(e) =>
+                                          setTableCell(
+                                            task.id,
+                                            r,
+                                            c,
+                                            e.target.value.replace(/\t/g, " "),
+                                            rows,
+                                            cols
+                                          )
+                                        }
+                                      />
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {!isHomework && p1Done && (
+                          <div
+                            className={
+                              checkedTasks[task.id] ? "exam-result exam-result--ok" : "exam-result exam-result--bad"
+                            }
+                          >
+                            {checkedTasks[task.id] ? (
+                              <>
+                                <strong>Верно</strong>
+                                <span className="exam-result__pts">{examP1PointsBadge(task)}</span>
+                              </>
+                            ) : (
+                              <>
+                                <strong>Неверно</strong>
+                                <div className="exam-result__correct">
+                                  Правильный ответ:{" "}
+                                  <MathContent
+                                    html={task.answer || ""}
+                                    className="exam-result-answer-math"
+                                    onImageClick={(src) => setLightbox({ open: true, src })}
+                                  />
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+
+                        {showP1Check && !p1Done && (
+                          <button
+                            type="button"
+                            className="exam-edu-btn exam-edu-btn--primary exam-edu-btn--full-mobile"
+                            onClick={() =>
+                              subject === "inf" && (task.number === 26 || task.number === 27)
+                                ? checkInfTask26Or27(task, rows, cols)
+                                : checkTask(task.id, task.answer, getTableAnswerForCheck(task.id, rows, cols))
+                            }
+                          >
+                            Проверить
+                          </button>
+                        )}
+                        {p1ShowHomeworkSave(task) && (
+                          <button
+                            type="button"
+                            className="exam-edu-btn exam-edu-btn--outline"
+                            disabled={hwActionBusy || hwLoading}
+                            onClick={() => runHomeworkSave()}
+                          >
+                            Сохранить
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <label className="exam-task-answer__label" htmlFor={`answer-${task.id}`}>
+                          Ответ
+                        </label>
+                        <div className="exam-task-answer__row">
+                          <input
+                            id={`answer-${task.id}`}
+                            type="text"
+                            className={`exam-task-input${
+                              !isHomework && p1Done
+                                ? checkedTasks[task.id]
+                                  ? " is-correct"
+                                  : " is-incorrect"
+                                : ""
+                            }`}
+                            placeholder="Введите ответ"
+                            value={userAnswers[task.id] || ""}
+                            disabled={p1FieldDisabled(task)}
+                            onChange={(e) =>
+                              setUserAnswers((prev) => ({ ...prev, [task.id]: e.target.value }))
+                            }
+                            autoComplete="off"
+                          />
+
+                          {showP1Check && !p1Done && (
+                            <button
+                              type="button"
+                              className="exam-edu-btn exam-edu-btn--primary exam-edu-btn--check-inline"
+                              onClick={() => checkTask(task.id, task.answer)}
+                            >
+                              Проверить
+                            </button>
+                          )}
+                          {p1ShowHomeworkSave(task) && (
+                            <button
+                              type="button"
+                              className="exam-edu-btn exam-edu-btn--outline exam-edu-btn--check-inline"
+                              disabled={hwActionBusy || hwLoading}
+                              onClick={() => runHomeworkSave()}
+                            >
+                              Сохранить
+                            </button>
+                          )}
+                        </div>
+
+                        {!isHomework && p1Done && (
+                          <div
+                            className={
+                              checkedTasks[task.id] ? "exam-result exam-result--ok" : "exam-result exam-result--bad"
+                            }
+                          >
+                            {checkedTasks[task.id] ? (
+                              <>
+                                <strong>Верно</strong>
+                                <span className="exam-result__pts">{examP1PointsBadge(task)}</span>
+                              </>
+                            ) : (
+                              <>
+                                <strong>Неверно</strong>
+                                <div className="exam-result__correct">
+                                  Правильный ответ:{" "}
+                                  <MathContent
+                                    html={task.answer || ""}
+                                    className="exam-result-answer-math"
+                                    onImageClick={(src) => setLightbox({ open: true, src })}
+                                  />
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    <div
+                      className={`exam-hw-solution${p1CorrectVisible(task) ? " is-visible" : ""}`}
+                    >
+                      <span className="exam-hw-solution__label">Правильный ответ: </span>
+                      <MathContent
+                        html={task.answer || ""}
+                        className="correct-answer-content"
+                        onImageClick={(src) => setLightbox({ open: true, src })}
+                      />
+                    </div>
+                  </div>
+                  </div>
+                  <div className="task-report-error-wrap">
+                    <TaskReportErrorButton taskId={task.id} taskNumber={task.number} onClick={handleReportErrorClick} />
+                  </div>
+                </section>
+              );
+            })}
+              </>
+            )}
+
+            {/* ===== ЧАСТЬ 2 ===== */}
+            {part2Tasks.length > 0 && (
+              <>
+                <div className="exam-edu-section-head">
+                  <h2 className="exam-edu-section-title">Часть 2</h2>
+                  <span className="exam-edu-section-chip">Развернутый ответ</span>
+                </div>
+
+                {showLinkedGroup && (
+                  <div className="exam-edu-linked-wrap">
+                    <h3 className="exam-edu-linked-title">Задания 19–21</h3>
+                    <p className="exam-edu-linked-desc">Общий сценарий, три задания по одному условию.</p>
+
+                    {part2Linked1921.map((task) => {
+                      const useTableHere = isTableAnswerTask(subject, task.number);
+                      const rowsHere = useTableHere ? INF_TABLE_ROWS : 0;
+                      const colsHere = useTableHere ? INF_TABLE_COLS : 0;
+
+                      return (
+                        <section
+                          key={task.id}
+                          data-task-id={task.id}
+                          className={`exam-task-card exam-task-card--p2 exam-task-card--in-group${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                          onClick={() => handleTaskFocus(task.id)}
+                        >
+                          <div className="exam-task-card__top">
+                            <div className="exam-task-card__title-block">
+                              <div className="exam-task-card__num">{task.number}</div>
+                              <div className="exam-task-card__title-text">
+                                <strong>Задание {task.number}</strong>
+                                <span>ID {task.id}</span>
+                              </div>
+                            </div>
+                            <span className="exam-task-card__chip">Развернутый ответ</span>
+                          </div>
+                          <div className="exam-task-card__body">
+                          <MathContent html={task.text} className="exam-task-card__text task-text" onImageClick={(src) => setLightbox({ open: true, src })} />
+                          {task.file && <TaskFileAttachment href={task.file} />}
+                          {task.author && <div className="task-author">{task.author}</div>}
+
+                          <div className="ev2-p2-body">
+                            {useTableHere && rowsHere > 0 && colsHere > 0 ? (
+                              <div className="exam-task-answer">{ev2Part2TableBlock(task, rowsHere, colsHere)}</div>
+                            ) : (
+                              ev2Part2Main(task)
+                            )}
+                          </div>
+                          </div>
+                          <LessonSolutionUpload
+                            taskNumber={task.number}
+                            taskId={task.id}
+                            lessonToken={lessonEmbedParams.token}
+                            assignmentId={cabinetAssignmentId}
+                            homeworkMode={isHomework}
+                            enabled={
+                              showLessonSolutionUpload && (!isHomework || (!hRead && !numLocked(task.number)))
+                            }
+                          />
+                          <div className="task-report-error-wrap">
+                            <TaskReportErrorButton taskId={task.id} taskNumber={task.number} onClick={handleReportErrorClick} />
+                          </div>
+                        </section>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {part2Regular.map((task) => {
+                  const useTableHere = isTableAnswerTask(subject, task.number);
+                  const rowsHere = useTableHere ? INF_TABLE_ROWS : 0;
+                  const colsHere = useTableHere ? INF_TABLE_COLS : 0;
+
+                  return (
+                    <section
+                      key={task.id}
+                      data-task-id={task.id}
+                      className={`exam-task-card exam-task-card--p2${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                      onClick={() => handleTaskFocus(task.id)}
+                    >
+                      <div className="exam-task-card__top">
+                        <div className="exam-task-card__title-block">
+                          <div className="exam-task-card__num">{task.number}</div>
+                          <div className="exam-task-card__title-text">
+                            <strong>Задание {task.number}</strong>
+                            <span>ID {task.id}</span>
+                          </div>
+                        </div>
+                        <span className="exam-task-card__chip">Развернутый ответ</span>
+                      </div>
+                      <div className="exam-task-card__body">
+                      <MathContent html={task.text} className="exam-task-card__text task-text" onImageClick={(src) => setLightbox({ open: true, src })} />
+                      {task.file && <TaskFileAttachment href={task.file} />}
+                      {task.author && <div className="task-author">{task.author}</div>}
+
+                      <div className="ev2-p2-body">
+                        {useTableHere && rowsHere > 0 && colsHere > 0 ? (
+                          <div className="exam-task-answer">{ev2Part2TableBlock(task, rowsHere, colsHere)}</div>
+                        ) : (
+                          ev2Part2Main(task)
+                        )}
+                      </div>
+                      </div>
+                      <LessonSolutionUpload
+                        taskNumber={task.number}
+                        taskId={task.id}
+                        lessonToken={lessonEmbedParams.token}
+                        assignmentId={cabinetAssignmentId}
+                        homeworkMode={isHomework}
+                        enabled={
+                          showLessonSolutionUpload && (!isHomework || (!hRead && !numLocked(task.number)))
+                        }
+                      />
+                      <div className="task-report-error-wrap">
+                        <TaskReportErrorButton taskId={task.id} taskNumber={task.number} onClick={handleReportErrorClick} />
+                      </div>
+                    </section>
+                  );
+                })}
+
+                <div className="ev2-p2-summary">
+                  <div className="ev2-p2-summary__left">
+                    <div className="ev2-p2-summary__headline">
+                      <span className="ev2-p2-summary__title">Итого за часть 2</span>
+                      <span className="ev2-p2-summary__meta">
+                        {" "}
+                        · {part2EvaluatedCount} заданий оценено
+                      </span>
+                    </div>
+                    <div className="ev2-p2-summary__bar-wrap">
+                      <div className="ev2-p2-summary__bar">
+                        <div
+                          className="ev2-p2-summary__bar-fill"
+                          style={{ width: `${part2SummaryBarPct}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="ev2-p2-summary__right">
+                    <span className="ev2-p2-summary__score">{part2ScoreSum}</span>
+                    <span className="ev2-p2-summary__max">
+                      {" "}
+                      / {part2MaxAggregate}
+                    </span>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {showHomeworkBottomActions && (
+              <div className="exam-homework-finish">
+                <p className="exam-homework-finish__hint">
+                  Сохраните ответы кнопкой «Сохранить» у заданий части 1 или кнопками ниже, затем отправьте работу — до проверки
+                  эталон и верность ответа не показываются.
+                </p>
+                <div className="exam-homework-finish__row">
+                  <button
+                    type="button"
+                    className="exam-homework-finish__btn exam-homework-finish__btn--secondary"
+                    disabled={hwActionBusy || hwLoading}
+                    onClick={() => runHomeworkSave()}
+                  >
+                    Сохранить черновик
+                  </button>
+                  <button
+                    type="button"
+                    className="exam-homework-finish__btn exam-homework-finish__btn--primary"
+                    disabled={hwActionBusy || hwLoading}
+                    onClick={() => runHomeworkSubmit()}
+                  >
+                    Отправить на проверку
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {showHomeworkReviewedResults && homeworkReviewData && (
+              <div className="exam-homework-reviewed">
+                <h3 className="exam-homework-reviewed__title">Результаты проверки</h3>
+                {homeworkReviewData.teacherComment ? (
+                  <div className="exam-homework-reviewed__teacher-comment">
+                    <b>Комментарий учителя:</b> {homeworkReviewData.teacherComment}
+                  </div>
+                ) : null}
+                <div className="exam-homework-reviewed__table-wrap">
+                  <table className="exam-homework-reviewed__table">
+                    <thead>
+                      <tr>
+                        <th>Задание</th>
+                        <th>Ваш ответ</th>
+                        <th>Статус</th>
+                        <th>Комментарий</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {homeworkReviewData.rows.map((row) => {
+                        const rowStatus =
+                          row.isCorrect === true
+                            ? "correct"
+                            : row.isCorrect === false
+                              ? "wrong"
+                              : "pending";
+                        const rowStatusText =
+                          row.isCorrect === true
+                            ? "Правильно"
+                            : row.isCorrect === false
+                              ? "Неправильно"
+                              : "Проверено";
+                        return (
+                          <tr key={row.id}>
+                            <td>{row.number}</td>
+                            <td>{row.answer || "—"}</td>
+                            <td>
+                              <span className={`exam-homework-reviewed__badge exam-homework-reviewed__badge--${rowStatus}`}>
+                                {rowStatusText}
+                              </span>
+                            </td>
+                            <td>{row.comment || "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Кнопка Завершить — в обычном экзамене, не в ДЗ; в edu-режиме — в сайдбаре */}
+            {!isHomework &&
+              !lessonEmbedParams.embed &&
+              !lessonEmbedParams.token &&
+              !showExamEducationShell && (
+                <div className="exam-finish-section">
+                  <button
+                    id="finish-btn"
+                    className="exam-finish-btn exam-finish-btn-inline"
+                    onClick={() => {
+                      if (lessonEmbedParams.embed && window.parent && window.parent !== window) {
+                        window.parent.postMessage({ source: "exam-embedded-lesson", type: "lesson_finish_click" }, "*");
+                        return;
+                      }
+                      handleFinish();
+                    }}
+                  >
+                    Завершить
+                  </button>
+                </div>
+              )}
+              </div>
+
+              {showExamEducationShell && (
+                <aside className="exam-edu-sidebar">
+                  <div className="exam-edu-side-card">
+                    <div className="exam-edu-timer-card">
+                      <strong className="exam-edu-timer-card__value">{formatTimer(timerSeconds)}</strong>
+                      <span className="exam-edu-timer-card__label">Время выполнения</span>
+                      <div className="exam-edu-timer-card__actions">
+                        {(timerStatus === "idle" || timerStatus === "paused") && (
+                          <button
+                            type="button"
+                            className="variant-timer-btn variant-timer-btn-start"
+                            onClick={() => setTimerStatus("running")}
+                            title="Старт"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polygon points="5 3 19 12 5 21 5 3" />
+                            </svg>
+                          </button>
+                        )}
+                        {timerStatus === "running" && (
+                          <button
+                            type="button"
+                            className="variant-timer-btn variant-timer-btn-pause"
+                            onClick={() => setTimerStatus("paused")}
+                            title="Пауза"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="6" y="4" width="4" height="16" />
+                              <rect x="14" y="4" width="4" height="16" />
+                            </svg>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="variant-timer-btn variant-timer-btn-stop"
+                          onClick={() => {
+                            setTimerStatus("idle");
+                            setTimerSeconds(0);
+                          }}
+                          title="Стоп"
+                          disabled={timerStatus === "idle" && timerSeconds === 0}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="6" y="6" width="12" height="12" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="exam-edu-side-grid">
+                      <div className="exam-edu-side-metric">
+                        <strong>
+                          {mode === "test" ? (
+                            <>
+                              {fullyCorrectTaskCount} / {taskCountTotal}
+                            </>
+                          ) : (
+                            <>
+                              {totalScore} / {maxScore}
+                            </>
+                          )}
+                        </strong>
+                        <span>
+                          {mode === "test"
+                            ? "верно"
+                            : part2Tasks.length > 0
+                              ? "баллы"
+                              : "правильных"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="exam-edu-task-nav" role="navigation" aria-label="Номера заданий">
+                      {navTasksOrdered.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          className={examNavBtnClass(t)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            goToExamTask(t.id);
+                          }}
+                        >
+                          {t.number}
+                        </button>
+                      ))}
+                    </div>
+
+                    {!isHomework && !lessonEmbedParams.embed && !lessonEmbedParams.token && (
+                      <button
+                        type="button"
+                        className="exam-edu-btn exam-edu-btn--outline exam-edu-sidebar-finish"
+                        onClick={() => {
+                          if (lessonEmbedParams.embed && window.parent && window.parent !== window) {
+                            window.parent.postMessage({ source: "exam-embedded-lesson", type: "lesson_finish_click" }, "*");
+                            return;
+                          }
+                          handleFinish();
+                        }}
+                      >
+                        Завершить вариант
+                      </button>
+                    )}
+
+                    {supportInfo.items?.length > 0 && (
+                      <button
+                        type="button"
+                        className="exam-edu-support-btn"
+                        onClick={() => setSupportInfo((s) => ({ ...s, open: true }))}
+                        title="Справочная информация"
+                      >
+                        Справочная информация
+                      </button>
+                    )}
+                  </div>
+                </aside>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+        {boardOpen && (
+          <canvas
+            ref={canvasRef}
+            id="boardCanvas"
+            style={{ cursor: tool === "eraser" ? "pointer" : "crosshair" }}
+          />
+        )}
+        </div>
+      </div>
+
+      {/* ===== КНОПКА ДОСКИ ===== */}
+      <button type="button" id="open-board-btn" onClick={() => setBoardOpen(true)} style={{ display: boardOpen ? "none" : undefined }}>
+          <svg
+            className="board-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 19l7-7 3 3-7 7-3-3z" />
+            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+            <path d="M2 2l7.586 7.586" />
+          </svg>
+          <span>Открыть доску</span>
+        </button>
+
+      {/* ===== Панель инструментов доски (fixed) ===== */}
+      {boardOpen && (
+          <div id="board-toolbar">
+            <button
+              type="button"
+              id="penBtn"
+              className={tool === "pen" ? "active" : ""}
+              onClick={() => setTool("pen")}
+              title="Карандаш"
+            >
+              <svg
+                className="board-toolbar-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 19l7-7 3 3-7 7-3-3z" />
+                <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              id="eraserBtn"
+              className={tool === "eraser" ? "active" : ""}
+              onClick={() => setTool("eraser")}
+              title="Ластик"
+            >
+              <svg
+                className="board-toolbar-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
+                <path d="M22 21H7" />
+                <path d="m5 11 9 9" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              className={tool === "line" ? "active" : ""}
+              onClick={() => setTool("line")}
+              title="Линия"
+            >
+              <svg className="board-toolbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="5" y1="19" x2="19" y2="5" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              className={tool === "triangle" ? "active" : ""}
+              onClick={() => setTool("triangle")}
+              title="Треугольник"
+            >
+              <svg className="board-toolbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 2L2 22h20L12 2z" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              className={tool === "circle" ? "active" : ""}
+              onClick={() => setTool("circle")}
+              title="Круг"
+            >
+              <svg className="board-toolbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              className={tool === "square" ? "active" : ""}
+              onClick={() => setTool("square")}
+              title="Квадрат"
+            >
+              <svg className="board-toolbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="1" />
+              </svg>
+            </button>
+
+            <div className="board-divider" />
+
+            <div className="board-color-palette">
+              {COLORS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={`board-color-btn${color === c && ["pen", "line", "triangle", "circle", "square"].includes(tool) ? " active" : ""}`}
+                  style={{ background: c }}
+                  onClick={() => {
+                    setColor(c);
+                    if (tool === "eraser") setTool("pen");
+                  }}
+                  title={c}
+                />
+              ))}
+            </div>
+
+            <div className="board-divider" />
+
+            <div className="board-undo-redo-group">
+              <button
+                type="button"
+                onClick={undoBoard}
+                disabled={!canUndo}
+                title="Отменить (Ctrl+Z)"
+              >
+                <svg className="board-toolbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 10h10a5 5 0 0 1 5 5v2" />
+                  <path d="M3 10l4-4" />
+                  <path d="M3 10l4 4" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={redoBoard}
+                disabled={!canRedo}
+                title="Вернуть (Ctrl+Shift+Z)"
+              >
+                <svg className="board-toolbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 10h-10a5 5 0 0 0-5 5v2" />
+                  <path d="M21 10l-4-4" />
+                  <path d="M21 10l-4 4" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="board-divider" />
+
+            <button type="button" id="clear-board-btn" onClick={clearBoard} title="Очистить">
+              <svg
+                className="board-toolbar-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                <line x1="10" y1="11" x2="10" y2="17" />
+                <line x1="14" y1="11" x2="14" y2="17" />
+              </svg>
+            </button>
+
+            <button type="button" id="close-board-btn" onClick={() => setBoardOpen(false)} title="Закрыть">
+              <svg
+                className="board-toolbar-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+      )}
+
+      <ImageLightbox
+        src={lightbox.src}
+        open={lightbox.open}
+        onClose={() => setLightbox((s) => ({ ...s, open: false }))}
+      />
+      <SupportInfoModal
+        open={supportInfo.open}
+        items={supportInfo.items}
+        onClose={() => setSupportInfo((s) => ({ ...s, open: false }))}
+      />
+      <ResultsModal
+        open={resultsOpen}
+        onClose={() => setResultsOpen(false)}
+        results={resultsData}
+        onRetry={() => {
+          setResultsOpen(false);
+          window.location.reload();
+        }}
+      />
+      <ReportErrorModal
+        open={reportErrorOpen}
+        onClose={() => {
+          setReportErrorOpen(false);
+          setReportErrorTask(null);
+        }}
+        onSubmit={handleReportErrorSubmit}
+        taskNumber={reportErrorTask?.taskNumber}
+      />
+    </div>
+  );
+}
+
+export default ExamPage;

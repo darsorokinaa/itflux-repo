@@ -1,0 +1,443 @@
+import { useEffect, useMemo, useState } from "react";
+import confetti from "canvas-confetti";
+import StudentNameModal from "./StudentNameModal";
+
+/**
+ * Модальное окно с результатами выполнения варианта.
+ */
+export default function ResultsModal({ open, onClose, results, onRetry }) {
+  const [studentNameModalOpen, setStudentNameModalOpen] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [open, onClose]);
+
+  const formatLocalDate = (d) => {
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    return `${day}.${month}.${d.getFullYear()}`;
+  };
+  const formatLocalTime = (d) => {
+    return [d.getHours(), d.getMinutes(), d.getSeconds()]
+      .map((n) => String(n).padStart(2, "0"))
+      .join(":");
+  };
+
+  const handleDownloadReport = async (studentName) => {
+    if (!results || reportLoading) return;
+    setReportLoading(true);
+    try {
+      const startDate = results.startTime ? new Date(results.startTime) : null;
+      const endDate = results.endTime ? new Date(results.endTime) : null;
+      const payload = {
+        studentName,
+        variantId: results.variantId,
+        startTime: results.startTime,
+        endTime: results.endTime,
+        dateSolutionLocal: startDate ? formatLocalDate(startDate) : "",
+        timeStartLocal: startDate ? formatLocalTime(startDate) : "",
+        timeEndLocal: endDate ? formatLocalTime(endDate) : "",
+        totalTimeFormatted: results.totalTimeFormatted,
+        taskTimes: results.taskTimes,
+        checkedTasks: results.checkedTasks,
+        scores: results.scores,
+        totalScore: results.totalScore,
+        maxScore: results.maxScore,
+        scoreExam: results.scoreExam,
+        scoreComment: results.scoreComment,
+        markLevel: results.markLevel,
+        tasks: results.tasks,
+      };
+      const res = await fetch(
+        `/api/${results.level}/${results.subject}/report-pdf/`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(payload),
+        }
+      );
+      if (!res.ok) throw new Error("Ошибка загрузки отчёта");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `report-${studentName.replace(/\s+/g, "-") || "report"}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (err) {
+      console.error(err);
+      alert("Не удалось скачать отчёт. Попробуйте позже.");
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const heroPresentation = useMemo(
+    () => deriveHeroPresentation(open && results ? results : null),
+    [open, results]
+  );
+  const thresholdMetric = useMemo(
+    () => deriveThresholdMetric(open && results ? results : null),
+    [open, results]
+  );
+  const modalTier = useMemo(
+    () => deriveResultsModalTier(open && results ? results : null),
+    [open, results]
+  );
+
+  useEffect(() => {
+    if (!open || modalTier !== "high") return;
+    let cancelled = false;
+    const frame = requestAnimationFrame(() => {
+      if (cancelled) return;
+      confetti({ particleCount: 80, spread: 70, origin: { y: 0.4 } });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [open, modalTier]);
+
+  if (!open || !results) return null;
+
+  const {
+    totalTimeFormatted,
+    taskTimes,
+    totalScore,
+    maxScore,
+    scoreExam,
+    scoreComment,
+    examMode,
+    fullyCorrectTaskCount,
+    taskCountTotal,
+    tasks,
+  } = results;
+  const taskIdToNumber = tasks?.reduce((acc, t) => ({ ...acc, [t.id]: t.number }), {}) ?? {};
+
+  const taskTimesEntries =
+    taskTimes && Object.keys(taskTimes).length > 0
+      ? Object.entries(taskTimes).sort(
+          ([a], [b]) => (taskIdToNumber[a] ?? 0) - (taskIdToNumber[b] ?? 0)
+        )
+      : [];
+
+  const metricsPointsValue =
+    examMode === "test"
+      ? `${fullyCorrectTaskCount} / ${taskCountTotal}`
+      : `${totalScore} / ${maxScore}`;
+
+  const metricsPointsLabel = "Баллы";
+
+  return (
+    <div
+      className="results-modal-overlay results-modal-overlay--tiered"
+      data-results-tier={modalTier}
+      onClick={onClose}
+    >
+      <div className="results-modal-wrapper">
+        <div className="results-modal-window results-modal-window--results" onClick={(e) => e.stopPropagation()}>
+          <div className="results-modal-header">
+            <h3 className="results-modal-title">Результаты</h3>
+            <button type="button" className="results-modal-close" onClick={onClose} aria-label="Закрыть">
+              ×
+            </button>
+          </div>
+          <div className="results-modal-body results-modal-body--v2">
+            <div className={`results-hero ${heroPresentation.heroClass}`} style={{ color: heroPresentation.fg }}>
+              <div className="results-hero__icon-wrap" aria-hidden="true">
+                {modalTier === "low" ? (
+                  <IconXCircle className="results-hero__icon-svg results-hero__icon-svg--static-red" />
+                ) : modalTier === "mid" ? (
+                  <IconCheckCircle className="results-hero__icon-svg results-hero__icon-svg--pulse-yellow" />
+                ) : heroPresentation.iconKind === "check" ? (
+                  <IconCheckCircle className="results-hero__icon-svg" />
+                ) : heroPresentation.iconKind === "warn" ? (
+                  <IconAlertCircle className="results-hero__icon-svg" />
+                ) : (
+                  <IconXCircle className="results-hero__icon-svg" />
+                )}
+              </div>
+              <div className="results-hero__score-line">
+                <span className="results-hero__score-num">{heroPresentation.mainNum}</span>
+                <span className="results-hero__score-suffix">{heroPresentation.suffix}</span>
+              </div>
+              {heroPresentation.note ? <p className="results-hero__note">{heroPresentation.note}</p> : null}
+            </div>
+
+            <div className="results-metrics">
+              <div className="results-metrics__cell">
+                <span className="results-metrics__label">{metricsPointsLabel}</span>
+                <span className="results-metrics__value">{metricsPointsValue}</span>
+              </div>
+              <div className="results-metrics__cell">
+                <span className="results-metrics__label">Время</span>
+                <span className="results-metrics__value">{totalTimeFormatted}</span>
+              </div>
+              <div className="results-metrics__cell">
+                <span className="results-metrics__label">Порог</span>
+                <span className={`results-metrics__value${thresholdMetric.failed ? " results-metrics__value--danger" : ""}`}>
+                  {thresholdMetric.text}
+                </span>
+              </div>
+            </div>
+
+            {taskTimesEntries.length > 1 && (
+              <section className="results-times-section">
+                <h4 className="results-times-section__title">Время по заданиям</h4>
+                <div className="results-times-scroll">
+                  <table className="results-times-table-compact">
+                    <thead>
+                      <tr>
+                        <th>Задание</th>
+                        <th>Время</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {taskTimesEntries.map(([taskId, seconds]) => (
+                      <tr key={taskId}>
+                        <td>{taskIdToNumber[taskId] ?? taskId}</td>
+                        <td>{formatDurationCompact(seconds)}</td>
+                      </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+
+            {scoreComment != null && String(scoreComment).trim() !== "" && (
+              <p className="results-comment-plain">{scoreComment}</p>
+            )}
+
+            <div className="results-modal-actions">
+              {typeof onRetry === "function" && (
+                <button type="button" className="results-btn results-btn--primary" onClick={onRetry}>
+                  Попробовать ещё раз
+                </button>
+              )}
+              <button
+                type="button"
+                className="results-btn results-btn--outline"
+                onClick={() => setStudentNameModalOpen(true)}
+                disabled={reportLoading}
+              >
+                {reportLoading ? "Загрузка…" : "Скачать отчёт"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <StudentNameModal
+        open={studentNameModalOpen}
+        onClose={() => setStudentNameModalOpen(false)}
+        onConfirm={(name) => {
+          setStudentNameModalOpen(false);
+          handleDownloadReport(name);
+        }}
+      />
+    </div>
+  );
+}
+
+function deriveHeroPresentation(r) {
+  if (!r) {
+    return {
+      heroClass: "results-hero--neutral",
+      fg: "#334155",
+      iconKind: "warn",
+      mainNum: "—",
+      suffix: "",
+      variant: "neutral",
+      note: null,
+    };
+  }
+  const { examMode, scoreExam, markLevel, level, fullyCorrectTaskCount, taskCountTotal, totalScore, maxScore } = r;
+
+  if (examMode === "test") {
+    const total = taskCountTotal || 1;
+    const ok = fullyCorrectTaskCount / total;
+    let variant = "bad";
+    if (ok >= 1) variant = "good";
+    else if (ok >= 0.5) variant = "mid";
+    const t = THEMES_TEST[variant];
+    return {
+      heroClass: t.heroClass,
+      fg: t.fg,
+      iconKind: variant === "good" ? "check" : variant === "mid" ? "warn" : "x",
+      mainNum: String(fullyCorrectTaskCount),
+      suffix: ` из ${taskCountTotal}`,
+      variant,
+      note: null,
+    };
+  }
+
+  const lvl = String(level || "").toLowerCase();
+  if (scoreExam != null && lvl === "oge") {
+    const m = Math.round(Number(scoreExam));
+    let tier = "bad";
+    if (m >= 4) tier = "good";
+    else if (m === 3) tier = "mid";
+    const t = THEMES_OGE_MARK[tier];
+    return {
+      heroClass: t.heroClass,
+      fg: t.fg,
+      iconKind: tier === "good" ? "check" : tier === "mid" ? "warn" : "x",
+      mainNum: String(scoreExam),
+      suffix: " из 5",
+      variant: tier,
+      note: null,
+    };
+  }
+
+  if (scoreExam != null && markLevel != null && markLevel >= 1 && markLevel <= 4) {
+    let tier = "bad";
+    if (markLevel >= 4) tier = "good";
+    else if (markLevel === 3) tier = "mid";
+    const t = THEMES_OGE_MARK[tier];
+    return {
+      heroClass: t.heroClass,
+      fg: t.fg,
+      iconKind: tier === "good" ? "check" : tier === "mid" ? "warn" : "x",
+      mainNum: String(scoreExam),
+      suffix: " из 100",
+      variant: tier,
+      note: null,
+    };
+  }
+
+  if (scoreExam != null) {
+    const s = Number(scoreExam);
+    let tier = "bad";
+    if (s >= 70) tier = "good";
+    else if (s >= 46) tier = "mid";
+    const t = THEMES_OGE_MARK[tier];
+    return {
+      heroClass: t.heroClass,
+      fg: t.fg,
+      iconKind: tier === "good" ? "check" : tier === "mid" ? "warn" : "x",
+      mainNum: String(scoreExam),
+      suffix: " из 100",
+      variant: tier,
+      note: null,
+    };
+  }
+
+  const tNeutral = THEMES_TEST.neutral;
+  return {
+    heroClass: tNeutral.heroClass,
+    fg: tNeutral.fg,
+    iconKind: "warn",
+    mainNum: String(totalScore),
+    suffix: ` из ${maxScore}`,
+    variant: "neutral",
+    note: "Оценка по шкале не получена — показаны первичные баллы.",
+  };
+}
+
+const THEMES_OGE_MARK = {
+  good: {
+    heroClass: "results-hero--good",
+    fg: "#166534",
+  },
+  mid: {
+    heroClass: "results-hero--mid",
+    fg: "#854D0E",
+  },
+  bad: {
+    heroClass: "results-hero--bad",
+    fg: "#9F1239",
+  },
+};
+
+const THEMES_TEST = {
+  good: THEMES_OGE_MARK.good,
+  mid: THEMES_OGE_MARK.mid,
+  bad: THEMES_OGE_MARK.bad,
+  neutral: {
+    heroClass: "results-hero--neutral",
+    fg: "#334155",
+  },
+};
+
+/** Анимация модалки: high (≥4 / «хорошо») — canvas-confetti; mid (3) — пульс check; low (≤2) — только fade + x; neutral — fade. */
+function deriveResultsModalTier(results) {
+  const h = deriveHeroPresentation(results);
+  if (h.variant === "good") return "high";
+  if (h.variant === "mid") return "mid";
+  if (h.variant === "bad") return "low";
+  return "neutral";
+}
+
+function deriveThresholdMetric(results) {
+  if (!results || results.examMode === "test") {
+    return { text: "—", failed: false };
+  }
+  const { markLevel } = results;
+  if (markLevel == null) {
+    return { text: "—", failed: false };
+  }
+  if (markLevel === 1) {
+    return { text: "не пройден", failed: true };
+  }
+  if (markLevel === 2) {
+    return { text: "на пороге", failed: false };
+  }
+  return { text: "пройден", failed: false };
+}
+
+function formatDurationCompact(seconds) {
+  const sec = Number(seconds);
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  if (m > 99) return `${m}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function IconCheckCircle({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" width="44" height="44" fill="none" aria-hidden="true">
+      <path
+        d="M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0Z"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path d="m8 12.5 2.5 2.5 5.5-5.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconXCircle({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" width="44" height="44" fill="none" aria-hidden="true">
+      <path
+        d="M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0Z"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconAlertCircle({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" width="44" height="44" fill="none" aria-hidden="true">
+      <path
+        d="M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0Z"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path d="M12 8v5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="12" cy="17.5" r="1" fill="currentColor" />
+    </svg>
+  );
+}

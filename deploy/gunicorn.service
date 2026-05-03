@@ -1,0 +1,65 @@
+[Unit]
+Description=Генератор ЕГЭ/ОГЭ — Daphne ASGI (HTTP + WebSocket уроков)
+After=network.target postgresql.service
+# С Redis-слоем каналов раскомментируйте: Wants=redis.service
+
+[Service]
+User=root
+Group=root
+WorkingDirectory=/opt/generator_test/Generator
+
+RuntimeDirectory=generator_test
+LogsDirectory=generator_test
+
+# WSGI (Gunicorn) не обрабатывает WebSocket: комната урока (/ws/lesson/…) не работает.
+# Нужен ASGI — Daphne, иначе ученик не получает вариант и fetch к API не вызывается / падает по таймауту.
+ExecStart=/opt/generator_test/venv/bin/python3 -m daphne \
+    -b 127.0.0.1 \
+    -p 8002 \
+    --access-log - \
+    --proxy-headers \
+    Generator.asgi:application
+
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+Environment="PGDATABASE=generatordb"
+Environment="PGUSER=generator_user"
+Environment="PGPASSWORD=StrongPass123"
+Environment="PGHOST=localhost"
+Environment="PGPORT=5432"
+Environment="DJANGO_SETTINGS_MODULE=Generator.settings"
+Environment="DEBUG=false"
+Environment="SECRET_KEY=WNbG1HzC4_lta5i_vvh6TPK3_G33Xlhzlr167fDXCFd_CVc0fS72WcaWvtLXwHreDpo"
+# CSRF_TRUSTED_ORIGINS задавать не нужно: они строятся автоматически из DJANGO_ALLOWED_HOSTS.
+# Если нужны дополнительные origins — добавьте: Environment="CSRF_TRUSTED_ORIGINS=https://extra.domain.ru"
+Environment="DJANGO_ALLOWED_HOSTS=tes.genurok.ru,lk.tes.genurok.ru,localhost,127.0.0.1"
+Environment="LK_PUBLIC_URL=https://lk.tes.genurok.ru"
+# Куда редирект после /admin/logout/ (публичный сайт, не localhost)
+Environment="GENUROK_PUBLIC_HOME_URL=https://tes.genurok.ru"
+# Куда открывать ЛК по кнопке (дашборд). Пример: http://lk.genurok.tw1.ru/dashboard
+# Environment="LK_DASHBOARD_URL=http://lk.genurok.tw1.ru/dashboard"
+# Пароль для кнопки «Личный кабинет»: если не задать — в коде по умолчанию 100326.
+# На проде лучше задать только на сервере (не коммитить): Environment="LK_NAVIGATION_PASSWORD=..."
+# Отключить проверку: Environment="LK_NAVIGATION_PASSWORD="
+# Тестовый стенд часто без Redis — in-memory каналы (один процесс Daphne). С Redis — удалите эту строку.
+Environment="CHANNEL_LAYER_BACKEND=inmemory"
+Environment="LESSON_SECRET=eKPoaKBpV0QeRzYi3YWUV3gBNfWamBmGwK5MgLWvSoKmenpLVQGf7s0"
+# Если ЛК проверяет X-Lesson-Webhook-Secret: задайте тот же ключ, что в ЛК, или оставьте пустым —
+# тогда генератор отправит LESSON_SECRET (если в ЛК разрешён тот же секрет, что у JWT).
+# Environment="LESSON_WEBHOOK_SECRET=..."
+# Прямой HTTP к ЛК (порт 8003) — минует nginx и самоподписанный SSL-сертификат.
+# Генератор и ЛК на одном сервере, поэтому http://127.0.0.1:8003 работает без TLS.
+Environment="LK_LESSON_NOTIFY_URL=http://127.0.0.1:8003/api/lesson/teacher-joined/"
+# Свой сервер Jitsi: lesson.genurok.ru — разрешаем встраивать iframe и добавлять config.*
+Environment="JITSI_EMBED_EXTRA_HOSTS=lesson.genurok.ru"
+# Jitsi JWT для роли модератора (учитель) и участника (ученик).
+# Значения берутся из prosody-конфига Jitsi-сервера (/etc/prosody/conf.d/lesson.genurok.ru.cfg.lua):
+#   VirtualHost "lesson.genurok.ru" → authentication = "token" → app_id, app_secret.
+# Без этих переменных учитель НЕ станет модератором и увидит "no moderators have arrived".
+Environment="JITSI_APP_ID=generator_test"
+Environment="JITSI_APP_SECRET=y4vz0t7pmGM8uppejoQwhGxIZv1vtWF3"
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

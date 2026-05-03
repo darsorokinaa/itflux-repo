@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.sqlite3
+.venv/
+venv/
+.pythonlibs/
+
+# Django
+*.log
+staticfiles/
+**/media/
+
+*.sql
+# Environment variables
+.env
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+
+# Replit
+.cache/

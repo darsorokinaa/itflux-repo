@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+
+{% block title %}Выбор экзамена{% endblock %}
+
+{% block header_title %}Выбор экзамена{% endblock %}
+
+{% block content %}
+<div class="container">
+    
+    <div class="hero">
+        <h1>Добро пожаловать!</h1>
+        <p>Начните подготовку к экзаменам прямо сейчас. Выберите нужный формат и достигайте отличных результатов вместе с нами.</p>
+    </div>
+
+    <div class="exam-grid">
+        
+        <a href="oge" class="exam-card exam-card-oge">
+            <div class="exam-icon">📝</div>
+            <h3 class="exam-title">ОГЭ</h3>
+            <p class="exam-description">Основной государственный экзамен для 9 класса</p>
+            <div class="exam-footer">
+                <span class="exam-badge">9 класс</span>
+                <span class="exam-arrow">→</span>
+            </div>
+        </a>
+
+        <a href="ege" class="exam-card exam-card-ege">
+            <div class="exam-icon">🎓</div>
+            <h3 class="exam-title">ЕГЭ</h3>
+            <p class="exam-description">Единый государственный экзамен для 11 класса</p>
+            <div class="exam-footer">
+                <span class="exam-badge">11 класс</span>
+                <span class="exam-arrow">→</span>
+            </div>
+        </a>
+
+    </div>
+
+</div>
+{% endblock %}

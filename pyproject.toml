@@ -1,0 +1,16 @@
+[project]
+name = "repl-nix-workspace"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.11"
+dependencies = [
+    "channels>=4.3.2",
+    "django>=5.2.11",
+    "django-ckeditor>=6.7.3",
+    "django-ckeditor-5>=0.2.19",
+    "django-cors-headers>=4.9.0",
+    "gunicorn>=25.1.0",
+    "psycopg2-binary>=2.9.11",
+    "weasyprint>=68.1",
+    "whitenoise>=6.11.0",
+]

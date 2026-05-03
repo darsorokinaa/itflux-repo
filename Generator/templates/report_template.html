@@ -1,0 +1,228 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Отчёт — {{ student_name }}</title>
+    <link rel="stylesheet" href="{% static 'css/pdf.css' %}">
+    <style>{{ pdf_css }}</style>
+    <style>
+        @page {
+            size: A4 portrait;
+            margin: 12mm;
+            @top-right {
+                content: element(report-header-brand);
+            }
+            @bottom-center {
+                content: counter(page) " / " counter(pages);
+                font-size: 8pt;
+            }
+        }
+        .report-header-brand {
+            position: running(report-header-brand);
+        }
+        .report-header-brand img {
+            width: 10pt !important;
+            height: 10pt !important;
+            max-width: 10pt !important;
+            max-height: 10pt !important;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 4pt;
+        }
+        .report-header-link {
+            color: #2563eb;
+            text-decoration: none !important;
+            font-size: 9pt;
+        }
+        .report-body {
+            font-family: "Times New Roman", Times, serif;
+            font-size: 10pt;
+            line-height: 1.35;
+        }
+        .report-header {
+            margin-bottom: 1em;
+        }
+        .report-header h1 {
+            font-size: 13pt;
+            margin-bottom: 0.4em;
+        }
+        .report-meta {
+            color: #333;
+            font-size: 9pt;
+        }
+        .report-columns {
+            display: flex;
+            gap: 10mm;
+        }
+        .report-column {
+            flex: 1;
+            min-width: 0;
+        }
+        .report-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0 0 0.6em 0;
+            font-size: 7.5pt;
+        }
+        .report-table th,
+        .report-table td {
+            border: 0.5pt solid #999;
+            padding: 2pt 4pt;
+            text-align: left;
+            line-height: 1.25;
+        }
+        .report-table th {
+            background: #f0f0f0;
+            font-weight: bold;
+        }
+        .report-table td.numeric {
+            text-align: right;
+        }
+        .report-task-subtopic {
+            font-size: 6.5pt;
+            color: #555;
+            margin-top: 1.5pt;
+            line-height: 1.2;
+        }
+        .report-task-subtopic-label {
+            font-weight: 600;
+            color: #444;
+        }
+        .report-table tr.row-score-zero {
+            background: rgba(220, 38, 38, 0.08);
+        }
+        .report-table tr.row-score-zero td {
+            color: #b91c1c;
+        }
+        .report-table tr.row-score-max td {
+            color: #15803d;
+        }
+        .report-table tr.row-score-max {
+            background: rgba(22, 163, 74, 0.08);
+        }
+        .report-table tr.row-score-mid {
+            background: rgba(202, 138, 4, 0.08);
+        }
+        .report-table tr.row-score-mid td {
+            color: #a16207;
+        }
+        .report-totals {
+            margin-top: 0.8em;
+            font-weight: bold;
+            font-size: 9pt;
+        }
+        .report-comment {
+            margin-top: 12pt;
+            padding: 12pt 14pt;
+            border-radius: 10pt;
+            font-size: 9pt;
+            line-height: 1.45;
+            white-space: pre-line;
+            background: #f8fafc;
+            color: #475569;
+        }
+        .report-comment.report-comment-insufficient {
+            background: rgba(220, 38, 38, 0.1);
+            color: #b91c1c;
+        }
+        .report-comment.report-comment-threshold {
+            background: rgba(234, 88, 12, 0.1);
+            color: #c2410c;
+        }
+        .report-comment.report-comment-average {
+            background: rgba(202, 138, 4, 0.12);
+            color: #a16207;
+        }
+        .report-comment.report-comment-high {
+            background: rgba(22, 163, 74, 0.1);
+            color: #15803d;
+        }
+    </style>
+</head>
+<body class="report-body">
+    <div class="report-header-brand">
+        <img src="{{ favicon_url }}" alt="" width="10" height="10" />
+        <a href="{{ base_url }}" class="report-header-link">Генератор</a>
+    </div>
+    <div class="report-header">
+        <h1>Результаты выполнения варианта</h1>
+        <div class="report-meta">
+            <p><strong>Ученик:</strong> {{ student_name }}</p>
+            <p><strong>Предмет:</strong> {{ subject_label }} | <strong>Уровень:</strong> {{ level_label }}</p>
+            <p><strong>Вариант №{{ variant_id }}</strong></p>
+            {% if date_solution %}<p><strong>Дата решения:</strong> {{ date_solution }}</p>{% endif %}
+            {% if time_start or time_end %}<p><strong>Время тестирования:</strong> {{ time_start|default:"—" }} — {{ time_end|default:"—" }}</p>{% endif %}
+            {% if total_time_formatted %}<p><strong>Время решения:</strong> {{ total_time_formatted }}</p>{% endif %}
+        </div>
+    </div>
+
+    <div class="report-columns">
+        <div class="report-column">
+            <table class="report-table">
+                <thead>
+                    <tr>
+                        <th>№</th>
+                        <th>Задание</th>
+                        <th class="numeric">Баллы</th>
+                        <th>Время</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in report_col1 %}
+                    <tr class="{% if row.score == 0 %}row-score-zero{% elif row.max_score > 0 and row.score >= row.max_score %}row-score-max{% else %}row-score-mid{% endif %}">
+                        <td>{{ row.number }}</td>
+                        <td>
+                            <div>{{ row.title|default:"—" }}</div>
+                            {% if row.subtopic_title %}<div class="report-task-subtopic"><span class="report-task-subtopic-label">Подтема:</span> {{ row.subtopic_title }}</div>{% endif %}
+                        </td>
+                        <td class="numeric">{{ row.score }}/{{ row.max_score }}</td>
+                        <td>{{ row.time|default:"—" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="report-column">
+            <table class="report-table">
+                <thead>
+                    <tr>
+                        <th>№</th>
+                        <th>Задание</th>
+                        <th class="numeric">Б.</th>
+                        <th>Время</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in report_col2 %}
+                    <tr class="{% if row.score == 0 %}row-score-zero{% elif row.max_score > 0 and row.score >= row.max_score %}row-score-max{% else %}row-score-mid{% endif %}">
+                        <td>{{ row.number }}</td>
+                        <td>
+                            <div>{{ row.title|default:"—" }}</div>
+                            {% if row.subtopic_title %}<div class="report-task-subtopic"><span class="report-task-subtopic-label">Подтема:</span> {{ row.subtopic_title }}</div>{% endif %}
+                        </td>
+                        <td class="numeric">{{ row.score }}/{{ row.max_score }}</td>
+                        <td>{{ row.time|default:"—" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="report-totals">
+        <p>Первичные баллы: {{ total_score }} из {{ max_score }}</p>
+        {% if score_exam is not None %}
+            {% if is_oge %}
+                <p>Оценка: {{ score_exam }} из 5</p>
+            {% else %}
+                <p>Вторичные баллы: {{ score_exam }} из 100</p>
+            {% endif %}
+        {% endif %}
+    </div>
+
+    {% if score_comment %}
+    <div class="report-comment report-comment-{{ score_comment_class }}">{{ score_comment }}</div>
+    {% endif %}
+</body>
+</html>

@@ -1,0 +1,882 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Вариант № {{ variant.id }}{% endblock %}
+
+{% block content %}
+
+<style>
+    /* Кнопка открытия доски */
+    #open-board-btn {
+        position: fixed;
+        bottom: 30px;
+        right: 30px;
+        padding: 15px 25px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 50px;
+        font-weight: 600;
+        font-size: 16px;
+        cursor: pointer;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        transition: all 0.3s ease;
+        z-index: 999;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    #open-board-btn:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+    }
+
+    #open-board-btn.hidden {
+        display: none;
+    }
+
+    /* Контейнер доски на весь экран */
+    #board-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 1000;
+        display: none;
+        flex-direction: column;
+        pointer-events: none;
+    }
+
+    #board-container.active {
+        display: flex;
+    }
+
+    /* Toolbar доски */
+    #board-toolbar {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 15px 20px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+        pointer-events: auto;
+    }
+
+    #board-toolbar button {
+        padding: 8px 16px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        backdrop-filter: blur(10px);
+    }
+
+    #board-toolbar button:hover {
+        background: rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.5);
+    }
+
+    #board-toolbar button.active {
+        background: white;
+        color: #667eea;
+        border-color: white;
+    }
+
+    .color-picker {
+        display: flex;
+        gap: 8px;
+    }
+
+    .color-btn {
+        width: 32px;
+        height: 32px;
+        border: 3px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .color-btn:hover {
+        transform: scale(1.15);
+        border-color: rgba(255, 255, 255, 0.6);
+    }
+
+    .color-btn.active {
+        border-color: white;
+        border-width: 3px;
+        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
+        transform: scale(1.1);
+    }
+
+    .divider {
+        width: 1px;
+        height: 24px;
+        background: rgba(255, 255, 255, 0.3);
+        margin: 0 5px;
+    }
+
+    #close-board-btn {
+        margin-left: auto;
+        background: linear-gradient(135deg, #ff8a8a 0%, #ffa5a5 100%) !important;
+        border-color: rgba(255, 255, 255, 0.4) !important;
+    }
+
+    #close-board-btn:hover {
+        background: linear-gradient(135deg, #ff7676 0%, #ff5e5e 100%) !important;
+        box-shadow: 0 4px 12px rgba(255, 138, 138, 0.35);
+        transform: translateY(-1px);
+    }
+
+    /* Canvas - прозрачный слой поверх всего */
+    #board {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        cursor: crosshair;
+        pointer-events: auto;
+        z-index: 999;
+    }
+
+    /* При активной доске смещаем canvas вниз под toolbar */
+    #board-container.active #board {
+        top: 65px;
+        height: calc(100vh - 65px);
+    }
+
+    /* Разделитель частей */
+    .part-divider {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1.5rem 2rem;
+        border-radius: 16px;
+        margin: 3rem 0 2rem 0;
+        color: white;
+        text-align: center;
+        box-shadow: 0 4px 16px rgba(102, 126, 234, 0.12);
+    }
+
+    .part-divider h2 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin: 0;
+        color: white;
+    }
+
+    .part-divider p {
+        margin: 0.5rem 0 0 0;
+        opacity: 0.95;
+        font-size: 0.95rem;
+    }
+
+    /* Счетчик баллов для части 2 */
+    .score-controls {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+        padding: 1rem 1.5rem;
+        border-radius: 12px;
+        margin-top: 1rem;
+    }
+
+    .score-controls button {
+        width: 40px;
+        height: 40px;
+        background: white;
+        color: var(--primary-purple);
+        border: 2px solid var(--primary-purple);
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 1.5rem;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+    }
+
+    .score-controls button:hover {
+        background: var(--primary-purple);
+        color: white;
+        transform: scale(1.1);
+    }
+
+    .score-controls button:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+        transform: scale(1);
+    }
+
+    .score-display {
+        font-size: 2rem;
+        font-weight: 700;
+        color: var(--primary-purple);
+        min-width: 60px;
+        text-align: center;
+    }
+
+    .score-label {
+        font-weight: 600;
+        color: var(--text-secondary);
+    }
+
+    .max-score {
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+    }
+
+    .correct-answer-display {
+        height: 48px;
+        visibility: hidden;
+        display: flex;
+        align-items: center;
+    }
+
+    .correct-answer-display.visible {
+        visibility: visible;
+    }
+
+    .answer-status {
+        display: inline-block;
+        min-width: 30px;
+        width: 30px;
+        text-align: center;
+        font-size: 20px;
+        font-weight: bold;
+        vertical-align: middle;
+    }
+
+    .answer-input.correct {
+        border-color: #4CAF50;
+        background-color: #E8F5E9;
+    }
+
+    .answer-input.incorrect {
+        border-color: #F44336;
+        background-color: #FFEBEE;
+    }
+
+    .answer-status.correct {
+        color: #4CAF50;
+    }
+
+    .answer-status.incorrect {
+        color: #F44336;
+    }
+
+    .correct-answer-display {
+        height: 48px;
+        visibility: hidden;
+        display: flex;
+        align-items: center;
+        color: #4CAF50;
+        font-weight: 600;
+        background-color: #E8F5E9;
+        padding: 8px 12px;
+        border-radius: 6px;
+        margin-top: 8px;
+    }
+
+    .correct-answer-display.visible {
+        visibility: visible;
+    }
+</style>
+
+<button id="open-board-btn" onclick="toggleBoard()">
+    ✏️ Открыть доску
+</button>
+
+<div class="main-wrapper" id="main-wrapper">
+    <div class="content-area">
+        <div class="container">
+            <div class="page">
+
+                <div class="header">
+                    <div class="header-left">
+                        <h1>Вариант № {{ variant.id }}</h1>
+                    </div>
+                    <div class="header-right">
+                        <div class="score-counter" id="scoreCounter" style="display:none;">
+                            <span>Правильных ответов:</span>
+                            <span>
+                                <span id="correctCount">0</span> /
+                                <span id="totalCount">{{ tasks|length }}</span>
+                            </span>
+                        </div>
+                        <button id="checkButton" onclick="checkAllAnswers()">
+                            Проверить ответы
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ЧАСТЬ 1 -->
+                <div class="part-divider">
+                    <h2>Часть 1</h2>
+                    <p>Краткий ответ</p>
+                </div>
+
+                {% for task in tasks %}
+                {% if task.task.part_id == 1 %}
+                <section class="task">
+                    <aside class="task-left">
+                        <div class="task-number">
+                            {{ task.task.task_number }}
+                        </div>
+                        <div class="task-id">
+                            {{ task.id }}
+                        </div>
+                    </aside>
+
+                    <article class="task-content">
+                        <div class="task-text">
+                            {{ task.task_template|safe }}
+                            {% if task.files %}
+                            <div class="task-files">
+                                <a href="{{ task.files.url }}" target="_blank">
+                                    📎 Скачать файл
+                                </a>
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <div class="answer-section">
+                            <input type="text" class="answer-input" data-correct-answer="{{ task.answer }}"
+                                placeholder="Введите ответ" />
+                            <span class="answer-status"></span>
+
+                            <div class="correct-answer-display">
+                                Правильный ответ: {{ task.answer }}
+                            </div>
+                        </div>
+                    </article>
+                </section>
+                {% endif %}
+                {% endfor %}
+
+                <!-- ЧАСТЬ 2 -->
+                <div class="part-divider">
+                    <h2>Часть 2</h2>
+                    <p>Развернутый ответ</p>
+                </div>
+
+                {% for task in tasks %}
+                {% if task.task.part_id == 2 %}
+                <section class="task">
+                    <aside class="task-left">
+                        <div class="task-number">
+                            {{ task.task.task_number }}
+                        </div>
+                        <div class="task-id">
+                            {{ task.id }}
+                        </div>
+                    </aside>
+
+                    <article class="task-content">
+                        <div class="task-text">
+                            {{ task.task_template|safe }}
+                            {% if task.files %}
+                            <div class="task-files">
+                                <a href="{{ task.files.url }}" target="_blank">
+                                    📎 Скачать файл
+                                </a>
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <div class="answer-section">
+                            <div class="score-label">Выставьте баллы за решение:</div>
+                            <div class="score-controls">
+                                <button onclick="decreaseScore(this)">−</button>
+                                <span class="score-display" data-score="0">0</span>
+                                <button onclick="increaseScore(this)">+</button>
+                                
+                            </div>
+                        </div>
+                    </article>
+                </section>
+                {% endif %}
+                {% endfor %}
+               
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Доска на весь экран -->
+<div id="board-container">
+    <div id="board-toolbar">
+        <button id="penBtn" onclick="setTool('pen')" class="active">✏️ </button>
+        <button id="eraserBtn" onclick="setTool('eraser')">🧽</button>
+
+        <div class="divider"></div>
+
+        <div class="color-picker">
+            <div class="color-btn active" style="background: #000000;" onclick="setColor('#000000')"></div>
+            <div class="color-btn" style="background: #2196F3;" onclick="setColor('#2196F3')"></div>
+            <div class="color-btn" style="background: #F44336;" onclick="setColor('#F44336')"></div>
+        </div>
+
+        <div class="divider"></div>
+
+        <button id="clear-board-btn" onclick="clearBoard()">🗑️ </button>
+
+        <button id="close-board-btn" onclick="toggleBoard()">✕ </button>
+    </div>
+    <canvas id="board"></canvas>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+
+        /* =========================
+           СЧЕТЧИК БАЛЛОВ ДЛЯ ЧАСТИ 2
+        ========================== */
+
+        window.increaseScore = function(btn) {
+            const scoreDisplay = btn.previousElementSibling;
+            let currentScore = parseInt(scoreDisplay.dataset.score);
+            
+            if (currentScore < 3) {
+                currentScore++;
+                scoreDisplay.dataset.score = currentScore;
+                scoreDisplay.textContent = currentScore;
+            }
+        };
+
+        window.decreaseScore = function(btn) {
+            const scoreDisplay = btn.nextElementSibling;
+            let currentScore = parseInt(scoreDisplay.dataset.score);
+            
+            if (currentScore > 0) {
+                currentScore--;
+                scoreDisplay.dataset.score = currentScore;
+                scoreDisplay.textContent = currentScore;
+            }
+        };
+
+        /* =========================
+           ДОСКА ДЛЯ РИСОВАНИЯ
+        ========================== */
+
+        const canvas = document.getElementById("board");
+        const ctx = canvas.getContext("2d");
+        const boardContainer = document.getElementById("board-container");
+        const openBoardBtn = document.getElementById("open-board-btn");
+        const toolbar = document.getElementById("board-toolbar");
+
+        let drawing = false;
+        let tool = "pen";
+        let currentLine = null;
+        let objects = [];
+        let currentColor = "#000000";
+        let erasing = false;
+        let erasedIndices = new Set();
+        let scrollOffset = { x: 0, y: 0 };
+
+        const penBtn = document.getElementById("penBtn");
+        const eraserBtn = document.getElementById("eraserBtn");
+
+        function resizeCanvas() {
+            const toolbarHeight = toolbar.offsetHeight;
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight - toolbarHeight;
+            redraw();
+        }
+
+        function getMousePos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scrollY = window.scrollY || window.pageYOffset;
+            const scrollX = window.scrollX || window.pageXOffset;
+
+            return {
+                x: e.clientX - rect.left + scrollX,
+                y: e.clientY - rect.top + scrollY
+            };
+        }
+
+        window.toggleBoard = function () {
+            boardContainer.classList.toggle('active');
+            openBoardBtn.classList.toggle('hidden');
+
+            if (boardContainer.classList.contains('active')) {
+                resizeCanvas();
+                scrollOffset.x = window.scrollX;
+                scrollOffset.y = window.scrollY;
+            }
+        };
+
+        window.addEventListener('scroll', function () {
+            if (boardContainer.classList.contains('active')) {
+                scrollOffset.x = window.scrollX;
+                scrollOffset.y = window.scrollY;
+                redraw();
+            }
+        });
+
+        window.clearBoard = function () {
+            if (confirm('Очистить всю доску?')) {
+                objects = [];
+                redraw();
+                socket.send(JSON.stringify({
+                    action: "clear_all"
+                }));
+            }
+        };
+
+        window.addEventListener('resize', function () {
+            if (boardContainer.classList.contains('active')) {
+                resizeCanvas();
+            }
+        });
+
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && boardContainer.classList.contains('active')) {
+                toggleBoard();
+            }
+        });
+
+        window.setTool = function (t) {
+            tool = t;
+
+            penBtn.classList.remove('active');
+            eraserBtn.classList.remove('active');
+
+            if (t === 'pen') {
+                penBtn.classList.add('active');
+                canvas.style.cursor = 'crosshair';
+            } else if (t === 'eraser') {
+                eraserBtn.classList.add('active');
+                canvas.style.cursor = 'pointer';
+            }
+        };
+
+        window.setColor = function (color) {
+            currentColor = color;
+
+            document.querySelectorAll('.color-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+
+            event.target.classList.add('active');
+
+            if (tool !== 'pen') {
+                setTool('pen');
+            }
+        };
+
+        const protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
+        const socket = new WebSocket(
+            protocol + window.location.host + "/ws/board/test/"
+        );
+
+        canvas.addEventListener("mousedown", (e) => {
+            e.preventDefault();
+            const pos = getMousePos(e);
+
+            drawing = true;
+
+            if (tool === "pen") {
+                currentLine = {
+                    type: "line",
+                    color: currentColor,
+                    width: 3,
+                    points: [pos]
+                };
+                redraw();
+            }
+
+            if (tool === "eraser") {
+                erasing = true;
+                erasedIndices.clear();
+                eraseAt(pos.x, pos.y);
+            }
+        });
+
+        canvas.addEventListener("mouseup", (e) => {
+            e.preventDefault();
+            if (currentLine) {
+                objects.push(currentLine);
+                socket.send(JSON.stringify({
+                    action: "add_object",
+                    object: currentLine
+                }));
+                currentLine = null;
+            }
+            drawing = false;
+            erasing = false;
+            erasedIndices.clear();
+        });
+
+        canvas.addEventListener("mousemove", (e) => {
+            e.preventDefault();
+            if (!drawing) return;
+
+            const pos = getMousePos(e);
+
+            if (tool === "pen" && currentLine) {
+                currentLine.points.push(pos);
+                redraw();
+            }
+
+            if (tool === "eraser" && erasing) {
+                eraseAt(pos.x, pos.y);
+            }
+        });
+
+        canvas.addEventListener("mouseleave", () => {
+            if (drawing && currentLine) {
+                objects.push(currentLine);
+                socket.send(JSON.stringify({
+                    action: "add_object",
+                    object: currentLine
+                }));
+                currentLine = null;
+            }
+            drawing = false;
+            erasing = false;
+            erasedIndices.clear();
+        });
+
+        socket.onmessage = function (e) {
+            const data = JSON.parse(e.data);
+
+            if (data.action === "add_object") {
+                objects.push(data.object);
+                redraw();
+            }
+
+            if (data.action === "remove_object") {
+                objects = objects.filter((_, index) => index !== data.index);
+                redraw();
+            }
+
+            if (data.action === "clear_all") {
+                objects = [];
+                redraw();
+            }
+        };
+
+        function drawSmoothLine(points, color, width) {
+            if (points.length < 1) return;
+
+            ctx.strokeStyle = color;
+            ctx.lineWidth = width;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+
+            if (points.length === 1) {
+                ctx.beginPath();
+                ctx.arc(points[0].x - scrollOffset.x, points[0].y - scrollOffset.y, width / 2, 0, Math.PI * 2);
+                ctx.fillStyle = color;
+                ctx.fill();
+                return;
+            }
+
+            ctx.beginPath();
+            ctx.moveTo(points[0].x - scrollOffset.x, points[0].y - scrollOffset.y);
+
+            for (let i = 1; i < points.length - 1; i++) {
+                const xc = (points[i].x + points[i + 1].x) / 2 - scrollOffset.x;
+                const yc = (points[i].y + points[i + 1].y) / 2 - scrollOffset.y;
+                ctx.quadraticCurveTo(
+                    points[i].x - scrollOffset.x,
+                    points[i].y - scrollOffset.y,
+                    xc,
+                    yc
+                );
+            }
+
+            ctx.lineTo(
+                points[points.length - 1].x - scrollOffset.x,
+                points[points.length - 1].y - scrollOffset.y
+            );
+            ctx.stroke();
+        }
+
+        function redraw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            objects.forEach((obj) => {
+                if (obj.type === "line") {
+                    drawSmoothLine(obj.points, obj.color, obj.width);
+                }
+            });
+
+            if (currentLine) {
+                drawSmoothLine(currentLine.points, currentLine.color, currentLine.width);
+            }
+        }
+
+        function eraseAt(x, y) {
+            const radius = 8;
+
+            for (let i = objects.length - 1; i >= 0; i--) {
+                if (erasedIndices.has(i)) continue;
+
+                const obj = objects[i];
+
+                if (obj.type === "line") {
+                    let foundMatch = false;
+                    for (let point of obj.points) {
+                        const dx = point.x - x;
+                        const dy = point.y - y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+
+                        if (distance < radius) {
+                            foundMatch = true;
+                            break;
+                        }
+                    }
+
+                    if (foundMatch) {
+                        erasedIndices.add(i);
+                        objects.splice(i, 1);
+                        socket.send(JSON.stringify({
+                            action: "remove_object",
+                            index: i
+                        }));
+                        redraw();
+                        return;
+                    }
+                }
+            }
+        }
+
+        /* =========================
+           ПРОВЕРКА ОТВЕТОВ
+        ========================== */
+
+        let isChecked = false;
+
+        function normalizeAnswer(answer) {
+            return String(answer).trim().toLowerCase().replace(/\s+/g, '');
+        }
+
+        window.checkAllAnswers = function () {
+    if (isChecked) {
+        resetAnswers();
+        return;
+    }
+
+    const inputs = document.querySelectorAll('.answer-input');
+    let correctCount = 0;
+    let totalScore = 0; // Общий балл
+
+    // Подсчет баллов за часть 1
+    inputs.forEach(input => {
+        const userAnswer = normalizeAnswer(input.value);
+        const correctAnswer = normalizeAnswer(input.dataset.correctAnswer);
+
+        const statusIcon = input.nextElementSibling;
+        const correctDisplay = input.parentElement.querySelector('.correct-answer-display');
+
+        input.disabled = true;
+
+        if (userAnswer && userAnswer === correctAnswer) {
+            if (statusIcon) {
+                statusIcon.textContent = "✓";
+                statusIcon.classList.add("correct");
+            }
+            input.classList.add("correct");
+            correctCount++;
+            totalScore += 1; // 1 балл за правильный ответ в части 1
+        } else {
+            if (statusIcon) {
+                statusIcon.textContent = "✗";
+                statusIcon.classList.add("incorrect");
+            }
+            input.classList.add("incorrect");
+            if (correctDisplay) {
+                correctDisplay.classList.add("visible");
+            }
+        }
+    });
+
+    // Подсчет баллов за часть 2
+    document.querySelectorAll('.score-display').forEach(display => {
+        const score = parseInt(display.dataset.score) || 0;
+        totalScore += score;
+    });
+
+    const correctCountEl = document.getElementById('correctCount');
+    const scoreCounter = document.getElementById('scoreCounter');
+    const checkButton = document.getElementById('checkButton');
+    const checkButton2 = document.getElementById('checkButton2');
+
+    // Показываем правильные ответы и общий балл
+    if (correctCountEl) correctCountEl.textContent = correctCount;
+    if (scoreCounter) {
+        scoreCounter.innerHTML = `
+            <span>Правильных ответов: ${correctCount} / ${inputs.length}</span>
+            <span style="margin-left: 2rem;">Всего баллов: <strong>${totalScore}</strong></span>
+        `;
+        scoreCounter.style.display = 'flex';
+    }
+
+    if (checkButton) {
+        checkButton.textContent = "Сбросить";
+        checkButton.classList.add("reset-mode");
+    }
+    
+    if (checkButton2) {
+        checkButton2.textContent = "Сбросить";
+        checkButton2.classList.add("reset-mode");
+    }
+
+    isChecked = true;
+};
+function resetAnswers() {
+    const inputs = document.querySelectorAll('.answer-input');
+
+    inputs.forEach(input => {
+        input.disabled = false;
+        input.value = "";
+        input.classList.remove("correct", "incorrect");
+
+        const statusIcon = input.nextElementSibling;
+        const correctDisplay = input.parentElement.querySelector('.correct-answer-display');
+
+        if (statusIcon) {
+            statusIcon.textContent = "";
+            statusIcon.classList.remove("correct", "incorrect");
+        }
+        if (correctDisplay) {
+            correctDisplay.classList.remove("visible");
+        }
+    });
+
+    // Сброс баллов для части 2
+    document.querySelectorAll('.score-display').forEach(display => {
+        display.dataset.score = 0;
+        display.textContent = 0;
+    });
+
+    const scoreCounter = document.getElementById('scoreCounter');
+    const checkButton = document.getElementById('checkButton');
+    const checkButton2 = document.getElementById('checkButton2');
+
+    if (scoreCounter) scoreCounter.style.display = 'none';
+
+    if (checkButton) {
+        checkButton.textContent = "Проверить ответы";
+        checkButton.classList.remove("reset-mode");
+    }
+    
+    if (checkButton2) {
+        checkButton2.textContent = "Проверить ответы";
+        checkButton2.classList.remove("reset-mode");
+    }
+
+    isChecked = false;
+}
+    });
+</script>
+
+{% endblock %}
