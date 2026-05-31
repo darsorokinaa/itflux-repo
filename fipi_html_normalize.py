@@ -480,8 +480,33 @@ def strip_trailing_empty_table_rows(html: str) -> str:
     return out
 
 
+def _is_real_data_table(table_html: str) -> bool:
+    """Настоящая таблица данных: ≥2 строки, и хотя бы 2 строки содержат ≥2 ячейки с контентом.
+
+    Признак отличает реальную таблицу (как в ОГЭ инф №14: «номер | пол | факультет | баллы»)
+    от layout-обёртки ФИПИ (одна ячейка-обёртка или линейный список).
+    """
+    multi_col_rows = 0
+    total_rows = 0
+    for row_m in _RE_TABLE_ROW.finditer(table_html):
+        total_rows += 1
+        cells = _RE_TABLE_CELL.findall(row_m.group(1))
+        if len(cells) < 2:
+            continue
+        with_content = sum(1 for c in cells if _cell_has_content(c.strip()))
+        # Любые ≥2 ячейки в строке считаем «табличной» — пусть даже одна из них пустая,
+        # как ячейка-уголок в заголовке «  / A / B / C / D» у ОГЭ инф №14.
+        if with_content >= 1 and len(cells) >= 2:
+            multi_col_rows += 1
+    return total_rows >= 2 and multi_col_rows >= 2
+
+
 def _unwrap_one_layout_table(table_html: str) -> str:
     if _is_choice_options_table(table_html):
+        return table_html
+    if _is_real_data_table(table_html):
+        # Сохраняем структуру: реальная таблица данных, а не layout-обёртка.
+        # Стилизуется CSS — в PDF получает синие 20%-границы.
         return table_html
     parts: list[str] = []
     has_any_row = False
