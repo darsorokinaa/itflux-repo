@@ -2,7 +2,10 @@ import { useEffect, useLayoutEffect } from "react";
 import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate } from "react-router-dom";
 
 import Layout from "./pages/Layout";
-import IndexPage from "./pages/IndexPage";
+import HomePage from "./pages/HomePage";
+import AllTasksPage from "./pages/AllTasksPage";
+import GeneratorHubPage from "./pages/GeneratorHubPage";
+import ExamLevelHubPage from "./pages/ExamLevelHubPage";
 import SubjectPage from "./pages/SubjectPage";
 import TasksPage from "./pages/TasksPage";
 import ExamPage from "./pages/ExamPage";
@@ -84,9 +87,12 @@ function App() {
 
         <Route element={<Layout />}>
 
-          <Route path="/" element={<IndexPage />} />
+          <Route path="/" element={<HomePage />} />
           <Route path="/about" element={<Navigate to="/" replace />} />
           <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/tasks" element={<AllTasksPage />} />
+          <Route path="/generator" element={<GeneratorHubPage />} />
+          <Route path="/subject/:level" element={<SubjectPage />} />
 
           <Route path="/search/tasks" element={<SearchTaskWithKey />} />
           <Route path="/search-variant" element={<SearchVariantWithKey />} />
@@ -96,7 +102,9 @@ function App() {
           <Route path="/lesson/join/" element={<LessonJoinBridge />} />
           <Route path="/lesson/join/variant/:variant_id" element={<LessonJoinVariantRedirect />} />
 
-          <Route path="/:level" element={<SubjectPage />} />
+          <Route path="/vpr" element={<Navigate to="/subject/vpr" replace />} />
+
+          <Route path="/:level" element={<ExamLevelHubPage />} />
 
           <Route path="/:level/:subject" element={<TasksPage />} />
 

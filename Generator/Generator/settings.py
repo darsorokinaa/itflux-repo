@@ -47,7 +47,7 @@ JITSI_EMBED_EXTRA_HOSTS = tuple(
 JITSI_APP_ID = os.environ.get("JITSI_APP_ID", "").strip()
 JITSI_APP_SECRET = os.environ.get("JITSI_APP_SECRET", "").strip()
 
-LK_PUBLIC_URL = os.environ.get("LK_PUBLIC_URL", "https://lk.genurok.tw1.ru").rstrip("/")
+LK_PUBLIC_URL = os.environ.get("LK_PUBLIC_URL", "https://lk.itflux.ru").rstrip("/")
 # Базовый API-URL личного кабинета для server-to-server запросов генератора.
 # Если не задан, используем LK_PUBLIC_URL для обратной совместимости.
 CABINET_API_BASE = (
@@ -92,6 +92,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
     'channels',
     'Generator.apps.GeneratorConfig',
     'Board',
@@ -113,6 +114,27 @@ CKEDITOR_5_CONFIGS = {
                 "imageStyle:full",
                 "imageStyle:side"
             ]
+        },
+        # Сохраняем вложенные таблицы ФИПИ (математика: условие + 1) 2) …) при правке в админке.
+        # Красивые карточки на сайте строятся при показе (MathContent), не в этом поле.
+        "htmlSupport": {
+            "allow": [
+                {"name": "div", "attributes": True, "classes": True, "styles": True},
+                {"name": "span", "attributes": True, "classes": True, "styles": True},
+                {"name": "figure", "attributes": True, "classes": True, "styles": True},
+                {
+                    "name": r"^(table|tbody|thead|tfoot|tr|td|th|colgroup|col|caption)$",
+                    "attributes": True,
+                    "classes": True,
+                    "styles": True,
+                },
+                {"name": "br"},
+                {"name": "b"},
+                {"name": "strong"},
+            ],
+            "disallow": [
+                {"name": "div", "classes": ["oge-math-choice-task"]},
+            ],
         },
     }
 }
@@ -146,7 +168,7 @@ _extra_origins_raw = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
 _extra_origins = [o.strip() for o in _extra_origins_raw.split(',') if o.strip()]
 
 # Если CSRF_TRUSTED_ORIGINS не задан — строим доверенные origins из DJANGO_ALLOWED_HOSTS автоматически.
-# Это позволяет не дублировать домен: достаточно задать только DJANGO_ALLOWED_HOSTS=tes.genurok.ru,...
+# Это позволяет не дублировать домен: достаточно задать только DJANGO_ALLOWED_HOSTS=tes.itflux.ru,...
 if not _extra_origins:
     _allowed_hosts_raw = os.environ.get('DJANGO_ALLOWED_HOSTS', '')
     for _h in _allowed_hosts_raw.split(','):
@@ -221,7 +243,7 @@ else:
 # DATABASES = {
 #     "default": {
 #         "ENGINE": "django.db.backends.postgresql",
-#         "NAME": os.environ.get("PGDATABASE", "generatordb"),
+#         "NAME": os.environ.get("PGDATABASE", "itflux"),
 #         "USER": os.environ.get("PGUSER", "generator_user"),
 #         "PASSWORD": os.environ.get("PGPASSWORD", "StrongPass123"),
 #         "HOST": os.environ.get("PGHOST", "localhost"),
@@ -232,7 +254,7 @@ else:
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("PGDATABASE", "generatordb"),
+        "NAME": os.environ.get("PGDATABASE", "itflux"),
         "USER": os.environ.get("PGUSER", "postgres"),
         "PASSWORD": os.environ.get("PGPASSWORD", "postgres"),
         "HOST": os.environ.get("PGHOST", "localhost"),
@@ -287,18 +309,20 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = '/admin/login/'
 LOGIN_REDIRECT_URL = '/'
 # После выхода из админки — на публичную главную (не «/» текущего хоста: на dev это localhost).
-_gen_home = os.environ.get("GENUROK_PUBLIC_HOME_URL", "http://genurok.ru").strip().rstrip("/")
-GENUROK_PUBLIC_HOME_URL = f"{_gen_home}/"
-LOGOUT_REDIRECT_URL = GENUROK_PUBLIC_HOME_URL
+_gen_home = os.environ.get("ITFLUX_PUBLIC_HOME_URL", "https://itflux.ru").strip().rstrip("/")
+ITFLUX_PUBLIC_HOME_URL = f"{_gen_home}/"
+LOGOUT_REDIRECT_URL = ITFLUX_PUBLIC_HOME_URL
 
-# Telegram bot для отправки сообщений об ошибках
-# Для группового чата: добавьте бота в группу, затем получите ID через
-# https://api.telegram.org/bot<TOKEN>/getUpdates после сообщения в группе.
-# ID группы — отрицательное число, например: -1001234567890
-# TELEGRAM_TOPIC_ID — ID топика (для групп с темами). Число из URL топика.
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
-TELEGRAM_TOPIC_ID = os.environ.get('TELEGRAM_TOPIC_ID', '') or None  # опционально
+# Telegram bot для отправки сообщений об ошибках.
+# Отправляем только одному пользователю в личку (TELEGRAM_CHAT_ID = его user_id).
+# Переменные окружения, если заданы, переопределяют значения по умолчанию.
+TELEGRAM_BOT_TOKEN = os.environ.get(
+    'TELEGRAM_BOT_TOKEN',
+    '8622825466:AAH-w-15rWafWzQhqjAOPEsHMMEmUsL9Ihw',
+)
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '791450487')
+# Для личных чатов топиков нет — оставляем None, чтобы не отправлять message_thread_id.
+TELEGRAM_TOPIC_ID = os.environ.get('TELEGRAM_TOPIC_ID', '') or None
 
 # —— HTTPS / cookies (прод, DEBUG=false): редирект HTTP→HTTPS обычно в nginx; Django может дублировать — осторожно с петлёй.
 if not DEBUG:

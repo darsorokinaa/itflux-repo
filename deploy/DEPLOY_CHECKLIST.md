@@ -21,9 +21,9 @@
 | Сборка SPA: ссылки/ДЗ в сторону ЛК | `frontend`: `VITE_LK_PUBLIC_URL` при `npm run build` | = origin `LK_PUBLIC_URL` (схема+хост+порт) |
 | JSON для SPA без жёсткого LK в бандле | `GET /api/site-config/` | Проверяйте `lk_public_url` после деплоя |
 | Редирект HTTP → HTTPS | Nginx: отдельный `server { listen 80; return 301 https://$host$request_uri; }` | Как в `deploy/nginx.conf` |
-| Выход из `/admin/logout/` | `GENUROK_PUBLIC_HOME_URL` | Публичная главная, не `localhost` |
+| Выход из `/admin/logout/` | `ITFLUX_PUBLIC_HOME_URL` | Публичная главная, не `localhost` |
 | WebSocket урока | `wss://<тот же host>/ws/lesson/...` | Nginx: `location /ws/` + `Upgrade` (см. `nginx.conf`) |
-| Прокси ДЗ → API ЛК | `LK_*` + опционально `LK_HOMEWORK_*` | `deploy/LK_GENUROK_DEBUG.md` |
+| Прокси ДЗ → API ЛК | `LK_*` + опционально `LK_HOMEWORK_*` | `deploy/LK_ITFLUX_DEBUG.md` |
 | CORS (ограничить внешние origin) | `CORS_ALLOWED_ORIGINS` | Список через запятую; не задан — режим «все origin» (только dev) |
 
 **CSRF / доверие к хосту:** задайте `CSRF_TRUSTED_ORIGINS` **или** только `DJANGO_ALLOWED_HOSTS` (хосты без `*`) — тогда `https`/`http` для них добавятся автоматически в `settings.py`.
@@ -43,7 +43,7 @@
 2. **Миграции БД** — на сервере после обновления кода:
 
    ```bash
-   cd /opt/generator_test/Generator   # ваш путь к проекту
+   cd /opt/itflux/Generator   # ваш путь к проекту
    source ../venv/bin/activate
    python manage.py migrate --noinput
    ```
@@ -69,7 +69,7 @@
 | `LK_PUBLIC_URL` | Базовый URL ЛК (домен), например `http://lk.example.com` — для обратных вызовов к API ЛК |
 | `CABINET_API_BASE` | Базовый URL API ЛК для server-to-server запросов генератора (если пусто, берётся `LK_PUBLIC_URL`) |
 | `LK_DASHBOARD_URL` | **Опционально.** Полный URL дашборда после входа, куда ведёт кнопка «Личный кабинет», например `http://lk.example.com/dashboard`. Если не задан, открывается корень `LK_PUBLIC_URL` (часто это не дашборд, а лендинг или логин) |
-| `GENUROK_PUBLIC_HOME_URL` | Публичная главная после **выхода из админки** генератора (`/admin/logout/`). По умолчанию `http://genurok.ru`. Без этого при `LOGOUT_REDIRECT_URL='/'` с dev-сервера уводило на `localhost` |
+| `ITFLUX_PUBLIC_HOME_URL` | Публичная главная после **выхода из админки** генератора (`/admin/logout/`). По умолчанию `https://itflux.ru`. Без этого при `LOGOUT_REDIRECT_URL='/'` с dev-сервера уводило на `localhost` |
 | `LK_NAVIGATION_PASSWORD` | Пароль для кнопки «Личный кабинет» на сайте генератора. Не задан — по умолчанию `100326`. Пустое значение `LK_NAVIGATION_PASSWORD=` — **отключить** запрос пароля |
 | `CSRF_TRUSTED_ORIGINS` | Список через запятую с **схемой** (`https://...`). При необходимости отдельно ЛК. Альтернатива: оставить пусто и задать только `DJANGO_ALLOWED_HOSTS` |
 | `CORS_ALLOWED_ORIGINS` | **Прод:** перечислить origin’ы (генератор + при необходимости ЛК). Пусто = как в dev (все origin) — нежелательно в бою |
@@ -87,24 +87,24 @@
 
 ## Команды на сервере (по порядку)
 
-**Рекомендуется:** один скрипт из репозитория (ветка по умолчанию `generator_test`, nginx-файл `generator_test`; см. переменные в шапке скрипта):
+**Рекомендуется:** один скрипт из репозитория (ветка по умолчанию `itflux`, nginx-файл `itflux`; см. переменные в шапке скрипта):
 
 ```bash
-sudo bash /opt/generator_test/deploy/update.sh
+sudo bash /opt/itflux/deploy/update.sh
 ```
 
 **Вручную** (если нужно обойти скрипт):
 
 ```bash
-cd /opt/generator_test
-git pull origin generator_test
+cd /opt/itflux
+git pull origin itflux
 
-sudo cp deploy/gunicorn.service /etc/systemd/system/generator_test.service
+sudo cp deploy/gunicorn.service /etc/systemd/system/itflux.service
 sudo systemctl daemon-reload
 
 # при изменении nginx (имя файла должно совпадать с тем, что в sites-enabled):
-sudo cp deploy/nginx.conf /etc/nginx/sites-available/generator_test
-sudo ln -sf /etc/nginx/sites-available/generator_test /etc/nginx/sites-enabled/generator_test
+sudo cp deploy/nginx.conf /etc/nginx/sites-available/itflux
+sudo ln -sf /etc/nginx/sites-available/itflux /etc/nginx/sites-enabled/itflux
 sudo nginx -t && sudo systemctl reload nginx
 
 source venv/bin/activate
@@ -115,8 +115,8 @@ python manage.py collectstatic --noinput
 
 cd ../frontend && rm -rf dist && npm ci && npm run build
 
-sudo systemctl restart generator_test
-sudo systemctl status generator_test
+sudo systemctl restart itflux
+sudo systemctl status itflux
 ```
 
 ## Проверки после деплоя

@@ -1,22 +1,22 @@
 #!/bin/bash
 # Запускать после копирования файлов проекта на сервер
-# bash /opt/generator_test/deploy/post_deploy.sh
+# bash /opt/itflux/deploy/post_deploy.sh
 set -e
 
-APP_DIR="/opt/generator_test"
-DB_NAME="generatordb_test"
-DB_USER="generatoruser_test"
+APP_DIR="/opt/itflux"
+DB_NAME="itflux"
+DB_USER="itflux_user"
 DOMAIN="ВАШ_ДОМЕН.ru"
 
 echo "=== Создание папки для логов ==="
-mkdir -p /var/log/generator_test
-chown generator_test:generator_test /var/log/generator_test
+mkdir -p /var/log/itflux
+chown itflux:itflux /var/log/itflux
 
 echo "=== Права на папку приложения ==="
-chown -R generator_test:generator_test $APP_DIR
+chown -R itflux:itflux $APP_DIR
 
 echo "=== Установка Python зависимостей ==="
-sudo -u generator_test $APP_DIR/venv/bin/pip install \
+sudo -u itflux $APP_DIR/venv/bin/pip install \
     django django-cors-headers django-ckeditor-5 django-ckeditor \
     weasyprint psycopg2-binary channels gunicorn whitenoise PyJWT
 
@@ -50,15 +50,15 @@ else:
 "
 
 echo "=== Установка конфига Nginx ==="
-cp $APP_DIR/deploy/nginx.conf /etc/nginx/sites-available/generator_test
-ln -sf /etc/nginx/sites-available/generator_test /etc/nginx/sites-enabled/generator_test
+cp $APP_DIR/deploy/nginx.conf /etc/nginx/sites-available/itflux
+ln -sf /etc/nginx/sites-available/itflux /etc/nginx/sites-enabled/itflux
 nginx -t && systemctl reload nginx
 
 echo "=== Установка systemd сервиса ==="
-cp $APP_DIR/deploy/gunicorn.service /etc/systemd/system/generator_test.service
+cp $APP_DIR/deploy/gunicorn.service /etc/systemd/system/itflux.service
 systemctl daemon-reload
-systemctl enable generator_test
-systemctl restart generator_test
+systemctl enable itflux
+systemctl restart itflux
 
 echo ""
 echo "=== Готово! ==="

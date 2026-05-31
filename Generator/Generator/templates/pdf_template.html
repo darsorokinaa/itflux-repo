@@ -2,425 +2,441 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Вариант — ГенУрок.рф</title>
+<title>Вариант — Цифровой Поток</title>
 {{ math_styles|safe }}
 <style>
-:root {
-  /* Как на платформе: header-gradient и акценты */
-  --accent: #3e73ef;
-  --accent-end: #4b91f7;
-  --accent-light: #eef4ff;
-  --accent-soft: #e8f2ff;
-  --text-main: #111111;
-  --text-secondary: #555555;
-  --text-muted: #888888;
-  --border: #cccccc;
-  --border-light: #e0e0e0;
-  --answer-line: #b0b0b0;
-  --solution-bg: #f8f8f8;
-  --font-size-base: 11pt;
-  --font-size-small: 9pt;
-  --font-size-task-num: 13pt;
-  --font-size-header: 10pt;
-  --font-size-part-label: 10pt;
-  --line-height: 1.65;
-  --page-margin: 18mm;
-  --page-margin-top: 16mm;
-  --page-margin-bottom: 14mm;
-  /* Слот рисунка: геометрия (task-geom); алгебра — крупнее */
-  --task-image-slot-w: 48mm;
-  --task-image-slot-h: 38mm;
-  /* Алгебра (числовые прямые, графики): немного выше геометрии, но без лишних полей */
-  --task-image-slot-w-algebra: 113mm;
-  --task-image-slot-h-algebra: 69mm;
-}
-
 @page {
   size: A4;
-  margin: 14mm 18mm 14mm 18mm;
-  @top-center {
-    content: string(variant-id);
-    font-family: "Montserrat", "Segoe UI", system-ui, sans-serif;
-    font-size: 8pt;
-    font-weight: 600;
-    color: #3e73ef;
-    letter-spacing: 0.03em;
-    vertical-align: bottom;
-  }
+  margin: 9mm 9mm 11mm;
   @bottom-left {
-    content: "ГенУрок.рф";
-    font-family: "Montserrat", "Segoe UI", system-ui, sans-serif;
-    font-size: 7.5pt;
-    color: #7d9fd9;
-    letter-spacing: 0.05em;
-  }
-  @bottom-center {
-    content: string(variant-id);
-    font-family: "Montserrat", "Segoe UI", system-ui, sans-serif;
-    font-size: 7.5pt;
-    color: #9eb7e8;
+    content: "Цифровой Поток · @itfluxacademy";
+    font-family: "PT Sans", "Inter", Arial, "DejaVu Sans", sans-serif;
+    font-size: 9pt;
+    color: #64748b;
   }
   @bottom-right {
-    content: counter(page) " / " counter(pages);
-    font-family: "Montserrat", "Segoe UI", system-ui, sans-serif;
-    font-size: 8pt;
-    color: #888888;
+    content: "стр. " counter(page) " / " counter(pages);
+    font-family: "PT Sans", "Inter", Arial, "DejaVu Sans", sans-serif;
+    font-size: 9pt;
+    color: #94a3b8;
   }
 }
 
-@page :first {
-  margin-top: 14mm;
-}
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+:root {
+  --ink: #0f172a;
+  --ink-mid: #334155;
+  --ink-soft: #64748b;
+  --ink-faint: #94a3b8;
+  --line: #e2e8f0;
+  --line-soft: #f1f5f9;
+  --accent: #1d4ed8;
+  --accent-light: #eff6ff;
+  --accent-mid: #3b82f6;
+  --accent-line: #bfdbfe;
+  --num-bg: #1d4ed8;
+  --num-color: #ffffff;
+  --bg-soft: #f8fafc;
 }
 
 html, body {
-  font-family: "PT Serif", "Georgia", "Times New Roman", serif;
-  font-size: var(--font-size-base);
-  line-height: var(--line-height);
-  color: var(--text-main);
-  background: white;
+  font-family: "PT Sans", "Inter", Arial, "DejaVu Sans", "Liberation Sans", sans-serif;
+  color: var(--ink);
+  background: #ffffff;
+  font-size: 11pt;
+  line-height: 1.55;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
 
-/* Красивая шапка — в потоке документа, только страница 1 */
-.exam-header {
+.page { width: 100%; }
+
+/* Тело варианта — одна колонка, вертикальный A4 */
+.variant-body { display: block; }
+
+/* ── HEADER ── */
+.header {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  display: flex;
   align-items: center;
-  padding: 11px 18px;
-  margin: 0 0 22px 0;
-  border-radius: 12px;
-  background: #3e73ef;
-  box-shadow: 0 3px 14px rgba(44, 92, 232, 0.28);
-  border-bottom: none;
+  gap: 10px;
+  color: var(--ink);
+  text-decoration: none;
 }
 
-.exam-header__brand {
-  font-family: "Unbounded", "Montserrat", "Segoe UI", system-ui, sans-serif;
-  font-size: 10.5pt;
+.brand:hover, .brand:visited, .brand:active { color: var(--ink); text-decoration: none; }
+
+.logo-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  color: #ffffff;
-  text-transform: uppercase;
-  padding-right: 16px;
-  margin-right: 16px;
-  border-right: 1.5px solid rgba(255, 255, 255, 0.35);
-  line-height: 1.2;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  font-size: 10pt;
+  letter-spacing: 0.01em;
+  overflow: hidden;
 }
 
-.exam-header__meta {
+.logo-mark img {
+  width: 26px;
+  height: 26px;
+  display: block;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.brand-text { line-height: 1.25; }
+
+.brand-name {
+  font-size: 11pt;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.1px;
+}
+
+.brand-handle {
+  font-size: 8.8pt;
+  color: var(--accent-mid);
+  font-weight: 400;
+  margin-top: 1px;
+}
+
+.header-meta {
   text-align: right;
   line-height: 1.4;
 }
 
-.exam-header__subject {
-  font-family: "Montserrat", "Segoe UI", system-ui, sans-serif;
-  font-size: 11pt;
-  font-weight: 700;
-  color: #ffffff;
-  letter-spacing: 0.01em;
-}
-
-.exam-header__details {
-  font-family: "Montserrat", "Segoe UI", system-ui, sans-serif;
-  font-size: 9pt;
+.exam-title {
+  font-size: 10pt;
+  color: var(--ink);
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.88);
+}
+
+.exam-duration {
+  font-size: 8.8pt;
+  color: var(--ink-soft);
   margin-top: 2px;
-  letter-spacing: 0.02em;
 }
 
-.exam-header-wrap {
-  display: block;
-  page-break-after: avoid;
-  break-after: avoid-page;
-}
-
-.exam-instruction {
-  font-size: 9pt;
-  color: var(--text-secondary);
-  font-style: italic;
-  line-height: 1.4;
-  padding: 6px 0 14px 0;
-  margin-bottom: 18px;
-  /* Цепочка: шапка → инструкция → первое задание — нельзя разрывать */
-  page-break-after: avoid;
-  break-after: avoid-page;
-}
-
-.exam-instruction p { margin-bottom: 6px; }
-.exam-instruction p:last-child { margin-bottom: 0; }
-
-.task {
-  /* position:relative + padding-left без overflow:hidden → WeasyPrint разрезает
-     такой блок между страницами (overflow:hidden/float создают BFC — неделимый блок) */
-  display: block;
-  position: relative;
-  padding-left: 38px; /* 28px (номер) + 10px (зазор) */
-  page-break-inside: auto;
-  break-inside: auto;
-  margin-bottom: 6px;
-  border: none;
-  box-shadow: none;
-}
-
-.task--long { page-break-inside: auto; }
-.task--long .task__text { page-break-after: avoid; }
-
-.task__num {
-  /* absolute → не влияет на поток, рисуется на первой странице задания */
-  position: absolute;
-  left: 0;
-  top: 2px;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: "Montserrat", "Arial", sans-serif;
-  font-size: var(--font-size-task-num);
+/* ── VARIANT TITLE ── */
+.variant-title {
+  font-size: 22pt;
   font-weight: 700;
-  color: var(--accent);
-  border: 1.5px solid var(--accent);
-  border-radius: 3px;
-  line-height: 1;
+  color: var(--ink);
+  letter-spacing: -0.4px;
+  margin: 12px 0 20px;
 }
 
-.task__body {
-  display: block;
-}
-
-.task__text {
-  font-size: var(--font-size-base);
-  line-height: var(--line-height);
-  color: var(--text-main);
-}
-
-/* LaTeX / MathJax в условии — крупнее базового текста */
-.task__text .math-inline {
-  font-size: 0.935em;
-  vertical-align: middle;
-}
-.task__text .math-display {
-  font-size: 0.935em;
-  margin: 0.25em 0;
-}
-
-.task__text p { margin-bottom: 6px; }
-.task__text p:last-child { margin-bottom: 0; }
-
-.task__file { margin-top: 6px; }
-.task__file-link {
-  font-family: "Montserrat", "Arial", sans-serif;
+/* ── PART HEADING ── */
+.section-title {
   font-size: 9pt;
-  color: var(--accent);
-  text-decoration: none;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-mid);
+  margin: 22px 0 14px;
 }
 
-.task__answer-line {
-  display: flex;
-  align-items: baseline;
-  margin-top: 8px;
-}
+.section-title:first-of-type { margin-top: 4px; }
 
-.task__answer-field {
-  flex: 1;
-  max-width: 100%;
-  border-bottom: 1px solid var(--border);
-  height: 18px;
-}
-
-.exam-preview {
-  margin-bottom: 8px;
+/* ── INSTRUCTION / PREVIEW ── */
+.instruction {
   page-break-inside: avoid;
-  border: none;
-  border-radius: 0;
-  padding: 10px 0;
+  break-inside: avoid;
+  margin: 0 0 18px;
+  padding: 10px 14px;
+  background: var(--accent-light);
+  border: 1px solid var(--accent-line);
+  border-radius: 8px;
+  font-size: 10pt;
+  color: var(--ink-mid);
 }
 
-.exam-preview--reminder {
+.instruction p { margin: 0 0 4px; }
+.instruction p:last-child { margin: 0; }
+
+.preview {
+  page-break-inside: avoid;
+  break-inside: avoid;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  font-size: 10pt;
+  color: var(--ink-mid);
+  line-height: 1.55;
+}
+
+.preview p { margin: 0 0 4px; }
+.preview p:last-child { margin: 0; }
+
+.preview-title {
+  font-weight: 700;
+  font-size: 10pt;
+  margin-bottom: 4px;
+  color: var(--ink);
+}
+
+.preview--reminder {
   display: flex;
   gap: 10px;
   align-items: flex-start;
+  background: var(--accent-light);
+  border: 1px solid var(--accent-line);
+  border-left: 3px solid var(--accent);
 }
 
-.exam-preview__bang {
-  font-family: "Montserrat", "Arial", sans-serif;
-  font-size: 18pt;
-  font-weight: 700;
-  line-height: 1;
+.preview-bang {
   flex-shrink: 0;
-}
-
-.exam-preview__title {
-  font-family: "Montserrat", "Arial", sans-serif;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
   font-size: 10pt;
   font-weight: 700;
+  line-height: 20px;
   text-align: center;
-  margin-bottom: 6px;
 }
 
-.exam-preview__inner {
-  font-size: 9.5pt;
-  line-height: 1.35;
-  text-align: justify;
-}
-
-.exam-preview__inner p { margin-bottom: 4px; }
-
-.answers-page {
-  page-break-before: always;
+/* ── QUESTION ── */
+.task {
   page-break-inside: avoid;
+  break-inside: avoid;
+  margin-bottom: 16px;
 }
 
-/* Две колонки таблиц ответов — одна страница, перенос «вправо» при переполнении по высоте */
-.answers-columns-wrap {
+/* Не разрывать длинные задания между колонками тоже */
+.task--long { page-break-inside: avoid; break-inside: avoid; }
+
+.task-content {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  column-gap: 14px;
+  row-gap: 0;
+  align-items: start;
+}
+
+.task-number {
+  width: 26px;
+  height: 26px;
+  background: var(--num-bg);
+  color: var(--num-color);
+  border-radius: 6px;
   display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 12px;
-  width: 100%;
-  page-break-inside: avoid;
+  align-items: center;
+  justify-content: center;
+  font-size: 10.5pt;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 1px;
+  letter-spacing: 0;
 }
 
-.answers-column {
-  flex: 1 1 0;
+.task-text {
+  font-size: 9.5pt;
+  line-height: 1.5;
+  color: var(--ink-mid);
+  margin: 0;
   min-width: 0;
 }
 
-.answers-column .answers-table {
-  margin-bottom: 0;
+.task-text strong { color: var(--ink); font-weight: 600; }
+.task-text em { font-style: italic; color: var(--ink); }
+.task-text code {
+  font-family: "Courier New", "DejaVu Sans Mono", monospace;
+  background: var(--line-soft);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 0.9em;
+  color: var(--ink);
 }
 
-.answers-columns-wrap--split .answers-table {
+.task-text p { margin: 0 0 6px; }
+.task-text p:last-child { margin: 0; }
+.task-text ul, .task-text ol { margin: 6px 0 6px 20px; padding: 0; }
+.task-text li { margin: 1px 0; }
+.task-text hr { display: none !important; }
+
+.task-points {
+  white-space: nowrap;
+  font-size: 9pt;
+  color: var(--ink-faint);
+  padding-top: 4px;
+}
+
+/* materials & answer-line span columns 2..4 */
+.materials {
+  grid-column: 2 / 4;
+  margin-top: 8px;
   font-size: 9pt;
 }
 
-.answers-columns-wrap--split .answers-table tbody td {
-  padding: 5px 7px;
-}
-
-.answers-columns-wrap--split .answer-cell-inner .math-inline,
-.answers-columns-wrap--split .answer-cell-inner .math-display {
-  font-size: 1.155em;
-}
-
-.answers-page__title {
-  font-family: "Montserrat", "Arial", sans-serif;
-  font-size: 11pt;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--text-main);
-  margin-bottom: 12px;
-  padding-bottom: 0;
-  text-transform: uppercase;
-}
-
-.answers-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: "Montserrat", "Arial", sans-serif;
-  font-size: 10pt;
-  margin-bottom: 20px;
-  border: 1.5px solid var(--accent);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.answers-table thead th {
-  background: var(--accent);
-  color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.45);
-  padding: 7px 10px;
-  text-align: center;
-  font-weight: 700;
-  font-size: 9pt;
-  font-family: "Montserrat", "Segoe UI", system-ui, sans-serif;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.12);
-  -webkit-print-color-adjust: exact;
-  print-color-adjust: exact;
-}
-
-.answers-table thead th.answers-table__th-num {
-  width: 48px;
-  max-width: 52px;
-}
-
-.answers-table thead th.answers-table__th-body {
-  text-align: left;
-}
-
-.answers-table tbody td {
-  border: 1px solid var(--border);
-  text-align: left;
-  vertical-align: top;
-  background: #fff;
-  color: var(--text-main);
-  padding: 8px 10px;
-}
-
-.answers-table tbody td.answers-table__td-num {
-  width: 48px;
-  max-width: 52px;
-  text-align: center;
-  font-weight: 700;
-  color: var(--accent);
-  font-family: "Montserrat", "Segoe UI", system-ui, sans-serif;
-  vertical-align: top;
-}
-
-.answers-table tbody td.answers-table__td-body {
-  min-height: 2.5em;
-}
-
-.answers-table tbody tr:nth-child(even) td {
+.materials a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: var(--accent-light);
+  border: 1px solid var(--accent-line);
+  border-radius: 5px;
+  padding: 3px 10px;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 9pt;
+  font-weight: 500;
 }
 
-.answer-cell-inner {
-  display: block;
-  text-align: left;
-  line-height: 1.45;
-  white-space: normal;
-  word-break: break-word;
+.answer {
+  grid-column: 2 / 4;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 10px;
+  line-height: 1;
 }
 
-.answer-cell-inner .math-inline,
-.answer-cell-inner .math-display {
-  display: block !important;
-  margin: 4px 0;
+.answer-label {
+  font-size: 9.5pt;
+  color: var(--ink-soft);
+  font-weight: 500;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+/* Линия для рукописного ответа: только верхняя граница, без высоты/фона.
+   Empty <span> с background в flex-контейнере у WeasyPrint иногда даёт
+   лишний вертикальный артефакт по левому краю — border-top чище. */
+.answer-line {
+  flex: 1 1 auto;
+  max-width: 260px;
+  height: 0;
+  line-height: 0;
+  font-size: 0;
+  border-top: 1px solid var(--ink-faint);
+  background: none;
+}
+
+/* ── TABLES ── */
+.task-text .task-html-block {
   text-align: left;
+  margin: 0 0 6px;
+}
+
+/* Принудительно держим табличное отображение: FIPI-HTML иногда тащит
+   inline style="display:block" или нестандартные display-объявления на ячейках,
+   из-за которых таблица «схлопывается» в столбец текста.                       */
+.task-text table {
+  display: table !important;
+  border-collapse: collapse !important;
+  margin: 6px 0;
+  width: auto;
   max-width: 100%;
-  font-size: 1.232em;
+  font-size: 9.5pt;
+  background: transparent !important;
+  background-color: transparent !important;
 }
 
-.answer-cell-inner svg {
-  display: block !important;
-  margin: 0.25em 0;
+.task-text thead { display: table-header-group !important; }
+.task-text tbody { display: table-row-group !important; }
+.task-text tfoot { display: table-footer-group !important; }
+.task-text tr { display: table-row !important; }
+.task-text col { display: table-column !important; }
+.task-text colgroup { display: table-column-group !important; }
+
+.task-text th,
+.task-text td {
+  display: table-cell !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 1px solid rgba(21, 80, 216, 0.2) !important;
+  outline: none !important;
+  color: var(--ink) !important;
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+  font-size: 9.5pt;
+  font-weight: inherit;
+}
+
+.task-text th { font-weight: 600; color: var(--ink); }
+
+.task-text hr {
+  display: none;
+  border: none;
+  height: 0;
+  margin: 0;
+}
+
+/* ── CODE BLOCK ── */
+.task-text pre.latex-verbatim,
+.task-text .code-block {
+  display: block;
+  margin: 8px 0;
+  padding: 10px 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: "Courier New", "DejaVu Sans Mono", monospace;
+  font-size: 9.5pt;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink);
+}
+
+/* ── IMAGES & FIGURES ── */
+.task-text img {
+  display: block;
   max-width: 100%;
   height: auto;
+  margin: 6px auto;
 }
 
-.variant-id-anchor {
-  string-set: variant-id content();
-  display: none;
+.task-text figure,
+.task-text figure.image,
+.task-text figure.table {
+  display: block;
+  margin: 6px auto;
+  text-align: center;
+  border: none;
 }
 
-.no-break { page-break-inside: avoid; }
-.break-before { page-break-before: always; }
+.task-text figure img {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
 
-/* Формулы: не использовать слот размеров иллюстраций */
-.task__text .math-inline img,
-.task__text .math-inline svg {
+.task-text figcaption {
+  margin-top: 3px;
+  font-size: 9pt;
+  color: var(--ink-soft);
+  text-align: center;
+  font-style: italic;
+}
+
+/* ── MATH ── */
+.task-text .math-inline { font-size: 0.98em; vertical-align: middle; color: var(--ink); }
+.task-text .math-display { font-size: 0.98em; margin: 0.3em 0; color: var(--ink); }
+
+.task-text .math-inline img,
+.task-text .math-inline svg {
   width: auto !important;
   height: auto !important;
   max-width: 100% !important;
@@ -432,8 +448,8 @@ html, body {
   object-fit: contain !important;
 }
 
-.task__text .math-display img,
-.task__text .math-display svg {
+.task-text .math-display img,
+.task-text .math-display svg {
   width: auto !important;
   height: auto !important;
   max-width: 100% !important;
@@ -444,260 +460,249 @@ html, body {
   object-fit: contain !important;
 }
 
-.task__text img {
-  box-sizing: border-box;
+.break-before { /* отключено: без принудительных переносов страниц внутри заданий */ }
+
+/* ── ЧАСТЬ 2 ОГЭ ИНФОРМАТИКА: компактный режим
+   Задания часть 2 длинные (программирование, таблицы, картинки) — даём
+   уменьшенный шрифт и ограничиваем картинки, чтобы всё умещалось.
+   Каждое задание стартует с новой страницы, чтобы не «съезжать».          */
+.task--inf-p2 {
+  page-break-before: always;
+  break-before: page;
+  page-break-inside: auto;
+  break-inside: auto;
+  margin-bottom: 0;
+}
+
+.task--inf-p2 .task-content {
+  grid-template-columns: 26px 1fr auto;
+  column-gap: 12px;
+}
+
+.task--inf-p2 .task-number {
+  width: 24px;
+  height: 24px;
+  font-size: 10pt;
+}
+
+.task--inf-p2 .task-text {
+  font-size: 9pt;
+  line-height: 1.42;
+}
+
+.task--inf-p2 .task-text p { margin: 0 0 4px; }
+.task--inf-p2 .task-text ul,
+.task--inf-p2 .task-text ol { margin: 4px 0 4px 18px; }
+.task--inf-p2 .task-text li { margin: 0; }
+
+.task--inf-p2 .task-text table { font-size: 8.8pt; }
+.task--inf-p2 .task-text th,
+.task--inf-p2 .task-text td { font-size: 8.8pt; padding: 1px 4px; }
+
+.task--inf-p2 .task-text pre.latex-verbatim,
+.task--inf-p2 .task-text .code-block {
+  font-size: 8.8pt;
+  line-height: 1.42;
+  padding: 8px 10px;
+  margin: 6px 0;
+}
+
+.task--inf-p2 .task-text img {
+  max-width: 78%;
+  max-height: 95mm;
+  margin: 4px auto;
+  object-fit: contain;
+}
+
+.task--inf-p2 .task-text figure img {
+  max-width: 78%;
+  max-height: 95mm;
+}
+
+.task--inf-p2 .task-points { font-size: 8.5pt; padding-top: 2px; }
+
+.task--inf-p2 .materials { margin-top: 6px; font-size: 8.5pt; }
+.task--inf-p2 .materials a { font-size: 8.5pt; padding: 2px 8px; }
+
+.task--inf-p2 .answer { margin-top: 8px; }
+.task--inf-p2 .answer-label { font-size: 9pt; }
+
+/* Задание 13 ОГЭ информатика: особенно длинное — ещё компактнее */
+.task--inf-13 .task-text { font-size: 8.7pt; line-height: 1.38; }
+.task--inf-13 .task-text table,
+.task--inf-13 .task-text th,
+.task--inf-13 .task-text td { font-size: 8.4pt; }
+.task--inf-13 .task-text img,
+.task--inf-13 .task-text figure img {
+  max-width: 70%;
+  max-height: 85mm;
+}
+
+/* ── ANSWERS PAGE — карточки ── */
+.answers-page {
+  page-break-before: always;
+  break-before: page;
+  padding-top: 4px;
+}
+
+.answers-page__title {
+  font-size: 16pt;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 14px;
+  letter-spacing: -0.2px;
+}
+
+/* Колонки ответов уже посчитаны на бэке (1/2/3) и приходят как обычные div-колонки,
+   а не через CSS column-count: так WeasyPrint точно не разрежет карточку. */
+.answers-grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 0 14px;
+}
+
+.answers-page--cols-2 .answers-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.answers-page--cols-3 .answers-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+.answers-col {
   display: block;
-  width: var(--task-image-slot-w);
-  height: var(--task-image-slot-h);
-  max-width: 100%;
-  margin: 2px auto;
-  padding: 0;
-  object-fit: contain;
-  object-position: center;
-  border: none !important;
-  outline: none !important;
-  box-shadow: none !important;
+  min-width: 0;
 }
 
-/* CKEditor: рисунок в figure — тот же слот по ширине/высоте */
-.task__text figure,
-.task__text figure.image,
-.task__text figure.table {
-  border: none !important;
-  outline: none !important;
-  box-shadow: none !important;
-  background: transparent !important;
-  margin: 2px auto;
-  padding: 0 !important;
-  width: var(--task-image-slot-w);
-  max-width: 100%;
-  min-height: var(--task-image-slot-h);
-  box-sizing: border-box;
-  /* block — надёжнее в WeasyPrint, чем flex у figure */
-  display: block;
-  text-align: center;
+.answer-card {
+  background: var(--accent-light);
+  border: 1px solid var(--accent-line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
-.task__text figure img {
-  border: none !important;
-  width: 100%;
-  height: var(--task-image-slot-h);
-  max-width: 100%;
-  margin: 0 auto !important;
-  object-fit: contain;
-  object-position: center;
-}
-
-.task__text figcaption {
-  border: none !important;
-  margin-top: 4px;
-  font-size: 8.5pt;
-  color: var(--text-muted);
-  font-style: italic;
-  text-align: center;
-}
-
-/* Таблица внутри figure.image (вёрстка рисунка) — без сетки ячеек.
-   figure.table не трогаем: там часто текстовые таблицы тарифов — им нужна рамка из .task__text table */
-.task__text figure.image table {
-  border: none !important;
-  margin: 0 !important;
-  background: transparent !important;
-}
-
-.task__text figure.image table td,
-.task__text figure.image table th {
-  border: none !important;
-  padding: 2px !important;
-  background: transparent !important;
-}
-
-/* Таблица с иллюстрацией (координатная сетка и т.п.) — без внешней рамки */
-.task__text table:has(img) {
-  border: none !important;
-}
-
-/* Таблица только с изображениями — без границы и с тем же слотом по размеру */
-.task__text table:has(img) td:has(img:only-child),
-.task__text table:has(img) th:has(img:only-child) {
-  border: none !important;
-  background: transparent !important;
-  padding: 2px !important;
-  width: var(--task-image-slot-w);
-  height: var(--task-image-slot-h);
-  max-width: 100%;
-  vertical-align: middle !important;
-  text-align: center !important;
-  box-sizing: border-box;
-}
-
-.task__text table:has(img) td img,
-.task__text table:has(img) th img {
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  margin: 0 auto !important;
-}
-
-.task__text table {
-  border-collapse: collapse;
-  margin: 8px 0;
+.ans-num {
+  width: 22px;
+  height: 22px;
+  background: var(--num-bg);
+  color: #fff;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 9.5pt;
-  width: 100%;
-  max-width: 100%;
-  table-layout: fixed;
-  border: 0.75pt solid var(--accent);
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
-.task__text th,
-.task__text td {
-  border: 0.75pt solid var(--accent);
-  padding: 4px 8px;
-  text-align: center;
+.ans-val {
+  font-size: 10pt;
+  font-weight: 500;
+  color: var(--ink);
   word-break: break-word;
+  flex: 1;
 }
 
-.task__text th {
-  font-weight: 600;
-  background: var(--accent-soft);
-  font-family: "Montserrat", "Arial", sans-serif;
+.ans-val .math-inline,
+.ans-val .math-display {
+  font-size: 0.96em;
+  color: var(--ink);
 }
 
-/* Геометрия (task-geom): базовый слот. Алгебра / инф. без geom — чуть крупнее */
-.pdf-subject-math .task:not(.task-geom) .task__text img,
-.pdf-subject-inf .task:not(.task-geom) .task__text img {
-  width: var(--task-image-slot-w-algebra);
-  height: var(--task-image-slot-h-algebra);
+@media print {
+  body { background: #fff; }
 }
-
-.pdf-subject-math .task:not(.task-geom) .task__text figure,
-.pdf-subject-math .task:not(.task-geom) .task__text figure.image,
-.pdf-subject-math .task:not(.task-geom) .task__text figure.table,
-.pdf-subject-inf .task:not(.task-geom) .task__text figure,
-.pdf-subject-inf .task:not(.task-geom) .task__text figure.image,
-.pdf-subject-inf .task:not(.task-geom) .task__text figure.table {
-  width: var(--task-image-slot-w-algebra);
-  min-height: var(--task-image-slot-h-algebra);
-}
-
-.pdf-subject-math .task:not(.task-geom) .task__text figure img,
-.pdf-subject-inf .task:not(.task-geom) .task__text figure img {
-  height: var(--task-image-slot-h-algebra);
-}
-
-.pdf-subject-math .task:not(.task-geom) .task__text table:has(img) td:has(img:only-child),
-.pdf-subject-math .task:not(.task-geom) .task__text table:has(img) th:has(img:only-child),
-.pdf-subject-inf .task:not(.task-geom) .task__text table:has(img) td:has(img:only-child),
-.pdf-subject-inf .task:not(.task-geom) .task__text table:has(img) th:has(img:only-child) {
-  width: var(--task-image-slot-w-algebra);
-  height: var(--task-image-slot-h-algebra);
-}
-
-/* Разделители из разметки редактора в условии не показываем */
-.task__text hr {
-  display: none !important;
-  margin: 0 !important;
-  height: 0 !important;
-  border: none !important;
-}
-
 </style>
 
 {% if background_url %}
 <style>
-  body::before {
-    content: '';
-    position: fixed;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    background-image: url("{{ background_url }}");
-    background-repeat: no-repeat;
-    background-size: cover;
-    opacity: 0.18;
-    pointer-events: none;
-    z-index: 0;
-    print-color-adjust: exact;
-    -webkit-print-color-adjust: exact;
-  }
-  body { position: relative; z-index: 1; }
+body::before {
+  content: "";
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image: url("{{ background_url }}");
+  background-repeat: no-repeat;
+  background-size: cover;
+  opacity: 0.04;
+  pointer-events: none;
+  z-index: 0;
+}
 </style>
 {% endif %}
 </head>
-<body class="pdf-exam pdf-subject-{{ subject }}">
+<body class="pdf-subject-{{ subject }}">
+<main class="page">
 
-<span class="variant-id-anchor">Вариант №{{ variant.id }}</span>
-
-<div class="exam-header-wrap">
-<header class="exam-header">
-  <div class="exam-header__brand">ГенУрок.рф</div>
-  <div class="exam-header__meta">
-    <div class="exam-header__subject">{{ subject_label }} &nbsp;·&nbsp; {{ level_label }}</div>
-    <div class="exam-header__details">Вариант №{{ variant.id }}</div>
-  </div>
-</header>
-
-{% if instruction_blocks %}
-<div class="exam-instruction">
-  {% for item in instruction_blocks %}
-    {{ item.preview_html|safe }}
-  {% endfor %}
-</div>
-{% endif %}
-</div>
-
-{% for item in tasks_content %}
-  {% if item.type == "preview" %}
-    {% if item.is_reminder %}
-    <div class="exam-preview exam-preview--reminder{% if item.start_new_page %} break-before{% endif %}">
-      <span class="exam-preview__bang">!</span>
-      <div>
-        {% if item.part_title %}<div class="exam-preview__title">{{ item.part_title }}</div>{% endif %}
-        <div class="exam-preview__inner">{{ item.preview_html|safe }}</div>
+  <header class="header">
+    <a class="brand" href="https://t.me/itfluxacademy" target="_blank" rel="noopener">
+      <div class="logo-mark">
+        {% if header_logo %}
+          <img src="{{ header_logo }}" alt="Цифровой Поток">
+        {% else %}ЦП{% endif %}
       </div>
-    </div>
-    {% else %}
-    <div class="exam-preview{% if item.start_new_page %} break-before{% endif %}">
-      {% if item.part_title %}<div class="exam-preview__title">{{ item.part_title }}</div>{% endif %}
-      <div class="exam-preview__inner">{{ item.preview_html|safe }}</div>
-    </div>
-    {% endif %}
-  {% else %}
-    {% include "pdf_fragment_task.html" with item=item %}
-  {% endif %}
-{% endfor %}
+      <div class="brand-text">
+        <div class="brand-name">Цифровой Поток</div>
+        <div class="brand-handle">@itfluxacademy</div>
+      </div>
+    </a>
 
-<div class="answers-page">
-  <div class="answers-page__title">Ответы</div>
+    <div class="header-meta">
+      <div class="exam-title">{{ pdf_header_subject_line }}</div>
+      {% if exam_duration_label %}<div class="exam-duration">{{ exam_duration_label }}</div>{% endif %}
+    </div>
+  </header>
+
+  <h1 class="variant-title">Вариант №{{ variant.id }}</h1>
+
+  {% if instruction_blocks %}
+  <div class="instruction">
+    {% for item in instruction_blocks %}{{ item.preview_html|safe }}{% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="variant-body">
+  {% for item in tasks_content %}
+    {% if item.type == "preview" %}
+      {% if item.is_reminder %}
+      <div class="preview preview--reminder">
+        <span class="preview-bang">!</span>
+        <div>
+          {% if item.part_title %}<div class="preview-title">{{ item.part_title }}</div>{% endif %}
+          {{ item.preview_html|safe }}
+        </div>
+      </div>
+      {% else %}
+      <div class="preview">
+        {% if item.part_title %}<div class="preview-title">{{ item.part_title }}</div>{% endif %}
+        {{ item.preview_html|safe }}
+      </div>
+      {% endif %}
+    {% else %}
+      {% ifchanged item.part %}{% if item.part %}<div class="section-title">{{ item.part }}</div>{% endif %}{% endifchanged %}
+      {% include "pdf_fragment_task.html" with item=item %}
+    {% endif %}
+  {% endfor %}
+  </div>
 
   {% if answers_columns %}
-  <div class="answers-columns-wrap{% if answers_columns|length > 1 %} answers-columns-wrap--split{% endif %}">
-    {% for col_rows in answers_columns %}
-    <div class="answers-column">
-      <table class="answers-table answers-table--vertical">
-        <thead>
-          <tr>
-            <th class="answers-table__th-num">№</th>
-            <th class="answers-table__th-body">Ответ</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in col_rows %}
-          <tr>
-            <td class="answers-table__td-num">{% if row.order is not None %}{{ row.order }}{% else %}—{% endif %}</td>
-            <td class="answers-table__td-body"><div class="answer-cell-inner">{{ row.answer|safe }}</div></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  <section class="answers-page answers-page--cols-{{ answers_columns|length }}">
+    <div class="answers-page__title">Ответы</div>
+    <div class="answers-grid">
+      {% for col_rows in answers_columns %}
+      <div class="answers-col">
+        {% for row in col_rows %}
+          <div class="answer-card">
+            <div class="ans-num">{% if row.order %}{{ row.order }}{% else %}—{% endif %}</div>
+            <div class="ans-val">{% if row.answer %}{{ row.answer|safe }}{% else %}&nbsp;{% endif %}</div>
+          </div>
+        {% endfor %}
+      </div>
+      {% endfor %}
     </div>
-    {% endfor %}
-  </div>
-  {% else %}
-  <p class="exam-instruction" style="border:none;margin-bottom:0;">Нет заданий для таблицы.</p>
+  </section>
   {% endif %}
-</div>
 
+</main>
 </body>
 </html>

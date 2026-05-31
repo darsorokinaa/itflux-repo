@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import Nav from "../components/Nav";
+import SearchByIdForm from "../components/SearchByIdForm";
 import MathContent from "../components/MathContent";
 import { devApiBase } from "../utils/devApiBase";
 
@@ -66,21 +68,27 @@ function SearchVariantPage() {
       ? `${data.variant.subject_name || ""} · ${formatLevel(data.variant.level)} · ${tasksCountLabel(data.tasks.length)}`
       : "";
 
+  const wrap = (content) => (
+    <div className="digital-flow-page">
+      <Nav />
+      <div className="digital-flow-page__wrap">
+        <div className="container search-variant-page search-variant-page--v2">{content}</div>
+      </div>
+    </div>
+  );
+
   if (!q) {
-    return (
-      <div className="container search-variant-page search-variant-page--v2">
-        <div className="sv-intro">
-          <h1 className="sv-intro-title">Поиск варианта</h1>
-          <p className="sv-intro-lead">
-            Введите ID варианта в форме поиска на странице выбора предмета (ОГЭ или ЕГЭ).
-          </p>
-        </div>
+    return wrap(
+      <div className="sv-intro">
+        <h1 className="sv-intro-title">Поиск варианта</h1>
+        <p className="sv-intro-lead">Введите числовой ID сохранённого варианта.</p>
+        <SearchByIdForm kind="variant" className="search-page__form" />
       </div>
     );
   }
 
-  return (
-    <div className="container search-variant-page search-variant-page--v2">
+  return wrap(
+    <>
       {loading && (
         <div className="sv-state sv-state--loading">
           <div className="search-task-spinner" aria-hidden="true" />
@@ -114,6 +122,7 @@ function SearchVariantPage() {
             <div className="sv-header-text">
               <h1 className="sv-header-title">Вариант ID {data.variant.id}</h1>
               <p className="sv-header-sub">{subline}</p>
+              <SearchByIdForm kind="variant" initialQuery={q} className="search-page__form" />
             </div>
             {variantHref ? (
               <Link
@@ -160,7 +169,7 @@ function SearchVariantPage() {
           </div>
         </>
       )}
-    </div>
+    </>
   );
 }
 

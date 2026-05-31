@@ -72,9 +72,33 @@ class TaskList(models.Model):
     def __str__(self):
         return f'{self.subject} {self.level}: {self.task_number} - {self.task_title}'
 
+
+class ActiveTaskManager(models.Manager):
+    """Только задания с is_active=True (для банка, тренажёра и генерации вариантов)."""
+
+    def get_queryset(self):
+        return super().get_queryset().filter(is_active=True)
+
+
 # Банк задач
 class Task(models.Model):
-    task = models.ForeignKey(TaskList, on_delete=CASCADE, null=True, db_index=True)
+    task = models.ForeignKey(
+        TaskList,
+        on_delete=CASCADE,
+        null=True,
+        db_index=True,
+        verbose_name="Задача",
+    )
+    quick_level = models.ForeignKey(
+        Level,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        db_index=True,
+        verbose_name="Уровень",
+        help_text="Копия уровня номера задания для правки прямо в списке админки; при изменении обновляется TaskList.level.",
+    )
     subtopic = models.ForeignKey(          # ← новое
         'SubTopic',
         on_delete=models.SET_NULL,
@@ -93,6 +117,38 @@ class Task(models.Model):
 
     added_at = models.DateTimeField(default=timezone.now, db_index=True)
     created_by = models.CharField(default='ADMIN', db_index=True)
+
+    is_active = models.BooleanField("Активна", default=True, db_index=True)
+
+    vpr_class = models.PositiveSmallIntegerField(
+        "Класс",
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Класс для ВПР (например 7, 8, 10). Только для заданий уровня ВПР.",
+    )
+    vpr_advanced = models.BooleanField(
+        "Углублённый",
+        default=False,
+        db_index=True,
+        help_text="Углублённый уровень (ВПР).",
+    )
+    vpr_basic = models.BooleanField(
+        "Базовый",
+        default=False,
+        db_index=True,
+        help_text="Базовый уровень (ВПР).",
+    )
+
+    truth_table_enabled = models.BooleanField(
+        "Таблица истинности на сайте",
+        default=False,
+        db_index=True,
+        help_text="Если включено, на странице варианта для этого задания показывается виджет таблицы истинности; ответ по-прежнему вводится строкой из 0 и 1 без подстановки правильных значений.",
+    )
+
+    objects = models.Manager()
+    active_objects = ActiveTaskManager()
 
     def __str__(self):
         return f'{self.id}: {self.task_template[:100]}'
@@ -233,9 +289,16 @@ class SupportInfo(models.Model):
     info_text = CKEditor5Field()
     subject = models.ForeignKey(Subject, on_delete=CASCADE)
     level = models.ForeignKey(Level, on_delete=CASCADE, blank=True, null=True)
-    
+    vpr_class = models.PositiveSmallIntegerField(
+        "Класс (ВПР)",
+        blank=True,
+        null=True,
+        help_text="Если указано — блок показывается только при совпадении класса варианта. Пусто — для всех классов ВПР.",
+    )
+
     class Meta:
         verbose_name = "Справочная информация"
+
     def __str__(self):
         return self.info_text[:50]
 
@@ -511,3 +574,179 @@ class LessonStudentResult(models.Model):
             f"room={self.room_id} variant={self.variant_id} student={self.student} "
             f"{self.correct_count}/{self.total_tasks}"
         )
+
+
+class TagType(models.Model):
+    """Тип тегов в справочнике: сложность, затем другие категории."""
+
+    slug = models.SlugField("Код", max_length=50, unique=True, db_index=True)
+    name = models.CharField("Название", max_length=100)
+    description = models.TextField("Описание", blank=True)
+    order = models.PositiveSmallIntegerField("Порядок", default=0)
+
+    class Meta:
+        ordering = ("order", "id")
+        verbose_name = "Тип тегов"
+        verbose_name_plural = "Типы тегов"
+
+    def __str__(self):
+        return self.name
+
+
+class TagOption(models.Model):
+    """Элемент справочника тегов (бейдж с цветом для UI)."""
+
+    class BadgeStyle(models.TextChoices):
+        GREEN = "green", "Зелёный"
+        YELLOW = "yellow", "Жёлтый"
+        RED = "red", "Красный"
+        NEUTRAL = "neutral", "Нейтральный"
+        BLUE = "blue", "Синий"
+
+    tag_type = models.ForeignKey(
+        TagType,
+        on_delete=models.CASCADE,
+        related_name="options",
+        verbose_name="Тип тега",
+    )
+    slug = models.SlugField("Код", max_length=50)
+    emoji = models.CharField("Эмодзи", max_length=16, blank=True, default="")
+    title = models.CharField("Подпись", max_length=120)
+    badge_style = models.CharField(
+        "Стиль бейджа",
+        max_length=20,
+        choices=BadgeStyle.choices,
+        default=BadgeStyle.NEUTRAL,
+    )
+    order = models.PositiveSmallIntegerField("Порядок", default=0)
+    is_active = models.BooleanField("Активен", default=True)
+
+    class Meta:
+        ordering = ("tag_type", "order", "id")
+        verbose_name = "Тег (справочник)"
+        verbose_name_plural = "Теги (справочник)"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tag_type", "slug"],
+                name="uniq_generator_tagoption_type_slug",
+            ),
+        ]
+
+    def __str__(self):
+        prefix = f"{self.emoji} " if self.emoji else ""
+        return f"{prefix}{self.title} ({self.tag_type.name})"
+
+
+class PedagogicalRecommendation(models.Model):
+    LEVEL_CHOICES = [
+        ("VPR", "ВПР"),
+        ("OGE", "ОГЭ"),
+        ("EGE", "ЕГЭ"),
+    ]
+
+    subject = models.CharField("Предмет", max_length=100)
+    exam_level = models.CharField("Уровень", max_length=10, choices=LEVEL_CHOICES)
+
+    topic = models.CharField("Тема", max_length=255, blank=True)
+    subtopic = models.CharField("Подтема", max_length=255, blank=True)
+    skill_group = models.CharField("Группа навыка", max_length=255, blank=True)
+
+    short_recommendation = models.TextField("Краткая рекомендация")
+    detailed_recommendation = models.TextField("Подробная рекомендация", blank=True)
+    next_lesson_action = models.TextField("Действие на следующее занятие", blank=True)
+
+    student_hint = models.TextField("Подсказка для ученика", blank=True)
+    parent_hint = models.TextField("Пояснение для родителя", blank=True)
+    teacher_hint = models.TextField("Комментарий для учителя", blank=True)
+
+    priority = models.PositiveSmallIntegerField("Приоритет", default=100)
+    is_active = models.BooleanField("Активно", default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Педагогическая рекомендация"
+        verbose_name_plural = "Педагогические рекомендации"
+        indexes = [
+            models.Index(fields=["subject", "exam_level"]),
+            models.Index(fields=["topic", "subtopic"]),
+            models.Index(fields=["is_active"]),
+        ]
+
+    def __str__(self):
+        return f"{self.subject} · {self.exam_level} · {self.subtopic or self.topic or '—'}"
+
+
+class ReportConclusionTemplate(models.Model):
+    RESULT_LEVEL_CHOICES = [
+        ("very_low", "Очень низкий"),
+        ("low", "Низкий"),
+        ("medium", "Средний"),
+        ("high", "Высокий"),
+    ]
+
+    subject = models.CharField("Предмет", max_length=100, blank=True)
+    exam_level = models.CharField("Уровень", max_length=10, blank=True)
+
+    result_level = models.CharField(
+        "Уровень результата",
+        max_length=20,
+        choices=RESULT_LEVEL_CHOICES,
+    )
+
+    min_percent = models.PositiveSmallIntegerField("Минимальный процент", default=0)
+    max_percent = models.PositiveSmallIntegerField("Максимальный процент", default=100)
+
+    text_template = models.TextField("Шаблон вывода")
+
+    is_active = models.BooleanField("Активно", default=True)
+    priority = models.PositiveSmallIntegerField("Приоритет", default=100)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Шаблон вывода отчёта"
+        verbose_name_plural = "Шаблоны выводов отчёта"
+        indexes = [
+            models.Index(fields=["result_level", "is_active"]),
+            models.Index(fields=["subject", "exam_level"]),
+        ]
+
+    def __str__(self):
+        return f"{self.result_level} {self.min_percent}-{self.max_percent}% ({self.subject or '—'})"
+
+
+class ReportNextStepTemplate(models.Model):
+    CONDITION_CHOICES = [
+        ("many_skipped", "Много пропущенных заданий"),
+        ("many_errors", "Много ошибок"),
+        ("low_percent", "Низкий процент"),
+        ("medium_percent", "Средний процент"),
+        ("high_percent", "Высокий процент"),
+        ("slow_first_task", "Долго решал первое задание"),
+        ("default", "По умолчанию"),
+    ]
+
+    subject = models.CharField("Предмет", max_length=100, blank=True)
+    exam_level = models.CharField("Уровень", max_length=10, blank=True)
+    condition_type = models.CharField("Условие", max_length=50, choices=CONDITION_CHOICES)
+
+    text = models.TextField("Текст шага")
+    priority = models.PositiveSmallIntegerField("Приоритет", default=100)
+    is_active = models.BooleanField("Активно", default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Шаг «Что сделать дальше»"
+        verbose_name_plural = "Шаги «Что сделать дальше»"
+        indexes = [
+            models.Index(fields=["condition_type", "is_active"]),
+            models.Index(fields=["subject", "exam_level"]),
+        ]
+
+    def __str__(self):
+        return f"{self.get_condition_type_display()} — {self.text[:50]}"

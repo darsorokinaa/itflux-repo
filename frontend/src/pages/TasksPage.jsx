@@ -8,6 +8,7 @@ import {
   Link,
 } from "react-router-dom";
 import { FileText, Target, CircleHelp } from "lucide-react";
+import Nav from "../components/Nav";
 
 const SUBJECT_NAMES = {
   inf: "Информатика",
@@ -40,6 +41,28 @@ function formatSubjectDisplayName(level, subjectKey, rawName) {
     : (SUBJECT_NAMES[subjectKey] || subjectKey);
 }
 
+/** Предложный падеж для заголовка «Вариант по …» (по ключу из URL). */
+function subjectPrepPhraseForVariantTitle(level, subjectKey) {
+  const sub = String(subjectKey || "").toLowerCase();
+  const lv = String(level || "").toLowerCase();
+  const prepByKey = {
+    inf: "информатике",
+    history: "истории",
+    rus: "русскому языку",
+    chem: "химии",
+    phys: "физике",
+    lit: "литературе",
+    bio: "биологии",
+    math: "математике",
+    math_base: "математике",
+  };
+  const prep = prepByKey[sub];
+  if (!prep) return null;
+  if (lv === "ege" && sub === "math") return `${prep} (профильная)`;
+  if (lv === "ege" && sub === "math_base") return `${prep} (базовая)`;
+  return prep;
+}
+
 function itemsIncludeTaskNumber(items, n) {
   for (const item of items) {
     if (item.type === "group" || item.type === "linked_group") {
@@ -48,6 +71,28 @@ function itemsIncludeTaskNumber(items, n) {
     } else if (item.task_number === n) return true;
   }
   return false;
+}
+
+/** Query для API ВПР: класс и углублённость (advanced 0/1). */
+function vprApiQueryString(level, searchParams) {
+  if (String(level || "").toLowerCase() !== "vpr") return "";
+  const p = new URLSearchParams();
+  const g = searchParams.get("grade");
+  if (g) p.set("grade", g);
+  p.set("advanced", searchParams.get("advanced") === "1" ? "1" : "0");
+  return `?${p.toString()}`;
+}
+
+/** Подпись уровня в крошках: «ВПР · 8 класс», «ОГЭ · 9 класс», … */
+function levelBreadcrumbLabel(level, vprGradeParam) {
+  const lv = String(level || "").toLowerCase();
+  if (lv === "vpr") {
+    if (vprGradeParam) return `ВПР · ${vprGradeParam} класс`;
+    return "ВПР · 7, 8, 10 класс";
+  }
+  if (lv === "oge") return "ОГЭ · 9 класс";
+  if (lv === "ege") return "ЕГЭ · 11 класс";
+  return formatExamLevelRu(level);
 }
 
 function TasksPage() {
@@ -63,6 +108,10 @@ function TasksPage() {
     pathNorm.toLowerCase() === "/lesson/join";
 
   const searchQuery = searchParams.get("search")?.trim() ?? "";
+  const vprGradeParam = String(level || "").toLowerCase() === "vpr" ? searchParams.get("grade")?.trim() : null;
+  const vprAdvanced =
+    String(level || "").toLowerCase() === "vpr" && searchParams.get("advanced") === "1";
+  const levelCrumbStr = levelBreadcrumbLabel(level, vprGradeParam);
 
   const [tasks, setTasks] = useState([]);
   const [subjectNameFromApi, setSubjectNameFromApi] = useState(() =>
@@ -98,9 +147,22 @@ function TasksPage() {
   const [prepModeFocus, setPrepModeFocus] = useState("variant");
   /** Левая колонка «как это работает» скрыта по умолчанию */
   const [showPrepIntro, setShowPrepIntro] = useState(false);
+  const [submitBlock1, setSubmitBlock1] = useState(false);
+  const [submitBlock2, setSubmitBlock2] = useState(false);
 
   const variantSectionRef = useRef(null);
   const trainerSectionRef = useRef(null);
+
+  const vprQs = vprApiQueryString(level, searchParams);
+
+  const appendVprOptions = (payload) => {
+    if (String(level || "").toLowerCase() !== "vpr") return payload;
+    const next = { ...payload };
+    const g = searchParams.get("grade");
+    if (g && /^\d+$/.test(String(g).trim())) next.vpr_grade = parseInt(String(g).trim(), 10);
+    next.vpr_advanced = searchParams.get("advanced") === "1";
+    return next;
+  };
 
   useLayoutEffect(() => {
     document.body.classList.add("tasks-prep-v2-active");
@@ -116,7 +178,7 @@ function TasksPage() {
   useEffect(() => {
     if (isLessonJoinPath) return undefined;
     let cancelled = false;
-    fetch(`/api/${level}/${subject}/subtopics/`)
+    fetch(`/api/${level}/${subject}/subtopics/${vprQs}`)
       .then((res) => (res.ok ? res.json() : { subtopics_by_task: [] }))
       .then((data) => {
         if (!cancelled) {
@@ -129,7 +191,7 @@ function TasksPage() {
         }
       });
     return () => { cancelled = true; };
-  }, [level, subject, isLessonJoinPath]);
+  }, [level, subject, isLessonJoinPath, vprQs]);
 
   useEffect(() => {
     if (isLessonJoinPath) return;
@@ -155,7 +217,7 @@ function TasksPage() {
     setSubjectNameFromApi(
       formatSubjectDisplayName(level, subject, SUBJECT_NAMES[subject] || subject)
     );
-    fetch(`/api/${level}/${subject}/tasks/`)
+    fetch(`/api/${level}/${subject}/tasks/${vprQs}`)
       .then((res) => {
         if (res.status === 404) {
           throw new Error(
@@ -184,7 +246,7 @@ function TasksPage() {
         }
       });
     return () => { cancelled = true; };
-  }, [level, subject, isLessonJoinPath]);
+  }, [level, subject, isLessonJoinPath, vprQs]);
 
   // На мобильных прокрутить к блоку подтем при открытии
   useEffect(() => {
@@ -348,11 +410,8 @@ function TasksPage() {
       }
     }
 
-    return payload;
+    return appendVprOptions(payload);
   };
-
-  const [submitBlock1, setSubmitBlock1] = useState(false);
-  const [submitBlock2, setSubmitBlock2] = useState(false);
 
   const onPart1 = () => {
     const items = onlyFipiVariant
@@ -487,7 +546,7 @@ function TasksPage() {
       });
       if (Object.keys(counts).length) payload.subtopic_counts = counts;
     }
-    return payload;
+    return appendVprOptions(payload);
   };
 
   const toggleSubtopic = (subtopicId) => {
@@ -737,7 +796,10 @@ function TasksPage() {
 
   const getTaskCountForIdentifier = (identifier) => getEffectiveTaskCount(identifier);
 
-  const prepShell = (main) => (
+  const prepShell = (main) => {
+    const subjectPickerUrl = `/subject/${level}${location.search || ""}`;
+    const levelCrumb = levelBreadcrumbLabel(level, vprGradeParam);
+    return (
     <div
       className={`tasks-prep-shell${showPrepIntro ? " tasks-prep-shell--intro-open" : ""}`}
     >
@@ -771,25 +833,19 @@ function TasksPage() {
         </div>
       </aside>
       <div className="tasks-prep-main">
-        <div className="tasks-prep-page-shell">
           <div className="tasks-prep-topbar">
             <nav className="tasks-prep-breadcrumb" aria-label="Навигация по разделам">
-              <Link className="tasks-prep-bc-link" to="/">
-                Главная
+              <Link className="subject-pick__back" to={subjectPickerUrl}>
+                ← На главную
               </Link>
               <span className="tasks-prep-bc-sep" aria-hidden>
                 /
               </span>
-              <Link className="tasks-prep-bc-link" to={`/${level}`}>
-                {formatExamLevelRu(level)}
-              </Link>
+              <span className="tasks-prep-bc-level">{levelCrumb}</span>
               <span className="tasks-prep-bc-sep" aria-hidden>
                 /
               </span>
               <span className="tasks-prep-bc-current">{subjectNameFromApi}</span>
-              <span className="tasks-prep-bc-chip tasks-prep-bc-chip--mode">
-                {prepModeFocus === "variant" ? "Вариант" : "Тренажёр"}
-              </span>
             </nav>
             <button
               type="button"
@@ -802,35 +858,37 @@ function TasksPage() {
             </button>
           </div>
           {main}
-        </div>
+      </div>
+    </div>
+    );
+  };
+
+  const prepDigitalWrap = (content) => (
+    <div className="digital-flow-page">
+      <Nav />
+      <div className="digital-flow-page__wrap">
+        <div className="tasks-page tasks-page--prep-v2 tasks-prep-flow">{content}</div>
       </div>
     </div>
   );
 
   if (loading) {
-    return (
-      <div className="container tasks-page tasks-page--prep-v2">
-        {prepShell(
-          <p className="tasks-prep-state-text">Загрузка заданий…</p>
-        )}
-      </div>
+    return prepDigitalWrap(
+      prepShell(<p className="tasks-prep-state-text">Загрузка заданий…</p>),
     );
   }
 
   if (error) {
-    return (
-      <div className="container tasks-page tasks-page--prep-v2">
-        {prepShell(<p className="error">{error}</p>)}
-      </div>
-    );
+    return prepDigitalWrap(prepShell(<p className="error">{error}</p>));
   }
 
   const part1Blocked = submitBlock1 || (subject === "inf" && level === "ege");
   const nPart1 = part1Tasks.length;
   const nPart2 = part2Tasks.length;
+  const variantTitlePrep = subjectPrepPhraseForVariantTitle(level, subject);
 
-  return (
-    <div className="container tasks-page tasks-page--prep-v2">
+  return prepDigitalWrap(
+    <>
       {tasks.length === 0 ? (
         <p className="tasks-page-empty-hint" role="status">
           Для этого предмета и уровня в базе пока нет ни одного задания в списке номеров. Добавьте записи TaskList и задачи в админке — после этого здесь появятся кнопки и генерация вариантов.
@@ -838,22 +896,32 @@ function TasksPage() {
       ) : null}
       {prepShell(
         <>
-          <header className="tasks-prep-subject-head">
-            <div className="tasks-prep-subject-tags" aria-label="Предмет и уровень">
-              <span className="tag-subject">{subjectNameFromApi}</span>
-              <span className="tag-exam">{formatExamLevelRu(level)}</span>
-            </div>
-            <h1 id="prep-subject-heading" className="tasks-prep-subject-heading">
-              {subjectNameFromApi}
-            </h1>
-            <p className="tasks-prep-subject-caption">
+          <header className="section-head section-head--page">
+            <h1 id="prep-subject-heading" className="section-head__title">
               {prepModeFocus === "variant"
-                ? "Экзаменационный вариант для урока и самоподготовки"
-                : "Тренировка по номерам и подтемам"}
+                ? variantTitlePrep
+                  ? `Вариант по ${variantTitlePrep}`
+                  : `Вариант — ${subjectNameFromApi}`
+                : `Тренировка по номерам — ${subjectNameFromApi}`}
+            </h1>
+            <p className="section-head__lead">
+              {prepModeFocus === "variant"
+                ? "Соберите работу для урока, домашнего задания или самостоятельной подготовки."
+                : "Отработайте конкретные номера, темы и слабые места в комфортном темпе."}
+              {vprAdvanced ? " · Углублённый уровень" : null}
             </p>
           </header>
 
-          <div className="tasks-prep-mode-row" role="radiogroup" aria-label="Сценарий подготовки">
+          <section className="tasks-prep-format-section" aria-labelledby="prep-format-work-title">
+            <header className="section-head">
+              <h2 id="prep-format-work-title" className="section-head__title">
+                Выберите формат работы
+              </h2>
+              <p className="section-head__lead">
+                Определите, как ученик будет проходить задания.
+              </p>
+            </header>
+            <div className="tasks-prep-mode-row" role="radiogroup" aria-label="Сценарий подготовки">
             <label
               className={`tasks-prep-mode-card tasks-prep-mode-card--variant${
                 prepModeFocus === "variant" ? " tasks-prep-mode-card--active" : ""
@@ -866,12 +934,15 @@ function TasksPage() {
                 checked={prepModeFocus === "variant"}
                 onChange={() => setPrepModeFocus("variant")}
               />
+              {prepModeFocus === "variant" ? (
+                <span className="tasks-prep-mode-selected-badge">Выбрано</span>
+              ) : null}
               <span className="tasks-prep-mode-card-icon" aria-hidden>
-                <FileText size={22} strokeWidth={2.25} />
+                <FileText size={20} strokeWidth={2} />
               </span>
               <span className="tasks-prep-mode-card-title">Экзаменационный вариант</span>
               <p className="tasks-prep-mode-card-text">
-                Для самостоятельной работы, урока или домашнего задания.
+                Часть 1, часть 2 или полный вариант в формате {formatExamLevelRu(level)}.
               </p>
             </label>
             <label
@@ -886,86 +957,75 @@ function TasksPage() {
                 checked={prepModeFocus === "trainer"}
                 onChange={() => setPrepModeFocus("trainer")}
               />
+              {prepModeFocus === "trainer" ? (
+                <span className="tasks-prep-mode-selected-badge">Выбрано</span>
+              ) : null}
               <span className="tasks-prep-mode-card-icon" aria-hidden>
-                <Target size={22} strokeWidth={2.25} />
+                <Target size={20} strokeWidth={2} />
               </span>
               <span className="tasks-prep-mode-card-title">Тренировка по номерам</span>
               <p className="tasks-prep-mode-card-text">
-                Для отработки конкретных заданий и слабых тем.
+                Отработка конкретных заданий, тем и слабых мест ученика.
               </p>
             </label>
-          </div>
+            </div>
+          </section>
 
           <section className="tasks-prep-workspace">
-            <div className="tasks-prep-workspace-head">
-              <div>
+            <div className={`tasks-prep-workspace-head${prepModeFocus === "trainer" ? " tasks-prep-workspace-head--trainer" : ""}`}>
+              <div className="tasks-prep-workspace-head-text">
                 <h2 id="prep-work-heading" className="tasks-prep-workspace-title">
-                  {prepModeFocus === "variant"
-                    ? "Сгенерировать вариант"
-                    : "Тренажёр по номерам"}
+                  {prepModeFocus === "variant" ? "Соберите вариант" : "Тренажёр по номерам"}
                 </h2>
                 <p className="tasks-prep-workspace-lead">
                   {prepModeFocus === "variant"
-                    ? "Выберите часть 1, часть 2 или полный вариант и нажмите «Сгенерировать»."
+                    ? "Выберите часть работы и источник заданий."
                     : "Выберите номера заданий в сетке, затем настройте количество и подтемы справа."}
                 </p>
               </div>
-              <div className="tasks-prep-fipi-column">
-                {prepModeFocus === "variant" ? (
-                  <label className="tasks-prep-checkbox tasks-page-fipi-toggle">
-                    <input
-                      type="checkbox"
-                      className="tasks-page-subtopic-checkbox-input"
-                      checked={onlyFipiVariant}
-                      onChange={(e) => setOnlyFipiVariant(e.target.checked)}
-                    />
+              <div className="tasks-prep-source-block">
+                <div className="tasks-prep-source-label-row">
+                  <span className="tasks-prep-source-label">Источник заданий</span>
+                  <span className="tasks-prep-fipi-help">
                     <span
-                      className={`tasks-page-subtopic-checkbox-visual ${onlyFipiVariant ? "selected" : ""}`}
-                      aria-hidden
-                    />
-                    <span className="tasks-prep-checkbox-text">Только задачи ФИПИ</span>
-                    <span className="tasks-prep-fipi-help">
-                      <span
-                        className="tasks-prep-tooltip-trigger"
-                        tabIndex={0}
-                        role="button"
-                        aria-label="Справка: только ФИПИ"
-                      >
-                        <CircleHelp size={17} strokeWidth={2} aria-hidden />
-                      </span>
-                      <span className="tasks-prep-tooltip-bubble" role="tooltip">
-                        Показывать только задания из официального банка ФИПИ
-                      </span>
+                      className="tasks-prep-tooltip-trigger"
+                      tabIndex={0}
+                      role="button"
+                      aria-label="Справка: только ФИПИ"
+                    >
+                      <CircleHelp size={16} strokeWidth={2} aria-hidden />
                     </span>
-                  </label>
-                ) : (
-                  <label className="tasks-prep-checkbox tasks-page-fipi-toggle">
-                    <input
-                      type="checkbox"
-                      className="tasks-page-subtopic-checkbox-input"
-                      checked={onlyFipiTrainer}
-                      onChange={(e) => setOnlyFipiTrainer(e.target.checked)}
-                    />
-                    <span
-                      className={`tasks-page-subtopic-checkbox-visual ${onlyFipiTrainer ? "selected" : ""}`}
-                      aria-hidden
-                    />
-                    <span className="tasks-prep-checkbox-text">Только задачи ФИПИ</span>
-                    <span className="tasks-prep-fipi-help">
-                      <span
-                        className="tasks-prep-tooltip-trigger"
-                        tabIndex={0}
-                        role="button"
-                        aria-label="Справка: только ФИПИ"
-                      >
-                        <CircleHelp size={17} strokeWidth={2} aria-hidden />
-                      </span>
-                      <span className="tasks-prep-tooltip-bubble" role="tooltip">
-                        Показывать только задания из официального банка ФИПИ
-                      </span>
+                    <span className="tasks-prep-tooltip-bubble" role="tooltip">
+                      Показывать только задания из официального банка ФИПИ
                     </span>
-                  </label>
-                )}
+                  </span>
+                </div>
+                <label className="tasks-prep-checkbox">
+                  <input
+                    type="checkbox"
+                    className="tasks-page-subtopic-checkbox-input"
+                    checked={
+                      prepModeFocus === "variant" ? onlyFipiVariant : onlyFipiTrainer
+                    }
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      if (prepModeFocus === "variant") {
+                        setOnlyFipiVariant(on);
+                      } else {
+                        setOnlyFipiTrainer(on);
+                      }
+                    }}
+                  />
+                  <span
+                    className={`tasks-page-subtopic-checkbox-visual ${
+                      (prepModeFocus === "variant" ? onlyFipiVariant : onlyFipiTrainer)
+                        ? "selected"
+                        : ""
+                    }`}
+                    aria-hidden
+                  />
+                  <span className="tasks-prep-checkbox-text">Только ФИПИ</span>
+                </label>
               </div>
             </div>
 
@@ -989,7 +1049,7 @@ function TasksPage() {
                     <div>
                       <span className="tasks-prep-format-title">Часть 1</span>
                       <p className="tasks-prep-format-text">
-                        Краткие ответы и базовая экзаменационная часть по данным вашей базы.
+                        Краткие ответы и базовая экзаменационная часть.
                       </p>
                     </div>
                     <span className="tasks-prep-format-meta">
@@ -1009,7 +1069,7 @@ function TasksPage() {
                     <div>
                       <span className="tasks-prep-format-title">Часть 2</span>
                       <p className="tasks-prep-format-text">
-                        Расширенные и практические задания с развёрнутой проверкой.
+                        Задания с развёрнутым ответом и практической проверкой.
                       </p>
                     </div>
                     <span className="tasks-prep-format-meta">
@@ -1025,7 +1085,7 @@ function TasksPage() {
                     onClick={() => setPrepVariantChoice("full")}
                     aria-pressed={prepVariantChoice === "full"}
                   >
-                    <div className="tasks-prep-format-mark tasks-prep-format-mark--full">16</div>
+                    <div className="tasks-prep-format-mark tasks-prep-format-mark--full">+</div>
                     <div>
                       <span className="tasks-prep-format-title">Полный вариант</span>
                       <p className="tasks-prep-format-text">
@@ -1071,14 +1131,14 @@ function TasksPage() {
                   </aside>
                 ) : null}
                 </div>
-                <div className="tasks-prep-variant-generate">
+                <div className="subject-pick__actions tasks-prep-variant-generate">
                   <button
                     type="button"
-                    className="tasks-prep-btn-primary tasks-prep-btn-full"
+                    className="subject-pick__cta"
                     disabled={submitBlock1}
                     onClick={runPrepVariantGeneration}
                   >
-                    {submitBlock1 ? "Формируем…" : "Сгенерировать"}
+                    {submitBlock1 ? "Формируем…" : "Сгенерировать вариант"}
                   </button>
                 </div>
               </div>
@@ -1441,7 +1501,7 @@ function TasksPage() {
           </section>
         </>
       )}
-    </div>
+    </>,
   );
 }
 

@@ -7,6 +7,18 @@ import SupportInfoModal from "../components/SupportInfoModal";
 import ResultsModal from "../components/ResultsModal";
 import ReportErrorModal from "../components/ReportErrorModal";
 import ExamBoardOverlay from "../components/ExamBoardOverlay";
+import ExamTaskDrawingShell, { ExamTaskDrawingHeaderButton } from "../components/ExamTaskDrawingShell";
+import EduVariantSidebarCard from "../components/EduVariantSidebarCard";
+import { ExamVariantTimerReadout, ExamVariantFixedTimer } from "../components/ExamVariantTimerReadout";
+import { createExamVariantTimerStore } from "../utils/examVariantTimerStore";
+import TruthTableInput from "../components/TruthTableInput";
+import Nav from "../components/Nav";
+import {
+  getTruthTableConfig,
+  sanitizeTruthTableAnswerString,
+  truthTableAnswerMaxChars,
+} from "../utils/truthTable";
+import { getShareablePageUrl } from "../utils/shareablePageUrl";
 import {
   parseHomeworkFromSearchForExam,
   getLkPublicBase,
@@ -22,23 +34,19 @@ import {
   homeworkShowSolutions,
 } from "../utils/cabinetHomework";
 
-const SUBJECT_NAMES = {
-  inf: "информатике",
-  history: "истории",
-};
-
-/** Подпись для шапки «Тестирование по …»: профиль/база только ЕГЭ, ОГЭ — просто «математике». */
-function examPageSubjectLabel(level, subjectKey) {
-  const lv = String(level || "").toLowerCase();
-  const sub = String(subjectKey || "").toLowerCase();
-  if (sub === "math") return lv === "ege" ? "профильной математике" : "математике";
-  if (sub === "math_base") return lv === "ege" ? "базовой математике" : "математике";
-  return SUBJECT_NAMES[subjectKey] || subjectKey;
-}
 
 function isMathLikeSubject(subject) {
   const s = String(subject || "").toLowerCase();
   return s === "math" || s === "math_base";
+}
+
+/** ОГЭ информатика, задание с номером n (API иногда отдаёт строку). */
+function isOgeInformaticsTask(level, subject, taskNumber, n) {
+  return (
+    String(level || "").toLowerCase() === "oge" &&
+    String(subject || "").toLowerCase() === "inf" &&
+    Number(taskNumber) === n
+  );
 }
 
 /** Подпись баллов для карточки критерия (1 балл / 2 балла / 5 баллов). */
@@ -84,10 +92,9 @@ function TaskReportErrorButton({ taskId, taskNumber, onClick }) {
       }}
       aria-label="Сообщить об ошибке"
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18" aria-hidden="true">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M12 8v4" />
-        <path d="M12 16h.01" />
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14" aria-hidden="true">
+        <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+        <line x1="4" y1="22" x2="4" y2="15" />
       </svg>
       <span className="task-report-error-label">Сообщить об ошибке</span>
     </button>
@@ -261,7 +268,90 @@ function LessonSolutionUpload({ taskNumber, taskId, lessonToken, assignmentId, h
 const LEVEL_NAMES = {
   ege: "ЕГЭ",
   oge: "ОГЭ",
+  vpr: "ВПР",
 };
+
+const SUBJECT_BADGE_NAMES = {
+  inf: "Информатика",
+  history: "История",
+  rus: "Русский язык",
+  chem: "Химия",
+  phys: "Физика",
+  lit: "Литература",
+  bio: "Биология",
+  math: "Математика",
+  math_base: "Математика",
+};
+
+function examHeroExamBadge(mode, levelKey) {
+  const lk = String(levelKey || "").toLowerCase();
+  const L =
+    LEVEL_NAMES[lk] ||
+    (levelKey != null && levelKey !== "" ? String(levelKey).toUpperCase() : "—");
+  if (mode === "part1") return `${L} · Часть 1`;
+  if (mode === "part2") return `${L} · Часть 2`;
+  if (mode === "test") return `${L} · Тренировка`;
+  return `${L} · Полный вариант`;
+}
+
+function examHeroSubjectBadge(subjectKey, stateSubjectName) {
+  const raw =
+    stateSubjectName != null && String(stateSubjectName).trim() !== ""
+      ? String(stateSubjectName).trim()
+      : null;
+  if (raw) return raw;
+  return SUBJECT_BADGE_NAMES[String(subjectKey || "").toLowerCase()] || subjectKey;
+}
+
+function p1TaskStatusPill(
+  task,
+  subject,
+  level,
+  checkedTasks,
+  userAnswers,
+  scores,
+  useTable,
+  rows,
+  cols,
+  getTableAnswerForCheck
+) {
+  const inf2627Ege =
+    subject === "inf" &&
+    String(level || "").toLowerCase() === "ege" &&
+    (task.number === 26 || task.number === 27);
+  let draft = false;
+  if (useTable && rows > 0 && cols > 0) {
+    const s = getTableAnswerForCheck(task.id, rows, cols);
+    draft = s.split(/\r?\n/).some((line) =>
+      line.split(/\t/).some((c) => String(c).trim() !== "")
+    );
+  } else {
+    draft =
+      userAnswers[task.id] != null && String(userAnswers[task.id]).trim() !== "";
+  }
+  if (inf2627Ege) {
+    if (checkedTasks[task.id] !== undefined) {
+      const sc = scores[task.id] ?? 0;
+      if (sc >= 2) return { key: "ok", label: "Верно" };
+      if (sc === 1) return { key: "warn", label: "Частично" };
+      return { key: "bad", label: "Ошибка" };
+    }
+  } else {
+    if (checkedTasks[task.id] === true) return { key: "ok", label: "Верно" };
+    if (checkedTasks[task.id] === false) return { key: "bad", label: "Ошибка" };
+  }
+  if (draft) return { key: "warn", label: "Ответ введён" };
+  return { key: "neutral", label: "Не проверено" };
+}
+
+function p2TaskStatusPill(task, selectedCriterionByTask, userAnswers) {
+  if (selectedCriterionByTask[task.id] != null)
+    return { key: "ok", label: "Оценено" };
+  const ua = userAnswers[task.id];
+  if (ua != null && String(ua).trim() !== "")
+    return { key: "warn", label: "Ответ введён" };
+  return { key: "neutral", label: "Не оценено" };
+}
 
 const EXAM_CORNER_POS_KEY = "exam_fixed_corner_pos";
 
@@ -334,10 +424,6 @@ function ExamPage() {
   }, [showExamEducationShell]);
 
   const mode = location.state?.mode || "variant";
-  const subjectLabel =
-    location.state?.subjectName || examPageSubjectLabel(level, subject);
-  const levelLabel =
-    LEVEL_NAMES[level] || (level != null && level !== "" ? String(level).toUpperCase() : "");
   const testTaskLabels = location.state?.testTaskLabels || [];
 
   const [variant, setVariant] = useState(null);
@@ -360,9 +446,7 @@ function ExamPage() {
   // Выбранный критерий: { taskId: criterionId }
   const [selectedCriterionByTask, setSelectedCriterionByTask] = useState({});
 
-  // Таймер варианта
-  const [timerSeconds, setTimerSeconds] = useState(0);
-  const [timerStatus, setTimerStatus] = useState("idle"); // "idle" | "running" | "paused"
+  const timerStore = useMemo(() => createExamVariantTimerStore(), []);
 
   /** Весь фиксированный блок (таймеры, баллы, справка): развёрнут / свёрнут в полоску */
   const [examFixedPanelOpen, setExamFixedPanelOpen] = useState(true);
@@ -375,7 +459,6 @@ function ExamPage() {
 
   // Lightbox для увеличения изображений
   const [lightbox, setLightbox] = useState({ open: false, src: "" });
-  const handleImageClick = useCallback((src) => setLightbox({ open: true, src }), []);
   const mainRef = useRef(null);
   const fixedCornerRef = useRef(null);
   const cornerDragRef = useRef({
@@ -397,6 +480,43 @@ function ExamPage() {
 
   // Справочная информация (items = массив {html})
   const [supportInfo, setSupportInfo] = useState({ items: [], open: false });
+  /** EdTech: открыть панель черновика у конкретного задания (после клика «Доска» в навигации). */
+  const [eduOpenBoardForTaskId, setEduOpenBoardForTaskId] = useState(null);
+  const [mobileVariantNavOpen, setMobileVariantNavOpen] = useState(false);
+  const [boardsByTask, setBoardsByTask] = useState({});
+
+  const boardPersistHasDraft = useCallback((persist) => {
+    if (Array.isArray(persist?.overlayV1?.strokes) && persist.overlayV1.strokes.length > 0) return true;
+    if (persist?.overlayV1?.snapshot && String(persist.overlayV1.snapshot).length > 400) return true;
+    if (!persist?.history?.length) return false;
+    const ix =
+      typeof persist.historyIndex === "number" ? persist.historyIndex : persist.history.length - 1;
+    if (ix < 0) return false;
+    const e = persist.history[ix];
+    if (typeof e === "string") return e.length > 2000;
+    if (e?.objects?.length) return true;
+    if (e?.bg && typeof e.bg === "string" && e.bg.length > 4500) return true;
+    return false;
+  }, []);
+
+  const handleBoardPersist = useCallback((payload) => {
+    if (!payload?.taskId) return;
+    const id = String(payload.taskId);
+    if (payload.overlayV1 !== undefined) {
+      setBoardsByTask((prev) => ({
+        ...prev,
+        [id]: { ...prev[id], overlayV1: payload.overlayV1 },
+      }));
+      return;
+    }
+    setBoardsByTask((prev) => ({
+      ...prev,
+      [id]: {
+        history: payload.history,
+        historyIndex: payload.historyIndex,
+      },
+    }));
+  }, []);
 
   // Результаты (всплывающее окно по кнопке «Завершить»)
   const [resultsOpen, setResultsOpen] = useState(false);
@@ -414,6 +534,17 @@ function ExamPage() {
   const startTimeRef = useRef(null);
   const endTimeRef = useRef(null);
 
+  const openBoardForActiveEduTask = useCallback(() => {
+    if (examNavActiveId == null) return;
+    setEduOpenBoardForTaskId(examNavActiveId);
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-task-id="${examNavActiveId}"]`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    });
+  }, [examNavActiveId]);
+
   /* =========================
      Загрузка варианта
   ========================== */
@@ -430,8 +561,14 @@ function ExamPage() {
       `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/variant/${encodeURIComponent(String(variant_id))}/`,
       { credentials: "same-origin", signal: ac.signal }
     )
-      .then((res) => {
-        if (!res.ok) throw new Error(`Ошибка загрузки варианта (${res.status})`);
+      .then(async (res) => {
+        if (!res.ok) {
+          const msg =
+            res.status === 404
+              ? "Вариант не найден или ссылка не совпадает с уровнем/предметом. Соберите вариант заново или откройте из раздела заданий."
+              : `Ошибка загрузки варианта (${res.status})`;
+          throw new Error(msg);
+        }
         return res.json();
       })
       .then((data) => {
@@ -454,7 +591,7 @@ function ExamPage() {
     const sorted = [...variant.tasks].sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
     const fid = sorted[0]?.id;
     if (fid != null) setExamNavActiveId(fid);
-  }, [variant?.id]);
+  }, [variant?.id, variant?.tasks]);
 
   useEffect(() => {
     if (!isHomework || !cabinetAssignmentId) {
@@ -511,12 +648,25 @@ function ExamPage() {
   }, [variant, hwApiRaw, cabinetAssignmentId]);
 
   /* =========================
-     Справочная информация
+     Справочная информация (ВПР: фильтр по классу варианта)
   ========================== */
+  const supportInfoQuerySuffix = useMemo(() => {
+    if (String(level).toLowerCase() !== "vpr" || !variant?.tasks?.length) return "";
+    const nums = variant.tasks
+      .map((t) => t.vpr_class)
+      .filter((c) => c != null && c !== "" && !Number.isNaN(Number(c)))
+      .map((c) => Number(c));
+    if (nums.length === 0) return "";
+    const uniq = [...new Set(nums)];
+    const g = uniq.length === 1 ? uniq[0] : Math.min(...uniq);
+    return `?vpr_class=${encodeURIComponent(g)}`;
+  }, [level, variant]);
+
   useEffect(() => {
     if (!level || !subject) return undefined;
     const ac = new AbortController();
-    fetch(`/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/support-info/`, {
+    const path = `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/support-info/${supportInfoQuerySuffix}`;
+    fetch(path, {
       signal: ac.signal,
     })
       .then((res) => (res.ok ? res.json() : { items: [] }))
@@ -526,7 +676,7 @@ function ExamPage() {
         setSupportInfo((s) => ({ ...s, items: [] }));
       });
     return () => ac.abort();
-  }, [level, subject]);
+  }, [level, subject, supportInfoQuerySuffix]);
 
   /* =========================
      Таймер
@@ -625,23 +775,20 @@ function ExamPage() {
     }
   }, []);
 
-  useEffect(() => {
-    if (timerStatus !== "running") return;
-    const id = setInterval(() => setTimerSeconds((s) => s + 1), 1000);
-    return () => clearInterval(id);
-  }, [timerStatus]);
+  useEffect(() => () => timerStore.destroy(), [timerStore]);
 
-  /* Время на каждое задание: каждую секунду добавляем к текущему заданию */
+  /* Время на каждое задание: каждую секунду добавляем к текущему заданию (только пока таймер идёт) */
   useEffect(() => {
-    if (timerStatus !== "running" || !variant) return;
+    if (!variant) return;
     const id = setInterval(() => {
+      if (timerStore.getStatus() !== "running") return;
       const tid = currentTaskIdRef.current;
       if (tid) {
         taskTimesRef.current[tid] = (taskTimesRef.current[tid] || 0) + 1;
       }
     }, 1000);
     return () => clearInterval(id);
-  }, [timerStatus, variant]);
+  }, [variant, timerStore]);
 
   /* Инициализация текущего задания при загрузке варианта */
   useEffect(() => {
@@ -652,11 +799,11 @@ function ExamPage() {
 
   /* Автозапуск таймера при загрузке варианта — время решения считается с момента открытия */
   useEffect(() => {
-    if (variant && timerStatus === "idle") {
+    if (variant && timerStore.getStatus() === "idle") {
       startTimeRef.current = new Date().toISOString();
-      setTimerStatus("running");
+      timerStore.setStatus("running");
     }
-  }, [variant, timerStatus]);
+  }, [variant, timerStore]);
 
   function formatTimer(sec) {
     const h = Math.floor(sec / 3600);
@@ -675,15 +822,21 @@ function ExamPage() {
     let cancelled = false;
     const tryTypeset = () => {
       if (cancelled) return;
+      const root = document.querySelector(
+        "#main-wrapper.exam-page .exam-page-container, #main-wrapper.exam-page"
+      );
       if (window.MathJax?.typesetPromise) {
-        try { window.MathJax.typesetPromise(); } catch (_) {}
+        const target = root || undefined;
+        window.MathJax.typesetPromise(target ? [target] : undefined).catch(() => {});
       } else {
         setTimeout(tryTypeset, 100);
       }
     };
-    const delay = variant ? 50 : 0;
-    const timer = setTimeout(tryTypeset, delay);
-    return () => { cancelled = true; clearTimeout(timer); };
+    const timer = setTimeout(tryTypeset, 180);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [variant]);
 
   /* Подсказка «листайте», если блок условия реально переполнен по ширине */
@@ -893,19 +1046,6 @@ function ExamPage() {
           : 0;
     setScores((prev) => ({ ...prev, [task.id]: score }));
     setCheckedTasks((prev) => ({ ...prev, [task.id]: score > 0 }));
-  }
-
-  function resetTask(taskId) {
-    setUserAnswers((prev) => {
-      const updated = { ...prev };
-      delete updated[taskId];
-      return updated;
-    });
-    setCheckedTasks((prev) => {
-      const updated = { ...prev };
-      delete updated[taskId];
-      return updated;
-    });
   }
 
   function togglePart2Answer(taskId) {
@@ -1134,7 +1274,7 @@ function ExamPage() {
     !hSol &&
     !numLocked(task.number);
   /** Блок «Правильный ответ» (пунктир): только в ДЗ при показе решений. В варианте после «Проверить» ответ уже в exam-result — не дублировать. */
-  const p1CorrectVisible = (task) => isHomework && hSol;
+  const p1CorrectVisible = () => isHomework && hSol;
   const lkBase = getLkPublicBase();
   const showHomeworkBottomActions =
     isHomework &&
@@ -1158,32 +1298,37 @@ function ExamPage() {
     part2MaxAggregate > 0
       ? Math.min(100, (part2ScoreSum / part2MaxAggregate) * 100)
       : 0;
-  const examMetaClassLabel =
-    String(level || "").toLowerCase() === "ege"
-      ? "11 класс"
-      : String(level || "").toLowerCase() === "oge"
-        ? "9 класс"
-        : "—";
   // ЕГЭ информатика: макс. первичный балл 29 (часть 1 + 26 и 27 по 2 балла и др.)
   const maxScore =
     String(subject).toLowerCase() === "inf" && String(level).toLowerCase() === "ege"
       ? 29
       : part1Tasks.length + part2Tasks.reduce((sum, t) => sum + getTaskMaxScore(t), 0);
 
-  /** При завершении: авто-проверка непроверенных заданий части 1, подсчёт эффективных баллов */
-  function getEffectiveResults() {
+  /**
+   * Подсчёт эффективных баллов.
+   * autoCheckUnchecked=false (по умолчанию, live-режим): непроверенные задания не дают балла —
+   *   цвет/баллы появляются только после нажатия «Проверить».
+   * autoCheckUnchecked=true (при «Завершить»): авто-проверка непроверенных заданий ч.1
+   *   для итогового подсчёта.
+   */
+  function getEffectiveResults({ autoCheckUnchecked = false } = {}) {
     const effectiveCheckedTasks = {};
     for (const task of part1Tasks) {
-      effectiveCheckedTasks[task.id] =
-        checkedTasks[task.id] !== undefined ? checkedTasks[task.id] : computeTaskCorrectness(task);
+      if (checkedTasks[task.id] !== undefined) {
+        effectiveCheckedTasks[task.id] = checkedTasks[task.id];
+      } else if (autoCheckUnchecked) {
+        effectiveCheckedTasks[task.id] = computeTaskCorrectness(task);
+      } else {
+        effectiveCheckedTasks[task.id] = null;
+      }
     }
-    const correctCount = part1Tasks.filter((t) => effectiveCheckedTasks[t.id]).length;
+    const correctCount = part1Tasks.filter((t) => effectiveCheckedTasks[t.id] === true).length;
     const effectiveScores = {};
     for (const task of variant.tasks) {
       if (inferPart(task) === 2) {
         effectiveScores[task.id] = scores[task.id] ?? 0;
       } else {
-        effectiveScores[task.id] = effectiveCheckedTasks[task.id] ? 1 : 0;
+        effectiveScores[task.id] = effectiveCheckedTasks[task.id] === true ? 1 : 0;
       }
     }
     const totalScore = correctCount + part2ScoreSum;
@@ -1195,11 +1340,9 @@ function ExamPage() {
     /** Полностью верные задания: ч.1 — верный ответ; ч.2 — набран максимум баллов по заданию */
     const fullyCorrectTaskCount = variant.tasks.filter((task) => {
       if (inferPart(task) === 1) {
-        const ok =
-          checkedTasks[task.id] !== undefined
-            ? checkedTasks[task.id]
-            : computeTaskCorrectness(task);
-        return !!ok;
+        if (checkedTasks[task.id] !== undefined) return !!checkedTasks[task.id];
+        if (autoCheckUnchecked) return !!computeTaskCorrectness(task);
+        return false;
       }
       return (scores[task.id] ?? 0) >= getTaskMaxScore(task);
     }).length;
@@ -1213,8 +1356,12 @@ function ExamPage() {
     };
   }
 
-  const { correctCount, totalScore, fullyCorrectTaskCount } = getEffectiveResults();
+  const { totalScore, fullyCorrectTaskCount } = getEffectiveResults();
   const taskCountTotal = variant.tasks.length;
+  const sidebarProgressPct =
+    mode === "test"
+      ? Math.min(100, (fullyCorrectTaskCount / Math.max(1, taskCountTotal)) * 100)
+      : Math.min(100, (totalScore / Math.max(1, maxScore)) * 100);
 
   const handleTaskFocus = (taskId) => {
     currentTaskIdRef.current = taskId;
@@ -1247,9 +1394,9 @@ function ExamPage() {
   };
 
   const handleFinish = async () => {
-    setTimerStatus("paused");
+    timerStore.setStatus("paused");
     endTimeRef.current = new Date().toISOString();
-    const totalTimeFormatted = formatTimer(timerSeconds);
+    const totalTimeFormatted = formatTimer(timerStore.getSeconds());
     const taskTimes = { ...taskTimesRef.current };
     const {
       effectiveCheckedTasks,
@@ -1258,7 +1405,7 @@ function ExamPage() {
       totalScore: effTotalScore,
       geoCorrectCount,
       fullyCorrectTaskCount: effFullyCorrect,
-    } = getEffectiveResults();
+    } = getEffectiveResults({ autoCheckUnchecked: true });
 
     let scoreExam = null;
     let scoreComment = null;
@@ -1280,7 +1427,9 @@ function ExamPage() {
           scoreComment = data.comment ?? null;
           markLevel = data.mark_level ?? null;
         }
-      } catch (_) {}
+      } catch {
+        /* ignore conversion API errors */
+      }
     }
 
     // Для тренировки maxScore = кол-во задач в тесте (1 балл за задачу), для варианта — как обычно
@@ -1325,7 +1474,7 @@ function ExamPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
-    } catch (err) {
+    } catch {
       const a = document.createElement("a");
       a.href = url;
       a.download = `variant-${variantId}.pdf`;
@@ -1340,12 +1489,11 @@ function ExamPage() {
 
   const copyVariantLink = async () => {
     const loc = window.location;
-    const pathWithQuery = `${loc.pathname}${loc.search}${loc.hash}`;
     const isLocal =
       loc.hostname === "localhost" ||
       loc.hostname === "127.0.0.1" ||
       loc.hostname === "[::1]";
-    const url = isLocal ? loc.href : `http://генурок.рф${pathWithQuery}`;
+    const url = isLocal ? loc.href : getShareablePageUrl();
     let ok = false;
     if (navigator.clipboard?.writeText) {
       try {
@@ -1366,10 +1514,6 @@ function ExamPage() {
     if (ok) setTimeout(() => setLinkCopied(false), 2000);
   };
 
-  const heroMeta =
-    mode === "test"
-      ? `Тестирование · ${subjectLabel} · ${levelLabel}`
-      : `${subjectLabel} · ${levelLabel} · ${examMetaClassLabel}`;
   const heroTitle =
     isHomework && !isTeacherHomeworkView
       ? "Домашнее задание"
@@ -1399,7 +1543,12 @@ function ExamPage() {
     return "заданий";
   };
   const heroLongDescription = `${variant.tasks.length} ${ruTasksWord(variant.tasks.length)} для подготовки к экзамену. Часть 1 — ${part1Tasks.length} ${ruTasksWord(part1Tasks.length)}, часть 2 — ${part2Tasks.length} ${ruTasksWord(part2Tasks.length)}. Решайте по порядку или переходите к нужному номеру.`;
+  const heroLeadForEdu = `${variant.tasks.length} ${ruTasksWord(variant.tasks.length)} для подготовки. Решайте по порядку или переходите к нужному номеру.`;
   const navTasksOrdered = [...tasksFilteredByAuthor].sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
+  const currentNavTask = navTasksOrdered.find((t) => t.id === examNavActiveId) ?? navTasksOrdered[0];
+  const activeBoardPersist =
+    examNavActiveId != null ? boardsByTask[String(examNavActiveId)] : undefined;
+  const activeBoardHasDraft = boardPersistHasDraft(activeBoardPersist);
 
   function examP1PointsBadge(task) {
     if (String(subject) === "inf" && (task.number === 26 || task.number === 27)) {
@@ -1415,6 +1564,7 @@ function ExamPage() {
   function examNavBtnClass(task) {
     let c = "exam-edu-nav-btn";
     if (examNavActiveId === task.id) c += " is-active";
+    if (boardPersistHasDraft(boardsByTask[String(task.id)])) c += " has-board-draft";
     const p = inferPart(task);
     const inf2627Ege =
       subject === "inf" &&
@@ -1427,10 +1577,17 @@ function ExamPage() {
         if (scInf !== undefined && scInf !== null) {
           if (scInf >= 2) c += " is-done";
           else c += " is-wrong";
+        } else {
+          const ua = userAnswers[task.id];
+          if (ua != null && String(ua).trim() !== "") c += " is-pending";
         }
       } else {
         if (checkedTasks[task.id] === true) c += " is-done";
         else if (checkedTasks[task.id] === false) c += " is-wrong";
+        else {
+          const ua = userAnswers[task.id];
+          if (ua != null && String(ua).trim() !== "") c += " is-pending";
+        }
       }
     }
 
@@ -1441,6 +1598,9 @@ function ExamPage() {
       if (p2Evaluated) {
         if (sc >= maxSc) c += " is-done";
         else c += " is-wrong";
+      } else {
+        const ua = userAnswers[task.id];
+        if (ua != null && String(ua).trim() !== "") c += " is-pending";
       }
     }
     return c;
@@ -1484,7 +1644,6 @@ function ExamPage() {
                   <MathContent
                     html={c.criteria_text || ""}
                     className="ev2-crit-math"
-                    onImageClick={(src) => setLightbox({ open: true, src })}
                   />
                 </div>
               </label>
@@ -1558,23 +1717,21 @@ function ExamPage() {
               <>
                 <strong>Неверно</strong>
                 <div className="exam-result__correct">
-                  Правильный ответ:{" "}
+                  {" "}
                   <MathContent
                     html={task.answer || ""}
                     className="exam-result-answer-math"
-                    onImageClick={(src) => setLightbox({ open: true, src })}
                   />
                 </div>
               </>
             )}
           </div>
         )}
-        <div className={`exam-hw-solution${p1CorrectVisible(task) ? " is-visible" : ""}`}>
-          <span className="exam-hw-solution__label">Правильный ответ: </span>
+        <div className={`exam-hw-solution${p1CorrectVisible() ? " is-visible" : ""}`}>
+          <span className="exam-hw-solution__label"></span>
           <MathContent
             html={task.answer || ""}
             className="correct-answer-content"
-            onImageClick={(src) => setLightbox({ open: true, src })}
           />
         </div>
         {showP1Check && !doneHere && (
@@ -1638,7 +1795,6 @@ function ExamPage() {
               <MathContent
                 html={task.answer}
                 className="ev2-p2-solution__math"
-                onImageClick={(src) => setLightbox({ open: true, src })}
               />
             </div>
           </div>
@@ -1649,6 +1805,10 @@ function ExamPage() {
   }
 
   return (
+    <>
+    <div className="exam-edu-shell digital-flow-page">
+      <Nav />
+    </div>
     <div
       ref={mainRef}
       className={`main-wrapper exam-page${isHomework ? " exam-page--homework" : ""}${showExamEducationShell ? " exam-page--edu" : ""}`}
@@ -1754,47 +1914,7 @@ function ExamPage() {
         </div>
         {examFixedPanelOpen && (
           <>
-        <div className="variant-timer exam-fixed-timer">
-          <div className="variant-timer-display">{formatTimer(timerSeconds)}</div>
-          <div className="variant-timer-actions">
-            {(timerStatus === "idle" || timerStatus === "paused") && (
-              <button
-                type="button"
-                className="variant-timer-btn variant-timer-btn-start"
-                onClick={() => setTimerStatus("running")}
-                title="Старт"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="5 3 19 12 5 21 5 3" />
-                </svg>
-              </button>
-            )}
-            {timerStatus === "running" && (
-              <button
-                type="button"
-                className="variant-timer-btn variant-timer-btn-pause"
-                onClick={() => setTimerStatus("paused")}
-                title="Пауза"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="6" y="4" width="4" height="16" />
-                  <rect x="14" y="4" width="4" height="16" />
-                </svg>
-              </button>
-            )}
-            <button
-              type="button"
-              className="variant-timer-btn variant-timer-btn-stop"
-              onClick={() => { setTimerStatus("idle"); setTimerSeconds(0); }}
-              title="Стоп"
-              disabled={timerStatus === "idle" && timerSeconds === 0}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="6" y="6" width="12" height="12" />
-              </svg>
-            </button>
-          </div>
-        </div>
+        <ExamVariantFixedTimer store={timerStore} formatTimer={formatTimer} />
         <div className="variant-score-block">
           <div className="variant-score-row">
             <span className="variant-score-label">
@@ -1851,20 +1971,59 @@ function ExamPage() {
           >
             <div className={`exam-edu-layout${showExamEducationShell ? "" : " exam-edu-layout--single"}`}>
               <div className="exam-edu-main">
+                {showExamEducationShell && (
+                  <div className="mobile-variant-bar" aria-label="Компактная панель варианта">
+                    <div className="mobile-stat mobile-stat--time">
+                      <span className="mobile-stat-label">Время</span>
+                      <ExamVariantTimerReadout
+                        store={timerStore}
+                        formatTimer={formatTimer}
+                        className="mobile-stat-value"
+                      />
+                    </div>
+                    <div className="mobile-stat mobile-stat--prog">
+                      <span className="mobile-stat-label">Прогресс</span>
+                      <span className="mobile-stat-value">
+                        {mode === "test" ? `${fullyCorrectTaskCount} / ${taskCountTotal}` : `${totalScore} / ${maxScore}`}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="mobile-bar-btn"
+                      onClick={() => setMobileVariantNavOpen(true)}
+                    >
+                      Задания
+                    </button>
+                    <button
+                      type="button"
+                      className="mobile-bar-btn mobile-bar-btn--primary"
+                      onClick={openBoardForActiveEduTask}
+                    >
+                      Доска
+                      {activeBoardHasDraft ? <span className="board-has-draft-dot" aria-hidden="true" /> : null}
+                    </button>
+                  </div>
+                )}
             <header className="exam-edu-hero">
               <div className="exam-edu-hero__grid">
                 <div className="exam-edu-hero__content">
-                  <div className="exam-edu-hero__badge">
-                    <span className="exam-edu-hero__badge-dot" aria-hidden />
-                    {heroMeta}
+                  <div className="exam-edu-hero__badges" aria-label="Предмет и формат работы">
+                    <span className="exam-edu-hero__badge exam-edu-hero__badge--subject">
+                      {examHeroSubjectBadge(subject, location.state?.subjectName)}
+                    </span>
+                    <span className="exam-edu-hero__badge exam-edu-hero__badge--exam">
+                      {examHeroExamBadge(mode, level)}
+                    </span>
                   </div>
                   <h1 className="exam-edu-hero__title">{heroTitle}</h1>
-                  <p className="exam-edu-hero__desc">{heroLongDescription}</p>
+                  <p className="exam-edu-hero__desc">
+                    {showExamEducationShell ? heroLeadForEdu : heroLongDescription}
+                  </p>
                   {!(isHomework && !isTeacherHomeworkView) && (
                     <div className="exam-edu-hero__actions">
                       <button
                         type="button"
-                        className="exam-edu-btn exam-edu-btn--outline"
+                        className="exam-edu-btn exam-edu-btn--pdf"
                         onClick={() => openPdf(variant.id)}
                         disabled={!!pdfLoading}
                       >
@@ -1872,7 +2031,7 @@ function ExamPage() {
                       </button>
                       <button
                         type="button"
-                        className="exam-edu-btn exam-edu-btn--primary"
+                        className="exam-edu-btn exam-edu-btn--link"
                         onClick={copyVariantLink}
                         title={linkCopied ? "Скопировано" : "Скопировать ссылку"}
                         aria-label={linkCopied ? "Скопировано" : "Скопировать ссылку"}
@@ -1902,29 +2061,73 @@ function ExamPage() {
 
                 {part1Tasks.map((task) => {
               const useTable = isTableAnswerTask(subject, task.number);
+              const truthCfg = !useTable ? getTruthTableConfig(task, { level, subject }) : null;
               const rows = useTable ? INF_TABLE_ROWS : 0;
               const cols = useTable ? INF_TABLE_COLS : 0;
               const p1Done = checkedTasks[task.id] !== undefined;
+              const p1Stat = p1TaskStatusPill(
+                task,
+                subject,
+                level,
+                checkedTasks,
+                userAnswers,
+                scores,
+                useTable,
+                rows,
+                cols,
+                getTableAnswerForCheck
+              );
 
               return (
                 <section
                   key={task.id}
                   data-task-id={task.id}
-                  className={`exam-task-card exam-task-card--p1${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                  data-task-number={task.number}
+                  className={`exam-task-card exam-task-card--p1${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
                   onClick={() => handleTaskFocus(task.id)}
                 >
                   <div className="exam-task-card__top">
-                    <div className="exam-task-card__title-block">
+                      <div className="exam-task-card__title-block">
                       <div className="exam-task-card__num">{task.number}</div>
                       <div className="exam-task-card__title-text">
                         <strong>Задание {task.number}</strong>
-                        <span>ID {task.id}</span>
+                        <span>
+                          ID {task.id} · Краткий ответ
+                        </span>
                       </div>
                     </div>
-                    <span className="exam-task-card__chip">Краткий ответ</span>
+                    {showExamEducationShell ? (
+                      <div className="exam-task-card__status-cluster">
+                        {boardPersistHasDraft(boardsByTask[task.id]) ? (
+                          <span className="exam-task-card__draft-label">Есть черновик</span>
+                        ) : null}
+                        <span className={`exam-task-card__status exam-task-card__status--${p1Stat.key}`}>
+                          {p1Stat.label}
+                        </span>
+                        <ExamTaskDrawingHeaderButton onClick={() => setEduOpenBoardForTaskId(task.id)} />
+                      </div>
+                    ) : (
+                      <span className={`exam-task-card__status exam-task-card__status--${p1Stat.key}`}>
+                        {p1Stat.label}
+                      </span>
+                    )}
                   </div>
-                  <div className="exam-task-card__body">
-                  <MathContent html={task.text} className="exam-task-card__text task-text" onImageClick={(src) => setLightbox({ open: true, src })} />
+                  <ExamTaskDrawingShell
+                    enabled={showExamEducationShell}
+                    taskId={task.id}
+                    level={level}
+                    subject={subject}
+                    variantId={variant?.id}
+                    persistEntry={boardsByTask[task.id]}
+                    onDrawingPersist={(payload) => handleBoardPersist({ taskId: task.id, ...payload })}
+                    openBoardForTaskId={eduOpenBoardForTaskId}
+                    onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
+                  >
+                  <MathContent
+                    html={task.text}
+                    className="exam-task-card__text task-text"
+                    ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
+                  />
                   {task.file && <TaskFileAttachment href={task.file} />}
                   {task.author && <div className="task-author">{task.author}</div>}
 
@@ -1985,11 +2188,10 @@ function ExamPage() {
                               <>
                                 <strong>Неверно</strong>
                                 <div className="exam-result__correct">
-                                  Правильный ответ:{" "}
+                                  {" "}
                                   <MathContent
                                     html={task.answer || ""}
                                     className="exam-result-answer-math"
-                                    onImageClick={(src) => setLightbox({ open: true, src })}
                                   />
                                 </div>
                               </>
@@ -2019,6 +2221,82 @@ function ExamPage() {
                           >
                             Сохранить
                           </button>
+                        )}
+                      </>
+                    ) : truthCfg ? (
+                      <>
+                        <TruthTableInput
+                          key={`truth-${task.id}-${truthCfg.mode}-${(truthCfg.variables || []).join(",")}-${truthCfg.expression}-${(truthCfg.steps || []).join("~")}`}
+                          variables={truthCfg.variables ?? undefined}
+                          expression={truthCfg.expression}
+                          steps={truthCfg.steps ?? undefined}
+                          mode={truthCfg.mode}
+                          value={userAnswers[task.id] || ""}
+                          onChange={(v) => {
+                            const max = truthTableAnswerMaxChars(truthCfg);
+                            let s = sanitizeTruthTableAnswerString(v);
+                            if (max > 0 && s.length > max) s = s.slice(0, max);
+                            setUserAnswers((prev) => ({ ...prev, [task.id]: s }));
+                          }}
+                          disabled={p1FieldDisabled(task)}
+                        />
+                        <input
+                          id={`answer-${task.id}`}
+                          type="text"
+                          className="hidden-answer"
+                          readOnly
+                          tabIndex={-1}
+                          aria-hidden="true"
+                          value={userAnswers[task.id] || ""}
+                          autoComplete="off"
+                        />
+                        {(showP1Check && !p1Done) || p1ShowHomeworkSave(task) ? (
+                          <div className="task-actions truth-task-actions">
+                            {showP1Check && !p1Done && (
+                              <button
+                                type="button"
+                                className="check-btn"
+                                onClick={() => checkTask(task.id, task.answer)}
+                              >
+                                Проверить
+                              </button>
+                            )}
+                            {p1ShowHomeworkSave(task) && (
+                              <button
+                                type="button"
+                                className="check-btn check-btn--outline"
+                                disabled={hwActionBusy || hwLoading}
+                                onClick={() => runHomeworkSave()}
+                              >
+                                Сохранить
+                              </button>
+                            )}
+                          </div>
+                        ) : null}
+                        {!isHomework && p1Done && (
+                          <div
+                            className={
+                              checkedTasks[task.id] ? "exam-result exam-result--ok" : "exam-result exam-result--bad"
+                            }
+                          >
+                            {checkedTasks[task.id] ? (
+                              <>
+                                <strong>Верно</strong>
+                                <span className="exam-result__pts">{examP1PointsBadge(task)}</span>
+                              </>
+                            ) : (
+                              <>
+                                <strong>Неверно</strong>
+                                <div className="exam-result__correct">
+                                 {" "}
+                                  <MathContent
+                                    html={task.answer || ""}
+                                    className="exam-result-answer-math"
+                                  />
+                                </div>
+                              </>
+                            )}
+                          </div>
                         )}
                       </>
                     ) : (
@@ -2082,11 +2360,10 @@ function ExamPage() {
                               <>
                                 <strong>Неверно</strong>
                                 <div className="exam-result__correct">
-                                  Правильный ответ:{" "}
+                                  {" "}
                                   <MathContent
                                     html={task.answer || ""}
                                     className="exam-result-answer-math"
-                                    onImageClick={(src) => setLightbox({ open: true, src })}
                                   />
                                 </div>
                               </>
@@ -2097,17 +2374,16 @@ function ExamPage() {
                     )}
 
                     <div
-                      className={`exam-hw-solution${p1CorrectVisible(task) ? " is-visible" : ""}`}
+                      className={`exam-hw-solution${p1CorrectVisible() ? " is-visible" : ""}`}
                     >
-                      <span className="exam-hw-solution__label">Правильный ответ: </span>
+                      <span className="exam-hw-solution__label"></span>
                       <MathContent
                         html={task.answer || ""}
                         className="correct-answer-content"
-                        onImageClick={(src) => setLightbox({ open: true, src })}
                       />
                     </div>
                   </div>
-                  </div>
+                  </ExamTaskDrawingShell>
                   <div className="task-report-error-wrap">
                     <TaskReportErrorButton taskId={task.id} taskNumber={task.number} onClick={handleReportErrorClick} />
                   </div>
@@ -2134,12 +2410,13 @@ function ExamPage() {
                       const useTableHere = isTableAnswerTask(subject, task.number);
                       const rowsHere = useTableHere ? INF_TABLE_ROWS : 0;
                       const colsHere = useTableHere ? INF_TABLE_COLS : 0;
+                      const p2Stat = p2TaskStatusPill(task, selectedCriterionByTask, userAnswers);
 
                       return (
                         <section
                           key={task.id}
                           data-task-id={task.id}
-                          className={`exam-task-card exam-task-card--p2 exam-task-card--in-group${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                          className={`exam-task-card exam-task-card--p2 exam-task-card--in-group${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
                           onClick={() => handleTaskFocus(task.id)}
                         >
                           <div className="exam-task-card__top">
@@ -2147,13 +2424,43 @@ function ExamPage() {
                               <div className="exam-task-card__num">{task.number}</div>
                               <div className="exam-task-card__title-text">
                                 <strong>Задание {task.number}</strong>
-                                <span>ID {task.id}</span>
+                                <span>
+                                  ID {task.id} · Развёрнутый ответ
+                                </span>
                               </div>
                             </div>
-                            <span className="exam-task-card__chip">Развернутый ответ</span>
+                            {showExamEducationShell ? (
+                              <div className="exam-task-card__status-cluster">
+                                {boardPersistHasDraft(boardsByTask[task.id]) ? (
+                                  <span className="exam-task-card__draft-label">Есть черновик</span>
+                                ) : null}
+                                <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
+                                  {p2Stat.label}
+                                </span>
+                                <ExamTaskDrawingHeaderButton onClick={() => setEduOpenBoardForTaskId(task.id)} />
+                              </div>
+                            ) : (
+                              <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
+                                {p2Stat.label}
+                              </span>
+                            )}
                           </div>
-                          <div className="exam-task-card__body">
-                          <MathContent html={task.text} className="exam-task-card__text task-text" onImageClick={(src) => setLightbox({ open: true, src })} />
+                          <ExamTaskDrawingShell
+                            enabled={showExamEducationShell}
+                            taskId={task.id}
+                            level={level}
+                            subject={subject}
+                            variantId={variant?.id}
+                            persistEntry={boardsByTask[task.id]}
+                            onDrawingPersist={(payload) => handleBoardPersist({ taskId: task.id, ...payload })}
+                            openBoardForTaskId={eduOpenBoardForTaskId}
+                            onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
+                          >
+                          <MathContent
+                            html={task.text}
+                            className="exam-task-card__text task-text"
+                            ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
+                          />
                           {task.file && <TaskFileAttachment href={task.file} />}
                           {task.author && <div className="task-author">{task.author}</div>}
 
@@ -2164,7 +2471,7 @@ function ExamPage() {
                               ev2Part2Main(task)
                             )}
                           </div>
-                          </div>
+                          </ExamTaskDrawingShell>
                           <LessonSolutionUpload
                             taskNumber={task.number}
                             taskId={task.id}
@@ -2188,12 +2495,13 @@ function ExamPage() {
                   const useTableHere = isTableAnswerTask(subject, task.number);
                   const rowsHere = useTableHere ? INF_TABLE_ROWS : 0;
                   const colsHere = useTableHere ? INF_TABLE_COLS : 0;
+                  const p2Stat = p2TaskStatusPill(task, selectedCriterionByTask, userAnswers);
 
                   return (
                     <section
                       key={task.id}
                       data-task-id={task.id}
-                      className={`exam-task-card exam-task-card--p2${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                      className={`exam-task-card exam-task-card--p2${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
                       onClick={() => handleTaskFocus(task.id)}
                     >
                       <div className="exam-task-card__top">
@@ -2201,13 +2509,43 @@ function ExamPage() {
                           <div className="exam-task-card__num">{task.number}</div>
                           <div className="exam-task-card__title-text">
                             <strong>Задание {task.number}</strong>
-                            <span>ID {task.id}</span>
+                            <span>
+                              ID {task.id} · Развёрнутый ответ
+                            </span>
                           </div>
                         </div>
-                        <span className="exam-task-card__chip">Развернутый ответ</span>
+                        {showExamEducationShell ? (
+                          <div className="exam-task-card__status-cluster">
+                            {boardPersistHasDraft(boardsByTask[task.id]) ? (
+                              <span className="exam-task-card__draft-label">Есть черновик</span>
+                            ) : null}
+                            <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
+                              {p2Stat.label}
+                            </span>
+                            <ExamTaskDrawingHeaderButton onClick={() => setEduOpenBoardForTaskId(task.id)} />
+                          </div>
+                        ) : (
+                          <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
+                            {p2Stat.label}
+                          </span>
+                        )}
                       </div>
-                      <div className="exam-task-card__body">
-                      <MathContent html={task.text} className="exam-task-card__text task-text" onImageClick={(src) => setLightbox({ open: true, src })} />
+                      <ExamTaskDrawingShell
+                        enabled={showExamEducationShell}
+                        taskId={task.id}
+                        level={level}
+                        subject={subject}
+                        variantId={variant?.id}
+                        persistEntry={boardsByTask[task.id]}
+                        onDrawingPersist={(payload) => handleBoardPersist({ taskId: task.id, ...payload })}
+                        openBoardForTaskId={eduOpenBoardForTaskId}
+                        onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
+                      >
+                      <MathContent
+                        html={task.text}
+                        className="exam-task-card__text task-text"
+                        ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
+                      />
                       {task.file && <TaskFileAttachment href={task.file} />}
                       {task.author && <div className="task-author">{task.author}</div>}
 
@@ -2218,7 +2556,7 @@ function ExamPage() {
                           ev2Part2Main(task)
                         )}
                       </div>
-                      </div>
+                      </ExamTaskDrawingShell>
                       <LessonSolutionUpload
                         taskNumber={task.number}
                         taskId={task.id}
@@ -2367,326 +2705,102 @@ function ExamPage() {
               </div>
 
               {showExamEducationShell && (
-                <aside className="exam-edu-sidebar">
-                  <div className="exam-edu-side-card">
-                    <div className="exam-edu-timer-card">
-                      <strong className="exam-edu-timer-card__value">{formatTimer(timerSeconds)}</strong>
-                      <span className="exam-edu-timer-card__label">Время выполнения</span>
-                      <div className="exam-edu-timer-card__actions">
-                        {(timerStatus === "idle" || timerStatus === "paused") && (
-                          <button
-                            type="button"
-                            className="variant-timer-btn variant-timer-btn-start"
-                            onClick={() => setTimerStatus("running")}
-                            title="Старт"
-                          >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <polygon points="5 3 19 12 5 21 5 3" />
-                            </svg>
-                          </button>
-                        )}
-                        {timerStatus === "running" && (
-                          <button
-                            type="button"
-                            className="variant-timer-btn variant-timer-btn-pause"
-                            onClick={() => setTimerStatus("paused")}
-                            title="Пауза"
-                          >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <rect x="6" y="4" width="4" height="16" />
-                              <rect x="14" y="4" width="4" height="16" />
-                            </svg>
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="variant-timer-btn variant-timer-btn-stop"
-                          onClick={() => {
-                            setTimerStatus("idle");
-                            setTimerSeconds(0);
-                          }}
-                          title="Стоп"
-                          disabled={timerStatus === "idle" && timerSeconds === 0}
-                        >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="6" y="6" width="12" height="12" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="exam-edu-side-grid">
-                      <div className="exam-edu-side-metric">
-                        <strong>
-                          {mode === "test" ? (
-                            <>
-                              {fullyCorrectTaskCount} / {taskCountTotal}
-                            </>
-                          ) : (
-                            <>
-                              {totalScore} / {maxScore}
-                            </>
-                          )}
-                        </strong>
-                        <span>
-                          {mode === "test"
-                            ? "верно"
-                            : part2Tasks.length > 0
-                              ? "баллы"
-                              : "правильных"}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="exam-edu-task-nav" role="navigation" aria-label="Номера заданий">
-                      {navTasksOrdered.map((t) => (
-                        <button
-                          key={t.id}
-                          type="button"
-                          className={examNavBtnClass(t)}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            goToExamTask(t.id);
-                          }}
-                        >
-                          {t.number}
-                        </button>
-                      ))}
-                    </div>
-
-                    {!isHomework && !lessonEmbedParams.embed && !lessonEmbedParams.token && (
-                      <button
-                        type="button"
-                        className="exam-edu-btn exam-edu-btn--outline exam-edu-sidebar-finish"
-                        onClick={() => {
-                          if (lessonEmbedParams.embed && window.parent && window.parent !== window) {
-                            window.parent.postMessage({ source: "exam-embedded-lesson", type: "lesson_finish_click" }, "*");
-                            return;
-                          }
-                          handleFinish();
-                        }}
-                      >
-                        Завершить вариант
-                      </button>
-                    )}
-
-                    {supportInfo.items?.length > 0 && (
-                      <button
-                        type="button"
-                        className="exam-edu-support-btn"
-                        onClick={() => setSupportInfo((s) => ({ ...s, open: true }))}
-                        title="Справочная информация"
-                      >
-                        Справочная информация
-                      </button>
-                    )}
-                  </div>
+                <aside className="exam-edu-sidebar desktop-variant-panel">
+                  <EduVariantSidebarCard
+                    formatTimer={formatTimer}
+                    timerStore={timerStore}
+                    mode={mode}
+                    fullyCorrectTaskCount={fullyCorrectTaskCount}
+                    taskCountTotal={taskCountTotal}
+                    totalScore={totalScore}
+                    maxScore={maxScore}
+                    part2Tasks={part2Tasks}
+                    sidebarProgressPct={sidebarProgressPct}
+                    navTasksOrdered={navTasksOrdered}
+                    activeNavTaskId={examNavActiveId}
+                    examNavBtnClass={examNavBtnClass}
+                    goToExamTask={goToExamTask}
+                    supportItems={supportInfo.items}
+                    onOpenSupport={() => setSupportInfo((s) => ({ ...s, open: true }))}
+                    hideFinish={isHomework || lessonEmbedParams.embed || lessonEmbedParams.token}
+                    onFinish={() => {
+                      if (lessonEmbedParams.embed && window.parent && window.parent !== window) {
+                        window.parent.postMessage({ source: "exam-embedded-lesson", type: "lesson_finish_click" }, "*");
+                        return;
+                      }
+                      handleFinish();
+                    }}
+                  />
                 </aside>
+              )}
+
+              {showExamEducationShell && mobileVariantNavOpen && (
+                <div
+                  className="mobile-panel-backdrop"
+                  onClick={() => setMobileVariantNavOpen(false)}
+                  role="presentation"
+                >
+                  <div
+                    className="mobile-panel-sheet"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Навигация по варианту"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="mobile-panel-head">
+                      <h3 className="mobile-panel-title">Навигация по варианту</h3>
+                      <button
+                        type="button"
+                        className="mobile-panel-close"
+                        onClick={() => setMobileVariantNavOpen(false)}
+                        aria-label="Закрыть"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <EduVariantSidebarCard
+                      formatTimer={formatTimer}
+                      timerSeconds={timerSeconds}
+                      timerStatus={timerStatus}
+                      setTimerStatus={setTimerStatus}
+                      setTimerSeconds={setTimerSeconds}
+                      mode={mode}
+                      fullyCorrectTaskCount={fullyCorrectTaskCount}
+                      taskCountTotal={taskCountTotal}
+                      totalScore={totalScore}
+                      maxScore={maxScore}
+                      part2Tasks={part2Tasks}
+                      sidebarProgressPct={sidebarProgressPct}
+                      navTasksOrdered={navTasksOrdered}
+                      activeNavTaskId={examNavActiveId}
+                      examNavBtnClass={examNavBtnClass}
+                      goToExamTask={goToExamTask}
+                      onAfterNavTask={() => setMobileVariantNavOpen(false)}
+                      supportItems={supportInfo.items}
+                      onOpenSupport={() => setSupportInfo((s) => ({ ...s, open: true }))}
+                      hideFinish={isHomework || lessonEmbedParams.embed || lessonEmbedParams.token}
+                      onFinish={() => {
+                        setMobileVariantNavOpen(false);
+                        if (lessonEmbedParams.embed && window.parent && window.parent !== window) {
+                          window.parent.postMessage({ source: "exam-embedded-lesson", type: "lesson_finish_click" }, "*");
+                          return;
+                        }
+                        handleFinish();
+                      }}
+                    />
+                  </div>
+                </div>
               )}
             </div>
           </div>
         </div>
       </div>
-        {boardOpen && (
-          <canvas
-            ref={canvasRef}
-            id="boardCanvas"
-            style={{ cursor: tool === "eraser" ? "pointer" : "crosshair" }}
-          />
-        )}
-        </div>
-      </div>
 
-      {/* ===== КНОПКА ДОСКИ ===== */}
-      <button type="button" id="open-board-btn" onClick={() => setBoardOpen(true)} style={{ display: boardOpen ? "none" : undefined }}>
-          <svg
-            className="board-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M12 19l7-7 3 3-7 7-3-3z" />
-            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
-            <path d="M2 2l7.586 7.586" />
-          </svg>
-          <span>Открыть доску</span>
-        </button>
-
-      {/* ===== Панель инструментов доски (fixed) ===== */}
-      {boardOpen && (
-          <div id="board-toolbar">
-            <button
-              type="button"
-              id="penBtn"
-              className={tool === "pen" ? "active" : ""}
-              onClick={() => setTool("pen")}
-              title="Карандаш"
-            >
-              <svg
-                className="board-toolbar-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 19l7-7 3 3-7 7-3-3z" />
-                <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
-              </svg>
-            </button>
-
-            <button
-              type="button"
-              id="eraserBtn"
-              className={tool === "eraser" ? "active" : ""}
-              onClick={() => setTool("eraser")}
-              title="Ластик"
-            >
-              <svg
-                className="board-toolbar-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
-                <path d="M22 21H7" />
-                <path d="m5 11 9 9" />
-              </svg>
-            </button>
-
-            <button
-              type="button"
-              className={tool === "line" ? "active" : ""}
-              onClick={() => setTool("line")}
-              title="Линия"
-            >
-              <svg className="board-toolbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="5" y1="19" x2="19" y2="5" />
-              </svg>
-            </button>
-
-            <button
-              type="button"
-              className={tool === "triangle" ? "active" : ""}
-              onClick={() => setTool("triangle")}
-              title="Треугольник"
-            >
-              <svg className="board-toolbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 2L2 22h20L12 2z" />
-              </svg>
-            </button>
-
-            <button
-              type="button"
-              className={tool === "circle" ? "active" : ""}
-              onClick={() => setTool("circle")}
-              title="Круг"
-            >
-              <svg className="board-toolbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" />
-              </svg>
-            </button>
-
-            <button
-              type="button"
-              className={tool === "square" ? "active" : ""}
-              onClick={() => setTool("square")}
-              title="Квадрат"
-            >
-              <svg className="board-toolbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="18" height="18" rx="1" />
-              </svg>
-            </button>
-
-            <div className="board-divider" />
-
-            <div className="board-color-palette">
-              {COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  className={`board-color-btn${color === c && ["pen", "line", "triangle", "circle", "square"].includes(tool) ? " active" : ""}`}
-                  style={{ background: c }}
-                  onClick={() => {
-                    setColor(c);
-                    if (tool === "eraser") setTool("pen");
-                  }}
-                  title={c}
-                />
-              ))}
-            </div>
-
-            <div className="board-divider" />
-
-            <div className="board-undo-redo-group">
-              <button
-                type="button"
-                onClick={undoBoard}
-                disabled={!canUndo}
-                title="Отменить (Ctrl+Z)"
-              >
-                <svg className="board-toolbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M3 10h10a5 5 0 0 1 5 5v2" />
-                  <path d="M3 10l4-4" />
-                  <path d="M3 10l4 4" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={redoBoard}
-                disabled={!canRedo}
-                title="Вернуть (Ctrl+Shift+Z)"
-              >
-                <svg className="board-toolbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 10h-10a5 5 0 0 0-5 5v2" />
-                  <path d="M21 10l-4-4" />
-                  <path d="M21 10l-4 4" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="board-divider" />
-
-            <button type="button" id="clear-board-btn" onClick={clearBoard} title="Очистить">
-              <svg
-                className="board-toolbar-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                <line x1="10" y1="11" x2="10" y2="17" />
-                <line x1="14" y1="11" x2="14" y2="17" />
-              </svg>
-            </button>
-
-            <button type="button" id="close-board-btn" onClick={() => setBoardOpen(false)} title="Закрыть">
-              <svg
-                className="board-toolbar-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-            </button>
-          </div>
+      {!showExamEducationShell && (
+        <ExamBoardOverlay
+          initialBoardPersist={activeBoardPersist}
+          onBoardPersist={handleBoardPersist}
+        />
       )}
 
       <ImageLightbox
@@ -2718,6 +2832,7 @@ function ExamPage() {
         taskNumber={reportErrorTask?.taskNumber}
       />
     </div>
+    </>
   );
 }
 

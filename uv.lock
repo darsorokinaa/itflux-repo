@@ -515,7 +515,7 @@ wheels = [
 ]
 
 [[package]]
-name = "repl-nix-workspace"
+name = "itflux"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

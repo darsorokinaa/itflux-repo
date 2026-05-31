@@ -1,0 +1,85 @@
+/* ========================================
+   Цифровой поток — design tokens
+======================================== */
+
+:root {
+  /* Цифровой поток — новая палитра */
+  --blue-main: #1550D8;
+  --blue-dark: #0B2F9F;
+  --blue-light: #6F91E8;
+  --black-deep: #050505;
+  --lime: #D7FF3F;
+  --grid-line: rgba(255, 255, 255, 0.13);
+  --grid-line-soft: rgba(255, 255, 255, 0.04);
+
+  --blue: var(--blue-main);
+  --blue-hero: var(--blue-main);
+  --blue-soft: #E8EFFE;
+  --indigo: var(--blue-dark);
+  --teal: #C0284A;
+
+  --bg-page: #f2f4ff;
+  --bg-card: #ffffff;
+
+  --text-main: var(--black-deep);
+  --text-sub: #5a6490;
+  --text-hint: #9ba3c4;
+
+  --border-card: #e4e8ff;
+  --border-blue: rgba(21, 80, 216, 0.22);
+
+  --shadow-card: 0 8px 24px rgba(11, 47, 159, 0.08);
+  --shadow-hover: 0 16px 40px rgba(11, 47, 159, 0.18);
+
+  --r-pill: 100px;
+  --r-lg: 24px;
+  --r-md: 16px;
+  --r-sm: 10px;
+
+  --font-display: "Bounded", system-ui, sans-serif;
+  --font-body: "TikTok Sans", "Manrope", "Nunito", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Marketing pages (HomePage, Nav, NewsBlock) */
+  --color-primary: var(--blue);
+  --color-primary-light: var(--blue-soft);
+  --color-bg-page: var(--bg-page);
+  --color-bg-card: var(--bg-card);
+  --color-text-primary: var(--text-main);
+  --color-text-secondary: var(--text-sub);
+  --color-text-muted: var(--text-hint);
+  --color-border: var(--border-card);
+  --gray-50: #f6f8ff;
+
+  /* Legacy bridge (styles.css, exam shell) */
+  --font-heading: var(--font-display);
+  --bg-main: var(--bg-page);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-sub);
+  --text-green: var(--blue-main);
+  --text-green-dark: var(--blue-dark);
+  --primary-purple: var(--blue-main);
+  --primary-purple2: var(--blue-dark);
+  --primary-purple-dark: var(--blue-dark);
+  --primary-pink: var(--blue-soft);
+  --primary-peach: var(--blue-soft);
+  --accent-green: var(--lime);
+  --accent-green-dark: var(--lime);
+  --accent-green-light: var(--lime);
+  --accent-cta: var(--blue-main);
+  --accent-cta-dark: var(--blue-dark);
+  --card-oge-from: #7B1226;
+  --card-oge-to: #C0284A;
+  --card-ege-from: var(--blue-dark);
+  --card-ege-to: var(--blue-main);
+  --card-vpr-from: #E05A00;
+  --card-vpr-to: #FF8C38;
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --shadow-sm: var(--shadow-hover);
+  --shadow-md: var(--shadow-card);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.35);
+  --border-hairline: var(--border-card);
+  --header-gradient: linear-gradient(90deg, var(--blue-dark) 0%, var(--blue-main) 100%);
+}

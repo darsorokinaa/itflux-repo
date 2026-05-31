@@ -1,0 +1,10 @@
+# Импорт Excel → PostgreSQL (scripts/import_to_db.py)
+pandas
+openpyxl
+psycopg2-binary
+requests
+pdfplumber
+python-docx
+python-pptx
+beautifulsoup4
+lxml

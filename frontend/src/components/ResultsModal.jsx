@@ -114,12 +114,12 @@ export default function ResultsModal({ open, onClose, results, onRetry }) {
     taskTimes,
     totalScore,
     maxScore,
-    scoreExam,
     scoreComment,
     examMode,
     fullyCorrectTaskCount,
     taskCountTotal,
     tasks,
+    level,
   } = results;
   const taskIdToNumber = tasks?.reduce((acc, t) => ({ ...acc, [t.id]: t.number }), {}) ?? {};
 
@@ -137,122 +137,190 @@ export default function ResultsModal({ open, onClose, results, onRetry }) {
 
   const metricsPointsLabel = "Баллы";
 
+  const lvNorm = String(level || "").toLowerCase();
+  const isVpr =
+    lvNorm === "vpr" ||
+    String(results.examType || "").toLowerCase() === "vpr" ||
+    String(level || "").toUpperCase() === "ВПР";
+
+  const safeScore = Number(totalScore) || 0;
+  const safeMaxScore = Number(maxScore) || 0;
+  const percent = safeMaxScore > 0 ? Math.round((safeScore / safeMaxScore) * 100) : 0;
+
+  const subtitle = buildResultSubtitle(results);
+  const scoreSuffix = String(heroPresentation.suffix || "").trimStart();
+
   return (
+    <>
     <div
-      className="results-modal-overlay results-modal-overlay--tiered"
+      className="modal-backdrop modal-backdrop--tiered"
       data-results-tier={modalTier}
       onClick={onClose}
+      role="presentation"
     >
-      <div className="results-modal-wrapper">
-        <div className="results-modal-window results-modal-window--results" onClick={(e) => e.stopPropagation()}>
-          <div className="results-modal-header">
-            <h3 className="results-modal-title">Результаты</h3>
-            <button type="button" className="results-modal-close" onClick={onClose} aria-label="Закрыть">
-              ×
-            </button>
+      <section
+        className="result-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="results-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="result-header">
+          <div className="result-title-wrap">
+            <h2 id="results-modal-title" className="result-title">
+              Результаты
+            </h2>
+            <p className="result-subtitle">{subtitle}</p>
           </div>
-          <div className="results-modal-body results-modal-body--v2">
-            <div className={`results-hero ${heroPresentation.heroClass}`} style={{ color: heroPresentation.fg }}>
-              <div className="results-hero__icon-wrap" aria-hidden="true">
-                {modalTier === "low" ? (
-                  <IconXCircle className="results-hero__icon-svg results-hero__icon-svg--static-red" />
-                ) : modalTier === "mid" ? (
-                  <IconCheckCircle className="results-hero__icon-svg results-hero__icon-svg--pulse-yellow" />
-                ) : heroPresentation.iconKind === "check" ? (
-                  <IconCheckCircle className="results-hero__icon-svg" />
-                ) : heroPresentation.iconKind === "warn" ? (
-                  <IconAlertCircle className="results-hero__icon-svg" />
-                ) : (
-                  <IconXCircle className="results-hero__icon-svg" />
-                )}
-              </div>
-              <div className="results-hero__score-line">
-                <span className="results-hero__score-num">{heroPresentation.mainNum}</span>
-                <span className="results-hero__score-suffix">{heroPresentation.suffix}</span>
-              </div>
-              {heroPresentation.note ? <p className="results-hero__note">{heroPresentation.note}</p> : null}
-            </div>
+          <button type="button" className="close-btn" onClick={onClose} aria-label="Закрыть">
+            ×
+          </button>
+        </header>
 
-            <div className="results-metrics">
-              <div className="results-metrics__cell">
-                <span className="results-metrics__label">{metricsPointsLabel}</span>
-                <span className="results-metrics__value">{metricsPointsValue}</span>
-              </div>
-              <div className="results-metrics__cell">
-                <span className="results-metrics__label">Время</span>
-                <span className="results-metrics__value">{totalTimeFormatted}</span>
-              </div>
-              <div className="results-metrics__cell">
-                <span className="results-metrics__label">Порог</span>
-                <span className={`results-metrics__value${thresholdMetric.failed ? " results-metrics__value--danger" : ""}`}>
-                  {thresholdMetric.text}
-                </span>
-              </div>
+        <div className="result-body">
+          <div className="score-card">
+            <div className="score-icon" aria-hidden="true">
+              {modalTier === "low" ? (
+                <IconXCircle className="result-modal-tier-icon result-modal-tier-icon--low" />
+              ) : modalTier === "mid" ? (
+                <IconCheckCircle className="result-modal-tier-icon result-modal-tier-icon--pulse" />
+              ) : heroPresentation.iconKind === "check" ? (
+                <IconCheckCircle className="result-modal-tier-icon" />
+              ) : heroPresentation.iconKind === "warn" ? (
+                <IconAlertCircle className="result-modal-tier-icon" />
+              ) : (
+                <IconXCircle className="result-modal-tier-icon" />
+              )}
             </div>
+            <div className="score-main">
+              <span className="score-number">{heroPresentation.mainNum}</span>
+              <span className="score-total">{scoreSuffix}</span>
+            </div>
+            {isVpr ? (
+              <p className="score-note">
+                Оценка по шкале не используется для ВПР — показаны первичные баллы и процент выполнения.
+              </p>
+            ) : heroPresentation.note ? (
+              <p className="score-note">{heroPresentation.note}</p>
+            ) : null}
+          </div>
 
-            {taskTimesEntries.length > 1 && (
-              <section className="results-times-section">
-                <h4 className="results-times-section__title">Время по заданиям</h4>
-                <div className="results-times-scroll">
-                  <table className="results-times-table-compact">
-                    <thead>
-                      <tr>
-                        <th>Задание</th>
-                        <th>Время</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {taskTimesEntries.map(([taskId, seconds]) => (
+          <div className="stats-grid">
+            <div className="stat-item">
+              <p className="stat-label">{metricsPointsLabel}</p>
+              <p className="stat-value">{metricsPointsValue}</p>
+            </div>
+            <div className="stat-item">
+              <p className="stat-label">Время</p>
+              <p className="stat-value">{totalTimeFormatted}</p>
+            </div>
+            {isVpr ? (
+              <div className="stat-item">
+                <p className="stat-label">Процент</p>
+                <p className="stat-value percent">{percent}%</p>
+                <div className="percent-bar" aria-hidden="true">
+                  <div className="percent-fill" style={{ width: `${percent}%` }} />
+                </div>
+              </div>
+            ) : (
+              <div className="stat-item">
+                <p className="stat-label">Порог</p>
+                <p className={`stat-value${thresholdMetric.failed ? " stat-value--danger" : ""}`}>{thresholdMetric.text}</p>
+              </div>
+            )}
+          </div>
+
+          {taskTimesEntries.length > 1 && (
+            <section className="results-times-section result-modal-times">
+              <h4 className="results-times-section__title">Время по заданиям</h4>
+              <div className="results-times-scroll">
+                <table className="results-times-table-compact">
+                  <thead>
+                    <tr>
+                      <th>Задание</th>
+                      <th>Время</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {taskTimesEntries.map(([taskId, seconds]) => (
                       <tr key={taskId}>
                         <td>{taskIdToNumber[taskId] ?? taskId}</td>
                         <td>{formatDurationCompact(seconds)}</td>
                       </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
 
-            {scoreComment != null && String(scoreComment).trim() !== "" && (
-              <p className="results-comment-plain">{scoreComment}</p>
-            )}
+          {scoreComment != null && String(scoreComment).trim() !== "" && (
+            <p className="results-comment-plain">{scoreComment}</p>
+          )}
 
-            <div className="results-modal-actions">
-              {typeof onRetry === "function" && (
-                <button type="button" className="results-btn results-btn--primary" onClick={onRetry}>
-                  Попробовать ещё раз
-                </button>
-              )}
-              <button
-                type="button"
-                className="results-btn results-btn--outline"
-                onClick={() => setStudentNameModalOpen(true)}
-                disabled={reportLoading}
-              >
-                {reportLoading ? "Загрузка…" : "Скачать отчёт"}
+          <div className="result-actions">
+            {typeof onRetry === "function" && (
+              <button type="button" className="result-btn primary" onClick={onRetry}>
+                Попробовать ещё раз
               </button>
-            </div>
+            )}
+            <button
+              type="button"
+              className="result-btn secondary"
+              onClick={() => setStudentNameModalOpen(true)}
+              disabled={reportLoading}
+            >
+              {reportLoading ? "Загрузка…" : "Скачать отчёт"}
+            </button>
           </div>
         </div>
-      </div>
-      <StudentNameModal
-        open={studentNameModalOpen}
-        onClose={() => setStudentNameModalOpen(false)}
-        onConfirm={(name) => {
-          setStudentNameModalOpen(false);
-          handleDownloadReport(name);
-        }}
-      />
+      </section>
     </div>
+    <StudentNameModal
+      open={studentNameModalOpen}
+      onClose={() => setStudentNameModalOpen(false)}
+      onConfirm={(name) => {
+        setStudentNameModalOpen(false);
+        handleDownloadReport(name);
+      }}
+    />
+    </>
   );
+}
+
+const SUBJECT_RESULT_LABELS = {
+  inf: "Информатика",
+  history: "История",
+  rus: "Русский язык",
+  chem: "Химия",
+  phys: "Физика",
+  lit: "Литература",
+  bio: "Биология",
+  math: "Математика",
+  math_base: "Математика",
+};
+
+function buildResultSubtitle(r) {
+  if (!r) return "";
+  const lv = String(r.level || "").toLowerCase();
+  const levelLabel =
+    { vpr: "ВПР", oge: "ОГЭ", ege: "ЕГЭ" }[lv] ||
+    (r.level != null && r.level !== "" ? String(r.level).toUpperCase() : "—");
+  const subj =
+    SUBJECT_RESULT_LABELS[String(r.subject || "").toLowerCase()] || r.subject || "—";
+  const m = r.examMode;
+  let part = "Полный вариант";
+  if (m === "part1") part = "Часть 1";
+  else if (m === "part2") part = "Часть 2";
+  else if (m === "test") part = "Тренировка";
+  return `${levelLabel} · ${subj} · ${part}`;
 }
 
 function deriveHeroPresentation(r) {
   if (!r) {
     return {
       heroClass: "results-hero--neutral",
-      fg: "#334155",
+      fg: "#757575",
       iconKind: "warn",
       mainNum: "—",
       suffix: "",
@@ -346,15 +414,15 @@ function deriveHeroPresentation(r) {
 const THEMES_OGE_MARK = {
   good: {
     heroClass: "results-hero--good",
-    fg: "#166534",
+    fg: "#43A047",
   },
   mid: {
     heroClass: "results-hero--mid",
-    fg: "#854D0E",
+    fg: "#FB8C00",
   },
   bad: {
     heroClass: "results-hero--bad",
-    fg: "#9F1239",
+    fg: "#E53935",
   },
 };
 
@@ -364,7 +432,7 @@ const THEMES_TEST = {
   bad: THEMES_OGE_MARK.bad,
   neutral: {
     heroClass: "results-hero--neutral",
-    fg: "#334155",
+    fg: "#757575",
   },
 };
 

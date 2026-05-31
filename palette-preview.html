@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hero preview</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Inter',system-ui,sans-serif; background:#F4F6FF; padding:32px; }
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 24px;
+  padding: 32px 32px 28px;
+  background:
+    radial-gradient(circle at 90% 20%, rgba(0,212,255,.1), transparent 30%),
+    linear-gradient(135deg, #2B50F5 0%, #1A2FB0 60%, #0E1E8A 100%);
+  box-shadow: 0 18px 40px rgba(43,80,245,.25);
+}
+
+/* сетка */
+.hero::before {
+  content:'';
+  position:absolute; inset:0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.07) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* декор-круг */
+.hero::after {
+  content:'';
+  position:absolute;
+  right:-70px; bottom:-120px;
+  width:300px; height:300px;
+  border-radius:50%;
+  border:1px solid rgba(255,255,255,.12);
+  pointer-events:none;
+}
+
+.hero-inner {
+  position:relative; z-index:2;
+  display:flex; justify-content:space-between; align-items:flex-start; gap:24px;
+}
+
+.hero-left { max-width: 680px; }
+
+/* бейдж */
+.badge {
+  display:inline-flex;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.12);
+  border: 1px solid rgba(255,255,255,.28);
+  color: rgba(255,255,255,.9);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+h1 {
+  font-size: clamp(28px, 3.5vw, 48px);
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: -0.04em;
+  line-height: 1.02;
+  margin-bottom: 14px;
+}
+
+h1 .accent { color: #00D4FF; }
+
+.sub {
+  font-size: 15px;
+  line-height: 1.5;
+  color: rgba(255,255,255,.8);
+  font-weight: 400;
+  margin-bottom: 22px;
+  max-width: 580px;
+}
+
+/* кнопка — белая */
+.cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 46px;
+  padding: 0 24px;
+  border-radius: 12px;
+  background: #FFFFFF;
+  color: #2B50F5;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+  letter-spacing: -0.01em;
+  box-shadow: 0 4px 16px rgba(0,0,0,.14);
+  transition: background .15s, transform .15s;
+  cursor: pointer;
+  border: none;
+}
+.cta:hover { background: #F0F4FF; transform: translateY(-2px); }
+.cta:active { transform: scale(0.97); }
+
+/* stat cards */
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.stat {
+  width: 128px;
+  padding: 14px 10px;
+  border-radius: 16px;
+  background: rgba(255,255,255,.10);
+  border: 1px solid rgba(255,255,255,.18);
+  text-align: center;
+}
+
+.stat-num {
+  display: block;
+  font-size: 24px;
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.stat-lbl {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,255,255,.7);
+}
+
+/* тег справа */
+.tag-right {
+  position: absolute;
+  top: 20px; right: 28px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.13);
+  border: 1px solid rgba(255,255,255,.22);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* ── Два варианта кнопки для сравнения ── */
+.compare {
+  margin-top: 32px;
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.compare-block { text-align: center; }
+.compare-label {
+  font-size: 10px; font-weight:700; letter-spacing:.1em;
+  text-transform:uppercase; color:#8892BB; margin-bottom:10px;
+}
+
+.btn-white {
+  display:inline-flex; align-items:center; gap:7px;
+  height:46px; padding:0 24px; border-radius:12px;
+  background:#fff; color:#2B50F5;
+  font-size:14px; font-weight:700; border:none; cursor:pointer;
+  box-shadow:0 4px 16px rgba(0,0,0,.14);
+}
+
+.btn-cyan {
+  display:inline-flex; align-items:center;
+  height:46px; padding:0 24px; border-radius:12px;
+  background:#00D4FF; color:#0A0F2E;
+  font-size:14px; font-weight:700; border:none; cursor:pointer;
+}
+
+.btn-blue {
+  display:inline-flex; align-items:center; gap:7px;
+  height:46px; padding:0 24px; border-radius:12px;
+  background:#2B50F5; color:#fff;
+  font-size:14px; font-weight:700; border:none; cursor:pointer;
+  box-shadow:0 8px 24px rgba(43,80,245,.4);
+}
+
+.btn-outline {
+  display:inline-flex; align-items:center; gap:7px;
+  height:46px; padding:0 24px; border-radius:12px;
+  background:rgba(255,255,255,.15); color:#fff;
+  font-size:14px; font-weight:700;
+  border:1.5px solid rgba(255,255,255,.4); cursor:pointer;
+}
+
+.on-blue {
+  background: linear-gradient(135deg,#2B50F5,#1A2FB0);
+  padding:20px 24px; border-radius:16px;
+  display:inline-flex; flex-direction:column; gap:10px; align-items:flex-start;
+}
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<div class="hero">
+  <span class="tag-right">ОГЭ • ЕГЭ • Информатика</span>
+  <div class="hero-inner">
+    <div class="hero-left">
+      <div class="badge">Подготовка к экзаменам по информатике</div>
+      <h1>Готовься не наугад: решай задания,<br>проверяй ответы и закрывай <span class="accent">ошибки.</span></h1>
+      <p class="sub">Платформа помогает готовиться системно: по темам, типам заданий, вариантам и результатам проверки.</p>
+      <button class="cta">
+        Начать подготовку
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+    </div>
+    <div class="stats">
+      <div class="stat"><span class="stat-num">3 124</span><span class="stat-lbl">задания</span></div>
+      <div class="stat"><span class="stat-num">1</span><span class="stat-lbl">типов ОГЭ</span></div>
+      <div class="stat"><span class="stat-num">ФИПИ</span><span class="stat-lbl">темы экзамена</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- Сравнение вариантов кнопки -->
+<div style="margin-top:40px">
+  <p style="font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#8892BB;margin-bottom:20px">Варианты кнопки на синем фоне — выберите</p>
+  <div class="compare">
+
+    <div class="compare-block">
+      <p class="compare-label">★ Белая (текущий)</p>
+      <div class="on-blue">
+        <button class="btn-white">Начать подготовку <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+      </div>
+    </div>
+
+    <div class="compare-block">
+      <p class="compare-label">Обводка белая</p>
+      <div class="on-blue">
+        <button class="btn-outline">Начать подготовку <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+      </div>
+    </div>
+
+    <div class="compare-block">
+      <p class="compare-label">Циан (старый)</p>
+      <div class="on-blue">
+        <button class="btn-cyan">Начать подготовку</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

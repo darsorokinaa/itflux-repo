@@ -3,10 +3,10 @@
 # Запускать от root: bash setup.sh
 set -e
 
-APP_DIR="/opt/generator_test"
-APP_USER="generator_test"
-DB_NAME="generatordb_test"
-DB_USER="generatoruser_test"
+APP_DIR="/opt/itflux"
+APP_USER="itflux"
+DB_NAME="itflux"
+DB_USER="itflux_user"
 DB_PASS="ЗАМЕНИТЕ_НА_НАДЁЖНЫЙ_ПАРОЛЬ"
 DOMAIN="ВАШ_ДОМЕН.ru"
 

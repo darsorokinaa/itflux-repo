@@ -7,222 +7,576 @@
     <link rel="stylesheet" href="{% static 'css/pdf.css' %}">
     <style>{{ pdf_css }}</style>
     <style>
+        :root {
+            --accent: {{ theme.accent|default:"#1d4ed8" }};
+            --accent-dark: {{ theme.accent_dark|default:"#1e3a8a" }};
+            --accent-soft: {{ theme.accent_soft|default:"#eff6ff" }};
+            --accent-border: {{ theme.accent_border|default:"#bfdbfe" }};
+            --vpr-fg: {{ vpr_badge.fg|default:"#1e3a8a" }};
+            --vpr-bg: {{ vpr_badge.bg|default:"#eff6ff" }};
+            --vpr-border: {{ vpr_badge.border|default:"#bfdbfe" }};
+            --card-bg: #f8fafc;
+            --border: #e2e8f0;
+            --text: #0f172a;
+            --muted: #64748b;
+        }
+
         @page {
             size: A4 portrait;
-            margin: 12mm;
-            @top-right {
-                content: element(report-header-brand);
-            }
-            @bottom-center {
-                content: counter(page) " / " counter(pages);
-                font-size: 8pt;
-            }
+            margin: 6mm 6mm 7mm 6mm;
         }
-        .report-header-brand {
-            position: running(report-header-brand);
+
+        * {
+            box-sizing: border-box;
         }
-        .report-header-brand img {
-            width: 10pt !important;
-            height: 10pt !important;
-            max-width: 10pt !important;
-            max-height: 10pt !important;
-            display: inline-block;
-            vertical-align: middle;
-            margin-right: 4pt;
+
+        body.report-pdf {
+            font-family: DejaVu Sans, Arial, Helvetica, sans-serif;
+            font-size: 9.5pt;
+            line-height: 1.45;
+            color: var(--text);
+            margin: 0;
+            padding: 0;
         }
-        .report-header-link {
-            color: #2563eb;
-            text-decoration: none !important;
-            font-size: 9pt;
+
+        .hero {
+            position: relative;
+            background: linear-gradient(135deg, var(--accent-soft) 0%, #ffffff 55%);
+            border: 1pt solid var(--accent-border);
+            border-radius: 6pt;
+            padding: 12pt 14pt 14pt 14pt;
+            margin-bottom: 10pt;
+            page-break-inside: avoid;
+            overflow: hidden;
         }
-        .report-body {
-            font-family: "Times New Roman", Times, serif;
-            font-size: 10pt;
-            line-height: 1.35;
+
+        .hero-decor-1, .hero-decor-2, .hero-decor-3 {
+            position: absolute;
+            border-radius: 50%;
+            opacity: 0.35;
+            pointer-events: none;
         }
-        .report-header {
-            margin-bottom: 1em;
+
+        .hero-decor-1 {
+            width: 120pt;
+            height: 120pt;
+            background: var(--accent);
+            top: -45pt;
+            right: -20pt;
+            opacity: 0.12;
         }
-        .report-header h1 {
-            font-size: 13pt;
-            margin-bottom: 0.4em;
+
+        .hero-decor-2 {
+            width: 80pt;
+            height: 80pt;
+            background: var(--accent-border);
+            bottom: -25pt;
+            left: 15%;
+            opacity: 0.35;
         }
-        .report-meta {
-            color: #333;
-            font-size: 9pt;
+
+        .hero-decor-3 {
+            width: 48pt;
+            height: 48pt;
+            background: var(--accent-dark);
+            top: 35%;
+            right: 28%;
+            opacity: 0.1;
         }
-        .report-columns {
-            display: flex;
-            gap: 10mm;
+
+        .platform-row {
+            position: relative;
+            z-index: 1;
+            font-size: 8.5pt;
+            color: var(--muted);
+            margin-bottom: 8pt;
         }
-        .report-column {
-            flex: 1;
-            min-width: 0;
+
+        .platform-name {
+            color: var(--accent-dark);
+            font-weight: 600;
+            text-decoration: none;
         }
-        .report-table {
+
+        .hero-top {
             width: 100%;
             border-collapse: collapse;
-            margin: 0 0 0.6em 0;
-            font-size: 7.5pt;
+            position: relative;
+            z-index: 1;
         }
-        .report-table th,
-        .report-table td {
-            border: 0.5pt solid #999;
-            padding: 2pt 4pt;
-            text-align: left;
-            line-height: 1.25;
+
+        .hero-top td {
+            vertical-align: top;
+            padding: 0;
         }
-        .report-table th {
-            background: #f0f0f0;
-            font-weight: bold;
+
+        .hero-left {
+            padding-right: 10pt;
+            width: 68%;
         }
-        .report-table td.numeric {
+
+        .hero-right {
+            width: 32%;
             text-align: right;
         }
-        .report-task-subtopic {
-            font-size: 6.5pt;
-            color: #555;
-            margin-top: 1.5pt;
-            line-height: 1.2;
-        }
-        .report-task-subtopic-label {
+
+        .subject-badge {
+            display: inline-block;
+            padding: 3pt 8pt;
+            border-radius: 4pt;
+            font-size: 8.5pt;
             font-weight: 600;
-            color: #444;
+            color: var(--accent-dark);
+            background: #ffffff;
+            border: 1pt solid var(--accent-border);
+            margin-right: 6pt;
         }
-        .report-table tr.row-score-zero {
-            background: rgba(220, 38, 38, 0.08);
+
+        .level-badge {
+            display: inline-block;
+            padding: 3pt 8pt;
+            border-radius: 4pt;
+            font-size: 8.5pt;
+            font-weight: 700;
         }
-        .report-table tr.row-score-zero td {
-            color: #b91c1c;
+
+        .level-badge--vpr {
+            color: var(--vpr-fg);
+            background: var(--vpr-bg);
+            border: 1pt solid var(--vpr-border);
         }
-        .report-table tr.row-score-max td {
-            color: #15803d;
+
+        .level-badge--exam {
+            color: var(--accent-dark);
+            background: #ffffff;
+            border: 1pt solid var(--accent-border);
         }
-        .report-table tr.row-score-max {
-            background: rgba(22, 163, 74, 0.08);
+
+        .hero-title {
+            margin: 8pt 0 4pt 0;
+            font-size: 16pt;
+            line-height: 1.2;
+            font-weight: 700;
+            color: var(--text);
         }
-        .report-table tr.row-score-mid {
-            background: rgba(202, 138, 4, 0.08);
+
+        .hero-subtitle {
+            margin: 0;
+            font-size: 9pt;
+            color: var(--muted);
+            max-width: 95%;
         }
-        .report-table tr.row-score-mid td {
-            color: #a16207;
+
+        .hero-score {
+            display: inline-block;
+            text-align: right;
+            padding: 10pt 12pt;
+            background: #ffffff;
+            border: 1pt solid var(--accent-border);
+            border-radius: 6pt;
+            min-width: 100pt;
         }
-        .report-totals {
-            margin-top: 0.8em;
-            font-weight: bold;
+
+        .hero-score-number {
+            display: block;
+            font-size: 18pt;
+            font-weight: 700;
+            color: var(--accent-dark);
+            line-height: 1.1;
+        }
+
+        .hero-score-text {
+            font-size: 8pt;
+            color: var(--muted);
+        }
+
+        .hero-meta {
+            margin-top: 10pt;
+            position: relative;
+            z-index: 1;
+            font-size: 8.5pt;
+            color: var(--text);
+        }
+
+        .hero-meta table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        .hero-meta td {
+            padding: 2pt 8pt 2pt 0;
+            vertical-align: top;
+        }
+
+        .hero-meta .hm-label {
+            color: var(--muted);
+            white-space: nowrap;
+            width: 1%;
+            padding-right: 6pt;
+        }
+
+        .section {
+            margin-bottom: 10pt;
+            page-break-inside: avoid;
+        }
+
+        .section-title {
+            font-size: 11pt;
+            font-weight: 700;
+            color: var(--accent-dark);
+            margin: 0 0 6pt 0;
+            padding-bottom: 3pt;
+            border-bottom: 1pt solid var(--border);
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1pt solid var(--border);
+            border-radius: 5pt;
+            padding: 10pt 12pt;
+            page-break-inside: avoid;
+        }
+
+        .summary-table {
+            width: 100%;
+            border-collapse: collapse;
             font-size: 9pt;
         }
-        .report-comment {
-            margin-top: 12pt;
-            padding: 12pt 14pt;
-            border-radius: 10pt;
+
+        .summary-table td {
+            padding: 5pt 8pt;
+            border-bottom: 1pt solid var(--border);
+            vertical-align: top;
+        }
+
+        .summary-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .summary-table .sk {
+            color: var(--muted);
+            width: 52%;
+        }
+
+        .summary-table .sv {
+            font-weight: 600;
+            text-align: right;
+        }
+
+        .ped-summary {
+            white-space: pre-wrap;
             font-size: 9pt;
-            line-height: 1.45;
-            white-space: pre-line;
-            background: #f8fafc;
+            line-height: 1.5;
+            margin: 0;
+            color: var(--text);
+        }
+
+        .audience-grid {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 4pt;
+        }
+
+        .audience-grid td {
+            width: 33%;
+            vertical-align: top;
+            padding: 6pt 8pt;
+            border: 1pt solid var(--border);
+            background: #ffffff;
+            font-size: 8.5pt;
+            line-height: 1.4;
+        }
+
+        .audience-grid .aud-h {
+            font-weight: 700;
+            color: var(--accent-dark);
+            margin-bottom: 4pt;
+            font-size: 9pt;
+        }
+
+        .tasks-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 7.5pt;
+            margin-top: 4pt;
+        }
+
+        .tasks-table th {
+            background: var(--accent-soft);
+            color: var(--accent-dark);
+            font-weight: 700;
+            text-align: left;
+            padding: 5pt 4pt;
+            border: 1pt solid var(--accent-border);
+        }
+
+        .tasks-table td {
+            padding: 5pt 4pt;
+            border: 1pt solid var(--border);
+            vertical-align: top;
+            line-height: 1.35;
+        }
+
+        .tasks-table .col-num { width: 5%; text-align: center; }
+        .tasks-table .col-score { width: 9%; white-space: nowrap; }
+        .tasks-table .col-time { width: 10%; white-space: nowrap; }
+        .tasks-table .col-status { width: 11%; }
+
+        .status-pill {
+            display: inline-block;
+            padding: 2pt 5pt;
+            border-radius: 3pt;
+            font-size: 7pt;
+            font-weight: 600;
+        }
+
+        .st-ok {
+            background: #ecfdf5;
+            color: #065f46;
+            border: 0.5pt solid #a7f3d0;
+        }
+
+        .st-err {
+            background: #fef2f2;
+            color: #991b1b;
+            border: 0.5pt solid #fecaca;
+        }
+
+        .st-skip {
+            background: #f1f5f9;
             color: #475569;
+            border: 0.5pt solid #cbd5e1;
         }
-        .report-comment.report-comment-insufficient {
-            background: rgba(220, 38, 38, 0.1);
-            color: #b91c1c;
+
+        .weak-list, .steps-list {
+            margin: 4pt 0 0 1.1em;
+            padding: 0;
         }
-        .report-comment.report-comment-threshold {
-            background: rgba(234, 88, 12, 0.1);
-            color: #c2410c;
+
+        .weak-list li, .steps-list li {
+            margin-bottom: 3pt;
         }
-        .report-comment.report-comment-average {
-            background: rgba(202, 138, 4, 0.12);
-            color: #a16207;
+
+        .final-box {
+            border-left: 3pt solid var(--accent);
+            padding-left: 10pt;
+            margin-top: 4pt;
         }
-        .report-comment.report-comment-high {
-            background: rgba(22, 163, 74, 0.1);
-            color: #15803d;
+
+        .final-text {
+            margin: 0;
+            font-size: 9.5pt;
+            line-height: 1.5;
+        }
+
+        .final-box.report-comment-insufficient { border-left-color: #dc2626; background: rgba(220, 38, 38, 0.06); }
+        .final-box.report-comment-threshold { border-left-color: #6366f1; background: rgba(99, 102, 241, 0.08); }
+        .final-box.report-comment-average { border-left-color: #2563eb; background: rgba(37, 99, 235, 0.08); }
+        .final-box.report-comment-high { border-left-color: #16a34a; background: rgba(22, 163, 74, 0.08); }
+
+        .muted {
+            color: var(--muted);
         }
     </style>
 </head>
-<body class="report-body">
-    <div class="report-header-brand">
-        <img src="{{ favicon_url }}" alt="" width="10" height="10" />
-        <a href="{{ base_url }}" class="report-header-link">Генератор</a>
-    </div>
-    <div class="report-header">
-        <h1>Результаты выполнения варианта</h1>
-        <div class="report-meta">
-            <p><strong>Ученик:</strong> {{ student_name }}</p>
-            <p><strong>Предмет:</strong> {{ subject_label }} | <strong>Уровень:</strong> {{ level_label }}</p>
-            <p><strong>Вариант №{{ variant_id }}</strong></p>
-            {% if date_solution %}<p><strong>Дата решения:</strong> {{ date_solution }}</p>{% endif %}
-            {% if time_start or time_end %}<p><strong>Время тестирования:</strong> {{ time_start|default:"—" }} — {{ time_end|default:"—" }}</p>{% endif %}
-            {% if total_time_formatted %}<p><strong>Время решения:</strong> {{ total_time_formatted }}</p>{% endif %}
-        </div>
-    </div>
+<body class="report-pdf">
+    <header class="hero">
+        <div class="hero-decor-1"></div>
+        <div class="hero-decor-2"></div>
+        <div class="hero-decor-3"></div>
 
-    <div class="report-columns">
-        <div class="report-column">
-            <table class="report-table">
+        <div class="platform-row">
+            Платформа:
+            <a class="platform-name" href="{{ base_url }}/">Цифровой поток</a>
+        </div>
+
+        <table class="hero-top">
+            <tr>
+                <td class="hero-left">
+                    <span class="subject-badge">{{ subject_label }}</span>
+                    {% if is_vpr %}
+                        <span class="level-badge level-badge--vpr">{{ level_label }}</span>
+                    {% else %}
+                        <span class="level-badge level-badge--exam">{{ level_label }}</span>
+                    {% endif %}
+
+                    <h1 class="hero-title">Отчёт по выполнению варианта</h1>
+                    <p class="hero-subtitle">
+                        Понятная сводка для учителя, родителя и ученика: результат, темы для повторения и следующие шаги.
+                    </p>
+                </td>
+                <td class="hero-right">
+                    <div class="hero-score">
+                        <span class="hero-score-number">{{ total_score }} / {{ max_score }}</span>
+                        <span class="hero-score-text">{{ hero_score_text }}</span>
+                        <span class="hero-score-text muted">{{ percent }}% выполнения</span>
+                    </div>
+                </td>
+            </tr>
+        </table>
+
+        <div class="hero-meta">
+            <table>
+                <tr>
+                    <td class="hm-label">Ученик</td>
+                    <td>{{ student_name }}</td>
+                    <td class="hm-label">Вариант</td>
+                    <td>№{{ variant_id }}</td>
+                </tr>
+                <tr>
+                    <td class="hm-label">Дата</td>
+                    <td>{{ date_solution|default:"—" }}</td>
+                    <td class="hm-label">Время</td>
+                    <td>
+                        {% if time_start or time_end %}
+                            {{ time_start|default:"—" }} — {{ time_end|default:"—" }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                </tr>
+                {% if total_time_formatted %}
+                <tr>
+                    <td class="hm-label">Длительность</td>
+                    <td colspan="3">{{ total_time_formatted }}</td>
+                </tr>
+                {% endif %}
+            </table>
+        </div>
+    </header>
+
+    <section class="section">
+        <h2 class="section-title">Сводка</h2>
+        <div class="card">
+            <table class="summary-table">
+                <tr>
+                    <td class="sk">Первичные баллы</td>
+                    <td class="sv">{{ total_score }} / {{ max_score }}</td>
+                </tr>
+                <tr>
+                    <td class="sk">Процент выполнения</td>
+                    <td class="sv">{{ percent }}%</td>
+                </tr>
+                {% if not is_vpr %}
+                <tr>
+                    <td class="sk">Тестовые баллы</td>
+                    <td class="sv">{{ total_score }} / {{ max_score }}</td>
+                </tr>
+                {% endif %}
+                <tr>
+                    <td class="sk">Верных заданий</td>
+                    <td class="sv">{{ correct_count }} из {{ tasks_count }}</td>
+                </tr>
+                <tr>
+                    <td class="sk">Среднее время на задание</td>
+                    <td class="sv">{% if tasks_count %}{{ avg_time_seconds }} сек{% else %}—{% endif %}</td>
+                </tr>
+                {% if not is_vpr and score_exam is not None %}
+                <tr>
+                    <td class="sk">{% if is_oge %}Оценка{% else %}Вторичные баллы{% endif %}</td>
+                    <td class="sv">
+                        {% if is_oge %}{{ score_exam }} из 5{% else %}{{ score_exam }} из 100{% endif %}
+                    </td>
+                </tr>
+                {% endif %}
+            </table>
+        </div>
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">Главный педагогический вывод</h2>
+        <div class="card">
+            <p class="ped-summary">{{ pedagogical_summary }}</p>
+        </div>
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">Как использовать отчёт</h2>
+        <table class="audience-grid">
+            <tr>
+                <td>
+                    <div class="aud-h">Для учителя</div>
+                    Ориентируйтесь на статусы и подтемы: они показывают, где именно возникла ошибка или пропуск. Используйте рекомендации для планирования разбора и подбора задач на следующий урок.
+                </td>
+                <td>
+                    <div class="aud-h">Для родителя</div>
+                    Процент и список тем для повторения — главные маркеры. Не фокусируйтесь на одной цифре: посмотрите, какие блоки ребёнку нужно закрепить, и поддержите регулярную короткую практику.
+                </td>
+                <td>
+                    <div class="aud-h">Для ученика</div>
+                    Прочитайте вывод и шаги внизу отчёта. Вернитесь к темам из списка повторения и решите несколько простых примеров по каждой — так результат станет устойчивее.
+                </td>
+            </tr>
+        </table>
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">Результаты по заданиям</h2>
+        <div class="card" style="padding: 6pt;">
+            <table class="tasks-table">
                 <thead>
                     <tr>
-                        <th>№</th>
+                        <th class="col-num">№</th>
                         <th>Задание</th>
-                        <th class="numeric">Баллы</th>
-                        <th>Время</th>
+                        <th>Подтема</th>
+                        <th class="col-score">Балл</th>
+                        <th class="col-time">Время</th>
+                        <th class="col-status">Статус</th>
+                        <th>Рекомендация</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for row in report_col1 %}
-                    <tr class="{% if row.score == 0 %}row-score-zero{% elif row.max_score > 0 and row.score >= row.max_score %}row-score-max{% else %}row-score-mid{% endif %}">
-                        <td>{{ row.number }}</td>
-                        <td>
-                            <div>{{ row.title|default:"—" }}</div>
-                            {% if row.subtopic_title %}<div class="report-task-subtopic"><span class="report-task-subtopic-label">Подтема:</span> {{ row.subtopic_title }}</div>{% endif %}
+                    {% for row in table_rows %}
+                    <tr>
+                        <td class="col-num">{{ row.number }}</td>
+                        <td>{{ row.title }}</td>
+                        <td>{{ row.subtopic_title }}</td>
+                        <td class="col-score">{{ row.score }}/{{ row.max_score }}</td>
+                        <td class="col-time">{{ row.time }}</td>
+                        <td class="col-status">
+                            <span class="status-pill {{ row.status_class }}">{{ row.status }}</span>
                         </td>
-                        <td class="numeric">{{ row.score }}/{{ row.max_score }}</td>
-                        <td>{{ row.time|default:"—" }}</td>
+                        <td>{{ row.recommendation }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
-        <div class="report-column">
-            <table class="report-table">
-                <thead>
-                    <tr>
-                        <th>№</th>
-                        <th>Задание</th>
-                        <th class="numeric">Б.</th>
-                        <th>Время</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in report_col2 %}
-                    <tr class="{% if row.score == 0 %}row-score-zero{% elif row.max_score > 0 and row.score >= row.max_score %}row-score-max{% else %}row-score-mid{% endif %}">
-                        <td>{{ row.number }}</td>
-                        <td>
-                            <div>{{ row.title|default:"—" }}</div>
-                            {% if row.subtopic_title %}<div class="report-task-subtopic"><span class="report-task-subtopic-label">Подтема:</span> {{ row.subtopic_title }}</div>{% endif %}
-                        </td>
-                        <td class="numeric">{{ row.score }}/{{ row.max_score }}</td>
-                        <td>{{ row.time|default:"—" }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
+    </section>
 
-    <div class="report-totals">
-        <p>Первичные баллы: {{ total_score }} из {{ max_score }}</p>
-        {% if score_exam is not None %}
-            {% if is_oge %}
-                <p>Оценка: {{ score_exam }} из 5</p>
+    <section class="section">
+        <h2 class="section-title">Темы для повторения</h2>
+        <div class="card">
+            {% if weak_topics %}
+            <ul class="weak-list">
+                {% for t in weak_topics %}
+                <li>{{ t }}</li>
+                {% endfor %}
+            </ul>
             {% else %}
-                <p>Вторичные баллы: {{ score_exam }} из 100</p>
+            <p class="muted" style="margin:0;">Нет выделенных проблемных подтем по данному варианту.</p>
             {% endif %}
-        {% endif %}
-    </div>
+        </div>
+    </section>
 
-    {% if score_comment %}
-    <div class="report-comment report-comment-{{ score_comment_class }}">{{ score_comment }}</div>
-    {% endif %}
+    <section class="section">
+        <h2 class="section-title">Что сделать дальше</h2>
+        <div class="card">
+            <ol class="steps-list">
+                {% for step in next_steps %}
+                <li>{{ step }}</li>
+                {% endfor %}
+            </ol>
+        </div>
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">Итог</h2>
+        <div class="card">
+            <div class="final-box {% if score_comment_class %}report-comment-{{ score_comment_class }}{% endif %}">
+                <p class="final-text">{{ final_comment }}</p>
+            </div>
+        </div>
+    </section>
 </body>
 </html>

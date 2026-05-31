@@ -1,17 +1,20 @@
-{# Один номер варианта для PDF (вёрстка ГенУрок / WeasyPrint A4). #}
-<div class="task{% if item.is_long %} task--long{% endif %}{% if item.start_new_page %} break-before{% endif %}{% if item.subdivision == 'geom' %} task-geom{% endif %}">
-  <div class="task__num">{{ item.order }}</div>
-  <div class="task__body">
-    <div class="task__text">
+<article class="task{% if item.is_long %} task--long{% endif %}{% if item.start_new_page %} break-before{% endif %}{% if item.subdivision == 'geom' %} task-geom{% endif %}{% if item.is_oge_inf_part_2 %} task--inf-p2{% endif %}{% if item.is_oge_inf_13 %} task--inf-13{% endif %}">
+  <div class="task-content">
+    <div class="task-number">{{ item.order }}</div>
+    <div class="task-text">
       {% if item.text %}{{ item.text|safe }}{% else %}<p>&nbsp;</p>{% endif %}
-      {% if item.file_url %}
-      <div class="task__file">
-        <a href="{{ item.file_url }}" class="task__file-link" target="_blank">Скачать файл</a>
-      </div>
-      {% endif %}
     </div>
-    <div class="task__answer-line">
-      <div class="task__answer-field"></div>
+    {% if item.max_score_phrase %}<div class="task-points">{{ item.max_score_phrase }}</div>{% endif %}
+
+    {% if item.file_url %}
+    <div class="materials">
+      <a href="{{ item.file_url }}" target="_blank">Скачать материалы к заданию</a>
+    </div>
+    {% endif %}
+
+    <div class="answer">
+      <span class="answer-label">Ответ:</span>
+      <span class="answer-line"></span>
     </div>
   </div>
-</div>
+</article>

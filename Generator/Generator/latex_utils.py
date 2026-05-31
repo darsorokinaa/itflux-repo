@@ -13,6 +13,30 @@ from django.conf import settings as django_settings
 
 logger = logging.getLogger(__name__)
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def prepare_stored_task_html(html: str, *, keep_layout_tables: bool = False) -> str:
+    """ФИПИ в БД: mjx → LaTeX, таблицы-обёртки → блоки перед process_latex.
+
+    keep_layout_tables=True — сохранить таблицы из БД как есть (для заданий,
+    где таблица — это сама структура условия, например ОГЭ инф №13/15).
+    """
+    if not html or not str(html).strip():
+        return html or ""
+    try:
+        import sys
+
+        root = str(_REPO_ROOT)
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        from fipi_html_normalize import prepare_task_html_for_display
+
+        return prepare_task_html_for_display(html, keep_layout_tables=keep_layout_tables)
+    except Exception:
+        logger.exception("prepare_stored_task_html failed")
+        return html
+
 MATH_SYMBOLS = {
     r'\times': '×', r'\div': '÷', r'\pm': '±', r'\mp': '∓',
     r'\cdot': '·', r'\neq': '≠', r'\leq': '≤', r'\geq': '≥',
@@ -222,8 +246,12 @@ def _convert_sqrt(text: str) -> str:
 
 
 def _split_array_row(row: str) -> list[str]:
-    """Разбивает строку по &, но не внутри {...} (чтобы \\text{Художник & Баталист} оставался одной ячейкой)."""
-    PLACEHOLDER = '\uE000'  # private use
+    """Разбивает строку по &, но не внутри {...} (чтобы \\text{Художник & Баталист} оставался одной ячейкой).
+
+    LaTeX \\& в tabular/array — литерал «&», не разделитель колонок."""
+    PLACEHOLDER = '\uE000'  # & внутри {...}
+    ESC_AMP = '\uE001'  # \& до разбиения
+    row = row.replace(r'\&', ESC_AMP)
     out = []
     depth = 0
     for c in row:
@@ -237,7 +265,10 @@ def _split_array_row(row: str) -> list[str]:
             out.append(PLACEHOLDER if depth > 0 else c)
         else:
             out.append(c)
-    return [cell.strip().replace(PLACEHOLDER, '&') for cell in ''.join(out).split('&')]
+    return [
+        cell.strip().replace(PLACEHOLDER, '&').replace(ESC_AMP, '&')
+        for cell in ''.join(out).split('&')
+    ]
 
 
 def _split_array_rows(body: str) -> list[str]:
@@ -569,11 +600,69 @@ def _render_math_block(latex: str, display: bool, for_pdf: bool = False, for_bro
     return f'<span class="math-inline">&#92;({escaped}&#92;&#41;</span>'
 
 
+_RE_LOGIC_SPAN_INNER = re.compile(
+    r'<span\s+class=["\']logic-connective-ru["\']>\s*(.*?)\s*</span>',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _logic_connectives_span_markup_to_tex(math_inner: str) -> str:
+    """
+    Внутри $$...$/\\(...)/$...$/span math из редактора иногда остаются
+    HTML-обёртки логических союзов; MathJax воспринимает угловые скобки как текст/операторы.
+    Также может быть порча («< spanclass =' logic - connective - ru' >»).
+    """
+    if not math_inner:
+        return math_inner
+    low = math_inner.lower()
+    if "<" not in math_inner or ("span" not in low and "logic" not in low):
+        return math_inner
+
+    s = math_inner
+    s = re.sub(r"<\s*spanclass\b", "<span class", s, flags=re.I)
+    s = re.sub(
+        r"<\s*span\s+class\s*=\s*[\"']?\s*logic\s*-\s*connective\s*-\s*ru\s*[\"']?\s*>",
+        '<span class="logic-connective-ru">',
+        s,
+        flags=re.I,
+    )
+    s = re.sub(r"</\s*sp\s*an\s*>", "</span>", s, flags=re.I)
+
+    def _repl(m: re.Match[str]) -> str:
+        inner = (m.group(1) or "").strip()
+        if not inner:
+            return ""
+        esc = inner.replace("\\", r"\textbackslash{}").replace("{", r"\{").replace("}", r"\}")
+        return r"\text{" + esc + "}"
+
+    prev = None
+    while prev != s:
+        prev = s
+        s = _RE_LOGIC_SPAN_INNER.sub(_repl, s)
+    return s
+
+
+def _add_thin_space_around_logic_connective_text(s: str) -> str:
+    """
+    В math mode обычные пробелы схлопываются; между скобками и \\text{ИЛИ}/\\text{НЕ}
+    и между несколькими \\text подряд вставляем \\; (тонкая видимая разрядка).
+    """
+    if not s or r"\text{" not in s:
+        return s
+    t = s
+    t = re.sub(r"\)\s*(?=\\text)", r")\\;", t)
+    t = re.sub(r"(\\text\{[^}]+\})\s*(?=\\text)", r"\1\\;", t)
+    t = re.sub(r"(\\text\{[^}]+\})\s*(?=\()", r"\1\\;", t)
+    return t
+
+
 def _normalize_latex(s: str) -> str:
     """Normalize LaTeX from HTML: unescape entities, clean BR/newlines so \\frac{1}\\n{125} works."""
     if not s:
         return s
     s = html_lib.unescape(s)
+    s = _logic_connectives_span_markup_to_tex(s)
+    s = _add_thin_space_around_logic_connective_text(s)
     s = s.replace('<br>', ' ').replace('<br/>', ' ').replace('<br />', ' ')
     s = _RE_NEWLINES.sub(' ', s)
     return s.strip()
@@ -587,10 +676,41 @@ def _replace_verbatim(m):
     return f'<pre class="latex-verbatim"><code>{content}</code></pre>'
 
 
-@lru_cache(maxsize=4096)
-def process_latex(html_text: str, for_pdf: bool = False, for_browser: bool = False) -> str:
+def _decode_html_entity_layers_if_stored_escaped(html_text: str) -> str:
+    """
+    CKEditor или вставка из внешних редакторов иногда сохраняют разметку как текст (&lt;p&gt;…).
+    Один вызов html.unescape не снимает двойное &amp;lt; — поэтому цикл.
+    """
     if not html_text:
         return html_text
+    cur = html_text
+    for _ in range(8):
+        t = cur.lstrip()
+        if not t.startswith(("&lt;", "&amp;lt;")):
+            break
+        nxt = html_lib.unescape(cur)
+        if nxt == cur:
+            break
+        cur = nxt
+    return cur
+
+
+@lru_cache(maxsize=4096)
+def process_latex(
+    html_text: str,
+    for_pdf: bool = False,
+    for_browser: bool = False,
+    keep_layout_tables: bool = False,
+) -> str:
+    if not html_text:
+        return html_text
+
+    if for_browser or for_pdf:
+        html_text = prepare_stored_task_html(
+            html_text, keep_layout_tables=keep_layout_tables
+        )
+
+    html_text = _decode_html_entity_layers_if_stored_escaped(html_text)
 
     # 0. Verbatim — до обработки math (MathJax не поддерживает verbatim)
     html_text = _RE_VERBATIM.sub(_replace_verbatim, html_text)
@@ -675,4 +795,6 @@ def process_latex(html_text: str, for_pdf: bool = False, for_browser: bool = Fal
     html_text = _RE_TEXTTT.sub(r'<code>\1</code>', html_text)
     # 8. Исправление &аmp; (кириллическая 'а') → & — corruption в некоторых данных
     html_text = html_text.replace("&\u0430mp;", "&")
+    # 8b. LaTeX \& в условиях (таблицы запросов) → видимый &
+    html_text = re.sub(r"\\&", "&", html_text)
     return html_text

@@ -3,12 +3,25 @@ import { Outlet, Link, useLocation } from "react-router-dom";
 import {
   readPersistedTheme,
 } from "../utils/themeStorage";
-import { LK_PUBLIC_URL } from "../config/publicUrls";
 
 const COOKIE_CONSENT_KEY = "cookie_consent_accepted";
 
 function Layout() {
   const { pathname, search } = useLocation();
+  /** Маркетинг и выбор заданий — свой Nav, без шапки/подвала генератора */
+  const pathNorm = (pathname || "").replace(/\/+$/, "") || "/";
+  const isTasksPrepPicker = /^\/(oge|ege|vpr)\/[^/]+$/.test(pathNorm);
+  const isExamVariantPage = /^\/(oge|ege|vpr)\/[^/]+\/variant\/[^/]+$/.test(pathNorm);
+  const isMarketingHome =
+    pathname === "/" ||
+    pathname === "/tasks" ||
+    pathname === "/generator" ||
+    pathname.startsWith("/subject/") ||
+    pathname.startsWith("/search/tasks") ||
+    pathname.startsWith("/search-variant") ||
+    /^\/(oge|ege)$/.test(pathNorm) ||
+    isTasksPrepPicker ||
+    isExamVariantPage;
   const lessonJoinMode = pathname.startsWith("/lesson/join");
   const query = new URLSearchParams(search || "");
   const isLessonOrHomeworkContext =
@@ -37,13 +50,6 @@ function Layout() {
       window.parent.postMessage({ source: "exam-embedded-lesson", type: "lesson_finish_click" }, "*");
     }
   };
-  /** URL ЛК: сначала из сборки (VITE_LK_PUBLIC_URL / VITE_LK_URL), после запроса — с сервера (Django LK_PUBLIC_URL), чтобы не открывалась главная генератора по ошибке. */
-  const [lkHref, setLkHref] = useState(LK_PUBLIC_URL);
-  const [lkNavGateRequired, setLkNavGateRequired] = useState(false);
-  const [lkNavUnlocked, setLkNavUnlocked] = useState(false);
-  const [lkModalOpen, setLkModalOpen] = useState(false);
-  const [lkModalPassword, setLkModalPassword] = useState("");
-  const [lkModalError, setLkModalError] = useState("");
   const [themeData, setThemeData] = useState(() => readPersistedTheme().themeData);
   const [cookieAccepted, setCookieAccepted] = useState(() => {
     try { return !!localStorage.getItem(COOKIE_CONSENT_KEY); } catch { return false; }
@@ -109,75 +115,6 @@ function Layout() {
   }, [themeData?.decor]);
 
   useEffect(() => {
-    const ac = new AbortController();
-    fetch("/api/site-config/", { credentials: "same-origin", signal: ac.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        const u = data?.lk_nav_url || data?.lk_public_url;
-        if (typeof u === "string" && u.trim()) {
-          const v = u.trim().replace(/\/$/, "");
-          if (/^https?:\/\//i.test(v)) setLkHref(v);
-        }
-        setLkNavGateRequired(!!data?.lk_nav_password_required);
-        setLkNavUnlocked(!!data?.lk_nav_unlocked);
-      })
-      .catch((err) => {
-        if (err?.name === "AbortError") return;
-      });
-    return () => ac.abort();
-  }, []);
-
-  /** Не даём href стать пустым, если /api/site-config/ не отдал URL */
-  const cabinetHref =
-    typeof lkHref === "string" && lkHref.trim() ? lkHref.trim() : LK_PUBLIC_URL;
-
-  const openCabinetInNewTab = useCallback((preOpenedWindow = null) => {
-    if (preOpenedWindow && !preOpenedWindow.closed) {
-      preOpenedWindow.location.href = cabinetHref;
-      return;
-    }
-    window.open(cabinetHref, "_blank", "noopener,noreferrer");
-  }, [cabinetHref]);
-
-  /** Без `<a href>` — иначе браузер может предзагрузить ЛК (страница входа) при открытии главной. */
-  function handleCabinetClick() {
-    if (lkNavGateRequired && !lkNavUnlocked) {
-      setLkModalError("");
-      setLkModalPassword("");
-      setLkModalOpen(true);
-      return;
-    }
-    openCabinetInNewTab();
-  }
-
-  async function submitLkNavUnlock() {
-    setLkModalError("");
-    const pendingWindow = window.open("", "_blank");
-    if (pendingWindow) pendingWindow.opener = null;
-    try {
-      const r = await fetch("/api/lk-nav-unlock/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ password: lkModalPassword.trim() }),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        if (pendingWindow && !pendingWindow.closed) pendingWindow.close();
-        setLkModalError(data.error || "Неверный пароль");
-        return;
-      }
-      setLkNavUnlocked(true);
-      setLkModalOpen(false);
-      setLkModalPassword("");
-      openCabinetInNewTab(pendingWindow);
-    } catch {
-      if (pendingWindow && !pendingWindow.closed) pendingWindow.close();
-      setLkModalError("Не удалось проверить пароль");
-    }
-  }
-
-  useEffect(() => {
     const run = () => {
       if (window.MathJax?.typesetPromise) {
         window.MathJax.typesetPromise().catch(() => {});
@@ -198,14 +135,15 @@ function Layout() {
           backgroundImage: `url('${import.meta.env.BASE_URL}img/bg.png')`,
         }}
       />
-      {themeData?.overlay && (
+      {!isMarketingHome && themeData?.overlay ? (
         <div
           className="app-shell-theme-overlay"
           aria-hidden="true"
           style={{ backgroundImage: `url(${themeData.overlay})` }}
         />
-      )}
+      ) : null}
       <div className="app-shell-content">
+      {!isMarketingHome ? (
       <header
         className={themeData?.headerBg ? "header--themed" : undefined}
         style={themeData?.headerBg ? { backgroundImage: `url(${themeData.headerBg})` } : undefined}
@@ -215,69 +153,51 @@ function Layout() {
         <Link to="/" className="logo-link">
           <img
             className="logo-theme-icon"
-            src={themeData?.logo || `${import.meta.env.BASE_URL}img/logum-logo.svg?v=2`}
-            alt="Логум"
+            src={themeData?.logo || `${import.meta.env.BASE_URL}img/digital-flow-logo.png?v=1`}
+            alt="Цифровой поток"
             onError={(e) => {
-              e.currentTarget.src = `${import.meta.env.BASE_URL}img/logum-logo.svg?v=2`;
+              const base = `${import.meta.env.BASE_URL}img/`;
+              const t = e.currentTarget;
+              if (t.src.includes("digital-flow-logo")) {
+                t.src = `${base}../favicon.png?v=1`;
+                return;
+              }
+              t.onerror = null;
             }}
           />
-          <span className="logo-text">Логум</span>
+          <span className="logo-text">Цифровой поток</span>
         </Link>
       </div>
       <nav className="header-nav">
-        {isHomeworkContext ? null : isLessonEmbedAny ? (
-          isLessonTeacherEmbedContext ? (
-            <button
-              type="button"
-              className="header-nav-finish"
-              onClick={handleLessonFinishClick}
-            >
-              Завершить
-            </button>
-          ) : null
-        ) : (
-          <>
-            {!lessonJoinMode ? (
-              <>
-                <button
-                  type="button"
-                  className="header-nav-link header-nav-cabinet"
-                  onClick={handleCabinetClick}
-                >
-                  <span className="header-nav-cabinet__icon-circle" aria-hidden="true">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <circle cx="12" cy="8" r="4" />
-                      <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
-                    </svg>
-                  </span>
-                  Личный кабинет
-                </button>
-              </>
-            ) : null}
-          </>
-        )}
+        {isHomeworkContext ? null : isLessonEmbedAny && isLessonTeacherEmbedContext ? (
+          <button
+            type="button"
+            className="header-nav-finish"
+            onClick={handleLessonFinishClick}
+          >
+            Завершить
+          </button>
+        ) : null}
       </nav>
     </div>
 </header>
+      ) : null}
 
 
       <aside>
         {/* боковое меню */}
       </aside>
 
-      <main className="container mt-4">
+      <main className={isMarketingHome ? "w-full" : "container mt-4"}>
         <Outlet />
       </main>
 
+      {!isMarketingHome ? (
       <footer className={`site-footer${isLessonOrHomeworkContext ? " site-footer--embed" : ""}`}>
         <div className="site-footer-inner">
-          <span className="site-footer-copy">© 2026 Логум</span>
+          <span className="site-footer-copy">© 2026 Цифровой поток</span>
           {!isLessonOrHomeworkContext && (
           <div className="site-footer-links">
-            <button type="button" className="site-footer-link" onClick={handleCabinetClick}>
-              Личный кабинет
-            </button>
-            <span className="site-footer-sep" aria-hidden="true">·</span>
             <Link to="/privacy" className="site-footer-link">Политика конфиденциальности</Link>
             <span className="site-footer-sep" aria-hidden="true">·</span>
             <Link to="/privacy#pd" className="site-footer-link">Согласие на обработку ПД</Link>
@@ -285,86 +205,7 @@ function Layout() {
           )}
         </div>
       </footer>
-
-      {lkModalOpen && (
-        <div
-          className="lk-nav-gate-overlay"
-          role="presentation"
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 20000,
-            background: "rgba(2, 6, 23, 0.55)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
-          }}
-          onClick={() => setLkModalOpen(false)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setLkModalOpen(false);
-          }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="lk-nav-gate-title"
-            className="lk-nav-gate-card"
-            style={{
-              width: "min(420px, 94vw)",
-              background: "#fff",
-              borderRadius: 16,
-              padding: "20px 18px",
-              boxShadow: "0 20px 56px rgba(2, 6, 23, 0.32)",
-              border: "1px solid #e2e8f0",
-              textAlign: "center",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="lk-nav-gate-title" style={{ fontSize: "1.05rem", marginBottom: 8, color: "#0f172a" }}>
-              Личный кабинет
-            </h2>
-            <p style={{ color: "#64748b", fontSize: "0.88rem", marginBottom: 14, lineHeight: 1.45 }}>
-              Введите пароль, чтобы открыть ссылку в новой вкладке.
-            </p>
-            <input
-              type="password"
-              value={lkModalPassword}
-              onChange={(e) => setLkModalPassword(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  submitLkNavUnlock();
-                }
-              }}
-              autoComplete="current-password"
-              placeholder="Пароль"
-              style={{
-                width: "100%",
-                maxWidth: 300,
-                margin: "0 auto 12px",
-                display: "block",
-                padding: "10px 12px",
-                border: "1px solid #cbd5e1",
-                borderRadius: 10,
-                font: "inherit",
-                textAlign: "center",
-              }}
-            />
-            {lkModalError ? (
-              <p style={{ color: "#b91c1c", fontSize: "0.82rem", marginBottom: 10 }}>{lkModalError}</p>
-            ) : null}
-            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-              <button type="button" className="btn btn-primary btn-sm" onClick={submitLkNavUnlock}>
-                Открыть
-              </button>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setLkModalOpen(false)}>
-                Отмена
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      ) : null}
 
       {!cookieAccepted && !isLessonOrHomeworkContext && (
         <div className="cookie-banner" role="alertdialog" aria-label="Уведомление об использовании файлов cookie">

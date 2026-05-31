@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.db.models import Q
+from django import forms
 from django.utils.html import strip_tags
 from django_ckeditor_5.widgets import CKEditor5Widget
 
@@ -12,11 +13,16 @@ from .models import (
     Mark,
     MarkComment,
     Part,
+    PedagogicalRecommendation,
     PreviewType,
+    ReportConclusionTemplate,
+    ReportNextStepTemplate,
     Subject,
     SubTopic,
     SupportInfo,
     Tag,
+    TagOption,
+    TagType,
     Task,
     TaskGroup,
     TaskGroupMember,
@@ -76,37 +82,102 @@ class LevelAdmin(admin.ModelAdmin):
 
 @admin.register(Task)
 class TaskAdmin(SearchByIdMixin, admin.ModelAdmin):
-    list_display = ("id", "task_with_title", "task_template_preview", "subtopic", "max_score", "answer_preview", "created_by", "added_at")
-    list_filter = ("task__subject", "task__level", "task__part", "subtopic", "created_by", "added_at")
-    list_editable = ("subtopic",)
-    search_fields = ("answer",)
+    class TaskAdminForm(forms.ModelForm):
+        class Meta:
+            model = Task
+            fields = "__all__"
+            widgets = {
+                "task_template": CKEditor5Widget(
+                    config_name="default",
+                    attrs={
+                        "data-upload-url": "/ckeditor/upload/",
+                        "data-ckeditor-custom-adapter": "1",
+                        "title": (
+                            "Условие в HTML (CKEditor). Для заданий с вариантами 1) 2) … "
+                            "оставляйте таблицы из импорта — на сайте они отобразятся карточками автоматически."
+                        ),
+                    },
+                ),
+                "answer": CKEditor5Widget(config_name="default"),
+            }
+
+        class Media:
+            js = ("js/ckeditor5_upload_adapter.js",)
+
+    form = TaskAdminForm
+
+    list_display = (
+        "id",
+        "quick_level",
+        "task",
+        "vpr_class",
+        "answer_preview",
+        "is_active",
+        "vpr_basic",
+        "vpr_advanced",
+        "subtopic",
+        "max_score",
+        "task_template_preview",
+        "created_by",
+        "added_at",
+    )
+    list_filter = (
+        ("task", admin.RelatedOnlyFieldListFilter),
+        "is_active",
+        "quick_level",
+        "task__subject",
+        "task__level",
+        "task__part",
+        "vpr_class",
+        "vpr_advanced",
+        "vpr_basic",
+        "subtopic",
+        "created_by",
+        "added_at",
+    )
+    list_editable = ("quick_level", "task", "vpr_class", "is_active", "vpr_basic", "vpr_advanced", "subtopic")
+    search_fields = ("answer", "task__task_title", "task_template")
     date_hierarchy = "added_at"
-    list_select_related = ("task__subject", "task__level", "task__part", "subtopic")
+    list_select_related = ("task__subject", "task__level", "task__part", "subtopic", "quick_level")
+    list_display_links = ("id",)
     list_per_page = 25
     show_full_result_count = False
     raw_id_fields = ("task",)
     autocomplete_fields = ("subtopic",)
     fieldsets = (
-        (None, {"fields": ("task", "subtopic", "task_template", "answer", "max_score", "files", "author", "added_at", "created_by")}),
+        (None, {"fields": ("task", "subtopic", "is_active", "task_template", "answer", "max_score", "files", "author", "added_at", "created_by")}),
+        ("ВПР", {"fields": ("vpr_class", "vpr_basic", "vpr_advanced", "truth_table_enabled")}),
     )
 
-    def formfield_for_dbfield(self, db_field, request, **kwargs):
-        if db_field.name == "answer":
-            kwargs["widget"] = CKEditor5Widget(config_name="default")
-        return super().formfield_for_dbfield(db_field, request, **kwargs)
-
-    def task_with_title(self, obj):
-        if not obj.task:
-            return "—"
-        return f"№{obj.task.task_number} — {obj.task.task_title}"
-    task_with_title.short_description = "Задача"
-    task_with_title.admin_order_field = "task__task_number"
+    def save_model(self, request, obj, form, change):
+        if not change:
+            obj.created_by = username_for_created_by(request)
+        if form is not None:
+            if not change and obj.task_id and obj.quick_level_id is None:
+                tl = TaskList.objects.filter(pk=obj.task_id).only("level_id").first()
+                if tl:
+                    obj.quick_level_id = tl.level_id
+            elif (
+                change
+                and "task" in form.changed_data
+                and "quick_level" not in form.changed_data
+                and obj.task_id
+            ):
+                tl = TaskList.objects.filter(pk=obj.task_id).only("level_id").first()
+                if tl:
+                    obj.quick_level_id = tl.level_id
+        super().save_model(request, obj, form, change)
+        if obj.task_id and obj.quick_level_id is not None:
+            TaskList.objects.filter(pk=obj.task_id).exclude(level_id=obj.quick_level_id).update(
+                level_id=obj.quick_level_id
+            )
 
     def task_template_preview(self, obj):
         raw = obj.task_template or ""
         plain = strip_tags(raw).strip() if raw else ""
         return (plain[:60] + "…") if len(plain) > 60 else plain
     task_template_preview.short_description = "Условие задачи"
+    task_template_preview.admin_order_field = "task_template"
 
     def answer_preview(self, obj):
         raw = obj.answer or ""
@@ -115,16 +186,15 @@ class TaskAdmin(SearchByIdMixin, admin.ModelAdmin):
 
     answer_preview.short_description = "Ответ"
 
-    def save_model(self, request, obj, form, change):
-        if not change:
-            obj.created_by = username_for_created_by(request)
-        super().save_model(request, obj, form, change)
-
 
 @admin.register(SubTopic)
 class SubTopicAdmin(admin.ModelAdmin):
     list_display = ("id", "task_list", "title", "order")
-    list_filter = ("task_list__subject", "task_list__level")
+    list_filter = (
+        ("task_list", admin.RelatedOnlyFieldListFilter),
+        "task_list__subject",
+        "task_list__level",
+    )
     search_fields = ("title", "task_list__task_title", "task_list__subject__subject_short", "task_list__level__level")
     ordering = ("task_list", "order", "title")
 
@@ -148,7 +218,11 @@ class VariantAdmin(SearchByIdMixin, admin.ModelAdmin):
 @admin.register(VariantContent)
 class VariantContentAdmin(admin.ModelAdmin):
     list_display = ("id", "variant", "task", "order")
-    list_filter = ("variant__var_subject", "variant__level")
+    list_filter = (
+        ("task__task", admin.RelatedOnlyFieldListFilter),
+        "variant__var_subject",
+        "variant__level",
+    )
     search_fields = ("variant__var_subject__subject_short",)
     ordering = ("variant", "order")
     list_select_related = ("variant__var_subject", "variant__level", "task")
@@ -213,6 +287,30 @@ class TaskGroupAdmin(admin.ModelAdmin):
 
 
 
+class TagOptionInline(admin.TabularInline):
+    model = TagOption
+    extra = 0
+    fields = ("slug", "emoji", "title", "badge_style", "order", "is_active")
+
+
+@admin.register(TagType)
+class TagTypeAdmin(admin.ModelAdmin):
+    list_display = ("id", "slug", "name", "order")
+    list_editable = ("order",)
+    search_fields = ("slug", "name")
+    ordering = ("order", "id")
+    inlines = (TagOptionInline,)
+
+
+@admin.register(TagOption)
+class TagOptionAdmin(admin.ModelAdmin):
+    list_display = ("id", "tag_type", "slug", "emoji", "title", "badge_style", "order", "is_active")
+    list_filter = ("tag_type", "badge_style", "is_active")
+    list_editable = ("order", "is_active")
+    search_fields = ("slug", "title", "emoji")
+    ordering = ("tag_type", "order", "id")
+
+
 @admin.register(Tag)
 class TagAdmin(admin.ModelAdmin):
     list_display = ("id", "task", "taskTag")
@@ -244,8 +342,8 @@ class MarkAdmin(admin.ModelAdmin):
 
 @admin.register(SupportInfo)
 class SupportInfoAdmin(admin.ModelAdmin):
-    list_display = ("id", "info_preview", "subject", "level")
-    list_filter = ("subject", "level")
+    list_display = ("id", "info_preview", "subject", "level", "vpr_class")
+    list_filter = ("subject", "level", "vpr_class")
     list_select_related = ("subject", "level")
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
@@ -312,6 +410,43 @@ class ErrorReportAdmin(admin.ModelAdmin):
         text = obj.comment or ""
         return (text[:60] + "…") if len(text) > 60 else text or "—"
     comment_preview.short_description = "Комментарий"
+
+
+@admin.register(PedagogicalRecommendation)
+class PedagogicalRecommendationAdmin(admin.ModelAdmin):
+    list_display = (
+        "subject",
+        "exam_level",
+        "topic",
+        "subtopic",
+        "skill_group",
+        "is_active",
+        "priority",
+    )
+    list_filter = ("subject", "exam_level", "skill_group", "is_active")
+    search_fields = ("topic", "subtopic", "short_recommendation", "skill_group")
+    ordering = ("subject", "exam_level", "priority", "id")
+
+
+@admin.register(ReportConclusionTemplate)
+class ReportConclusionTemplateAdmin(admin.ModelAdmin):
+    list_display = (
+        "result_level",
+        "subject",
+        "exam_level",
+        "min_percent",
+        "max_percent",
+        "is_active",
+    )
+    list_filter = ("result_level", "subject", "exam_level", "is_active")
+    search_fields = ("text_template",)
+
+
+@admin.register(ReportNextStepTemplate)
+class ReportNextStepTemplateAdmin(admin.ModelAdmin):
+    list_display = ("condition_type", "subject", "exam_level", "priority", "is_active")
+    list_filter = ("condition_type", "subject", "exam_level", "is_active")
+    search_fields = ("text",)
 
 
 @admin.register(Announcement)

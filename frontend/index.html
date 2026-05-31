@@ -5,25 +5,27 @@
   <meta name="yandex-verification" content="ef13ec5e267d285b" />
     <!-- Основные мета для соцсетей -->
 <meta property="og:type" content="website">
-<meta property="og:title" content="Генурок — генератор ОГЭ и ЕГЭ по математике и информатике">
+<meta property="og:title" content="Цифровой поток — ОГЭ и ЕГЭ">
 <meta property="og:description" content="Онлайн-генератор экзаменационных заданий, автопроверка, PDF-варианты, удобная структура по темам.">
-<meta property="og:url" content="http://xn--c1aeplflu.xn--p1ai/">
-<meta property="og:image" content="http://xn--c1aeplflu.xn--p1ai/static/share.png">
+<meta property="og:url" content="https://itflux.ru/">
+<meta property="og:image" content="https://itflux.ru/img/digital-flow-logo.png">
 
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Генурок — генератор ОГЭ и ЕГЭ">
+<meta name="twitter:title" content="Цифровой поток — ОГЭ и ЕГЭ">
 <meta name="twitter:description" content="Онлайн-генератор экзаменационных заданий, автопроверка, PDF-варианты.">
-<meta name="twitter:image" content="http://xn--c1aeplflu.xn--p1ai/static/share.png">
+<meta name="twitter:image" content="https://itflux.ru/img/digital-flow-logo.png">
 
 
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/png" href="/favicon.png" sizes="64x64" />
+  <link rel="apple-touch-icon" href="/favicon.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Генератор</title>
+  <title>Цифровой поток — ОГЭ и ЕГЭ</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Geologica:wght@400;500;600;700;800&family=Mulish:ital,wght@0,400;0,500;0,600;0,700&family=Nunito+Sans:ital,wght@0,400;0,500;0,600;0,700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=TikTok+Sans:wght@400;500;600;700;800&family=Manrope:wght@400;500;700;800&family=Onest:wght@600;700;800;900&family=Nunito:wght@400;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/ttf" href="/fonts/Bounded-Variable.ttf" crossorigin />
 
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
 
@@ -36,15 +38,15 @@
       /* CHTML: глифы формул — шрифт MathJax; Calibri только через CSS для mjx-mtext (\text{}) */
       chtml: {
         scale: 1.525,
-        mtextInheritFont: true,
-        /* true сжимает формулы под x-height окружающего текста — на экране кажутся мелкими */
+        /* false: метрики \text{…} из шрифта MathJax — стабильная ширина кириллицы; true + Inter давало «схлопывание» букв */
+        mtextInheritFont: false,
         matchFontHeight: false
       },
       startup: { typeset: false }
     };
   </script>
 
-  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 
   <!-- Yandex.Metrika counter -->
   <script type="text/javascript">

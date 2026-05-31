@@ -1,11 +1,18 @@
+# Зависимости: uv sync (из корня репозитория).
+# Django: uv run python Generator/manage.py migrate
+
 [project]
-name = "repl-nix-workspace"
+name = "itflux"
 version = "0.1.0"
-description = "Add your description here"
+description = "IT Flux — платформа «Цифровой поток» (генератор вариантов ОГЭ/ЕГЭ/ВПР)"
 requires-python = ">=3.11"
 dependencies = [
+    "pandas>=2.2.0",
+    "openpyxl>=3.1.0",
+    "requests>=2.31.0",
     "channels>=4.3.2",
     "django>=5.2.11",
+    "djangorestframework>=3.16.0",
     "django-ckeditor>=6.7.3",
     "django-ckeditor-5>=0.2.19",
     "django-cors-headers>=4.9.0",

@@ -73,8 +73,8 @@ function fmtInt(n) {
   return Math.round(n).toLocaleString("ru-RU");
 }
 
-const FOOTNOTE_PHRASE_STORAGE_KEY_V1 = "genurok_exam_footnote_comparison_v1";
-const FOOTNOTE_SEED_STORAGE_KEY = "genurok_exam_footnote_hourly_v1";
+const FOOTNOTE_PHRASE_STORAGE_KEY_V1 = "digital_flow_exam_footnote_comparison_v1";
+const FOOTNOTE_SEED_STORAGE_KEY = "digital_flow_exam_footnote_hourly_v1";
 
 /**
  * Сравнения по оставшимся секундам (числа пересчитываются от таймера).

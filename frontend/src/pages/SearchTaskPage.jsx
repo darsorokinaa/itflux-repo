@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import Nav from "../components/Nav";
+import SearchByIdForm from "../components/SearchByIdForm";
 import MathContent from "../components/MathContent";
 import { devApiBase } from "../utils/devApiBase";
 
@@ -39,23 +41,35 @@ function SearchTaskPage() {
 
   if (!q) {
     return (
-      <div className="container search-task-page">
-        <div className="search-task-hero">
-          <h1>Поиск задачи</h1>
-          <p>Введите ID задачи в форме поиска на странице выбора предмета (ОГЭ или ЕГЭ).</p>
+      <div className="digital-flow-page">
+        <Nav />
+        <div className="digital-flow-page__wrap">
+          <div className="container search-task-page">
+            <div className="search-task-hero">
+              <h1>Поиск задачи</h1>
+              <p>Введите числовой ID задачи из банка.</p>
+              <SearchByIdForm kind="task" className="search-page__form" />
+              <p className="search-page__hint">
+                Или откройте <Link to="/tasks">все задачи</Link> с фильтрами по предмету и уровню.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="container search-task-page">
-      <div className="search-task-hero">
-        <h1>Поиск: ID {q}</h1>
-        <p>Результат поиска по запросу</p>
-      </div>
+    <div className="digital-flow-page">
+      <Nav />
+      <div className="digital-flow-page__wrap">
+        <div className="container search-task-page">
+          <div className="search-task-hero">
+            <h1>Поиск: ID {q}</h1>
+            <SearchByIdForm kind="task" initialQuery={q} className="search-page__form" />
+          </div>
 
-      {loading && (
+          {loading && (
         <div className="search-task-loading">
           <div className="search-task-spinner" />
           <p>Загрузка...</p>
@@ -94,6 +108,8 @@ function SearchTaskPage() {
           ))}
         </div>
       )}
+        </div>
+      </div>
     </div>
   );
 }

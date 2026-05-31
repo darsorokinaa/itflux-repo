@@ -2,7 +2,7 @@ import punycode from "punycode";
 
 /**
  * Браузер отдаёт IDN-хост в Punycode (xn--…); для копирования ссылки нужен читаемый домен.
- * Опционально: VITE_PUBLIC_SITE_ORIGIN=http://генурок.рф — канонический origin при сборке.
+ * Опционально: VITE_PUBLIC_SITE_ORIGIN=https://itflux.ru — канонический origin при сборке.
  */
 function hostnameToUnicode(hostname) {
   if (!hostname) return hostname;

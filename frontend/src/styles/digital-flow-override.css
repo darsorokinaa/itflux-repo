@@ -1,0 +1,1525 @@
+/* ============================================================
+   Цифровой поток — CSS override (design system 2026)
+   Палитра: #1550D8 / #0B2F9F / #6F91E8 / #050505 / #D7FF3F
+   Шрифты : Bounded (display) + Manrope (body)
+   Никакой HTML/JS логики не трогаем — только цвета/типографика/декор.
+   ============================================================ */
+
+/* Локально подключаем Bounded (вариативный TTF, SIL OFL).
+   Файл лежит в frontend/public/fonts/Bounded-Variable.ttf */
+@font-face {
+  font-family: "Bounded";
+  src: url("/fonts/Bounded-Variable.ttf") format("truetype-variations"),
+       url("/fonts/Bounded-Variable.ttf") format("truetype");
+  font-weight: 200 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ── Базовая типографика ─────────────────────────────────────── */
+
+html,
+body {
+  color: var(--text-main);
+  font-family: "TikTok Sans", "Manrope", system-ui, sans-serif !important;
+}
+
+body,
+button,
+input,
+select,
+textarea {
+  font-family: "TikTok Sans", "Manrope", system-ui, sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.section-head__title,
+.hero-h1,
+.home-level-card__title,
+.updates-section__title,
+.updates-section h2,
+.update-card__title,
+.brand-name,
+.subject-pick__title,
+.subject-pick__heading,
+.tasks-prep-flow h1,
+.tasks-prep-flow h2,
+.tasks-prep-flow h3,
+.exam-page h1,
+.exam-page h2,
+.exam-page h3,
+.search-page h1,
+.search-page h2,
+.search-task-card__title,
+.sv-header__title,
+.report-template h1,
+.report-template h2 {
+  font-family: "Bounded", system-ui, sans-serif !important;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+}
+
+.section-head__lead,
+p,
+li,
+label,
+input,
+select,
+button,
+.hero-desc,
+.update-card__detail,
+.update-card__date,
+.update-card__title,
+.home-level-card__desc,
+.home-level-card__badge,
+.all-tasks-filter__control,
+.all-tasks-card,
+.site-nav__tab,
+.cta-primary,
+.btn-hero-primary {
+  font-family: "TikTok Sans", "Manrope", system-ui, sans-serif;
+}
+
+/* Small-caps лейблы */
+.hero-eyebrow,
+.section-head__eyebrow,
+.home-level-card__class,
+.all-tasks-filter__label,
+.site-nav__tab-soon,
+.site-nav__search-label,
+.update-card__tag {
+  font-family: var(--font-body) !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.1em !important;
+  font-size: 11px !important;
+}
+
+/* ── Навигация ──────────────────────────────────────────────── */
+
+.site-header {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 200 !important;
+  background: transparent;
+}
+
+.site-nav {
+  background: rgba(255, 255, 255, 0.96) !important;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2) !important;
+}
+
+.site-nav__inner,
+.digital-flow-page .site-nav__inner {
+  min-height: 56px;
+}
+
+.site-nav .brand-name {
+  font-family: var(--font-display);
+  font-weight: 800;
+  color: var(--black-deep) !important;
+  letter-spacing: -0.02em;
+  text-transform: none;
+}
+
+.site-nav .brand-sub {
+  color: var(--text-sub);
+}
+
+.site-nav__tab {
+  color: var(--text-main) !important;
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  padding: 8px 4px !important;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.site-nav__tab + .site-nav__tab {
+  margin-left: 18px;
+}
+
+.site-nav__tab:hover {
+  color: var(--blue-main) !important;
+  background: transparent !important;
+}
+
+.site-nav__tab--active {
+  color: var(--blue-main) !important;
+  background: transparent !important;
+  border-bottom-color: var(--blue-main) !important;
+}
+
+.site-nav__tab--disabled {
+  color: var(--text-hint) !important;
+  background: transparent !important;
+  opacity: 0.65;
+}
+
+.site-nav__tab-soon {
+  background: var(--lime) !important;
+  color: var(--black-deep) !important;
+  border-radius: 4px !important;
+  padding: 2px 6px !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.05em !important;
+  margin-left: 6px;
+}
+
+.site-nav__search-input {
+  border: 1.5px solid #E5E8F0 !important;
+  background: #fff !important;
+  color: var(--text-main) !important;
+}
+
+.site-nav__search-input:focus {
+  border-color: var(--blue-main) !important;
+  box-shadow: 0 0 0 3px rgba(21, 80, 216, 0.16) !important;
+}
+
+.site-nav__search-btn {
+  background: var(--blue-main) !important;
+  color: #fff !important;
+  font-family: var(--font-display);
+  font-weight: 800;
+}
+
+.site-nav__search-btn:hover {
+  background: var(--blue-dark) !important;
+}
+
+/* ── HERO ───────────────────────────────────────────────────── */
+
+.hero-section {
+  position: relative;
+  overflow: hidden;
+  background: var(--blue-main) !important;
+  background-image:
+    linear-gradient(135deg, var(--blue-dark) 0%, var(--blue-main) 100%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 28px !important;
+  padding: 42px 48px !important;
+  box-shadow: 0 28px 72px rgba(11, 47, 159, 0.34) !important;
+}
+
+.hero-section::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+  background-size: 28px 28px;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.hero-section::after {
+  display: none !important;
+}
+
+.hero-section__inner {
+  position: relative;
+  z-index: 2;
+  gap: 26px !important;
+}
+
+.hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 6px 16px !important;
+  border-radius: 100px !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+  color: rgba(255, 255, 255, 0.78) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+}
+
+.hero-h1 {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(28px, 3.6vw, 40px) !important;
+  color: #fff !important;
+  text-transform: none !important;
+  letter-spacing: -0.04em !important;
+  line-height: 1.12 !important;
+  margin: 0 0 12px !important;
+}
+
+.hero-h1 .hero-accent {
+  color: var(--lime) !important;
+}
+
+.hero-desc {
+  color: rgba(255, 255, 255, 0.72) !important;
+  font-size: 16px;
+  line-height: 1.55;
+  margin: 0 0 20px !important;
+  max-width: 560px;
+}
+
+.cta-primary,
+.btn-hero-primary {
+  background: var(--lime) !important;
+  color: var(--black-deep) !important;
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  border-radius: 100px !important;
+  padding: 14px 28px !important;
+  font-size: 15px !important;
+  min-height: 54px !important;
+  box-shadow: 0 10px 28px rgba(215, 255, 63, 0.32) !important;
+}
+
+.cta-primary:hover,
+.btn-hero-primary:hover {
+  background: #C2E632 !important;
+  transform: translateY(-2px);
+  box-shadow: 0 14px 36px rgba(215, 255, 63, 0.42) !important;
+}
+
+/* Stat cards */
+.hero-aside {
+  gap: 10px !important;
+}
+
+.hero-stat {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 18px !important;
+  padding: 15px 22px !important;
+  text-align: left;
+  align-items: flex-start !important;
+  gap: 3px !important;
+  min-width: 0 !important;
+}
+
+.hero-stat-num {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 32px !important;
+  letter-spacing: -0.04em !important;
+  color: #fff !important;
+  line-height: 1 !important;
+}
+
+.hero-stat-label {
+  font-size: 11px !important;
+  color: rgba(255, 255, 255, 0.55) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+/* ── Pill-теги ──────────────────────────────────────────────── */
+
+.hero-tag,
+.value-block__pill,
+.features-block .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  border-radius: 100px !important;
+  padding: 8px 18px !important;
+  color: #fff !important;
+  font-weight: 700;
+  font-size: 14px;
+  transition: background 0.15s ease;
+}
+
+.hero-tag:hover,
+.value-block__pill:hover,
+.features-block .pill:hover {
+  background: rgba(255, 255, 255, 0.2) !important;
+}
+
+/* ── Карточки уровней (компактные, ~2.5x меньше) ────────────── */
+
+.home-level-card {
+  border-radius: 18px !important;
+  overflow: hidden;
+  position: relative;
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+  cursor: pointer;
+  border: 1px solid transparent !important;
+  padding: 16px 20px !important;
+  min-height: 0 !important;
+  gap: 14px !important;
+}
+
+.home-level-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 18px 18px !important;
+  pointer-events: none;
+  opacity: 1 !important;
+}
+
+.home-level-card::after {
+  display: none !important;
+}
+
+.home-level-card:hover:not(:disabled) {
+  transform: translateY(-5px) !important;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.3) !important;
+}
+
+.home-level-card--base,
+.home-level-card.subject-pick-card--base {
+  background: linear-gradient(135deg, #E05A00 0%, #FF8C38 100%) !important;
+  border: none !important;
+}
+
+.home-level-card--oge,
+.home-level-card.subject-pick-card--oge {
+  background: linear-gradient(135deg, #7B1226 0%, #C0284A 100%) !important;
+  border: none !important;
+}
+
+.home-level-card--ege,
+.home-level-card.subject-pick-card--ege {
+  background: linear-gradient(135deg, var(--blue-dark) 0%, var(--blue-main) 100%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+}
+
+.home-level-card__inner {
+  gap: 14px !important;
+}
+
+.home-level-card__icon {
+  width: 44px !important;
+  height: 44px !important;
+  border-radius: 10px !important;
+}
+
+.home-level-card__icon-glyph {
+  font-size: 22px !important;
+}
+
+.home-level-card__icon-glyph--code {
+  font-size: 18px !important;
+}
+
+.home-level-card__line {
+  gap: 4px !important;
+}
+
+.home-level-card__title {
+  font-family: var(--font-display) !important;
+  font-weight: 900 !important;
+  font-size: 22px !important;
+  letter-spacing: -0.03em !important;
+  text-transform: none !important;
+  color: #fff !important;
+  line-height: 1.1 !important;
+}
+
+.home-level-card__desc {
+  color: rgba(255, 255, 255, 0.78) !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+}
+
+.home-level-card__badge,
+.home-level-card .home-level-card__badge {
+  background: rgba(0, 0, 0, 0.25) !important;
+  border-radius: 100px !important;
+  padding: 4px 12px !important;
+  font-size: 12px !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+  font-weight: 600 !important;
+  font-family: var(--font-body) !important;
+}
+
+.home-level-card__class {
+  background: rgba(0, 0, 0, 0.3) !important;
+  color: rgba(255, 255, 255, 0.6) !important;
+  border: none !important;
+  border-radius: 5px !important;
+  font-size: 10px !important;
+  padding: 2px 8px !important;
+}
+
+.home-level-card__right {
+  gap: 8px !important;
+}
+
+.home-level-card__arrow {
+  background: rgba(255, 255, 255, 0.15) !important;
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 8px !important;
+}
+
+.home-level-card__arrow svg {
+  width: 18px !important;
+  height: 18px !important;
+}
+
+/* ── Блок «Обновления» ──────────────────────────────────────── */
+
+.updates-section,
+.home-page__updates > .updates-section {
+  background: #fff !important;
+  border-radius: 18px !important;
+  padding: 18px 22px !important;
+  border: 1px solid #E5E8F0 !important;
+  box-shadow: 0 4px 18px rgba(11, 47, 159, 0.06) !important;
+  color: var(--black-deep);
+}
+
+.updates-section__head {
+  margin-bottom: 8px !important;
+  padding-bottom: 8px !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.updates-section__title {
+  font-family: var(--font-display) !important;
+  font-weight: 800 !important;
+  font-size: 14px !important;
+  color: var(--black-deep) !important;
+  letter-spacing: -0.02em !important;
+  text-transform: uppercase;
+}
+
+.updates-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.update-card {
+  position: relative;
+  border: none !important;
+  border-radius: 0 !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
+  background: transparent !important;
+  padding: 8px 4px 8px 12px !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+  transition: background 0.15s ease;
+  min-height: 0 !important;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.update-card:last-child {
+  border-bottom: none !important;
+}
+
+.update-card:hover {
+  background: rgba(21, 80, 216, 0.04) !important;
+}
+
+.update-card--new {
+  background: transparent !important;
+}
+
+.update-card--new::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--blue-main);
+  border-radius: 0 2px 2px 0;
+}
+
+.update-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.update-card__title {
+  color: var(--black-deep) !important;
+  font-family: var(--font-body) !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.005em !important;
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+  margin: 0 !important;
+}
+
+.update-card__detail {
+  color: var(--text-sub) !important;
+  font-size: 11.5px !important;
+  margin: 0 !important;
+  line-height: 1.3 !important;
+}
+
+.update-card__date {
+  color: var(--text-hint) !important;
+  font-size: 11.5px !important;
+  white-space: nowrap;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.update-card__tag {
+  background: var(--lime) !important;
+  color: var(--black-deep) !important;
+  border-radius: 3px !important;
+  padding: 1px 6px !important;
+  font-size: 9px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.05em !important;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+/* ── «Цифры/CTA» в общих блоках section-head ────────────────── */
+
+.section-head__title {
+  font-family: var(--font-display) !important;
+  font-weight: 900 !important;
+  letter-spacing: -0.04em !important;
+  color: #fff;
+}
+
+.digital-flow-page .nav-hub-page .section-head__title,
+.digital-flow-page .all-tasks-page .section-head__title {
+  color: #fff;
+}
+
+.digital-flow-page .section-head__lead {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+/* ── Заголовки в подстраницах (на светлом фоне) ─────────────── */
+
+.digital-flow-page .nav-hub-page .section-head__title,
+.digital-flow-page .all-tasks-page .section-head__title {
+  color: var(--black-deep);
+}
+
+.digital-flow-page .section-head__lead {
+  color: var(--text-sub);
+}
+
+.all-tasks-pager__info,
+.all-tasks-meta {
+  color: var(--text-sub) !important;
+}
+
+/* ── Часть 2 / ОГЭ инф. №13: оставляем 2-колоночные таблицы и блочную
+   разметку как в БД; размер шрифта берём такой же, как для части 1
+   (правила ниже без data-exam-style каскадно сюда же применяются). */
+
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text p,
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text li,
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text div,
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text span:not(mjx-c):not(mjx-mi):not(mjx-mn):not(mjx-mo) {
+  text-align: left !important;
+  letter-spacing: normal !important;
+}
+
+/* Таблицы как в БД — двух-/многоколоночная вёрстка с лёгкой сеткой.
+   Структура из БД: <tr><td>Лейбл</td><td>Значение</td></tr>,
+   секционные заголовки идут как <tr><td colspan="2"><u>…</u></td></tr>. */
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text table {
+  display: table !important;
+  border: 1px solid #DCE0EA !important;
+  background: #fff !important;
+  margin: 14px 0 !important;
+  width: auto !important;
+  max-width: 100% !important;
+  border-collapse: collapse !important;
+  table-layout: auto !important;
+}
+
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text thead,
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text tbody,
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text tr {
+  background: transparent !important;
+  border: none !important;
+}
+
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text th,
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text td {
+  border: 1px solid #DCE0EA !important;
+  padding: 8px 14px !important;
+  text-align: left !important;
+  vertical-align: middle !important;
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  color: inherit !important;
+  background: transparent !important;
+  white-space: normal !important;
+  line-height: 1.55 !important;
+}
+
+/* Секционные «шапки» (td с colspan="2", обычно подчёркнутый <u>): по центру,
+   тон шапки — как в БД. */
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text td[colspan],
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text th[colspan] {
+  text-align: center !important;
+  background: #F5F7FB !important;
+  font-weight: 600 !important;
+}
+
+/* Внутренние <p>/<b>/<u> в ячейках — наследуем визуал, не схлопываем margin */
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text td p,
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text th p {
+  margin: 0 !important;
+  font-size: inherit !important;
+  line-height: 1.55 !important;
+  text-align: inherit !important;
+}
+
+/* Никаких синих «шапок» и «первых столбцов» в части 2 — оставляем «как в БД»:
+   жирность — только если в исходнике есть <b>/<strong>/<u>. */
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text tr td:first-child,
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text tr th:first-child {
+  color: inherit !important;
+  font-weight: inherit !important;
+}
+
+/* Картинки в части 2 — как в варианте */
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text img,
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text figure,
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text figure img {
+  max-width: 100% !important;
+  width: auto !important;
+  height: auto !important;
+  display: block !important;
+  margin: 12px 0 !important;
+}
+
+/* Параграф со строкой-«шифровкой» в части 2 не увеличивается */
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text p:has(+ table),
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text > p + p:not(:has(b)):not(:has(strong)) {
+  text-align: left !important;
+  letter-spacing: normal !important;
+}
+
+/* Как .task-text / exam-page: блоки слева */
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text .task-html-block {
+  text-align: left !important;
+  margin: 0 0 0.5rem !important;
+}
+
+.all-tasks-card[data-exam-style="1"] .all-tasks-card__text .task-html-block:has(table) {
+  text-align: left !important;
+}
+
+/* ОГЭ инф. №13: заголовок требований и списки */
+.all-tasks-card[data-exam-style="1"] .oge-inf-13-requirements-heading {
+  margin: 1rem 0 0.5rem !important;
+  font-family: var(--font-body) !important;
+  font-size: 1rem !important;
+  font-weight: 700 !important;
+  color: var(--text-main) !important;
+}
+
+.all-tasks-card[data-exam-style="1"] .oge-inf-13-line {
+  margin: 0.35rem 0 !important;
+  padding-left: 0 !important;
+  text-align: left !important;
+}
+
+.all-tasks-card[data-exam-style="1"] .oge-inf-13-li-num,
+.all-tasks-card[data-exam-style="1"] .oge-inf-13-li-mark {
+  font-weight: 700;
+  margin-right: 0.25em;
+}
+
+/* ── Все задачи: уменьшаем картинки в задании №9 ОГЭ информатика
+   (там обычно крупные схемы / изображения файлов) в 2.5 раза ───── */
+
+.all-tasks-card[data-task-number="9"] .all-tasks-card__text img,
+.all-tasks-card[data-task-number="9"] .all-tasks-card__text figure,
+.all-tasks-card[data-task-number="9"] .all-tasks-card__text figure img {
+  max-width: 100% !important;
+  width: auto !important;
+  height: auto !important;
+}
+
+/* Перенос строки перед картинкой — figure/img на своей строке */
+.all-tasks-card[data-task-number="9"] .all-tasks-card__text figure,
+.all-tasks-card[data-task-number="9"] .all-tasks-card__text > img,
+.all-tasks-card[data-task-number="9"] .all-tasks-card__text p > img,
+.all-tasks-card[data-task-number="9"] .all-tasks-card__text p img {
+  display: block !important;
+  margin: 12px 0 !important;
+  clear: both;
+}
+
+.all-tasks-card[data-task-number="9"] .all-tasks-card__text p:has(> img),
+.all-tasks-card[data-task-number="9"] .all-tasks-card__text p:has(img) {
+  display: block;
+  text-align: left;
+}
+
+/* ── Все задачи: ленивый skeleton до появления карточки во вью ─ */
+
+.all-tasks-lazy {
+  width: 100%;
+}
+
+.all-tasks-lazy__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.all-tasks-lazy__skeleton span {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    #ECEEF6 0%,
+    #F6F8FC 50%,
+    #ECEEF6 100%
+  );
+  background-size: 200% 100%;
+  animation: all-tasks-lazy-shimmer 1.4s ease-in-out infinite;
+}
+
+.all-tasks-lazy__skeleton span:nth-child(1) {
+  width: 92%;
+}
+.all-tasks-lazy__skeleton span:nth-child(2) {
+  width: 75%;
+}
+.all-tasks-lazy__skeleton span:nth-child(3) {
+  width: 58%;
+}
+
+@keyframes all-tasks-lazy-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* ── Все задачи: пустое состояние «Выберите задание» ───────── */
+
+.all-tasks-empty--pick {
+  margin: 18px 0 0 !important;
+  padding: 24px 24px !important;
+  border-radius: 16px !important;
+  background: #fff !important;
+  border: 1.5px dashed rgba(21, 80, 216, 0.35) !important;
+  text-align: center;
+}
+
+.all-tasks-empty__title {
+  margin: 0 0 6px !important;
+  font-family: "Bounded", system-ui, sans-serif !important;
+  font-weight: 800 !important;
+  font-size: 18px !important;
+  color: var(--blue-dark) !important;
+  letter-spacing: -0.03em;
+}
+
+.all-tasks-empty__lead {
+  margin: 0 !important;
+  font-size: 13px !important;
+  color: var(--text-sub) !important;
+  line-height: 1.5 !important;
+}
+
+/* ── Все задачи: meta-строка (количество + контекст) ───────── */
+
+.all-tasks-meta {
+  margin: 6px 0 18px !important;
+}
+
+.all-tasks-meta__inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.all-tasks-meta__count {
+  display: inline-flex;
+  align-items: center;
+  font-family: "Bounded", system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: -0.03em;
+  color: var(--text-main) !important;
+}
+
+.all-tasks-meta__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 100px;
+  background: rgba(21, 80, 216, 0.08);
+  color: var(--blue-main) !important;
+  font-weight: 700;
+  font-size: 13px;
+  font-family: "TikTok Sans", "Manrope", system-ui, sans-serif;
+  letter-spacing: 0;
+}
+
+.all-tasks-meta__sub {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 100px;
+  background: rgba(0, 0, 0, 0.045);
+  color: var(--text-sub) !important;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+/* Скрываем дублирующиеся плашки внутри карточек (на случай старого DOM) */
+.all-tasks-card__head,
+.all-tasks-card__badge,
+.all-tasks-card__title {
+  display: none !important;
+}
+
+/* Карточка: номер слева, условие справа; кнопки под условием */
+.all-tasks-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 14px;
+  row-gap: 10px;
+  align-items: start;
+}
+
+.all-tasks-card__aside {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.all-tasks-card__content {
+  grid-column: 2;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.all-tasks-card__content .all-tasks-lazy {
+  width: 100%;
+  min-width: 0;
+}
+
+.all-tasks-card__id {
+  position: static !important;
+  font-size: 10px !important;
+  font-weight: 600;
+  color: var(--text-hint) !important;
+  background: transparent !important;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* Порядковый номер задачи */
+.all-tasks-card__num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 0;
+  background: #fff;
+  border: 1px solid var(--blue-main);
+  color: var(--blue-main) !important;
+  font-family: "Nunito", var(--font-body), system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0;
+  line-height: 1;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+/* «Посмотреть ответ» — текстовая ссылка, не кнопка */
+.all-tasks-card__actions {
+  grid-column: 2;
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 2px;
+}
+
+.all-tasks-card__answer-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--blue-main);
+  font-family: "TikTok Sans", "Manrope", system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 1.35;
+  text-decoration: underline;
+  text-decoration-color: rgba(21, 80, 216, 0.35);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+
+.all-tasks-card__answer-btn:hover {
+  color: var(--blue-dark);
+  text-decoration-color: var(--blue-main);
+}
+
+.all-tasks-card__answer-btn[aria-expanded="true"] {
+  color: var(--blue-dark);
+  text-decoration-color: var(--blue-main);
+}
+
+.all-tasks-card__answer {
+  grid-column: 2;
+  margin-top: 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #F4F8FE;
+  border: 1px solid rgba(21, 80, 216, 0.18);
+}
+
+.all-tasks-card__answer-label {
+  display: inline-block;
+  font-family: "Bounded", system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--blue-main);
+  margin-bottom: 6px;
+}
+
+.all-tasks-card__answer-content {
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+  color: var(--text-main);
+}
+
+.all-tasks-card__answer-content p,
+.all-tasks-card__answer-content li,
+.all-tasks-card__answer-content div,
+.all-tasks-card__answer-content span:not(mjx-c):not(mjx-mi):not(mjx-mn):not(mjx-mo) {
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+}
+
+.all-tasks-card__answer-error {
+  margin: 0;
+  color: #c92a2a;
+  font-size: 13px;
+}
+
+/* ── Все задачи: уменьшаем текст карточек (только часть 1) ──── */
+
+.all-tasks-card {
+  padding: 13px 14px !important;
+}
+
+.all-tasks-card__badge {
+  font-size: 12px !important;
+}
+
+.all-tasks-card__id {
+  font-size: 11px !important;
+}
+
+.all-tasks-card__title {
+  font-size: 12px !important;
+}
+
+.all-tasks-card .all-tasks-card__text,
+.all-tasks-card .task-text {
+  font-size: 15px !important;
+  line-height: 1.55 !important;
+  text-align: left !important;
+  margin: 0 !important;
+}
+
+.all-tasks-card .all-tasks-card__text p,
+.all-tasks-card .all-tasks-card__text li,
+.all-tasks-card .all-tasks-card__text div,
+.all-tasks-card .all-tasks-card__text td,
+.all-tasks-card .all-tasks-card__text th,
+.all-tasks-card .all-tasks-card__text span:not(mjx-c):not(mjx-mi):not(mjx-mn):not(mjx-mo) {
+  font-size: 15px !important;
+  line-height: 1.55 !important;
+  text-align: left !important;
+}
+
+/* Никаких лишних margin у первого/последнего блока внутри карточки */
+.all-tasks-card .all-tasks-card__text > *:first-child,
+.all-tasks-card .all-tasks-card__text > *:first-child > *:first-child {
+  margin-top: 0 !important;
+}
+.all-tasks-card .all-tasks-card__text > *:last-child,
+.all-tasks-card .all-tasks-card__text > *:last-child > *:last-child {
+  margin-bottom: 0 !important;
+}
+.all-tasks-card .all-tasks-card__text p {
+  margin: 0 !important;
+}
+
+/* Висячие пустые узлы, которые ФИПИ оставляет под условием задания: */
+.all-tasks-card .all-tasks-card__text > p:empty,
+.all-tasks-card .all-tasks-card__text > div:empty,
+.all-tasks-card .all-tasks-card__text > br:last-child,
+.all-tasks-card .all-tasks-card__text p:last-child:empty,
+.all-tasks-card .all-tasks-card__text div:last-child:empty {
+  display: none !important;
+}
+
+.all-tasks-card .all-tasks-card__text mjx-container,
+.all-tasks-card .all-tasks-card__text mjx-container[display="true"],
+.all-tasks-card .all-tasks-card__text mjx-container * {
+  font-size: 14pt !important;
+}
+
+/* ── Все задачи: таблицы — компактно, по центру, серые рамки (часть 1) */
+
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table {
+  display: table !important;
+  width: auto !important;
+  max-width: 100% !important;
+  margin: 10px auto !important;
+  border: 1px solid #B8BFCE !important;
+  border-collapse: collapse !important;
+  border-spacing: 0 !important;
+  background: #fff !important;
+  table-layout: auto !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text thead,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text tbody,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text tfoot,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text tr {
+  background: transparent !important;
+  border: none !important;
+}
+
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text th,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text td {
+  border: 1px solid #D9DEE8 !important;
+  padding: 11px 21px !important;
+  text-align: center !important;
+  vertical-align: middle !important;
+  font-size: 21px !important;
+  min-width: 0 !important;
+  width: auto !important;
+  background: transparent !important;
+  color: var(--text-main) !important;
+  font-weight: 400 !important;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+/* По умолчанию: все ячейки чёрные */
+
+/* «Шапка»: ячейки в <thead>, либо первая строка таблицы без thead.
+   В таких ячейках обычно стоят буквы / заголовки → синие, жирные. */
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text thead th,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text thead td,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:not(:has(thead)) tr:first-child td,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:not(:has(thead)) tr:first-child th {
+  font-weight: 700 !important;
+  background: transparent !important;
+  color: var(--blue-main) !important;
+}
+
+/* Первый столбец синим — только если в таблице есть thead
+   и таблица «широкая» (≥4 столбцов: расстояния A/B/C/D/E и т.п.).
+   Для узких таблиц (запросы, поиск и т.п.) первый столбец остаётся чёрным —
+   синяя только сама шапка. */
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(thead):has(tr td:nth-child(4)) tr td:first-child,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(thead):has(tr td:nth-child(4)) tr th:first-child,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(thead):has(tr th:nth-child(4)) tr td:first-child,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(thead):has(tr th:nth-child(4)) tr th:first-child {
+  font-weight: 700 !important;
+  background: transparent !important;
+  color: var(--blue-main) !important;
+}
+
+/* Узкие таблицы (≤3 столбцов, например задание №8 ОГЭ — «запрос/количество»):
+   шрифт 14 px, синим только шапка (thead), все остальные ячейки — чёрные. */
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:not(:has(tr td:nth-child(4))):not(:has(tr th:nth-child(4))) th,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:not(:has(tr td:nth-child(4))):not(:has(tr th:nth-child(4))) td {
+  font-size: 14px !important;
+  padding: 7px 14px !important;
+}
+
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:not(:has(tr td:nth-child(4))):not(:has(tr th:nth-child(4))) tbody td,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:not(:has(tr td:nth-child(4))):not(:has(tr th:nth-child(4))) tbody th {
+  color: var(--text-main) !important;
+  font-weight: 400 !important;
+}
+
+/* Однострочные «таблицы-листинги» (Python-код, фрагменты кода):
+   таблица с одной колонкой → выровнять слева, убрать границы, обычный шрифт. */
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child) {
+  border: none !important;
+  background: transparent !important;
+  margin: 8px 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child) tr,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child) thead,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child) tbody {
+  background: transparent !important;
+  border: none !important;
+}
+
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child) td,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child) th {
+  border: none !important;
+  background: transparent !important;
+  padding: 2px 0 !important;
+  text-align: left !important;
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+  font-weight: 400 !important;
+  color: var(--text-main) !important;
+  white-space: pre-wrap !important;
+}
+
+/* Алфавит-таблицы (буква-число попарно): 7+ столбцов и 5+ строк.
+   Не цепляет Морзе-таблицу (5 столбцов) и таблицу расстояний A/B/C/D/E (6 столбцов).
+   Нечётные столбцы → буквы (синие), чётные → числа (чёрные).
+   Перебивает «первая строка синяя у таблицы без thead», чтобы числа в первой
+   строке (1, 11, 21, 31) оставались чёрными. */
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:nth-child(7)):has(tr:nth-child(5)) td:nth-child(odd),
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:nth-child(7)):has(tr:nth-child(5)) th:nth-child(odd),
+.all-tasks-card:not([data-exam-style="1"])
+  .all-tasks-card__text
+  table:has(tr td:nth-child(7)):has(tr:nth-child(5)):not(:has(thead))
+  tr:first-child
+  td:nth-child(odd) {
+  color: var(--blue-main) !important;
+  font-weight: 700 !important;
+}
+
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:nth-child(7)):has(tr:nth-child(5)) td:nth-child(even),
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:nth-child(7)):has(tr:nth-child(5)) th:nth-child(even),
+.all-tasks-card:not([data-exam-style="1"])
+  .all-tasks-card__text
+  table:has(tr td:nth-child(7)):has(tr:nth-child(5)):not(:has(thead))
+  tr:first-child
+  td:nth-child(even) {
+  color: var(--text-main) !important;
+  font-weight: 400 !important;
+}
+
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table p {
+  margin: 0 !important;
+  font-size: inherit !important;
+  text-align: center !important;
+}
+
+/* Оборачивающие блоки задания — слева, минимальный нижний отступ */
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text .task-html-block {
+  text-align: left !important;
+  margin: 0 0 0.25rem !important;
+}
+
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text .task-html-block:last-child {
+  margin-bottom: 0 !important;
+}
+
+/* Блок с таблицей оставляем по левому краю, центрируем только сами ячейки таблицы */
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text .task-html-block:has(> table),
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text .task-html-block:has(table) {
+  text-align: left !important;
+}
+
+/* ── Варианты ответа 1) 2) 3) 4) (ОГЭ математика) ─────────── */
+
+.all-tasks-card__text .oge-math-choice-task {
+  margin: 4px 0 8px !important;
+}
+
+.all-tasks-card__text .oge-math-choice-question {
+  margin: 0 0 12px !important;
+  text-align: left !important;
+  font-size: 15px !important;
+  line-height: 1.55 !important;
+}
+
+.all-tasks-card__text .oge-math-choice-question p {
+  margin: 0 !important;
+  text-align: left !important;
+}
+
+.all-tasks-card__text .oge-math-choice-options {
+  list-style: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+}
+
+.all-tasks-card__text .oge-math-choice-option {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 12px !important;
+  margin: 0 !important;
+  padding: 4px 0 !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+.all-tasks-card__text .oge-math-choice-option__num {
+  flex-shrink: 0 !important;
+  width: 28px !important;
+  height: 28px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 6px !important;
+  background: var(--blue-main) !important;
+  color: #fff !important;
+  font-family: var(--font-display) !important;
+  font-weight: 800 !important;
+  font-size: 12px !important;
+  line-height: 1 !important;
+}
+
+.all-tasks-card__text .oge-math-choice-option__body {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  text-align: left !important;
+  font-size: 15px !important;
+  line-height: 1.5 !important;
+  white-space: normal !important;
+  color: var(--text-main) !important;
+}
+
+.all-tasks-card__text .oge-math-choice-option__body p {
+  margin: 0 !important;
+  text-align: left !important;
+}
+
+.all-tasks-card__text .oge-math-choice-task img.oge-math-fipi-bitmap,
+.all-tasks-card__text .oge-math-choice-task .oge-math-fipi-bitmap img {
+  width: auto !important;
+  max-width: 100% !important;
+  height: auto !important;
+  margin: 0.25rem 0 !important;
+  object-fit: contain !important;
+  image-rendering: -webkit-optimize-contrast !important;
+  image-rendering: crisp-edges !important;
+}
+
+.all-tasks-card__text .oge-math-choice-question .oge-math-fipi-formula {
+  display: block !important;
+  margin: 0.2rem 0 0.85rem !important;
+  overflow: visible !important;
+  line-height: 0 !important;
+}
+
+.all-tasks-card__text .oge-math-choice-question .oge-math-fipi-formula img {
+  max-width: none !important;
+  transform: scale(2.25) !important;
+  transform-origin: top left !important;
+}
+
+.all-tasks-card__text .oge-math-choice-option__body .oge-math-fipi-bitmap {
+  transform: none !important;
+}
+
+/* Не применять «компактные таблицы» к карточкам вариантов */
+.all-tasks-card__text .oge-math-choice-task table,
+.all-tasks-card__text .oge-math-choice-task th,
+.all-tasks-card__text .oge-math-choice-task td {
+  border: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  white-space: normal !important;
+  text-align: left !important;
+  color: inherit !important;
+  background: transparent !important;
+}
+
+/* Запасной вид: вложенная таблица ФИПИ 1) 2) … до срабатывания JS */
+.all-tasks-card__text table table:has(tr td b),
+.all-tasks-card__text table table:has(tr td strong) {
+  border: none !important;
+  margin: 8px 0 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.all-tasks-card__text table table:has(tr td b) td,
+.all-tasks-card__text table table:has(tr td b) th,
+.all-tasks-card__text table table:has(tr td strong) td,
+.all-tasks-card__text table table:has(tr td strong) th {
+  border: none !important;
+  padding: 6px 10px !important;
+  font-size: 15px !important;
+  line-height: 1.45 !important;
+  white-space: normal !important;
+  text-align: left !important;
+  font-weight: 400 !important;
+  color: var(--text-main) !important;
+  vertical-align: top !important;
+}
+
+.all-tasks-card__text table table:has(tr td b) tr:first-child td,
+.all-tasks-card__text table table:has(tr td b) tr:first-child th,
+.all-tasks-card__text table table:has(tr td strong) tr:first-child td,
+.all-tasks-card__text table table:has(tr td strong) tr:first-child th {
+  color: var(--text-main) !important;
+  font-weight: 400 !important;
+}
+
+.all-tasks-card__text table table:has(tr td b) td:first-child b,
+.all-tasks-card__text table table:has(tr td b) td:first-child strong,
+.all-tasks-card__text table table:has(tr td strong) td:first-child b,
+.all-tasks-card__text table table:has(tr td strong) td:first-child strong {
+  color: var(--blue-main) !important;
+  font-weight: 700 !important;
+}
+
+/* ОГЭ мат. №11: соответствие — графики и варианты в одну строку */
+.all-tasks-card__text .oge-math-matching-task {
+  margin: 4px 0 8px !important;
+}
+
+.all-tasks-card__text .oge-math-matching-question {
+  text-align: left !important;
+  font-size: 15px !important;
+  margin-bottom: 12px !important;
+}
+
+.all-tasks-card__text .oge-math-matching-strip {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  gap: 12px 16px !important;
+  overflow-x: auto !important;
+  justify-content: flex-start !important;
+}
+
+.all-tasks-card__text .oge-math-matching-item {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+.all-tasks-card__text .oge-math-matching-item__label {
+  color: var(--blue-main) !important;
+  font-weight: 800 !important;
+}
+
+.all-tasks-card__text .oge-math-matching-item__body,
+.all-tasks-card__text .oge-math-matching-item__body p,
+.all-tasks-card__text .oge-math-matching-item__body td,
+.all-tasks-card__text .oge-math-matching-item__body th {
+  border: none !important;
+  padding: 0 !important;
+  font-size: 14px !important;
+  text-align: center !important;
+  white-space: normal !important;
+}
+
+.all-tasks-card__text .oge-math-matching-strip--graphs .oge-math-matching-item {
+  min-width: 130px !important;
+}
+
+.all-tasks-card__text .oge-math-matching-item--graph img {
+  max-width: 100% !important;
+  height: auto !important;
+  margin: 0 auto !important;
+  display: block !important;
+}
+
+.all-tasks-card__text .oge-math-matching-footer {
+  text-align: left !important;
+  font-size: 13px !important;
+  color: var(--text-muted) !important;
+  margin-top: 8px !important;
+}
+
+/* ── Responsive ─────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .hero-section {
+    padding: 28px 22px !important;
+    border-radius: 20px !important;
+  }
+
+  .hero-section::after {
+    display: none !important;
+  }
+
+  .hero-h1 {
+    font-size: 26px !important;
+  }
+
+  .hero-stat {
+    width: 100%;
+  }
+
+  .home-levels-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .updates-section,
+  .home-page__updates > .updates-section {
+    padding: 14px 16px !important;
+    border-radius: 14px !important;
+  }
+}

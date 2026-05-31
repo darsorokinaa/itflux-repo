@@ -11,7 +11,8 @@ export function devApiBase() {
   if (typeof window === "undefined") return "";
   if (!import.meta.env.DEV) return "";
   const port = window.location.port;
-  if (port === "5000" || port === "5173") {
+  // Типичные порты Vite (в т.ч. если занят 5000 и подняли на 5001) — прямой запрос к Django для тяжёлых бинарников
+  if (port === "5000" || port === "5001" || port === "5173") {
     return `${window.location.protocol}//127.0.0.1:8000`;
   }
   return "";

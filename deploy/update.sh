@@ -2,16 +2,16 @@
 # Обновление приложения на сервере после push в git.
 #
 # Запуск от root (нужны systemctl, nginx, запись в /etc):
-#   bash /opt/generator_test/deploy/update.sh
+#   bash /opt/itflux/deploy/update.sh
 #
 # При необходимости (редко):
-#   APP_DIR=/opt/generator_test DEPLOY_BRANCH=generator_test NGINX_SITE_NAME=generator_test bash .../update.sh
+#   APP_DIR=/opt/itflux DEPLOY_BRANCH=main NGINX_SITE_NAME=itflux bash .../update.sh
 #
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/opt/generator_test}"
-DEPLOY_BRANCH="${DEPLOY_BRANCH:-generator_test}"
-NGINX_SITE_NAME="${NGINX_SITE_NAME:-generator_test}"
+APP_DIR="${APP_DIR:-/opt/itflux}"
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
+NGINX_SITE_NAME="${NGINX_SITE_NAME:-itflux}"
 
 VENV_PY="${APP_DIR}/venv/bin/python3"
 VENV_PIP="${APP_DIR}/venv/bin/pip"
@@ -37,7 +37,7 @@ cd "$APP_DIR/Generator"
 "$VENV_PY" manage.py collectstatic --noinput
 
 echo "=== Unit systemd (Daphne из репозитория) ==="
-cp "$APP_DIR/deploy/gunicorn.service" /etc/systemd/system/generator_test.service
+cp "$APP_DIR/deploy/gunicorn.service" /etc/systemd/system/itflux.service
 systemctl daemon-reload
 
 echo "=== Конфиг Nginx ==="
@@ -45,7 +45,7 @@ cp "$APP_DIR/deploy/nginx.conf" "/etc/nginx/sites-available/${NGINX_SITE_NAME}"
 ln -sf "/etc/nginx/sites-available/${NGINX_SITE_NAME}" "/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
 nginx -t && systemctl reload nginx
 
-echo "=== Перезапуск Daphne (generator_test) ==="
-systemctl restart generator_test
+echo "=== Перезапуск Daphne (itflux) ==="
+systemctl restart itflux
 
-echo "Готово. Проверка: systemctl status generator_test --no-pager"
+echo "Готово. Проверка: systemctl status itflux --no-pager"

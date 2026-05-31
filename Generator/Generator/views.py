@@ -12,14 +12,16 @@ import secrets
 import threading
 import time
 from datetime import datetime
+from uuid import uuid4
 
 import jwt as pyjwt
 
 from django.conf import settings as django_settings
 from django.core.signing import BadSignature, Signer
-from django.db.models import Case, Count, IntegerField, Prefetch, Q, Value, When
+from django.db.models import Case, Count, IntegerField, Min, Prefetch, Q, Value, When
 from django.http import (
     FileResponse,
+    Http404,
     HttpResponse,
     HttpResponseBadRequest,
     HttpResponseRedirect,
@@ -29,6 +31,7 @@ from django.shortcuts import get_object_or_404, render
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 from django.utils import timezone
+from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 from rest_framework.views import APIView
@@ -65,8 +68,52 @@ from .models import (
 from .latex_utils import process_latex
 from . import pdf_utils
 from . import telegram_utils
+from .report_pedagogy import build_pedagogical_report_context
 
 logger = logging.getLogger(__name__)
+
+_CKEDITOR_ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
+_CKEDITOR_MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+
+
+@login_required
+@require_http_methods(["POST"])
+def ckeditor_upload(request):
+    """
+    Custom CKEditor5 image upload endpoint.
+    Saves files to MEDIA_ROOT/tasks/ and returns {"url": "/media/tasks/<uuid>.<ext>"}.
+    """
+    upload = request.FILES.get("upload")
+    if not upload:
+        return JsonResponse({"error": {"message": "Файл не передан (поле upload)."}}, status=400)
+
+    if upload.size > _CKEDITOR_MAX_FILE_SIZE:
+        return JsonResponse({"error": {"message": "Файл слишком большой. Максимум 5MB."}}, status=400)
+
+    original_name = (upload.name or "").strip()
+    ext = os.path.splitext(original_name)[1].lower().lstrip(".")
+    if ext not in _CKEDITOR_ALLOWED_EXTENSIONS:
+        return JsonResponse(
+            {"error": {"message": "Недопустимый формат. Разрешены: jpg, jpeg, png, gif, webp."}},
+            status=400,
+        )
+
+    media_root = str(getattr(django_settings, "MEDIA_ROOT", "") or "").strip()
+    media_url = getattr(django_settings, "MEDIA_URL", "/media/") or "/media/"
+    if not media_root:
+        return JsonResponse({"error": {"message": "MEDIA_ROOT не настроен."}}, status=500)
+
+    target_dir = os.path.join(media_root, "tasks")
+    os.makedirs(target_dir, exist_ok=True)
+
+    filename = f"{uuid4().hex}.{ext}"
+    absolute_path = os.path.join(target_dir, filename)
+    with open(absolute_path, "wb+") as f:
+        for chunk in upload.chunks():
+            f.write(chunk)
+
+    media_prefix = media_url if media_url.endswith("/") else f"{media_url}/"
+    return JsonResponse({"url": f"{media_prefix}tasks/{filename}"})
 
 
 def get_subject_for_api(subject_param):
@@ -95,25 +142,20 @@ FAVICON_SVG = (
 )
 
 
-def _subtopics_for_groups(subject_instance, level_instance, task_numbers):
+def _subtopics_for_groups(subject_instance, level_instance, task_numbers, vpr_vf=None):
     """Подтемы для групп: TaskGroup.subtopic + Task.subtopic + все SubTopic предмета/уровня."""
     if not task_numbers:
         return []
-    matching_ids = (
-        TaskGroup.objects.filter(
-            subject=subject_instance,
-            level=level_instance,
-            taskgroupmember__task_number__in=task_numbers,
-        )
-        .annotate(mcnt=Count("taskgroupmember", distinct=True))
-        .filter(mcnt=len(task_numbers))
-        .values_list("id", flat=True)
-        .distinct()
+    group_ids = _taskgroup_ids_matching_task_numbers(
+        subject_instance, level_instance, task_numbers, vpr_vf
     )
-    group_ids = list(matching_ids)
     from django.db.models import Count as DbCount
 
     by_sid = {}
+    _tm_kwargs = {}
+    if vpr_vf:
+        for _k, _v in vpr_vf.items():
+            _tm_kwargs[f"task__{_k}"] = _v
 
     # 1) По TaskGroup.subtopic (пропускаем sid=None) — только если есть группы
     if group_ids:
@@ -134,7 +176,9 @@ def _subtopics_for_groups(subject_instance, level_instance, task_numbers):
         for row in (
             TaskGroupMember.objects.filter(
                 task_group_id__in=group_ids,
+                task__is_active=True,
                 task__subtopic_id__isnull=False,
+                **_tm_kwargs,
             )
             .values("task__subtopic_id")
             .annotate(cnt=DbCount("task_group_id", distinct=True))
@@ -162,13 +206,16 @@ def _subtopics_for_groups(subject_instance, level_instance, task_numbers):
         if st.id not in by_sid:
             cnt = TaskGroupMember.objects.filter(
                 task_group_id__in=group_ids,
+                task__is_active=True,
                 task__subtopic_id=st.id,
+                **_tm_kwargs,
             ).values("task_group_id").distinct().count()
-            task_cnt = Task.objects.filter(
+            task_cnt = Task.active_objects.filter(
                 task__subject=subject_instance,
                 task__level=level_instance,
                 task__task_number__in=task_numbers,
                 subtopic_id=st.id,
+                **(vpr_vf or {}),
             ).count()
             display_count = cnt if cnt > 0 else max(0, task_cnt // len(task_numbers))
             by_sid[st.id] = {"id": st.id, "title": st.title, "group_count": cnt, "display_count": display_count}
@@ -181,12 +228,15 @@ def _subtopics_for_groups(subject_instance, level_instance, task_numbers):
         for st in SubTopic.objects.filter(task_list_id__in=all_tls).order_by("order", "title")[:20]:
             cnt = TaskGroupMember.objects.filter(
                 task_group_id__in=group_ids,
+                task__is_active=True,
                 task__subtopic_id=st.id,
+                **_tm_kwargs,
             ).values("task_group_id").distinct().count()
-            task_cnt = Task.objects.filter(
+            task_cnt = Task.active_objects.filter(
                 task__subject=subject_instance,
                 task__level=level_instance,
                 subtopic_id=st.id,
+                **(vpr_vf or {}),
             ).count()
             n_per_group = len(task_numbers)
             display_count = cnt if cnt > 0 else max(0, task_cnt // n_per_group)
@@ -265,7 +315,10 @@ def _parse_linked_task_numbers(raw):
 
 
 def favicon(request):
-    return HttpResponse(FAVICON_SVG, content_type='image/svg+xml')
+    png_path = os.path.join(django_settings.BASE_DIR, "static", "img", "digital-flow-logo.png")
+    if os.path.isfile(png_path):
+        return FileResponse(open(png_path, "rb"), content_type="image/png")
+    return HttpResponse(FAVICON_SVG, content_type="image/svg+xml")
 
 
 def yandex_webmaster_verification(request):
@@ -321,10 +374,85 @@ def _get_fipi_q():
     )
 
 
+def _get_fipi_task_filter_q():
+    """ФИПИ в банке: поле author и импорт с created_by=ФИПИ."""
+    return (
+        _get_fipi_q()
+        | Q(created_by__iexact="ФИПИ")
+        | Q(created_by__icontains="fipi")
+    )
+
+
+def _vpr_task_filters_from_request(request, level_str):
+    """GET: класс (grade) и углублённость (advanced=1) для заданий ВПР. None — не ВПР."""
+    if (level_str or "").lower() != "vpr":
+        return None
+    flt = {}
+    g = (request.GET.get("grade") or "").strip()
+    if g.isdigit():
+        flt["vpr_class"] = int(g)
+    flt["vpr_advanced"] = (request.GET.get("advanced") or "").strip() == "1"
+    return flt
+
+
+def _vpr_task_filters_from_payload(data, level_str):
+    """POST варианта/теста: vpr_grade, vpr_advanced в JSON."""
+    if (level_str or "").lower() != "vpr" or not isinstance(data, dict):
+        return None
+    flt = {}
+    g = data.get("vpr_grade", data.get("grade"))
+    if g is not None and str(g).strip().isdigit():
+        flt["vpr_class"] = int(g)
+    if "vpr_advanced" in data:
+        flt["vpr_advanced"] = bool(data.get("vpr_advanced"))
+    else:
+        flt["vpr_advanced"] = False
+    return flt
+
+
+def _taskmember_q_for_vpr(vf):
+    """Фильтр TaskGroupMember по полям связанной Task (vf — словарь с ключами модели Task)."""
+    q = Q(task__is_active=True)
+    if vf:
+        for k, v in vf.items():
+            q &= Q(**{f"task__{k}": v})
+    return q
+
+
+def _taskgroup_ids_matching_task_numbers(subject_instance, level_instance, task_numbers, vpr_vf=None):
+    """ID групп с ровно len(task_numbers) членами и нужными номерами; при vpr_vf все задачи проходят фильтр ВПР."""
+    n = len(task_numbers)
+    if n <= 0:
+        return []
+    base = TaskGroup.objects.filter(
+        subject=subject_instance,
+        level=level_instance,
+        taskgroupmember__task_number__in=task_numbers,
+    )
+    if vpr_vf:
+        return list(
+            base.annotate(
+                good_m=Count("taskgroupmember", filter=_taskmember_q_for_vpr(vpr_vf)),
+                all_m=Count("taskgroupmember", distinct=True),
+            )
+            .filter(good_m=n, all_m=n)
+            .values_list("id", flat=True)
+            .distinct()
+        )
+    return list(
+        base.exclude(taskgroupmember__task__is_active=False)
+        .annotate(mcnt=Count("taskgroupmember", distinct=True))
+        .filter(mcnt=n)
+        .values_list("id", flat=True)
+        .distinct()
+    )
+
+
 def _create_variant(subject_short, level_str, body_bytes, create=True, request=None):
     subject_instance = get_subject_for_api(subject_short)
     level_instance = get_object_or_404(Level, level=level_str)
     data = json.loads(body_bytes)
+    vpr_vf = _vpr_task_filters_from_payload(data, level_str) if isinstance(data, dict) else None
 
     # Глобальный флаг "только ФИПИ" (для варианта/теста)
     only_fipi = False
@@ -474,24 +602,47 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
         st_counts = cfg.get("subtopic_counts") or {}
         st_ids = cfg.get("subtopic_ids") or []
 
+        member_qs = TaskGroupMember.objects.select_related("task").filter(task__is_active=True)
+        if vpr_vf:
+            for _k, _v in vpr_vf.items():
+                member_qs = member_qs.filter(**{f"task__{_k}": _v})
         member_prefetch = Prefetch(
             "taskgroupmember_set",
-            queryset=TaskGroupMember.objects.select_related("task").order_by("task_number"),
+            queryset=member_qs.order_by("task_number"),
         )
         required_nums = set(task_numbers)
         n_per = len(task_numbers)
 
         def _linked_groups_base_qs(extra_filter=None):
-            qs = (
-                TaskGroup.objects.filter(
-                    subject=subject_instance,
-                    level=level_instance,
-                    taskgroupmember__task_number__in=task_numbers,
+            if vpr_vf:
+                qs = (
+                    TaskGroup.objects.filter(
+                        subject=subject_instance,
+                        level=level_instance,
+                        taskgroupmember__task_number__in=task_numbers,
+                    )
+                    .annotate(
+                        good_m=Count(
+                            "taskgroupmember",
+                            filter=_taskmember_q_for_vpr(vpr_vf),
+                        ),
+                        all_m=Count("taskgroupmember", distinct=True),
+                    )
+                    .filter(good_m=n_per, all_m=n_per)
+                    .distinct()
                 )
-                .annotate(mcnt=Count("taskgroupmember", distinct=True))
-                .filter(mcnt=n_per)
-                .distinct()
-            )
+            else:
+                qs = (
+                    TaskGroup.objects.filter(
+                        subject=subject_instance,
+                        level=level_instance,
+                        taskgroupmember__task_number__in=task_numbers,
+                    )
+                    .exclude(taskgroupmember__task__is_active=False)
+                    .annotate(mcnt=Count("taskgroupmember", distinct=True))
+                    .filter(mcnt=n_per)
+                    .distinct()
+                )
             if extra_filter is not None:
                 qs = qs.filter(extra_filter)
             return qs
@@ -556,7 +707,7 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
                 if only_fipi and fipi_q:
                     tids = [t.id for t in tasks_row]
                     if (
-                        Task.objects.filter(id__in=tids)
+                        Task.active_objects.filter(id__in=tids)
                         .filter(fipi_q)
                         .count()
                         != len(tids)
@@ -732,7 +883,9 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
                         break
                 n_per_group = len(task_numbers) if task_numbers else len(group_ids)
                 fipi_ids = set(
-                    Task.objects.filter(id__in=[t.id for t in group_tasks]).filter(fipi_q).values_list("id", flat=True)
+                    Task.active_objects.filter(id__in=[t.id for t in group_tasks])
+                    .filter(fipi_q)
+                    .values_list("id", flat=True)
                 )
                 for i in range(0, len(group_tasks), n_per_group):
                     chunk = group_tasks[i : i + n_per_group]
@@ -743,7 +896,9 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
             handled_tasklist_ids.update(group_ids)
             continue
         # Одиночные задания: берём случайные задачи (с фильтром по подтемам при выборе)
-        qs = Task.objects.filter(task_id=tasklist_id)
+        qs = Task.active_objects.filter(task_id=tasklist_id)
+        if vpr_vf:
+            qs = qs.filter(**vpr_vf)
         if only_fipi and fipi_q:
             qs = qs.filter(fipi_q)
 
@@ -816,7 +971,7 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
                 capped_ids = pooled[: int(count)]
                 id_to_task = {
                     t.id: t
-                    for t in Task.objects.filter(id__in=capped_ids)
+                    for t in Task.active_objects.filter(id__in=capped_ids)
                 }
                 tasks_for_slot = [
                     id_to_task[i] for i in capped_ids if i in id_to_task
@@ -865,12 +1020,12 @@ def api_csrf(request):
 
 
 def admin_logout_to_public_home(request):
-    """Выход из Django-админки с редиректом на публичную главную (genurok.ru), а не на / текущего хоста."""
+    """Выход из Django-админки с редиректом на публичную главную (itflux.ru), а не на / текущего хоста."""
     from django.contrib.auth import logout as auth_logout
     from django.http import HttpResponseRedirect
 
     auth_logout(request)
-    url = getattr(django_settings, "GENUROK_PUBLIC_HOME_URL", "http://genurok.ru/").strip()
+    url = getattr(django_settings, "ITFLUX_PUBLIC_HOME_URL", "https://itflux.ru/").strip()
     if not url.endswith("/"):
         url += "/"
     return HttpResponseRedirect(url)
@@ -899,7 +1054,7 @@ def lk_nav_password_configured() -> bool:
 
 
 def lk_site_base_url() -> str:
-    return getattr(django_settings, "LK_PUBLIC_URL", "http://lk.genurok.tw1.ru").rstrip("/")
+    return getattr(django_settings, "LK_PUBLIC_URL", "http://lk.itflux.ru").rstrip("/")
 
 
 def lk_user_nav_url() -> str:
@@ -922,6 +1077,77 @@ def api_site_config(request):
             "lk_nav_unlocked": (not pwd_required) or lk_nav_cookie_is_valid(request),
         }
     )
+
+
+def _vpr_counts_filters_from_request(request):
+    """Фильтры Task для подсчёта ВПР: применяем только если передан grade и/или advanced."""
+    if not any(k in request.GET for k in ("grade", "advanced")):
+        return {}
+    flt = {}
+    g = (request.GET.get("grade") or "").strip()
+    if g.isdigit():
+        flt["vpr_class"] = int(g)
+    flt["vpr_advanced"] = (request.GET.get("advanced") or "").strip() == "1"
+    return flt
+
+
+def _subject_task_counts_by_level(request, level_str: str):
+    """
+    Счётчики активных заданий по предметам для уровня (vpr / oge / ege).
+    Для ВПР: с query grade / advanced — как у api_tasks.
+    """
+    level_str = (level_str or "").lower()
+    if level_str not in ("vpr", "oge", "ege"):
+        return None
+
+    level_instance = _level_instance_for_canonical_slug(level_str)
+    if not level_instance:
+        return JsonResponse({})
+
+    shorts_by_level = {
+        "vpr": ("math", "inf", "phys", "rus", "history"),
+        "oge": ("math", "inf", "phys", "rus"),
+        "ege": ("math", "inf"),
+    }
+    shorts = shorts_by_level[level_str]
+
+    vf = {}
+    if level_str == "vpr":
+        vf = _vpr_counts_filters_from_request(request)
+
+    out = {}
+    for short in shorts:
+        try:
+            subject_instance = Subject.objects.get(subject_short__iexact=short)
+        except Subject.DoesNotExist:
+            out[short] = 0
+            continue
+        qs = Task.active_objects.filter(task__subject=subject_instance, task__level=level_instance)
+        if vf:
+            qs = qs.filter(**vf)
+        out[short] = qs.count()
+
+    return JsonResponse(out)
+
+
+@require_http_methods(["GET"])
+def api_vpr_subject_task_counts(request):
+    """
+    Число активных заданий ВПР по предметам (math, inf, phys, …) для карточек выбора.
+    Без query — все активные задания уровня ВПР по предмету.
+    С grade / advanced — те же ограничения, что у api_tasks для ВПР.
+    """
+    resp = _subject_task_counts_by_level(request, "vpr")
+    return resp if resp is not None else JsonResponse({})
+
+
+@require_http_methods(["GET"])
+def api_level_subject_task_counts(request, level):
+    """GET /api/<level>/subject-task-counts/ — счётчики по предметам для vpr, oge, ege."""
+    resp = _subject_task_counts_by_level(request, level)
+    if resp is None:
+        return JsonResponse({"error": "unknown level"}, status=400)
+    return resp
 
 
 @csrf_exempt
@@ -957,6 +1183,7 @@ def api_tasks(request, level, subject):
         return JsonResponse({"subject_name": "", "tasks": []})
     subject_instance = get_subject_for_api(subject)
     level_instance = get_object_or_404(Level, level=level)
+    vpr_vf = _vpr_task_filters_from_request(request, level)
 
     subtopic_ids = None
     if request.GET.get("subtopic_ids"):
@@ -965,20 +1192,28 @@ def api_tasks(request, level, subject):
         if not subtopic_ids:
             subtopic_ids = None
 
+    count_task_filter = Q(task__is_active=True)
+    if vpr_vf:
+        for _vk, _vv in vpr_vf.items():
+            count_task_filter &= Q(**{f"task__{_vk}": _vv})
     tasks_qs = list(
         TaskList.objects.filter(
             subject=subject_instance,
             level=level_instance,
-        ).annotate(count_task=Count("task")).order_by('task_number')
+        )
+        .annotate(count_task=Count("task", filter=count_task_filter))
+        .order_by('task_number')
     )
     if subtopic_ids:
+        _tq = Task.active_objects.filter(
+            task__subject=subject_instance,
+            task__level=level_instance,
+            subtopic_id__in=subtopic_ids,
+        )
+        if vpr_vf:
+            _tq = _tq.filter(**vpr_vf)
         id_to_count = dict(
-            Task.objects.filter(
-                task__subject=subject_instance,
-                task__level=level_instance,
-                subtopic_id__in=subtopic_ids,
-            )
-            .values("task_id")
+            _tq.values("task_id")
             .annotate(c=Count("id"))
             .values_list("task_id", "c")
         )
@@ -1010,18 +1245,14 @@ def api_tasks(request, level, subject):
     for linked, task_numbers, ids_for_group in linked_number_sets:
         key = tuple(task_numbers)
         if key not in linked_counts:
-            matching_ids = (
-                TaskGroup.objects.filter(
-                    subject=subject_instance,
-                    level=level_instance,
-                    taskgroupmember__task_number__in=task_numbers,
+            linked_counts[key] = len(
+                _taskgroup_ids_matching_task_numbers(
+                    subject_instance,
+                    level_instance,
+                    task_numbers,
+                    vpr_vf,
                 )
-                .annotate(mcnt=Count("taskgroupmember", distinct=True))
-                .filter(mcnt=len(task_numbers))
-                .values_list("id", flat=True)
-                .distinct()
             )
-            linked_counts[key] = matching_ids.count()
 
     linked_tasklist_ids = set()
     linked_group_items = []
@@ -1029,7 +1260,7 @@ def api_tasks(request, level, subject):
     for linked, task_numbers, ids_for_group in linked_number_sets:
         key = tuple(task_numbers)
         groups_count = linked_counts.get(key, 0)
-        subtopics = _subtopics_for_groups(subject_instance, level_instance, task_numbers)
+        subtopics = _subtopics_for_groups(subject_instance, level_instance, task_numbers, vpr_vf)
         # Показываем linked_group, если есть группы ИЛИ подтемы с задачами (display_count > 0)
         has_subtopics_with_tasks = any((s.get("display_count") or 0) > 0 for s in subtopics)
         if groups_count == 0 and not has_subtopics_with_tasks:
@@ -1061,17 +1292,27 @@ def api_tasks(request, level, subject):
         subject=subject_instance,
         level=level_instance,
     )
+    _gm_extra = {}
+    if vpr_vf:
+        for _gk, _gv in vpr_vf.items():
+            _gm_extra[f"task__{_gk}"] = _gv
     group_members = TaskGroupMember.objects.filter(
-        task_group__in=groups
+        task_group__in=groups,
+        task__is_active=True,
+        **_gm_extra,
     ).select_related("task_group", "task", "task__task")
 
     group_dict = {}
     grouped_tasklist_ids = set(linked_tasklist_ids)
 
     group_tasklist_ids = [m.task.task_id for m in group_members if m.task.task_id]
+    _tcl_f = Q(task__is_active=True)
+    if vpr_vf:
+        for _ck, _cv in vpr_vf.items():
+            _tcl_f &= Q(**{f"task__{_ck}": _cv})
     tasklist_counts = dict(
         TaskList.objects.filter(id__in=group_tasklist_ids)
-        .annotate(count_task=Count("task"))
+        .annotate(count_task=Count("task", filter=_tcl_f))
         .values_list("id", "count_task")
     ) if group_tasklist_ids else {}
 
@@ -1101,7 +1342,7 @@ def api_tasks(request, level, subject):
     # Добавляем подтемы для каждой группы
     for group_id, gd in group_dict.items():
         task_nums = sorted({t["task_number"] for t in gd["tasks"]})
-        gd["subtopics"] = _subtopics_for_groups(subject_instance, level_instance, task_nums)
+        gd["subtopics"] = _subtopics_for_groups(subject_instance, level_instance, task_nums, vpr_vf)
         gd["task_numbers"] = task_nums
 
     result = []
@@ -1209,7 +1450,8 @@ def api_subtopics(request, level, subject):
         return JsonResponse({"subtopics_by_task": []})
     subject_instance = get_subject_for_api(subject)
     level_instance = get_object_or_404(Level, level=level)
- 
+    vpr_vf = _vpr_task_filters_from_request(request, level)
+
     # --- Одиночные задания (старая логика) ---
     task_lists = (
         TaskList.objects.filter(
@@ -1232,7 +1474,9 @@ def api_subtopics(request, level, subject):
             continue
         for st in subtopics:
             title = st["title"]
-            base_qs = Task.objects.filter(task_id=tl.id, subtopic__title=title)
+            base_qs = Task.active_objects.filter(task_id=tl.id, subtopic__title=title)
+            if vpr_vf:
+                base_qs = base_qs.filter(**vpr_vf)
             st["task_count"] = base_qs.count()
             st["fipi_task_count"] = base_qs.filter(fipi_q).count()
         out.append({
@@ -1280,19 +1524,125 @@ def api_catalog(request):
     return JsonResponse({'catalog': result})
 
 
+def _normalize_level_slug(value):
+    """Привести значение Level.level к каноническому slug vpr | oge | ege."""
+    if value is None:
+        return None
+    s = str(value).strip().lower()
+    cyr = {
+        "впр": "vpr",
+        "огэ": "oge",
+        "егэ": "ege",
+        "ёгэ": "ege",
+    }
+    return cyr.get(s, s)
+
+
+def _level_instance_for_canonical_slug(canonical: str):
+    """Найти запись Level по латинскому slug из URL (vpr/oge/ege), если в БД level хранится по-русски или иначе."""
+    if canonical not in ("vpr", "oge", "ege"):
+        return None
+    for lev in Level.objects.all():
+        if _normalize_level_slug(lev.level) == canonical:
+            return lev
+    return None
+
+
+@require_http_methods(["GET"])
+def api_platform_stats(request):
+    """GET /api/platform-stats/ — агрегаты для главной: всего заданий, предметов с заданиями, суммы по уровням."""
+    total_tasks = Task.active_objects.count()
+    subjects_count = (
+        Task.active_objects.filter(task__subject_id__isnull=False)
+        .values("task__subject_id")
+        .distinct()
+        .count()
+    )
+
+    tasks_by_level = {}
+    for level_str in ("vpr", "oge", "ege"):
+        li = _level_instance_for_canonical_slug(level_str)
+        tasks_by_level[level_str] = (
+            int(Task.active_objects.filter(task__level=li).count()) if li else 0
+        )
+    return JsonResponse(
+        {
+            "total_tasks": int(total_tasks),
+            "subjects_count": int(subjects_count),
+            "tasks_by_level": tasks_by_level,
+        }
+    )
+
+
+@require_http_methods(["GET"])
+def api_task_bank_filters(request, level, subject):
+    """GET /api/<level>/<subject>/task-bank-filters/ — номера заданий и подтемы для фильтра банка."""
+    subject_instance = get_subject_for_api(subject)
+    level_instance = get_object_or_404(Level, level=level)
+    vpr_vf = _vpr_task_filters_from_request(request, level)
+
+    task_list_qs = TaskList.objects.filter(
+        subject=subject_instance,
+        level=level_instance,
+    ).order_by("task_number")
+
+    task_list_id = (request.GET.get("task_list_id") or "").strip()
+    tl_id_filter = int(task_list_id) if task_list_id.isdigit() else None
+
+    task_numbers = []
+    for tl in task_list_qs:
+        task_count = Task.active_objects.filter(task_id=tl.id, **(vpr_vf or {})).count()
+        task_numbers.append({
+            "task_list_id": tl.id,
+            "task_number": tl.task_number,
+            "task_title": tl.task_title or "",
+            "task_count": task_count,
+        })
+
+    subtopics = []
+    subtopic_tl_qs = (
+        task_list_qs.filter(id=tl_id_filter) if tl_id_filter is not None else task_list_qs
+    )
+    for tl in subtopic_tl_qs:
+        for st in SubTopic.objects.filter(task_list=tl).order_by("order", "title"):
+            st_qs = Task.active_objects.filter(task_id=tl.id, subtopic_id=st.id)
+            if vpr_vf:
+                st_qs = st_qs.filter(**vpr_vf)
+            subtopics.append({
+                "id": st.id,
+                "title": st.title,
+                "task_list_id": tl.id,
+                "task_number": tl.task_number,
+                "task_count": st_qs.count(),
+            })
+
+    return JsonResponse({
+        "task_numbers": task_numbers,
+        "subtopics": subtopics,
+    })
+
+
 @require_http_methods(["GET"])
 def api_task_bank(request, level, subject):
     """GET /api/<level>/<subject>/task-bank/
     Individual tasks from the bank for the LK manual variant builder.
-    Query params: task_list_id, subtopic_id, page (default 1), per_page (default 12, max 50).
+    Query params: task_list_id, subtopic_id, only_fipi (1), grade/advanced (ВПР),
+    page (default 1), per_page (default 12, max 50).
     """
     subject_instance = get_subject_for_api(subject)
     level_instance = get_object_or_404(Level, level=level)
 
-    qs = Task.objects.filter(
+    qs = Task.active_objects.filter(
         task__subject=subject_instance,
         task__level=level_instance,
     ).select_related('task', 'task__part', 'subtopic')
+
+    vpr_vf = _vpr_task_filters_from_request(request, level)
+    if vpr_vf:
+        qs = qs.filter(**vpr_vf)
+
+    if (request.GET.get("only_fipi") or "").strip() in ("1", "true", "yes"):
+        qs = qs.filter(_get_fipi_task_filter_q())
 
     task_list_id = request.GET.get('task_list_id')
     if task_list_id:
@@ -1310,17 +1660,34 @@ def api_task_bank(request, level, subject):
 
     try:
         page = max(1, int(request.GET.get('page', 1)))
-        per_page = min(50, max(1, int(request.GET.get('per_page', 12))))
+        per_page = min(10000, max(1, int(request.GET.get('per_page', 12))))
     except (TypeError, ValueError):
         page, per_page = 1, 12
 
     total = qs.count()
     offset = (page - 1) * per_page
-    tasks_qs = qs.order_by('id')[offset:offset + per_page]
+    tasks_qs = qs.order_by('task__task_number', 'id')[offset:offset + per_page]
 
     result = []
     for task in tasks_qs:
         tl = task.task
+
+        file_url = None
+        if getattr(task, 'files', None):
+            f = task.files
+            try:
+                url = f.url
+                if url:
+                    file_url = request.build_absolute_uri(url)
+            except Exception:
+                pass
+            if not file_url and getattr(f, 'name', ''):
+                media_url = getattr(django_settings, 'MEDIA_URL', '/media/') or '/media/'
+                rel = (media_url.rstrip('/') + '/' + f.name.lstrip('/')).replace('//', '/')
+                file_url = request.build_absolute_uri(rel)
+
+        keep_tables = bool(tl and tl.part_id == 2)
+
         result.append({
             'id': task.id,
             'task_list_id': task.task_id,
@@ -1330,8 +1697,13 @@ def api_task_bank(request, level, subject):
             'max_score': tl.max_score if tl else 1,
             'part_id': tl.part_id if tl else None,
             'part_title': (tl.part.part_title if tl and tl.part else None),
-            'text': process_latex(str(task.task_template or ''), for_browser=True),
+            'text': process_latex(
+                str(task.task_template or ''),
+                for_browser=True,
+                keep_layout_tables=keep_tables,
+            ),
             'answer': str(task.answer or ''),
+            'file_url': file_url,
             'added_at': task.added_at.strftime('%d.%m.%Y') if task.added_at else None,
         })
 
@@ -1368,7 +1740,7 @@ def api_variant_from_ids(request, level, subject):
     # Verify tasks exist and belong to this subject+level
     task_map = {
         t.id: t
-        for t in Task.objects.filter(
+        for t in Task.active_objects.filter(
             id__in=[int(tid) for tid in task_ids],
             task__subject=subject_instance,
             task__level=level_instance,
@@ -1410,7 +1782,7 @@ class TaskListView(APIView):
         task_param    = (request.GET.get('task')     or '').strip()
         subtopic_param = (request.GET.get('subtopic') or '').strip()
 
-        qs = Task.objects.select_related('task', 'subtopic')
+        qs = Task.active_objects.select_related('task', 'subtopic')
 
         if subject_param:
             subj = Subject.objects.filter(subject_short__iexact=subject_param).first()
@@ -1490,10 +1862,13 @@ def api_group_instances(request, level, subject):
     qs = (
         TaskGroup.objects
         .filter(subject=subject_instance, level=level_instance)
+        .exclude(taskgroupmember__task__is_active=False)
         .prefetch_related(
             Prefetch(
                 'taskgroupmember_set',
-                queryset=TaskGroupMember.objects.select_related('task', 'task__task').order_by('task_number'),
+                queryset=TaskGroupMember.objects.select_related('task', 'task__task')
+                .filter(task__is_active=True)
+                .order_by('task_number'),
             )
         )
     )
@@ -1669,6 +2044,9 @@ def _variant_detail_payload(request, variant):
             "file": file_url,
             "author": (item.task.author or "").strip() or None,
             "max_score": max_score,
+            "truth_table_enabled": item.task.truth_table_enabled,
+            "vpr_class": item.task.vpr_class,
+            "vpr_advanced": bool(item.task.vpr_advanced),
         })
 
     return {
@@ -1681,6 +2059,12 @@ def _variant_detail_payload(request, variant):
 
 def api_variant_detail(request, level, subject, variant_id):
     variant = get_object_or_404(Variant.objects.select_related('level', 'var_subject'), id=variant_id)
+    url_level = (level or "").strip().lower()
+    url_subject = (subject or "").strip().lower()
+    if (variant.level.level or "").strip().lower() != url_level:
+        raise Http404()
+    if (variant.var_subject.subject_short or "").strip().lower() != url_subject:
+        raise Http404()
     return JsonResponse(_variant_detail_payload(request, variant))
 
 
@@ -1764,16 +2148,25 @@ def api_score_conversion(request, level, subject):
 
 @require_http_methods(["GET"])
 def api_support_info(request, level, subject):
-    """Справочная информация по предмету и уровню — все записи."""
+    """Справочная информация по предмету и уровню.
+
+    Для ВПР: при query-параметре vpr_class или class (целое число) отдаются блоки без класса
+    (общие) и блоки с указанным классом.
+    """
     from django.db.models import Q
 
-    items = list(
+    qs = (
         SupportInfo.objects
         .filter(subject__subject_short__iexact=(subject or "").strip())
         .filter(Q(level__level=level) | Q(level__isnull=True))
-        .select_related("subject", "level")
-        .order_by("-level_id")
     )
+    level_norm = str(level or "").strip().lower()
+    if level_norm == "vpr":
+        raw = request.GET.get("vpr_class") or request.GET.get("class")
+        if raw is not None and str(raw).strip().isdigit():
+            g = int(str(raw).strip())
+            qs = qs.filter(Q(vpr_class__isnull=True) | Q(vpr_class=g))
+    items = list(qs.select_related("subject", "level").order_by("-level_id"))
     result = [
         {"html": process_latex(str(info.info_text or ""), for_browser=True)}
         for info in items
@@ -1891,77 +2284,83 @@ def report_pdf(request, level, subject):
         except (ValueError, TypeError):
             pass
 
+    subj_short = str(subject).strip().lower()
     subject_label = {
         "inf": "Информатика",
         "math": "Математика",
-    }.get(subject, variant.var_subject.subject_name or str(subject))
+    }.get(subj_short, variant.var_subject.subject_name or str(subject))
     level_val = str(level).lower()
-    level_label = {"oge": "ОГЭ", "ege": "ЕГЭ"}.get(level_val, level_val.upper())
+    level_label = {"oge": "ОГЭ", "ege": "ЕГЭ", "vpr": "ВПР"}.get(level_val, level_val.upper())
     if level_val.isdigit():
         level_label = f"{level_val} класс"
 
+    vpr_grade = None
+    if level_val == "vpr":
+        agg = VariantContent.objects.filter(variant=variant).aggregate(
+            _vpr=Min("task__vpr_class")
+        )
+        vpr_grade = agg.get("_vpr")
+        if vpr_grade is None:
+            raw_g = data.get("vprGrade") or data.get("vpr_grade") or data.get("grade")
+            if raw_g is not None and str(raw_g).strip().isdigit():
+                vpr_grade = int(str(raw_g).strip())
+        if vpr_grade is None:
+            for t in tasks:
+                if not isinstance(t, dict):
+                    continue
+                vc = t.get("vpr_class")
+                if vc is not None and str(vc).strip().isdigit():
+                    vpr_grade = int(str(vc).strip())
+                    break
+
     subtopic_by_task_id = {}
+    topic_by_task_id = {}
     try:
-        for vc in VariantContent.objects.filter(variant=variant).select_related("task__subtopic"):
+        for vc in VariantContent.objects.filter(variant=variant).select_related("task__subtopic", "task__task"):
             st = getattr(vc.task, "subtopic", None)
             if st and (st.title or "").strip():
                 subtopic_by_task_id[vc.task_id] = (st.title or "").strip()
+            tl = getattr(vc.task, "task", None)
+            if tl and (tl.task_title or "").strip():
+                topic_by_task_id[vc.task_id] = (tl.task_title or "").strip()
     except Exception:
         pass
-
-    report_rows = []
-    for t in tasks:
-        tid = str(t.get("id", ""))
-        tid_int = int(tid) if tid.isdigit() else None
-        num = t.get("number", tid)
-        title = t.get("task_title", "")
-        st_raw = t.get("subtopic_title")
-        subtopic_title = (st_raw or "").strip() if isinstance(st_raw, str) else ""
-        if not subtopic_title and tid_int is not None:
-            subtopic_title = subtopic_by_task_id.get(tid_int, "")
-        max_s = t.get("max_score", 1)
-        sc = scores.get(tid, scores.get(int(tid) if tid.isdigit() else tid, 0))
-        sec = task_times.get(tid, task_times.get(int(tid) if tid.isdigit() else tid, 0))
-        time_str = f"{sec} сек" if isinstance(sec, (int, float)) else ""
-        report_rows.append({
-            "number": num,
-            "title": title,
-            "subtopic_title": subtopic_title,
-            "score": sc,
-            "max_score": max_s,
-            "time": time_str,
-        })
-
-    mid = (len(report_rows) + 1) // 2
-    report_col1 = report_rows[:mid]
-    report_col2 = report_rows[mid:]
 
     level_to_class = {1: "insufficient", 2: "threshold", 3: "average", 4: "high"}
     score_comment_class = level_to_class.get(mark_level, "") if mark_level else ""
 
     base_url = request.build_absolute_uri("/").rstrip("/") or "/"
-    favicon_url = base_url + ("favicon.svg" if base_url.endswith("/") else "/favicon.svg")
+
+    pedagogical_ctx = build_pedagogical_report_context(
+        student_name=student_name,
+        subject_label=subject_label,
+        level_val=level_val,
+        level_label=level_label,
+        variant_id=variant_id,
+        date_solution=date_solution,
+        time_start=time_start,
+        time_end=time_end,
+        total_time_formatted=total_time_formatted,
+        total_score=total_score,
+        max_score=max_score,
+        score_exam=score_exam,
+        score_comment=score_comment,
+        mark_level=mark_level,
+        is_vpr=level_val == "vpr",
+        vpr_grade=vpr_grade,
+        tasks_payload=tasks,
+        scores=scores,
+        task_times=task_times,
+        subtopic_by_task_id=subtopic_by_task_id,
+        topic_by_task_id=topic_by_task_id,
+    )
 
     context = {
+        **pedagogical_ctx,
         "base_url": base_url,
-        "favicon_url": favicon_url,
-        "student_name": student_name,
-        "subject_label": subject_label,
-        "level_label": level_label,
-        "variant_id": variant_id,
-        "date_solution": date_solution,
-        "time_start": time_start,
-        "time_end": time_end,
-        "total_time_formatted": total_time_formatted,
-        "report_col1": report_col1,
-        "report_col2": report_col2,
-        "total_score": total_score,
-        "max_score": max_score,
-        "score_exam": score_exam,
-        "score_comment": score_comment,
-        "score_comment_class": score_comment_class,
         "pdf_css": pdf_utils.get_pdf_css(),
-        "is_oge": level_val == "oge",
+        "score_comment_class": score_comment_class,
+        "favicon_url": request.build_absolute_uri("/static/img/digital-flow-logo.png"),
     }
 
     html_string = render_to_string("report_template.html", context)
@@ -1985,19 +2384,30 @@ def report_pdf(request, level, subject):
 def _render_variant_pdf(request, level, subject, variant_id, background_url="", theme="default"):
 
     author_filter = (request.GET.get("author") or "").strip() or None
+    url_level = (level or "").strip().lower()
+    url_subject = (subject or "").strip().lower()
     cache_path = pdf_utils.get_pdf_cache_path(variant_id, theme, author_filter)
     nocache = request.GET.get("nocache", "").lower() in ("1", "true", "yes")
     if django_settings.DEBUG:
         nocache = True  # В режиме разработки всегда перегенерируем PDF
+    variant = get_object_or_404(Variant.objects.select_related("level", "var_subject"), id=variant_id)
+    if (variant.level.level or "").strip().lower() != url_level:
+        raise Http404()
+    if (variant.var_subject.subject_short or "").strip().lower() != url_subject:
+        raise Http404()
     if os.path.exists(cache_path) and not nocache:
         f = open(cache_path, "rb")
         try:
-            return FileResponse(f, content_type="application/pdf")
+            ascii_name, pretty_name = pdf_utils.build_pdf_filename(variant)
+            response = FileResponse(f, content_type="application/pdf")
+            response["Content-Disposition"] = (
+                f'inline; filename="{ascii_name}"; '
+                f"filename*=UTF-8''{quote(pretty_name)}"
+            )
+            return response
         except Exception:
             f.close()
             raise
-
-    variant = get_object_or_404(Variant, id=variant_id)
     try:
         context = pdf_utils.build_pdf_context(request, variant, subject, author_filter=author_filter)
     except Exception as e:
@@ -2046,8 +2456,12 @@ def _render_variant_pdf(request, level, subject, variant_id, background_url="", 
     except OSError as e:
         logger.warning("Could not cache PDF to %s: %s", cache_path, e)
 
+    ascii_name, pretty_name = pdf_utils.build_pdf_filename(variant)
     response = HttpResponse(pdf, content_type="application/pdf")
-    response["Content-Disposition"] = f'inline; filename="variant_{variant_id}.pdf"'
+    response["Content-Disposition"] = (
+        f'inline; filename="{ascii_name}"; '
+        f"filename*=UTF-8''{quote(pretty_name)}"
+    )
     return response
 
 
@@ -2107,7 +2521,7 @@ def search_task(request):
     if not q or not q.isdigit():
         return JsonResponse({"tasks": []})
 
-    task = Task.objects.filter(id=int(q)).select_related("task").first()
+    task = Task.active_objects.filter(id=int(q)).select_related("task").first()
     if not task or not task.task:
         return JsonResponse({"tasks": []})
 
@@ -2710,7 +3124,7 @@ def _merge_jitsi_jwt_query(url: str, payload: dict, lesson_type: str) -> str:
 
 def _generate_jitsi_jwt(room_name: str, hostname: str, *, moderator: bool, display_name: str = "") -> str:
     """
-    Генерирует Jitsi JWT (HS256) для собственного сервера (lesson.genurok.ru и т.п.).
+    Генерирует Jitsi JWT (HS256) для собственного сервера (lesson.itflux.ru и т.п.).
     Требует JITSI_APP_ID и JITSI_APP_SECRET в settings (из prosody-конфига Jitsi).
     moderator=True  → учитель/организатор.
     moderator=False → ученик/участник.
