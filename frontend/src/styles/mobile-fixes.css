@@ -1,0 +1,298 @@
+/* ========================================
+   МОБИЛЬНАЯ АДАПТАЦИЯ - КРИТИЧЕСКИЕ ИСПРАВЛЕНИЯ
+   ======================================== */
+
+/* Исправление overflow-x на мобильных */
+html,
+body {
+    overflow-x: clip !important;
+    width: 100%;
+    max-width: 100vw;
+}
+
+/* Контейнеры должны быть адаптивными */
+.digital-flow-page__wrap,
+.container {
+    width: 100% !important;
+    box-sizing: border-box;
+    padding-left: clamp(12px, 5vw, 24px);
+    padding-right: clamp(12px, 5vw, 24px);
+}
+
+/* ── ЭКРАНЫ ДО 480px (СМАРТФОНЫ) ── */
+@media (max-width: 480px) {
+    /* Общие */
+    * {
+        max-width: 100% !important;
+    }
+
+    html {
+        font-size: 14px;
+    }
+
+    body {
+        overflow-x: hidden !important;
+    }
+
+    /* Заголовки */
+    h1 {
+        font-size: clamp(20px, 5vw, 28px) !important;
+        line-height: 1.2 !important;
+    }
+
+    h2 {
+        font-size: clamp(18px, 4.5vw, 24px) !important;
+    }
+
+    h3 {
+        font-size: clamp(16px, 4vw, 18px) !important;
+    }
+
+    h4,
+    h5,
+    h6 {
+        font-size: clamp(14px, 3.5vw, 16px) !important;
+    }
+
+    /* Кнопки - минимум 44px для тач-интерфейса */
+    button,
+    .btn,
+    a.btn,
+    [role="button"] {
+        min-height: 44px !important;
+        min-width: 44px !important;
+        padding: 12px 16px !important;
+        font-size: 14px !important;
+    }
+
+    /* Форм-элементы */
+    input,
+    textarea,
+    select,
+    .form-control,
+    .form-select {
+        min-height: 44px !important;
+        padding: 12px 12px !important;
+        font-size: 16px !important;
+        border-radius: 8px !important;
+        width: 100% !important;
+        box-sizing: border-box;
+    }
+
+    /* Таблицы - горизонтальный скролл */
+    table {
+        font-size: 12px !important;
+        width: 100% !important;
+        overflow-x: auto !important;
+        display: block !important;
+    }
+
+    /* Изображения */
+    img {
+        max-width: 100% !important;
+        height: auto !important;
+        display: block;
+    }
+
+    /* Flex контейнеры */
+    .flex-row {
+        flex-direction: column !important;
+    }
+
+    .grid,
+    [class*="grid-"],
+    [style*="display: grid"] {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* Padding/margin мобильный */
+    [class*="px-"],
+    [class*="padding-x"],
+    [style*="padding-left"],
+    [style*="padding-right"] {
+        padding-left: clamp(8px, 3vw, 12px) !important;
+        padding-right: clamp(8px, 3vw, 12px) !important;
+    }
+
+    /* Меню/навигация */
+    nav {
+        width: 100% !important;
+    }
+
+    .nav-tabs,
+    .navbar,
+    [class*="nav-"],
+    [class*="menu"] {
+        flex-direction: column !important;
+        gap: 8px !important;
+    }
+
+    /* Карточки */
+    .card,
+    [class*="card"],
+    [class*="-card"] {
+        padding: 12px !important;
+        margin-bottom: 12px !important;
+        width: 100% !important;
+    }
+
+    /* Модали/попапы */
+    .modal,
+    .modal-content,
+    [class*="modal"] {
+        width: 95vw !important;
+        max-width: 95vw !important;
+        max-height: 90vh !important;
+        margin: auto !important;
+    }
+
+    /* Sidebars - скрыть на мобильных */
+    aside,
+    .sidebar,
+    .aside,
+    [class*="sidebar"] {
+        display: none !important;
+    }
+
+    /* Overflow для контента */
+    [class*="content"],
+    [class*="body"],
+    [class*="main"] {
+        overflow-x: hidden !important;
+        width: 100% !important;
+    }
+
+    /* Минимум видимого контента */
+    .container,
+    .wrapper,
+    [class*="wrap"] {
+        width: 100vw;
+        max-width: 100vw;
+        overflow-x: hidden;
+        padding: 0 clamp(8px, 3vw, 16px);
+    }
+}
+
+/* ── ЭКРАНЫ 481px - 768px (ПЛАНШЕТЫ МАЛЫЕ) ── */
+@media (max-width: 768px) and (min-width: 481px) {
+    h1 {
+        font-size: clamp(24px, 5vw, 32px) !important;
+    }
+
+    h2 {
+        font-size: clamp(20px, 4.5vw, 28px) !important;
+    }
+
+    /* Флекс элементы */
+    .flex-md-wrap {
+        flex-wrap: wrap !important;
+    }
+
+    /* Сетка на 2 колонки вместо 3+ */
+    [class*="grid"] {
+        grid-template-columns: repeat(2, 1fr) !important;
+    }
+
+    /* Меньше паддинга */
+    .container,
+    [class*="wrap"],
+    .wrapper {
+        padding-left: 16px !important;
+        padding-right: 16px !important;
+    }
+}
+
+/* ── ИСПРАВЛЕНИЯ СПЕЦИФИЧНЫХ ЭЛЕМЕНТОВ ── */
+
+/* Убираем горизонтальный скролл */
+html,
+body,
+[class*="wrap"],
+[class*="container"],
+[class*="page"] {
+    overflow-x: clip !important;
+    max-width: 100vw !important;
+}
+
+/* Слишком узкие элементы */
+[style*="width: 80px"],
+[style*="width: 88px"],
+[style*="width: 100px"],
+[style*="min-width: 200px"] {
+    width: auto !important;
+    min-width: auto !important;
+}
+
+/* Абсолютно позиционированные элементы */
+.welcome-banner-owl,
+.hero-owl,
+[class*="owl"],
+[class*="-aside"],
+[class*="-right"] {
+    display: none !important;
+}
+
+@media (min-width: 769px) {
+    .welcome-banner-owl,
+    .hero-owl,
+    [class*="owl"],
+    [class*="-aside"],
+    [class*="-right"] {
+        display: block !important;
+    }
+}
+
+/* Текст должен быть читаемым */
+body {
+    font-size: clamp(14px, 2.2vw, 16px) !important;
+    line-height: 1.6 !important;
+}
+
+p {
+    font-size: clamp(14px, 2.2vw, 15px) !important;
+}
+
+/* Минимальный размер тач-целей */
+a,
+button,
+input[type="checkbox"],
+input[type="radio"],
+label {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+}
+
+/* Видимость focus состояния */
+:focus-visible {
+    outline: 2px solid var(--blue, #2b52f5) !important;
+    outline-offset: 2px !important;
+}
+
+/* ── ИСПРАВЛЕНИЯ ДВОЙНЫХ ПРАВИЛ ── */
+
+/* Если есть конфликтующие стили */
+[class*="max-width"] {
+    max-width: 100% !important;
+}
+
+[class*="width-100"],
+.w-100 {
+    width: 100% !important;
+}
+
+/* Центрирование на мобильных */
+.text-center-mobile {
+    text-align: center !important;
+}
+
+@media (max-width: 480px) {
+    .text-left {
+        text-align: center !important;
+    }
+
+    .justify-content-space-between {
+        justify-content: flex-start !important;
+    }
+}
