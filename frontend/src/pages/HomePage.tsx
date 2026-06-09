@@ -6,7 +6,6 @@ import {
   ClipboardList,
   CompassIcon,
 } from "lucide-react";
-import Nav from "../components/Nav";
 import NewsBlock from "../components/NewsBlock";
 import { type LevelId } from "../data/levels";
 import { formatTasksCount } from "../utils/formatTasksCount";
@@ -102,7 +101,6 @@ export default function HomePage() {
 
   return (
     <div className="digital-flow-page relative min-h-screen overflow-x-hidden">
-      <Nav />
 
       <div className="digital-flow-page__wrap">
         <main className="home-page__main">

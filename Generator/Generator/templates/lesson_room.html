@@ -514,6 +514,172 @@
       border-top: 1px solid var(--lesson-ui-border);
       background: #f8fafc;
     }
+    @media (max-width: 768px) {
+      .lesson-ui-btn {
+        min-height: 44px;
+        padding: 10px 14px;
+      }
+      .lesson-modal-overlay {
+        padding: 12px;
+      }
+      .lesson-modal-card {
+        max-width: none;
+        border-radius: 18px;
+      }
+      .lesson-modal-header {
+        padding: 14px 16px;
+        align-items: flex-start;
+      }
+      .lesson-modal-title {
+        font-size: .95rem;
+        line-height: 1.25;
+      }
+      .lesson-modal-close {
+        width: 40px;
+        height: 40px;
+        flex-shrink: 0;
+      }
+      .lesson-modal-layout {
+        flex-direction: column;
+        min-height: 0;
+        max-height: calc(100vh - 118px);
+      }
+      .lesson-modal-slots {
+        width: 100%;
+        max-height: 164px;
+        border-right: 0;
+        border-bottom: 1px solid var(--lesson-ui-border);
+        overflow-x: auto;
+        overflow-y: auto;
+        padding: 10px 12px;
+      }
+      .lesson-slot-group {
+        margin-bottom: 8px;
+        padding-bottom: 8px;
+      }
+      .lesson-slot-header,
+      .lesson-slot-group-title {
+        font-size: .62rem;
+      }
+      .lesson-slot-item {
+        min-height: 40px;
+        padding: 9px 10px;
+      }
+      .lesson-modal-bank-wrap {
+        min-height: 0;
+      }
+      .lesson-modal-subtopic-bar {
+        padding: 10px 12px;
+      }
+      .lesson-modal-bank {
+        min-height: 0;
+        padding: 12px;
+      }
+      .lesson-bank-card {
+        width: 100%;
+        max-width: 100%;
+      }
+      #lesson-teacher-ui,
+      #lesson-student-ui {
+        top: 10px;
+        right: 10px;
+        max-width: calc(100vw - 20px);
+      }
+      .lesson-ui-fab {
+        right: 14px;
+        bottom: 76px;
+        width: 54px;
+        height: 54px;
+      }
+      #lesson-student-results-body,
+      #lesson-finish-modal-body {
+        padding: 14px 16px !important;
+        max-height: calc(100vh - 132px) !important;
+      }
+      .lesson-student-results-table,
+      .lesson-student-results-table thead,
+      .lesson-student-results-table tbody,
+      .lesson-student-results-table tr,
+      .lesson-student-results-table th,
+      .lesson-student-results-table td {
+        display: block;
+        width: 100%;
+      }
+      .lesson-student-results-table thead {
+        display: none;
+      }
+      .lesson-student-results-table tr {
+        margin: 0 0 10px;
+        padding: 10px 12px;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        background: #fff;
+      }
+      .lesson-student-results-table td {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 7px 0;
+        border-bottom: 1px solid #eef2f7;
+        line-height: 1.4;
+      }
+      .lesson-student-results-table td:last-child {
+        border-bottom: 0;
+      }
+      .lesson-student-results-table td::before {
+        content: "";
+        min-width: 38%;
+        color: #64748b;
+        font-size: .72rem;
+        font-weight: 700;
+      }
+      .lesson-student-results-table td:nth-child(1)::before { content: "Ученик"; }
+      .lesson-student-results-table td:nth-child(2)::before { content: "Ответ / балл"; }
+      .lesson-student-results-table td:nth-child(3)::before { content: "Итог"; }
+      .lesson-student-results-table td:nth-child(4)::before { content: "Статус"; }
+      .lesson-modal-actions {
+        position: sticky;
+        bottom: 0;
+        flex-direction: column;
+        align-items: stretch;
+        padding: 12px 16px;
+      }
+      .lesson-modal-actions .lesson-ui-btn,
+      #lesson-finish-close-session {
+        width: 100%;
+        margin-left: 0 !important;
+      }
+      .lesson-status-toast {
+        top: 10px;
+        min-width: auto;
+        width: calc(100vw - 24px);
+        align-items: flex-start;
+      }
+    }
+    @media (max-width: 480px) {
+      .lesson-modal-overlay {
+        padding: 8px;
+      }
+      .lesson-modal-card {
+        border-radius: 16px;
+      }
+      .lesson-modal-layout {
+        max-height: calc(100vh - 98px);
+      }
+      .lesson-modal-slots {
+        max-height: 136px;
+      }
+      .lesson-modal-bank {
+        padding: 10px;
+      }
+      .lesson-result-card {
+        padding: 12px !important;
+      }
+      .lesson-result-comment {
+        min-height: 88px;
+        font-size: 16px;
+      }
+    }
   </style>
   <script>
     window.MathJax = {

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import Nav from "../components/Nav";
 import SubjectCard from "../components/SubjectCard";
 import ScientistQuoteBanner from "../components/ScientistQuoteBanner";
 import NotFoundPage from "./NotFoundPage";
@@ -126,7 +125,6 @@ export default function SubjectPage() {
 
   return (
     <div className="digital-flow-page" style={pageStyle}>
-      <Nav />
       <div className="digital-flow-page__wrap">
         <main className="subject-pick">
           <div className="subject-pick__top">

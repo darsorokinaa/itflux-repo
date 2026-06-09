@@ -9,6 +9,7 @@ from .models import (
     Criteria,
     ErrorReport,
     Level,
+    Lesson,
     LinkedTaskGroup,
     Mark,
     MarkComment,
@@ -382,6 +383,37 @@ class TaskPreviewAdmin(admin.ModelAdmin):
         return (plain[:50] + "…") if len(plain) > 50 else plain
 
     preview_preview.short_description = "Текст перед задачами"
+
+
+@admin.register(Lesson)
+class LessonAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "title",
+        "subject",
+        "grade",
+        "level",
+        "exam_type",
+        "task_number",
+        "difficulty",
+        "access_level",
+        "status",
+        "updated_at",
+    )
+    list_filter = (
+        "subject",
+        "grade",
+        "level",
+        "exam_type",
+        "difficulty",
+        "access_level",
+        "status",
+    )
+    search_fields = ("title", "slug", "topic", "subtopic", "short_description")
+    prepopulated_fields = {"slug": ("title",)}
+    list_editable = ("status", "access_level")
+    ordering = ("-updated_at",)
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(Update)

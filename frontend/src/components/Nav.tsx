@@ -21,6 +21,7 @@ export default function Nav() {
   const { pathname, search, hash } = useLocation();
   const navigate = useNavigate();
   const active = getActiveNavTab(pathname, hash);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const scrollToGenerator = (smooth = true) => {
     const el = document.getElementById(GENERATOR_HASH);
@@ -34,6 +35,7 @@ export default function Nav() {
       scrollToGenerator(true);
       window.history.replaceState(null, "", `/#${GENERATOR_HASH}`);
     }
+    setMenuOpen(false);
   };
 
   const [taskQuery, setTaskQuery] = useState("");
@@ -51,15 +53,21 @@ export default function Nav() {
     }
   }, [pathname, search]);
 
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname, search, hash]);
+
   const onSearchSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const taskId = taskQuery.trim();
     const variantId = variantQuery.trim();
     if (variantId) {
+      setMenuOpen(false);
       navigate(`/search-variant?q=${encodeURIComponent(variantId)}`);
       return;
     }
     if (taskId) {
+      setMenuOpen(false);
       navigate(`/search/tasks?q=${encodeURIComponent(taskId)}`);
     }
   };
@@ -76,88 +84,108 @@ export default function Nav() {
             </span>
           </Link>
 
-          <div className="site-nav__tabs" role="tablist" aria-label="Разделы платформы">
-            {NAV_TABS.map((tab) => {
-              const isActive = active === tab.key;
-              const className = [
-                "site-nav__tab",
-                isActive ? "site-nav__tab--active" : "",
-                tab.disabled ? "site-nav__tab--disabled" : "",
-              ]
-                .filter(Boolean)
-                .join(" ");
+          <button
+            type="button"
+            className={`site-nav__menu-btn${menuOpen ? " is-open" : ""}`}
+            aria-expanded={menuOpen}
+            aria-controls="site-nav-mobile-panel"
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            <span className="site-nav__menu-icon" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+            <span className="site-nav__menu-text">Меню</span>
+          </button>
 
-              if (tab.disabled) {
+          <div
+            id="site-nav-mobile-panel"
+            className={`site-nav__panel${menuOpen ? " is-open" : ""}`}
+          >
+            <div className="site-nav__tabs" role="tablist" aria-label="Разделы платформы">
+              {NAV_TABS.map((tab) => {
+                const isActive = active === tab.key;
+                const className = [
+                  "site-nav__tab",
+                  isActive ? "site-nav__tab--active" : "",
+                  tab.disabled ? "site-nav__tab--disabled" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ");
+
+                if (tab.disabled) {
+                  return (
+                    <span
+                      key={tab.key}
+                      className={className}
+                      role="tab"
+                      aria-selected={false}
+                      aria-disabled="true"
+                      title="Раздел в разработке"
+                    >
+                      <span className="site-nav__tab-label">{tab.label}</span>
+                      {tab.soon ? (
+                        <span className="site-nav__tab-soon">скоро</span>
+                      ) : null}
+                    </span>
+                  );
+                }
+
+                const linkProps =
+                  tab.key === "generator"
+                    ? { onClick: onGeneratorClick }
+                    : { onClick: () => setMenuOpen(false) };
+
                 return (
-                  <span
+                  <Link
                     key={tab.key}
+                    to={tab.to || "/"}
                     className={className}
                     role="tab"
-                    aria-selected={false}
-                    aria-disabled="true"
-                    title="Раздел в разработке"
+                    aria-selected={isActive}
+                    {...linkProps}
                   >
                     <span className="site-nav__tab-label">{tab.label}</span>
-                    {tab.soon ? (
-                      <span className="site-nav__tab-soon">скоро</span>
-                    ) : null}
-                  </span>
+                  </Link>
                 );
-              }
+              })}
+            </div>
 
-              const linkProps =
-                tab.key === "generator"
-                  ? { onClick: onGeneratorClick }
-                  : {};
-
-              return (
-                <Link
-                  key={tab.key}
-                  to={tab.to || "/"}
-                  className={className}
-                  role="tab"
-                  aria-selected={isActive}
-                  {...linkProps}
-                >
-                  <span className="site-nav__tab-label">{tab.label}</span>
-                </Link>
-              );
-            })}
+            <form
+              className="site-nav__search"
+              onSubmit={onSearchSubmit}
+              aria-label="Поиск по ID"
+            >
+              <label className="site-nav__search-field">
+                <span className="site-nav__search-label">Поиск задачи</span>
+                <input
+                  type="search"
+                  className="site-nav__search-input"
+                  placeholder="ID"
+                  value={taskQuery}
+                  onChange={(e) => setTaskQuery(e.target.value)}
+                  inputMode="numeric"
+                  autoComplete="off"
+                />
+              </label>
+              <label className="site-nav__search-field">
+                <span className="site-nav__search-label">Поиск варианта</span>
+                <input
+                  type="search"
+                  className="site-nav__search-input"
+                  placeholder="ID"
+                  value={variantQuery}
+                  onChange={(e) => setVariantQuery(e.target.value)}
+                  inputMode="numeric"
+                  autoComplete="off"
+                />
+              </label>
+              <button type="submit" className="site-nav__search-btn">
+                Найти
+              </button>
+            </form>
           </div>
-
-          <form
-            className="site-nav__search"
-            onSubmit={onSearchSubmit}
-            aria-label="Поиск по ID"
-          >
-            <label className="site-nav__search-field">
-              <span className="site-nav__search-label">Поиск задачи</span>
-              <input
-                type="search"
-                className="site-nav__search-input"
-                placeholder="ID"
-                value={taskQuery}
-                onChange={(e) => setTaskQuery(e.target.value)}
-                inputMode="numeric"
-                autoComplete="off"
-              />
-            </label>
-            <label className="site-nav__search-field">
-              <span className="site-nav__search-label">Поиск варианта</span>
-              <input
-                type="search"
-                className="site-nav__search-input"
-                placeholder="ID"
-                value={variantQuery}
-                onChange={(e) => setVariantQuery(e.target.value)}
-                inputMode="numeric"
-                autoComplete="off"
-              />
-            </label>
-            <button type="submit" className="site-nav__search-btn">
-              Найти
-            </button>
-          </form>
         </div>
       </nav>
     </header>

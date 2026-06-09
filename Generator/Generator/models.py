@@ -1,6 +1,10 @@
 from django.db import models
 from django.db.models import DO_NOTHING, CASCADE
 from django.utils import timezone
+from django.conf import settings
+from django.core.files.storage import FileSystemStorage
+from django.utils.deconstruct import deconstructible
+from django.utils.text import slugify
 import os
 from uuid import uuid4
 from django_ckeditor_5.fields import CKEditor5Field
@@ -21,6 +25,53 @@ def task_url(instance, filename):
         f'task_{task_number}',
         f'{task_id}_{uuid4().hex[:10]}.{ext}'
     )
+
+
+def _safe_ext(filename, fallback=".bin"):
+    ext = os.path.splitext(filename or "")[1].lower()
+    return ext or fallback
+
+
+def lesson_cover_upload_to(instance, filename):
+    return os.path.join("lessons", "covers", f"{uuid4().hex}{_safe_ext(filename, '.jpg')}")
+
+
+def lesson_file_resource_upload_to(instance, filename):
+    return os.path.join("lessons", "resources", f"{uuid4().hex}{_safe_ext(filename)}")
+
+
+def lesson_file_upload_to(instance, filename):
+    return os.path.join("lessons", "files", f"{uuid4().hex}{_safe_ext(filename)}")
+
+
+def presentation_public_pdf_upload_to(instance, filename):
+    return os.path.join("lessons", "presentations", "pdf", f"{uuid4().hex}{_safe_ext(filename, '.pdf')}")
+
+
+def presentation_slide_upload_to(instance, filename):
+    return os.path.join("lessons", "presentations", "slides", f"{uuid4().hex}{_safe_ext(filename, '.png')}")
+
+
+def presentation_original_upload_to(instance, filename):
+    return os.path.join("presentations", "originals", f"{uuid4().hex}{_safe_ext(filename, '.pptx')}")
+
+
+@deconstructible
+class PrivateMediaStorage(FileSystemStorage):
+    """
+    Storage for editable source files (e.g. PPTX) outside public MEDIA_ROOT.
+    """
+
+    def __init__(self, *args, **kwargs):
+        location = kwargs.pop("location", os.path.join(settings.BASE_DIR, "private_media"))
+        super().__init__(location=location, base_url=None, *args, **kwargs)
+
+    def url(self, name):  # pragma: no cover - used only in admin previews
+        safe_name = str(name or "").lstrip("/")
+        return f"/private-media/{safe_name}"
+
+
+private_media_storage = PrivateMediaStorage()
 
 
 
@@ -476,26 +527,109 @@ class ErrorReport(models.Model):
         return f"Ошибка №{self.task_number} ({self.subject} {self.level}) — {self.get_error_type_display()}"
 
 
-class LessonRoom(models.Model):
-    """Комната урока по ссылке из ЛК (JWT): идентификатор и снимок полезной нагрузки токена."""
+class Lesson(models.Model):
+    class ExamType(models.TextChoices):
+        NONE = "", "Без экзамена"
+        OGE = "oge", "ОГЭ"
+        EGE = "ege", "ЕГЭ"
 
-    room_id = models.CharField(max_length=200, unique=True, db_index=True)
-    jwt_payload = models.JSONField(default=dict, blank=True)
-    lesson_ended_at = models.DateTimeField(
-        null=True,
+    class Difficulty(models.TextChoices):
+        BEGINNER = "beginner", "Beginner"
+        MEDIUM = "medium", "Medium"
+        ADVANCED = "advanced", "Advanced"
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Черновик"
+        PUBLISHED = "published", "Опубликован"
+        ARCHIVED = "archived", "Архив"
+
+    class AccessLevel(models.TextChoices):
+        FREE = "free", "Бесплатный"
+        PAID = "paid", "Платный"
+        PRIVATE = "private", "Закрытый"
+
+    title = models.CharField(max_length=255, db_index=True)
+    slug = models.SlugField(max_length=255, unique=True, db_index=True)
+    subject = models.CharField(max_length=120, db_index=True)
+    grade = models.PositiveSmallIntegerField(null=True, blank=True, db_index=True)
+    level = models.CharField(max_length=120, blank=True, default="", db_index=True)
+    exam_type = models.CharField(
+        max_length=10,
+        choices=ExamType.choices,
         blank=True,
-        verbose_name="Урок завершён",
-        help_text="После установки вход по той же ссылке (комната) запрещён.",
+        default=ExamType.NONE,
+        db_index=True,
     )
+    task_number = models.PositiveSmallIntegerField(null=True, blank=True, db_index=True)
+    topic = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    subtopic = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    short_description = models.TextField(blank=True, default="")
+    teacher_goal = models.TextField(blank=True, default="")
+    student_result = models.TextField(blank=True, default="")
+    duration_minutes = models.PositiveSmallIntegerField(null=True, blank=True)
+    difficulty = models.CharField(
+        max_length=20,
+        choices=Difficulty.choices,
+        default=Difficulty.MEDIUM,
+        db_index=True,
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        db_index=True,
+    )
+    access_level = models.CharField(
+        max_length=20,
+        choices=AccessLevel.choices,
+        default=AccessLevel.FREE,
+        db_index=True,
+    )
+    cover_image = models.ImageField(upload_to=lesson_cover_upload_to, blank=True, null=True)
+    file = models.FileField(upload_to=lesson_file_upload_to, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = "Комната урока (ЛК)"
-        verbose_name_plural = "Комнаты уроков (ЛК)"
+        ordering = ("-created_at", "id")
+        indexes = [
+            models.Index(fields=["status", "access_level"], name="lesson_status_access_idx"),
+            models.Index(fields=["subject", "grade"], name="lesson_subject_grade_idx"),
+            models.Index(fields=["level", "exam_type"], name="lesson_level_exam_idx"),
+            models.Index(fields=["topic", "subtopic"], name="lesson_topic_subtopic_idx"),
+            models.Index(fields=["difficulty"], name="lesson_difficulty_idx"),
+            models.Index(fields=["task_number"], name="lesson_task_number_idx"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            parts = []
+            if self.title:
+                parts.append(self.title[:30]) # Краткое название
+            if self.subject:
+                parts.append(self.subject)
+            if self.grade:
+                parts.append(f"{self.grade}-klass")
+            if self.exam_type:
+                parts.append(self.exam_type)
+            elif self.level:
+                parts.append(self.level)
+                
+            raw_slug = "-".join([str(p) for p in parts if p])
+            from django.utils.text import slugify
+            from uuid import uuid4
+            base_slug = slugify(raw_slug) or f"lesson-{uuid4().hex[:8]}"
+            
+            candidate = base_slug
+            index = 2
+            while Lesson.objects.exclude(pk=self.pk).filter(slug=candidate).exists():
+                candidate = f"{base_slug}-{index}"
+                index += 1
+            self.slug = candidate
+        super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"LessonRoom {self.room_id}"
+        return self.title
 
 
 def username_for_created_by(request):
@@ -508,72 +642,6 @@ def username_for_created_by(request):
         if name:
             return name[:100]
     return "ADMIN"
-
-class LessonStudentsAnswer(models.Model):
-    room_id = models.CharField(max_length=200, db_index=True, blank=True, default="")
-    variant_id = models.PositiveIntegerField(default=0, db_index=True)
-    task_number = models.CharField(max_length=32, blank=True, default="")
-    teacher = models.CharField(max_length=200, blank=True, default="")
-    student = models.CharField(max_length=200, blank=True, default="")
-    answer = models.TextField(blank=True, default="")
-    is_correct = models.BooleanField(default=False)
-    is_empty = models.BooleanField(default=False)
-    payload = models.JSONField(default=dict, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "Ответ ученика на уроке"
-        verbose_name_plural = "Ответы учеников на уроке"
-        indexes = [
-            models.Index(fields=["room_id", "variant_id"], name="lesson_answer_room_variant_idx"),
-            models.Index(fields=["variant_id", "task_number"], name="lesson_answer_variant_task_idx"),
-        ]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["room_id", "variant_id", "task_number", "student"],
-                name="lesson_answer_unique_per_student_task",
-            )
-        ]
-
-    def __str__(self):
-        task = self.task_number or "?"
-        return f"room={self.room_id} variant={self.variant_id} task={task} student={self.student}"
-
-
-class LessonStudentResult(models.Model):
-    room_id = models.CharField(max_length=200, db_index=True, blank=True, default="")
-    variant_id = models.PositiveIntegerField(default=0, db_index=True)
-    teacher = models.CharField(max_length=200, blank=True, default="")
-    student = models.CharField(max_length=200, blank=True, default="")
-    total_tasks = models.PositiveIntegerField(default=0)
-    correct_count = models.PositiveIntegerField(default=0)
-    wrong_count = models.PositiveIntegerField(default=0)
-    empty_count = models.PositiveIntegerField(default=0)
-    teacher_comment = models.TextField(blank=True, default="")
-    payload = models.JSONField(default=dict, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "Результат ученика в уроке"
-        verbose_name_plural = "Результаты учеников в уроке"
-        indexes = [
-            models.Index(fields=["room_id", "variant_id"], name="lesson_result_room_variant_idx"),
-            models.Index(fields=["room_id", "student"], name="lesson_result_room_student_idx"),
-        ]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["room_id", "variant_id", "student"],
-                name="lesson_result_unique_per_student",
-            )
-        ]
-
-    def __str__(self):
-        return (
-            f"room={self.room_id} variant={self.variant_id} student={self.student} "
-            f"{self.correct_count}/{self.total_tasks}"
-        )
 
 
 class TagType(models.Model):

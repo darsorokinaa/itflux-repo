@@ -579,7 +579,14 @@ def _is_display_math(latex: str, span_html: str = "") -> bool:
     ))
 
 
+def _latex_is_punctuation_dash(latex: str) -> bool:
+    stripped = (latex or "").strip()
+    return stripped in ("–", "—", "−", "-")
+
+
 def _render_math_block(latex: str, display: bool, for_pdf: bool = False, for_browser: bool = False) -> str:
+    if _latex_is_punctuation_dash(latex):
+        return " – "
     # tabular/array не поддерживаются MathJax — конвертируем в HTML (и для PDF, и для SPA в браузере)
     if latex and _RE_HAS_TABULAR_OR_ARRAY.search(latex):
         return _convert_math_block(latex, display=display)

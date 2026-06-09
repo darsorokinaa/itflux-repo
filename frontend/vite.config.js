@@ -28,7 +28,7 @@ const backendProxy = {
     target: 'http://127.0.0.1:8000',
     changeOrigin: true,
   },
-  '/lesson': {
+  '^/lesson(?:/|$)': {
     target: 'http://127.0.0.1:8000',
     changeOrigin: true,
   },

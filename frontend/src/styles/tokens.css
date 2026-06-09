@@ -36,6 +36,14 @@
   --r-md: 16px;
   --r-sm: 10px;
 
+  --page-max-width: 1200px;
+  --page-gutter: 24px;
+  --page-gutter-mobile: 16px;
+  --tap-target: 44px;
+  --bp-mobile: 480px;
+  --bp-tablet: 768px;
+  --bp-laptop: 1024px;
+
   --font-display: "Bounded", system-ui, sans-serif;
   --font-body: "TikTok Sans", "Manrope", "Nunito", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
@@ -82,4 +90,38 @@
   --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.35);
   --border-hairline: var(--border-card);
   --header-gradient: linear-gradient(90deg, var(--blue-dark) 0%, var(--blue-main) 100%);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+img,
+svg,
+canvas,
+video,
+iframe {
+  max-width: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+@media (max-width: 480px) {
+  :root {
+    --page-gutter: var(--page-gutter-mobile);
+  }
 }

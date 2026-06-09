@@ -1,4 +1,4 @@
-export type NavTabKey = "tasks" | "generator" | "lessons";
+export type NavTabKey = "tasks" | "generator";
 
 export type NavTabDef = {
   key: NavTabKey;
@@ -14,7 +14,6 @@ export const GENERATOR_HASH = "home-levels";
 export const NAV_TABS: ReadonlyArray<NavTabDef> = [
   { key: "tasks", label: "Все задачи", to: "/tasks" },
   { key: "generator", label: "Генератор вариантов", to: `/#${GENERATOR_HASH}` },
-  { key: "lessons", label: "Готовые уроки", soon: true, disabled: true },
 ];
 
 /** Какая вкладка подсвечена на текущем пути. */

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import Nav from "../components/Nav";
 import SearchByIdForm from "../components/SearchByIdForm";
 import MathContent from "../components/MathContent";
 import { devApiBase } from "../utils/devApiBase";
@@ -70,7 +69,6 @@ function SearchVariantPage() {
 
   const wrap = (content) => (
     <div className="digital-flow-page">
-      <Nav />
       <div className="digital-flow-page__wrap">
         <div className="container search-variant-page search-variant-page--v2">{content}</div>
       </div>

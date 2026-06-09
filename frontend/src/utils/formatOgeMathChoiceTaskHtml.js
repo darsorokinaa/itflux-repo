@@ -320,6 +320,7 @@ function formatFromTaskHtmlBlocks(root) {
 function decorateFipiBitmapImages(root, mode) {
   if (!root) return;
   root.querySelectorAll("img").forEach((img) => {
+    if (img.classList.contains("ege-inf-1-graph-img")) return;
     const src = (img.getAttribute("src") || "").toLowerCase();
     if (!src.endsWith(".gif")) return;
     img.classList.add("oge-math-fipi-bitmap");
@@ -333,11 +334,73 @@ function decorateFipiBitmapImages(root, mode) {
   });
 }
 
+function normalizeImageSrc(rawSrc) {
+  const s = String(rawSrc || "").trim();
+  if (!s) return "";
+  return s.replace(/[?#].*$/, "");
+}
+
+function collectChoiceImageSrcSet(choices) {
+  const srcSet = new Set();
+  for (const { bodyHtml } of choices || []) {
+    const frag = parseHtmlFragment(bodyHtml || "");
+    if (!frag) continue;
+    frag.querySelectorAll("img").forEach((img) => {
+      const src = normalizeImageSrc(img.getAttribute("src"));
+      if (src) srcSet.add(src);
+    });
+  }
+  return srcSet;
+}
+
+function isImageOnlyNodeForChoice(node, choiceSrcSet) {
+  if (!node || !choiceSrcSet || choiceSrcSet.size < 2) return false;
+  const imgs = [...node.querySelectorAll("img")];
+  if (!imgs.length) return false;
+  const srcs = imgs.map((img) => normalizeImageSrc(img.getAttribute("src"))).filter(Boolean);
+  if (!srcs.length) return false;
+  const matched = srcs.filter((src) => choiceSrcSet.has(src)).length;
+  if (matched !== srcs.length) return false;
+  const text = normalizeCellText(node).replace(/\b\d+\)?\b/g, "").trim();
+  return text.length === 0;
+}
+
+function stripDuplicateChoiceMediaFromQuestion(questionHtml, choices) {
+  const qHtml = String(questionHtml || "").trim();
+  if (!qHtml) return qHtml;
+  const choiceSrcSet = collectChoiceImageSrcSet(choices);
+  if (choiceSrcSet.size < 2) return qHtml;
+
+  const root = parseHtmlFragment(qHtml);
+  if (!root) return qHtml;
+
+  // Удаляем "галереи" вариантов, если они полностью состоят из тех же картинок, что и в 1) 2) 3) 4).
+  [...root.children].forEach((child) => {
+    if (isImageOnlyNodeForChoice(child, choiceSrcSet)) {
+      child.remove();
+      return;
+    }
+
+    if (child.tagName === "TABLE") {
+      const rows = tableDirectRows(child);
+      const mediaRows = rows.filter((tr) => isImageOnlyNodeForChoice(tr, choiceSrcSet));
+      if (rows.length >= 2 && mediaRows.length >= 2 && mediaRows.length === rows.length) {
+        child.remove();
+      }
+    }
+  });
+
+  stripTrailingEmptyTableRows(root);
+  stripTrailingEmptyTaskBlocks(root);
+  pruneEmptyNodes(root);
+  return root.innerHTML.trim();
+}
+
 function buildChoiceMarkup(questionHtml, choices) {
   const wrap = document.createElement("div");
   wrap.className = "oge-math-choice-task";
 
-  const qHtml = (questionHtml || "").trim();
+  const qHtml = stripDuplicateChoiceMediaFromQuestion(questionHtml, choices);
   if (qHtml && htmlHasVisibleText(qHtml)) {
     const q = document.createElement("div");
     q.className = "oge-math-choice-question";

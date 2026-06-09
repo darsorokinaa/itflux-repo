@@ -1,0 +1,53 @@
+<table>
+<tbody><tr><td> <p>На рисунке справа схема дорог Н-ского района изображена в виде графа, в таблице содержатся сведения о протяжённости каждой из этих дорог (в километрах).</p>
+<table>
+<tbody>
+<tr>
+<td>
+<table>
+<tbody>
+<tr><td>&nbsp;</td><td>
+<p>П1</p></td><td>
+<p>П2</p></td><td>
+<p>П3</p></td><td>
+<p>П4</p></td><td>
+<p>П5</p></td><td>
+<p>П6</p></td><td>
+<p>П7</p></td></tr>
+<tr><td>
+<p>П1</p></td><td>&nbsp;</td><td>
+<p>15</p></td><td>
+<p>15</p></td><td>
+<p>9</p></td><td>
+<p>7</p></td><td>&nbsp;</td><td>&nbsp;</td></tr>
+<tr><td>
+<p>П2</p></td><td>
+<p>15</p></td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+<tr><td>
+<p>П3</p></td><td>
+<p>15</p></td><td>&nbsp;</td><td>&nbsp;</td><td>
+<p>12</p></td><td>&nbsp;</td><td>&nbsp;</td><td>
+<p>20</p></td></tr>
+<tr><td>
+<p>П4</p></td><td>
+<p>9</p></td><td>&nbsp;</td><td>
+<p>12</p></td><td>&nbsp;</td><td>&nbsp;</td><td>
+<p>14</p></td><td>
+<p>10</p></td></tr>
+<tr><td>
+<p>П5</p></td><td>
+<p>7</p></td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+<tr><td>
+<p>П6</p></td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>
+<p>14</p></td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+<tr><td>
+<p>П7</p></td><td>&nbsp;</td><td>&nbsp;</td><td>
+<p>20</p></td><td>
+<p>10</p></td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr></tbody></table>
+</td>
+<td>
+<p><img alt="" src="/media/task_files/xs3qstsrcD1360EF24182A21341D8B4AB192CE0BB_1_1486125108_0aba959f54b9.png"/></p></td></tr></tbody></table>
+<p>Так как таблицу и схему рисовали независимо друг от друга, то нумерация населённых пунктов в таблице никак не связана с буквенными обозначениями на графе. Определите, какова протяжённость дороги из пункта К в пункт Г. В ответе запишите целое число <!--?import namespace = m urn = "http://www.w3.org/1998/Math/MathML" implementation = "#MathPlayer" declareNamespace /--> –  так, как оно указано <br/>в таблице.</p></td></tr>
+<tr><td>
+
+</td></tr></tbody></table><p><img src="/media/task_files/xs3qstsrcD1360EF24182A21341D8B4AB192CE0BB_1_1486125108_0aba959f54b9.png"></p>

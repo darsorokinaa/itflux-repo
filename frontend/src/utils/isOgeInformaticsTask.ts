@@ -30,3 +30,57 @@ export function isOgeInformaticsPart2TaskNumber(
 ): boolean {
   return isOgeInformaticsContext(level, subject) && Number(taskNumber) >= 13;
 }
+
+/** ЕГЭ информатика (любой номер задания). */
+export function isEgeInformaticsContext(
+  level: string | undefined,
+  subject: string | undefined
+): boolean {
+  return (
+    String(level || "").toLowerCase() === "ege" &&
+    String(subject || "").toLowerCase() === "inf"
+  );
+}
+
+/** ЕГЭ информатика, задание с номером n (API иногда отдаёт строку). */
+export function isEgeInformaticsTask(
+  level: string | undefined,
+  subject: string | undefined,
+  taskNumber: number | string | null | undefined,
+  n: number
+): boolean {
+  return (
+    String(level || "").toLowerCase() === "ege" &&
+    String(subject || "").toLowerCase() === "inf" &&
+    Number(taskNumber) === n
+  );
+}
+
+/** ЕГЭ информатика №1 — схема дорог и таблица смежности / расстояний. */
+export function isEgeInfRoadGraphTask(
+  level: string | undefined,
+  subject: string | undefined,
+  taskNumber: number | string | null | undefined
+): boolean {
+  return isEgeInformaticsTask(level, subject, taskNumber, 1);
+}
+
+/** ЕГЭ информатика №22 — параллельные и последовательные процессы. */
+export function isEgeInfParallelProcessesTask(
+  level: string | undefined,
+  subject: string | undefined,
+  taskNumber: number | string | null | undefined
+): boolean {
+  return isEgeInformaticsTask(level, subject, taskNumber, 22);
+}
+
+/** ОГЭ или ЕГЭ информатика — показываем редактор кода. */
+export function isInformaticsCodeEditorContext(
+  level: string | undefined,
+  subject: string | undefined
+): boolean {
+  return (
+    isOgeInformaticsContext(level, subject) ||
+    isEgeInformaticsContext(level, subject)
+  );
+}

@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import Nav from "../components/Nav";
 import NotFoundPage from "./NotFoundPage";
 import { SubjectExamCountdownCompactCard } from "../components/SubjectExamCountdowns";
 
@@ -121,7 +120,6 @@ function ExamLevelHubPage() {
 
   return (
     <div className="digital-flow-page">
-      <Nav />
       <div className="digital-flow-page__wrap subject-page sc-subject-v2">
       <div className="container subject-page-container">
         <div className="sc-subject-root">

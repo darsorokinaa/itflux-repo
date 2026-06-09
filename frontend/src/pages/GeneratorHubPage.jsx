@@ -1,5 +1,4 @@
 import { Link } from "react-router-dom";
-import Nav from "../components/Nav";
 import { getLevelDef } from "../data/levels";
 
 const GENERATOR_LEVELS = [
@@ -22,7 +21,6 @@ const GENERATOR_LEVELS = [
 export default function GeneratorHubPage() {
   return (
     <div className="digital-flow-page">
-      <Nav />
       <div className="digital-flow-page__wrap">
         <main className="nav-hub-page">
           <header className="section-head section-head--page">

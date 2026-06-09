@@ -8,7 +8,6 @@ import {
   Link,
 } from "react-router-dom";
 import { FileText, Target, CircleHelp } from "lucide-react";
-import Nav from "../components/Nav";
 
 const SUBJECT_NAMES = {
   inf: "Информатика",
@@ -865,7 +864,6 @@ function TasksPage() {
 
   const prepDigitalWrap = (content) => (
     <div className="digital-flow-page">
-      <Nav />
       <div className="digital-flow-page__wrap">
         <div className="tasks-page tasks-page--prep-v2 tasks-prep-flow">{content}</div>
       </div>

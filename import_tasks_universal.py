@@ -30,7 +30,7 @@ from fipi_html_normalize import (
 
 # ──────────────────────────── КОНФИГУРАЦИЯ ────────────────────────────────────
 
-EXCEL_FILE = "/Users/darsorokina/Desktop/Преподавание/kes_8_2.xlsx"
+EXCEL_FILE = "/Users/darsorokina/Desktop/Преподавание/result/inf_kes_4_6.xlsx"
 
 # Колонка с текстом задачи.
 # Для Excel из fipi_parser_inf_html.py используй "task_html" —
@@ -38,23 +38,23 @@ EXCEL_FILE = "/Users/darsorokina/Desktop/Преподавание/kes_8_2.xlsx"
 COL_TASK = "text"
 
 # Колонка с URL файла для поля files (zip/pdf и т.п.), None — не используется
-COL_FILES = None       # ZIP-архив презентации
+COL_FILES = 'file_url'       # ZIP-архив презентации
 
 # Колонка с URL изображений для вставки в task_template, None — не используется
 # Несколько URL в ячейке разделяются запятой ИЛИ переносом строки.
 # Для fipi_parser_inf_html.py не нужно — картинки уже встроены в task_html.
-COL_IMAGES = "image_url"        # PNG/GIF слайды (через запятую)
+COL_IMAGES = 'image_url'     # PNG/GIF слайды (через запятую)
 
 # Колонка с ответом, None — пустая строка
-COL_ANSWER = 'answer'     # например: "answer"
+COL_ANSWER = None    # например: "answer"
 
 # Номер задания (ОГЭ/ЕГЭ) и подтема — привязка к TaskList / SubTopic в БД
 COL_TASK_NUMBER = "task_number"   # None — не заполнять task_id
-COL_SUBTOPIC = "subtopic"         # None — не заполнять subtopic_id
+COL_SUBTOPIC = None      # None — не заполнять subtopic_id
 
 # Предмет и уровень для поиска TaskList (subject_short и level.level в БД)
-SUBJECT = "math"   # например math, inf
-LEVEL = "oge"      # например oge, ege, vpr
+SUBJECT = "inf"   # например math, inf
+LEVEL = "ege"      # например oge, ege, vpr
 
 # Если подтемы нет в БД — создать автоматически (иначе только существующие)
 CREATE_SUBTOPIC_IF_MISSING = True
@@ -68,7 +68,7 @@ USE_ALL_JSON_FOR_ORPHAN_CHOICES = True
 
 # Значения полей БД
 CREATED_BY = "ФИПИ"
-MAX_SCORE  = 2
+MAX_SCORE  = 1
 IS_ACTIVE  = True
 
 # ──────────────────────────────────────────────────────────────────────────────

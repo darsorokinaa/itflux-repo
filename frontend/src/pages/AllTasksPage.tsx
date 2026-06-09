@@ -1,5 +1,7 @@
 import {
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -8,9 +10,9 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import Nav from "../components/Nav";
-import MathContent from "../components/MathContent";
-import TaskFileAttachment from "../components/TaskFileAttachment";
+import { useSearchParams } from "react-router-dom";
+// @ts-ignore JSX module without d.ts
+import ExamTaskDrawingShell, { ExamTaskDrawingHeaderButton } from "../components/ExamTaskDrawingShell";
 import { getLevelDef, type LevelId } from "../data/levels";
 import {
   GRADES_BY_LEVEL,
@@ -20,9 +22,13 @@ import {
 } from "../data/subjects";
 import { formatTasksCount } from "../utils/formatTasksCount";
 import {
-  isOgeInformaticsPart2TaskNumber,
-  isOgeInformaticsTask,
+  isInformaticsCodeEditorContext,
 } from "../utils/isOgeInformaticsTask";
+import type { TaskFileSource } from "../components/InformaticsCodeEditor/types";
+
+const InformaticsCodeEditorEntry = lazy(
+  () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
+);
 
 type BankTask = {
   id: number;
@@ -57,12 +63,17 @@ type TaskNumberOption = {
 };
 
 type SubtopicOption = {
-  id: number;
+  id: number | null;
   title: string;
-  task_list_id: number;
-  task_number: number;
+  task_list_id: number | null;
+  task_number: number | null;
   task_count: number;
+  no_subtopic?: boolean;
+  no_subtopic_scope?: "all" | "task";
 };
+
+/** Значение select и query-параметр subtopic=none */
+const SUBTOPIC_NONE = "none";
 
 type FiltersResponse = {
   task_numbers: TaskNumberOption[];
@@ -70,6 +81,7 @@ type FiltersResponse = {
 };
 
 const PER_PAGE = 5000;
+const ALL_TASKS_BOARD_VARIANT_ID = "task-bank";
 
 const LazyVisible = memo(function LazyVisible({
   minHeight = 140,
@@ -148,21 +160,84 @@ function buildQuery(
   return s ? `?${s}` : "";
 }
 
+type AllTasksFilters = {
+  level: LevelId;
+  subject: SubjectId;
+  vprGrade: number;
+  taskListId: string;
+  subtopicId: string;
+  onlyFipi: boolean;
+  page: number;
+};
+
+function readFiltersFromSearchParams(sp: URLSearchParams): AllTasksFilters {
+  const levelRaw = sp.get("level");
+  const level = LEVEL_OPTIONS.some((o) => o.id === levelRaw)
+    ? (levelRaw as LevelId)
+    : "oge";
+
+  const subjects = SUBJECTS_BY_LEVEL[level] ?? [];
+  const subjectRaw = sp.get("subject");
+  const subject =
+    subjects.find((s) => s.id === subjectRaw && !s.comingSoon)?.id ??
+    subjects.find((s) => !s.comingSoon)?.id ??
+    "inf";
+
+  const grades = GRADES_BY_LEVEL.vpr;
+  const gradeRaw = Number(sp.get("grade"));
+  const vprGrade =
+    level === "vpr" && grades.includes(gradeRaw) ? gradeRaw : (grades[0] ?? 7);
+
+  const taskListId = sp.get("task")?.trim() ?? "";
+  const subtopicRaw = sp.get("subtopic")?.trim() ?? "";
+  const subtopicId = subtopicRaw === SUBTOPIC_NONE ? SUBTOPIC_NONE : subtopicRaw;
+  const onlyFipi = sp.get("fipi") === "1";
+  const page = Math.max(1, Number(sp.get("page")) || 1);
+
+  return { level, subject, vprGrade, taskListId, subtopicId, onlyFipi, page };
+}
+
+function writeFiltersToSearchParams(f: AllTasksFilters): URLSearchParams {
+  const p = new URLSearchParams();
+  p.set("level", f.level);
+  p.set("subject", f.subject);
+  if (f.level === "vpr") p.set("grade", String(f.vprGrade));
+  if (f.taskListId) p.set("task", f.taskListId);
+  if (f.subtopicId) p.set("subtopic", f.subtopicId);
+  if (f.onlyFipi) p.set("fipi", "1");
+  if (f.page > 1) p.set("page", String(f.page));
+  return p;
+}
+
 export default function AllTasksPage() {
-  const [level, setLevel] = useState<LevelId>("oge");
-  const [subject, setSubject] = useState<SubjectId>("inf");
-  const [onlyFipi, setOnlyFipi] = useState(false);
-  const [vprGrade, setVprGrade] = useState<number>(() => GRADES_BY_LEVEL.vpr[0] ?? 7);
-  const [taskListId, setTaskListId] = useState("");
-  const [subtopicId, setSubtopicId] = useState("");
-  const [page, setPage] = useState(1);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialFilters = useMemo(
+    () => readFiltersFromSearchParams(searchParams),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- только при первом монтировании
+    []
+  );
+
+  const [level, setLevel] = useState<LevelId>(initialFilters.level);
+  const [subject, setSubject] = useState<SubjectId>(initialFilters.subject);
+  const [onlyFipi, setOnlyFipi] = useState(initialFilters.onlyFipi);
+  const [vprGrade, setVprGrade] = useState<number>(initialFilters.vprGrade);
+  const [taskListId, setTaskListId] = useState(initialFilters.taskListId);
+  const [subtopicId, setSubtopicId] = useState(initialFilters.subtopicId);
+  const [page, setPage] = useState(initialFilters.page);
+
+  const levelSubjectRef = useRef<{ level: LevelId; subject: SubjectId } | null>(
+    null
+  );
 
   const [filterOptions, setFilterOptions] = useState<FiltersResponse | null>(null);
   const [filtersLoading, setFiltersLoading] = useState(false);
   const [data, setData] = useState<BankResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [answers, setAnswers] = useState<Record<number, AnswerState>>({});
+  const [openBoardForTaskId, setOpenBoardForTaskId] = useState<number | null>(null);
+  const [boardsByTask, setBoardsByTask] = useState<Record<string, any>>({});
 
   useEffect(() => {
     setAnswers({});
@@ -213,20 +288,83 @@ export default function AllTasksPage() {
     }
   }, [answers]);
 
+  const boardPersistHasDraft = useCallback((persist: any) => {
+    if (Array.isArray(persist?.overlayV1?.strokes) && persist.overlayV1.strokes.length > 0) return true;
+    if (persist?.overlayV1?.snapshot && String(persist.overlayV1.snapshot).length > 400) return true;
+    if (!persist?.history?.length) return false;
+    const ix = typeof persist.historyIndex === "number" ? persist.historyIndex : persist.history.length - 1;
+    if (ix < 0) return false;
+    const e = persist.history[ix];
+    if (typeof e === "string") return e.length > 2000;
+    if (e?.objects?.length) return true;
+    if (e?.bg && typeof e.bg === "string" && e.bg.length > 4500) return true;
+    return false;
+  }, []);
+
+  const handleBoardPersist = useCallback((payload: any) => {
+    if (!payload?.taskId) return;
+    const id = String(payload.taskId);
+    if (payload.overlayV1 !== undefined) {
+      setBoardsByTask((prev) => ({
+        ...prev,
+        [id]: { ...prev[id], overlayV1: payload.overlayV1 },
+      }));
+      return;
+    }
+    setBoardsByTask((prev) => ({
+      ...prev,
+      [id]: {
+        history: payload.history,
+        historyIndex: payload.historyIndex,
+      },
+    }));
+  }, []);
+
   const subjects = SUBJECTS_BY_LEVEL[level] ?? [];
   const levelDef = getLevelDef(level);
 
   const subtopicsForTask = useMemo(() => {
     if (!filterOptions) return [];
-    if (!taskListId) return filterOptions.subtopics;
+    const list = filterOptions.subtopics;
+    if (!taskListId) {
+      const global = list.find(
+        (s) => s.no_subtopic && s.no_subtopic_scope === "all"
+      );
+      return global ? [global] : [];
+    }
     const tlId = Number(taskListId);
-    return filterOptions.subtopics.filter((s) => s.task_list_id === tlId);
+    const forTask = list.filter(
+      (s) =>
+        s.task_list_id === tlId &&
+        (!s.no_subtopic || s.no_subtopic_scope !== "all")
+    );
+    const noSt = forTask.find((s) => s.no_subtopic);
+    const rest = forTask.filter((s) => !s.no_subtopic);
+    return noSt ? [noSt, ...rest] : rest;
   }, [filterOptions, taskListId]);
+
+  const canPickSubtopic = Boolean(taskListId || subtopicsForTask.length > 0);
+
+  useEffect(() => {
+    const next = writeFiltersToSearchParams({
+      level,
+      subject,
+      vprGrade,
+      taskListId,
+      subtopicId,
+      onlyFipi,
+      page,
+    });
+    setSearchParams((prev) => (prev.toString() === next.toString() ? prev : next), {
+      replace: true,
+    });
+  }, [level, subject, vprGrade, taskListId, subtopicId, onlyFipi, page, setSearchParams]);
 
   useEffect(() => {
     const list = SUBJECTS_BY_LEVEL[level] ?? [];
     if (!list.some((s) => s.id === subject)) {
       setSubject(list[0]?.id ?? "inf");
+      return;
     }
     if (level === "vpr") {
       const grades = GRADES_BY_LEVEL.vpr;
@@ -234,10 +372,22 @@ export default function AllTasksPage() {
         setVprGrade(grades[0]);
       }
     }
-    setTaskListId("");
-    setSubtopicId("");
-    setPage(1);
+    const prev = levelSubjectRef.current;
+    if (prev && (prev.level !== level || prev.subject !== subject)) {
+      setTaskListId("");
+      setSubtopicId("");
+      setPage(1);
+    }
+    levelSubjectRef.current = { level, subject };
   }, [level, subject, vprGrade]);
+
+  useEffect(() => {
+    if (!filterOptions || !taskListId) return;
+    const ok = filterOptions.task_numbers.some(
+      (t) => String(t.task_list_id) === taskListId
+    );
+    if (!ok) setTaskListId("");
+  }, [filterOptions, taskListId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -266,12 +416,17 @@ export default function AllTasksPage() {
 
   useEffect(() => {
     if (!subtopicId) return;
+    if (subtopicId === SUBTOPIC_NONE) {
+      const ok = subtopicsForTask.some((s) => s.no_subtopic);
+      if (!ok) setSubtopicId("");
+      return;
+    }
     const ok = subtopicsForTask.some((s) => String(s.id) === subtopicId);
     if (!ok) setSubtopicId("");
   }, [subtopicsForTask, subtopicId]);
 
   const fetchTasks = useCallback(async () => {
-    if (!taskListId) {
+    if (!taskListId && subtopicId !== SUBTOPIC_NONE) {
       setData(null);
       setError(null);
       setLoading(false);
@@ -282,9 +437,13 @@ export default function AllTasksPage() {
     const qs = buildQuery(level, vprGrade, {
       page: String(page),
       per_page: String(PER_PAGE),
+      raw_html: "1",
       only_fipi: onlyFipi ? "1" : undefined,
       task_list_id: taskListId || undefined,
-      subtopic_id: subtopicId || undefined,
+      subtopic_id:
+        subtopicId === SUBTOPIC_NONE
+          ? SUBTOPIC_NONE
+          : subtopicId || undefined,
     });
     try {
       const res = await fetch(
@@ -308,17 +467,26 @@ export default function AllTasksPage() {
     fetchTasks();
   }, [fetchTasks]);
 
-  const totalPages = useMemo(() => {
-    if (!data?.total) return 1;
-    return Math.max(1, Math.ceil(data.total / PER_PAGE));
-  }, [data?.total]);
-
   const resetPage = () => setPage(1);
+
+  const showCodeSidebar = isInformaticsCodeEditorContext(level, subject);
+
+  const getCodeEditorTaskSources = useCallback((): TaskFileSource[] => {
+    return (data?.tasks ?? [])
+      .filter((t) => t.file_url)
+      .slice(0, 80)
+      .map((t) => ({
+        id: t.id,
+        label: t.task_number != null ? `№${t.task_number} · id ${t.id}` : `id ${t.id}`,
+        fileUrl: t.file_url,
+      }));
+  }, [data?.tasks]);
 
   return (
     <div className="digital-flow-page">
-      <Nav />
-      <div className="digital-flow-page__wrap">
+      <div
+        className={`digital-flow-page__wrap${showCodeSidebar ? " digital-flow-page__wrap--with-code-sidebar" : ""}`}
+      >
         <main className="all-tasks-page">
           <header className="section-head section-head--page">
             <h1 className="section-head__title">Все задачи</h1>
@@ -327,9 +495,24 @@ export default function AllTasksPage() {
             </p>
           </header>
 
+          <button
+            type="button"
+            className="all-tasks-filters-toggle"
+            aria-expanded={filtersOpen}
+            aria-controls="all-tasks-filters"
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <span>Фильтры</span>
+            <span className="all-tasks-filters-toggle__meta">
+              {levelDef?.label ?? level.toUpperCase()}
+              {onlyFipi ? " · ФИПИ" : ""}
+            </span>
+          </button>
+
           <div
-            className="all-tasks-filters"
-            style={{ "--filter-accent": levelDef.bg } as CSSProperties}
+            id="all-tasks-filters"
+            className={`all-tasks-filters${filtersOpen ? " is-open" : ""}`}
+            style={{ "--filter-accent": levelDef?.bg ?? "#2b52f5" } as CSSProperties}
           >
             <label className="all-tasks-filter">
               <span className="all-tasks-filter__label">Уровень</span>
@@ -338,6 +521,8 @@ export default function AllTasksPage() {
                 value={level}
                 onChange={(e) => {
                   setLevel(e.target.value as LevelId);
+                  setTaskListId("");
+                  setSubtopicId("");
                   resetPage();
                 }}
               >
@@ -356,6 +541,8 @@ export default function AllTasksPage() {
                 value={subject}
                 onChange={(e) => {
                   setSubject(e.target.value as SubjectId);
+                  setTaskListId("");
+                  setSubtopicId("");
                   resetPage();
                 }}
               >
@@ -405,30 +592,45 @@ export default function AllTasksPage() {
                   <option key={t.task_list_id} value={String(t.task_list_id)}>
                     №{t.task_number}
                     {t.task_title ? ` — ${t.task_title}` : ""}
+                    {t.task_count > 0 ? ` (${t.task_count})` : ""}
                   </option>
                 ))}
               </select>
             </label>
 
             <label
-              className={`all-tasks-filter${!taskListId ? " all-tasks-filter--inactive" : ""}`}
-              title={!taskListId ? "Сначала выберите задание" : undefined}
+              className={`all-tasks-filter${!canPickSubtopic ? " all-tasks-filter--inactive" : ""}`}
+              title={
+                !canPickSubtopic
+                  ? "Сначала выберите задание или дождитесь загрузки фильтров"
+                  : undefined
+              }
             >
               <span className="all-tasks-filter__label">Подтема</span>
               <select
                 className="all-tasks-filter__control"
                 value={subtopicId}
-                disabled={!taskListId || filtersLoading}
+                disabled={!canPickSubtopic || filtersLoading}
                 onChange={(e) => {
                   setSubtopicId(e.target.value);
                   resetPage();
                 }}
               >
-                <option value="">{taskListId ? "Все" : "Выберите задание"}</option>
+                <option value="">
+                  {taskListId ? "Все подтемы" : "Все задания — без подтемы"}
+                </option>
                 {subtopicsForTask.map((s) => (
-                  <option key={s.id} value={String(s.id)}>
+                  <option
+                    key={
+                      s.no_subtopic
+                        ? `none-${s.task_list_id ?? "all"}`
+                        : String(s.id)
+                    }
+                    value={s.no_subtopic ? SUBTOPIC_NONE : String(s.id)}
+                  >
                     {s.title}
-                    {!taskListId ? ` (№${s.task_number})` : ""}
+                    {` (${s.task_count})`}
+                    {!taskListId && s.task_number != null ? ` · №${s.task_number}` : ""}
                   </option>
                 ))}
               </select>
@@ -470,7 +672,11 @@ export default function AllTasksPage() {
                     )
                   : null;
                 const selectedSubtopic = subtopicId
-                  ? subtopicsForTask.find((s) => String(s.id) === subtopicId)
+                  ? subtopicId === SUBTOPIC_NONE
+                    ? subtopicsForTask.find((s) => s.no_subtopic) ?? {
+                        title: "Без подтемы",
+                      }
+                    : subtopicsForTask.find((s) => String(s.id) === subtopicId)
                   : null;
                 return (
                   <div className="all-tasks-meta__inner">
@@ -497,17 +703,20 @@ export default function AllTasksPage() {
             ) : null}
           </div>
 
-          {!taskListId && !loading && !error ? (
+          {!taskListId && subtopicId !== SUBTOPIC_NONE && !loading && !error ? (
             <div className="all-tasks-empty all-tasks-empty--pick" role="status">
               <p className="all-tasks-empty__title">Выберите задание</p>
               <p className="all-tasks-empty__lead">
-                Чтобы увидеть задачи, укажите номер задания в фильтре «Задание»
-                (опционально — уровень, предмет, подтему и «Только ФИПИ»).
+                Укажите номер в фильтре «Задание» или выберите в «Подтема» пункт
+                «Без подтемы», чтобы показать все задачи без подтемы.
               </p>
             </div>
           ) : null}
 
-          {taskListId && !loading && !error && data?.tasks.length === 0 ? (
+          {(taskListId || subtopicId === SUBTOPIC_NONE) &&
+          !loading &&
+          !error &&
+          data?.tasks.length === 0 ? (
             <p className="all-tasks-empty" role="status">
               По выбранным фильтрам заданий нет. Смените задание, подтему или снимите «Только ФИПИ».
             </p>
@@ -517,26 +726,13 @@ export default function AllTasksPage() {
             {(data?.tasks ?? []).map((t, i) => {
               const ordinal = (data!.page - 1) * data!.per_page + i + 1;
               const a = answers[t.id];
-              const isPart2 =
-                t.part_id === 2 ||
-                /(^|[^\dа-яё])2|втор/iu.test(t.part_title ?? "") ||
-                isOgeInformaticsPart2TaskNumber(level, subject, t.task_number);
-              const ogeInf13 = isOgeInformaticsTask(
-                level,
-                subject,
-                t.task_number,
-                13
-              );
-              const useExamTaskStyle = isPart2 || ogeInf13;
+              const taskBoardPersist = boardsByTask[String(t.id)];
+              const hasTaskBoardDraft = boardPersistHasDraft(taskBoardPersist);
               return (
                 <li
                   key={t.id}
-                  className={`all-tasks-card${isPart2 ? " all-tasks-card--part2" : ""}${
-                    ogeInf13 ? " all-tasks-card--oge-inf-13" : ""
-                  }`}
+                  className="all-tasks-card all-tasks-card--raw"
                   data-task-number={t.task_number ?? undefined}
-                  data-part={isPart2 ? "2" : "1"}
-                  data-exam-style={useExamTaskStyle ? "1" : undefined}
                 >
                   <div className="all-tasks-card__aside">
                     <span
@@ -545,19 +741,43 @@ export default function AllTasksPage() {
                     >
                       {ordinal}
                     </span>
-                    <span className="all-tasks-card__id">{t.id}</span>
+                    <span className="all-tasks-card__id">id {t.id}</span>
                   </div>
                   <div className="all-tasks-card__content">
-                    <LazyVisible minHeight={120}>
-                      <MathContent
-                        html={t.text || ""}
-                        className="task-text all-tasks-card__text"
-                        ogeInf13Enhance={ogeInf13}
-                      />
-                      {t.file_url ? (
-                        <TaskFileAttachment href={t.file_url} />
-                      ) : null}
-                    </LazyVisible>
+                    <div className="all-tasks-raw-item__meta">
+                      {t.task_number != null ? <span>№{t.task_number}</span> : null}
+                      {t.task_title ? <span>{t.task_title}</span> : null}
+                      {t.subtopic ? <span>{t.subtopic}</span> : null}
+                    </div>
+                    <ExamTaskDrawingShell
+                      enabled
+                      taskId={t.id}
+                      level={level}
+                      subject={subject}
+                      variantId={ALL_TASKS_BOARD_VARIANT_ID}
+                      persistEntry={taskBoardPersist}
+                      onDrawingPersist={(payload: any) =>
+                        handleBoardPersist({ taskId: t.id, ...payload })
+                      }
+                      openBoardForTaskId={openBoardForTaskId}
+                      onConsumedBoardOpenRequest={() => setOpenBoardForTaskId(null)}
+                    >
+                      <div className="all-tasks-raw-item__body">
+                        <LazyVisible minHeight={120}>
+                          <div
+                            className="all-tasks-raw-html"
+                            dangerouslySetInnerHTML={{ __html: t.text || "" }}
+                          />
+                          {t.file_url ? (
+                            <p className="all-tasks-raw-file">
+                              <a href={t.file_url} target="_blank" rel="noreferrer">
+                                Файл задания
+                              </a>
+                            </p>
+                          ) : null}
+                        </LazyVisible>
+                      </div>
+                    </ExamTaskDrawingShell>
                   </div>
                   <div className="all-tasks-card__actions">
                     <button
@@ -572,16 +792,24 @@ export default function AllTasksPage() {
                         ? "Скрыть ответ"
                         : "Посмотреть ответ"}
                     </button>
+                    <div className="exam-task-card__status-cluster">
+                      {hasTaskBoardDraft ? (
+                        <span className="exam-task-card__draft-label">Есть черновик</span>
+                      ) : null}
+                      <ExamTaskDrawingHeaderButton onClick={() => setOpenBoardForTaskId(t.id)} />
+                    </div>
                   </div>
                   {a?.open ? (
-                    <div className="all-tasks-card__answer" role="region" aria-live="polite">
-                      <span className="all-tasks-card__answer-label">Ответ</span>
+                    <div className="all-tasks-card__answer all-tasks-raw-answer" role="region" aria-live="polite">
+                      <div className="all-tasks-card__answer-label">
+                        <strong>Ответ</strong>
+                      </div>
                       {a.error ? (
-                        <p className="all-tasks-card__answer-error">{a.error}</p>
+                        <p>{a.error}</p>
                       ) : a.html ? (
-                        <MathContent
-                          html={a.html}
-                          className="task-text all-tasks-card__answer-content"
+                        <div
+                          className="all-tasks-raw-html"
+                          dangerouslySetInnerHTML={{ __html: a.html }}
                         />
                       ) : null}
                     </div>
@@ -592,6 +820,12 @@ export default function AllTasksPage() {
           </ul>
 
         </main>
+
+        {showCodeSidebar ? (
+          <Suspense fallback={null}>
+            <InformaticsCodeEditorEntry getTaskSources={getCodeEditorTaskSources} />
+          </Suspense>
+        ) : null}
       </div>
     </div>
   );

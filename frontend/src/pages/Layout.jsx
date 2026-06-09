@@ -3,6 +3,7 @@ import { Outlet, Link, useLocation } from "react-router-dom";
 import {
   readPersistedTheme,
 } from "../utils/themeStorage";
+import Nav from "../components/Nav";
 
 const COOKIE_CONSENT_KEY = "cookie_consent_accepted";
 
@@ -20,8 +21,7 @@ function Layout() {
     pathname.startsWith("/search/tasks") ||
     pathname.startsWith("/search-variant") ||
     /^\/(oge|ege)$/.test(pathNorm) ||
-    isTasksPrepPicker ||
-    isExamVariantPage;
+    isTasksPrepPicker;
   const lessonJoinMode = pathname.startsWith("/lesson/join");
   const query = new URLSearchParams(search || "");
   const isLessonOrHomeworkContext =
@@ -143,7 +143,8 @@ function Layout() {
         />
       ) : null}
       <div className="app-shell-content">
-      {!isMarketingHome ? (
+      {!isLessonOrHomeworkContext && !isExamVariantPage && <Nav />}
+      {/* !isMarketingHome ? (
       <header
         className={themeData?.headerBg ? "header--themed" : undefined}
         style={themeData?.headerBg ? { backgroundImage: `url(${themeData.headerBg})` } : undefined}
@@ -181,7 +182,7 @@ function Layout() {
       </nav>
     </div>
 </header>
-      ) : null}
+      ) : null */}
 
 
       <aside>

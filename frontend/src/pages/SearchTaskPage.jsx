@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
-import Nav from "../components/Nav";
 import SearchByIdForm from "../components/SearchByIdForm";
 import MathContent from "../components/MathContent";
 import { devApiBase } from "../utils/devApiBase";
@@ -42,7 +41,6 @@ function SearchTaskPage() {
   if (!q) {
     return (
       <div className="digital-flow-page">
-        <Nav />
         <div className="digital-flow-page__wrap">
           <div className="container search-task-page">
             <div className="search-task-hero">
@@ -61,7 +59,6 @@ function SearchTaskPage() {
 
   return (
     <div className="digital-flow-page">
-      <Nav />
       <div className="digital-flow-page__wrap">
         <div className="container search-task-page">
           <div className="search-task-hero">

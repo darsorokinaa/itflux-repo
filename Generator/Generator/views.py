@@ -5,7 +5,9 @@ import os
 import re
 import io
 import csv
+import html as html_lib
 import zipfile
+from functools import lru_cache
 from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
 from urllib import request as urlrequest, error as urlerror
 import secrets
@@ -18,6 +20,7 @@ import jwt as pyjwt
 
 from django.conf import settings as django_settings
 from django.core.signing import BadSignature, Signer
+from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Min, Prefetch, Q, Value, When
 from django.http import (
     FileResponse,
@@ -47,9 +50,7 @@ from .models import (
     Announcement,
     Criteria,
     ErrorReport,
-    LessonRoom,
-    LessonStudentResult,
-    LessonStudentsAnswer,
+    Lesson,
     Level,
     LinkedTaskGroup,
     Mark,
@@ -65,6 +66,10 @@ from .models import (
     VariantContent,
     username_for_created_by,
 )
+from .serializers import (
+    LessonAdminSerializer,
+    LessonCatalogSerializer,
+)
 from .latex_utils import process_latex
 from . import pdf_utils
 from . import telegram_utils
@@ -74,6 +79,448 @@ logger = logging.getLogger(__name__)
 
 _CKEDITOR_ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
 _CKEDITOR_MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+
+
+_INNER_TABLE_RE = re.compile(r"<table\b[^>]*>(?:(?!<table\b).)*?</table>", re.IGNORECASE | re.DOTALL)
+_TR_RE = re.compile(r"(<tr\b[^>]*>)(.*?)(</tr>)", re.IGNORECASE | re.DOTALL)
+_CELL_RE = re.compile(r"<t[dh]\b[^>]*>.*?</t[dh]>", re.IGNORECASE | re.DOTALL)
+_TASK_HTML_BLOCK_RE = re.compile(
+    r'<div\b[^>]*class=["\'][^"\']*\btask-html-block\b[^"\']*["\'][^>]*>\s*<p\b[^>]*>.*?</p>\s*</div>',
+    re.IGNORECASE | re.DOTALL,
+)
+_EGE_INF_1_SPARSE_POINT_TASK_IDS = {
+    13715, 13716, 13718, 13720, 13721, 13722, 13725, 13726, 13727, 13729,
+    13731, 13733, 13736, 13738, 13739, 13740, 13741, 13744, 13746, 13748,
+    13749, 13751, 13752, 13753, 13757, 13758, 13762, 13764, 13768, 13769,
+    13770, 13771, 13776, 13777, 13778, 13779, 13780, 13782, 13784, 13785,
+    13786, 13787, 13789, 13790, 13792, 13793, 13795, 13796, 13797, 13798,
+    13801, 13805, 13807, 13808, 13811, 13812, 13816, 13820, 13821, 13824,
+    13827, 13828, 13829, 13831, 13832, 13833, 13834, 13836, 13838, 13839,
+    13840, 13843, 13848, 13850, 13851, 13855, 13856, 13857, 13859, 13861,
+    13863, 13864, 13865, 13866, 13867, 13868, 13869,
+}
+
+
+def _html_cell_text(cell_html: str) -> str:
+    text = html_lib.unescape(strip_tags(cell_html))
+    return re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip()
+
+
+def _is_point_label(text: str) -> bool:
+    value = (text or "").strip()
+    if len(value) > 12:
+        return False
+    return bool(
+        re.fullmatch(r"[ПпPp]\s*[1-9]\d*", value)
+        or re.fullmatch(r"[A-Za-zА-Яа-яЁё]", value)
+        or re.fullmatch(r"[1-9]\d*", value)
+    )
+
+
+def _empty_td() -> str:
+    return "<td>&nbsp;</td>"
+
+
+def _solve_sparse_symmetric_matrix(labels: list[str], row_values: list[list[str]]) -> list[list[str | None]] | None:
+    size = len(labels)
+    matrix: list[list[str | None]] = [[None for _ in range(size)] for _ in range(size)]
+
+    def solve(row: int, col: int, value_idx: int) -> bool:
+        if row == size:
+            return True
+        if col == size:
+            return value_idx == len(row_values[row]) and solve(row + 1, 0, 0)
+        if col == row:
+            return solve(row, col + 1, value_idx)
+
+        if matrix[row][col] is not None:
+            if value_idx < len(row_values[row]) and row_values[row][value_idx] == matrix[row][col]:
+                return solve(row, col + 1, value_idx + 1)
+            return False
+
+        if solve(row, col + 1, value_idx):
+            return True
+
+        if value_idx < len(row_values[row]):
+            value = row_values[row][value_idx]
+            matrix[row][col] = value
+            matrix[col][row] = value
+            if solve(row, col + 1, value_idx + 1):
+                return True
+            matrix[row][col] = None
+            matrix[col][row] = None
+        return False
+
+    return matrix if solve(0, 0, 0) else None
+
+
+def _fill_sparse_point_table(table_html: str) -> str:
+    rows = list(_TR_RE.finditer(table_html))
+    if len(rows) < 4 or len(rows) > 20:
+        return table_html
+
+    row_cells = [_CELL_RE.findall(match.group(2)) for match in rows]
+    if any(not cells for cells in row_cells):
+        return table_html
+
+    header_texts = [_html_cell_text(cell) for cell in row_cells[0]]
+    has_corner = bool(header_texts and not _is_point_label(header_texts[0]))
+    labels = [text for text in header_texts if _is_point_label(text)]
+    if len(labels) < 3 or len(labels) > 15:
+        return table_html
+    if len(labels) == len(row_cells[0]) and has_corner:
+        return table_html
+
+    entries = []
+    for cells in row_cells[1 : 1 + len(labels)]:
+        row_label = _html_cell_text(cells[0])
+        if not _is_point_label(row_label):
+            return table_html
+        values = [_html_cell_text(cell) for cell in cells[1:] if _html_cell_text(cell)]
+        entries.append({"label": row_label, "cells": cells, "values": values})
+
+    if [entry["label"] for entry in entries] != labels:
+        return table_html
+
+    if all(len(entry["cells"]) >= len(labels) + 1 for entry in entries):
+        return table_html
+
+    matrix = _solve_sparse_symmetric_matrix(labels, [entry["values"] for entry in entries])
+    if matrix is None:
+        return table_html
+
+    replacements: dict[tuple[int, int], str] = {}
+
+    header_cells = row_cells[0]
+    new_header = []
+    if has_corner:
+        new_header.append(header_cells[0])
+        label_cells = header_cells[1:]
+    else:
+        new_header.append(_empty_td())
+        label_cells = header_cells
+    new_header.extend(label_cells)
+    replacements[(rows[0].start(2), rows[0].end(2))] = "".join(new_header)
+
+    for row_idx, entry in enumerate(entries, start=1):
+        cells = entry["cells"]
+        value_cells = [cell for cell in cells[1:] if _html_cell_text(cell)]
+        value_columns = [col for col, value in enumerate(matrix[row_idx - 1]) if value is not None]
+        value_by_col = {
+            col: value_cells[i]
+            for i, col in enumerate(value_columns)
+            if i < len(value_cells)
+        }
+        new_cells = [cells[0]]
+        for col in range(len(labels)):
+            new_cells.append(value_by_col.get(col, _empty_td()))
+        replacements[(rows[row_idx].start(2), rows[row_idx].end(2))] = "".join(new_cells)
+
+    pieces = []
+    cursor = 0
+    for (start, end), replacement in sorted(replacements.items()):
+        pieces.append(table_html[cursor:start])
+        pieces.append(replacement)
+        cursor = end
+    pieces.append(table_html[cursor:])
+    return "".join(pieces)
+
+
+def _fill_numbered_point_table(table_html: str) -> str:
+    rows = list(_TR_RE.finditer(table_html))
+    if len(rows) < 4 or len(rows) > 25:
+        return table_html
+
+    row_cells = [_CELL_RE.findall(match.group(2)) for match in rows]
+    if any(not cells for cells in row_cells):
+        return table_html
+
+    header_idx = None
+    labels: list[str] = []
+    for idx, cells in enumerate(row_cells[:-1]):
+        texts = [_html_cell_text(cell) for cell in cells]
+        if len(texts) >= 3 and all(_is_point_label(text) for text in texts):
+            header_idx = idx
+            labels = texts
+            break
+
+    if header_idx is None or not labels:
+        return table_html
+
+    data_start = header_idx + 1
+    data_rows = row_cells[data_start : data_start + len(labels)]
+    if len(data_rows) < len(labels):
+        return table_html
+
+    entries = []
+    for row_offset, cells in enumerate(data_rows):
+        first_text = _html_cell_text(cells[0])
+        has_side_title = row_offset == 0 and "номер" in first_text.lower() and len(cells) >= 2
+        label_idx = 1 if has_side_title else 0
+        value_start = label_idx + 1
+        if len(cells) <= label_idx:
+            return table_html
+        row_label = _html_cell_text(cells[label_idx])
+        if row_label != labels[row_offset]:
+            return table_html
+        entries.append({
+            "cells": cells,
+            "prefix": cells[:value_start],
+            "value_start": value_start,
+            "values": [_html_cell_text(cell) for cell in cells[value_start:] if _html_cell_text(cell)],
+        })
+
+    if all(len(entry["cells"]) - entry["value_start"] >= len(labels) for entry in entries):
+        return table_html
+
+    matrix = _solve_sparse_symmetric_matrix(labels, [entry["values"] for entry in entries])
+    if matrix is None:
+        return table_html
+
+    replacements: dict[tuple[int, int], str] = {}
+    title_row_cells = row_cells[header_idx - 1] if header_idx > 0 else []
+    if (
+        header_idx > 0
+        and len(title_row_cells) == 1
+        and "номер" in _html_cell_text(title_row_cells[0]).lower()
+    ):
+        replacements[
+            (rows[header_idx - 1].start(2), rows[header_idx - 1].end(2))
+        ] = '<td colspan="2" rowspan="2">&nbsp;</td>' + title_row_cells[0]
+
+    for row_offset, entry in enumerate(entries):
+        value_cells = [
+            cell
+            for cell in entry["cells"][entry["value_start"]:]
+            if _html_cell_text(cell)
+        ]
+        value_columns = [
+            col
+            for col, value in enumerate(matrix[row_offset])
+            if value is not None
+        ]
+        value_by_col = {
+            col: value_cells[i]
+            for i, col in enumerate(value_columns)
+            if i < len(value_cells)
+        }
+        new_cells = list(entry["prefix"])
+        for col in range(len(labels)):
+            new_cells.append(value_by_col.get(col, _empty_td()))
+        row_match = rows[data_start + row_offset]
+        replacements[(row_match.start(2), row_match.end(2))] = "".join(new_cells)
+
+    pieces = []
+    cursor = 0
+    for (start, end), replacement in sorted(replacements.items()):
+        pieces.append(table_html[cursor:start])
+        pieces.append(replacement)
+        cursor = end
+    pieces.append(table_html[cursor:])
+    return "".join(pieces)
+
+
+def _fill_sparse_point_tables_in_html(html: str) -> str:
+    if not html or "<table" not in html.lower():
+        return html
+
+    def replace_table(match: re.Match[str]) -> str:
+        table_html = match.group(0)
+        filled = _fill_sparse_point_table(table_html)
+        if filled != table_html:
+            return filled
+        return _fill_numbered_point_table(table_html)
+
+    return _INNER_TABLE_RE.sub(replace_table, html)
+
+
+def _block_contains_image(block_html: str) -> bool:
+    return bool(re.search(r"<img\b", block_html, re.IGNORECASE))
+
+
+def _build_point_matrix_table_html(labels: list[str], matrix: list[list[str | None]]) -> str:
+    head_cells = ['<td colspan="2" rowspan="2">&nbsp;</td>', '<td colspan="%d"><p>Номер пункта</p></td>' % len(labels)]
+    rows = ["<tr>%s</tr>" % "".join(head_cells)]
+    rows.append("<tr>%s</tr>" % "".join(f"<td><p>{label}</p></td>" for label in labels))
+    for row_idx, label in enumerate(labels):
+        cells = []
+        if row_idx == 0:
+            cells.append(f'<td rowspan="{len(labels)}"><p>Номер пункта</p></td>')
+        cells.append(f"<td><p>{label}</p></td>")
+        for value in matrix[row_idx]:
+            cells.append(f"<td><p>{value}</p></td>" if value is not None else _empty_td())
+        rows.append("<tr>%s</tr>" % "".join(cells))
+    return '<table class="raw-rebuilt-point-table"><tbody>%s</tbody></table>' % "".join(rows)
+
+
+def _build_simple_point_matrix_table_html(labels: list[str], matrix: list[list[str | None]]) -> str:
+    rows = ["<tr>%s</tr>" % ("<td>&nbsp;</td>" + "".join(f"<td><p>{label}</p></td>" for label in labels))]
+    for row_idx, label in enumerate(labels):
+        cells = [f"<td><p>{label}</p></td>"]
+        for value in matrix[row_idx]:
+            cells.append(f"<td><p>{value}</p></td>" if value is not None else _empty_td())
+        rows.append("<tr>%s</tr>" % "".join(cells))
+    return '<table class="raw-rebuilt-point-table"><tbody>%s</tbody></table>' % "".join(rows)
+
+
+def _partition_flattened_point_rows(
+    labels: list[str],
+    texts: list[str],
+    blocks: list[re.Match[str]],
+    token_start: int,
+) -> tuple[list[list[str]], int] | None:
+    size = len(labels)
+    solutions: list[tuple[list[list[str]], int]] = []
+
+    def search(row_idx: int, idx: int, current: list[list[str]]) -> None:
+        if solutions:
+            return
+        if row_idx == size:
+            matrix = _solve_sparse_symmetric_matrix(labels, current)
+            if matrix is not None:
+                solutions.append((current, idx))
+            return
+        if idx >= len(texts) or texts[idx] != labels[row_idx]:
+            return
+
+        values_start = idx + 1
+        if row_idx == size - 1:
+            end = values_start
+            while end < len(texts):
+                if _block_contains_image(blocks[end].group(0)) or "номер" in texts[end].lower():
+                    break
+                end += 1
+            values = [text for text in texts[values_start:end] if text]
+            search(row_idx + 1, end, [*current, values])
+            return
+
+        next_label = labels[row_idx + 1]
+        max_end = min(len(texts), values_start + size + 1)
+        for end in range(values_start, max_end):
+            if texts[end] != next_label:
+                continue
+            values = [text for text in texts[values_start:end] if text]
+            search(row_idx + 1, end, [*current, values])
+
+    search(0, token_start, [])
+    return solutions[0] if solutions else None
+
+
+def _rebuild_flattened_simple_point_table_in_html(html: str) -> str:
+    if not html or "task-html-block" not in html:
+        return html
+
+    blocks = list(_TASK_HTML_BLOCK_RE.finditer(html))
+    if len(blocks) < 10:
+        return html
+
+    texts = [_html_cell_text(block.group(0)) for block in blocks]
+    idx = 0
+    while idx < len(blocks):
+        preserved_image = ""
+        if _block_contains_image(blocks[idx].group(0)):
+            preserved_image = blocks[idx].group(0)
+            label_start = idx + 1
+        else:
+            label_start = idx
+
+        labels: list[str] = []
+        cursor = label_start
+        while cursor < len(blocks) and _is_point_label(texts[cursor]):
+            if len(labels) >= 3 and texts[cursor] == labels[0]:
+                break
+            labels.append(texts[cursor])
+            cursor += 1
+
+        if len(labels) < 3:
+            idx += 1
+            continue
+
+        partition = _partition_flattened_point_rows(labels, texts, blocks, cursor)
+        if partition is None:
+            idx += 1
+            continue
+        row_values, token_idx = partition
+        matrix = _solve_sparse_symmetric_matrix(labels, row_values)
+        if matrix is None:
+            idx += 1
+            continue
+
+        rebuilt = _build_simple_point_matrix_table_html(labels, matrix)
+        if preserved_image:
+            rebuilt = preserved_image + rebuilt
+        return html[:blocks[idx].start()] + rebuilt + html[blocks[token_idx - 1].end():]
+
+    return html
+
+
+def _rebuild_flattened_point_tables_in_html(html: str) -> str:
+    if not html or "task-html-block" not in html or "Номер пункта" not in html:
+        return html
+
+    blocks = list(_TASK_HTML_BLOCK_RE.finditer(html))
+    if len(blocks) < 10:
+        return html
+
+    texts = [_html_cell_text(block.group(0)) for block in blocks]
+    replacements: list[tuple[int, int, str]] = []
+    idx = 0
+    while idx < len(blocks):
+        if "номер" not in texts[idx].lower():
+            idx += 1
+            continue
+
+        label_start = idx + 1
+        preserved_image = ""
+        if label_start < len(blocks) and _block_contains_image(blocks[label_start].group(0)):
+            preserved_image = blocks[label_start].group(0)
+            label_start += 1
+
+        labels: list[str] = []
+        cursor = label_start
+        while cursor < len(blocks) and _is_point_label(texts[cursor]):
+            labels.append(texts[cursor])
+            cursor += 1
+
+        if len(labels) < 3 or cursor >= len(blocks) or "номер" not in texts[cursor].lower():
+            idx += 1
+            continue
+
+        partition = _partition_flattened_point_rows(labels, texts, blocks, cursor + 1)
+        if partition is None:
+            idx += 1
+            continue
+        row_values, token_idx = partition
+
+        matrix = _solve_sparse_symmetric_matrix(labels, row_values)
+        if matrix is None:
+            idx += 1
+            continue
+
+        start = blocks[idx].start()
+        end = blocks[token_idx - 1].end()
+        rebuilt = _build_point_matrix_table_html(labels, matrix)
+        if preserved_image:
+            rebuilt = preserved_image + rebuilt
+        replacements.append((start, end, rebuilt))
+        idx = token_idx
+
+    if not replacements:
+        return html
+
+    pieces = []
+    cursor = 0
+    for start, end, replacement in replacements:
+        pieces.append(html[cursor:start])
+        pieces.append(replacement)
+        cursor = end
+    pieces.append(html[cursor:])
+    return "".join(pieces)
+
+
+@lru_cache(maxsize=1024)
+def _fill_sparse_point_tables_cached(html: str) -> str:
+    return _fill_sparse_point_tables_in_html(html)
 
 
 @login_required
@@ -1603,7 +2050,36 @@ def api_task_bank_filters(request, level, subject):
     subtopic_tl_qs = (
         task_list_qs.filter(id=tl_id_filter) if tl_id_filter is not None else task_list_qs
     )
+    if tl_id_filter is None:
+        all_no_qs = Task.active_objects.filter(
+            task__subject=subject_instance,
+            task__level=level_instance,
+            subtopic_id__isnull=True,
+        )
+        if vpr_vf:
+            all_no_qs = all_no_qs.filter(**vpr_vf)
+        subtopics.append({
+            "id": None,
+            "no_subtopic": True,
+            "no_subtopic_scope": "all",
+            "title": "Без подтемы",
+            "task_list_id": None,
+            "task_number": None,
+            "task_count": all_no_qs.count(),
+        })
     for tl in subtopic_tl_qs:
+        no_st_qs = Task.active_objects.filter(task_id=tl.id, subtopic_id__isnull=True)
+        if vpr_vf:
+            no_st_qs = no_st_qs.filter(**vpr_vf)
+        subtopics.append({
+            "id": None,
+            "no_subtopic": True,
+            "no_subtopic_scope": "task",
+            "title": "Без подтемы",
+            "task_list_id": tl.id,
+            "task_number": tl.task_number,
+            "task_count": no_st_qs.count(),
+        })
         for st in SubTopic.objects.filter(task_list=tl).order_by("order", "title"):
             st_qs = Task.active_objects.filter(task_id=tl.id, subtopic_id=st.id)
             if vpr_vf:
@@ -1626,7 +2102,7 @@ def api_task_bank_filters(request, level, subject):
 def api_task_bank(request, level, subject):
     """GET /api/<level>/<subject>/task-bank/
     Individual tasks from the bank for the LK manual variant builder.
-    Query params: task_list_id, subtopic_id, only_fipi (1), grade/advanced (ВПР),
+    Query params: task_list_id, subtopic_id, only_fipi (1), raw_html (1), grade/advanced (ВПР),
     page (default 1), per_page (default 12, max 50).
     """
     subject_instance = get_subject_for_api(subject)
@@ -1653,10 +2129,15 @@ def api_task_bank(request, level, subject):
 
     subtopic_id = request.GET.get('subtopic_id')
     if subtopic_id:
-        try:
-            qs = qs.filter(subtopic_id=int(subtopic_id))
-        except (TypeError, ValueError):
-            pass
+        if subtopic_id.strip().lower() == "none":
+            qs = qs.filter(subtopic_id__isnull=True)
+        else:
+            try:
+                qs = qs.filter(subtopic_id=int(subtopic_id))
+            except (TypeError, ValueError):
+                pass
+
+    raw_html = (request.GET.get("raw_html") or "").strip().lower() in ("1", "true", "yes")
 
     try:
         page = max(1, int(request.GET.get('page', 1)))
@@ -1687,6 +2168,7 @@ def api_task_bank(request, level, subject):
                 file_url = request.build_absolute_uri(rel)
 
         keep_tables = bool(tl and tl.part_id == 2)
+        task_text_raw = str(task.task_template or '')
 
         result.append({
             'id': task.id,
@@ -1697,10 +2179,14 @@ def api_task_bank(request, level, subject):
             'max_score': tl.max_score if tl else 1,
             'part_id': tl.part_id if tl else None,
             'part_title': (tl.part.part_title if tl and tl.part else None),
-            'text': process_latex(
-                str(task.task_template or ''),
-                for_browser=True,
-                keep_layout_tables=keep_tables,
+            'text': (
+                task_text_raw
+                if raw_html
+                else process_latex(
+                    task_text_raw,
+                    for_browser=True,
+                    keep_layout_tables=keep_tables,
+                )
             ),
             'answer': str(task.answer or ''),
             'file_url': file_url,
@@ -2228,6 +2714,552 @@ def api_announcements(request):
             "theme_worksheet_bg_url": build_url(obj.theme_worksheet_bg),
         })
     return JsonResponse({"announcements": rows})
+
+
+def _lesson_viewer_is_teacher_or_admin(request) -> bool:
+    user = getattr(request, "user", None)
+    if user is None:
+        return False
+    if not getattr(user, "is_authenticated", False):
+        return False
+    return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+
+
+def _lesson_admin_forbidden_response():
+    return JsonResponse({"error": "Недостаточно прав"}, status=403)
+
+
+def _require_lesson_admin(request):
+    if _lesson_viewer_is_teacher_or_admin(request):
+        return None
+    return _lesson_admin_forbidden_response()
+
+
+def _visible_lessons_queryset(request):
+    qs = Lesson.objects.all()
+    if _lesson_viewer_is_teacher_or_admin(request):
+        return qs
+    return qs.filter(status=Lesson.Status.PUBLISHED).exclude(access_level=Lesson.AccessLevel.PRIVATE)
+
+
+def _parse_lesson_int_param(request, key):
+    value = (request.GET.get(key) or "").strip()
+    if not value:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_request_json_object(request):
+    try:
+        raw = request.body.decode("utf-8") if isinstance(request.body, (bytes, bytearray)) else request.body
+        data = json.loads(raw or "{}")
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError):
+        return None, JsonResponse({"error": "Неверный JSON"}, status=400)
+    if not isinstance(data, dict):
+        return None, JsonResponse({"error": "Тело запроса должно быть JSON-объектом"}, status=400)
+    return data, None
+
+
+def _extract_task_ids_from_block_content(content):
+    if not isinstance(content, dict):
+        return []
+    raw_ids = content.get("task_ids")
+    if not isinstance(raw_ids, list):
+        return []
+    result = []
+    seen = set()
+    for raw in raw_ids:
+        try:
+            task_id = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if task_id <= 0 or task_id in seen:
+            continue
+        seen.add(task_id)
+        result.append(task_id)
+    return result
+
+
+def _task_file_absolute_url(request, task):
+    f = getattr(task, "files", None)
+    if not f:
+        return None
+    try:
+        url = f.url
+    except Exception:
+        return None
+    try:
+        return request.build_absolute_uri(url)
+    except Exception:
+        return url
+
+
+def _serialize_task_for_lesson(request, task, include_answer=False):
+    tl = getattr(task, "task", None)
+    part_id = getattr(tl, "part_id", None)
+    keep_tables = bool(part_id == 2)
+    payload = {
+        "id": task.id,
+        "task_list_id": tl.id if tl else None,
+        "task_number": tl.task_number if tl else None,
+        "task_title": tl.task_title if tl else "",
+        "subject": tl.subject.subject_short if tl and tl.subject else None,
+        "level": tl.level.level if tl and tl.level else None,
+        "text": process_latex(
+            str(task.task_template or ""),
+            for_browser=True,
+            keep_layout_tables=keep_tables,
+        ),
+        "max_score": getattr(task, "max_score", 1) or 1,
+        "file_url": _task_file_absolute_url(request, task),
+    }
+    if include_answer:
+        payload["answer"] = process_latex(str(task.answer or ""), for_browser=True)
+    return payload
+
+
+def _serialize_lesson_blocks(request, steps, viewer_is_teacher):
+    step_payloads = []
+    file_resource_ids = set()
+    task_ids = set()
+
+    for step in steps:
+        if hasattr(step, 'genericstep'):
+            content = step.genericstep.content if isinstance(step.genericstep.content, dict) else {}
+            file_keys = ("file_resource_id", "file_resource_ids", "resource_id", "resource_ids")
+            for key in file_keys:
+                raw = content.get(key)
+                if raw is None:
+                    continue
+                if isinstance(raw, list):
+                    candidates = raw
+                else:
+                    candidates = [raw]
+                for candidate in candidates:
+                    try:
+                        file_resource_ids.add(int(candidate))
+                    except (TypeError, ValueError):
+                        continue
+            if step.step_type in {
+                LessonStep.StepType.TASKS,
+                LessonStep.StepType.HOMEWORK,
+                LessonStep.StepType.QUIZ,
+            }:
+                task_ids.update(_extract_task_ids_from_block_content(content))
+
+    file_resources_map = {
+        fr.id: fr
+        for fr in FileResource.objects.filter(id__in=file_resource_ids)
+    }
+    tasks_map = {
+        t.id: t
+        for t in Task.active_objects.filter(id__in=task_ids).select_related(
+            "task",
+            "task__subject",
+            "task__level",
+            "task__part",
+            "subtopic",
+        )
+    }
+
+    for step in steps:
+        serialized = LessonStepSerializer(step, context={"request": request}).data
+
+        if hasattr(step, 'presentationstep') and step.presentationstep.presentation:
+            serialized["presentation"] = PresentationPublicSerializer(
+                step.presentationstep.presentation,
+                context={"request": request},
+            ).data
+
+        if hasattr(step, 'genericstep'):
+            content = serialized.get("content") or {}
+            if not isinstance(content, dict):
+                content = {}
+
+            file_candidates = []
+            for key in ("file_resource_id", "resource_id"):
+                if content.get(key) is not None:
+                    file_candidates.append(content.get(key))
+            for key in ("file_resource_ids", "resource_ids"):
+                value = content.get(key)
+                if isinstance(value, list):
+                    file_candidates.extend(value)
+            resolved_files = []
+            for candidate in file_candidates:
+                try:
+                    rid = int(candidate)
+                except (TypeError, ValueError):
+                    continue
+                resource = file_resources_map.get(rid)
+                if resource is None:
+                    continue
+                resolved_files.append(
+                    FileResourceSerializer(resource, context={"request": request}).data
+                )
+            if resolved_files:
+                content["resources"] = resolved_files
+
+            if step.step_type in {
+                LessonStep.StepType.TASKS,
+                LessonStep.StepType.HOMEWORK,
+                LessonStep.StepType.QUIZ,
+            }:
+                task_ids_ordered = _extract_task_ids_from_block_content(content)
+                include_answer = bool(content.get("show_answers")) or viewer_is_teacher
+                content["tasks"] = [
+                    _serialize_task_for_lesson(request, tasks_map[task_id], include_answer=include_answer)
+                    for task_id in task_ids_ordered
+                    if task_id in tasks_map
+                ]
+
+            serialized["content"] = content
+
+        step_payloads.append(serialized)
+
+    return step_payloads
+
+
+@require_http_methods(["GET"])
+def api_lessons(request):
+    qs = _visible_lessons_queryset(request)
+
+    subject = (request.GET.get("subject") or "").strip()
+    if subject:
+        qs = qs.filter(subject__iexact=subject)
+    grade = _parse_lesson_int_param(request, "grade")
+    if grade is not None:
+        qs = qs.filter(grade=grade)
+    level = (request.GET.get("level") or "").strip()
+    if level:
+        qs = qs.filter(level__iexact=level)
+    exam_type = (request.GET.get("exam_type") or "").strip()
+    if exam_type:
+        qs = qs.filter(exam_type=exam_type.lower())
+    task_number = _parse_lesson_int_param(request, "task_number")
+    if task_number is not None:
+        qs = qs.filter(task_number=task_number)
+    topic = (request.GET.get("topic") or "").strip()
+    if topic:
+        qs = qs.filter(topic__icontains=topic)
+    subtopic = (request.GET.get("subtopic") or "").strip()
+    if subtopic:
+        qs = qs.filter(subtopic__icontains=subtopic)
+    difficulty = (request.GET.get("difficulty") or "").strip()
+    if difficulty:
+        qs = qs.filter(difficulty=difficulty)
+    access_level = (request.GET.get("access_level") or "").strip()
+    if access_level:
+        qs = qs.filter(access_level=access_level)
+
+    if _lesson_viewer_is_teacher_or_admin(request):
+        status = (request.GET.get("status") or "").strip()
+        if status:
+            qs = qs.filter(status=status)
+
+    q = (request.GET.get("q") or "").strip()
+    if q:
+        qs = qs.filter(
+            Q(title__icontains=q)
+            | Q(topic__icontains=q)
+            | Q(subtopic__icontains=q)
+            | Q(short_description__icontains=q)
+        )
+
+    lessons = list(qs.order_by("-updated_at", "-created_at"))
+
+    serializer = LessonCatalogSerializer(lessons, many=True, context={"request": request})
+    return JsonResponse({"lessons": serializer.data, "total": len(serializer.data)})
+
+
+@require_http_methods(["GET"])
+def api_lesson_detail(request, slug):
+    lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
+    lesson_data = LessonCatalogSerializer(lesson, context={"request": request}).data
+    lesson_data.update(
+        {
+            "teacher_goal": lesson.teacher_goal,
+            "student_result": lesson.student_result,
+            "viewer": {"is_teacher_or_admin": _lesson_viewer_is_teacher_or_admin(request)},
+        }
+    )
+    return JsonResponse({"lesson": lesson_data})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_lesson_block_launch(request, slug, block_id):
+    lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
+    step = get_object_or_404(LessonStep, lesson=lesson, id=block_id)
+
+    viewer_is_teacher = _lesson_viewer_is_teacher_or_admin(request)
+    if not viewer_is_teacher and not step.is_visible_to_student:
+        return JsonResponse({"error": "Блок недоступен"}, status=403)
+
+    if step.step_type not in {
+        LessonStep.StepType.TASKS,
+        LessonStep.StepType.HOMEWORK,
+        LessonStep.StepType.QUIZ,
+    }:
+        return JsonResponse({"error": "Блок не поддерживает интерактивный запуск"}, status=400)
+
+    content = {}
+    if hasattr(step, 'genericstep'):
+        content = step.genericstep.content if isinstance(step.genericstep.content, dict) else {}
+        
+    task_ids = _extract_task_ids_from_block_content(content)
+    if not task_ids:
+        return JsonResponse({"error": "В блоке нет task_ids"}, status=400)
+
+    tasks = list(
+        Task.active_objects.filter(id__in=task_ids).select_related("task", "task__subject", "task__level")
+    )
+    task_map = {task.id: task for task in tasks}
+    ordered_tasks = [task_map[task_id] for task_id in task_ids if task_id in task_map]
+    if not ordered_tasks:
+        return JsonResponse({"error": "Не найдены валидные задачи для запуска"}, status=400)
+
+    subject_ids = {task.task.subject_id for task in ordered_tasks if task.task and task.task.subject_id}
+    level_ids = {task.task.level_id for task in ordered_tasks if task.task and task.task.level_id}
+    if len(subject_ids) != 1 or len(level_ids) != 1:
+        return JsonResponse(
+            {"error": "Для интерактивного запуска задачи должны быть одного предмета и уровня"},
+            status=400,
+        )
+
+    variant = Variant.objects.create(
+        var_subject=ordered_tasks[0].task.subject,
+        level=ordered_tasks[0].task.level,
+        created_by=username_for_created_by(request),
+    )
+    VariantContent.objects.bulk_create(
+        [
+            VariantContent(variant=variant, task=task, order=order)
+            for order, task in enumerate(ordered_tasks, start=1)
+        ]
+    )
+
+    level_slug = ordered_tasks[0].task.level.level
+    subject_slug = ordered_tasks[0].task.subject.subject_short
+    return JsonResponse(
+        {
+            "variant_id": variant.id,
+            "variant_url": f"/{level_slug}/{subject_slug}/variant/{variant.id}",
+            "subject": subject_slug,
+            "level": level_slug,
+        }
+    )
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def api_admin_lessons(request):
+    denied = _require_lesson_admin(request)
+    if denied is not None:
+        return denied
+
+    if request.method == "GET":
+        qs = Lesson.objects.all().order_by("-updated_at", "-created_at")
+        status = (request.GET.get("status") or "").strip()
+        if status:
+            qs = qs.filter(status=status)
+        subject = (request.GET.get("subject") or "").strip()
+        if subject:
+            qs = qs.filter(subject__iexact=subject)
+        q = (request.GET.get("q") or "").strip()
+        if q:
+            qs = qs.filter(
+                Q(title__icontains=q)
+                | Q(topic__icontains=q)
+                | Q(subtopic__icontains=q)
+                | Q(short_description__icontains=q)
+            )
+
+        data = LessonAdminSerializer(qs, many=True, context={"request": request}).data
+        return JsonResponse({"lessons": data, "total": len(data)})
+
+    payload, err = _parse_request_json_object(request)
+    if err is not None:
+        return err
+    serializer = LessonAdminSerializer(data=payload, context={"request": request})
+    if not serializer.is_valid():
+        return JsonResponse({"errors": serializer.errors}, status=400)
+    lesson = serializer.save()
+    out = LessonAdminSerializer(lesson, context={"request": request}).data
+    return JsonResponse({"lesson": out}, status=201)
+
+
+@csrf_exempt
+@require_http_methods(["GET", "PATCH", "DELETE"])
+def api_admin_lesson_detail(request, slug):
+    denied = _require_lesson_admin(request)
+    if denied is not None:
+        return denied
+
+    lesson = get_object_or_404(Lesson, slug=slug)
+    if request.method == "GET":
+        data = LessonAdminSerializer(lesson, context={"request": request}).data
+        return JsonResponse({"lesson": data})
+
+    if request.method == "DELETE":
+        lesson.delete()
+        return JsonResponse({"ok": True})
+
+    payload, err = _parse_request_json_object(request)
+    if err is not None:
+        return err
+    serializer = LessonAdminSerializer(
+        lesson,
+        data=payload,
+        partial=True,
+        context={"request": request},
+    )
+    if not serializer.is_valid():
+        return JsonResponse({"errors": serializer.errors}, status=400)
+    updated_lesson = serializer.save()
+    data = LessonAdminSerializer(updated_lesson, context={"request": request}).data
+    return JsonResponse({"lesson": data})
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def api_admin_lesson_blocks(request, slug):
+    denied = _require_lesson_admin(request)
+    if denied is not None:
+        return denied
+
+    lesson = get_object_or_404(Lesson, slug=slug)
+    if request.method == "GET":
+        steps = LessonStep.objects.filter(lesson=lesson).order_by("order", "id")
+        data = LessonStepSerializer(steps, many=True, context={"request": request}).data
+        return JsonResponse({"lesson_slug": lesson.slug, "blocks": data, "total": len(data)})
+
+    payload, err = _parse_request_json_object(request)
+    if err is not None:
+        return err
+
+    step_type = payload.get("block_type") or payload.get("step_type")
+    payload["step_type"] = step_type
+
+    if step_type == LessonStep.StepType.PRESENTATION:
+        serializer = PresentationStepSerializer(data=payload, context={"request": request})
+    elif step_type == LessonStep.StepType.HTML:
+        serializer = HtmlStepSerializer(data=payload, context={"request": request})
+    else:
+        serializer = GenericStepSerializer(data=payload, context={"request": request})
+
+    if not serializer.is_valid():
+        return JsonResponse({"errors": serializer.errors}, status=400)
+    try:
+        step = serializer.save(lesson=lesson)
+    except Exception as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    return JsonResponse({"block": LessonStepSerializer(step, context={"request": request}).data}, status=201)
+
+
+@csrf_exempt
+@require_http_methods(["PATCH", "DELETE"])
+def api_admin_lesson_block_detail(request, slug, block_id):
+    denied = _require_lesson_admin(request)
+    if denied is not None:
+        return denied
+
+    lesson = get_object_or_404(Lesson, slug=slug)
+    step = get_object_or_404(LessonStep, lesson=lesson, id=block_id)
+
+    if request.method == "DELETE":
+        step.delete()
+        return JsonResponse({"ok": True})
+
+    payload, err = _parse_request_json_object(request)
+    if err is not None:
+        return err
+
+    if hasattr(step, 'presentationstep'):
+        serializer = PresentationStepSerializer(step.presentationstep, data=payload, partial=True, context={"request": request})
+    elif hasattr(step, 'htmlstep'):
+        serializer = HtmlStepSerializer(step.htmlstep, data=payload, partial=True, context={"request": request})
+    elif hasattr(step, 'genericstep'):
+        serializer = GenericStepSerializer(step.genericstep, data=payload, partial=True, context={"request": request})
+    else:
+        serializer = LessonStepSerializer(step, data=payload, partial=True, context={"request": request})
+
+    if not serializer.is_valid():
+        return JsonResponse({"errors": serializer.errors}, status=400)
+    try:
+        updated_step = serializer.save()
+    except Exception as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    return JsonResponse({"block": LessonStepSerializer(updated_step, context={"request": request}).data})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_admin_lesson_blocks_reorder(request, slug):
+    denied = _require_lesson_admin(request)
+    if denied is not None:
+        return denied
+
+    lesson = get_object_or_404(Lesson, slug=slug)
+    payload, err = _parse_request_json_object(request)
+    if err is not None:
+        return err
+
+    ordered_block_ids = payload.get("ordered_block_ids")
+    order_rows = payload.get("orders")
+
+    steps = {
+        step.id: step
+        for step in LessonStep.objects.filter(lesson=lesson)
+    }
+
+    with transaction.atomic():
+        if isinstance(ordered_block_ids, list):
+            seq = []
+            seen = set()
+            for raw in ordered_block_ids:
+                try:
+                    step_id = int(raw)
+                except (TypeError, ValueError):
+                    continue
+                if step_id in seen or step_id not in steps:
+                    continue
+                seen.add(step_id)
+                seq.append(step_id)
+            tail = [bid for bid in steps.keys() if bid not in seen]
+            full_order = seq + tail
+            for index, step_id in enumerate(full_order, start=1):
+                LessonStep.objects.filter(id=step_id, lesson=lesson).update(order=index)
+        elif isinstance(order_rows, list):
+            used_orders = set()
+            updates = []
+            for row in order_rows:
+                if not isinstance(row, dict):
+                    continue
+                try:
+                    step_id = int(row.get("id"))
+                    order_value = int(row.get("order"))
+                except (TypeError, ValueError):
+                    continue
+                if step_id not in steps or order_value < 0 or order_value in used_orders:
+                    continue
+                used_orders.add(order_value)
+                updates.append((step_id, order_value))
+            if not updates:
+                return JsonResponse({"error": "Передайте ordered_block_ids или корректный список orders"}, status=400)
+            for step_id, order_value in updates:
+                LessonStep.objects.filter(id=step_id, lesson=lesson).update(order=order_value)
+        else:
+            return JsonResponse({"error": "Передайте ordered_block_ids или список orders"}, status=400)
+
+    data = LessonStepSerializer(
+        LessonStep.objects.filter(lesson=lesson).order_by("order", "id"),
+        many=True,
+        context={"request": request}
+    ).data
+    return JsonResponse({"lesson_slug": lesson.slug, "blocks": data, "total": len(data)})
 
 
 @csrf_exempt
@@ -4877,3 +5909,42 @@ def lesson_join(request):
         request
     )
     return render(request, "lesson_room.html", normalized)
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_admin_upload(request):
+    denied = _require_lesson_admin(request)
+    if denied is not None:
+        return denied
+
+    upload_type = request.POST.get("type", "file")
+    uploaded_file = request.FILES.get("file")
+    
+    if not uploaded_file:
+        return JsonResponse({"error": "Файл не передан"}, status=400)
+
+    try:
+        if upload_type == "presentation":
+            presentation = Presentation.objects.create(
+                title=uploaded_file.name,
+                original_file=uploaded_file
+            )
+            return JsonResponse({
+                "id": presentation.id,
+                "title": presentation.title,
+                "type": "presentation"
+            })
+        else:
+            file_resource = FileResource.objects.create(
+                title=uploaded_file.name,
+                file=uploaded_file,
+                file_type=uploaded_file.name.split('.')[-1].lower() if '.' in uploaded_file.name else ""
+            )
+            return JsonResponse({
+                "id": file_resource.id,
+                "title": file_resource.title,
+                "url": file_resource.file.url if file_resource.file else None,
+                "type": "file"
+            })
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)

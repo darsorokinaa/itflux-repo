@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import MathContent from "../components/MathContent";
+import { isEgeInfParallelProcessesTask, isEgeInfRoadGraphTask, isEgeInformaticsContext, isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
+
+const InformaticsCodeEditorEntry = lazy(
+  () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
+);
 import TaskFileAttachment from "../components/TaskFileAttachment";
 import ImageLightbox from "../components/ImageLightbox";
 import SupportInfoModal from "../components/SupportInfoModal";
@@ -12,7 +17,6 @@ import EduVariantSidebarCard from "../components/EduVariantSidebarCard";
 import { ExamVariantTimerReadout, ExamVariantFixedTimer } from "../components/ExamVariantTimerReadout";
 import { createExamVariantTimerStore } from "../utils/examVariantTimerStore";
 import TruthTableInput from "../components/TruthTableInput";
-import Nav from "../components/Nav";
 import {
   getTruthTableConfig,
   sanitizeTruthTableAnswerString,
@@ -428,6 +432,7 @@ function ExamPage() {
 
   const [variant, setVariant] = useState(null);
   const [error, setError] = useState(null);
+  const [variantLoadingUrl, setVariantLoadingUrl] = useState("");
 
   // Ответы части 1
   const [userAnswers, setUserAnswers] = useState({}); // { taskId: "текст" }
@@ -555,12 +560,12 @@ function ExamPage() {
       return undefined;
     }
     setError(null);
+    setVariant(null);
     const idWanted = String(variant_id);
+    const variantUrl = `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/variant/${encodeURIComponent(String(variant_id))}/`;
+    setVariantLoadingUrl(variantUrl);
     const ac = new AbortController();
-    fetch(
-      `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/variant/${encodeURIComponent(String(variant_id))}/`,
-      { credentials: "same-origin", signal: ac.signal }
-    )
+    fetch(variantUrl, { credentials: "same-origin", signal: ac.signal })
       .then(async (res) => {
         if (!res.ok) {
           const msg =
@@ -576,12 +581,16 @@ function ExamPage() {
         if (!data || !Array.isArray(data.tasks)) {
           throw new Error("Сервер вернул неполные данные варианта");
         }
-        if (String(data.id) !== idWanted) return;
+        if (String(data.id) !== idWanted) {
+          throw new Error(`Сервер вернул вариант ${data.id}, ожидался ${idWanted}`);
+        }
         setVariant(data);
+        setVariantLoadingUrl("");
       })
       .catch((err) => {
         if (err?.name === "AbortError") return;
         setError(err.message || "Ошибка загрузки варианта");
+        setVariantLoadingUrl("");
       });
     return () => ac.abort();
   }, [level, subject, variant_id]);
@@ -1142,7 +1151,18 @@ function ExamPage() {
   }, []);
 
   if (error) return <div style={{ padding: 20 }}>Ошибка: {error}</div>;
-  if (!variant) return <div style={{ padding: 20 }}>Загрузка...</div>;
+  if (!variant) {
+    return (
+      <div style={{ padding: 20 }}>
+        Загрузка...
+        {variantLoadingUrl ? (
+          <div style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>
+            Запрос: {variantLoadingUrl}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
   if (isHomework && !cabinetAssignmentId) {
     return (
       <div style={{ padding: 24, maxWidth: 520 }}>
@@ -1184,6 +1204,19 @@ function ExamPage() {
   const part2Linked1921 = part2Tasks.filter((t) => LINKED_19_21.includes(t.number));
   const part2Rest = part2Tasks.filter((t) => !LINKED_19_21.includes(t.number));
   const showLinkedGroup = subject === "inf" && part2Linked1921.length === 3;
+  const showInfCodeSidebar = isInformaticsCodeEditorContext(level, subject);
+  const getCodeEditorTaskSources = useCallback(
+    () =>
+      tasksFilteredByAuthor
+        .filter((t) => t.file)
+        .slice(0, 80)
+        .map((t) => ({
+          id: t.id,
+          label: t.number != null ? `№${t.number}` : `id ${t.id}`,
+          fileUrl: t.file || null,
+        })),
+    [tasksFilteredByAuthor]
+  );
   // Для математики или если не все три — показываем 19/20/21 как обычные задания
   const part2Regular = showLinkedGroup ? part2Rest : [...part2Linked1921, ...part2Rest].sort((a, b) => a.number - b.number);
 
@@ -1807,7 +1840,6 @@ function ExamPage() {
   return (
     <>
     <div className="exam-edu-shell digital-flow-page">
-      <Nav />
     </div>
     <div
       ref={mainRef}
@@ -1965,6 +1997,8 @@ function ExamPage() {
         </div>
       )}
       <div className="content-area">
+        <div className={`exam-inf-code-layout${showInfCodeSidebar ? " exam-inf-code-layout--with-sidebar" : ""}`}>
+          <div className="exam-inf-code-main">
         <div className="container exam-page-container exam-edu">
           <div
             className={`exam-edu-page exam-variant-v2 exam-variant-v2__page${showExamEducationShell ? " exam-edu-page--sidebar" : ""}`}
@@ -2083,7 +2117,7 @@ function ExamPage() {
                   key={task.id}
                   data-task-id={task.id}
                   data-task-number={task.number}
-                  className={`exam-task-card exam-task-card--p1${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                  className={`exam-task-card exam-task-card--p1${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
                   onClick={() => handleTaskFocus(task.id)}
                 >
                   <div className="exam-task-card__top">
@@ -2127,6 +2161,9 @@ function ExamPage() {
                     html={task.text}
                     className="exam-task-card__text task-text"
                     ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
+                    egeInfFileEnhance={isEgeInformaticsContext(level, subject)}
+                    egeInf22Enhance={isEgeInfParallelProcessesTask(level, subject, task.number)}
+                    egeInf1Enhance={isEgeInfRoadGraphTask(level, subject, task.number)}
                   />
                   {task.file && <TaskFileAttachment href={task.file} />}
                   {task.author && <div className="task-author">{task.author}</div>}
@@ -2416,7 +2453,7 @@ function ExamPage() {
                         <section
                           key={task.id}
                           data-task-id={task.id}
-                          className={`exam-task-card exam-task-card--p2 exam-task-card--in-group${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                          className={`exam-task-card exam-task-card--p2 exam-task-card--in-group${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
                           onClick={() => handleTaskFocus(task.id)}
                         >
                           <div className="exam-task-card__top">
@@ -2460,6 +2497,9 @@ function ExamPage() {
                             html={task.text}
                             className="exam-task-card__text task-text"
                             ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
+                            egeInfFileEnhance={isEgeInformaticsContext(level, subject)}
+                            egeInf22Enhance={isEgeInfParallelProcessesTask(level, subject, task.number)}
+                    egeInf1Enhance={isEgeInfRoadGraphTask(level, subject, task.number)}
                           />
                           {task.file && <TaskFileAttachment href={task.file} />}
                           {task.author && <div className="task-author">{task.author}</div>}
@@ -2501,7 +2541,7 @@ function ExamPage() {
                     <section
                       key={task.id}
                       data-task-id={task.id}
-                      className={`exam-task-card exam-task-card--p2${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                      className={`exam-task-card exam-task-card--p2${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
                       onClick={() => handleTaskFocus(task.id)}
                     >
                       <div className="exam-task-card__top">
@@ -2545,6 +2585,9 @@ function ExamPage() {
                         html={task.text}
                         className="exam-task-card__text task-text"
                         ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
+                        egeInfFileEnhance={isEgeInformaticsContext(level, subject)}
+                        egeInf22Enhance={isEgeInfParallelProcessesTask(level, subject, task.number)}
+                    egeInf1Enhance={isEgeInfRoadGraphTask(level, subject, task.number)}
                       />
                       {task.file && <TaskFileAttachment href={task.file} />}
                       {task.author && <div className="task-author">{task.author}</div>}
@@ -2760,10 +2803,7 @@ function ExamPage() {
                     </div>
                     <EduVariantSidebarCard
                       formatTimer={formatTimer}
-                      timerSeconds={timerSeconds}
-                      timerStatus={timerStatus}
-                      setTimerStatus={setTimerStatus}
-                      setTimerSeconds={setTimerSeconds}
+                      timerStore={timerStore}
                       mode={mode}
                       fullyCorrectTaskCount={fullyCorrectTaskCount}
                       taskCountTotal={taskCountTotal}
@@ -2793,6 +2833,13 @@ function ExamPage() {
               )}
             </div>
           </div>
+        </div>
+          </div>
+          {showInfCodeSidebar ? (
+            <Suspense fallback={null}>
+              <InformaticsCodeEditorEntry getTaskSources={getCodeEditorTaskSources} />
+            </Suspense>
+          ) : null}
         </div>
       </div>
 

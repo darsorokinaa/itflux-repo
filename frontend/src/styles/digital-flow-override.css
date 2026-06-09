@@ -120,6 +120,59 @@ button,
 .site-nav__inner,
 .digital-flow-page .site-nav__inner {
   min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+@media (max-width: 768px) {
+  .site-nav__inner,
+  .digital-flow-page .site-nav__inner {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    flex-wrap: wrap;
+  }
+
+  .site-nav__brand {
+    width: auto;
+    justify-content: flex-start;
+  }
+
+  .site-nav__tabs {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+    justify-content: flex-start;
+    order: 3;
+    margin-top: 4px;
+  }
+
+  .site-nav__search {
+    width: auto;
+    flex-wrap: nowrap;
+    gap: 8px;
+    order: 2;
+    margin-left: auto;
+  }
+
+  .site-nav__search-field {
+    flex: 0 0 auto;
+    min-width: 0;
+  }
+  
+  .site-nav__search-input {
+    width: 70px;
+  }
+
+  .site-nav__search-btn {
+    width: auto;
+    margin-top: 0;
+  }
 }
 
 .site-nav .brand-name {
@@ -984,7 +1037,9 @@ button,
 .all-tasks-card__actions {
   grid-column: 2;
   display: flex;
-  justify-content: flex-start;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
   margin-top: 2px;
 }
 
@@ -1017,6 +1072,132 @@ button,
 .all-tasks-card__answer-btn[aria-expanded="true"] {
   color: var(--blue-dark);
   text-decoration-color: var(--blue-main);
+}
+
+.all-tasks-card__draft-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  border: 1px solid transparent;
+  color: #ffffff;
+  font-family: "TikTok Sans", "Manrope", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 12.5px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 999px;
+  padding: 9px 14px;
+  background: #1f5ee8;
+  box-shadow: 0 8px 18px rgba(31, 94, 232, 0.28);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+  z-index: 2;
+  position: relative;
+}
+
+.all-tasks-card__draft-btn--fab {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+}
+
+.all-tasks-card__draft-btn:hover,
+.all-tasks-card__draft-btn[aria-expanded="true"] {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(31, 94, 232, 0.34);
+  filter: saturate(1.08);
+}
+
+.all-tasks-card__draft-btn-icon {
+  display: inline-flex;
+  line-height: 0;
+}
+
+.all-tasks-card__draft-btn--filled::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 7px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: #fff;
+  opacity: 0.95;
+}
+
+.all-tasks-card__draft {
+  grid-column: 2;
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(108, 71, 255, 0.2);
+  background: #f8f7ff;
+}
+
+.all-tasks-card__draft-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #4d2fd4;
+  font-family: "Bounded", system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.all-tasks-card__draft-input {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(108, 71, 255, 0.28);
+  background: #fff;
+  color: var(--text-main);
+  font-family: "TikTok Sans", "Manrope", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.all-tasks-card__draft-input:focus {
+  outline: none;
+  border-color: rgba(108, 71, 255, 0.65);
+  box-shadow: 0 0 0 3px rgba(108, 71, 255, 0.14);
+}
+
+.all-tasks-card__draft-row {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.all-tasks-card__draft-hint {
+  color: var(--text-hint);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.all-tasks-card__draft-clear {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: #4d2fd4;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.all-tasks-card__draft-clear:disabled {
+  color: var(--text-hint);
+  cursor: default;
+  text-decoration: none;
 }
 
 .all-tasks-card__answer {
@@ -1107,6 +1288,13 @@ button,
 }
 .all-tasks-card .all-tasks-card__text p {
   margin: 0 !important;
+}
+
+/* Абзацы условия — не слипаются в «простыню» */
+.all-tasks-card .all-tasks-card__text > p + p,
+.all-tasks-card .all-tasks-card__text .ege-inf-1-task > p + p,
+.exam-task-card .exam-task-card__text > p + p {
+  margin-top: 0.65rem !important;
 }
 
 /* Висячие пустые узлы, которые ФИПИ оставляет под условием задания: */
@@ -1203,9 +1391,33 @@ button,
   font-weight: 400 !important;
 }
 
+/* Нумерованные двухколоночные таблицы (1) 18 / 2) 17 / ...):
+   делаем аккуратный «карточный» вид вместо сырой сетки. */
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table) {
+  border: 1px solid #cfd6e6 !important;
+  border-radius: 10px !important;
+  overflow: hidden !important;
+  box-shadow: 0 2px 10px rgba(28, 45, 92, 0.08);
+}
+
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table) td,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table) th {
+  padding: 9px 16px !important;
+  font-size: 16px !important;
+  line-height: 1.3 !important;
+}
+
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table) td:first-child,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table) th:first-child {
+  background: #f4f7ff !important;
+  color: #1f2f4c !important;
+  font-weight: 700 !important;
+  min-width: 64px !important;
+}
+
 /* Однострочные «таблицы-листинги» (Python-код, фрагменты кода):
    таблица с одной колонкой → выровнять слева, убрать границы, обычный шрифт. */
-.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child) {
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child):not(.ege-inf-1-road-table) {
   border: none !important;
   background: transparent !important;
   margin: 8px 0 !important;
@@ -1213,15 +1425,15 @@ button,
   max-width: 100% !important;
 }
 
-.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child) tr,
-.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child) thead,
-.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child) tbody {
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child):not(.ege-inf-1-road-table) tr,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child):not(.ege-inf-1-road-table) thead,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child):not(.ege-inf-1-road-table) tbody {
   background: transparent !important;
   border: none !important;
 }
 
-.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child) td,
-.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child) th {
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child):not(.ege-inf-1-road-table) td,
+.all-tasks-card:not([data-exam-style="1"]) .all-tasks-card__text table:has(tr td:only-child):not(.ege-inf-1-road-table) th {
   border: none !important;
   background: transparent !important;
   padding: 2px 0 !important;
@@ -1374,8 +1586,17 @@ button,
   transform-origin: top left !important;
 }
 
-.all-tasks-card__text .oge-math-choice-option__body .oge-math-fipi-bitmap {
-  transform: none !important;
+.all-tasks-card__text .oge-math-choice-question img:not(.oge-math-fipi-bitmap) {
+  display: block;
+  max-width: min(100%, 440px) !important;
+  height: auto !important;
+  margin: 0.5rem auto !important;
+}
+
+.all-tasks-card__text .oge-math-choice-option__body img:not(.oge-math-fipi-bitmap) {
+  max-width: min(100%, 360px) !important;
+  height: auto !important;
+  margin: 0.25rem 0 !important;
 }
 
 /* Не применять «компактные таблицы» к карточкам вариантов */
@@ -1521,5 +1742,398 @@ button,
   .home-page__updates > .updates-section {
     padding: 14px 16px !important;
     border-radius: 14px !important;
+  }
+}
+
+/* ── ЕГЭ информатика №22: параллельные процессы ─────────────────────────── */
+
+.all-tasks-card--ege-inf-22 .all-tasks-card__text,
+.exam-task-card--ege-inf-22 .exam-task-card__text,
+.ege-inf-22-task {
+  font-size: 15px;
+  line-height: 1.6;
+  text-align: left;
+}
+
+.ege-inf-22-file-notice,
+.ege-inf-file-notice {
+  margin: 0 0 0.75rem !important;
+  padding: 0.55rem 0.85rem;
+  border-radius: 8px;
+  background: #eef3ff;
+  border: 1px solid #d6e0ff;
+  font-size: 14px;
+}
+
+.ege-inf-22-file-notice p,
+.ege-inf-file-notice p {
+  margin: 0 !important;
+}
+
+.ege-inf-22-process-table {
+  width: auto !important;
+  max-width: 100%;
+  margin: 0.75rem 0 !important;
+  border-collapse: collapse !important;
+  border: 1px solid #dce0ea !important;
+  background: #fff;
+  font-size: 14px;
+}
+
+.ege-inf-22-process-table th,
+.ege-inf-22-process-table td {
+  border: 1px solid #dce0ea !important;
+  padding: 8px 12px !important;
+  text-align: center !important;
+  vertical-align: middle !important;
+  white-space: nowrap;
+  line-height: 1.45;
+}
+
+.ege-inf-22-process-table thead th {
+  background: #f5f7fb !important;
+  font-weight: 600 !important;
+  white-space: normal;
+  min-width: 6.5rem;
+}
+
+.ege-inf-22-process-table tbody td:first-child {
+  font-weight: 600;
+  background: #fafbfe;
+}
+
+.all-tasks-card--ege-inf-22 .all-tasks-card__text table:not(.ege-inf-22-process-table),
+.exam-task-card--ege-inf-22 .exam-task-card__text table:not(.ege-inf-22-process-table) {
+  border: none !important;
+  background: transparent !important;
+}
+
+.all-tasks-card--ege-inf-22 .all-tasks-card__text > table,
+.exam-task-card--ege-inf-22 .exam-task-card__text > table {
+  border: none !important;
+}
+
+/* ── ЕГЭ информатика №1: схема дорог + таблица ─────────────────────────── */
+
+.all-tasks-card--ege-inf-1 .all-tasks-card__text,
+.exam-task-card--ege-inf-1 .exam-task-card__text,
+.ege-inf-1-task {
+  font-size: 15px;
+  line-height: 1.55;
+  text-align: left;
+}
+
+.ege-inf-1-intro,
+.ege-inf-1-question,
+.ege-inf-1-task > p:not(.ege-inf-1-graph) {
+  margin: 0 0 0.75rem !important;
+  text-align: left !important;
+}
+
+.ege-inf-1-graph,
+.ege-inf-1-task .ege-inf-1-graph {
+  display: block;
+  margin: 0.35rem 0 1rem !important;
+  text-align: center !important;
+}
+
+.ege-inf-1-graph img,
+.ege-inf-1-graph-img {
+  display: inline-block;
+  max-width: min(100%, 440px);
+  height: auto;
+  margin: 0 auto;
+}
+
+.ege-inf-1-matrix-wrap {
+  overflow-x: auto;
+  margin: 0 0 1rem;
+  text-align: center;
+}
+
+.ege-inf-1-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1rem 1.75rem;
+  margin: 0.35rem 0 1rem;
+}
+
+.ege-inf-1-body .ege-inf-1-matrix-wrap {
+  margin: 0;
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+
+.ege-inf-1-body .ege-inf-1-graph {
+  margin: 0 !important;
+  flex: 0 1 auto;
+  min-width: 250px; /* Предотвращаем схлопывание в 0px внутри flex (Safari bug) */
+  max-width: 100%;
+  align-self: center;
+}
+
+@media (max-width: 720px) {
+  .ege-inf-1-body {
+    flex-direction: column;
+    align-items: center;
+  }
+}
+
+.all-tasks-card--ege-inf-1 .ege-inf-1-road-table,
+.exam-task-card--ege-inf-1 .ege-inf-1-road-table,
+.ege-inf-1-road-table {
+  display: table !important;
+  width: auto !important;
+  max-width: 100% !important;
+  margin: 0 auto !important;
+  border-collapse: collapse !important;
+  border: 1px solid #b8bfce !important;
+  background: #fff !important;
+  font-size: 14px !important;
+  table-layout: fixed !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.ege-inf-1-road-table td,
+.ege-inf-1-road-table th {
+  border: 1px solid #d9dee8 !important;
+  padding: 6px 11px !important;
+  text-align: center !important;
+  vertical-align: middle !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  color: var(--text-main) !important;
+  white-space: nowrap !important;
+  line-height: 1.35;
+  background: transparent !important;
+  min-width: 2.25rem;
+}
+
+/* Базовая подсветка шапки/лейблов даже без класса карточки (--ege-inf-1). */
+.ege-inf-1-road-table tr:first-child td,
+.ege-inf-1-road-table tr:first-child th,
+.ege-inf-1-road-table tr:nth-child(2) td,
+.ege-inf-1-road-table tr:nth-child(2) th {
+  font-weight: 600 !important;
+  color: var(--blue-main) !important;
+}
+
+.ege-inf-1-road-table tr td:first-child,
+.ege-inf-1-road-table tr th:first-child {
+  font-weight: 600 !important;
+  color: var(--blue-main) !important;
+}
+
+.ege-inf-1-road-table tr:first-child td:first-child,
+.ege-inf-1-road-table tr:first-child th:first-child {
+  font-weight: 400 !important;
+  color: var(--text-main) !important;
+}
+
+/* Перебиваем «таблицы-листинги» и общие правила части 1 */
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table td,
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table th,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table td,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table th {
+  border: 1px solid #d9dee8 !important;
+  padding: 6px 11px !important;
+  text-align: center !important;
+  font-size: 14px !important;
+  white-space: nowrap !important;
+  font-weight: 400 !important;
+  color: var(--text-main) !important;
+}
+
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table tr:first-child td,
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table tr:first-child th,
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table tr:nth-child(2) td,
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table tr:nth-child(2) th,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table tr:first-child td,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table tr:first-child th,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table tr:nth-child(2) td,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table tr:nth-child(2) th {
+  font-weight: 600 !important;
+  color: var(--blue-main) !important;
+}
+
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table tr td:first-child,
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table tr th:first-child,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table tr td:first-child,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table tr th:first-child {
+  font-weight: 600 !important;
+  color: var(--blue-main) !important;
+}
+
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table tr:first-child td:first-child,
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table tr:first-child th:first-child,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table tr:first-child td:first-child,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table tr:first-child th:first-child {
+  font-weight: 400 !important;
+  color: var(--text-main) !important;
+}
+
+.all-tasks-card--ege-inf-1 .ege-inf-1-road-table td p,
+.all-tasks-card--ege-inf-1 .ege-inf-1-road-table th p,
+.exam-task-card--ege-inf-1 .ege-inf-1-road-table td p,
+.exam-task-card--ege-inf-1 .ege-inf-1-road-table th p {
+  margin: 0 !important;
+  font-size: inherit !important;
+  text-align: center !important;
+}
+
+/* ЕГЭ инф №1: показываем как в исходном ФИПИ — без полной сетки и синей раскраски. */
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table,
+.all-tasks-card--ege-inf-1 .ege-inf-1-road-table,
+.exam-task-card--ege-inf-1 .ege-inf-1-road-table,
+.ege-inf-1-road-table {
+  border: none !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  background: transparent !important;
+  table-layout: auto !important;
+  margin: 0 !important;
+}
+
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table td,
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table th,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table td,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table th,
+.all-tasks-card--ege-inf-1 .ege-inf-1-road-table td,
+.all-tasks-card--ege-inf-1 .ege-inf-1-road-table th,
+.exam-task-card--ege-inf-1 .ege-inf-1-road-table td,
+.exam-task-card--ege-inf-1 .ege-inf-1-road-table th,
+.ege-inf-1-road-table td,
+.ege-inf-1-road-table th {
+  border: none !important;
+  background: transparent !important;
+  color: var(--text-main) !important;
+  font-weight: 400 !important;
+  text-align: left !important;
+  padding: 0 14px 6px 0 !important;
+  min-width: 0 !important;
+}
+
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table tr:first-child td,
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table tr:first-child th,
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table tr td:first-child,
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table tr th:first-child,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table tr:first-child td,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table tr:first-child th,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table tr td:first-child,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table tr th:first-child,
+.all-tasks-card--ege-inf-1 .ege-inf-1-road-table tr:first-child td,
+.all-tasks-card--ege-inf-1 .ege-inf-1-road-table tr:first-child th,
+.all-tasks-card--ege-inf-1 .ege-inf-1-road-table tr td:first-child,
+.all-tasks-card--ege-inf-1 .ege-inf-1-road-table tr th:first-child,
+.exam-task-card--ege-inf-1 .ege-inf-1-road-table tr:first-child td,
+.exam-task-card--ege-inf-1 .ege-inf-1-road-table tr:first-child th,
+.exam-task-card--ege-inf-1 .ege-inf-1-road-table tr td:first-child,
+.exam-task-card--ege-inf-1 .ege-inf-1-road-table tr th:first-child,
+.ege-inf-1-road-table tr:first-child td,
+.ege-inf-1-road-table tr:first-child th,
+.ege-inf-1-road-table tr td:first-child,
+.ege-inf-1-road-table tr th:first-child {
+  font-weight: 700 !important;
+  color: var(--text-main) !important;
+}
+
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table td p,
+#root .all-tasks-card--ege-inf-1 .all-tasks-card__text .ege-inf-1-road-table th p,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table td p,
+#root .exam-task-card--ege-inf-1 .exam-task-card__text .ege-inf-1-road-table th p,
+.all-tasks-card--ege-inf-1 .ege-inf-1-road-table td p,
+.all-tasks-card--ege-inf-1 .ege-inf-1-road-table th p,
+.exam-task-card--ege-inf-1 .ege-inf-1-road-table td p,
+.exam-task-card--ege-inf-1 .ege-inf-1-road-table th p,
+.ege-inf-1-road-table td p,
+.ege-inf-1-road-table th p {
+  text-align: left !important;
+}
+
+.all-tasks-card--ege-inf-1 .all-tasks-card__text table:not(.ege-inf-1-road-table),
+.exam-task-card--ege-inf-1 .exam-task-card__text table:not(.ege-inf-1-road-table) {
+  border: none !important;
+  background: transparent !important;
+}
+
+/* Bootstrap reboot ставит body { background: #fff } — возвращаем фирменную сетку */
+html,
+body,
+#root {
+  background-color: var(--bg-page) !important;
+  background-image:
+    linear-gradient(rgba(43, 82, 245, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(43, 82, 245, 0.04) 1px, transparent 1px) !important;
+  background-repeat: repeat !important;
+  background-size: 32px 32px !important;
+  background-attachment: fixed !important;
+  min-height: 100%;
+}
+
+/* Final responsive fixes loaded after brand overrides. */
+@media (max-width: 768px) {
+  .site-nav__inner,
+  .digital-flow-page .site-nav__inner {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 48px !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 10px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .site-nav__brand {
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+  }
+
+  .site-nav__menu-btn {
+    width: 48px !important;
+    min-width: 48px !important;
+    padding: 0 !important;
+  }
+
+  .site-nav__menu-text {
+    display: none !important;
+  }
+
+  .site-nav__panel {
+    display: none !important;
+    grid-column: 1 / -1 !important;
+    width: 100%;
+    min-width: 0 !important;
+    flex-basis: 100%;
+  }
+
+  .site-nav__panel.is-open {
+    display: flex !important;
+  }
+
+  .site-nav__tabs {
+    order: initial !important;
+    margin-top: 0 !important;
+  }
+
+  .site-nav__tab + .site-nav__tab {
+    margin-left: 10px !important;
+  }
+
+  .site-nav__search {
+    order: initial !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+  }
+
+  .site-nav__search-input,
+  .site-nav__search-btn {
+    width: 100% !important;
+    min-height: 42px;
   }
 }
