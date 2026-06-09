@@ -14,6 +14,7 @@ import SearchVariantPage from "./pages/SearchVariantPage";
 import PrivacyPage from "./pages/PrivacyPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import LessonJoinBridge from "./pages/LessonJoinBridge";
+import ReadyLessonsPage from "./pages/ReadyLessonsPage";
 
 function scrollDocumentToTop() {
   window.scrollTo(0, 0);
@@ -92,6 +93,7 @@ function App() {
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/tasks" element={<AllTasksPage />} />
           <Route path="/generator" element={<GeneratorHubPage />} />
+          <Route path="/lessons" element={<ReadyLessonsPage />} />
           <Route path="/subject/:level" element={<SubjectPage />} />
 
           <Route path="/search/tasks" element={<SearchTaskWithKey />} />

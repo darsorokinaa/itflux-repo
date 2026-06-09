@@ -1,0 +1,359 @@
+/* Токены как на карточке задания (урок — отдельный HTML без SPA) */
+.lesson-draw-root {
+  --blue-hero: #1550d8;
+  --blue-soft: #e8effe;
+  --bg-card: #ffffff;
+  --text-main: #050505;
+  --text-sub: #5a6490;
+  --text-hint: #9ba3c4;
+  --border-card: #e4e8ff;
+  --border-blue: rgba(21, 80, 216, 0.22);
+  --shadow-card: 0 8px 24px rgba(11, 47, 159, 0.08);
+  --shadow-hover: 0 16px 40px rgba(11, 47, 159, 0.18);
+  --r-sm: 10px;
+  --r-md: 16px;
+}
+
+.slide.lesson-draw-host {
+  position: relative !important;
+}
+
+.lesson-draw-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  pointer-events: none;
+}
+
+.lesson-draw-layer.is-visible {
+  pointer-events: auto;
+}
+
+.lesson-draw-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+
+.lesson-draw-canvas.is-drawing {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.lesson-draw-canvas.is-eraser {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='%23334155' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='2.25' fill='%23334155'/%3E%3Cpath d='M16 5v22M5 16h22' stroke='%2364748b' stroke-width='1.25' stroke-linecap='round' opacity='0.85'/%3E%3C/svg%3E") 16 16, crosshair;
+}
+
+/* Плавающая кнопка + панель — правый нижний угол */
+.lesson-draw-chrome {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  max-width: min(calc(100vw - 32px), 560px);
+  pointer-events: none;
+}
+
+.lesson-draw-chrome > * {
+  pointer-events: auto;
+}
+
+.lesson-draw-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #1a5de0 0%, #0b2f9f 100%);
+  color: #fff;
+  cursor: pointer;
+  box-shadow:
+    0 10px 28px rgba(21, 80, 216, 0.45),
+    0 2px 8px rgba(11, 47, 159, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.lesson-draw-fab:hover {
+  transform: translateY(-2px) scale(1.04);
+  box-shadow:
+    0 14px 36px rgba(21, 80, 216, 0.52),
+    0 4px 12px rgba(11, 47, 159, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.lesson-draw-fab.is-active {
+  background: linear-gradient(145deg, #0b2f9f 0%, #061f6b 100%);
+  box-shadow:
+    0 8px 22px rgba(11, 47, 159, 0.42),
+    0 0 0 3px rgba(21, 80, 216, 0.28);
+}
+
+.lesson-draw-fab svg {
+  width: 28px;
+  height: 28px;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.15));
+}
+
+.lesson-draw-panel-wrap {
+  display: none;
+  width: min(calc(100vw - 32px), 520px);
+}
+
+.lesson-draw-panel-wrap.is-open {
+  display: block;
+}
+
+/* Панель — те же классы, что у задания */
+.lesson-draw-root .exam-drawing-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 1.5px solid var(--border-card);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-hover);
+}
+
+.lesson-draw-root .exam-drawing-panel__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.lesson-draw-root .exam-drawing-panel__row--secondary {
+  border-top: 1px dashed var(--border-card);
+  padding-top: 8px;
+  justify-content: flex-start;
+  gap: 10px 14px;
+}
+
+.lesson-draw-root .exam-drawing-panel__tools-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.lesson-draw-root .toolbar-row1 {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.lesson-draw-root .toolbar-row1__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--r-sm);
+  border: 1.5px solid transparent;
+  background: transparent;
+  color: var(--text-sub);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.lesson-draw-root .toolbar-row1__btn:hover:not(:disabled) {
+  background: var(--blue-soft);
+  color: var(--blue-hero);
+}
+
+.lesson-draw-root .toolbar-row1__btn.is-active {
+  background: var(--blue-hero);
+  border-color: var(--blue-hero);
+  color: #fff;
+}
+
+.lesson-draw-root .toolbar-row1__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.lesson-draw-root .toolbar-row1__btn--danger:hover:not(:disabled) {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.lesson-draw-root .toolbar-row1__sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--border-card);
+}
+
+.lesson-draw-root .exam-drawing-panel__shapes-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.lesson-draw-root .exam-drawing-panel__popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  min-width: 160px;
+  padding: 6px;
+  border-radius: var(--r-sm);
+  border: 1.5px solid var(--border-card);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-card);
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lesson-draw-root .exam-drawing-panel__popover.is-open {
+  display: flex;
+}
+
+.lesson-draw-root .exam-drawing-panel__popover-title {
+  padding: 4px 8px;
+  font-family: system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-hint);
+}
+
+.lesson-draw-root .exam-drawing-panel__shape-pick {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 7px 10px;
+  border-radius: 8px;
+  text-align: left;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.lesson-draw-root .exam-drawing-panel__shape-pick:hover,
+.lesson-draw-root .exam-drawing-panel__shape-pick.is-active {
+  background: var(--blue-soft);
+  color: var(--blue-hero);
+}
+
+.lesson-draw-root .exam-drawing-panel__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--r-sm);
+  border: 1.5px solid var(--border-card);
+  background: var(--bg-card);
+  color: var(--text-sub);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.lesson-draw-root .exam-drawing-panel__icon-btn:hover {
+  background: var(--blue-soft);
+  border-color: var(--border-blue);
+  color: var(--blue-hero);
+}
+
+.lesson-draw-root .exam-drawing-panel__label {
+  font-family: system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-sub);
+}
+
+.lesson-draw-root .exam-drawing-panel__widths {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lesson-draw-root .exam-drawing-panel__width-dot {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  position: relative;
+}
+
+.lesson-draw-root .exam-drawing-panel__width-dot::after {
+  content: "";
+  width: var(--dot-size, 6px);
+  height: var(--dot-size, 6px);
+  border-radius: 50%;
+  background: var(--text-sub);
+  transition: background 0.15s ease;
+}
+
+.lesson-draw-root .exam-drawing-panel__width-dot:hover::after {
+  background: var(--blue-hero);
+}
+
+.lesson-draw-root .exam-drawing-panel__width-dot.is-active {
+  background: var(--blue-soft);
+  box-shadow: inset 0 0 0 1.5px var(--blue-hero);
+}
+
+.lesson-draw-root .exam-drawing-panel__width-dot.is-active::after {
+  background: var(--blue-hero);
+}
+
+.lesson-draw-root .exam-drawing-panel__colors {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lesson-draw-root .exam-drawing-panel__swatch {
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  padding: 0;
+  cursor: pointer;
+  background: var(--swatch, #1550d8);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1.5px var(--border-card);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.lesson-draw-root .exam-drawing-panel__swatch:hover {
+  transform: scale(1.06);
+}
+
+.lesson-draw-root .exam-drawing-panel__swatch.is-active {
+  box-shadow: 0 0 0 2px var(--blue-hero);
+}
+
+@media (max-width: 479px) {
+  .lesson-draw-chrome {
+    display: none;
+  }
+}

@@ -91,6 +91,7 @@ button,
 .section-head__eyebrow,
 .home-level-card__class,
 .all-tasks-filter__label,
+.site-nav__tab-badge,
 .site-nav__tab-soon,
 .site-nav__search-label,
 .update-card__tag {
@@ -220,6 +221,7 @@ button,
   opacity: 0.65;
 }
 
+.site-nav__tab-badge,
 .site-nav__tab-soon {
   background: var(--lime) !important;
   color: var(--black-deep) !important;
@@ -229,6 +231,11 @@ button,
   font-weight: 800 !important;
   letter-spacing: 0.05em !important;
   margin-left: 6px;
+}
+
+.site-nav__tab-badge--beta {
+  background: rgba(43, 82, 245, 0.14) !important;
+  color: var(--blue-main) !important;
 }
 
 .site-nav__search-input {
@@ -960,6 +967,31 @@ button,
   color: var(--text-sub) !important;
   font-weight: 600;
   font-size: 12.5px;
+}
+
+.all-tasks-workbook-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 100px;
+  background: var(--blue-main);
+  color: #fff !important;
+  font-family: "TikTok Sans", "Manrope", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.all-tasks-workbook-btn:hover {
+  background: var(--blue-dark);
+}
+
+.all-tasks-workbook-btn:active {
+  transform: translateY(1px);
 }
 
 /* Скрываем дублирующиеся плашки внутри карточек (на случай старого DOM) */

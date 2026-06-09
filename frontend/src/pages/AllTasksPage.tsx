@@ -21,6 +21,7 @@ import {
   type SubjectId,
 } from "../data/subjects";
 import { formatTasksCount } from "../utils/formatTasksCount";
+import { openWorkbook } from "../utils/buildWorkbookHtml";
 import {
   isInformaticsCodeEditorContext,
 } from "../utils/isOgeInformaticsTask";
@@ -39,13 +40,6 @@ type BankTask = {
   file_url?: string | null;
   part_id?: number | null;
   part_title?: string | null;
-};
-
-type AnswerState = {
-  open: boolean;
-  loading: boolean;
-  html: string | null;
-  error: string | null;
 };
 
 type BankResponse = {
@@ -235,58 +229,8 @@ export default function AllTasksPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [answers, setAnswers] = useState<Record<number, AnswerState>>({});
   const [openBoardForTaskId, setOpenBoardForTaskId] = useState<number | null>(null);
   const [boardsByTask, setBoardsByTask] = useState<Record<string, any>>({});
-
-  useEffect(() => {
-    setAnswers({});
-  }, [level, subject, vprGrade, taskListId, subtopicId, onlyFipi, page]);
-
-  const toggleAnswer = useCallback(async (taskId: number) => {
-    const current = answers[taskId];
-    if (current?.html != null) {
-      setAnswers((prev) => ({
-        ...prev,
-        [taskId]: { ...prev[taskId], open: !prev[taskId].open },
-      }));
-      return;
-    }
-    if (current?.loading) return;
-    setAnswers((prev) => ({
-      ...prev,
-      [taskId]: { open: true, loading: true, html: null, error: null },
-    }));
-    try {
-      const res = await fetch(
-        `/api/search_task/?q=${encodeURIComponent(String(taskId))}`,
-        { credentials: "same-origin" }
-      );
-      if (!res.ok) throw new Error(`Ошибка ${res.status}`);
-      const json = await res.json();
-      const t = Array.isArray(json.tasks) ? json.tasks[0] : null;
-      const html: string = t?.answer || "";
-      setAnswers((prev) => ({
-        ...prev,
-        [taskId]: {
-          open: true,
-          loading: false,
-          html: html || "<p>Ответ не указан</p>",
-          error: null,
-        },
-      }));
-    } catch (e) {
-      setAnswers((prev) => ({
-        ...prev,
-        [taskId]: {
-          open: true,
-          loading: false,
-          html: null,
-          error: e instanceof Error ? e.message : "Не удалось загрузить ответ",
-        },
-      }));
-    }
-  }, [answers]);
 
   const boardPersistHasDraft = useCallback((persist: any) => {
     if (Array.isArray(persist?.overlayV1?.strokes) && persist.overlayV1.strokes.length > 0) return true;
@@ -466,6 +410,69 @@ export default function AllTasksPage() {
   useEffect(() => {
     fetchTasks();
   }, [fetchTasks]);
+
+  const selectedSubtopicTitle = useMemo(() => {
+    if (!subtopicId) return "";
+    if (subtopicId === SUBTOPIC_NONE) {
+      return subtopicsForTask.find((s) => s.no_subtopic)?.title ?? "Без подтемы";
+    }
+    return subtopicsForTask.find((s) => String(s.id) === subtopicId)?.title ?? "";
+  }, [subtopicId, subtopicsForTask]);
+
+  const canBuildWorkbook = Boolean(!loading && !error && data?.tasks?.length);
+
+  const handleCreateWorkbook = useCallback(() => {
+    if (!data?.tasks?.length) return;
+
+    const subjectTitle =
+      subjects.find((s) => s.id === subject)?.title ?? subject;
+    const subtitleParts = [levelDef?.label ?? level.toUpperCase(), subjectTitle];
+
+    if (level === "vpr") {
+      subtitleParts.push(`${vprGrade} класс`);
+    }
+
+    const selectedTaskNum = taskListId
+      ? filterOptions?.task_numbers?.find(
+          (t) => String(t.task_list_id) === taskListId
+        )
+      : null;
+
+    if (selectedTaskNum) {
+      subtitleParts.push(`Задание №${selectedTaskNum.task_number}`);
+      if (selectedTaskNum.task_title) {
+        subtitleParts.push(selectedTaskNum.task_title);
+      }
+    }
+
+    if (selectedSubtopicTitle) {
+      subtitleParts.push(selectedSubtopicTitle);
+    }
+
+    openWorkbook(
+      data.tasks.map((task) => ({
+        id: task.id,
+        task_number: task.task_number,
+        text: task.text,
+        subtopic: task.subtopic,
+        task_title: task.task_title,
+      })),
+      {
+        title: "Рабочая тетрадь",
+        subtitle: subtitleParts.join(" · "),
+      }
+    );
+  }, [
+    data?.tasks,
+    filterOptions?.task_numbers,
+    level,
+    levelDef?.label,
+    selectedSubtopicTitle,
+    subject,
+    subjects,
+    taskListId,
+    vprGrade,
+  ]);
 
   const resetPage = () => setPage(1);
 
@@ -697,6 +704,15 @@ export default function AllTasksPage() {
                         {selectedSubtopic.title}
                       </span>
                     ) : null}
+                    {canBuildWorkbook ? (
+                      <button
+                        type="button"
+                        className="all-tasks-workbook-btn"
+                        onClick={handleCreateWorkbook}
+                      >
+                        Создать рабочую тетрадь
+                      </button>
+                    ) : null}
                   </div>
                 );
               })()
@@ -725,7 +741,6 @@ export default function AllTasksPage() {
           <ul className="all-tasks-list">
             {(data?.tasks ?? []).map((t, i) => {
               const ordinal = (data!.page - 1) * data!.per_page + i + 1;
-              const a = answers[t.id];
               const taskBoardPersist = boardsByTask[String(t.id)];
               const hasTaskBoardDraft = boardPersistHasDraft(taskBoardPersist);
               return (
@@ -780,18 +795,6 @@ export default function AllTasksPage() {
                     </ExamTaskDrawingShell>
                   </div>
                   <div className="all-tasks-card__actions">
-                    <button
-                      type="button"
-                      className="all-tasks-card__answer-btn"
-                      onClick={() => toggleAnswer(t.id)}
-                      aria-expanded={a?.open ? "true" : "false"}
-                    >
-                      {a?.loading
-                        ? "Загрузка…"
-                        : a?.open
-                        ? "Скрыть ответ"
-                        : "Посмотреть ответ"}
-                    </button>
                     <div className="exam-task-card__status-cluster">
                       {hasTaskBoardDraft ? (
                         <span className="exam-task-card__draft-label">Есть черновик</span>
@@ -799,21 +802,6 @@ export default function AllTasksPage() {
                       <ExamTaskDrawingHeaderButton onClick={() => setOpenBoardForTaskId(t.id)} />
                     </div>
                   </div>
-                  {a?.open ? (
-                    <div className="all-tasks-card__answer all-tasks-raw-answer" role="region" aria-live="polite">
-                      <div className="all-tasks-card__answer-label">
-                        <strong>Ответ</strong>
-                      </div>
-                      {a.error ? (
-                        <p>{a.error}</p>
-                      ) : a.html ? (
-                        <div
-                          className="all-tasks-raw-html"
-                          dangerouslySetInnerHTML={{ __html: a.html }}
-                        />
-                      ) : null}
-                    </div>
-                  ) : null}
                 </li>
               );
             })}

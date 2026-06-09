@@ -14931,7 +14931,7 @@ body.exam-variant-view--edu main.container {
     box-shadow: none !important;
 }
 
-@media (min-width: 769px) {
+@media (min-width: 1025px) {
     .mobile-variant-bar {
         display: none !important;
     }
@@ -14949,6 +14949,24 @@ body.exam-variant-view--edu main.container {
 
     #main-wrapper.exam-page--edu .desktop-variant-panel {
         display: none;
+    }
+
+    #main-wrapper.exam-page--edu .mobile-variant-bar,
+    .mobile-variant-bar {
+        position: sticky;
+        top: 72px;
+        z-index: 180;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        max-width: 100%;
+        padding: 10px;
+        border: 1px solid var(--exam-edu-line, #e3e4fb);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 12px 26px rgba(58, 53, 138, 0.1);
+        -webkit-backdrop-filter: blur(10px);
+        backdrop-filter: blur(10px);
     }
 }
 
@@ -14968,19 +14986,7 @@ body.exam-variant-view--edu main.container {
 
     #main-wrapper.exam-page--edu .mobile-variant-bar,
     .mobile-variant-bar {
-        position: sticky;
-        top: 72px;
-        z-index: 180;
-        display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 8px;
-        padding: 10px;
-        border: 1px solid var(--exam-edu-line, #e3e4fb);
-        border-radius: 18px;
-        background: rgba(255, 255, 255, 0.96);
-        box-shadow: 0 12px 26px rgba(58, 53, 138, 0.1);
-        -webkit-backdrop-filter: blur(10px);
-        backdrop-filter: blur(10px);
     }
 
     .mobile-stat {
@@ -15041,6 +15047,16 @@ body.exam-variant-view--edu main.container {
         border-radius: 20px;
     }
 
+    #main-wrapper.exam-page--edu .exam-edu-page,
+    #main-wrapper.exam-page--edu .exam-edu-layout,
+    #main-wrapper.exam-page--edu .exam-edu-main,
+    #main-wrapper.exam-page--edu .exam-task-card,
+    #main-wrapper.exam-page--edu .exam-task-card__body,
+    #main-wrapper.exam-page--edu .exam-task-answer {
+        min-width: 0;
+        max-width: 100%;
+    }
+
     #main-wrapper.exam-page--edu .exam-edu-hero__badges,
     #main-wrapper.exam-page--edu .exam-edu-hero__actions,
     #main-wrapper.exam-page--edu .exam-task-card__status-cluster,
@@ -15090,6 +15106,7 @@ body.exam-variant-view--edu main.container {
     #main-wrapper.exam-page--edu .answer-table,
     #main-wrapper.exam-page--edu .exam-homework-reviewed__table {
         width: max-content;
+        min-width: 100%;
         max-width: none;
     }
 
@@ -15113,6 +15130,8 @@ body.exam-variant-view--edu main.container {
     #main-wrapper.exam-page--edu .task-report-error-btn {
         min-height: 44px;
         justify-content: center;
+        white-space: normal;
+        text-align: center;
     }
 
     #main-wrapper.exam-page--edu .task-actions,
@@ -15122,6 +15141,38 @@ body.exam-variant-view--edu main.container {
     #main-wrapper.exam-page--edu .lesson-solution-pending {
         flex-direction: column;
         align-items: stretch;
+    }
+
+    #main-wrapper.exam-page--edu .exam-result__correct,
+    #main-wrapper.exam-page--edu .correct-answer-content,
+    #main-wrapper.exam-page--edu .exam-result-answer-math,
+    #main-wrapper.exam-page--edu .truth-table-wrap {
+        min-width: 0;
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    #main-wrapper.exam-page--edu .truth-table {
+        width: max-content;
+        min-width: 100%;
+    }
+
+    .support-info-window {
+        left: 16px !important;
+        right: 16px !important;
+        top: auto !important;
+        bottom: calc(16px + env(safe-area-inset-bottom)) !important;
+        width: auto !important;
+        max-width: calc(100vw - 32px) !important;
+        max-height: min(76vh, calc(100dvh - 32px)) !important;
+        border-radius: 18px;
+    }
+
+    .support-info-body,
+    .results-modal-body,
+    .report-error-form {
+        -webkit-overflow-scrolling: touch;
     }
 
     .modal-content,
@@ -15166,6 +15217,7 @@ body.exam-variant-view--edu main.container {
         grid-template-columns: 1fr 1fr;
         gap: 7px;
         padding: 8px;
+        max-width: 100%;
     }
 
     .mobile-stat,
@@ -15193,5 +15245,27 @@ body.exam-variant-view--edu main.container {
         margin-left: -2px;
         margin-right: -2px;
         padding-bottom: 2px;
+    }
+
+    #main-wrapper.exam-page--edu .exam-edu-hero__actions,
+    #main-wrapper.exam-page--edu .exam-task-card__status-cluster,
+    #main-wrapper.exam-page--edu .ev2-p2-actions,
+    #main-wrapper.exam-page--edu .report-error-actions {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
+    #main-wrapper.exam-page--edu .exam-edu-hero__actions > *,
+    #main-wrapper.exam-page--edu .ev2-p2-actions > *,
+    .report-error-actions > * {
+        width: 100%;
+    }
+
+    .exam-fixed-corner {
+        max-width: calc(100vw - 24px);
+        transform: scale(0.94);
+        transform-origin: top right;
     }
 }

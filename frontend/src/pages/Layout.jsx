@@ -17,6 +17,7 @@ function Layout() {
     pathname === "/" ||
     pathname === "/tasks" ||
     pathname === "/generator" ||
+    pathname === "/lessons" ||
     pathname.startsWith("/subject/") ||
     pathname.startsWith("/search/tasks") ||
     pathname.startsWith("/search-variant") ||

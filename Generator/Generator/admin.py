@@ -414,6 +414,40 @@ class LessonAdmin(admin.ModelAdmin):
     list_editable = ("status", "access_level")
     ordering = ("-updated_at",)
     readonly_fields = ("created_at", "updated_at")
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "title",
+                    "slug",
+                    "subject",
+                    "grade",
+                    "level",
+                    "exam_type",
+                    "task_number",
+                    "topic",
+                    "subtopic",
+                    "duration_minutes",
+                    "difficulty",
+                    "status",
+                    "access_level",
+                )
+            },
+        ),
+        (
+            "Описание",
+            {"fields": ("short_description", "teacher_goal", "student_result")},
+        ),
+        (
+            "Файлы",
+            {"fields": ("cover_image", "file", "archive")},
+        ),
+        (
+            "Служебное",
+            {"fields": ("created_at", "updated_at")},
+        ),
+    )
 
 
 @admin.register(Update)

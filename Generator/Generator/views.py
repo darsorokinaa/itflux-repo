@@ -2988,6 +2988,63 @@ def api_lesson_detail(request, slug):
     return JsonResponse({"lesson": lesson_data})
 
 
+@require_http_methods(["GET"])
+def api_lesson_archive_view(request, slug):
+    lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
+
+    from .lesson_archive import (
+        archive_base_dir,
+        find_html_entry,
+        lesson_file_base_href,
+        open_lesson_archive,
+        read_archive_html,
+        read_lesson_file_html,
+    )
+
+    if lesson.archive:
+        with open_lesson_archive(lesson.archive.path) as zf:
+            html_entry = find_html_entry(zf.namelist())
+            if not html_entry:
+                raise Http404("HTML в архиве не найден")
+            base_dir = archive_base_dir(html_entry)
+            base_href = request.build_absolute_uri(f"/api/lessons/{slug}/archive/{base_dir}")
+            if not base_href.endswith("/"):
+                base_href += "/"
+            html = read_archive_html(zf, html_entry, base_href, request=request, slug=slug)
+        return HttpResponse(html, content_type="text/html; charset=utf-8")
+
+    if lesson.file:
+        base_href = lesson_file_base_href(request, lesson)
+        html = read_lesson_file_html(lesson.file.path, base_href, request=request, slug=slug)
+        return HttpResponse(html, content_type="text/html; charset=utf-8")
+
+    raise Http404("Урок не найден")
+
+
+@require_http_methods(["GET"])
+def api_lesson_archive_asset(request, slug, asset_path):
+    lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
+    if not lesson.archive:
+        raise Http404("Архив урока не найден")
+
+    from .lesson_archive import (
+        archive_asset_response,
+        find_html_entry,
+        open_lesson_archive,
+        resolve_archive_asset,
+    )
+
+    with open_lesson_archive(lesson.archive.path) as zf:
+        namelist = zf.namelist()
+        html_entry = find_html_entry(namelist)
+        if not html_entry:
+            raise Http404("HTML в архиве не найден")
+        entry = resolve_archive_asset(namelist, asset_path, html_entry)
+        if not entry:
+            raise Http404("Файл не найден")
+        return archive_asset_response(zf, entry)
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_lesson_block_launch(request, slug, block_id):

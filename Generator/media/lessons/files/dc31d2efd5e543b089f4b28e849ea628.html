@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Цифровой поток · ЕГЭ · Задание 4 · Условие Фано</title>
+<style>
+    :root{
+      --bg:#fffaf1; --card:#ffffff; --sand:#fff6e7; --sea:#ebf8fb; --mint:#dff5ef; --sky:#eef7ff;
+      --line:#eadfcb; --ink:#18314d; --muted:#68788f; --blue:#59a9e6; --teal:#59c9b0;
+      --coral:#ff8f72; --sun:#ffd56c; --green:#39a76c; --red:#c7553d;
+      --shadow:0 18px 45px rgba(24,49,77,.08); --radius:28px; --side:260px;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:"TikTok Sans","Inter","Segoe UI",Arial,sans-serif;-webkit-text-size-adjust:100%}
+    h1,h2,h3,.btn,.step b,.tag,.logo,.badge{font-family:"Bounded","Arial Rounded MT Bold","Trebuchet MS",sans-serif;letter-spacing:-.02em}
+    button,input,textarea{font:inherit}
+    .app{height:100vh;display:grid;grid-template-columns:var(--side) minmax(0,1fr);gap:16px;padding:16px}
+    .rail{background:var(--card);border:1px solid var(--line);border-radius:28px;box-shadow:var(--shadow);padding:18px;display:flex;flex-direction:column;min-height:0}
+    .brand{display:flex;gap:12px;align-items:center;padding-bottom:14px;border-bottom:1px solid var(--line);margin-bottom:14px}
+    .logo{width:44px;height:44px;border-radius:16px;background:#ffe6b8;color:var(--ink);display:grid;place-items:center;font-size:15px;font-weight:900;border:1px solid #f1d8a7}
+    .brand strong{display:block;font-size:14px;line-height:1.15}.brand span{display:block;color:var(--muted);font-size:12px;margin-top:3px}
+    .summer-card{height:120px;border-radius:20px;margin-bottom:14px;border:1px solid var(--line);background:linear-gradient(135deg,#fff3db,#ebf8fb);position:relative;overflow:hidden;padding:14px}
+    .summer-card .sun{position:absolute;right:18px;top:14px;width:44px;height:44px;border-radius:50%;background:var(--sun);box-shadow:0 0 0 14px rgba(255,213,108,.22)}
+    .summer-card .wave{position:absolute;left:-20px;right:-20px;bottom:-18px;height:64px;background:rgba(89,169,230,.22);border-radius:50% 50% 0 0}
+    .summer-card b{position:relative;z-index:2;font-family:"Bounded","Arial Rounded MT Bold",sans-serif;font-size:18px;line-height:1.05}.summer-card small{position:relative;z-index:2;display:block;margin-top:8px;color:var(--muted);font-weight:800}
+    .progress-box{background:var(--sand);border:1px solid var(--line);border-radius:18px;padding:12px;margin-bottom:14px}.progress-label{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;font-weight:800;margin-bottom:8px}.progress{height:10px;border-radius:999px;background:#f0e4cc;overflow:hidden}.progress span{display:block;height:100%;width:0%;background:var(--coral);border-radius:999px;transition:.25s ease}
+    .steps{display:grid;gap:8px;overflow:auto;flex:1}.step{border:1px solid transparent;border-radius:18px;background:transparent;padding:10px;display:grid;grid-template-columns:34px 1fr;gap:10px;align-items:start;text-align:left;cursor:pointer;color:var(--ink)}.step:hover{background:var(--sand);border-color:#f0e4cf}.step.active{background:#fff3db;border-color:#f1ddaf}.step.done .dot{background:var(--green);border-color:var(--green)}.step.future{opacity:.75}.dot{width:18px;height:18px;border-radius:50%;border:2px solid #d8c9b1;background:#fff;margin:3px auto 0}.step.active .dot{background:var(--coral);border-color:var(--coral)}.step small{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:900;margin-bottom:3px}.step b{display:block;font-size:13px;line-height:1.25}.step span span{display:block;color:var(--muted);font-size:11px;line-height:1.3;margin-top:3px}
+    .side-footer{padding-top:12px;border-top:1px solid var(--line);margin-top:12px;display:grid;gap:8px}.btn{border:0;border-radius:999px;padding:11px 16px;cursor:pointer;font-weight:900;transition:.15s ease;background:var(--ink);color:#fff;box-shadow:0 10px 20px rgba(24,49,77,.12)}.btn:hover{transform:translateY(-1px)}.btn.secondary{background:#fff;color:var(--ink);border:1px solid var(--line);box-shadow:none}.btn.coral{background:var(--coral)}.btn.teal{background:var(--teal)}
+    .stage{min-width:0;height:calc(100vh - 32px);display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:12px}.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:50px}.pill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:9px 13px;color:var(--muted);font-weight:800;font-size:13px}.top-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+    .deck{min-height:0;position:relative}.slide{display:none;height:100%;overflow:auto;position:relative;background:var(--card);border:1px solid var(--line);border-radius:34px;box-shadow:var(--shadow);padding:30px}.slide.active{display:block}.slide-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:20px}.tag{display:inline-flex;padding:8px 12px;border-radius:999px;background:var(--sand);color:#9a6f2b;font-size:12px;font-weight:900;text-transform:uppercase;margin-bottom:12px;border:1px solid #f1dfbc}h1{margin:0;font-size:clamp(38px,5vw,70px);line-height:.94;max-width:950px}h2{margin:0;font-size:clamp(28px,3.5vw,48px);line-height:1;max-width:950px}.lead{margin:14px 0 0;max-width:900px;color:var(--muted);font-size:clamp(17px,1.5vw,21px);line-height:1.55}.slide-no{width:60px;height:60px;border-radius:22px;background:#ffe6b8;color:var(--ink);display:grid;place-items:center;font-weight:900;border:1px solid #f1d8a7;flex:0 0 auto}
+    .hero{display:grid;grid-template-columns:1.05fr .95fr;gap:18px;align-items:stretch}.hero-copy{border:1px solid var(--line);border-radius:26px;background:var(--sand);padding:24px;display:flex;flex-direction:column;justify-content:center}.hero-art{border:1px solid var(--line);border-radius:26px;background:#fff;min-height:360px;padding:24px;display:grid;place-items:center;overflow:hidden}.beach-code{width:min(100%,520px);border:1px solid var(--line);border-radius:28px;background:linear-gradient(180deg,#eef7ff,#fff6e7);padding:22px;position:relative}.beach-code:before{content:"☀️";position:absolute;right:20px;top:18px;font-size:42px}.binary{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:34px;font-weight:900;letter-spacing:.04em;line-height:1.25}.binary span{display:inline-block;background:#fff;border:1px solid var(--line);border-radius:14px;padding:8px 10px;margin:4px}.chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}.chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:10px 13px;font-weight:800;color:var(--ink);font-size:14px}
+    .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.card{border:1px solid var(--line);background:#fff;border-radius:24px;padding:20px}.card.sand{background:var(--sand)}.card.sky{background:var(--sky)}.card.mint{background:var(--mint)}.card.sea{background:var(--sea)}.card h3{margin:0 0 10px;font-size:20px;line-height:1.1}.card p,.card li{color:var(--muted);line-height:1.55;font-size:16px}.card ul,.card ol{margin:0;padding-left:20px}.emoji{font-size:34px;margin-bottom:10px}.badge{display:inline-flex;padding:8px 12px;border-radius:999px;background:#fff;border:1px solid var(--line);font-size:12px;font-weight:900;text-transform:uppercase;margin-bottom:10px;color:#9a6f2b}
+    table{width:100%;border-collapse:collapse;font-size:15px;background:#fff}th,td{border:1px solid var(--line);padding:10px;text-align:center}th{background:var(--sand)}td.blank{background:#fff;color:#c9bda9}.code-table td:first-child,.code-table td:nth-child(3){font-weight:900;background:#fffaf1}
+    .algo{display:grid;gap:12px}.algo-item{display:grid;grid-template-columns:54px 1fr;gap:14px;align-items:start;border:1px solid var(--line);border-radius:22px;background:#fff;padding:16px}.algo-num{width:42px;height:42px;border-radius:14px;background:#ffe6b8;border:1px solid #f1d8a7;display:grid;place-items:center;font-weight:900}.algo-item h3{margin:0 0 5px;font-size:19px}.algo-item p{margin:0;color:var(--muted);line-height:1.5}
+    .task-layout{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}.workspace{border:1px solid var(--line);border-radius:24px;background:#fff;padding:18px;margin-top:16px}.tokens{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}.input{max-width:220px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#fff;color:var(--ink);font-weight:900}.result{margin:8px 0 0;color:var(--muted);font-weight:800}.result.ok{color:#1f7b4f}.result.bad{color:var(--red)}
+    .options{display:grid;gap:8px;margin-top:8px}.option{border:1px solid var(--line);border-radius:16px;padding:10px 12px;background:#fff;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:800}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:900;color:var(--ink)}
+    details{margin-top:12px;border:1px solid var(--line);border-radius:18px;background:#fff;overflow:hidden}summary{cursor:pointer;padding:12px 14px;font-weight:900;color:var(--ink)}details .inside{padding:0 14px 14px;color:var(--muted);line-height:1.55}details .inside b{color:var(--ink)}
+    .ladder{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;align-items:end}.level-card{border:1px solid var(--line);background:#fff;border-radius:18px;padding:12px;min-height:130px}.level-card:nth-child(1){margin-top:42px}.level-card:nth-child(2){margin-top:36px}.level-card:nth-child(3){margin-top:30px}.level-card:nth-child(4){margin-top:24px}.level-card:nth-child(5){margin-top:18px}.level-card:nth-child(6){margin-top:10px}.level-card:nth-child(7){margin-top:0}.level-card b{font-family:"Bounded","Arial Rounded MT Bold",sans-serif}.level-card small{display:block;color:#9a6f2b;font-weight:900;margin-bottom:6px}.level-card span{display:block;color:var(--muted);font-size:13px;line-height:1.35;margin-top:6px}
+    .reflection{border:1px solid var(--line);background:#fff;border-radius:24px;box-shadow:var(--shadow);padding:20px}.traffic{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0}.traffic button{border:1px solid var(--line);background:#fff;border-radius:22px;padding:18px;cursor:pointer;font-weight:900;color:var(--ink);font-size:17px}.traffic button.active{background:var(--sand);border-color:#f1ddaf}textarea{width:100%;min-height:110px;resize:vertical;border:1px solid var(--line);border-radius:18px;padding:14px;color:var(--ink);line-height:1.5;background:#fff}.footer-nav{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:54px}.footer-center{color:var(--muted);font-weight:800;font-size:14px}
+
+    .summer-story{margin:-4px 0 14px;border:1px solid #f1dfbc;background:linear-gradient(135deg,#fff9ec,#eef7ff);border-radius:22px;padding:14px 16px;display:flex;gap:12px;align-items:flex-start}
+    .summer-story .story-icon{font-size:28px;line-height:1;flex:0 0 auto}
+    .summer-story strong{display:block;margin:0 0 4px;font-weight:900;color:var(--ink)}
+    .summer-story p{margin:0;color:var(--muted);line-height:1.45;font-size:15px}
+    @media (max-width:700px){.summer-story{padding:12px;border-radius:18px}.summer-story .story-icon{font-size:24px}}
+    @media (max-width:1200px){:root{--side:230px}.slide{padding:24px;border-radius:30px}.hero-art{min-height:300px}.ladder{grid-template-columns:repeat(4,1fr)}}
+    @media (max-width:1024px){body{overflow:auto}.app{height:auto;min-height:100vh;grid-template-columns:1fr;padding:12px;gap:12px}.rail{position:sticky;top:8px;z-index:30;padding:14px;border-radius:22px}.summer-card{display:none}.progress-box{margin-bottom:10px}.steps{display:flex;overflow:auto;gap:6px;padding-bottom:4px}.step{min-width:156px;padding:8px;grid-template-columns:28px 1fr;gap:8px;border-radius:14px}.stage{height:auto;min-height:calc(100vh - 32px)}.deck{min-height:62vh}.slide{min-height:62vh;height:auto;overflow:hidden;padding:22px;border-radius:26px}.hero,.grid-2,.task-layout{grid-template-columns:1fr}.grid-3,.grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}table{display:block;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch}th,td{min-width:72px}.side-footer{display:none}.hero-art{min-height:220px}.ladder{grid-template-columns:repeat(3,1fr)}}
+    @media (max-width:700px){.app{padding:8px}.rail{position:static;padding:10px;border-radius:18px}.slide{padding:16px;border-radius:20px}.slide-head{flex-direction:column;gap:10px}.slide-no{width:44px;height:44px;border-radius:14px;font-size:14px}h1{font-size:32px}h2{font-size:26px}.lead{font-size:16px;line-height:1.45}.topbar,.footer-nav{flex-wrap:wrap}.topbar .pill:nth-child(2){display:none}.top-actions{width:100%}.top-actions .btn{width:100%}.card{padding:14px;border-radius:18px}.card h3{font-size:18px}.card p,.card li{font-size:15px}.chip{font-size:13px;padding:8px 11px}.binary{font-size:23px}.algo-item{grid-template-columns:40px 1fr;gap:10px;padding:12px;border-radius:18px}.algo-num{width:34px;height:34px;border-radius:10px}.ladder{grid-template-columns:1fr}.level-card{margin-top:0!important;min-height:auto}.traffic{grid-template-columns:1fr}.footer-nav{position:sticky;bottom:0;z-index:20;background:var(--bg);padding:8px 0 calc(8px + env(safe-area-inset-bottom))}#prevBtn,#nextBtn{flex:1}.footer-center{flex:1 1 100%;text-align:center;order:3}}
+    @media print{html,body{overflow:auto;background:#fff}.app{display:block;height:auto}.rail,.topbar,.footer-nav,.btn{display:none!important}.slide{display:block!important;height:auto;box-shadow:none;margin-bottom:18px;break-inside:avoid}}
+  </style>
+</head>
+<body>
+<div class="app">
+<aside class="rail">
+<div class="brand"><div class="logo">ЦП</div><div><strong>Цифровой поток</strong><span>ЕГЭ · задание 4 · условие Фано</span></div></div>
+<div class="summer-card"><div class="sun"></div><div class="wave"></div><b>Летний кодовый пляж</b><small>ищем короткие безопасные коды</small></div>
+<div class="progress-box"><div class="progress-label"><span>Прогресс</span><span id="progressText">1 / 11</span></div><div class="progress"><span id="progressBar"></span></div></div>
+<div class="steps" id="steps"></div>
+<div class="side-footer"><button class="btn teal" id="completeBtn" type="button">Шаг пройден</button><button class="btn secondary" id="fullscreenBtn" type="button">Во весь экран</button></div>
+</aside>
+<main class="stage">
+<div class="topbar"><div class="pill">XP: <strong id="xpValue">0</strong></div><div class="pill">Ученическая презентация · летний режим</div><div class="top-actions"><button class="btn secondary" id="resetBtn" type="button">Сбросить</button></div></div>
+<div class="deck">
+<section class="slide active" data-step-sub="Тема и цель" data-step-title="Старт">
+<div class="slide-head"><div><div class="tag">Слайд 1 · старт</div><h1>Условие Фано</h1><p class="lead">Задание 4 ЕГЭ по информатике: учимся строить и проверять неравномерные двоичные коды без угадывания.</p></div><div class="slide-no">01</div></div>
+<div class="hero"><div class="hero-copy"><h3 style="margin:0 0 8px;font-size:28px;">Миссия урока</h3><div style="font-size:22px;line-height:1.35;font-weight:900;">Понять, почему один код может ломать расшифровку, а другой делает сообщение однозначным.</div><div class="chips"><span class="chip">префикс</span><span class="chip">кодовое слово</span><span class="chip">дерево вариантов</span><span class="chip">минимальная длина</span><span class="chip">ЕГЭ №4</span></div></div><div class="hero-art"><div class="beach-code"><div class="binary"><span>0</span><span>10</span><span>110</span><span>111</span></div><p class="lead" style="font-size:17px;margin-top:18px;">Каждый код — как отдельная дорожка к пляжу: нельзя, чтобы одна дорожка была началом другой.</p></div></div></div>
+</section>
+<section class="slide" data-step-sub="Что запрещено" data-step-title="Теория">
+<div class="slide-head"><div><div class="tag">Слайд 2 · теория</div><h2>Что говорит условие Фано</h2><p class="lead">Никакое кодовое слово не должно быть началом другого кодового слова.</p></div><div class="slide-no">02</div></div>
+<div class="grid-3">
+<div class="card sand"><div class="emoji">✅</div><h3>Можно</h3><p><span class="mono">0, 10, 110, 111</span></p><p>Ни один код не является началом другого.</p></div>
+<div class="card sky"><div class="emoji">⛔</div><h3>Нельзя</h3><p><span class="mono">0, 01, 10</span></p><p>Код <span class="mono">0</span> является началом кода <span class="mono">01</span>.</p></div>
+<div class="card mint"><div class="emoji">🧠</div><h3>Зачем это нужно</h3><p>Чтобы сообщение можно было расшифровать однозначно, без выбора между несколькими вариантами.</p></div>
+</div>
+<div class="grid-2" style="margin-top:16px;"><div class="card"><h3>Главная проверка</h3><ol><li>Новый код не должен начинаться с уже известного кода.</li><li>Уже известный код не должен начинаться с нового кода.</li><li>Коды не должны совпадать.</li></ol></div><div class="card sea"><h3>Ловушка задания</h3><p>Слова «с наименьшим числовым значением» и «с наибольшим числовым значением» проверяются только среди кодов минимальной длины.</p></div></div>
+</section>
+<section class="slide" data-step-sub="Как решать" data-step-title="Алгоритм">
+<div class="slide-head"><div><div class="tag">Слайд 3 · алгоритм</div><h2>Рабочий алгоритм</h2><p class="lead">Подходит для задач на поиск одного кода и для задач на минимальную длину слова.</p></div><div class="slide-no">03</div></div>
+<div class="algo"><div class="algo-item"><div class="algo-num">1</div><div><h3>Выпиши известные коды</h3><p>Отдельно отметь короткие коды: именно они чаще всего запрещают целые ветки.</p></div></div><div class="algo-item"><div class="algo-num">2</div><div><h3>Иди по длинам</h3><p>Проверяй сначала коды длины 1, потом 2, потом 3 и так далее.</p></div></div><div class="algo-item"><div class="algo-num">3</div><div><h3>Вычёркивай запрещённые ветки</h3><p>Если есть код <span class="mono">0</span>, то все коды, начинающиеся на <span class="mono">0</span>, уже запрещены.</p></div></div><div class="algo-item"><div class="algo-num">4</div><div><h3>Учитывай условие выбора</h3><p>Если несколько вариантов одной длины — выбирай наименьший или наибольший по условию задачи.</p></div></div></div>
+</section>
+
+<section class="slide task" data-step-sub="Лёгкая" data-step-title="Практика 1">
+<div class="slide-head"><div><div class="tag">Слайд 4 · практика 1 · легко</div><h2>Фиксированный код и шестнадцатеричная запись</h2><p class="lead">id 11742. Для букв А, Б, В, Г используются двухразрядные последовательные двоичные числа от <span class="mono">00</span> до <span class="mono">11</span>.</p></div><div class="slide-no">04</div></div><div class="summer-story"><div class="story-icon">🏖️</div><div><strong>Летняя предыстория</strong><p>На пляжном квесте четыре станции обозначили буквами А, Б, В, Г. Организатор быстро шифрует маршрут ГБВА и просит перевести получившийся двоичный код в шестнадцатеричный вид для табло.</p></div></div>
+<div class="task-layout"><div class="card sand"><h3>Условие</h3><p>Закодируй последовательность символов <b>ГБВА</b> и запиши результат шестнадцатеричным кодом.</p><table><tr><th>А</th><th>Б</th><th>В</th><th>Г</th></tr><tr><td>00</td><td>01</td><td>10</td><td>11</td></tr></table></div><div class="card"><h3>Варианты</h3><div class="options"><div class="option">1) 138</div><div class="option">2) DBCA</div><div class="option">3) D8</div><div class="option">4) 3120</div></div></div></div>
+<div class="workspace" data-answer="D8|3|вариант 3"><h3>Проверка ответа</h3><div class="tokens"><input class="input answer-input" placeholder="Введите D8 или номер варианта"/><button class="btn coral check-btn" type="button">Проверить ответ</button></div><p class="result">Введите ответ и нажмите «Проверить».</p><details><summary>Показать решение</summary><div class="inside">ГБВА → <b>11 01 10 00</b> → <b>11011000₂</b> → <b>D8₁₆</b>. Верный вариант: <b>3</b>.</div></details></div>
+</section>
+<section class="slide task" data-step-sub="Декодирование" data-step-title="Практика 2">
+<div class="slide-head"><div><div class="tag">Слайд 5 · практика 2 · базовая</div><h2>Какое сообщение можно декодировать?</h2><p class="lead">Даны коды пяти букв. Только одно из четырёх сообщений прошло без ошибки.</p></div><div class="slide-no">05</div></div><div class="summer-story"><div class="story-icon">🌊</div><div><strong>Летняя предыстория</strong><p>После морской прогулки на сервер клуба пришли четыре бинарных сообщения. Из-за помех только одно сообщение можно разобрать по кодовой таблице без остатка и противоречий.</p></div></div>
+<div class="task-layout"><div class="card sand"><h3>Коды букв</h3><table><tr><th>В</th><th>К</th><th>А</th><th>Р</th><th>Д</th></tr><tr><td>000</td><td>11</td><td>01</td><td>001</td><td>10</td></tr></table><p>Нужно найти номер сообщения, которое полностью разбивается на данные кодовые слова.</p></div><div class="card"><h3>Сообщения</h3><div class="options"><div class="option">1) 110100000100110011</div><div class="option">2) 111010000010010011</div><div class="option">3) 110100001001100111</div><div class="option">4) 110110000100110010</div></div></div></div>
+<div class="workspace" data-answer="3|вариант 3"><h3>Проверка ответа</h3><div class="tokens"><input class="input answer-input" placeholder="Введите номер сообщения"/><button class="btn coral check-btn" type="button">Проверить ответ</button></div><p class="result">Введите ответ и нажмите «Проверить».</p><details><summary>Показать решение</summary><div class="inside">Третье сообщение разбивается полностью: <b>11 01 000 01 001 10 01 11</b>. Остальные варианты оставляют «хвост», который нельзя расшифровать.</div></details></div>
+</section>
+<section class="slide task" data-step-sub="Код для буквы" data-step-title="Практика 3">
+<div class="slide-head"><div><div class="tag">Слайд 6 · практика 3 · средняя</div><h2>Кратчайший код для буквы Г</h2><p class="lead">id 11706. Для букв А, Б, В известны коды: А – <span class="mono">1010</span>, Б – <span class="mono">1100</span>, В – <span class="mono">0</span>.</p></div><div class="slide-no">06</div></div><div class="summer-story"><div class="story-icon">🍋</div><div><strong>Летняя предыстория</strong><p>В летнем кафе добавляют новую метку для напитка «Гранитный лимонад». Нужно выбрать код для буквы Г так, чтобы кассовая система не путала его с уже существующими кодами.</p></div></div>
+<div class="grid-2"><div class="card sand"><h3>Условие</h3><p>Укажите кратчайшее кодовое слово для буквы <b>Г</b>, при котором код будет допускать однозначное декодирование. Если таких кодов несколько, укажите код с <b>наибольшим числовым значением</b>.</p></div><div class="card sea"><h3>Подсказка</h3><p>Код <span class="mono">0</span> запрещает все варианты, которые начинаются с нуля. Код <span class="mono">1</span> нельзя взять, потому что он будет началом кодов <span class="mono">1010</span> и <span class="mono">1100</span>.</p></div></div>
+<div class="workspace" data-answer="111"><h3>Проверка ответа</h3><div class="tokens"><input class="input answer-input" placeholder="Введите двоичный код"/><button class="btn coral check-btn" type="button">Проверить ответ</button></div><p class="result">Введите ответ и нажмите «Проверить».</p><details><summary>Показать решение</summary><div class="inside">Длина 1 и 2 не подходит. На длине 3 подходят <b>100</b> и <b>111</b>. Нужно взять наибольшее числовое значение, значит ответ: <b>111</b>.</div></details></div>
+</section>
+<section class="slide task" data-step-sub="10 букв" data-step-title="Практика 4">
+<div class="slide-head"><div><div class="tag">Слайд 7 · практика 4 · средняя+</div><h2>Код для буквы Т</h2><p class="lead">id 11709. Нужно найти кратчайшее кодовое слово для буквы Т. Если вариантов несколько — взять наибольшее числовое значение.</p></div><div class="slide-no">07</div></div><div class="summer-story"><div class="story-icon">🎒</div><div><strong>Летняя предыстория</strong><p>В курортном лагере шифруют названия точек маршрута: автобус, лодочная, ресторан, сцена и другие. Осталось добавить букву Т для «турбазы» и сохранить однозначную расшифровку.</p></div></div>
+<div class="task-layout"><div class="card sand"><h3>Таблица кодов</h3><table class="code-table"><tr><th>Буква</th><th>Код</th><th>Буква</th><th>Код</th></tr><tr><td>А</td><td>00</td><td>Л</td><td>1001</td></tr><tr><td>Б</td><td>1000</td><td>Р</td><td>1110</td></tr><tr><td>Е</td><td>010</td><td>С</td><td>1010</td></tr><tr><td>И</td><td>011</td><td>Т</td><td>?</td></tr><tr><td>К</td><td>1011</td><td>У</td><td>110</td></tr></table></div><div class="card sea"><h3>Как думать</h3><p>Сначала проверь длины 1, 2, 3. Если все варианты запрещены, переходи к длине 4.</p></div></div>
+<div class="workspace" data-answer="1111"><h3>Проверка ответа</h3><div class="tokens"><input class="input answer-input" placeholder="Введите двоичный код"/><button class="btn coral check-btn" type="button">Проверить ответ</button></div><p class="result">Введите ответ и нажмите «Проверить».</p><details><summary>Показать решение</summary><div class="inside">На длине 3 варианты <span class="mono">100</span>, <span class="mono">101</span>, <span class="mono">110</span>, <span class="mono">111</span> запрещены: первые три являются началом известных кодов или уже заняты, <span class="mono">111</span> является началом <span class="mono">1110</span>. На длине 4 подходит <b>1111</b>.</div></details></div>
+</section>
+<section class="slide task" data-step-sub="Минимальное значение" data-step-title="Практика 5">
+<div class="slide-head"><div><div class="tag">Слайд 8 · практика 5 · средняя+</div><h2>Код для буквы E</h2><p class="lead">В сообщениях используются десять букв: A, B, C, D, E, F, S, X, Y, Z. Нужно найти кратчайший код для E.</p></div><div class="slide-no">08</div></div><div class="summer-story"><div class="story-icon">☀️</div><div><strong>Летняя предыстория</strong><p>На международной летней смене станции подписаны латинскими буквами. Для точки E нужен самый короткий безопасный код, а при равенстве длины выбирают код с меньшим числовым значением.</p></div></div>
+<div class="task-layout"><div class="card sand"><h3>Таблица кодов</h3><table class="code-table"><tr><th>Буква</th><th>Код</th><th>Буква</th><th>Код</th></tr><tr><td>A</td><td>00</td><td>F</td><td>1001</td></tr><tr><td>B</td><td>1000</td><td>S</td><td>1100</td></tr><tr><td>C</td><td>010</td><td>X</td><td>1010</td></tr><tr><td>D</td><td>011</td><td>Y</td><td>1101</td></tr><tr><td>E</td><td>?</td><td>Z</td><td>111</td></tr></table></div><div class="card sea"><h3>Условие выбора</h3><p>Если кратчайших кодов несколько, нужно указать код с <b>наименьшим числовым значением</b>.</p></div></div>
+<div class="workspace" data-answer="1011"><h3>Проверка ответа</h3><div class="tokens"><input class="input answer-input" placeholder="Введите двоичный код"/><button class="btn coral check-btn" type="button">Проверить ответ</button></div><p class="result">Введите ответ и нажмите «Проверить».</p><details><summary>Показать решение</summary><div class="inside">Длины 1, 2 и 3 запрещены. На длине 4 первый подходящий вариант — <b>1011</b>. Он не начинается с известного кода и сам не является началом известного кода.</div></details></div>
+</section>
+<section class="slide task" data-step-sub="Минимум слова" data-step-title="Практика 6">
+<div class="slide-head"><div><div class="tag">Слайд 9 · практика 6 · сложная</div><h2>Минимальная длина слова КАЗАЧКА</h2><p class="lead">id 11733. Известны коды: Н – <span class="mono">1111</span>, З – <span class="mono">110</span>. Нужно закодировать слово минимально возможным количеством бит.</p></div><div class="slide-no">09</div></div><div class="summer-story"><div class="story-icon">🛶</div><div><strong>Летняя предыстория</strong><p>Команда придумывает код для названия лодки «КАЗАЧКА». Чем короче коды для часто встречающихся букв, тем быстрее передать слово по рации.</p></div></div>
+<div class="grid-2"><div class="card sand"><h3>Условие</h3><p>Сообщения содержат буквы А, З, К, Н, Ч. Коды для А, К и Ч неизвестны. Сколько двоичных знаков потребуется для кодирования слова <b>КАЗАЧКА</b>, если оно закодировано минимально?</p></div><div class="card sea"><h3>Частоты в слове</h3><table><tr><th>А</th><th>К</th><th>З</th><th>Ч</th><th>Н</th></tr><tr><td>3</td><td>2</td><td>1</td><td>1</td><td>0</td></tr></table><p>Самые частые буквы выгодно делать самыми короткими.</p></div></div>
+<div class="workspace" data-answer="14"><h3>Проверка ответа</h3><div class="tokens"><input class="input answer-input" placeholder="Введите число бит"/><button class="btn coral check-btn" type="button">Проверить ответ</button></div><p class="result">Введите ответ и нажмите «Проверить».</p><details><summary>Показать решение</summary><div class="inside">Оптимально взять: А = <b>0</b>, К = <b>10</b>, Ч = <b>1110</b>. Тогда КАЗАЧКА: 2 + 1 + 3 + 1 + 4 + 2 + 1 = <b>14</b> бит.</div></details></div>
+</section>
+<section class="slide task" data-step-sub="Сложная" data-step-title="Практика 7">
+<div class="slide-head"><div><div class="tag">Слайд 10 · практика 7 · сложная</div><h2>Минимальная длина слова КАНТАТА</h2><p class="lead">id 11734. Известны коды: К – <span class="mono">1</span>, Н – <span class="mono">001</span>. Нужно закодировать слово минимально возможным количеством бит.</p></div><div class="slide-no">10</div></div><div class="summer-story"><div class="story-icon">🎵</div><div><strong>Летняя предыстория</strong><p>Вечером на сцене лагеря объявляют номер «КАНТАТА». Нужно закодировать название минимально, но код К уже занимает всю ветку, начинающуюся с единицы.</p></div></div>
+<div class="grid-2"><div class="card sand"><h3>Условие</h3><p>Сообщения содержат буквы А, З, К, Н, Т. Коды для А, З и Т неизвестны. Сколько двоичных знаков потребуется для слова <b>КАНТАТА</b>?</p></div><div class="card sea"><h3>Частоты в слове</h3><table><tr><th>А</th><th>Т</th><th>К</th><th>Н</th><th>З</th></tr><tr><td>3</td><td>2</td><td>1</td><td>1</td><td>0</td></tr></table><p>Код <span class="mono">1</span> запрещает всю ветку, начинающуюся с единицы.</p></div></div>
+<div class="workspace" data-answer="18"><h3>Проверка ответа</h3><div class="tokens"><input class="input answer-input" placeholder="Введите число бит"/><button class="btn coral check-btn" type="button">Проверить ответ</button></div><p class="result">Введите ответ и нажмите «Проверить».</p><details><summary>Показать решение</summary><div class="inside">Оптимально взять: А = <b>01</b>, Т = <b>0001</b>, З = <b>0000</b> или наоборот для Т и З по длине. Тогда КАНТАТА: 1 + 2 + 3 + 4 + 2 + 4 + 2 = <b>18</b> бит.</div></details></div>
+</section>
+<section class="slide" data-step-sub="Рефлексия" data-step-title="Финиш">
+<div class="slide-head"><div><div class="tag">Слайд 11 · финиш</div><h2>Фано-чек перед ЕГЭ</h2><p class="lead">Зафиксируй, что теперь получается, а что стоит потренировать отдельно.</p></div><div class="slide-no">11</div></div>
+<div class="reflection"><h3 style="margin:0 0 8px;font-size:28px;">Выбери уровень уверенности</h3><div class="traffic"><button type="button">🟢 Могу объяснить</button><button type="button">🟡 Нужно ещё 2–3 задачи</button><button type="button">🔴 Путаюсь в префиксах</button></div><textarea placeholder="Запиши один вывод: что запрещает условие Фано и какой тип задач надо повторить?"></textarea><div class="grid-3" style="margin-top:16px;"><div class="card sand"><h3>Мини-чек</h3><p>Код не должен быть началом другого кода.</p></div><div class="card mint"><h3>Типовая ошибка</h3><p>Выбирать самый короткий код без проверки известных кодов.</p></div><div class="card sky"><h3>Следующий шаг</h3><p>Решить ещё 5 задач: 2 на код буквы, 2 на слово, 1 на декодирование.</p></div></div></div>
+</section>
+</div>
+<div class="footer-nav"><button class="btn secondary" id="prevBtn" type="button">← Назад</button><div class="footer-center" id="slideCounter">Слайд 1 из 11</div><button class="btn coral" id="nextBtn" type="button">Дальше →</button></div>
+</main>
+</div>
+<script>
+    const slides = [...document.querySelectorAll('.slide')];
+    const stepsBox = document.getElementById('steps');
+    const progressText = document.getElementById('progressText');
+    const progressBar = document.getElementById('progressBar');
+    const slideCounter = document.getElementById('slideCounter');
+    const xpValue = document.getElementById('xpValue');
+    let current = Number(localStorage.getItem('fanoCurrentStories') || 0);
+    let done = new Set(JSON.parse(localStorage.getItem('fanoDoneStories') || '[]'));
+
+    function two(n){return String(n).padStart(2,'0')}
+    function makeSteps(){
+      stepsBox.innerHTML='';
+      slides.forEach((s,i)=>{
+        const btn=document.createElement('button');
+        btn.className='step'; btn.dataset.slide=i;
+        btn.innerHTML=`<span class="dot"></span><span><small>${two(i+1)}</small><b>${s.dataset.stepTitle||'Слайд'}</b><span>${s.dataset.stepSub||''}</span></span>`;
+        btn.addEventListener('click',()=>showSlide(i)); stepsBox.appendChild(btn);
+      });
+    }
+    function save(){localStorage.setItem('fanoCurrentStories',current);localStorage.setItem('fanoDoneStories',JSON.stringify([...done]));}
+    function showSlide(index){
+      current=Math.max(0,Math.min(slides.length-1,index));
+      slides.forEach((s,i)=>s.classList.toggle('active',i===current));
+      [...stepsBox.children].forEach((st,i)=>{st.classList.toggle('active',i===current);st.classList.toggle('done',done.has(i));st.classList.toggle('future',i>current&&!done.has(i));});
+      progressText.textContent=`${current+1} / ${slides.length}`;
+      progressBar.style.width=`${((current+1)/slides.length)*100}%`;
+      slideCounter.textContent=`Слайд ${current+1} из ${slides.length}`;
+      xpValue.textContent=done.size*10;
+      document.getElementById('prevBtn').disabled=current===0;
+      document.getElementById('nextBtn').textContent=current===slides.length-1?'Завершить':'Дальше →';
+      save();
+    }
+    document.getElementById('nextBtn').addEventListener('click',()=>{ if(current<slides.length-1) showSlide(current+1); });
+    document.getElementById('prevBtn').addEventListener('click',()=>showSlide(current-1));
+    document.getElementById('completeBtn').addEventListener('click',()=>{done.add(current);showSlide(current);});
+    document.getElementById('resetBtn').addEventListener('click',()=>{done.clear();current=0;localStorage.removeItem('fanoCurrentStories');localStorage.removeItem('fanoDoneStories');showSlide(0);});
+    document.getElementById('fullscreenBtn').addEventListener('click',()=>{document.documentElement.requestFullscreen?.();});
+    document.addEventListener('keydown',(e)=>{if(e.key==='ArrowRight')document.getElementById('nextBtn').click();if(e.key==='ArrowLeft')document.getElementById('prevBtn').click();});
+
+    function normalize(s){return (s||'').trim().toLowerCase().replace(/№/g,'').replace(/\s+/g,' ')}
+    document.querySelectorAll('.workspace[data-answer]').forEach(box=>{
+      const input=box.querySelector('.answer-input'); const btn=box.querySelector('.check-btn'); const result=box.querySelector('.result');
+      const answers=box.dataset.answer.split('|').map(normalize);
+      function check(){
+        const value=normalize(input.value);
+        const ok=answers.includes(value);
+        result.classList.remove('ok','bad'); result.classList.add(ok?'ok':'bad');
+        result.textContent=ok?'Верно. Ответ засчитан.':'Пока нет. Проверь префиксы и условие выбора.';
+        if(ok){done.add(current);showSlide(current)}
+      }
+      btn.addEventListener('click',check); input.addEventListener('keydown',e=>{if(e.key==='Enter')check();});
+    });
+    document.querySelectorAll('.traffic button').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('.traffic button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}));
+    makeSteps(); showSlide(current);
+  </script>
+</body>
+</html>

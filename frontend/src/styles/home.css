@@ -236,8 +236,10 @@
   border-color: var(--border-card);
 }
 
+.site-nav__tab-badge,
 .site-nav__tab-soon {
   display: inline-block;
+  margin-left: 6px;
   padding: 2px 7px;
   border-radius: var(--r-pill);
   font-size: 10px;
@@ -246,6 +248,11 @@
   letter-spacing: 0.04em;
   color: var(--text-hint);
   background: #e8ecf4;
+}
+
+.site-nav__tab-badge--beta {
+  color: var(--blue-dark);
+  background: rgba(43, 82, 245, 0.12);
 }
 
 .site-nav__tab-label {
@@ -804,6 +811,7 @@
     font-size: 11px;
   }
 
+  .site-nav__tab-badge,
   .site-nav__tab-soon {
     font-size: 9px;
     padding: 1px 5px;
@@ -4386,6 +4394,20 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   align-items: flex-start;
 }
 
+.lesson-card-v3__preview-card--cover {
+  inset: 0;
+  transform: rotate(-4deg);
+  overflow: hidden;
+  padding: 0;
+}
+
+.lesson-card-v3__cover-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .lesson-card-v3__topic-icon {
   width: 34px;
   height: 34px;
@@ -4531,6 +4553,38 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
 
 .lessons-filter--actions {
   justify-content: flex-end;
+}
+
+.lesson-detail-back {
+  margin: 0 0 14px;
+}
+
+.lesson-detail-back a {
+  color: var(--blue);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.lesson-detail-back a:hover {
+  text-decoration: underline;
+}
+
+.lesson-detail-downloads {
+  margin-top: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.lesson-detail-downloads .lesson-card-v3__btn {
+  text-decoration: none;
+}
+
+.lesson-detail-empty-materials {
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 14px;
 }
 
 .lesson-detail-layout {
@@ -5204,6 +5258,9 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
+    max-height: calc(100dvh - 74px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .site-nav__tabs {
@@ -5223,8 +5280,9 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   }
 
   .site-nav__tab {
-    min-height: 40px;
+    min-height: var(--tap-target);
     align-items: center;
+    justify-content: center;
   }
 
   .site-nav__search {
@@ -5241,7 +5299,8 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   .site-nav__search-input,
   .site-nav__search-btn {
     width: 100%;
-    min-height: 42px;
+    min-height: var(--tap-target);
+    font-size: 16px;
   }
 
   .hero-section,
@@ -5377,6 +5436,7 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   .all-tasks-card {
     grid-template-columns: 1fr !important;
     padding: 14px !important;
+    overflow: hidden;
   }
 
   .all-tasks-card__aside {
@@ -5404,6 +5464,37 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
     align-items: stretch;
   }
 
+  .all-tasks-raw-item__meta,
+  .all-tasks-meta__inner {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .all-tasks-raw-item__body,
+  .all-tasks-card__answer,
+  .all-tasks-raw-answer {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .all-tasks-raw-html {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .all-tasks-raw-html img {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  .all-tasks-raw-html table {
+    width: max-content;
+    min-width: 100%;
+    max-width: none !important;
+  }
+
   .all-tasks-card__draft-btn--fab {
     position: static;
   }
@@ -5421,6 +5512,7 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
 
   .digital-flow-page .tasks-prep-mode-row,
   .digital-flow-page .tasks-prep-format-list,
+  .digital-flow-page .tasks-prep-format-stack,
   .digital-flow-page .tasks-prep-segmented,
   .tasks-page-oge-inf13-radios-row {
     grid-template-columns: 1fr;
@@ -5428,9 +5520,33 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   }
 
   .digital-flow-page .tasks-prep-format-option,
+  .digital-flow-page .tasks-prep-format-card,
   .digital-flow-page .tasks-prep-mode-card,
   .digital-flow-page .tasks-prep-segment {
     width: 100%;
+  }
+
+  .digital-flow-page .tasks-prep-workspace-body {
+    padding: 14px;
+  }
+
+  .digital-flow-page .tasks-prep-source-block {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .digital-flow-page .tasks-prep-checkbox {
+    min-height: var(--tap-target);
+    justify-content: flex-start;
+  }
+
+  .digital-flow-page .tasks-prep-variant-compose,
+  .digital-flow-page .tasks-prep-trainer-compose,
+  .digital-flow-page .tasks-prep-trainer-panel,
+  .digital-flow-page .tasks-prep-numbers-board,
+  .digital-flow-page .tasks-prep-trainer-aside {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .tasks-page-numbers-grid {
@@ -5454,10 +5570,12 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   .tasks-page-subtopic-label,
   .tasks-page-subtopic-title {
     min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .tasks-page-subtopic-num-input {
     min-height: 40px;
+    font-size: 16px;
   }
 }
 
@@ -5492,6 +5610,11 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
 
   .site-nav__search {
     grid-template-columns: 1fr;
+  }
+
+  .site-nav__panel.is-open {
+    max-height: calc(100dvh - 62px);
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
   }
 
   .site-nav__search-field,
@@ -5532,6 +5655,29 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
 
   .tasks-page-numbers-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .all-tasks-page,
+  .tasks-prep-flow,
+  .subject-pick,
+  .generator-hub-page,
+  .exam-level-hub-page {
+    padding-bottom: 36px;
+  }
+
+  .all-tasks-filters,
+  .all-tasks-card,
+  .digital-flow-page .tasks-prep-workspace,
+  .digital-flow-page .tasks-prep-mode-card {
+    border-radius: 16px;
+  }
+
+  .all-tasks-card__answer-btn,
+  .all-tasks-card__draft-btn,
+  .subject-pick__actions > *,
+  .digital-flow-page .tasks-prep-btn-start-test,
+  .digital-flow-page .tasks-prep-btn-clear {
+    width: 100%;
   }
 
   .update-card,

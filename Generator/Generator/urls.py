@@ -24,6 +24,12 @@ urlpatterns = [
     path("api/updates/", views.api_updates, name="api_updates"),
     path("api/announcements/", views.api_announcements, name="api_announcements"),
     path("api/lessons/", views.api_lessons, name="api_lessons"),
+    path("api/lessons/<slug:slug>/view/", views.api_lesson_archive_view, name="api_lesson_archive_view"),
+    path(
+        "api/lessons/<slug:slug>/archive/<path:asset_path>",
+        views.api_lesson_archive_asset,
+        name="api_lesson_archive_asset",
+    ),
     path("api/lessons/<slug:slug>/", views.api_lesson_detail, name="api_lesson_detail"),
     path("api/admin/lessons/", views.api_admin_lessons, name="api_admin_lessons"),
     path("api/admin/lessons/<slug:slug>/", views.api_admin_lesson_detail, name="api_admin_lesson_detail"),

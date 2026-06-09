@@ -44,6 +44,10 @@ def lesson_file_upload_to(instance, filename):
     return os.path.join("lessons", "files", f"{uuid4().hex}{_safe_ext(filename)}")
 
 
+def lesson_archive_upload_to(instance, filename):
+    return os.path.join("lessons", "archives", f"{uuid4().hex}{_safe_ext(filename, '.zip')}")
+
+
 def presentation_public_pdf_upload_to(instance, filename):
     return os.path.join("lessons", "presentations", "pdf", f"{uuid4().hex}{_safe_ext(filename, '.pdf')}")
 
@@ -587,6 +591,13 @@ class Lesson(models.Model):
     )
     cover_image = models.ImageField(upload_to=lesson_cover_upload_to, blank=True, null=True)
     file = models.FileField(upload_to=lesson_file_upload_to, blank=True, null=True)
+    archive = models.FileField(
+        upload_to=lesson_archive_upload_to,
+        blank=True,
+        null=True,
+        verbose_name="Архив",
+        help_text="ZIP, RAR или 7Z с материалами урока",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

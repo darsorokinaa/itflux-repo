@@ -125,8 +125,10 @@ export default function Nav() {
                       title="Раздел в разработке"
                     >
                       <span className="site-nav__tab-label">{tab.label}</span>
-                      {tab.soon ? (
-                        <span className="site-nav__tab-soon">скоро</span>
+                      {tab.badge ? (
+                        <span className="site-nav__tab-badge site-nav__tab-badge--beta">{tab.badge}</span>
+                      ) : tab.soon ? (
+                        <span className="site-nav__tab-badge">скоро</span>
                       ) : null}
                     </span>
                   );
@@ -147,6 +149,11 @@ export default function Nav() {
                     {...linkProps}
                   >
                     <span className="site-nav__tab-label">{tab.label}</span>
+                    {tab.badge ? (
+                      <span className="site-nav__tab-badge site-nav__tab-badge--beta">{tab.badge}</span>
+                    ) : tab.soon ? (
+                      <span className="site-nav__tab-badge">скоро</span>
+                    ) : null}
                   </Link>
                 );
               })}

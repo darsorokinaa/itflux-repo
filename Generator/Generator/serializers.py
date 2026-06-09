@@ -28,6 +28,7 @@ class TaskSerializer(serializers.ModelSerializer):
 class LessonCatalogSerializer(serializers.ModelSerializer):
     cover_image_url = serializers.SerializerMethodField()
     file_url = serializers.SerializerMethodField()
+    archive_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Lesson
@@ -49,14 +50,16 @@ class LessonCatalogSerializer(serializers.ModelSerializer):
             "status",
             "cover_image_url",
             "file_url",
+            "archive_url",
         ]
 
-    def get_cover_image_url(self, obj):
+    def _absolute_file_url(self, obj, field_name: str):
         request = self.context.get("request")
-        if not getattr(obj, "cover_image", None):
+        file_field = getattr(obj, field_name, None)
+        if not file_field:
             return None
         try:
-            url = obj.cover_image.url
+            url = file_field.url
         except Exception:
             return None
         if request:
@@ -66,24 +69,19 @@ class LessonCatalogSerializer(serializers.ModelSerializer):
                 return url
         return url
 
+    def get_cover_image_url(self, obj):
+        return self._absolute_file_url(obj, "cover_image")
+
     def get_file_url(self, obj):
-        request = self.context.get("request")
-        if not getattr(obj, "file", None):
-            return None
-        try:
-            url = obj.file.url
-        except Exception:
-            return None
-        if request:
-            try:
-                return request.build_absolute_uri(url)
-            except Exception:
-                return url
-        return url
+        return self._absolute_file_url(obj, "file")
+
+    def get_archive_url(self, obj):
+        return self._absolute_file_url(obj, "archive")
 
 
 class LessonAdminSerializer(serializers.ModelSerializer):
     file_url = serializers.SerializerMethodField()
+    archive_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Lesson
@@ -107,15 +105,20 @@ class LessonAdminSerializer(serializers.ModelSerializer):
             "access_level",
             "cover_image",
             "file",
+            "archive",
             "file_url",
+            "archive_url",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at", "file_url"]
+        read_only_fields = ["id", "created_at", "updated_at", "file_url", "archive_url"]
         extra_kwargs = {
             "slug": {"required": False, "allow_blank": True},
         }
 
     def get_file_url(self, obj):
         return LessonCatalogSerializer(context=self.context).get_file_url(obj)
+
+    def get_archive_url(self, obj):
+        return LessonCatalogSerializer(context=self.context).get_archive_url(obj)
 
