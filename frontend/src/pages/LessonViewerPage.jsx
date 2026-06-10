@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import DocViewer, { DocViewerRenderers } from "@cyntler/react-doc-viewer";
 import "@cyntler/react-doc-viewer/dist/index.css";
 import { devApiBase } from "../utils/devApiBase";
@@ -42,24 +42,19 @@ export default function LessonViewerPage() {
 
   if (loading) {
     return (
-      <div className="digital-flow-page min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="spinner-border text-primary mb-3" role="status">
-            <span className="visually-hidden">Загрузка...</span>
-          </div>
-          <p className="text-muted">Загружаем урок...</p>
-        </div>
+      <div className="lesson-viewer-page lesson-viewer-page--loading">
+        <p className="lesson-viewer-page__status">Загружаем урок…</p>
       </div>
     );
   }
 
   if (error || !lesson) {
     return (
-      <div className="digital-flow-page min-h-screen flex flex-col items-center justify-center p-4">
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-red-200 max-w-md w-full text-center">
-          <h2 className="text-xl font-bold text-red-600 mb-2">Ошибка</h2>
-          <p className="text-gray-600 mb-4">{error || "Урок не найден"}</p>
-          <Link to="/lessons" className="btn btn-primary">
+      <div className="lesson-viewer-page lesson-viewer-page--error">
+        <div className="lesson-viewer-page__error-card">
+          <h2>Ошибка</h2>
+          <p>{error || "Урок не найден"}</p>
+          <Link to="/lessons" className="lesson-viewer-page__back">
             Вернуться к каталогу
           </Link>
         </div>
@@ -70,11 +65,11 @@ export default function LessonViewerPage() {
   const fileUrl = lesson.file_url;
   if (!fileUrl) {
     return (
-      <div className="digital-flow-page min-h-screen flex flex-col items-center justify-center p-4">
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-red-200 max-w-md w-full text-center">
-          <h2 className="text-xl font-bold text-red-600 mb-2">Файл не найден</h2>
-          <p className="text-gray-600 mb-4">Для этого урока не загружен файл.</p>
-          <Link to="/lessons" className="btn btn-primary">
+      <div className="lesson-viewer-page lesson-viewer-page--error">
+        <div className="lesson-viewer-page__error-card">
+          <h2>Файл не найден</h2>
+          <p>Для этого урока не загружен файл.</p>
+          <Link to="/lessons" className="lesson-viewer-page__back">
             Вернуться к каталогу
           </Link>
         </div>
@@ -82,7 +77,8 @@ export default function LessonViewerPage() {
     );
   }
 
-  const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  const isLocalhost =
+    window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
   const fileExt = fileUrl.toLowerCase().split("?")[0];
   const isPptx = fileExt.endsWith(".pptx") || fileExt.endsWith(".ppt");
   const isPdf = fileExt.endsWith(".pdf");
@@ -101,56 +97,41 @@ export default function LessonViewerPage() {
     }
   };
 
-  const docs = [
-    { uri: fileUrl, fileName: lesson.title }
-  ];
+  const docs = [{ uri: fileUrl, fileName: lesson.title }];
+
+  if (isPdf) {
+    return (
+      <div className="lesson-viewer-page lesson-viewer-page--pdf">
+        <iframe
+          src={toSameOriginUrl(fileUrl)}
+          title={lesson.title}
+          className="lesson-viewer-page__pdf-frame"
+        />
+      </div>
+    );
+  }
 
   return (
-    <div className="h-screen w-full flex flex-col bg-gray-50">
-      <header className="bg-white border-b px-4 py-3 flex items-center justify-between shadow-sm z-10">
-        <div>
-          <h1 className="text-lg font-bold text-gray-900 m-0">{lesson.title}</h1>
-          {lesson.topic && <p className="text-sm text-gray-500 m-0">{lesson.topic}</p>}
+    <div className="lesson-viewer-page lesson-viewer-page--doc">
+      {isLocalhost && isPptx ? (
+        <div className="lesson-viewer-page__warn">
+          <strong>Внимание:</strong> на localhost встроенный просмотр Office недоступен — скачайте
+          файл или проверьте на публичном сервере.
         </div>
-        <div className="flex items-center gap-3">
-          <a href={fileUrl} download className="btn btn-outline-primary btn-sm" target="_blank" rel="noreferrer">
-            Скачать файл
-          </a>
-          <Link to="/lessons" className="btn btn-outline-secondary btn-sm">
-            Закрыть
-          </Link>
-        </div>
-      </header>
-      
-      {isLocalhost && isPptx && (
-        <div className="bg-yellow-50 border-b border-yellow-200 p-3 text-sm text-yellow-800 text-center">
-          <strong>Внимание:</strong> Вы просматриваете презентацию на локальном сервере (localhost). 
-          Встроенный просмотрщик Microsoft Office не может получить доступ к локальным файлам. 
-          Пожалуйста, скачайте файл для просмотра или проверьте на публичном сервере.
-        </div>
-      )}
-
-      <main className="flex-1 overflow-hidden">
-        {isPdf ? (
-          <iframe
-            src={toSameOriginUrl(fileUrl)}
-            title={lesson.title}
-            style={{ height: "100%", width: "100%", border: "none" }}
-          />
-        ) : (
-          <DocViewer 
-            documents={docs} 
-            pluginRenderers={DocViewerRenderers}
-            style={{ height: "100%", width: "100%" }}
-            config={{
-              header: {
-                disableHeader: true,
-                disableFileName: true,
-                retainURLParams: false
-              }
-            }}
-          />
-        )}
+      ) : null}
+      <main className="lesson-viewer-page__doc-main">
+        <DocViewer
+          documents={docs}
+          pluginRenderers={DocViewerRenderers}
+          style={{ height: "100%", width: "100%" }}
+          config={{
+            header: {
+              disableHeader: true,
+              disableFileName: true,
+              retainURLParams: false,
+            },
+          }}
+        />
       </main>
     </div>
   );

@@ -35,7 +35,6 @@ urlpatterns = [
     path("api/admin/lessons/<slug:slug>/", views.api_admin_lesson_detail, name="api_admin_lesson_detail"),
     path("api/search_task/", views.search_task, name="search_task"),
     path("api/search_variant/", views.search_variant, name="search_variant"),
-    path("favicon.svg", views.favicon),
     path("favicon.png", views.favicon),
     path("favicon.ico", views.favicon),
     path("yandex_ef13ec5e267d285b.html", views.yandex_webmaster_verification),

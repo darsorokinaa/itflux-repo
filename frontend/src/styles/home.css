@@ -4564,13 +4564,18 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   transform: rotate(-4deg);
   overflow: hidden;
   padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.96);
 }
 
 .lesson-card-v3__cover-image {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center;
 }
 
 .lesson-card-v3__topic-icon {

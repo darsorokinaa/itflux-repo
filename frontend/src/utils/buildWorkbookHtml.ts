@@ -34,7 +34,7 @@ function siteOrigin(): string {
 function logoUrl(): string {
   const base = import.meta.env.BASE_URL || "/";
   const origin = siteOrigin();
-  return `${origin}${base}img/digital-flow-logo.png`;
+  return `${origin}${base}favicon.png?v=1`;
 }
 
 function renderTask(task: WorkbookTask, index: number): string {

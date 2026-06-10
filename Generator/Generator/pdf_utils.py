@@ -497,7 +497,7 @@ def build_pdf_context(request, variant, subject, author_filter=None):
     if level_val.isdigit():
         level_label = f"{level_val} класс"
     header_subject_level = f"{subject_label}, {level_label}"
-    header_logo = resolve_background_image("img/digital-flow-logo.png", request=request)
+    header_logo = resolve_background_image("favicon.png", request=request)
     header_variant = f"Вариант № {variant.id}"
     base_url = request.build_absolute_uri("/").rstrip("/") or "/"
     footer_left = mark_safe(f'© <a href="{base_url}" class="pdf-footer-link">Цифровой поток</a>')

@@ -79,7 +79,7 @@ html, body {
   width: 26px;
   height: 26px;
   border-radius: 6px;
-  background: var(--accent);
+  background: transparent;
   color: #fff;
   display: flex;
   align-items: center;
@@ -88,6 +88,7 @@ html, body {
   font-size: 10pt;
   letter-spacing: 0.01em;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .logo-mark img {
@@ -95,7 +96,8 @@ html, body {
   height: 26px;
   display: block;
   border-radius: 6px;
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center;
 }
 
 .brand-text { line-height: 1.25; }
@@ -639,7 +641,7 @@ body::before {
       <div class="logo-mark">
         {% if header_logo %}
           <img src="{{ header_logo }}" alt="Цифровой Поток">
-        {% else %}ЦП{% endif %}
+        {% endif %}
       </div>
       <div class="brand-text">
         <div class="brand-name">Цифровой Поток</div>

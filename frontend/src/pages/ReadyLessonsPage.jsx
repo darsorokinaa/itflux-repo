@@ -52,25 +52,20 @@ function LessonCard({ lesson }) {
   const cardBgColor = lesson.card_background_color;
   const canOpenLesson = Boolean(lesson.slug && (lesson.archive_url || lesson.file_url));
   const fileExtLower = (lesson.file_url || "").toLowerCase().split("?")[0];
-  const isPdfLesson = Boolean(!lesson.archive_url && fileExtLower.endsWith(".pdf"));
-  const directFileUrl = mediaUrl(lesson.file_url);
   const isReactViewer = Boolean(
     !lesson.archive_url && 
     lesson.file_url && 
     !fileExtLower.endsWith(".html")
   );
-  // PDF-урок открываем сразу в нативном просмотрщике браузера (новая вкладка, на весь экран),
-  // без промежуточной страницы-вьюера с шапкой.
-  const lessonUrl = isPdfLesson && directFileUrl
-    ? directFileUrl
-    : isReactViewer
+  const lessonUrl = isReactViewer
     ? `/lessons/${encodeURIComponent(lesson.slug)}/view`
     : `/api/lessons/${encodeURIComponent(lesson.slug)}/view/`;
 
   const cardStyle = {};
   if (cardBgImageUrl) {
     cardStyle.backgroundImage = `url(${cardBgImageUrl})`;
-    cardStyle.backgroundSize = "cover";
+    cardStyle.backgroundSize = "contain";
+    cardStyle.backgroundRepeat = "no-repeat";
     cardStyle.backgroundPosition = "center";
   } else if (cardBgColor) {
     cardStyle.backgroundColor = cardBgColor;

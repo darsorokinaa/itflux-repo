@@ -577,18 +577,6 @@ def _is_spa_lesson_join_path(level, subject):
     )
 
 
-FAVICON_SVG = (
-    b'<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">'
-    b'<defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">'
-    b'<feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity="0.18"/>'
-    b'</filter></defs>'
-    b'<rect width="1024" height="1024" fill="#2F6FFF"/>'
-    b'<rect x="200" y="200" width="624" height="624" rx="140" fill="#5F8FFF" filter="url(#shadow)"/>'
-    b'<path d="M660 340H420L560 512L420 684H660" fill="none" stroke="#FFFFFF" stroke-width="88" '
-    b'stroke-linecap="round" stroke-linejoin="round"/></svg>'
-)
-
-
 def _subtopics_for_groups(subject_instance, level_instance, task_numbers, vpr_vf=None):
     """Подтемы для групп: TaskGroup.subtopic + Task.subtopic + все SubTopic предмета/уровня."""
     if not task_numbers:
@@ -762,10 +750,12 @@ def _parse_linked_task_numbers(raw):
 
 
 def favicon(request):
-    png_path = os.path.join(django_settings.BASE_DIR, "static", "img", "digital-flow-logo.png")
-    if os.path.isfile(png_path):
+    from django.contrib.staticfiles import finders
+
+    png_path = finders.find("favicon.png")
+    if png_path and os.path.isfile(png_path):
         return FileResponse(open(png_path, "rb"), content_type="image/png")
-    return HttpResponse(FAVICON_SVG, content_type="image/svg+xml")
+    return HttpResponse(status=404)
 
 
 def yandex_webmaster_verification(request):

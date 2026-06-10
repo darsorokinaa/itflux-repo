@@ -1,0 +1,66 @@
+/* HTML-уроки: изображения вписываются в родительский блок, не вылезают за края */
+body img,
+picture img,
+figure img,
+.slide img,
+.card img,
+.grid img,
+.media img,
+.image img,
+.content img,
+.lesson-content img {
+  box-sizing: border-box;
+  display: block;
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
+figure,
+picture,
+.media,
+.image,
+.image-block,
+.media-block,
+.img-wrap,
+.photo,
+.lesson-attachment-fig {
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+figure img,
+.lesson-attachment-fig img {
+  margin: 0 auto;
+}
+
+/* Сетки/галереи в материалах урока */
+.grid,
+.gallery,
+.row,
+.flex,
+.images {
+  max-width: 100%;
+}
+
+.grid > *,
+.gallery > *,
+.row > *,
+.flex > *,
+.images > * {
+  min-width: 0;
+}
+
+.grid img,
+.gallery img,
+.row img,
+.flex img,
+.images img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}

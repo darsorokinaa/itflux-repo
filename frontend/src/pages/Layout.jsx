@@ -12,6 +12,7 @@ function Layout() {
   /** Маркетинг и выбор заданий — свой Nav, без шапки/подвала генератора */
   const pathNorm = (pathname || "").replace(/\/+$/, "") || "/";
   const isTasksPrepPicker = /^\/(oge|ege|vpr)\/[^/]+$/.test(pathNorm);
+  const isLessonViewerPage = /^\/lessons\/[^/]+\/view$/.test(pathNorm);
   const isMarketingHome =
     pathname === "/" ||
     pathname === "/tasks" ||
@@ -127,7 +128,7 @@ function Layout() {
   }, [pathname]);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${isLessonViewerPage ? " app-shell--lesson-viewer" : ""}`}>
       <div
         className="app-shell-pattern"
         aria-hidden="true"
@@ -143,7 +144,7 @@ function Layout() {
         />
       ) : null}
       <div className="app-shell-content">
-      {!isLessonOrHomeworkContext && <Nav />}
+      {!isLessonOrHomeworkContext && !isLessonViewerPage && <Nav />}
       {/* !isMarketingHome ? (
       <header
         className={themeData?.headerBg ? "header--themed" : undefined}
@@ -154,17 +155,8 @@ function Layout() {
         <Link to="/" className="logo-link">
           <img
             className="logo-theme-icon"
-            src={themeData?.logo || `${import.meta.env.BASE_URL}img/digital-flow-logo.png?v=1`}
+            src={themeData?.logo || `${import.meta.env.BASE_URL}favicon.png?v=1`}
             alt="Цифровой поток"
-            onError={(e) => {
-              const base = `${import.meta.env.BASE_URL}img/`;
-              const t = e.currentTarget;
-              if (t.src.includes("digital-flow-logo")) {
-                t.src = `${base}../favicon.png?v=1`;
-                return;
-              }
-              t.onerror = null;
-            }}
           />
           <span className="logo-text">Цифровой поток</span>
         </Link>
@@ -189,11 +181,11 @@ function Layout() {
         {/* боковое меню */}
       </aside>
 
-      <main className={isMarketingHome ? "w-full" : "container mt-4"}>
+      <main className={isMarketingHome || isLessonViewerPage ? "w-full" : "container mt-4"}>
         <Outlet />
       </main>
 
-      {!isMarketingHome ? (
+      {!isMarketingHome && !isLessonViewerPage ? (
       <footer className={`site-footer${isLessonOrHomeworkContext ? " site-footer--embed" : ""}`}>
         <div className="site-footer-inner">
           <span className="site-footer-copy">© 2026 Цифровой поток</span>
@@ -208,7 +200,7 @@ function Layout() {
       </footer>
       ) : null}
 
-      {!cookieAccepted && !isLessonOrHomeworkContext && (
+      {!cookieAccepted && !isLessonOrHomeworkContext && !isLessonViewerPage && (
         <div className="cookie-banner" role="alertdialog" aria-label="Уведомление об использовании файлов cookie">
           <div className="cookie-banner-inner">
             <p className="cookie-banner-text">

@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { getActiveNavTab, GENERATOR_HASH, NAV_TABS } from "../config/navTabs";
 
 function LogoMark() {
-  const src = `${import.meta.env.BASE_URL}img/digital-flow-logo.png`;
+  const src = `${import.meta.env.BASE_URL}favicon.png?v=1`;
   return (
     <img
       src={src}

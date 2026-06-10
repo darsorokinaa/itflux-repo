@@ -71,6 +71,18 @@ def resolve_archive_asset(namelist: list[str], asset_path: str, html_entry: str)
     return None
 
 
+def inject_lesson_content_styles(html: str, request) -> str:
+    css_url = request.build_absolute_uri(static("css/lesson-content.css"))
+    tag = f'<link rel="stylesheet" href="{css_url}">'
+    if "lesson-content.css" in html:
+        return html
+    if re.search(r"<head\b", html, re.I):
+        return re.sub(r"(<head[^>]*>)", rf"\1\n  {tag}", html, count=1, flags=re.I)
+    if re.search(r"<html\b", html, re.I):
+        return re.sub(r"(<html[^>]*>)", rf"\1\n<head>{tag}</head>", html, count=1, flags=re.I)
+    return f"<!DOCTYPE html><html><head>{tag}</head><body>{html}</body></html>"
+
+
 def inject_lesson_drawing_assets(html: str, request, slug: str) -> str:
     css_url = request.build_absolute_uri(static("css/lesson-slide-drawing.css"))
     js_url = request.build_absolute_uri(static("js/lesson-slide-drawing.js"))
@@ -107,6 +119,8 @@ def read_lesson_file_html(
     if html is None:
         html = raw.decode("utf-8", errors="replace")
     html = inject_base_href(html, base_href)
+    if request:
+        html = inject_lesson_content_styles(html, request)
     if request and slug:
         html = inject_lesson_drawing_assets(html, request, slug)
     return html
@@ -139,6 +153,8 @@ def read_archive_html(
     if html is None:
         html = raw.decode("utf-8", errors="replace")
     html = inject_base_href(html, base_href)
+    if request:
+        html = inject_lesson_content_styles(html, request)
     if request and slug:
         html = inject_lesson_drawing_assets(html, request, slug)
     return html
