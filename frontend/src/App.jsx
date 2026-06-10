@@ -17,6 +17,7 @@ import LessonJoinBridge from "./pages/LessonJoinBridge";
 import ReadyLessonsPage from "./pages/ReadyLessonsPage";
 import LessonViewerPage from "./pages/LessonViewerPage";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { ensureSiteFavicon } from "./utils/ensureSiteFavicon";
 
 function scrollDocumentToTop() {
   window.scrollTo(0, 0);
@@ -60,6 +61,10 @@ function ScrollToTop() {
       scrollDocumentToTop();
     });
     return () => cancelAnimationFrame(id);
+  }, [pathname]);
+
+  useEffect(() => {
+    ensureSiteFavicon();
   }, [pathname]);
 
   return null;

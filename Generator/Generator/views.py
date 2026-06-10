@@ -3456,7 +3456,7 @@ def report_pdf(request, level, subject):
         "base_url": base_url,
         "pdf_css": pdf_utils.get_pdf_css(),
         "score_comment_class": score_comment_class,
-        "favicon_url": request.build_absolute_uri("/static/img/digital-flow-logo.png"),
+        "favicon_url": request.build_absolute_uri("/favicon.png"),
     }
 
     html_string = render_to_string("report_template.html", context)
