@@ -1,7 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useLocation } from "react-router-dom";
+import { useParams, useLocation, Link } from "react-router-dom";
 import MathContent from "../components/MathContent";
-import { isEgeInfParallelProcessesTask, isEgeInfRoadGraphTask, isEgeInformaticsContext, isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
+import { devApiBase } from "../utils/devApiBase";
+import { isEgeInfTruthTableTask, isEgeInfParallelProcessesTask, isEgeInfRoadGraphTask, isEgeInformaticsContext, isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
 
 const InformaticsCodeEditorEntry = lazy(
   () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
@@ -562,24 +563,44 @@ function ExamPage() {
     setError(null);
     setVariant(null);
     const idWanted = String(variant_id);
-    const variantUrl = `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/variant/${encodeURIComponent(String(variant_id))}/`;
+    const apiBase = devApiBase();
+    const variantUrl = `${apiBase}/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/variant/${encodeURIComponent(String(variant_id))}/`;
     setVariantLoadingUrl(variantUrl);
     const ac = new AbortController();
-    fetch(variantUrl, { credentials: "same-origin", signal: ac.signal })
+    fetch(variantUrl, {
+      credentials: apiBase ? "omit" : "same-origin",
+      signal: ac.signal,
+    })
       .then(async (res) => {
+        const text = await res.text();
+        let data = null;
+        if (text) {
+          try {
+            data = JSON.parse(text);
+          } catch {
+            throw new Error(
+              res.ok
+                ? "Сервер вернул некорректный ответ при загрузке варианта."
+                : `Ошибка загрузки варианта (${res.status || "ошибка сервера"})`
+            );
+          }
+        }
         if (!res.ok) {
           const msg =
             res.status === 404
-              ? "Вариант не найден или ссылка не совпадает с уровнем/предметом. Соберите вариант заново или откройте из раздела заданий."
-              : `Ошибка загрузки варианта (${res.status})`;
+              ? "Вариант не найден или ссылка не совпадает с уровнем/предметом. Соберите вариант заново."
+              : data?.error || `Ошибка загрузки варианта (${res.status})`;
           throw new Error(msg);
         }
-        return res.json();
+        return data;
       })
       .then((data) => {
         if (ac.signal.aborted) return;
         if (!data || !Array.isArray(data.tasks)) {
           throw new Error("Сервер вернул неполные данные варианта");
+        }
+        if (data.tasks.length === 0) {
+          throw new Error("Вариант создан, но в нём нет заданий. Проверьте базу данных или снимите фильтр «Только ФИПИ».");
         }
         if (String(data.id) !== idWanted) {
           throw new Error(`Сервер вернул вариант ${data.id}, ожидался ${idWanted}`);
@@ -822,31 +843,6 @@ function ExamPage() {
       return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
     return `${m}:${String(s).padStart(2, "0")}`;
   }
-
-  /* =========================
-     MathJax
-  ========================== */
-  useEffect(() => {
-    if (!variant) return;
-    let cancelled = false;
-    const tryTypeset = () => {
-      if (cancelled) return;
-      const root = document.querySelector(
-        "#main-wrapper.exam-page .exam-page-container, #main-wrapper.exam-page"
-      );
-      if (window.MathJax?.typesetPromise) {
-        const target = root || undefined;
-        window.MathJax.typesetPromise(target ? [target] : undefined).catch(() => {});
-      } else {
-        setTimeout(tryTypeset, 100);
-      }
-    };
-    const timer = setTimeout(tryTypeset, 180);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [variant]);
 
   /* Подсказка «листайте», если блок условия реально переполнен по ширине */
   useEffect(() => {
@@ -1150,15 +1146,40 @@ function ExamPage() {
     });
   }, []);
 
-  if (error) return <div style={{ padding: 20 }}>Ошибка: {error}</div>;
+  const tasksFilteredByAuthor = Array.isArray(variant?.tasks) ? variant.tasks : [];
+  const getCodeEditorTaskSources = useCallback(
+    () =>
+      tasksFilteredByAuthor
+        .filter((t) => t.file)
+        .slice(0, 80)
+        .map((t) => ({
+          id: t.id,
+          label: t.number != null ? `№${t.number}` : `id ${t.id}`,
+          fileUrl: t.file || null,
+        })),
+    [tasksFilteredByAuthor]
+  );
+
+  if (error) {
+    return (
+      <div className="exam-variant-status exam-variant-status--error">
+        <h2 className="exam-variant-status__title">Не удалось открыть вариант</h2>
+        <p className="exam-variant-status__text">{error}</p>
+        {level && subject ? (
+          <Link className="exam-variant-status__back" to={`/${level}/${subject}`}>
+            ← Вернуться к выбору формата
+          </Link>
+        ) : null}
+      </div>
+    );
+  }
   if (!variant) {
     return (
-      <div style={{ padding: 20 }}>
-        Загрузка...
+      <div className="exam-variant-status exam-variant-status--loading">
+        <h2 className="exam-variant-status__title">Загружаем вариант…</h2>
+        <p className="exam-variant-status__text">Подождите, идёт загрузка заданий.</p>
         {variantLoadingUrl ? (
-          <div style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>
-            Запрос: {variantLoadingUrl}
-          </div>
+          <p className="exam-variant-status__meta">{variantLoadingUrl}</p>
         ) : null}
       </div>
     );
@@ -1185,7 +1206,6 @@ function ExamPage() {
     );
   }
 
-  const tasksFilteredByAuthor = Array.isArray(variant.tasks) ? variant.tasks : [];
   // Fallback: если part не задан, определяем по номеру (ОГЭ матем: 1–19 ч.1, 20+ ч.2; ЕГЭ матем: 1–11 ч.1; ОГЭ инф: 1–15 ч.1)
   const inferPart = (t) => {
     if (t.part === 1 || t.part === 2) return t.part;
@@ -1205,18 +1225,6 @@ function ExamPage() {
   const part2Rest = part2Tasks.filter((t) => !LINKED_19_21.includes(t.number));
   const showLinkedGroup = subject === "inf" && part2Linked1921.length === 3;
   const showInfCodeSidebar = isInformaticsCodeEditorContext(level, subject);
-  const getCodeEditorTaskSources = useCallback(
-    () =>
-      tasksFilteredByAuthor
-        .filter((t) => t.file)
-        .slice(0, 80)
-        .map((t) => ({
-          id: t.id,
-          label: t.number != null ? `№${t.number}` : `id ${t.id}`,
-          fileUrl: t.file || null,
-        })),
-    [tasksFilteredByAuthor]
-  );
   // Для математики или если не все три — показываем 19/20/21 как обычные задания
   const part2Regular = showLinkedGroup ? part2Rest : [...part2Linked1921, ...part2Rest].sort((a, b) => a.number - b.number);
 
@@ -2117,7 +2125,7 @@ function ExamPage() {
                   key={task.id}
                   data-task-id={task.id}
                   data-task-number={task.number}
-                  className={`exam-task-card exam-task-card--p1${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                  className={`exam-task-card exam-task-card--p1${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
                   onClick={() => handleTaskFocus(task.id)}
                 >
                   <div className="exam-task-card__top">
@@ -2132,13 +2140,13 @@ function ExamPage() {
                     </div>
                     {showExamEducationShell ? (
                       <div className="exam-task-card__status-cluster">
-                        {boardPersistHasDraft(boardsByTask[task.id]) ? (
-                          <span className="exam-task-card__draft-label">Есть черновик</span>
-                        ) : null}
                         <span className={`exam-task-card__status exam-task-card__status--${p1Stat.key}`}>
                           {p1Stat.label}
                         </span>
-                        <ExamTaskDrawingHeaderButton onClick={() => setEduOpenBoardForTaskId(task.id)} />
+                        <ExamTaskDrawingHeaderButton 
+                          onClick={() => setEduOpenBoardForTaskId(task.id)} 
+                          hasDraft={boardPersistHasDraft(boardsByTask[task.id])}
+                        />
                       </div>
                     ) : (
                       <span className={`exam-task-card__status exam-task-card__status--${p1Stat.key}`}>
@@ -2161,9 +2169,11 @@ function ExamPage() {
                     html={task.text}
                     className="exam-task-card__text task-text"
                     ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
+                    ogeInf6Enhance={isOgeInformaticsTask(level, subject, task.number, 6)}
                     egeInfFileEnhance={isEgeInformaticsContext(level, subject)}
                     egeInf22Enhance={isEgeInfParallelProcessesTask(level, subject, task.number)}
                     egeInf1Enhance={isEgeInfRoadGraphTask(level, subject, task.number)}
+                    egeInf2Enhance={isEgeInfTruthTableTask(level, subject, task.number)}
                   />
                   {task.file && <TaskFileAttachment href={task.file} />}
                   {task.author && <div className="task-author">{task.author}</div>}
@@ -2453,7 +2463,7 @@ function ExamPage() {
                         <section
                           key={task.id}
                           data-task-id={task.id}
-                          className={`exam-task-card exam-task-card--p2 exam-task-card--in-group${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                          className={`exam-task-card exam-task-card--p2 exam-task-card--in-group${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
                           onClick={() => handleTaskFocus(task.id)}
                         >
                           <div className="exam-task-card__top">
@@ -2468,13 +2478,13 @@ function ExamPage() {
                             </div>
                             {showExamEducationShell ? (
                               <div className="exam-task-card__status-cluster">
-                                {boardPersistHasDraft(boardsByTask[task.id]) ? (
-                                  <span className="exam-task-card__draft-label">Есть черновик</span>
-                                ) : null}
                                 <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
                                   {p2Stat.label}
                                 </span>
-                                <ExamTaskDrawingHeaderButton onClick={() => setEduOpenBoardForTaskId(task.id)} />
+                                <ExamTaskDrawingHeaderButton 
+                                  onClick={() => setEduOpenBoardForTaskId(task.id)}
+                                  hasDraft={boardPersistHasDraft(boardsByTask[task.id])}
+                                />
                               </div>
                             ) : (
                               <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
@@ -2497,9 +2507,11 @@ function ExamPage() {
                             html={task.text}
                             className="exam-task-card__text task-text"
                             ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
+                    ogeInf6Enhance={isOgeInformaticsTask(level, subject, task.number, 6)}
                             egeInfFileEnhance={isEgeInformaticsContext(level, subject)}
                             egeInf22Enhance={isEgeInfParallelProcessesTask(level, subject, task.number)}
                     egeInf1Enhance={isEgeInfRoadGraphTask(level, subject, task.number)}
+                    egeInf2Enhance={isEgeInfTruthTableTask(level, subject, task.number)}
                           />
                           {task.file && <TaskFileAttachment href={task.file} />}
                           {task.author && <div className="task-author">{task.author}</div>}
@@ -2541,7 +2553,7 @@ function ExamPage() {
                     <section
                       key={task.id}
                       data-task-id={task.id}
-                      className={`exam-task-card exam-task-card--p2${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
+                      className={`exam-task-card exam-task-card--p2${task.subdivision === "geom" ? " task-geom" : task.subdivision === "alg" ? " task-alg" : ""}${isOgeInformaticsTask(level, subject, task.number, 6) ? " exam-task-card--oge-inf-6" : ""}${isOgeInformaticsTask(level, subject, task.number, 13) ? " exam-task-card--oge-inf-13" : ""}${isEgeInfParallelProcessesTask(level, subject, task.number) ? " exam-task-card--ege-inf-22" : ""}${isEgeInfRoadGraphTask(level, subject, task.number) ? " exam-task-card--ege-inf-1" : ""}${isEgeInfTruthTableTask(level, subject, task.number) ? " exam-task-card--ege-inf-2" : ""}${((level === "oge" && subject === "inf" && task.number === 13) || (level === "oge" && isMathLikeSubject(subject) && task.number === 1)) ? " task-img-full" : ""}`}
                       onClick={() => handleTaskFocus(task.id)}
                     >
                       <div className="exam-task-card__top">
@@ -2556,13 +2568,13 @@ function ExamPage() {
                         </div>
                         {showExamEducationShell ? (
                           <div className="exam-task-card__status-cluster">
-                            {boardPersistHasDraft(boardsByTask[task.id]) ? (
-                              <span className="exam-task-card__draft-label">Есть черновик</span>
-                            ) : null}
                             <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
                               {p2Stat.label}
                             </span>
-                            <ExamTaskDrawingHeaderButton onClick={() => setEduOpenBoardForTaskId(task.id)} />
+                            <ExamTaskDrawingHeaderButton 
+                              onClick={() => setEduOpenBoardForTaskId(task.id)}
+                              hasDraft={boardPersistHasDraft(boardsByTask[task.id])}
+                            />
                           </div>
                         ) : (
                           <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
@@ -2585,9 +2597,11 @@ function ExamPage() {
                         html={task.text}
                         className="exam-task-card__text task-text"
                         ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
+                    ogeInf6Enhance={isOgeInformaticsTask(level, subject, task.number, 6)}
                         egeInfFileEnhance={isEgeInformaticsContext(level, subject)}
                         egeInf22Enhance={isEgeInfParallelProcessesTask(level, subject, task.number)}
                     egeInf1Enhance={isEgeInfRoadGraphTask(level, subject, task.number)}
+                    egeInf2Enhance={isEgeInfTruthTableTask(level, subject, task.number)}
                       />
                       {task.file && <TaskFileAttachment href={task.file} />}
                       {task.author && <div className="task-author">{task.author}</div>}

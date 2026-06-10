@@ -65,6 +65,15 @@ export function isEgeInfRoadGraphTask(
   return isEgeInformaticsTask(level, subject, taskNumber, 1);
 }
 
+/** ЕГЭ информатика №2 — таблица истинности. */
+export function isEgeInfTruthTableTask(
+  level: string | undefined,
+  subject: string | undefined,
+  taskNumber: number | string | null | undefined
+): boolean {
+  return isEgeInformaticsTask(level, subject, taskNumber, 2);
+}
+
 /** ЕГЭ информатика №22 — параллельные и последовательные процессы. */
 export function isEgeInfParallelProcessesTask(
   level: string | undefined,

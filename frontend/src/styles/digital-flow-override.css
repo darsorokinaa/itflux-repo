@@ -2169,3 +2169,56 @@ body,
     min-height: 42px;
   }
 }
+
+.ege-inf-2-truth-table,
+.all-tasks-card--ege-inf-2 .ege-inf-2-truth-table,
+.exam-task-card--ege-inf-2 .ege-inf-2-truth-table {
+  border-collapse: collapse !important;
+  border: 1px solid var(--text-primary) !important;
+  margin: 1rem 0;
+  table-layout: auto !important;
+}
+
+.ege-inf-2-truth-table td,
+.ege-inf-2-truth-table th {
+  border: 1px solid var(--text-primary) !important;
+  padding: 0.5rem 0.75rem !important;
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+
+.ege-inf-2-truth-table td p,
+.ege-inf-2-truth-table th p {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.ege-inf-2-task > table:not(.ege-inf-2-truth-table) {
+  border: none !important;
+}
+
+/* Кнопка черновика в сгенерированном варианте: переносим из плавающего нижнего
+   правого угла в правый верхний угол карточки (внутрь кластера статуса в шапке). */
+.exam-task-card {
+  padding-bottom: 0 !important;
+}
+
+.exam-task-card .exam-task-draw-fab {
+  position: static !important;
+  right: auto !important;
+  bottom: auto !important;
+  z-index: auto !important;
+  padding: 7px 13px !important;
+  font-size: 12px !important;
+  box-shadow: 0 4px 12px rgba(43, 82, 245, 0.22) !important;
+}
+
+.exam-task-card .exam-task-draw-fab:hover {
+  transform: none !important;
+  box-shadow: 0 6px 14px rgba(43, 82, 245, 0.28) !important;
+}
+
+.exam-task-card .exam-task-draw-fab svg {
+  width: 15px !important;
+  height: 15px !important;
+}

@@ -10,9 +10,11 @@ export function devApiBase() {
   }
   if (typeof window === "undefined") return "";
   if (!import.meta.env.DEV) return "";
-  const port = window.location.port;
-  // Типичные порты Vite (в т.ч. если занят 5000 и подняли на 5001) — прямой запрос к Django для тяжёлых бинарников
-  if (port === "5000" || port === "5001" || port === "5173") {
+  const { hostname, port } = window.location;
+  const hostOk = hostname === "localhost" || hostname === "127.0.0.1";
+  const portOk = port === "5000" || port === "5001" || port === "5173";
+  // Прямой Django только с локального Vite; с телефона/по IP — через прокси Vite (/api).
+  if (hostOk && portOk) {
     return `${window.location.protocol}//127.0.0.1:8000`;
   }
   return "";

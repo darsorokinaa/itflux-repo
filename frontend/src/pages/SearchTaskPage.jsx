@@ -92,7 +92,16 @@ function SearchTaskPage() {
               <div className="search-task-card-body">
                 <div className="search-task-section">
                   <h4>Условие</h4>
-                  <MathContent html={t.task_text || ""} className="search-task-condition" />
+                  <MathContent 
+                    html={t.task_text || ""} 
+                    className="search-task-condition" 
+                    ogeInf13Enhance={t.task_number === 13}
+                    ogeInf6Enhance={t.task_number === 6}
+                    egeInfFileEnhance={true}
+                    egeInf22Enhance={t.task_number === 22}
+                    egeInf1Enhance={t.task_number === 1}
+                    egeInf2Enhance={t.task_number === 2}
+                  />
                 </div>
                 {t.answer && (
                   <div className="search-task-section search-task-answer">

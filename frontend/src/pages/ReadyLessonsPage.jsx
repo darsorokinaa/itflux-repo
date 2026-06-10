@@ -48,10 +48,36 @@ function LessonCard({ lesson }) {
   const durationLabel = formatDuration(lesson.duration_minutes);
   const difficultyLabel = DIFFICULTY_LABELS[lesson.difficulty] || lesson.difficulty;
   const coverUrl = mediaUrl(lesson.cover_image_url);
+  const cardBgImageUrl = mediaUrl(lesson.card_background_image_url);
+  const cardBgColor = lesson.card_background_color;
   const canOpenLesson = Boolean(lesson.slug && (lesson.archive_url || lesson.file_url));
+  const fileExtLower = (lesson.file_url || "").toLowerCase().split("?")[0];
+  const isPdfLesson = Boolean(!lesson.archive_url && fileExtLower.endsWith(".pdf"));
+  const directFileUrl = mediaUrl(lesson.file_url);
+  const isReactViewer = Boolean(
+    !lesson.archive_url && 
+    lesson.file_url && 
+    !fileExtLower.endsWith(".html")
+  );
+  // PDF-урок открываем сразу в нативном просмотрщике браузера (новая вкладка, на весь экран),
+  // без промежуточной страницы-вьюера с шапкой.
+  const lessonUrl = isPdfLesson && directFileUrl
+    ? directFileUrl
+    : isReactViewer
+    ? `/lessons/${encodeURIComponent(lesson.slug)}/view`
+    : `/api/lessons/${encodeURIComponent(lesson.slug)}/view/`;
+
+  const cardStyle = {};
+  if (cardBgImageUrl) {
+    cardStyle.backgroundImage = `url(${cardBgImageUrl})`;
+    cardStyle.backgroundSize = "cover";
+    cardStyle.backgroundPosition = "center";
+  } else if (cardBgColor) {
+    cardStyle.backgroundColor = cardBgColor;
+  }
 
   return (
-    <article className={`lesson-card-v3 lesson-card-v3--${theme}`}>
+    <article className={`lesson-card-v3 lesson-card-v3--${theme}`} style={cardStyle}>
       <div className="lesson-card-v3__layout">
         <div className="lesson-card-v3__content">
           <div className="lesson-card-v3__top">
@@ -83,7 +109,7 @@ function LessonCard({ lesson }) {
           <div className="lesson-card-v3__actions">
             {canOpenLesson ? (
               <a
-                href={`/api/lessons/${encodeURIComponent(lesson.slug)}/view/`}
+                href={lessonUrl}
                 className="lesson-card-v3__btn lesson-card-v3__btn--primary"
                 target="_blank"
                 rel="noopener noreferrer"

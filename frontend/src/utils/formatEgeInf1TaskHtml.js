@@ -428,6 +428,11 @@ function normalizeSparseRoadMatrix(table) {
     .filter((text) => cellTextIsPointLabel(text));
   if (headerLabels.length < 3) return;
 
+  const N = headerLabels.length;
+  // Если таблица уже полная (N+1 строк и N+1 столбцов), не нужно её нормализовать
+  const isFullMatrix = rows.length === N + 1 && rows.every(row => directCells(row).length === N + 1);
+  if (isFullMatrix) return;
+
   const byLabel = new Map();
   for (let i = 1; i < rows.length; i++) {
     const cells = directCells(rows[i]);
@@ -438,17 +443,15 @@ function normalizeSparseRoadMatrix(table) {
     const values = [];
     for (let c = 1; c < cells.length; c++) {
       const t = normalizeCellText(cells[c]);
-      if (!t) continue;
       // Метки пунктов внутри строки матрицы не считаем весами рёбер.
       if (cellTextIsPointLabel(t)) continue;
-      values.push(t);
+      values.push(t || null);
     }
     byLabel.set(rowLabel, values);
   }
 
   if (!headerLabels.every((label) => byLabel.has(label))) return;
   const lists = headerLabels.map((label) => byLabel.get(label) || []);
-  const N = headerLabels.length;
 
   const matrix = Array.from({ length: N }, () => Array(N).fill(null));
   const solve = (r, c, idx) => {

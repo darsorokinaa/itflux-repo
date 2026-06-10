@@ -27,6 +27,7 @@ class TaskSerializer(serializers.ModelSerializer):
 
 class LessonCatalogSerializer(serializers.ModelSerializer):
     cover_image_url = serializers.SerializerMethodField()
+    card_background_image_url = serializers.SerializerMethodField()
     file_url = serializers.SerializerMethodField()
     archive_url = serializers.SerializerMethodField()
 
@@ -49,6 +50,8 @@ class LessonCatalogSerializer(serializers.ModelSerializer):
             "access_level",
             "status",
             "cover_image_url",
+            "card_background_image_url",
+            "card_background_color",
             "file_url",
             "archive_url",
         ]
@@ -71,6 +74,9 @@ class LessonCatalogSerializer(serializers.ModelSerializer):
 
     def get_cover_image_url(self, obj):
         return self._absolute_file_url(obj, "cover_image")
+
+    def get_card_background_image_url(self, obj):
+        return self._absolute_file_url(obj, "card_background_image")
 
     def get_file_url(self, obj):
         return self._absolute_file_url(obj, "file")
@@ -104,6 +110,8 @@ class LessonAdminSerializer(serializers.ModelSerializer):
             "status",
             "access_level",
             "cover_image",
+            "card_background_image",
+            "card_background_color",
             "file",
             "archive",
             "file_url",

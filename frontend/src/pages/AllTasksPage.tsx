@@ -27,6 +27,8 @@ import {
 } from "../utils/isOgeInformaticsTask";
 import type { TaskFileSource } from "../components/InformaticsCodeEditor/types";
 
+import MathContent from "../components/MathContent";
+
 const InformaticsCodeEditorEntry = lazy(
   () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
 );
@@ -779,9 +781,15 @@ export default function AllTasksPage() {
                     >
                       <div className="all-tasks-raw-item__body">
                         <LazyVisible minHeight={120}>
-                          <div
+                          <MathContent
                             className="all-tasks-raw-html"
-                            dangerouslySetInnerHTML={{ __html: t.text || "" }}
+                            html={t.text || ""}
+                            ogeInf13Enhance={level === "oge" && subject === "inf" && t.task_number === 13}
+                            ogeInf6Enhance={level === "oge" && subject === "inf" && t.task_number === 6}
+                            egeInfFileEnhance={level === "ege" && subject === "inf"}
+                            egeInf22Enhance={level === "ege" && subject === "inf" && t.task_number === 22}
+                            egeInf1Enhance={level === "ege" && subject === "inf" && t.task_number === 1}
+                            egeInf2Enhance={level === "ege" && subject === "inf" && t.task_number === 2}
                           />
                           {t.file_url ? (
                             <p className="all-tasks-raw-file">
@@ -796,10 +804,10 @@ export default function AllTasksPage() {
                   </div>
                   <div className="all-tasks-card__actions">
                     <div className="exam-task-card__status-cluster">
-                      {hasTaskBoardDraft ? (
-                        <span className="exam-task-card__draft-label">Есть черновик</span>
-                      ) : null}
-                      <ExamTaskDrawingHeaderButton onClick={() => setOpenBoardForTaskId(t.id)} />
+                      <ExamTaskDrawingHeaderButton 
+                        onClick={() => setOpenBoardForTaskId(t.id)} 
+                        hasDraft={hasTaskBoardDraft}
+                      />
                     </div>
                   </div>
                 </li>

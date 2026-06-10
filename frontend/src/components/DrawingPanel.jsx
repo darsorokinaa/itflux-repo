@@ -128,11 +128,11 @@ function IconCollapse({ size = 18 }) {
 /**
  * Кнопка-карандаш в шапке карточки задания (только иконка).
  */
-export function ExamTaskDrawingHeaderButton({ onClick, title = "Черновик" }) {
+export function ExamTaskDrawingHeaderButton({ onClick, title = "Черновик", hasDraft = false }) {
   return (
     <button
       type="button"
-      className="exam-task-draw-header-pencil"
+      className="exam-task-draw-fab"
       onClick={(e) => {
         e.stopPropagation();
         onClick?.();
@@ -141,6 +141,7 @@ export function ExamTaskDrawingHeaderButton({ onClick, title = "Черновик
       aria-label={title}
     >
       <IconPencil />
+      <span>{hasDraft ? "Продолжить" : "Черновик"}</span>
     </button>
   );
 }

@@ -152,7 +152,16 @@ function SearchVariantPage() {
                     </div>
                     <div className="task-content">
                       {t.task_text ? (
-                        <MathContent html={t.task_text} className="task-text" />
+                        <MathContent 
+                          html={t.task_text} 
+                          className="task-text" 
+                          ogeInf13Enhance={data.variant.level === "oge" && data.variant.subject === "inf" && t.number === 13}
+                          ogeInf6Enhance={data.variant.level === "oge" && data.variant.subject === "inf" && t.number === 6}
+                          egeInfFileEnhance={data.variant.level === "ege" && data.variant.subject === "inf"}
+                          egeInf22Enhance={data.variant.level === "ege" && data.variant.subject === "inf" && t.number === 22}
+                          egeInf1Enhance={data.variant.level === "ege" && data.variant.subject === "inf" && t.number === 1}
+                          egeInf2Enhance={data.variant.level === "ege" && data.variant.subject === "inf" && t.number === 2}
+                        />
                       ) : (
                         <span className="sv-task-text-fallback">Текст задания недоступен.</span>
                       )}

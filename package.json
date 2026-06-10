@@ -5,6 +5,7 @@
     "build": "cd frontend && npm install && npm run build"
   },
   "dependencies": {
+    "@cyntler/react-doc-viewer": "^1.17.1",
     "@tailwindcss/vite": "^4.2.4",
     "@tiptap/core": "^3.20.0",
     "@tiptap/extension-image": "^3.20.0",

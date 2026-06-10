@@ -3,8 +3,10 @@ import { formatOgeInformaticsTask13Html } from "../utils/formatOgeInf13TaskHtml"
 import { formatOgeMathChoiceTaskHtml } from "../utils/formatOgeMathChoiceTaskHtml";
 import { formatOgeMathMatchingTaskHtml } from "../utils/formatOgeMathMatchingTaskHtml";
 import { formatEgeInf22ParallelProcessesHtml } from "../utils/formatEgeInf22TaskHtml";
+import { formatEgeInf2TruthTableHtml } from "../utils/formatEgeInf2TaskHtml";
 import { formatEgeInf1RoadGraphHtml } from "../utils/formatEgeInf1TaskHtml";
 import { stripFipiAttachedFileMarkup } from "../utils/formatEgeInfAttachedFileHtml";
+import { formatOgeInf6TaskHtml } from "../utils/formatOgeInf6TaskHtml";
 
 /** Снять слои &lt;…&gt; если HTML целиком попал в БД как экранированный текст. */
 function decodeHtmlEntityLayersIfStoredEscaped(raw) {
@@ -30,8 +32,12 @@ function normalizeEscapedTaskSymbols(raw) {
   if (typeof raw !== "string" || !raw) return raw;
   return raw
     .replace(/\\([#+^])/g, "$1")
+    // Исправление для ОГЭ 4: когда перенос строки сливается с \end{array} (получается \\end{array})
+    .replace(/\\\\end\{/g, "\\\\ \\end{")
     // Удаляем одиночный "\" перед пробелом, HTML-тегом или концом строки.
-    .replace(/\\(?=\s|<|$)/g, "");
+    // Используем negative lookbehind, чтобы не ломать двойные слеши (\\) переноса строк в LaTeX
+    // и логические И (/\), где слеш предшествует обратному слешу.
+    .replace(/(?<!\\|\/)\\(?=\s|<|$)/g, "");
 }
 
 /** span.logic-connective-ru иногда портится при сохранении (пробелы в тегах). */
@@ -277,6 +283,40 @@ function normalizeSparseTables(root) {
     return [...body.querySelectorAll(":scope > tr")];
   };
 
+  const tryAlignTruthTableRight = (table) => {
+    const rows = directRows(table);
+    if (rows.length < 3 || rows.length > MAX_TABLE_ROWS) return false;
+
+    const rowCells = rows.map((row) => [...row.querySelectorAll(":scope > td, :scope > th")]);
+    const counts = rowCells.map(c => c.length);
+    const maxCols = Math.max(...counts);
+    if (maxCols < 3 || counts[0] !== 1) return false;
+
+    let zeroOneCount = 0;
+    let totalCells = 0;
+    rowCells.forEach(cells => {
+      cells.forEach(cell => {
+        totalCells++;
+        const text = normalizeCellText(cell);
+        if (text === '0' || text === '1') zeroOneCount++;
+      });
+    });
+
+    if (zeroOneCount / totalCells > 0.5) {
+      rows.forEach((row, r) => {
+        const cells = rowCells[r];
+        const missing = maxCols - cells.length;
+        for (let i = 0; i < missing; i++) {
+          const td = table.ownerDocument.createElement(cells[0]?.tagName?.toLowerCase() === "th" ? "th" : "td");
+          td.innerHTML = "&nbsp;";
+          row.insertBefore(td, cells[0]);
+        }
+      });
+      return true;
+    }
+    return false;
+  };
+
   const tryInsertMissingCornerCell = (table) => {
     const rows = directRows(table);
     if (rows.length < 3 || rows.length > MAX_TABLE_ROWS) return;
@@ -336,6 +376,7 @@ function normalizeSparseTables(root) {
     }
 
     try {
+      if (tryAlignTruthTableRight(table)) return;
       tryInsertMissingCornerCell(table);
 
       const rows = directRows(table);
@@ -438,7 +479,9 @@ function removeDuplicateRoadGraphImages(root, isEgeInf1) {
   });
 }
 
-function MathContentInner({ html, className, onImageClick, ogeInf13Enhance = false, egeInfFileEnhance = false, egeInf22Enhance = false, egeInf1Enhance = false }) {
+let mathJaxPromise = Promise.resolve();
+
+function MathContentInner({ html, className, onImageClick, ogeInf13Enhance = false, ogeInf6Enhance = false, egeInfFileEnhance = false, egeInf22Enhance = false, egeInf1Enhance = false, egeInf2Enhance = false }) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -446,84 +489,98 @@ function MathContentInner({ html, className, onImageClick, ogeInf13Enhance = fal
     const el = ref.current;
     const s = (html != null ? String(html) : "") || "";
     const decoded = decodeHtmlEntityLayersIfStoredEscaped(s);
-    const cleaned = decoded; // stripEmbeddedStyleBlocks(decoded); - убрано по просьбе
-    const normalized = normalizeEscapedTaskSymbols(cleaned);
-    const repaired = repairLogicConnectiveSpanMarkup(normalized);
-    const afterFile = egeInfFileEnhance
-      ? stripFipiAttachedFileMarkup(repaired)
-      : repaired;
-    const pipedFile = afterFile && afterFile.trim() ? afterFile : repaired;
-    const inf22 = egeInf22Enhance ? formatEgeInf22ParallelProcessesHtml(pipedFile) : pipedFile;
-    const afterInf22 = inf22 && inf22.trim() ? inf22 : pipedFile;
-    let shouldNormalizeTables = false;
-    try {
-      shouldNormalizeTables = rawHasSparseGridTables(afterInf22);
-    } catch (err) {
-      console.error("RAW_TABLE_SCAN_ERR:", err);
-      shouldNormalizeTables = false;
-    }
-    let afterInf1 = afterInf22;
-    try {
-      // Запускаем всегда: форматтер сам отфильтрует нерелевантные задания.
-      // Это покрывает кейсы, когда road-task ошибочно попал не под №1.
-      const inf1 = formatEgeInf1RoadGraphHtml(afterInf22);
-      if (inf1 && inf1.trim()) afterInf1 = inf1;
-    } catch (err) {
-      console.error("FORMATTER ERR:", err);
-      // Временно выводим ошибку на экран, чтобы понять, что ломается в браузере
-      afterInf1 = `<div style="color:red;font-weight:bold;">FORMATTER ERR: ${err.message}</div>` + afterInf22;
-    }
-    const inf13 = ogeInf13Enhance ? formatOgeInformaticsTask13Html(afterInf1) : afterInf1;
-    // Соответствие А/Б/В ↔ 1/2/3 (ОГЭ мат. №11) — до choice, иначе 1) 2) путаются с вариантами.
-    const matched = formatOgeMathMatchingTaskHtml(inf13);
-    const afterMatch = matched && matched.trim() ? matched : inf13;
-    // Только отображение: в CKEditor в БД остаются исходные <table>, не oge-math-choice-*.
-    const formatted = formatOgeMathChoiceTaskHtml(afterMatch);
-    const piped = formatted && formatted.trim() ? formatted : afterMatch;
-    el.innerHTML = convertLogicSpansInsideMathDelimitersToTex(piped);
-    if (shouldNormalizeTables) {
-      try {
-        normalizeSparseTables(el);
-      } catch (err) {
-        console.error("TABLE_NORMALIZE_ERR:", err);
-      }
-    }
-    removeDuplicateRoadGraphImages(el, egeInf1Enhance);
-    
-    // ДОПОЛНИТЕЛЬНАЯ ЗАЧИСТКА: если это 1-е задание, принудительно удаляем
-    // все картинки с одинаковым src (кроме первой), даже если они не попали
-    // в .ege-inf-1-task (на всякий случай).
-    if (egeInf1Enhance) {
-      const allImgs = [...el.querySelectorAll("img")].filter(img => {
-        const src = img.getAttribute("src") || "";
-        return !src.includes("math") && !src.includes("mjx");
-      });
-      if (allImgs.length > 1) {
-        allImgs.slice(1).forEach(img => {
-          const host = img.closest("p, figure, div.task-html-block");
-          if (host && host.querySelectorAll("img").length <= 1) {
-            host.remove();
-          } else {
-            img.remove();
-          }
-        });
-      }
-    }
-    // stripFipiInlineLayoutStyles(el); - убрано по просьбе
 
-    // На странице варианта MathJax один раз на весь документ (ExamPage), не на каждую задачу.
-    const inExamVariant = !!el.closest(
-      "#main-wrapper.exam-page, .exam-page, .exam-page-container"
-    );
-    if (inExamVariant) return undefined;
+    // Весь конвейер форматтеров обёрнут в try/catch: одна ошибка форматирования
+    // не должна обрушивать рендер всей страницы варианта (React без error boundary
+    // размонтирует всё дерево при выбросе из эффекта → пустой экран).
+    try {
+      const cleaned = decoded; // stripEmbeddedStyleBlocks(decoded); - убрано по просьбе
+      const normalized = normalizeEscapedTaskSymbols(cleaned);
+      const repaired = repairLogicConnectiveSpanMarkup(normalized);
+      const afterFile = egeInfFileEnhance
+        ? stripFipiAttachedFileMarkup(repaired)
+        : repaired;
+      const pipedFile = afterFile && afterFile.trim() ? afterFile : repaired;
+      const inf2 = egeInf2Enhance ? formatEgeInf2TruthTableHtml(pipedFile) : pipedFile;
+      const afterInf2 = inf2 && inf2.trim() ? inf2 : pipedFile;
+      const inf22 = egeInf22Enhance ? formatEgeInf22ParallelProcessesHtml(afterInf2) : afterInf2;
+      const afterInf22 = inf22 && inf22.trim() ? inf22 : afterInf2;
+      let shouldNormalizeTables = false;
+      try {
+        shouldNormalizeTables = rawHasSparseGridTables(afterInf22);
+      } catch (err) {
+        console.error("RAW_TABLE_SCAN_ERR:", err);
+        shouldNormalizeTables = false;
+      }
+      let afterInf1 = afterInf22;
+      try {
+        // Запускаем всегда: форматтер сам отфильтрует нерелевантные задания.
+        // Это покрывает кейсы, когда road-task ошибочно попал не под №1.
+        const inf1 = formatEgeInf1RoadGraphHtml(afterInf22);
+        if (inf1 && inf1.trim()) afterInf1 = inf1;
+      } catch (err) {
+        console.error("FORMATTER ERR:", err);
+        afterInf1 = afterInf22;
+      }
+      const inf13 = ogeInf13Enhance ? formatOgeInformaticsTask13Html(afterInf1) : afterInf1;
+      const afterInf13 = inf13 && inf13.trim() ? inf13 : afterInf1;
+      const inf6 = ogeInf6Enhance ? formatOgeInf6TaskHtml(afterInf13) : afterInf13;
+      const afterInf6 = inf6 && inf6.trim() ? inf6 : afterInf13;
+      // Соответствие А/Б/В ↔ 1/2/3 (ОГЭ мат. №11) — до choice, иначе 1) 2) путаются с вариантами.
+      const matched = formatOgeMathMatchingTaskHtml(afterInf6);
+      const afterMatch = matched && matched.trim() ? matched : afterInf6;
+      // Только отображение: в CKEditor в БД остаются исходные <table>, не oge-math-choice-*.
+      const formatted = formatOgeMathChoiceTaskHtml(afterMatch);
+      const piped = formatted && formatted.trim() ? formatted : afterMatch;
+      el.innerHTML = convertLogicSpansInsideMathDelimitersToTex(piped);
+      if (shouldNormalizeTables) {
+        try {
+          normalizeSparseTables(el);
+        } catch (err) {
+          console.error("TABLE_NORMALIZE_ERR:", err);
+        }
+      }
+      removeDuplicateRoadGraphImages(el, egeInf1Enhance);
+
+      // ДОПОЛНИТЕЛЬНАЯ ЗАЧИСТКА: если это 1-е задание, принудительно удаляем
+      // все картинки с одинаковым src (кроме первой), даже если они не попали
+      // в .ege-inf-1-task (на всякий случай).
+      if (egeInf1Enhance) {
+        const allImgs = [...el.querySelectorAll("img")].filter(img => {
+          const src = img.getAttribute("src") || "";
+          return !src.includes("math") && !src.includes("mjx");
+        });
+        if (allImgs.length > 1) {
+          allImgs.slice(1).forEach(img => {
+            const host = img.closest("p, figure, div.task-html-block");
+            if (host && host.querySelectorAll("img").length <= 1) {
+              host.remove();
+            } else {
+              img.remove();
+            }
+          });
+        }
+      }
+      // stripFipiInlineLayoutStyles(el); - убрано по просьбе
+    } catch (err) {
+      // Любой сбой форматирования → показываем исходный (декодированный) HTML,
+      // а не пустую страницу.
+      console.error("MATH_CONTENT_RENDER_ERR:", err);
+      try {
+        el.innerHTML = decoded || s;
+      } catch {
+        el.textContent = s;
+      }
+    }
 
     let cancelled = false;
     const run = () => {
       if (cancelled) return;
       if (window.MathJax?.typesetPromise) {
-        window.MathJax.typesetPromise([el])
+        mathJaxPromise = mathJaxPromise
           .then(() => {
-            // if (!cancelled) stripFipiInlineLayoutStyles(el); - убрано по просьбе
+            if (cancelled) return;
+            return window.MathJax.typesetPromise([el]);
           })
           .catch(() => {});
       } else {
@@ -534,7 +591,7 @@ function MathContentInner({ html, className, onImageClick, ogeInf13Enhance = fal
     return () => {
       cancelled = true;
     };
-  }, [html, ogeInf13Enhance, egeInfFileEnhance, egeInf22Enhance, egeInf1Enhance]);
+  }, [html, ogeInf13Enhance, ogeInf6Enhance, egeInfFileEnhance, egeInf22Enhance, egeInf1Enhance, egeInf2Enhance]);
 
   useEffect(() => {
     if (!onImageClick || !ref.current) return;

@@ -3014,8 +3014,15 @@ def api_lesson_archive_view(request, slug):
         return HttpResponse(html, content_type="text/html; charset=utf-8")
 
     if lesson.file:
+        file_path = lesson.file.path
+        if not file_path.lower().endswith(".html"):
+            from django.http import FileResponse
+            import mimetypes
+            content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+            return FileResponse(open(file_path, "rb"), content_type=content_type)
+            
         base_href = lesson_file_base_href(request, lesson)
-        html = read_lesson_file_html(lesson.file.path, base_href, request=request, slug=slug)
+        html = read_lesson_file_html(file_path, base_href, request=request, slug=slug)
         return HttpResponse(html, content_type="text/html; charset=utf-8")
 
     raise Http404("Урок не найден")

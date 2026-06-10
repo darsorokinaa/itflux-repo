@@ -590,6 +590,8 @@ class Lesson(models.Model):
         db_index=True,
     )
     cover_image = models.ImageField(upload_to=lesson_cover_upload_to, blank=True, null=True)
+    card_background_image = models.ImageField(upload_to=lesson_cover_upload_to, blank=True, null=True, verbose_name="Фон карточки (картинка)")
+    card_background_color = models.CharField(max_length=7, blank=True, default="", verbose_name="Фон карточки (HEX цвет)", help_text="Например, #2B52F5")
     file = models.FileField(upload_to=lesson_file_upload_to, blank=True, null=True)
     archive = models.FileField(
         upload_to=lesson_archive_upload_to,

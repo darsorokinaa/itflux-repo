@@ -118,6 +118,7 @@ function TasksPage() {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [prepActionError, setPrepActionError] = useState(null);
 
   /** Подтемы для тренажёра: список по номерам заданий (только для одиночных заданий) */
   const [subtopicsByTask, setSubtopicsByTask] = useState([]);
@@ -330,21 +331,70 @@ function TasksPage() {
   };
 
   const postVariant = (payload, mode = "variant", extra = {}) => {
-    const body = JSON.stringify(payload);
+    setPrepActionError(null);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 120000);
     return fetch(`/api/${level}/${subject}/variant/`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body,
+      credentials: "same-origin",
+      signal: controller.signal,
+      body: JSON.stringify(payload),
     })
-      .then((res) => {
-        if (!res.ok) return res.json().then((d) => { throw new Error(d.error || res.statusText); });
-        return res.json();
+      .then(async (res) => {
+        window.clearTimeout(timeoutId);
+        const text = await res.text();
+        let data = null;
+        if (text) {
+          try {
+            data = JSON.parse(text);
+          } catch {
+            throw new Error(
+              res.ok
+                ? "Сервер вернул некорректный ответ. Обновите страницу и попробуйте снова."
+                : `Не удалось сформировать вариант (${res.status || "ошибка сервера"})`
+            );
+          }
+        }
+        if (!res.ok) {
+          throw new Error(data?.error || res.statusText || "Не удалось сформировать вариант");
+        }
+        if (!data?.variant_id) {
+          throw new Error("Сервер не вернул номер варианта");
+        }
+        return data;
       })
       .then((data) => {
         navigate(`/${level}/${subject}/variant/${data.variant_id}`, {
           state: { mode, subjectName: subjectNameFromApi, ...extra },
         });
+      })
+      .catch((err) => {
+        window.clearTimeout(timeoutId);
+        if (err?.name === "AbortError") {
+          throw new Error("Сервер не ответил вовремя. Проверьте, что Django запущен на :8000.");
+        }
+        throw err;
       });
+  };
+
+  const handleVariantGenerationError = (err) => {
+    const message = err?.message || "Не удалось сформировать вариант";
+    setPrepActionError(message);
+  };
+
+  const warnEmptyVariantPayload = (items, partLabel) => {
+    if (Object.keys(payloadFromTasks(items)).length > 0) return false;
+    const fipiHint =
+      onlyFipiVariant && subtopicsByTask.length > 0
+        ? " Снимите «Только ФИПИ» или выберите другую часть."
+        : "";
+    setPrepActionError(
+      partLabel
+        ? `Для «${partLabel}» нет доступных заданий.${fipiHint}`
+        : `Нет заданий для формирования варианта.${fipiHint}`
+    );
+    return true;
   };
 
   const payloadFromTasks = (items) => {
@@ -414,42 +464,49 @@ function TasksPage() {
 
   const onPart1 = () => {
     const items = onlyFipiVariant
-      ? tasks.filter((item) => getItemPart(item) === 1)
+      ? tasks.filter((item) => getItemPart(item) === 1).filter(isFipiItem)
       : part1Tasks;
     const err13 = ogeInf13SelectionError(items);
     if (err13) {
-      setError(err13);
+      setPrepActionError(err13);
       return;
     }
     const payload = buildVariantPayload(items);
-    if (Object.keys(payload.content).length === 0) return;
+    if (warnEmptyVariantPayload(items, "Часть 1")) return;
     setSubmitBlock1(true);
-    postVariant(payload, "part1").catch((err) => setError(err.message)).finally(() => setSubmitBlock1(false));
+    postVariant(payload, "part1")
+      .catch(handleVariantGenerationError)
+      .finally(() => setSubmitBlock1(false));
   };
   const onPart2 = () => {
     const items = onlyFipiVariant
-      ? tasks.filter((item) => getItemPart(item) === 2)
+      ? tasks.filter((item) => getItemPart(item) === 2).filter(isFipiItem)
       : part2Tasks;
     const err13 = ogeInf13SelectionError(items);
     if (err13) {
-      setError(err13);
+      setPrepActionError(err13);
       return;
     }
     const payload = buildVariantPayload(items);
-    if (Object.keys(payload.content).length === 0) return;
+    if (warnEmptyVariantPayload(items, "Часть 2")) return;
     setSubmitBlock1(true);
-    postVariant(payload, "part2").catch((err) => setError(err.message)).finally(() => setSubmitBlock1(false));
+    postVariant(payload, "part2")
+      .catch(handleVariantGenerationError)
+      .finally(() => setSubmitBlock1(false));
   };
   const onChooseAll = () => {
-    const err13 = ogeInf13SelectionError(tasks);
+    const items = tasksForVariant;
+    const err13 = ogeInf13SelectionError(items);
     if (err13) {
-      setError(err13);
+      setPrepActionError(err13);
       return;
     }
-    const payload = buildVariantPayload(tasks);
-    if (Object.keys(payload.content).length === 0) return;
+    const payload = buildVariantPayload(items);
+    if (warnEmptyVariantPayload(items, "Полный вариант")) return;
     setSubmitBlock1(true);
-    postVariant(payload, "variant").catch((err) => setError(err.message)).finally(() => setSubmitBlock1(false));
+    postVariant(payload, "variant")
+      .catch(handleVariantGenerationError)
+      .finally(() => setSubmitBlock1(false));
   };
 
   const runPrepVariantGeneration = () => {
@@ -660,11 +717,15 @@ function TasksPage() {
 
   const onStartTest = () => {
     const payload = buildPayloadFromTestCounts();
-    if (!payload.tasks?.length) return;
+    if (!payload.tasks?.length) {
+      setPrepActionError("Выберите хотя бы один номер задания в сетке.");
+      return;
+    }
+    setPrepActionError(null);
     setSubmitBlock2(true);
     const testTaskLabels = testSelectedIdsSorted.map((id) => identifierToLabel[id] ?? id);
     postVariant(payload, "test", { testTaskLabels })
-      .catch((err) => setError(err.message))
+      .catch(handleVariantGenerationError)
       .finally(() => setSubmitBlock2(false));
   };
 
@@ -881,6 +942,7 @@ function TasksPage() {
   }
 
   const part1Blocked = submitBlock1 || (subject === "inf" && level === "ege");
+  const part2Blocked = submitBlock1;
   const nPart1 = part1Tasks.length;
   const nPart2 = part2Tasks.length;
   const variantTitlePrep = subjectPrepPhraseForVariantTitle(level, subject);
@@ -930,7 +992,10 @@ function TasksPage() {
                 name="prep-scenario-focus"
                 className="tasks-prep-mode-radio-input"
                 checked={prepModeFocus === "variant"}
-                onChange={() => setPrepModeFocus("variant")}
+                onChange={() => {
+                  setPrepActionError(null);
+                  setPrepModeFocus("variant");
+                }}
               />
               {prepModeFocus === "variant" ? (
                 <span className="tasks-prep-mode-selected-badge">Выбрано</span>
@@ -953,7 +1018,10 @@ function TasksPage() {
                 name="prep-scenario-focus"
                 className="tasks-prep-mode-radio-input"
                 checked={prepModeFocus === "trainer"}
-                onChange={() => setPrepModeFocus("trainer")}
+                onChange={() => {
+                  setPrepActionError(null);
+                  setPrepModeFocus("trainer");
+                }}
               />
               {prepModeFocus === "trainer" ? (
                 <span className="tasks-prep-mode-selected-badge">Выбрано</span>
@@ -970,6 +1038,21 @@ function TasksPage() {
           </section>
 
           <section className="tasks-prep-workspace">
+            {(prepActionError || submitBlock1 || submitBlock2) ? (
+              <div
+                className={`tasks-prep-status-banner${
+                  prepActionError ? " tasks-prep-status-banner--error" : " tasks-prep-status-banner--info"
+                }`}
+                role={prepActionError ? "alert" : "status"}
+                aria-live="polite"
+              >
+                {prepActionError
+                  ? prepActionError
+                  : submitBlock1
+                    ? "Формируем вариант…"
+                    : "Запускаем тестирование…"}
+              </div>
+            ) : null}
             <div className={`tasks-prep-workspace-head${prepModeFocus === "trainer" ? " tasks-prep-workspace-head--trainer" : ""}`}>
               <div className="tasks-prep-workspace-head-text">
                 <h2 id="prep-work-heading" className="tasks-prep-workspace-title">
@@ -1040,7 +1123,10 @@ function TasksPage() {
                     type="button"
                     className={`tasks-prep-format-option${prepVariantChoice === "part1" ? " is-active" : ""}`}
                     disabled={part1Blocked}
-                    onClick={() => setPrepVariantChoice("part1")}
+                    onClick={() => {
+                      setPrepActionError(null);
+                      setPrepVariantChoice("part1");
+                    }}
                     aria-pressed={prepVariantChoice === "part1"}
                   >
                     <div className="tasks-prep-format-mark tasks-prep-format-mark--p1">1</div>
@@ -1059,8 +1145,11 @@ function TasksPage() {
                   <button
                     type="button"
                     className={`tasks-prep-format-option${prepVariantChoice === "part2" ? " is-active" : ""}`}
-                    disabled={part1Blocked}
-                    onClick={() => setPrepVariantChoice("part2")}
+                    disabled={part2Blocked}
+                    onClick={() => {
+                      setPrepActionError(null);
+                      setPrepVariantChoice("part2");
+                    }}
                     aria-pressed={prepVariantChoice === "part2"}
                   >
                     <div className="tasks-prep-format-mark tasks-prep-format-mark--p2">2</div>
@@ -1080,7 +1169,10 @@ function TasksPage() {
                     type="button"
                     className={`tasks-prep-format-option${prepVariantChoice === "full" ? " is-active" : ""}`}
                     disabled={submitBlock1}
-                    onClick={() => setPrepVariantChoice("full")}
+                    onClick={() => {
+                      setPrepActionError(null);
+                      setPrepVariantChoice("full");
+                    }}
                     aria-pressed={prepVariantChoice === "full"}
                   >
                     <div className="tasks-prep-format-mark tasks-prep-format-mark--full">+</div>

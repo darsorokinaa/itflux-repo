@@ -12,7 +12,6 @@ function Layout() {
   /** Маркетинг и выбор заданий — свой Nav, без шапки/подвала генератора */
   const pathNorm = (pathname || "").replace(/\/+$/, "") || "/";
   const isTasksPrepPicker = /^\/(oge|ege|vpr)\/[^/]+$/.test(pathNorm);
-  const isExamVariantPage = /^\/(oge|ege|vpr)\/[^/]+\/variant\/[^/]+$/.test(pathNorm);
   const isMarketingHome =
     pathname === "/" ||
     pathname === "/tasks" ||
@@ -144,7 +143,7 @@ function Layout() {
         />
       ) : null}
       <div className="app-shell-content">
-      {!isLessonOrHomeworkContext && !isExamVariantPage && <Nav />}
+      {!isLessonOrHomeworkContext && <Nav />}
       {/* !isMarketingHome ? (
       <header
         className={themeData?.headerBg ? "header--themed" : undefined}

@@ -2269,6 +2269,41 @@
 
 .digital-flow-page .tasks-prep-variant-generate {
   margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.tasks-prep-status-banner {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: var(--r-sm);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.tasks-prep-status-banner--info {
+  border: 1.5px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.tasks-prep-status-banner--error {
+  border: 1.5px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.tasks-prep-action-error {
+  flex: 1 1 100%;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  border: 1.5px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
 }
 
 .digital-flow-page .tasks-page.tasks-page--prep-v2 .tasks-prep-trainer-actions.tasks-page-test-actions {
@@ -3072,6 +3107,62 @@ body.exam-variant-view .exam-page-container,
 body.exam-variant-view .exam-edu-page,
 body.exam-variant-view .content-area {
   background: transparent !important;
+}
+
+.exam-variant-status {
+  max-width: 640px;
+  margin: 32px auto;
+  padding: 24px;
+  border-radius: var(--r-md);
+  border: 1.5px solid var(--border-card);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-card);
+}
+
+.exam-variant-status--loading {
+  border-color: #bfdbfe;
+}
+
+.exam-variant-status--error {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.exam-variant-status__title {
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.exam-variant-status__text {
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.exam-variant-status--error .exam-variant-status__text {
+  color: #b91c1c;
+}
+
+.exam-variant-status__meta {
+  margin: 12px 0 0;
+  color: var(--text-hint);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.exam-variant-status__back {
+  display: inline-flex;
+  margin-top: 16px;
+  color: var(--blue-hero);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.exam-variant-status__back:hover {
+  text-decoration: underline;
 }
 
 /* Header нового стиля над страницей варианта */
@@ -3972,6 +4063,49 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   white-space: nowrap;
 }
 
+/* Отступы для плавающей кнопки черновика */
+.all-tasks-card,
+.exam-task-card {
+  position: relative;
+  padding-bottom: 64px !important;
+}
+
+.exam-task-draw-fab {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  border: 1px solid transparent;
+  color: #ffffff !important;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 10px 16px;
+  background: var(--blue-hero, #2b52f5) !important;
+  box-shadow: 0 8px 18px rgba(43, 82, 245, 0.28);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  z-index: 10;
+}
+
+.exam-task-draw-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 22px rgba(43, 82, 245, 0.34);
+  background: var(--blue-dark, #1e3ebd) !important;
+}
+
+.exam-task-draw-fab svg {
+  width: 16px;
+  height: 16px;
+}
+
 /* Кнопка-карандаш в шапке карточки задания */
 .exam-task-draw-header-pencil {
   display: inline-flex;
@@ -4191,6 +4325,35 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   border: 1px solid #d2daea;
   background: var(--lesson-soft);
   box-shadow: 0 6px 18px rgba(28, 52, 108, 0.06);
+  background-size: cover;
+  background-position: center;
+  overflow: hidden;
+}
+
+.lesson-card-v3::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: inherit;
+  opacity: 0.85;
+  z-index: 0;
+  transition: opacity 0.2s ease;
+}
+
+.lesson-card-v3[style*="background"]::before {
+  opacity: 0.4;
+  background: linear-gradient(to right, var(--lesson-soft) 40%, transparent 100%);
+}
+
+.lesson-card-v3:hover::before {
+  opacity: 0.92;
+}
+
+.lesson-card-v3[style*="background"]:hover::before {
+  opacity: 0.5;
 }
 
 .lesson-card-v3__layout {
@@ -4198,6 +4361,8 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   grid-template-columns: minmax(0, 1fr) 230px;
   gap: 16px;
   align-items: center;
+  position: relative;
+  z-index: 1;
 }
 
 .lesson-card-v3__content {
@@ -5696,4 +5861,105 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
     flex-direction: column;
     gap: 12px;
   }
+}
+
+/* Стили для кода в 6 задании ОГЭ */
+.task-code-block {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--r-sm, 8px);
+  padding: 12px 16px;
+  margin: 12px 0;
+  overflow-x: auto;
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 14px;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.task-code-block code {
+  font-family: inherit;
+  color: inherit;
+  background: transparent;
+  padding: 0;
+}
+
+/* Новая плавающая кнопка черновика в правом нижнем углу карточки */
+.exam-task-draw-fab {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  border: 1px solid transparent;
+  color: #ffffff;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 10px 16px;
+  background: var(--blue-hero, #2b52f5);
+  box-shadow: 0 8px 18px rgba(43, 82, 245, 0.28);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  z-index: 10;
+}
+
+.exam-task-draw-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 22px rgba(43, 82, 245, 0.34);
+  background: var(--blue-dark, #1e3ebd);
+}
+
+.exam-task-draw-fab svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Отступы для плавающей кнопки черновика */
+.all-tasks-card,
+.exam-task-card {
+  position: relative;
+  padding-bottom: 64px !important;
+}
+
+.exam-task-draw-fab {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  border: 1px solid transparent;
+  color: #ffffff !important;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 10px 16px;
+  background: var(--blue-hero, #2b52f5) !important;
+  box-shadow: 0 8px 18px rgba(43, 82, 245, 0.28);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  z-index: 10;
+}
+
+.exam-task-draw-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 22px rgba(43, 82, 245, 0.34);
+  background: var(--blue-dark, #1e3ebd) !important;
+}
+
+.exam-task-draw-fab svg {
+  width: 16px;
+  height: 16px;
 }

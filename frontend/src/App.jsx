@@ -15,6 +15,8 @@ import PrivacyPage from "./pages/PrivacyPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import LessonJoinBridge from "./pages/LessonJoinBridge";
 import ReadyLessonsPage from "./pages/ReadyLessonsPage";
+import LessonViewerPage from "./pages/LessonViewerPage";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 function scrollDocumentToTop() {
   window.scrollTo(0, 0);
@@ -79,6 +81,16 @@ function LessonJoinVariantRedirect() {
   return <Navigate to={{ pathname: "/lesson/join/", search: location.search }} replace />;
 }
 
+/** Страница варианта под error boundary: сбой рендера не должен давать пустой экран. */
+function ExamPageWithBoundary() {
+  const location = useLocation();
+  return (
+    <ErrorBoundary key={location.pathname}>
+      <ExamPage />
+    </ErrorBoundary>
+  );
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -94,6 +106,7 @@ function App() {
           <Route path="/tasks" element={<AllTasksPage />} />
           <Route path="/generator" element={<GeneratorHubPage />} />
           <Route path="/lessons" element={<ReadyLessonsPage />} />
+          <Route path="/lessons/:slug/view" element={<LessonViewerPage />} />
           <Route path="/subject/:level" element={<SubjectPage />} />
 
           <Route path="/search/tasks" element={<SearchTaskWithKey />} />
@@ -112,7 +125,7 @@ function App() {
 
           <Route
             path="/:level/:subject/variant/:variant_id"
-            element={<ExamPage />}
+            element={<ExamPageWithBoundary />}
           />
 
           <Route path="*" element={<NotFoundPage />} />
