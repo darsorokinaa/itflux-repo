@@ -441,6 +441,11 @@ export default function AllTasksPage() {
 
   const noAnswerOnly = subtopicId === SUBTOPIC_NO_ANSWER;
 
+  const noAnswerCount = useMemo(() => {
+    if (!data?.tasks) return null;
+    return data.tasks.filter((t) => !(t.answer && String(t.answer).trim())).length;
+  }, [data?.tasks]);
+
   const visibleTasks = useMemo(() => {
     const list = data?.tasks ?? [];
     if (!noAnswerOnly) return list;
@@ -649,7 +654,9 @@ export default function AllTasksPage() {
                 <option value="">
                   {taskListId ? "Все подтемы" : "Все задания — без подтемы"}
                 </option>
-                <option value={SUBTOPIC_NO_ANSWER}>Без ответов</option>
+                <option value={SUBTOPIC_NO_ANSWER}>
+                  Без ответов{noAnswerCount != null ? ` (${noAnswerCount})` : ""}
+                </option>
                 {subtopicsForTask.map((s) => (
                   <option
                     key={
