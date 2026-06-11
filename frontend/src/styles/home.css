@@ -4070,9 +4070,9 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   gap: 6px;
   padding: 4px 10px;
   border-radius: var(--r-pill, 999px);
-  background: #fef3c7;
-  border: 1px solid #fcd97a;
-  color: #92660a;
+  background: #ffe066;
+  border: 1px solid #f5c518;
+  color: #6b4e00;
   font-family: var(--font-body);
   font-size: 11px;
   font-weight: 600;
@@ -4085,7 +4085,7 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #f59e0b;
+  background: #d49a00;
 }
 
 /* Отступы для плавающей кнопки черновика */

@@ -71,6 +71,8 @@ type SubtopicOption = {
 
 /** Значение select и query-параметр subtopic=none */
 const SUBTOPIC_NONE = "none";
+/** Псевдо-подтема: показать только задачи без ответа (фильтруется на клиенте). */
+const SUBTOPIC_NO_ANSWER = "no-answer";
 
 type FiltersResponse = {
   task_numbers: TaskNumberOption[];
@@ -295,8 +297,6 @@ export default function AllTasksPage() {
     return noSt ? [noSt, ...rest] : rest;
   }, [filterOptions, taskListId]);
 
-  const canPickSubtopic = Boolean(taskListId || subtopicsForTask.length > 0);
-
   useEffect(() => {
     const next = writeFiltersToSearchParams({
       level,
@@ -368,6 +368,7 @@ export default function AllTasksPage() {
 
   useEffect(() => {
     if (!subtopicId) return;
+    if (subtopicId === SUBTOPIC_NO_ANSWER) return;
     if (subtopicId === SUBTOPIC_NONE) {
       const ok = subtopicsForTask.some((s) => s.no_subtopic);
       if (!ok) setSubtopicId("");
@@ -378,7 +379,11 @@ export default function AllTasksPage() {
   }, [subtopicsForTask, subtopicId]);
 
   const fetchTasks = useCallback(async () => {
-    if (!taskListId && subtopicId !== SUBTOPIC_NONE) {
+    if (
+      !taskListId &&
+      subtopicId !== SUBTOPIC_NONE &&
+      subtopicId !== SUBTOPIC_NO_ANSWER
+    ) {
       setData(null);
       setError(null);
       setLoading(false);
@@ -395,7 +400,9 @@ export default function AllTasksPage() {
       subtopic_id:
         subtopicId === SUBTOPIC_NONE
           ? SUBTOPIC_NONE
-          : subtopicId || undefined,
+          : subtopicId && subtopicId !== SUBTOPIC_NO_ANSWER
+            ? subtopicId
+            : undefined,
     });
     try {
       const res = await fetch(
@@ -425,16 +432,27 @@ export default function AllTasksPage() {
 
   const selectedSubtopicTitle = useMemo(() => {
     if (!subtopicId) return "";
+    if (subtopicId === SUBTOPIC_NO_ANSWER) return "Без ответов";
     if (subtopicId === SUBTOPIC_NONE) {
       return subtopicsForTask.find((s) => s.no_subtopic)?.title ?? "Без подтемы";
     }
     return subtopicsForTask.find((s) => String(s.id) === subtopicId)?.title ?? "";
   }, [subtopicId, subtopicsForTask]);
 
-  const canBuildWorkbook = Boolean(!loading && !error && data?.tasks?.length);
+  const noAnswerOnly = subtopicId === SUBTOPIC_NO_ANSWER;
+
+  const visibleTasks = useMemo(() => {
+    const list = data?.tasks ?? [];
+    if (!noAnswerOnly) return list;
+    return list.filter((t) => !(t.answer && String(t.answer).trim()));
+  }, [data?.tasks, noAnswerOnly]);
+
+  const visibleTotal = noAnswerOnly ? visibleTasks.length : data?.total ?? 0;
+
+  const canBuildWorkbook = Boolean(!loading && !error && visibleTasks.length);
 
   const handleCreateWorkbook = useCallback(() => {
-    if (!data?.tasks?.length) return;
+    if (!visibleTasks.length) return;
 
     const subjectTitle =
       subjects.find((s) => s.id === subject)?.title ?? subject;
@@ -462,7 +480,7 @@ export default function AllTasksPage() {
     }
 
     openWorkbook(
-      data.tasks.map((task) => ({
+      visibleTasks.map((task) => ({
         id: task.id,
         task_number: task.task_number,
         text: task.text,
@@ -475,7 +493,7 @@ export default function AllTasksPage() {
       }
     );
   }, [
-    data?.tasks,
+    visibleTasks,
     filterOptions?.task_numbers,
     level,
     levelDef?.label,
@@ -617,19 +635,12 @@ export default function AllTasksPage() {
               </select>
             </label>
 
-            <label
-              className={`all-tasks-filter${!canPickSubtopic ? " all-tasks-filter--inactive" : ""}`}
-              title={
-                !canPickSubtopic
-                  ? "Сначала выберите задание или дождитесь загрузки фильтров"
-                  : undefined
-              }
-            >
+            <label className="all-tasks-filter">
               <span className="all-tasks-filter__label">Подтема</span>
               <select
                 className="all-tasks-filter__control"
                 value={subtopicId}
-                disabled={!canPickSubtopic || filtersLoading}
+                disabled={filtersLoading}
                 onChange={(e) => {
                   setSubtopicId(e.target.value);
                   resetPage();
@@ -638,6 +649,7 @@ export default function AllTasksPage() {
                 <option value="">
                   {taskListId ? "Все подтемы" : "Все задания — без подтемы"}
                 </option>
+                <option value={SUBTOPIC_NO_ANSWER}>Без ответов</option>
                 {subtopicsForTask.map((s) => (
                   <option
                     key={
@@ -691,16 +703,18 @@ export default function AllTasksPage() {
                     )
                   : null;
                 const selectedSubtopic = subtopicId
-                  ? subtopicId === SUBTOPIC_NONE
-                    ? subtopicsForTask.find((s) => s.no_subtopic) ?? {
-                        title: "Без подтемы",
-                      }
-                    : subtopicsForTask.find((s) => String(s.id) === subtopicId)
+                  ? subtopicId === SUBTOPIC_NO_ANSWER
+                    ? { title: "Без ответов" }
+                    : subtopicId === SUBTOPIC_NONE
+                      ? subtopicsForTask.find((s) => s.no_subtopic) ?? {
+                          title: "Без подтемы",
+                        }
+                      : subtopicsForTask.find((s) => String(s.id) === subtopicId)
                   : null;
                 return (
                   <div className="all-tasks-meta__inner">
                     <span className="all-tasks-meta__count">
-                      {formatTasksCount(data.total)}
+                      {formatTasksCount(visibleTotal)}
                       {onlyFipi ? " · только ФИПИ" : ""}
                     </span>
                     {selectedTaskNum ? (
@@ -731,7 +745,11 @@ export default function AllTasksPage() {
             ) : null}
           </div>
 
-          {!taskListId && subtopicId !== SUBTOPIC_NONE && !loading && !error ? (
+          {!taskListId &&
+          subtopicId !== SUBTOPIC_NONE &&
+          subtopicId !== SUBTOPIC_NO_ANSWER &&
+          !loading &&
+          !error ? (
             <div className="all-tasks-empty all-tasks-empty--pick" role="status">
               <p className="all-tasks-empty__title">Выберите задание</p>
               <p className="all-tasks-empty__lead">
@@ -741,18 +759,20 @@ export default function AllTasksPage() {
             </div>
           ) : null}
 
-          {(taskListId || subtopicId === SUBTOPIC_NONE) &&
+          {(taskListId || subtopicId === SUBTOPIC_NONE || subtopicId === SUBTOPIC_NO_ANSWER) &&
           !loading &&
           !error &&
-          data?.tasks.length === 0 ? (
+          visibleTasks.length === 0 ? (
             <p className="all-tasks-empty" role="status">
-              По выбранным фильтрам заданий нет. Смените задание, подтему или снимите «Только ФИПИ».
+              {noAnswerOnly
+                ? "Среди выбранных задач все уже имеют ответ."
+                : "По выбранным фильтрам заданий нет. Смените задание, подтему или снимите «Только ФИПИ»."}
             </p>
           ) : null}
 
           <ul className="all-tasks-list">
-            {(data?.tasks ?? []).map((t, i) => {
-              const ordinal = (data!.page - 1) * data!.per_page + i + 1;
+            {visibleTasks.map((t, i) => {
+              const ordinal = i + 1;
               const taskBoardPersist = boardsByTask[String(t.id)];
               const hasTaskBoardDraft = boardPersistHasDraft(taskBoardPersist);
               const answerOpen = !!openAnswers[t.id];

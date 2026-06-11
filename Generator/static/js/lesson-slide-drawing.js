@@ -728,6 +728,16 @@
 
       entry.canvas.addEventListener("pointerup", endPointer);
       entry.canvas.addEventListener("pointercancel", endPointer);
+
+      // На iPad/Safari `touch-action: none` не всегда блокирует прокрутку при
+      // рисовании пальцем/стилусом — гасим жесты явно, пока доска открыта.
+      function blockTouch(e) {
+        if (!state.boardOpen || entry.index !== state.activeIndex) return;
+        if (state.tool === "cursor" || !state.tool) return;
+        e.preventDefault();
+      }
+      entry.canvas.addEventListener("touchstart", blockTouch, { passive: false });
+      entry.canvas.addEventListener("touchmove", blockTouch, { passive: false });
     });
 
     state.activeIndex = getActiveIndex();
