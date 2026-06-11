@@ -102,7 +102,9 @@ html,
 body,
 #root {
   max-width: 100%;
-  overflow-x: hidden;
+  /* `clip` прячет горизонтальное переполнение, но (в отличие от hidden) не создаёт
+     скролл-контейнер — иначе ломается position: sticky у закреплённого редактора кода. */
+  overflow-x: clip;
 }
 
 img,
