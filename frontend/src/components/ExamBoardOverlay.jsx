@@ -1143,12 +1143,18 @@ export default function ExamBoardOverlay({
     canvas.addEventListener("pointermove", onPointerMove, { passive: false });
     canvas.addEventListener("pointerup", onPointerUp, { passive: false });
     canvas.addEventListener("pointercancel", onPointerUp, { passive: false });
+    // На iPad/Safari `touch-action: none` не всегда блокирует прокрутку — гасим жесты явно.
+    const blockTouch = (ev) => ev.preventDefault();
+    canvas.addEventListener("touchstart", blockTouch, { passive: false });
+    canvas.addEventListener("touchmove", blockTouch, { passive: false });
 
     return () => {
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointercancel", onPointerUp);
+      canvas.removeEventListener("touchstart", blockTouch);
+      canvas.removeEventListener("touchmove", blockTouch);
     };
   }, [
     open,

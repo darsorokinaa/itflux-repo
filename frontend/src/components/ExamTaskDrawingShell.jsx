@@ -354,11 +354,17 @@ export default function ExamTaskDrawingShell({
     const up = (ev) => endPointer(ev);
     canvas.addEventListener("pointerup", up, opts);
     canvas.addEventListener("pointercancel", up, opts);
+    // На iPad/Safari `touch-action: none` не всегда блокирует прокрутку — гасим жесты явно.
+    const blockTouch = (ev) => ev.preventDefault();
+    canvas.addEventListener("touchstart", blockTouch, opts);
+    canvas.addEventListener("touchmove", blockTouch, opts);
     return () => {
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", up);
       canvas.removeEventListener("pointercancel", up);
+      canvas.removeEventListener("touchstart", blockTouch);
+      canvas.removeEventListener("touchmove", blockTouch);
     };
   }, [canvasInteractive, endPointer, onPointerDown, onPointerMove]);
 
