@@ -4063,16 +4063,16 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   white-space: nowrap;
 }
 
-/* Лёгкий бейдж для задач без ответа — единый вид во всех местах списков задач */
+/* Лёгкий жёлтый бейдж для задач без ответа — единый вид во всех местах списков задач */
 .task-no-answer-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
   border-radius: var(--r-pill, 999px);
-  background: #f1f3f9;
-  border: 1px solid #e4e8f1;
-  color: #8a93a6;
+  background: #fef3c7;
+  border: 1px solid #fcd97a;
+  color: #92660a;
   font-family: var(--font-body);
   font-size: 11px;
   font-weight: 600;
@@ -4085,7 +4085,7 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #c2c9d6;
+  background: #f59e0b;
 }
 
 /* Отступы для плавающей кнопки черновика */

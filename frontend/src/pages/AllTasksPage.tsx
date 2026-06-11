@@ -777,6 +777,9 @@ export default function AllTasksPage() {
                       {t.task_number != null ? <span>№{t.task_number}</span> : null}
                       {t.task_title ? <span>{t.task_title}</span> : null}
                       {t.subtopic ? <span>{t.subtopic}</span> : null}
+                      {!answerHtml ? (
+                        <span className="task-no-answer-badge">Пока без ответа</span>
+                      ) : null}
                     </div>
                     <ExamTaskDrawingShell
                       enabled
@@ -825,7 +828,7 @@ export default function AllTasksPage() {
                         {answerOpen ? "Скрыть ответ" : "Посмотреть ответ"}
                       </button>
                     ) : (
-                      <span className="task-no-answer-badge">Пока без ответа</span>
+                      <span aria-hidden="true" />
                     )}
                     <div className="exam-task-card__status-cluster">
                       <ExamTaskDrawingHeaderButton 

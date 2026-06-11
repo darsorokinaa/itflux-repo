@@ -88,6 +88,9 @@ function SearchTaskPage() {
               <div className="search-task-card-header">
                 <span className="search-task-badge">Задача №{t.task_number}</span>
                 <span className="search-task-id">ID: {t.id}</span>
+                {!t.answer ? (
+                  <span className="task-no-answer-badge">Пока без ответа</span>
+                ) : null}
               </div>
               <div className="search-task-card-body">
                 <div className="search-task-section">
@@ -108,11 +111,7 @@ function SearchTaskPage() {
                     <h4>Ответ</h4>
                     <MathContent html={t.answer} className="search-task-answer-content" />
                   </div>
-                ) : (
-                  <div className="search-task-section">
-                    <span className="task-no-answer-badge">Пока без ответа</span>
-                  </div>
-                )}
+                ) : null}
               </div>
             </article>
           ))}

@@ -149,6 +149,9 @@ function SearchVariantPage() {
                     <div className="sv-task-id-row">
                       <span className="sv-task-id-label">ID</span>
                       <span className="sv-task-id-value">{t.id}</span>
+                      {!String(t.answer || "").trim() ? (
+                        <span className="task-no-answer-badge">Пока без ответа</span>
+                      ) : null}
                     </div>
                     <div className="task-content">
                       {t.task_text ? (
@@ -167,11 +170,7 @@ function SearchVariantPage() {
                       )}
                     </div>
                     <div className="sv-task-answer">
-                      {String(t.answer || "").trim() ? (
-                        <MathContent html={String(t.answer)} className="sv-task-answer-inner" />
-                      ) : (
-                        <span className="task-no-answer-badge">Пока без ответа</span>
-                      )}
+                      <MathContent html={String(t.answer || "")} className="sv-task-answer-inner" />
                     </div>
                   </div>
                 </div>
