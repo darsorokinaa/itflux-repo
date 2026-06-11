@@ -39,6 +39,7 @@ type BankTask = {
   task_title: string;
   subtopic: string | null;
   text: string;
+  answer?: string | null;
   file_url?: string | null;
   part_id?: number | null;
   part_title?: string | null;
@@ -233,6 +234,11 @@ export default function AllTasksPage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [openBoardForTaskId, setOpenBoardForTaskId] = useState<number | null>(null);
   const [boardsByTask, setBoardsByTask] = useState<Record<string, any>>({});
+  const [openAnswers, setOpenAnswers] = useState<Record<number, boolean>>({});
+
+  const toggleAnswer = useCallback((taskId: number) => {
+    setOpenAnswers((prev) => ({ ...prev, [taskId]: !prev[taskId] }));
+  }, []);
 
   const boardPersistHasDraft = useCallback((persist: any) => {
     if (Array.isArray(persist?.overlayV1?.strokes) && persist.overlayV1.strokes.length > 0) return true;
@@ -412,6 +418,10 @@ export default function AllTasksPage() {
   useEffect(() => {
     fetchTasks();
   }, [fetchTasks]);
+
+  useEffect(() => {
+    setOpenAnswers({});
+  }, [level, subject, vprGrade, taskListId, subtopicId, onlyFipi, page]);
 
   const selectedSubtopicTitle = useMemo(() => {
     if (!subtopicId) return "";
@@ -745,6 +755,8 @@ export default function AllTasksPage() {
               const ordinal = (data!.page - 1) * data!.per_page + i + 1;
               const taskBoardPersist = boardsByTask[String(t.id)];
               const hasTaskBoardDraft = boardPersistHasDraft(taskBoardPersist);
+              const answerOpen = !!openAnswers[t.id];
+              const answerHtml = (t.answer || "").trim();
               return (
                 <li
                   key={t.id}
@@ -803,6 +815,18 @@ export default function AllTasksPage() {
                     </ExamTaskDrawingShell>
                   </div>
                   <div className="all-tasks-card__actions">
+                    {answerHtml ? (
+                      <button
+                        type="button"
+                        className="all-tasks-card__answer-btn"
+                        onClick={() => toggleAnswer(t.id)}
+                        aria-expanded={answerOpen ? "true" : "false"}
+                      >
+                        {answerOpen ? "Скрыть ответ" : "Посмотреть ответ"}
+                      </button>
+                    ) : (
+                      <span className="task-no-answer-badge">Пока без ответа</span>
+                    )}
                     <div className="exam-task-card__status-cluster">
                       <ExamTaskDrawingHeaderButton 
                         onClick={() => setOpenBoardForTaskId(t.id)} 
@@ -810,6 +834,24 @@ export default function AllTasksPage() {
                       />
                     </div>
                   </div>
+                  {answerOpen ? (
+                    <div className="all-tasks-card__answer all-tasks-raw-answer" role="region" aria-live="polite">
+                      <div className="all-tasks-card__answer-label">
+                        <strong>Ответ</strong>
+                      </div>
+                      {answerHtml ? (
+                        <MathContent
+                          className="all-tasks-raw-html"
+                          html={answerHtml}
+                          ogeInf13Enhance={level === "oge" && subject === "inf" && t.task_number === 13}
+                          ogeInf6Enhance={level === "oge" && subject === "inf" && t.task_number === 6}
+                          egeInfFileEnhance={level === "ege" && subject === "inf"}
+                        />
+                      ) : (
+                        <p>Ответ не указан.</p>
+                      )}
+                    </div>
+                  ) : null}
                 </li>
               );
             })}

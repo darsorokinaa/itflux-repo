@@ -2136,6 +2136,9 @@ function ExamPage() {
                         <span>
                           ID {task.id} · Краткий ответ
                         </span>
+                        {!task.answer || String(task.answer).trim() === "" ? (
+                          <span className="task-no-answer-badge">Пока без ответа</span>
+                        ) : null}
                       </div>
                     </div>
                     {showExamEducationShell ? (
@@ -2474,6 +2477,9 @@ function ExamPage() {
                                 <span>
                                   ID {task.id} · Развёрнутый ответ
                                 </span>
+                                {!task.answer || String(task.answer).trim() === "" ? (
+                                  <span className="task-no-answer-badge">Пока без ответа</span>
+                                ) : null}
                               </div>
                             </div>
                             {showExamEducationShell ? (
@@ -2564,6 +2570,9 @@ function ExamPage() {
                             <span>
                               ID {task.id} · Развёрнутый ответ
                             </span>
+                            {!task.answer || String(task.answer).trim() === "" ? (
+                              <span className="task-no-answer-badge">Пока без ответа</span>
+                            ) : null}
                           </div>
                         </div>
                         {showExamEducationShell ? (

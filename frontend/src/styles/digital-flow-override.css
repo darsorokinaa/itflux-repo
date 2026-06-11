@@ -2223,6 +2223,32 @@ body,
   height: 15px !important;
 }
 
+/* «Все задачи»: кнопка черновика встаёт в ряд действий карточки, а не плавает
+   absolute поверх условия. Снимаем зарезервированный padding-bottom. */
+.all-tasks-card {
+  padding-bottom: 14px !important;
+}
+
+.all-tasks-card .exam-task-draw-fab {
+  position: static !important;
+  right: auto !important;
+  bottom: auto !important;
+  z-index: auto !important;
+  padding: 7px 13px !important;
+  font-size: 12px !important;
+  box-shadow: 0 4px 12px rgba(43, 82, 245, 0.22) !important;
+}
+
+.all-tasks-card .exam-task-draw-fab:hover {
+  transform: none !important;
+  box-shadow: 0 6px 14px rgba(43, 82, 245, 0.28) !important;
+}
+
+.all-tasks-card .exam-task-draw-fab svg {
+  width: 15px !important;
+  height: 15px !important;
+}
+
 /* Просмотр готового урока (PDF/PPTX): на весь экран, без шапки сайта */
 .app-shell--lesson-viewer .app-shell-pattern,
 .app-shell--lesson-viewer .app-shell-theme-overlay {

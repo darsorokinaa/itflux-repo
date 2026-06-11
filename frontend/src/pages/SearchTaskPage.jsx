@@ -103,10 +103,14 @@ function SearchTaskPage() {
                     egeInf2Enhance={t.task_number === 2}
                   />
                 </div>
-                {t.answer && (
+                {t.answer ? (
                   <div className="search-task-section search-task-answer">
                     <h4>Ответ</h4>
                     <MathContent html={t.answer} className="search-task-answer-content" />
+                  </div>
+                ) : (
+                  <div className="search-task-section">
+                    <span className="task-no-answer-badge">Пока без ответа</span>
                   </div>
                 )}
               </div>

@@ -167,7 +167,11 @@ function SearchVariantPage() {
                       )}
                     </div>
                     <div className="sv-task-answer">
-                      <MathContent html={String(t.answer || "")} className="sv-task-answer-inner" />
+                      {String(t.answer || "").trim() ? (
+                        <MathContent html={String(t.answer)} className="sv-task-answer-inner" />
+                      ) : (
+                        <span className="task-no-answer-badge">Пока без ответа</span>
+                      )}
                     </div>
                   </div>
                 </div>
