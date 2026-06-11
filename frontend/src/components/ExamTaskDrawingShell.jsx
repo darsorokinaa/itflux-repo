@@ -447,7 +447,10 @@ export default function ExamTaskDrawingShell({
         </div>
       )}
 
-      <div ref={hostRef} className="exam-task-draw-stack">
+      <div
+        ref={hostRef}
+        className={`exam-task-draw-stack${canvasInteractive ? " exam-task-draw-stack--drawing" : ""}`}
+      >
         <div className="exam-task-card__body-inner">{children}</div>
         {!narrowPhone && extraDrawingPad && showCanvasLayer && (
           <div className="exam-task-draw-extra-slab" aria-hidden="true">

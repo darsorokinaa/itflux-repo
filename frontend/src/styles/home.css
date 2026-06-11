@@ -4143,6 +4143,16 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   position: relative;
 }
 
+/* Пока активно рисование стилусом/пальцем — текст задания под холстом не выделяется. */
+.exam-task-draw-stack--drawing,
+.exam-task-draw-stack--drawing * {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
 .exam-task-draw-canvas {
   position: absolute;
   inset: 0;
