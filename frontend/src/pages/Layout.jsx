@@ -4,6 +4,7 @@ import {
   readPersistedTheme,
 } from "../utils/themeStorage";
 import Nav from "../components/Nav";
+import MobileTabBar from "../components/MobileTabBar";
 
 const COOKIE_CONSENT_KEY = "cookie_consent_accepted";
 
@@ -13,11 +14,14 @@ function Layout() {
   const pathNorm = (pathname || "").replace(/\/+$/, "") || "/";
   const isTasksPrepPicker = /^\/(oge|ege|vpr)\/[^/]+$/.test(pathNorm);
   const isLessonViewerPage = /^\/lessons\/[^/]+\/view$/.test(pathNorm);
+  /** Экзамен/вариант: своя залипающая панель действий снизу — нижнюю навигацию там не показываем. */
+  const isExamVariantPage = /^\/(oge|ege|vpr)\/[^/]+\/variant\//.test(pathNorm);
   const isMarketingHome =
     pathname === "/" ||
     pathname === "/tasks" ||
     pathname === "/generator" ||
     pathname === "/lessons" ||
+    pathname === "/teachers" ||
     pathname.startsWith("/subject/") ||
     pathname.startsWith("/search/tasks") ||
     pathname.startsWith("/search-variant") ||
@@ -127,8 +131,13 @@ function Layout() {
     return () => clearTimeout(id);
   }, [pathname]);
 
+  const showMobileTabBar =
+    !isLessonOrHomeworkContext && !isLessonViewerPage && !isExamVariantPage;
+
   return (
-    <div className={`app-shell${isLessonViewerPage ? " app-shell--lesson-viewer" : ""}`}>
+    <div
+      className={`app-shell${isLessonViewerPage ? " app-shell--lesson-viewer" : ""}${showMobileTabBar ? " app-shell--has-tabbar" : ""}`}
+    >
       <div
         className="app-shell-pattern"
         aria-hidden="true"
@@ -191,6 +200,15 @@ function Layout() {
           <span className="site-footer-copy">© 2026 Цифровой поток</span>
           {!isLessonOrHomeworkContext && (
           <div className="site-footer-links">
+            <a
+              href="https://summerclub.itflux-academy.ru"
+              className="site-footer-link"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Летний IT-клуб
+            </a>
+            <span className="site-footer-sep" aria-hidden="true">·</span>
             <Link to="/privacy" className="site-footer-link">Политика конфиденциальности</Link>
             <span className="site-footer-sep" aria-hidden="true">·</span>
             <Link to="/privacy#pd" className="site-footer-link">Согласие на обработку ПД</Link>
@@ -213,6 +231,8 @@ function Layout() {
           </div>
         </div>
       )}
+
+      {showMobileTabBar && <MobileTabBar />}
 
       <script
         src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.min.js"

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import SearchByIdForm from "../components/SearchByIdForm";
 import MathContent from "../components/MathContent";
+import StateView from "../components/StateView";
 import { devApiBase } from "../utils/devApiBase";
 
 function formatLevel(level) {
@@ -88,30 +89,24 @@ function SearchVariantPage() {
   return wrap(
     <>
       {loading && (
-        <div className="sv-state sv-state--loading">
-          <div className="search-task-spinner" aria-hidden="true" />
-          <p className="sv-state-muted">Загрузка варианта {q}…</p>
-        </div>
+        <StateView variant="loading" title="Загружаем вариант" description={`Вариант с ID ${q}…`} />
       )}
 
       {!loading && error && (
-        <div className="sv-state sv-state--error" role="alert">
-          <span className="sv-state-icon" aria-hidden="true">
-            ⚠️
-          </span>
-          <h2 className="sv-state-heading">Ошибка</h2>
-          <p>Вариант {q}: {error}</p>
-        </div>
+        <StateView
+          variant="error"
+          title="Не удалось загрузить вариант"
+          description={`Вариант ${q}: ${error}`}
+        />
       )}
 
       {!loading && !error && (!data.variant || data.tasks.length === 0) && (
-        <div className="sv-state sv-state--empty">
-          <span className="sv-state-icon" aria-hidden="true">
-            🔍
-          </span>
-          <h2 className="sv-state-heading">Ничего не найдено</h2>
-          <p>Вариант с ID {q} не найден.</p>
-        </div>
+        <StateView
+          variant="search"
+          title="Ничего не найдено"
+          description={`Вариант с ID ${q} не найден. Проверьте номер и попробуйте снова.`}
+          action={<Link to="/tasks" className="state-view__btn state-view__btn--ghost">Открыть все задачи</Link>}
+        />
       )}
 
       {!loading && !error && data.variant && data.tasks.length > 0 && (

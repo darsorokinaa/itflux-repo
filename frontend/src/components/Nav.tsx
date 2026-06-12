@@ -1,6 +1,12 @@
-import { type FormEvent, type MouseEvent, useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { type MouseEvent, useEffect, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { getActiveNavTab, GENERATOR_HASH, NAV_TABS } from "../config/navTabs";
+import {
+  SUMMER_CLUB_NAV_LABEL,
+  SUMMER_CLUB_SEASON_BADGE,
+  SUMMER_CLUB_TAGLINE,
+  SUMMER_CLUB_URL,
+} from "../config/summerClub";
 
 function LogoMark() {
   const src = `${import.meta.env.BASE_URL}favicon.png?v=1`;
@@ -19,7 +25,6 @@ function LogoMark() {
 
 export default function Nav() {
   const { pathname, search, hash } = useLocation();
-  const navigate = useNavigate();
   const active = getActiveNavTab(pathname, hash);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -38,39 +43,9 @@ export default function Nav() {
     setMenuOpen(false);
   };
 
-  const [taskQuery, setTaskQuery] = useState("");
-  const [variantQuery, setVariantQuery] = useState("");
-
-  useEffect(() => {
-    const params = new URLSearchParams(search);
-    const q = params.get("q")?.trim() ?? "";
-    if (pathname.startsWith("/search/tasks")) {
-      setTaskQuery(q);
-      setVariantQuery("");
-    } else if (pathname.startsWith("/search-variant")) {
-      setVariantQuery(q);
-      setTaskQuery("");
-    }
-  }, [pathname, search]);
-
   useEffect(() => {
     setMenuOpen(false);
   }, [pathname, search, hash]);
-
-  const onSearchSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const taskId = taskQuery.trim();
-    const variantId = variantQuery.trim();
-    if (variantId) {
-      setMenuOpen(false);
-      navigate(`/search-variant?q=${encodeURIComponent(variantId)}`);
-      return;
-    }
-    if (taskId) {
-      setMenuOpen(false);
-      navigate(`/search/tasks?q=${encodeURIComponent(taskId)}`);
-    }
-  };
 
   return (
     <header className="site-header">
@@ -80,7 +55,7 @@ export default function Nav() {
             <LogoMark />
             <span className="site-nav__titles">
               <span className="brand-name">Цифровой поток</span>
-              <span className="brand-sub">ОГЭ · ЕГЭ · информатика</span>
+              <span className="brand-sub">ОГЭ · ЕГЭ · Информатика</span>
             </span>
           </Link>
 
@@ -109,6 +84,7 @@ export default function Nav() {
                 const className = [
                   "site-nav__tab",
                   isActive ? "site-nav__tab--active" : "",
+                  tab.key === "teachers" ? "site-nav__tab--teachers" : "",
                   tab.disabled ? "site-nav__tab--disabled" : "",
                 ]
                   .filter(Boolean)
@@ -159,39 +135,33 @@ export default function Nav() {
               })}
             </div>
 
-            <form
-              className="site-nav__search"
-              onSubmit={onSearchSubmit}
-              aria-label="Поиск по ID"
+            {/* Главный CTA шапки — летний IT-клуб в стиле summerclub-лендинга. */}
+            <a
+              href={SUMMER_CLUB_URL}
+              className="summer-club-nav-button"
+              target="_blank"
+              rel="noopener noreferrer"
             >
-              <label className="site-nav__search-field">
-                <span className="site-nav__search-label">Поиск задачи</span>
-                <input
-                  type="search"
-                  className="site-nav__search-input"
-                  placeholder="ID"
-                  value={taskQuery}
-                  onChange={(e) => setTaskQuery(e.target.value)}
-                  inputMode="numeric"
-                  autoComplete="off"
-                />
-              </label>
-              <label className="site-nav__search-field">
-                <span className="site-nav__search-label">Поиск варианта</span>
-                <input
-                  type="search"
-                  className="site-nav__search-input"
-                  placeholder="ID"
-                  value={variantQuery}
-                  onChange={(e) => setVariantQuery(e.target.value)}
-                  inputMode="numeric"
-                  autoComplete="off"
-                />
-              </label>
-              <button type="submit" className="site-nav__search-btn">
-                Найти
-              </button>
-            </form>
+              {SUMMER_CLUB_NAV_LABEL}
+            </a>
+
+            {/* Мобильное меню: отдельная промо-карточка клуба вместо обычной строки. */}
+            <a
+              href={SUMMER_CLUB_URL}
+              className="mobile-summer-club-card"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setMenuOpen(false)}
+            >
+              <span className="mobile-summer-club-card__badge">{SUMMER_CLUB_SEASON_BADGE}</span>
+              <strong className="mobile-summer-club-card__title">
+                {SUMMER_CLUB_NAV_LABEL}
+              </strong>
+              <p className="mobile-summer-club-card__text">{SUMMER_CLUB_TAGLINE}</p>
+              <span className="mobile-summer-club-card__button" aria-hidden="true">
+                {SUMMER_CLUB_NAV_LABEL}
+              </span>
+            </a>
           </div>
         </div>
       </nav>

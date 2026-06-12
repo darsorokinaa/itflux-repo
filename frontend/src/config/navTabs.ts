@@ -1,4 +1,4 @@
-export type NavTabKey = "tasks" | "generator" | "lessons";
+export type NavTabKey = "tasks" | "generator" | "lessons" | "teachers";
 
 export type NavTabDef = {
   key: NavTabKey;
@@ -16,6 +16,7 @@ export const NAV_TABS: ReadonlyArray<NavTabDef> = [
   { key: "tasks", label: "Все задачи", to: "/tasks" },
   { key: "generator", label: "Генератор вариантов", to: `/#${GENERATOR_HASH}`, badge: "бета-версия" },
   { key: "lessons", label: "Готовые уроки", to: "/lessons" },
+  { key: "teachers", label: "Для учителей", to: "/teachers" },
 ];
 
 /** Какая вкладка подсвечена на текущем пути. */
@@ -32,6 +33,9 @@ export function getActiveNavTab(
   }
   if (p === "/lessons" || p.startsWith("/lessons/")) {
     return "lessons";
+  }
+  if (p === "/teachers") {
+    return "teachers";
   }
   return null;
 }

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookOpen } from "lucide-react";
+import StateView from "../components/StateView";
 
 const DIFFICULTY_LABELS = {
   beginner: "Начальный",
@@ -159,6 +160,9 @@ export default function ReadyLessonsPage() {
   const [grade, setGrade] = useState("");
   const [difficulty, setDifficulty] = useState("");
 
+  const [reloadKey, setReloadKey] = useState(0);
+  const reloadLessons = useCallback(() => setReloadKey((k) => k + 1), []);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -185,7 +189,7 @@ export default function ReadyLessonsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   const subjectOptions = useMemo(() => {
     const values = new Set();
@@ -352,15 +356,39 @@ export default function ReadyLessonsPage() {
             </header>
 
             {loading ? (
-              <p className="lessons-library-v3__empty">Загрузка каталога…</p>
+              <StateView variant="loading" title="Загружаем каталог" description="Это займёт пару секунд." />
             ) : error ? (
-              <p className="lessons-library-v3__empty">{error}</p>
+              <StateView
+                variant="error"
+                title="Не удалось загрузить уроки"
+                description="Проверьте соединение и попробуйте ещё раз."
+                action={
+                  <button type="button" className="state-view__btn" onClick={reloadLessons}>
+                    Повторить
+                  </button>
+                }
+              />
             ) : filteredLessons.length === 0 ? (
-              <p className="lessons-library-v3__empty">
-                {lessons.length === 0
-                  ? "Пока нет опубликованных уроков."
-                  : "По выбранным фильтрам ничего не найдено."}
-              </p>
+              lessons.length === 0 ? (
+                <StateView
+                  variant="empty"
+                  title="Пока нет уроков"
+                  description="Опубликованные уроки появятся здесь, как только их добавят."
+                />
+              ) : (
+                <StateView
+                  variant="search"
+                  title="Ничего не найдено"
+                  description="По выбранным фильтрам уроков нет. Попробуйте смягчить условия."
+                  action={
+                    hasActiveFilters ? (
+                      <button type="button" className="state-view__btn state-view__btn--ghost" onClick={resetFilters}>
+                        Сбросить фильтры
+                      </button>
+                    ) : null
+                  }
+                />
+              )
             ) : (
               <div className="lessons-library-v3__grid">
                 {filteredLessons.map((lesson) => (

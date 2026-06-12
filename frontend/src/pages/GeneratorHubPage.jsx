@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { getLevelDef } from "../data/levels";
+import TaskSearchPanel from "../components/TaskSearchPanel";
 
 const GENERATOR_LEVELS = [
   {
@@ -29,6 +30,8 @@ export default function GeneratorHubPage() {
               Выберите экзамен и предмет, отметьте задания — получите ссылку на готовый вариант для класса.
             </p>
           </header>
+
+          <TaskSearchPanel />
 
           <div className="home-levels-grid nav-hub-page__levels">
             {GENERATOR_LEVELS.map((level) => {

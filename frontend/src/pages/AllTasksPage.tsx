@@ -28,6 +28,7 @@ import {
 import type { TaskFileSource } from "../components/InformaticsCodeEditor/types";
 
 import MathContent from "../components/MathContent";
+import TaskSearchPanel from "../components/TaskSearchPanel";
 
 const InformaticsCodeEditorEntry = lazy(
   () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
@@ -536,6 +537,8 @@ export default function AllTasksPage() {
               Фильтры по уровню, предмету, номеру задания и подтеме.
             </p>
           </header>
+
+          <TaskSearchPanel />
 
           <button
             type="button"

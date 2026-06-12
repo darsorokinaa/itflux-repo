@@ -16,6 +16,7 @@ import NotFoundPage from "./pages/NotFoundPage";
 import LessonJoinBridge from "./pages/LessonJoinBridge";
 import ReadyLessonsPage from "./pages/ReadyLessonsPage";
 import LessonViewerPage from "./pages/LessonViewerPage";
+import ForTeachersPage from "./pages/ForTeachersPage";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ensureSiteFavicon } from "./utils/ensureSiteFavicon";
 
@@ -112,6 +113,8 @@ function App() {
           <Route path="/generator" element={<GeneratorHubPage />} />
           <Route path="/lessons" element={<ReadyLessonsPage />} />
           <Route path="/lessons/:slug/view" element={<LessonViewerPage />} />
+          <Route path="/teachers" element={<ForTeachersPage />} />
+          <Route path="/for-teachers" element={<Navigate to="/teachers" replace />} />
           <Route path="/subject/:level" element={<SubjectPage />} />
 
           <Route path="/search/tasks" element={<SearchTaskWithKey />} />

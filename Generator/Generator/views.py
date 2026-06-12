@@ -758,10 +758,12 @@ def favicon(request):
     return HttpResponse(status=404)
 
 
-def yandex_webmaster_verification(request):
-    """Файл подтверждения из корня репозитория или папки Django-проекта."""
+def yandex_webmaster_verification(request, filename="yandex_ef13ec5e267d285b.html"):
+    """Файл подтверждения Яндекс.Вебмастера из корня репозитория или папки Django-проекта."""
+    if not re.fullmatch(r"yandex_[0-9a-f]+\.html", filename):
+        return HttpResponse(status=404)
     for base in (django_settings.BASE_DIR.parent, django_settings.BASE_DIR):
-        p = os.path.join(base, "yandex_ef13ec5e267d285b.html")
+        p = os.path.join(base, filename)
         if os.path.isfile(p):
             return FileResponse(open(p, "rb"), content_type="text/html; charset=UTF-8")
     return HttpResponse("Verification file not found", status=404, content_type="text/plain; charset=UTF-8")

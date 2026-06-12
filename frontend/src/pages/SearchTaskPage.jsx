@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import SearchByIdForm from "../components/SearchByIdForm";
 import MathContent from "../components/MathContent";
+import StateView from "../components/StateView";
 import { devApiBase } from "../utils/devApiBase";
 
 function SearchTaskPage() {
@@ -67,18 +68,24 @@ function SearchTaskPage() {
           </div>
 
           {loading && (
-        <div className="search-task-loading">
-          <div className="search-task-spinner" />
-          <p>Загрузка...</p>
-        </div>
+        <StateView variant="loading" title="Ищем задачу" description={`Загружаем задачу с ID ${q}…`} />
       )}
 
-      {!loading && tasks.length === 0 && (
-        <div className="search-task-empty-card">
-          <span className="search-task-empty-icon">🔍</span>
-          <h3>Ничего не найдено</h3>
-          <p>Задача с ID {q} не найдена. Проверьте правильность введённого номера.</p>
-        </div>
+      {!loading && error && (
+        <StateView
+          variant="error"
+          title="Не удалось выполнить поиск"
+          description="Что-то пошло не так при загрузке. Попробуйте ещё раз."
+        />
+      )}
+
+      {!loading && !error && tasks.length === 0 && (
+        <StateView
+          variant="search"
+          title="Ничего не найдено"
+          description={`Задача с ID ${q} не найдена. Проверьте правильность введённого номера.`}
+          action={<Link to="/tasks" className="state-view__btn state-view__btn--ghost">Открыть все задачи</Link>}
+        />
       )}
 
       {!loading && tasks.length > 0 && (

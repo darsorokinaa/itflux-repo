@@ -37,7 +37,7 @@ urlpatterns = [
     path("api/search_variant/", views.search_variant, name="search_variant"),
     path("favicon.png", views.favicon),
     path("favicon.ico", views.favicon),
-    path("yandex_ef13ec5e267d285b.html", views.yandex_webmaster_verification),
+    re_path(r"^(?P<filename>yandex_[0-9a-f]+\.html)$", views.yandex_webmaster_verification),
     path("api/<str:level>/<str:subject>/tasks/", views.api_tasks),
     path("api/<str:level>/<str:subject>/subtopics/", views.api_subtopics),
     path("api/variant-lookup/<int:variant_id>/", views.api_variant_lookup),
