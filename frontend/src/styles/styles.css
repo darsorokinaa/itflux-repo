@@ -6068,10 +6068,16 @@ mjx-container {
 
 .results-modal-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
+    gap: 12px;
     padding: 20px 24px;
     border-bottom: 1px solid #e5e7eb;
+}
+
+.results-modal-header__titles {
+    min-width: 0;
+    flex: 1;
 }
 
 .results-modal-title {
@@ -6079,6 +6085,14 @@ mjx-container {
     font-weight: 600;
     color: var(--text-primary);
     margin: 0;
+}
+
+.results-modal-subtitle {
+    margin: 4px 0 0;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #64748b;
+    line-height: 1.35;
 }
 
 .results-modal-close {
@@ -6366,6 +6380,21 @@ mjx-container {
 
 .results-metrics__value--danger {
     color: #dc2626;
+}
+
+.results-metrics__percent-bar {
+    height: 6px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    overflow: hidden;
+    margin-top: 2px;
+}
+
+.results-metrics__percent-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6);
+    transition: width 0.35s ease;
 }
 
 .results-times-section {
