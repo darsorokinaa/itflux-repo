@@ -758,14 +758,46 @@ def favicon(request):
     return HttpResponse(status=404)
 
 
+_YANDEX_WEBMASTER_HTML = {
+    "yandex_ef13ec5e267d285b.html": (
+        "<html>\n"
+        "    <head>\n"
+        '        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">\n'
+        "    </head>\n"
+        "    <body>Verification: ef13ec5e267d285b</body>\n"
+        "</html>\n"
+    ),
+    "yandex_031b211eae53d997.html": (
+        "<html>\n"
+        "    <head>\n"
+        '        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">\n'
+        "    </head>\n"
+        "    <body>Verification: 031b211eae53d997</body>\n"
+        "</html>\n"
+    ),
+}
+
+
 def yandex_webmaster_verification(request, filename="yandex_ef13ec5e267d285b.html"):
-    """Файл подтверждения Яндекс.Вебмастера из корня репозитория или папки Django-проекта."""
+    """Файл подтверждения Яндекс.Вебмастера из корня репозитория или встроенный шаблон."""
     if not re.fullmatch(r"yandex_[0-9a-f]+\.html", filename):
         return HttpResponse(status=404)
-    for base in (django_settings.BASE_DIR.parent, django_settings.BASE_DIR):
+
+    search_roots = [
+        django_settings.BASE_DIR.parent,
+        django_settings.BASE_DIR,
+        getattr(django_settings, "FRONTEND_DIR", django_settings.BASE_DIR.parent / "frontend" / "dist"),
+        django_settings.BASE_DIR.parent / "frontend" / "public",
+    ]
+    for base in search_roots:
         p = os.path.join(base, filename)
         if os.path.isfile(p):
             return FileResponse(open(p, "rb"), content_type="text/html; charset=UTF-8")
+
+    body = _YANDEX_WEBMASTER_HTML.get(filename)
+    if body:
+        return HttpResponse(body, content_type="text/html; charset=UTF-8")
+
     return HttpResponse("Verification file not found", status=404, content_type="text/plain; charset=UTF-8")
 
 
