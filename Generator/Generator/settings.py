@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import sys
 import os
 from pathlib import Path
 
@@ -17,6 +18,10 @@ from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = BASE_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
+
 # .env: в папке Generator/ или в корне проекта (например /opt/generator/.env)
 load_dotenv(BASE_DIR / ".env")
 load_dotenv(BASE_DIR.parent / ".env")
@@ -70,6 +75,44 @@ _lk_nav_env = os.environ.get("LK_NAVIGATION_PASSWORD")
 
 TASKS_GET_SECRET = os.environ.get("LINK_SECRET_FOR_TASKS", "").strip()
 
+# Яндекс Телемост — создание видеовстреч из кабинета.
+YANDEX_TELEMOST_CLIENT_ID = os.environ.get(
+    "YANDEX_TELEMOST_CLIENT_ID",
+    "21e10d82239446508ab6f2417c596fa2",
+).strip()
+YANDEX_TELEMOST_CLIENT_SECRET = os.environ.get("YANDEX_TELEMOST_CLIENT_SECRET", "").strip()
+YANDEX_TELEMOST_OAUTH_TOKEN = os.environ.get("YANDEX_TELEMOST_OAUTH_TOKEN", "").strip()
+YANDEX_TELEMOST_REFRESH_TOKEN = os.environ.get("YANDEX_TELEMOST_REFRESH_TOKEN", "").strip()
+YANDEX_TELEMOST_AUTH_CODE = os.environ.get("YANDEX_TELEMOST_AUTH_CODE", "").strip()
+YANDEX_TELEMOST_REDIRECT_URI = os.environ.get(
+    "YANDEX_TELEMOST_REDIRECT_URI",
+    "https://oauth.yandex.ru/verification_code",
+).strip()
+YANDEX_ACCOUNT_EMAIL = os.environ.get(
+    "YANDEX_ACCOUNT_EMAIL",
+    "darvitol.s@yandex.ru",
+).strip()
+YANDEX_TELEMOST_COHOST_EMAIL = os.environ.get(
+    "YANDEX_TELEMOST_COHOST_EMAIL",
+    YANDEX_ACCOUNT_EMAIL,
+).strip()
+YANDEX_TELEMOST_ALLOW_WEB_FALLBACK = os.environ.get(
+    "YANDEX_TELEMOST_ALLOW_WEB_FALLBACK", "true"
+).strip().lower() not in ("0", "false", "no", "off")
+YANDEX_TELEMOST_WEB_FALLBACK_URL = os.environ.get(
+    "YANDEX_TELEMOST_WEB_FALLBACK_URL",
+    "https://telemost.yandex.ru/",
+).strip()
+YANDEX_OAUTH_SCOPES = os.environ.get("YANDEX_OAUTH_SCOPES", "").strip()
+YANDEX_CALENDAR_ENABLED = os.environ.get(
+    "YANDEX_CALENDAR_ENABLED", "false"
+).strip().lower() not in ("0", "false", "no", "off")
+YANDEX_CALENDAR_LAYER_IDS = os.environ.get("YANDEX_CALENDAR_LAYER_IDS", "").strip()
+YANDEX_CALENDAR_TZ_ID = os.environ.get("YANDEX_CALENDAR_TZ_ID", "Europe/Moscow").strip()
+YANDEX_CALENDAR_EMBED_URL = os.environ.get("YANDEX_CALENDAR_EMBED_URL", "").strip()
+YANDEX_TELEMOST_AUTO_CREATE = os.environ.get(
+    "YANDEX_TELEMOST_AUTO_CREATE", "true"
+).strip().lower() not in ("0", "false", "no", "off")
 
 
 if _lk_nav_env is None:
@@ -96,6 +139,7 @@ INSTALLED_APPS = [
     'channels',
     'Generator.apps.GeneratorConfig',
     'Board',
+    'Cabinet.apps.CabinetConfig',
     'corsheaders',
     "django_ckeditor_5",
 ]

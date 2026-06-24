@@ -7,6 +7,7 @@ import {
   SUMMER_CLUB_TAGLINE,
   SUMMER_CLUB_URL,
 } from "../config/summerClub";
+import { fetchCabinetSession } from "../utils/cabinetAuth";
 
 function LogoMark() {
   const src = `${import.meta.env.BASE_URL}favicon.png?v=1`;
@@ -20,6 +21,40 @@ function LogoMark() {
       loading="eager"
       decoding="async"
     />
+  );
+}
+
+function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
+  const [cabinetAuthed, setCabinetAuthed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCabinetSession()
+      .then((data) => {
+        if (!cancelled) setCabinetAuthed(!!data?.authenticated);
+      })
+      .catch(() => {
+        if (!cancelled) setCabinetAuthed(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <Link
+      to={cabinetAuthed ? "/cabinet" : "/cabinet/login"}
+      className="cabinet-nav-button"
+      onClick={onNavigate}
+    >
+      <span className="cabinet-nav-button__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 21a8 8 0 0 0-16 0" />
+          <circle cx="12" cy="7" r="4" />
+        </svg>
+      </span>
+      Личный кабинет
+    </Link>
   );
 }
 
@@ -134,6 +169,8 @@ export default function Nav() {
                 );
               })}
             </div>
+
+            <CabinetNavButton onNavigate={() => setMenuOpen(false)} />
 
             {/* Главный CTA шапки — летний IT-клуб в стиле summerclub-лендинга. */}
             <a

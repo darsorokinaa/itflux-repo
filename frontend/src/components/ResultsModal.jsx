@@ -135,7 +135,7 @@ export default function ResultsModal({ open, onClose, results, onRetry }) {
       ? `${fullyCorrectTaskCount} / ${taskCountTotal}`
       : `${totalScore} / ${maxScore}`;
 
-  const metricsPointsLabel = "Баллы";
+  const metricsPointsLabel = results.scorePart1Only ? "Часть 1" : "Баллы";
 
   const lvNorm = String(level || "").toLowerCase();
   const isVpr =
@@ -330,7 +330,26 @@ function deriveHeroPresentation(r) {
       note: null,
     };
   }
-  const { examMode, scoreExam, markLevel, level, fullyCorrectTaskCount, taskCountTotal, totalScore, maxScore } = r;
+  const { examMode, scoreExam, markLevel, level, fullyCorrectTaskCount, taskCountTotal, totalScore, maxScore, scorePart1Only } = r;
+
+  if (scorePart1Only) {
+    const ok = fullyCorrectTaskCount;
+    const total = taskCountTotal || maxScore || 1;
+    const ratio = ok / total;
+    let variant = "bad";
+    if (ratio >= 0.85) variant = "good";
+    else if (ratio >= 0.5) variant = "mid";
+    const t = THEMES_TEST[variant];
+    return {
+      heroClass: t.heroClass,
+      fg: t.fg,
+      iconKind: variant === "good" ? "check" : variant === "mid" ? "warn" : "x",
+      mainNum: String(totalScore),
+      suffix: ` из ${maxScore}`,
+      variant,
+      note: "Учитываются только задания части 1.",
+    };
+  }
 
   if (examMode === "test") {
     const total = taskCountTotal || 1;

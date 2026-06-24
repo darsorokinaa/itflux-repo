@@ -1,0 +1,467 @@
+import { useEffect, useMemo, useState } from "react";
+import CabinetIcon from "../CabinetIcons";
+import { fetchGroups, fetchStudents } from "../../utils/cabinetAuth";
+
+const WEEKDAYS = [
+  { value: 0, label: "Пн" },
+  { value: 1, label: "Вт" },
+  { value: 2, label: "Ср" },
+  { value: 3, label: "Чт" },
+  { value: 4, label: "Пт" },
+  { value: 5, label: "Сб" },
+  { value: 6, label: "Вс" },
+];
+
+const RECURRENCE_OPTIONS = [
+  { value: "none", label: "Не повторять" },
+  { value: "daily", label: "Каждый день" },
+  { value: "weekly", label: "Каждую неделю" },
+  { value: "weekdays", label: "По будням" },
+  { value: "custom_weekdays", label: "По выбранным дням" },
+  { value: "biweekly", label: "Каждые 2 недели" },
+  { value: "monthly", label: "Каждый месяц" },
+];
+
+const REMINDER_OPTIONS = [
+  { value: "", label: "Не напоминать" },
+  { value: 5, label: "За 5 минут" },
+  { value: 15, label: "За 15 минут" },
+  { value: 60, label: "За 1 час" },
+  { value: 1440, label: "За 1 день" },
+];
+
+function formatApiDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function buildLessonTitle({ audienceLabel, type }) {
+  if (audienceLabel.trim()) return audienceLabel.trim();
+  return type === "individual_lesson" ? "Индивидуальное занятие" : "Групповое занятие";
+}
+
+export default function CreateScheduleLessonModal({
+  onClose,
+  onCreate,
+  defaultDate,
+  defaultStartTime,
+  defaultEndTime,
+  defaultLessonTitle,
+  defaultTopic,
+  lessonPlanItemId,
+  dialogTitle,
+}) {
+  const [type, setType] = useState("group_lesson");
+  const [date, setDate] = useState(defaultDate || formatApiDate(new Date()));
+  const [startTime, setStartTime] = useState(defaultStartTime || "15:00");
+  const [endTime, setEndTime] = useState(defaultEndTime || "15:45");
+  const [lessonTitle, setLessonTitle] = useState(defaultLessonTitle || "");
+  const [topic, setTopic] = useState(defaultTopic || "");
+
+  useEffect(() => {
+    if (defaultDate) setDate(defaultDate);
+    if (defaultStartTime) setStartTime(defaultStartTime);
+    if (defaultEndTime) setEndTime(defaultEndTime);
+  }, [defaultDate, defaultStartTime, defaultEndTime]);
+
+  useEffect(() => {
+    if (defaultLessonTitle) setLessonTitle(defaultLessonTitle);
+    if (defaultTopic) setTopic(defaultTopic);
+  }, [defaultLessonTitle, defaultTopic]);
+  const [timezone, setTimezone] = useState("Europe/Moscow");
+  const [format, setFormat] = useState("online");
+  const isIndividual = type === "individual_lesson";
+  const [groupId, setGroupId] = useState("");
+  const [studentId, setStudentId] = useState("");
+  const [selectedStudentIds, setSelectedStudentIds] = useState([]);
+  const [recurrenceType, setRecurrenceType] = useState("none");
+  const [weekdays, setWeekdays] = useState([]);
+  const [repeatUntil, setRepeatUntil] = useState("");
+  const [repeatCount, setRepeatCount] = useState("");
+  const [repeatEndMode, setRepeatEndMode] = useState("none");
+  const [reminderMinutes, setReminderMinutes] = useState(15);
+  const [notifyParticipants, setNotifyParticipants] = useState(true);
+  const [meetingMode, setMeetingMode] = useState("auto");
+  const [manualLink, setManualLink] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [conflict, setConflict] = useState(null);
+
+  const [students, setStudents] = useState([]);
+  const [groups,   setGroups]   = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      fetchStudents({ status: "active" }),
+      fetchGroups({ status: "active" }),
+    ])
+      .then(([s, g]) => {
+        if (cancelled) return;
+        setStudents(s?.results || s || []);
+        setGroups(g?.results || g || []);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const audienceLabel = useMemo(() => {
+    if (groupId) {
+      const g = groups.find((x) => String(x.id) === String(groupId));
+      return g?.title || "";
+    }
+    if (studentId) {
+      const s = students.find((x) => String(x.id) === String(studentId));
+      return s?.full_name || "";
+    }
+    if (selectedStudentIds.length) {
+      return selectedStudentIds
+        .map((id) => students.find((x) => x.id === id)?.full_name)
+        .filter(Boolean)
+        .join(", ");
+    }
+    return "";
+  }, [groupId, studentId, selectedStudentIds, groups, students]);
+
+  const toggleStudent = (id) => {
+    setSelectedStudentIds((prev) => (
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    ));
+    setStudentId("");
+  };
+
+  const toggleExtraStudent = (id) => {
+    setSelectedStudentIds((prev) => (
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    ));
+  };
+
+  const toggleWeekday = (value) => {
+    setWeekdays((prev) => (
+      prev.includes(value) ? prev.filter((d) => d !== value) : [...prev, value].sort()
+    ));
+  };
+
+  const participantStudentIds = () => {
+    if (groupId) {
+      return selectedStudentIds.length ? selectedStudentIds : undefined;
+    }
+    if (studentId) return [Number(studentId)];
+    if (selectedStudentIds.length) return selectedStudentIds;
+    return undefined;
+  };
+
+  const buildPayload = (force = false) => {
+    const ids = participantStudentIds();
+    const payload = {
+      title: lessonTitle.trim() || buildLessonTitle({ audienceLabel, type }),
+      topic: topic.trim() || undefined,
+      type,
+      event_type: type,
+      audience: audienceLabel,
+      format,
+      starts_at: `${date}T${startTime}:00`,
+      ends_at: `${date}T${endTime}:00`,
+      timezone,
+      group_id: groupId ? Number(groupId) : undefined,
+      student_ids: ids,
+      extra_student_ids: groupId && selectedStudentIds.length ? selectedStudentIds : undefined,
+      recurrence_type: recurrenceType,
+      recurrence_weekdays: recurrenceType === "custom_weekdays" ? weekdays : undefined,
+      recurrence_until: repeatEndMode === "date" && repeatUntil ? repeatUntil : undefined,
+      recurrence_count: repeatEndMode === "count" && repeatCount ? Number(repeatCount) : undefined,
+      reminder_minutes: reminderMinutes || undefined,
+      notify_participants: notifyParticipants,
+      lesson_plan_item: lessonPlanItemId || undefined,
+      lesson_plan_item_id: lessonPlanItemId || undefined,
+      force,
+    };
+    if (meetingMode === "manual" && manualLink.trim()) {
+      payload.telemost_url = manualLink.trim();
+      payload.link = manualLink.trim();
+    }
+    if (meetingMode === "later") {
+      payload.telemost_url = "";
+    }
+    return payload;
+  };
+
+  const handleSubmit = async (e, force = false) => {
+    e.preventDefault();
+    setError("");
+    setConflict(null);
+    if (!groupId && !studentId && !selectedStudentIds.length) {
+      setError(isIndividual ? "Выберите ученика." : "Выберите группу или ученика.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await onCreate(buildPayload(force));
+    } catch (err) {
+      if (err.code === "schedule_conflict" || err.message?.includes("уже есть занятие")) {
+        setConflict(err.conflicts || true);
+        setError("В это время уже есть занятие.");
+      } else {
+        setError(err.message || "Не удалось сохранить урок.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="cb-sch-overlay" onClick={onClose} role="presentation">
+      <div
+        className="cb-sch-modal cb-sch-modal--wide"
+        onClick={(ev) => ev.stopPropagation()}
+        role="dialog"
+        aria-labelledby="sch-create-title"
+      >
+        <div className="cb-sch-modal__head">
+          <h2 id="sch-create-title">{dialogTitle || "Новый урок"}</h2>
+          <button type="button" className="cb-sch-popover__close" onClick={onClose} aria-label="Закрыть">
+            <CabinetIcon name="close" />
+          </button>
+        </div>
+        <form className="cb-sch-form cb-sch-form--sections" onSubmit={(e) => handleSubmit(e, false)}>
+          {error ? <p className="cb-sch-form__error" role="alert">{error}</p> : null}
+          {lessonPlanItemId ? (
+            <section className="cb-sch-form__section">
+              <h3>Занятие из плана</h3>
+              <label className="cb-sch-field">
+                <span>Название</span>
+                <input
+                  value={lessonTitle}
+                  onChange={(e) => setLessonTitle(e.target.value)}
+                  placeholder="Название занятия"
+                />
+              </label>
+              <label className="cb-sch-field">
+                <span>Тема</span>
+                <input
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                  placeholder="Тема занятия"
+                />
+              </label>
+            </section>
+          ) : null}
+          {conflict ? (
+            <div className="cb-sch-form__conflict">
+              <p>В это время уже есть занятие. Выберите другое время или создайте всё равно.</p>
+              <button
+                type="button"
+                className="cb-sch-btn cb-sch-btn--outline cb-sch-btn--sm"
+                onClick={(e) => handleSubmit(e, true)}
+              >
+                Всё равно создать
+              </button>
+            </div>
+          ) : null}
+
+          <section className="cb-sch-form__section">
+            <h3>Участники</h3>
+            <label className="cb-sch-field">
+              <span>Тип занятия</span>
+              <select
+                value={type}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setType(next);
+                  if (next === "individual_lesson") {
+                    setGroupId("");
+                    setSelectedStudentIds([]);
+                  }
+                }}
+              >
+                <option value="group_lesson">Групповое</option>
+                <option value="individual_lesson">Индивидуальное</option>
+              </select>
+            </label>
+
+            {/* Группа — только для групповых */}
+            {!isIndividual && (
+              <label className="cb-sch-field">
+                <span>Группа</span>
+                <select value={groupId} onChange={(e) => { setGroupId(e.target.value); setSelectedStudentIds([]); }}>
+                  <option value="">Не выбрана</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>{g.title}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            {/* Ученик — всегда при индивидуальном; при групповом — только если группа не выбрана */}
+            {(isIndividual || !groupId) && (
+              <>
+                <label className="cb-sch-field">
+                  <span>Ученик</span>
+                  <select value={studentId} onChange={(e) => { setStudentId(e.target.value); setSelectedStudentIds([]); }}>
+                    <option value="">Не выбран</option>
+                    {students.map((s) => (
+                      <option key={s.id} value={s.id}>{s.full_name}</option>
+                    ))}
+                  </select>
+                </label>
+                {!isIndividual && (
+                  <div className="cb-sch-field">
+                    <span>Или несколько учеников</span>
+                    <div className="cb-sch-chip-list">
+                      {students.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          className={`cb-sch-chip ${selectedStudentIds.includes(s.id) ? "cb-sch-chip--active" : ""}`}
+                          onClick={() => toggleStudent(s.id)}
+                        >
+                          {s.full_name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Дополнительные ученики для групп */}
+            {!isIndividual && groupId && (
+              <div className="cb-sch-field">
+                <span>Дополнительные ученики</span>
+                <div className="cb-sch-chip-list">
+                  {students.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className={`cb-sch-chip ${selectedStudentIds.includes(s.id) ? "cb-sch-chip--active" : ""}`}
+                      onClick={() => toggleExtraStudent(s.id)}
+                    >
+                      {s.full_name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <p className="cb-sch-form__hint">Организатор добавляется автоматически.</p>
+          </section>
+
+          <section className="cb-sch-form__section">
+            <h3>Время</h3>
+            <div className="cb-sch-form__row">
+              <label className="cb-sch-field">
+                <span>Дата</span>
+                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+              </label>
+              <label className="cb-sch-field">
+                <span>Начало</span>
+                <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+              </label>
+              <label className="cb-sch-field">
+                <span>Окончание</span>
+                <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+              </label>
+            </div>
+            <label className="cb-sch-field">
+              <span>Часовой пояс</span>
+              <select value={timezone} onChange={(e) => setTimezone(e.target.value)}>
+                <option value="Europe/Moscow">Москва (UTC+3)</option>
+                <option value="Europe/Kaliningrad">Калининград</option>
+                <option value="Asia/Yekaterinburg">Екатеринбург</option>
+              </select>
+            </label>
+          </section>
+
+          <section className="cb-sch-form__section">
+            <h3>Формат</h3>
+            <label className="cb-sch-field">
+              <span>Формат занятия</span>
+              <select value={format} onChange={(e) => setFormat(e.target.value)}>
+                <option value="online">Онлайн</option>
+                <option value="offline">Офлайн</option>
+              </select>
+            </label>
+            {format === "online" ? (
+              <>
+                <label className="cb-sch-field">
+                  <span>Ссылка на встречу</span>
+                  <select value={meetingMode} onChange={(e) => setMeetingMode(e.target.value)}>
+                    <option value="auto">Создать Телемост автоматически</option>
+                    <option value="manual">Ввести вручную</option>
+                    <option value="later">Создать позже</option>
+                  </select>
+                </label>
+                {meetingMode === "manual" ? (
+                  <label className="cb-sch-field">
+                    <span>URL встречи</span>
+                    <input type="url" value={manualLink} onChange={(e) => setManualLink(e.target.value)} />
+                  </label>
+                ) : null}
+              </>
+            ) : null}
+          </section>
+
+          <section className="cb-sch-form__section">
+            <h3>Повторение</h3>
+            <label className="cb-sch-field">
+              <span>Периодичность</span>
+              <select value={recurrenceType} onChange={(e) => setRecurrenceType(e.target.value)}>
+                {RECURRENCE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </label>
+            {recurrenceType === "custom_weekdays" ? (
+              <div className="cb-sch-weekdays">
+                {WEEKDAYS.map((d) => (
+                  <button
+                    key={d.value}
+                    type="button"
+                    className={`cb-sch-weekday ${weekdays.includes(d.value) ? "cb-sch-weekday--active" : ""}`}
+                    onClick={() => toggleWeekday(d.value)}
+                    aria-pressed={weekdays.includes(d.value)}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {recurrenceType !== "none" ? (
+              <>
+                <label className="cb-sch-field">
+                  <span>Повторять до</span>
+                  <select value={repeatEndMode} onChange={(e) => setRepeatEndMode(e.target.value)}>
+                    <option value="none">Без даты окончания</option>
+                    <option value="date">До выбранной даты</option>
+                    <option value="count">Количество занятий</option>
+                  </select>
+                </label>
+                {repeatEndMode === "date" ? (
+                  <label className="cb-sch-field">
+                    <span>Дата окончания</span>
+                    <input type="date" value={repeatUntil} onChange={(e) => setRepeatUntil(e.target.value)} />
+                  </label>
+                ) : null}
+                {repeatEndMode === "count" ? (
+                  <label className="cb-sch-field">
+                    <span>Количество занятий</span>
+                    <input type="number" min="1" value={repeatCount} onChange={(e) => setRepeatCount(e.target.value)} />
+                  </label>
+                ) : null}
+              </>
+            ) : null}
+          </section>
+
+          <div className="cb-sch-modal__actions">
+            <button type="submit" className="cb-sch-btn cb-sch-btn--primary" disabled={saving}>
+              {saving ? "Сохранение…" : recurrenceType !== "none" ? "Создать серию" : "Создать урок"}
+            </button>
+            <button type="button" className="cb-sch-btn cb-sch-btn--outline" onClick={onClose}>Отмена</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

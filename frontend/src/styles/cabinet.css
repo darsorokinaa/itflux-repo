@@ -1,0 +1,339 @@
+/* Личный кабинет — авторизация и заглушка дашборда */
+
+.cabinet-auth-page,
+.cabinet-page {
+  display: flex;
+  justify-content: center;
+  padding: 32px 16px 48px;
+}
+
+.cabinet-auth-card,
+.cabinet-page-card {
+  width: 100%;
+  max-width: 480px;
+  padding: 28px 24px 24px;
+  border-radius: 20px;
+  border: 1px solid var(--border-card);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 48px rgba(43, 82, 245, 0.08);
+  box-sizing: border-box;
+}
+
+.cabinet-auth-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eef0ff;
+  color: #3730a3;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cabinet-auth-title,
+.cabinet-page-title {
+  margin: 12px 0 8px;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 4vw, 1.85rem);
+  line-height: 1.15;
+  color: var(--text-main);
+}
+
+.cabinet-auth-lead,
+.cabinet-page-lead {
+  margin: 0;
+  color: var(--text-muted, #64748b);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.cabinet-auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 24px 0 16px;
+  padding: 4px;
+  border-radius: 12px;
+  background: #f1f5f9;
+}
+
+.cabinet-auth-tab {
+  min-height: 42px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #475569;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cabinet-auth-tab.is-active {
+  background: #fff;
+  color: #3730a3;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.cabinet-auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cabinet-auth-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 520px) {
+  .cabinet-auth-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cabinet-auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.cabinet-auth-field input,
+.cabinet-auth-field select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--border-card);
+  border-radius: 12px;
+  background: #fff;
+  font: inherit;
+  font-weight: 500;
+  color: var(--text-main);
+  box-sizing: border-box;
+}
+
+.cabinet-auth-field input:focus,
+.cabinet-auth-field select:focus {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(43, 82, 245, 0.12);
+}
+
+.cabinet-auth-submit {
+  margin-top: 4px;
+  min-height: 48px;
+  border: none;
+  border-radius: 12px;
+  background: var(--blue-hero, #2b52f5);
+  color: #fff;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.cabinet-auth-submit:hover:not(:disabled) {
+  background: var(--blue-dark, #1e3fd4);
+}
+
+.cabinet-auth-submit:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.cabinet-auth-error {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 0.92rem;
+}
+
+.cabinet-auth-referral {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.cabinet-auth-muted {
+  margin: 0;
+  text-align: center;
+  color: var(--text-muted, #64748b);
+}
+
+.cb-invite-preview {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: var(--text-main);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.cb-invite-preview p {
+  margin: 0 0 8px;
+}
+
+.cb-invite-preview__message {
+  font-style: italic;
+}
+
+.cb-students-pending {
+  margin: 0 0 20px;
+}
+
+.cb-students-pending__list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cb-students-pending__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px dashed var(--border-card, #e2e8f0);
+  background: #fff;
+}
+
+.cb-students-pending__meta {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted, #64748b);
+  font-size: 0.85rem;
+}
+
+.cabinet-auth-footer {
+  margin: 18px 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted, #64748b);
+  line-height: 1.45;
+}
+
+.cabinet-auth-link {
+  color: #3730a3;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.cabinet-profile-grid {
+  display: grid;
+  gap: 14px;
+  margin: 24px 0;
+}
+
+.cabinet-profile-grid dt {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.cabinet-profile-grid dd {
+  margin: 4px 0 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.cabinet-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.cabinet-page-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid #c7d2fe;
+  color: #3730a3;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.cabinet-page-logout {
+  min-height: 42px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 10px;
+  background: #eef0ff;
+  color: #3730a3;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cabinet-page-logout:hover:not(:disabled) {
+  background: #e0e7ff;
+}
+
+/* Кнопка «Личный кабинет» в шапке */
+.cabinet-nav-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1.5px solid #c7d2fe;
+  background: #fff;
+  color: #3730a3 !important;
+  font-family: var(--font-body);
+  font-weight: 800;
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.cabinet-nav-button:hover {
+  background: #eef0ff;
+  color: #3730a3 !important;
+}
+
+.cabinet-nav-button__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #e0e7ff;
+}
+
+.cabinet-nav-button__icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 900px) {
+  .cabinet-nav-button {
+    width: 100%;
+    justify-content: center;
+  }
+}

@@ -76,6 +76,11 @@ export default function EduVariantSidebarCard({
   onOpenSupport,
   hideFinish,
   onFinish,
+  progressPart1Only = false,
+  finishLabel,
+  finishDisabled = false,
+  finishBusy = false,
+  submittedMessage = "",
 }) {
   const taskTotal = navTasksOrdered.length;
   const needTaskPaging = taskTotal > TASK_NAV_PAGE_SIZE;
@@ -127,9 +132,11 @@ export default function EduVariantSidebarCard({
         <span className="exam-edu-progress-caption">
           {mode === "test"
             ? "правильных ответов"
-            : part2Tasks.length > 0
-              ? "баллов из максимума"
-              : "правильных ответов"}
+            : progressPart1Only
+              ? "дано ответов"
+              : part2Tasks.length === 0
+                ? "правильных ответов"
+                : "баллов из максимума"}
         </span>
         <div className="exam-edu-progress-track" aria-hidden="true">
           <div className="exam-edu-progress-fill" style={{ width: `${sidebarProgressPct}%` }} />
@@ -204,9 +211,18 @@ export default function EduVariantSidebarCard({
       ) : null}
 
       {!hideFinish && (
-        <button type="button" className="exam-edu-btn exam-edu-btn--finish exam-edu-sidebar-finish" onClick={onFinish}>
-          Завершить вариант
-        </button>
+        submittedMessage ? (
+          <p className="exam-edu-sidebar-finish-note">{submittedMessage}</p>
+        ) : (
+          <button
+            type="button"
+            className="exam-edu-btn exam-edu-btn--finish exam-edu-sidebar-finish"
+            onClick={onFinish}
+            disabled={finishDisabled || finishBusy}
+          >
+            {finishBusy ? "Отправка…" : (finishLabel || "Завершить вариант")}
+          </button>
+        )
       )}
     </div>
   );

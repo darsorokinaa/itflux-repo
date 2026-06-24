@@ -1,0 +1,198 @@
+.interactive-play-page {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(16px, 4vw, 40px);
+  overflow: auto;
+}
+
+.interactive-player {
+  width: min(100%, 720px);
+}
+
+.interactive-player--bare {
+  width: min(100%, 640px);
+}
+
+.interactive-player--bare .cb-flash-card {
+  width: min(100%, 480px);
+  min-height: min(52vh, 320px);
+}
+
+.interactive-player--bare .cb-flash-card__face {
+  border: none;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+  background: #FFFFFF;
+}
+
+.interactive-player--bare .cb-flash-card__face--back {
+  background: #FFFFFF;
+}
+
+.interactive-player--bare .cb-flash-card__face p {
+  font-size: clamp(1.1rem, 2.5vw, 1.35rem);
+}
+
+.interactive-player--bare .cb-preview-nav--bare {
+  gap: 20px;
+}
+
+.cb-play-nav-btn {
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #334155;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.cb-play-nav-btn:hover:not(:disabled) {
+  transform: scale(1.04);
+}
+
+.cb-play-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.cb-play-nav-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cb-play-nav-dots i {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.35);
+}
+
+.cb-play-nav-dots i.is-active {
+  width: 18px;
+  background: #64748B;
+}
+
+.interactive-player--bare .cb-match-item {
+  border: none;
+  background: #FFFFFF;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
+  font-size: 0.95rem;
+  padding: 14px 16px;
+}
+
+.interactive-player--bare .cb-match-item--done {
+  background: rgba(16, 185, 129, 0.14);
+  box-shadow: inset 3px 0 0 #10B981, 0 6px 20px rgba(16, 185, 129, 0.12);
+}
+
+.interactive-player--bare .cb-match-item--wrong {
+  background: rgba(239, 68, 68, 0.14);
+  box-shadow: inset 3px 0 0 #EF4444, 0 6px 20px rgba(239, 68, 68, 0.12);
+}
+
+.interactive-player--bare .cb-match-item--selected {
+  background: #EFF6FF;
+  box-shadow: inset 3px 0 0 #2563EB, 0 6px 20px rgba(37, 99, 235, 0.1);
+}
+
+.interactive-player--bare .cb-preview-match__cols {
+  gap: 16px;
+}
+
+.interactive-player--bare .cb-preview-match__line {
+  stroke: #34D399;
+  stroke-width: 3;
+}
+
+.interactive-player--bare .cb-sequence-item {
+  border: none;
+  background: #FFFFFF;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
+  padding: 14px 16px;
+}
+
+.interactive-player--bare .cb-sequence-item--ok {
+  background: rgba(16, 185, 129, 0.14);
+  box-shadow: inset 3px 0 0 #10B981, 0 6px 20px rgba(16, 185, 129, 0.12);
+}
+
+.interactive-player--bare .cb-sequence-item--bad {
+  background: rgba(239, 68, 68, 0.14);
+  box-shadow: inset 3px 0 0 #EF4444, 0 6px 20px rgba(239, 68, 68, 0.12);
+}
+
+.interactive-player--bare .cb-sequence-item__text {
+  font-size: 0.95rem;
+}
+
+.cb-play-check-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: 0 auto;
+  border: none;
+  border-radius: 999px;
+  background: #FFFFFF;
+  color: #2563EB;
+  font-size: 1.2rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+}
+
+.cb-play-check-btn--ok {
+  background: #10B981;
+  color: #FFFFFF;
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.35);
+}
+
+.cb-play-check-btn--bad {
+  background: #EF4444;
+  color: #FFFFFF;
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.35);
+}
+
+.ix-flash-btn {
+  min-width: 110px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.ix-flash-btn--know {
+  background: #10B981;
+  border: 1px solid #059669;
+  color: #FFFFFF;
+}
+
+.ix-flash-btn--know:hover {
+  background: #059669;
+}
+
+.ix-flash-btn--repeat {
+  background: #FFFFFF;
+  border: 1px solid #EF4444;
+  color: #DC2626;
+}
+
+.ix-flash-btn--repeat:hover {
+  background: #FEF2F2;
+}
+
+@media (max-width: 640px) {
+  .interactive-player--bare .cb-preview-match__cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

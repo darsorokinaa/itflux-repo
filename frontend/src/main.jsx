@@ -5,6 +5,7 @@ import './styles/home.css'
 import './styles/styles.css'
 import './styles/digital-flow-override.css'
 import './styles/teachers.css'
+import './styles/cabinet.css'
 import App from './App.jsx'
 import { ensureSiteFavicon } from './utils/ensureSiteFavicon'
 

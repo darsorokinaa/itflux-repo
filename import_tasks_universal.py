@@ -30,8 +30,7 @@ from fipi_html_normalize import (
 
 # ──────────────────────────── КОНФИГУРАЦИЯ ────────────────────────────────────
 
-EXCEL_FILE = "/Users/darsorokina/Desktop/Преподавание/result/inf_kes_4_6.xlsx"
-
+EXCEL_FILE = "/opt/itfluxacademy/itflux/infege_kes_2_7.xlsx"
 # Колонка с текстом задачи.
 # Для Excel из fipi_parser_inf_html.py используй "task_html" —
 # эта колонка уже содержит <img src="https://..."> теги с картинками.
@@ -49,7 +48,7 @@ COL_IMAGES = 'image_url'     # PNG/GIF слайды (через запятую)
 COL_ANSWER = None    # например: "answer"
 
 # Номер задания (ОГЭ/ЕГЭ) и подтема — привязка к TaskList / SubTopic в БД
-COL_TASK_NUMBER = "task_number"   # None — не заполнять task_id
+COL_TASK_NUMBER = None   # None — не заполнять task_id
 COL_SUBTOPIC = None      # None — не заполнять subtopic_id
 
 # Предмет и уровень для поиска TaskList (subject_short и level.level в БД)
@@ -78,10 +77,10 @@ TASK_FILES_DIR = MEDIA_ROOT / "task_files"
 
 DB = {
     "dbname":   os.environ.get("PGDATABASE", "itflux"),
-    "user":     os.environ.get("PGUSER", "postgres"),
-    "password": os.environ.get("PGPASSWORD", "postgres"),
-    "host":     os.environ.get("PGHOST", "localhost"),
-    "port":     os.environ.get("PGPORT", "5432"),
+    "user":     os.environ.get("PGUSER", "itflux_user"),
+    "password": os.environ.get("PGPASSWORD", "StrongPass123itflux2026"),
+    "host":     os.environ.get("PGHOST", "itflux-academy.ru"),
+    "port":     os.environ.get("PGPORT", "5433"),
 }
 
 HEADERS = {

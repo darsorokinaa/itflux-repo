@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useLocation, Link } from "react-router-dom";
+import { useParams, useLocation, Link, useNavigate } from "react-router-dom";
 import MathContent from "../components/MathContent";
 import { devApiBase } from "../utils/devApiBase";
 import { isEgeInfTruthTableTask, isEgeInfParallelProcessesTask, isEgeInfRoadGraphTask, isEgeInformaticsContext, isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
@@ -36,8 +36,16 @@ import {
   homeworkApiUserMessage,
   homeworkTaskNumberEditable,
   homeworkIsReadonly,
+  homeworkIsReviewed,
   homeworkShowSolutions,
+  homeworkTaskAttachments,
+  uploadHomeworkAnswer,
+  deleteHomeworkAnswer,
 } from "../utils/cabinetHomework";
+import HomeworkReviewResults, {
+  HomeworkTaskReviewNote,
+  buildHomeworkReviewFromVariant,
+} from "../cabinet/HomeworkReviewResults";
 
 
 function isMathLikeSubject(subject) {
@@ -106,19 +114,41 @@ function TaskReportErrorButton({ taskId, taskNumber, onClick }) {
   );
 }
 
-/** Урок/ДЗ в iframe: ученик прикрепляет изображение решения (часть 2). */
-function LessonSolutionUpload({ taskNumber, taskId, lessonToken, assignmentId, homeworkMode, enabled }) {
+/** Урок/ДЗ: ученик прикрепляет файлы решения (часть 2). */
+function LessonSolutionUpload({
+  taskNumber,
+  taskId,
+  lessonToken,
+  assignmentId,
+  homeworkMode,
+  cabinetMode,
+  enabled,
+  allowDelete,
+  initialAttachments,
+}) {
   const FILE_ACCEPT =
     ".kum,.xls,.xlsx,.xlsm,.xlsb,.csv,.tsv,.ods,.ots,.numbers,.png,.jpg,.jpeg,.webp,.gif,.bmp,.heic,.heif,.txt,.pdf,.doc,.docx,.odt,.rtf,.zip,.7z,.rar";
   const fileInputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  const [sentPreviews, setSentPreviews] = useState([]);
+  const [sentPreviews, setSentPreviews] = useState(initialAttachments || []);
   
   const [pendingFile, setPendingFile] = useState(null);
   const [pendingPreview, setPendingPreview] = useState(null);
+  const initialAttachmentsKeyRef = useRef("");
 
-  if (!enabled || !lessonToken) return null;
+  useEffect(() => {
+    const key = JSON.stringify(initialAttachments || []);
+    if (initialAttachmentsKeyRef.current === key) return;
+    initialAttachmentsKeyRef.current = key;
+    setSentPreviews(Array.isArray(initialAttachments) ? initialAttachments : []);
+  }, [initialAttachments]);
+
+  const canDeleteAttachment =
+    allowDelete && (cabinetMode || homeworkMode) && !!assignmentId;
+
+  if (!enabled) return null;
+  if (!cabinetMode && !lessonToken) return null;
 
   const onFileSelect = (e) => {
     const file = e.target.files?.[0];
@@ -147,25 +177,28 @@ function LessonSolutionUpload({ taskNumber, taskId, lessonToken, assignmentId, h
     setErr(null);
     const fd = new FormData();
     fd.append("task_number", String(taskNumber));
-    if (!homeworkMode) {
+    if (taskId != null && String(taskId).trim() !== "") fd.append("task_id", String(taskId));
+    if (!homeworkMode && !cabinetMode) {
       fd.append("lesson_token", lessonToken);
-      if (taskId != null && String(taskId).trim() !== "") fd.append("task_id", String(taskId));
     }
     fd.append("file", pendingFile);
     try {
-      const uploadUrl =
-        homeworkMode && assignmentId
-          ? `/api/lesson/homework/assignment/${encodeURIComponent(String(assignmentId))}/upload-answer/?${new URLSearchParams({ token: lessonToken }).toString()}`
-          : "/api/lesson/attachment/";
-      const res = await fetch(uploadUrl, {
-        method: "POST",
-        body: fd,
-        credentials: "include",
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || (Object.prototype.hasOwnProperty.call(data, "ok") && !data.ok)) {
-        throw new Error(data.error || "Не удалось загрузить файл");
-      }
+      const uploadOpts = lessonToken ? { lessonToken } : undefined;
+      const useNativeHomeworkUpload = (cabinetMode || homeworkMode) && assignmentId;
+      const data = useNativeHomeworkUpload
+        ? await uploadHomeworkAnswer(assignmentId, fd, uploadOpts)
+        : await (async () => {
+            const res = await fetch("/api/lesson/attachment/", {
+              method: "POST",
+              body: fd,
+              credentials: "include",
+            });
+            const parsed = await res.json().catch(() => ({}));
+            if (!res.ok || (Object.prototype.hasOwnProperty.call(parsed, "ok") && !parsed.ok)) {
+              throw new Error(parsed.error || "Не удалось загрузить файл");
+            }
+            return parsed;
+          })();
       const url = String(data.url || "");
       const filename = String(data.filename || pendingFile.name);
       setSentPreviews((prev) => [...prev, { url, filename, isImage: pendingFile.type.startsWith("image/") }]);
@@ -173,14 +206,54 @@ function LessonSolutionUpload({ taskNumber, taskId, lessonToken, assignmentId, h
       if (pendingPreview) URL.revokeObjectURL(pendingPreview);
       setPendingPreview(null);
     } catch (ex) {
-      setErr(ex.message || "Ошибка загрузки");
+      const raw = ex instanceof Error ? ex.message : String(ex || "");
+      setErr(
+        raw === "Failed to fetch"
+          ? "Не удалось связаться с сервером. Проверьте подключение и попробуйте снова."
+          : raw || "Ошибка загрузки"
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDeleteAttachment = async (e, attachmentUrl) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!canDeleteAttachment || !attachmentUrl || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const uploadOpts = lessonToken ? { lessonToken } : undefined;
+      await deleteHomeworkAnswer(
+        assignmentId,
+        { url: attachmentUrl, taskNumber, taskId },
+        uploadOpts
+      );
+      setSentPreviews((prev) => {
+        const next = prev.filter((p) => p.url !== attachmentUrl);
+        initialAttachmentsKeyRef.current = JSON.stringify(next);
+        return next;
+      });
+    } catch (ex) {
+      const raw = ex instanceof Error ? ex.message : String(ex || "");
+      setErr(
+        raw === "Failed to fetch"
+          ? "Не удалось связаться с сервером. Проверьте подключение и попробуйте снова."
+          : raw || "Ошибка удаления"
+      );
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="lesson-solution-upload" onClick={(e) => e.stopPropagation()} style={{ width: "100%" }}>
+    <div className="lesson-solution-upload" onClick={(e) => e.stopPropagation()}>
+      <div className="lesson-solution-upload__head">
+        <span className="lesson-solution-upload__label">Прикрепить файлы</span>
+        <span className="lesson-solution-upload__hint">PNG, PDF, DOC, XLS и другие форматы</span>
+      </div>
+
       <input
         ref={fileInputRef}
         type="file"
@@ -190,80 +263,101 @@ function LessonSolutionUpload({ taskNumber, taskId, lessonToken, assignmentId, h
         onChange={onFileSelect}
       />
 
-      <div className="lesson-solution-picker">
-        <button
-          type="button"
-          className="lesson-solution-picker-btn"
-          disabled={busy}
-          onClick={(e) => {
-            e.stopPropagation();
-            fileInputRef.current?.click();
-          }}
-        >
-          Выбрать файл
-        </button>
-        <span className={`lesson-solution-picker-name${pendingFile ? " is-selected" : ""}`}>
-          {pendingFile?.name || "Файл не выбран"}
-        </span>
-      </div>
-
-      {pendingFile ? (
+      {!pendingFile ? (
+        <div className="lesson-solution-picker">
+          <button
+            type="button"
+            className="lesson-solution-picker-btn"
+            disabled={busy}
+            onClick={(e) => {
+              e.stopPropagation();
+              fileInputRef.current?.click();
+            }}
+          >
+            Выбрать файл
+          </button>
+          <span className="lesson-solution-picker-name">Файл не выбран</span>
+        </div>
+      ) : (
         <div className="lesson-solution-pending">
           <div className="lesson-solution-pending-preview">
             {pendingPreview ? (
               <img
                 src={pendingPreview}
-                alt="Preview"
+                alt=""
                 className="lesson-solution-pending-image"
               />
             ) : (
-              <div className="lesson-solution-pending-file">
-                <span className="lesson-solution-pending-file-icon" aria-hidden="true">📄</span>
-                <span className="lesson-solution-pending-file-name">{pendingFile.name}</span>
+              <div className="lesson-solution-pending-file-icon" aria-hidden="true">
+                📄
               </div>
             )}
-            <button
-              type="button"
-              className="lesson-solution-pending-remove"
-              onClick={onCancel}
-              aria-label="Убрать выбранный файл"
-            >
-              ✕
-            </button>
+            <div className="lesson-solution-pending-meta">
+              <span className="lesson-solution-pending-file-name">{pendingFile.name}</span>
+              <div className="lesson-solution-pending-actions">
+                <button
+                  type="button"
+                  className="lesson-solution-pending-action lesson-solution-pending-action--ghost"
+                  disabled={busy}
+                  onClick={onCancel}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  className="lesson-solution-pending-action lesson-solution-pending-action--primary"
+                  disabled={busy}
+                  onClick={onSend}
+                >
+                  {busy ? "Отправка…" : "Прикрепить"}
+                </button>
+              </div>
+            </div>
           </div>
-          <button
-            type="button"
-            className="add-button lesson-solution-send-btn"
-            disabled={busy}
-            onClick={onSend}
-          >
-            {busy ? "Отправка…" : "Прикрепить решение"}
-          </button>
         </div>
-      ) : null}
+      )}
 
-      {err ? <span className="lesson-solution-upload-error" style={{ display: "block", marginTop: "8px" }}>{err}</span> : null}
-      
+      {err ? <span className="lesson-solution-upload-error">{err}</span> : null}
+
       {sentPreviews.length > 0 ? (
-        <div className="lesson-solution-previews" style={{ marginTop: "12px" }}>
-          {sentPreviews.map((p, i) => {
-            const src = `${p.url}${p.url.includes("?") ? "&" : "?"}t=${encodeURIComponent(lessonToken)}`;
-            return (
-              <figure key={`${p.url}-${i}`} className="lesson-solution-preview-fig">
-                {p.isImage ? (
-                  <img src={src} alt="" className="lesson-solution-thumb" />
-                ) : (
-                  <a href={src} target="_blank" rel="noreferrer" className="lesson-solution-file-item">
-                    <span className="lesson-solution-file-item__icon" aria-hidden="true">📎</span>
-                    <span className="lesson-solution-file-item__name">{p.filename || "Файл"}</span>
-                  </a>
-                )}
-                {p.isImage && p.filename ? (
-                  <figcaption className="lesson-solution-preview-cap">{p.filename}</figcaption>
-                ) : null}
-              </figure>
-            );
-          })}
+        <div className="lesson-solution-previews">
+          <span className="lesson-solution-previews__label">Прикреплено</span>
+          <div className="lesson-solution-previews__grid">
+            {sentPreviews.map((p, i) => {
+              const src = lessonToken && !cabinetMode
+                ? `${p.url}${p.url.includes("?") ? "&" : "?"}t=${encodeURIComponent(lessonToken)}`
+                : p.url;
+              return (
+                <figure key={`${p.url}-${i}`} className="lesson-solution-preview-fig">
+                  {canDeleteAttachment ? (
+                    <button
+                      type="button"
+                      className="lesson-solution-preview-remove"
+                      disabled={busy}
+                      aria-label="Удалить файл"
+                      title="Удалить файл"
+                      onClick={(e) => onDeleteAttachment(e, p.url)}
+                    >
+                      ✕
+                    </button>
+                  ) : null}
+                  {p.isImage ? (
+                    <a href={src} target="_blank" rel="noreferrer" className="lesson-solution-preview-link">
+                      <img src={src} alt="" className="lesson-solution-thumb" />
+                    </a>
+                  ) : (
+                    <a href={src} target="_blank" rel="noreferrer" className="lesson-solution-file-item">
+                      <span className="lesson-solution-file-item__icon" aria-hidden="true">📎</span>
+                      <span className="lesson-solution-file-item__name">{p.filename || "Файл"}</span>
+                    </a>
+                  )}
+                  {p.filename ? (
+                    <figcaption className="lesson-solution-preview-cap">{p.filename}</figcaption>
+                  ) : null}
+                </figure>
+              );
+            })}
+          </div>
         </div>
       ) : null}
     </div>
@@ -318,7 +412,9 @@ function p1TaskStatusPill(
   useTable,
   rows,
   cols,
-  getTableAnswerForCheck
+  getTableAnswerForCheck,
+  homeworkNoReveal = false,
+  homeworkConfirmedTasks = {},
 ) {
   const inf2627Ege =
     subject === "inf" &&
@@ -333,6 +429,11 @@ function p1TaskStatusPill(
   } else {
     draft =
       userAnswers[task.id] != null && String(userAnswers[task.id]).trim() !== "";
+  }
+  if (homeworkNoReveal) {
+    if (homeworkConfirmedTasks[task.id]) return { key: "warn", label: "Подтверждено" };
+    if (draft) return { key: "warn", label: "Ответ введён" };
+    return { key: "neutral", label: "Не отвечено" };
   }
   if (inf2627Ege) {
     if (checkedTasks[task.id] !== undefined) {
@@ -349,7 +450,16 @@ function p1TaskStatusPill(
   return { key: "neutral", label: "Не проверено" };
 }
 
-function p2TaskStatusPill(task, selectedCriterionByTask, userAnswers) {
+function p2TaskStatusPill(task, selectedCriterionByTask, userAnswers, scorePart1Only = false, scores = {}, reviewed = false) {
+  if (reviewed && scores[task.id] != null && scores[task.id] !== "") {
+    return { key: "ok", label: `${scores[task.id]} б.` };
+  }
+  if (scorePart1Only) {
+    const ua = userAnswers[task.id];
+    if (ua != null && String(ua).trim() !== "")
+      return { key: "warn", label: "Ответ введён" };
+    return { key: "neutral", label: "Без оценки" };
+  }
   if (selectedCriterionByTask[task.id] != null)
     return { key: "ok", label: "Оценено" };
   const ua = userAnswers[task.id];
@@ -378,6 +488,7 @@ function clampExamCornerToViewport(el, left, top) {
 function ExamPage() {
   const { level, subject, variant_id } = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
   const lessonEmbedParams = useMemo(() => {
     const sp = new URLSearchParams(location.search);
     return {
@@ -392,19 +503,28 @@ function ExamPage() {
     return parseHomeworkFromSearchForExam(location.search, embed);
   }, [location.search]);
   const isHomework = homeworkQuery.isHomework;
-  /** Полноэкранный EdTech-макет с сайдбаром: не урок и не режим ДЗ из ЛК */
-  const showExamEducationShell = !lessonEmbedParams.embed && !isHomework;
+  const isEmbeddedHomework = isHomework && lessonEmbedParams.embed;
+  const isCabinetHomework = isHomework && !lessonEmbedParams.embed;
+  /** Полноэкранный EdTech-макет с сайдбаром: не урок (в т.ч. ДЗ из кабинета ученика) */
+  const showExamEducationShell = !lessonEmbedParams.embed;
   const cabinetAssignmentId = homeworkQuery.cabinetAssignment;
   const isTeacherHomeworkView =
     isHomework && lessonEmbedParams.embed && !lessonEmbedParams.student;
+  const homeworkStudentMode = isHomework && !isTeacherHomeworkView;
   const [hwApiRaw, setHwApiRaw] = useState(null);
   const [hwLoading, setHwLoading] = useState(false);
   const [hwError, setHwError] = useState(null);
   const [hwActionBusy, setHwActionBusy] = useState(false);
   const [hwNotice, setHwNotice] = useState("");
+  const [homeworkFieldsLocked, setHomeworkFieldsLocked] = useState(false);
+  const [homeworkConfirmedTasks, setHomeworkConfirmedTasks] = useState({});
   const hwHydrateKeyRef = useRef("");
   const showLessonSolutionUpload =
     lessonEmbedParams.embed && lessonEmbedParams.student && !!lessonEmbedParams.token;
+  const showCabinetPart2SolutionUpload =
+    isCabinetHomework && homeworkStudentMode && !!cabinetAssignmentId;
+  /** ДЗ из кабинета: без ID заданий, статус-плашек, номера варианта, PDF и ссылки */
+  const hideHomeworkVariantChrome = isCabinetHomework && homeworkStudentMode;
 
   /**
    * Пока variant ещё null, рендер только «Загрузка…» без #main-wrapper — :has(#main-wrapper…) в CSS не срабатывает.
@@ -630,11 +750,6 @@ function ExamPage() {
       setHwLoading(false);
       return undefined;
     }
-    if (!getLkPublicBase() && !lessonEmbedParams.token) {
-      setHwError("no_lk_env");
-      setHwLoading(false);
-      return undefined;
-    }
     let cancelled = false;
     setHwLoading(true);
     setHwError(null);
@@ -676,6 +791,14 @@ function ExamPage() {
     setScores((p) => ({ ...p, ...sc }));
     if (ch && Object.keys(ch).length) setCheckedTasks((p) => ({ ...p, ...ch }));
   }, [variant, hwApiRaw, cabinetAssignmentId]);
+
+  useEffect(() => {
+    if (!homeworkStudentMode || !hwApiRaw) return;
+    const picked = pickHomeworkFields(hwApiRaw, cabinetAssignmentId || "");
+    if (homeworkIsReadonly(picked.status, isTeacherHomeworkView)) {
+      setHomeworkFieldsLocked(true);
+    }
+  }, [homeworkStudentMode, hwApiRaw, cabinetAssignmentId, isTeacherHomeworkView]);
 
   /* =========================
      Справочная информация (ВПР: фильтр по классу варианта)
@@ -1102,23 +1225,13 @@ function ExamPage() {
 
   const runHomeworkSave = useCallback(async () => {
     if (!isHomework || !cabinetAssignmentId || !variant) return;
-    setHwActionBusy(true);
-    setHwNotice("");
-    try {
-      const r = buildHomeworkResultPayload(variant.tasks, userAnswers, scores, checkedTasks);
-      await saveHomeworkDraft(cabinetAssignmentId, { result: r }, homeworkLkOpts);
-      setHwNotice("Черновик сохранён");
-      setTimeout(() => setHwNotice(""), 2400);
-    } catch (e) {
-      setHwNotice(homeworkApiUserMessage(e) || "Не удалось сохранить");
-    } finally {
-      setHwActionBusy(false);
-    }
-  }, [isHomework, cabinetAssignmentId, variant, userAnswers, scores, checkedTasks, homeworkLkOpts]);
-
-  const runHomeworkSubmit = useCallback(async () => {
-    if (!isHomework || !cabinetAssignmentId || !variant) return;
-    if (!window.confirm("Отправить работу на проверку? После отправки нельзя править, пока не вернут на доработку.")) {
+    const statusNorm = pickHomeworkFields(hwApiRaw, cabinetAssignmentId || "").status;
+    if (homeworkIsReadonly(statusNorm, isTeacherHomeworkView)) {
+      setHwNotice(
+        homeworkIsReviewed(statusNorm)
+          ? "Работа уже проверена — изменения недоступны"
+          : "Работа уже отправлена на проверку",
+      );
       return;
     }
     setHwActionBusy(true);
@@ -1126,16 +1239,75 @@ function ExamPage() {
     try {
       const r = buildHomeworkResultPayload(variant.tasks, userAnswers, scores, checkedTasks);
       await saveHomeworkDraft(cabinetAssignmentId, { result: r }, homeworkLkOpts);
+      if (isEmbeddedHomework) setHomeworkFieldsLocked(true);
+      setHwNotice("Черновик сохранён");
+      setTimeout(() => setHwNotice(""), 2400);
+    } catch (e) {
+      setHwNotice(homeworkApiUserMessage(e) || "Не удалось сохранить");
+    } finally {
+      setHwActionBusy(false);
+    }
+  }, [isHomework, cabinetAssignmentId, variant, userAnswers, scores, checkedTasks, homeworkLkOpts, hwApiRaw, isTeacherHomeworkView]);
+
+  const runHomeworkSubmit = useCallback(async () => {
+    if (!isHomework || !cabinetAssignmentId || !variant) return;
+    const statusNorm = pickHomeworkFields(hwApiRaw, cabinetAssignmentId || "").status;
+    if (homeworkIsReadonly(statusNorm, isTeacherHomeworkView)) {
+      setHwNotice(
+        homeworkIsReviewed(statusNorm)
+          ? "Работа уже проверена — повторная отправка недоступна"
+          : "Работа уже отправлена на проверку",
+      );
+      return;
+    }
+    if (
+      !window.confirm(
+        "Отправить работу на проверку? После отправки изменить ответы нельзя — учитель проверит часть 2."
+      )
+    ) {
+      return;
+    }
+    setHwActionBusy(true);
+    setHwNotice("");
+    try {
+      const r = buildHomeworkResultPayload(
+        variant.tasks,
+        userAnswers,
+        homeworkStudentMode ? {} : scores,
+        homeworkStudentMode ? {} : checkedTasks
+      );
+      await saveHomeworkDraft(cabinetAssignmentId, { result: r }, homeworkLkOpts);
       await submitHomework(cabinetAssignmentId, { result: r }, homeworkLkOpts);
+      setHomeworkFieldsLocked(true);
       setHwNotice("Отправлено на проверку");
       const j = await fetchHomeworkAssignment(cabinetAssignmentId, homeworkLkOpts);
       setHwApiRaw(j);
+      if (isCabinetHomework) {
+        navigate(`/cabinet/student/assignments/${cabinetAssignmentId}`);
+      }
     } catch (e) {
       setHwNotice(homeworkApiUserMessage(e) || "Ошибка отправки");
     } finally {
       setHwActionBusy(false);
     }
-  }, [isHomework, cabinetAssignmentId, variant, userAnswers, scores, checkedTasks, homeworkLkOpts]);
+  }, [
+    isHomework,
+    homeworkStudentMode,
+    isCabinetHomework,
+    cabinetAssignmentId,
+    variant,
+    userAnswers,
+    scores,
+    checkedTasks,
+    homeworkLkOpts,
+    navigate,
+    hwApiRaw,
+    isTeacherHomeworkView,
+  ]);
+
+  const confirmHomeworkPart1Answer = useCallback((task) => {
+    setHomeworkConfirmedTasks((prev) => ({ ...prev, [task.id]: true }));
+  }, []);
 
   const goToExamTask = useCallback((taskId) => {
     currentTaskIdRef.current = taskId;
@@ -1192,21 +1364,8 @@ function ExamPage() {
       </div>
     );
   }
-  if (isHomework && !getLkPublicBase() && !lessonEmbedParams.token) {
-    return (
-      <div style={{ padding: 24, maxWidth: 560 }}>
-        <h2 style={{ fontFamily: "var(--font-heading), sans-serif", marginBottom: 8 }}>Домашнее задание</h2>
-        <p>
-          Для связи с кабинетом задайте в сборке фронтенда переменную{" "}
-          <code style={{ background: "#f1f5f9", padding: "2px 6px", borderRadius: 6 }}>VITE_LK_PUBLIC_URL</code> — тот
-          же origin, что и у сессии ЛК (CORS + credentials). В уроке с токеном вариант использует прокси генератор → ЛК
-          (без CORS), если открыт из комнаты с <code>lesson_token</code>.
-        </p>
-      </div>
-    );
-  }
 
-  // Fallback: если part не задан, определяем по номеру (ОГЭ матем: 1–19 ч.1, 20+ ч.2; ЕГЭ матем: 1–11 ч.1; ОГЭ инф: 1–15 ч.1)
+  // Fallback: если part не задан, определяем по номеру
   const inferPart = (t) => {
     if (t.part === 1 || t.part === 2) return t.part;
     const n = t.number;
@@ -1234,82 +1393,42 @@ function ExamPage() {
   const hRead = homeworkIsReadonly(hwSt, isTeacherHomeworkView);
   const hSol = homeworkShowSolutions(hwSt);
   const showHomeworkReviewedResults = isHomework && !isTeacherHomeworkView && hwSt === "reviewed";
-  const homeworkReviewData = (() => {
-    if (!showHomeworkReviewedResults || !variant?.tasks?.length) return null;
-    const rawObj = hwPicked?.raw && typeof hwPicked.raw === "object" ? hwPicked.raw : {};
-    const resultObj = parseMaybeJsonObject(hwPicked?.result);
-    const commentsByTaskId =
-      resultObj?.comments_by_task_id ||
-      resultObj?.commentsByTaskId ||
-      resultObj?.task_comments_by_id ||
-      rawObj.comments_by_task_id ||
-      rawObj.commentsByTaskId ||
-      {};
-    const commentsByNumber =
-      resultObj?.comments_by_number ||
-      resultObj?.commentsByNumber ||
-      resultObj?.task_comments_by_number ||
-      rawObj.comments_by_number ||
-      rawObj.commentsByNumber ||
-      {};
-    const normalizedTaskIdComments =
-      commentsByTaskId && typeof commentsByTaskId === "object" ? commentsByTaskId : {};
-    const normalizedNumberComments =
-      commentsByNumber && typeof commentsByNumber === "object" ? commentsByNumber : {};
-    const teacherComment = pickFirstNonEmptyString([
-      rawObj.teacher_comment,
-      rawObj.teacherComment,
-      rawObj.review_comment,
-      rawObj.reviewComment,
-      resultObj?.teacher_comment,
-      resultObj?.teacherComment,
-      resultObj?.review_comment,
-      resultObj?.reviewComment,
-      resultObj?.comment,
-      rawObj.comment,
-    ]);
-    const normalizeSimple = (s) =>
-      String(s || "")
-        .trim()
-        .replace(/\s+/g, "")
-        .toLowerCase();
-    const rows = [...variant.tasks]
-      .sort((a, b) => a.number - b.number)
-      .map((task) => {
-        const taskId = String(task.id);
-        const byIdComment = normalizedTaskIdComments[taskId];
-        const byNumComment =
-          normalizedNumberComments[String(task.number)] ??
-          normalizedNumberComments[String(Number(task.number))];
-        const taskComment = pickFirstNonEmptyString([byIdComment, byNumComment]);
-        const studentAnswer = String(userAnswers[task.id] ?? "").trim();
-        let isCorrect = typeof checkedTasks[task.id] === "boolean" ? checkedTasks[task.id] : null;
-        if (isCorrect == null && studentAnswer && task.answer) {
-          const expected = normalizeSimple(task.answer);
-          const actual = normalizeSimple(studentAnswer);
-          if (expected && actual) isCorrect = expected === actual;
-        }
-        return {
-          id: taskId,
-          number: task.number,
-          answer: studentAnswer,
-          isCorrect,
-          comment: taskComment,
-        };
-      });
-    return { teacherComment, rows };
-  })();
+  const hwResultPayload = parseMaybeJsonObject(hwPicked?.result) || {};
+  const homeworkReviewData = showHomeworkReviewedResults && variant?.tasks?.length
+    ? buildHomeworkReviewFromVariant(variant.tasks, hwResultPayload, level, subject)
+    : null;
   const numLocked = (n) =>
     isHomework && !homeworkTaskNumberEditable(hwSt, hwRevisions, n, isTeacherHomeworkView);
+  /** В ДЗ ученика баллы и прогресс считаются только по части 1. */
+  const hwScorePart1Only = homeworkStudentMode;
   const p1FieldDisabled = (task) => {
-    if (!isHomework) return checkedTasks[task.id] !== undefined;
     if (hRead) return true;
-    return numLocked(task.number);
+    if (homeworkStudentMode) {
+      if (homeworkConfirmedTasks[task.id]) return true;
+      if (homeworkFieldsLocked || numLocked(task.number)) return true;
+      return false;
+    }
+    if (checkedTasks[task.id] !== undefined) return true;
+    const inf2627Ege =
+      subject === "inf" &&
+      String(level || "").toLowerCase() === "ege" &&
+      (task.number === 26 || task.number === 27);
+    if (inf2627Ege && scores[task.id] != null) return true;
+    return false;
   };
-  const showP1Check = !isHomework;
-  /** В ДЗ: вместо «Проверить» — «Сохранить» (черновик в ЛК), без отображения верно/неверно. */
+  const p2FieldDisabled = () =>
+    hRead || (isHomework && (homeworkFieldsLocked || hwSt === "reviewed"));
+  const showAnswerFeedback = !homeworkStudentMode || showHomeworkReviewedResults;
+  const showP1HomeworkConfirm = (task) =>
+    homeworkStudentMode &&
+    !isEmbeddedHomework &&
+    !hRead &&
+    !homeworkConfirmedTasks[task.id];
+  const showP1CheckNormal = (task) =>
+    !homeworkStudentMode && checkedTasks[task.id] === undefined;
+  /** В ДЗ в iframe урока: «Сохранить» вместо «Проверить». */
   const p1ShowHomeworkSave = (task) =>
-    isHomework &&
+    isEmbeddedHomework &&
     !isTeacherHomeworkView &&
     !hRead &&
     !hSol &&
@@ -1318,7 +1437,7 @@ function ExamPage() {
   const p1CorrectVisible = () => isHomework && hSol;
   const lkBase = getLkPublicBase();
   const showHomeworkBottomActions =
-    isHomework &&
+    isEmbeddedHomework &&
     !isTeacherHomeworkView &&
     !hRead &&
     (hwSt === "sent" || hwSt === "revision" || hwSt === "unknown");
@@ -1339,9 +1458,10 @@ function ExamPage() {
     part2MaxAggregate > 0
       ? Math.min(100, (part2ScoreSum / part2MaxAggregate) * 100)
       : 0;
-  // ЕГЭ информатика: макс. первичный балл 29 (часть 1 + 26 и 27 по 2 балла и др.)
-  const maxScore =
-    String(subject).toLowerCase() === "inf" && String(level).toLowerCase() === "ege"
+  const part1MaxScore = part1Tasks.length;
+  const maxScore = hwScorePart1Only
+    ? part1MaxScore
+    : String(subject).toLowerCase() === "inf" && String(level).toLowerCase() === "ege"
       ? 29
       : part1Tasks.length + part2Tasks.reduce((sum, t) => sum + getTaskMaxScore(t), 0);
 
@@ -1353,6 +1473,7 @@ function ExamPage() {
    *   для итогового подсчёта.
    */
   function getEffectiveResults({ autoCheckUnchecked = false } = {}) {
+    const part1ConfirmedCount = part1Tasks.filter((t) => homeworkConfirmedTasks[t.id]).length;
     const effectiveCheckedTasks = {};
     for (const task of part1Tasks) {
       if (checkedTasks[task.id] !== undefined) {
@@ -1363,30 +1484,33 @@ function ExamPage() {
         effectiveCheckedTasks[task.id] = null;
       }
     }
-    const correctCount = part1Tasks.filter((t) => effectiveCheckedTasks[t.id] === true).length;
+    const correctCount = hwScorePart1Only
+      ? part1ConfirmedCount
+      : part1Tasks.filter((t) => effectiveCheckedTasks[t.id] === true).length;
     const effectiveScores = {};
     for (const task of variant.tasks) {
       if (inferPart(task) === 2) {
-        effectiveScores[task.id] = scores[task.id] ?? 0;
+        effectiveScores[task.id] = hwScorePart1Only ? 0 : (scores[task.id] ?? 0);
       } else {
         effectiveScores[task.id] = effectiveCheckedTasks[task.id] === true ? 1 : 0;
       }
     }
-    const totalScore = correctCount + part2ScoreSum;
+    const totalScore = hwScorePart1Only ? correctCount : correctCount + part2ScoreSum;
     // Кол-во верно решённых задач геометрии (subdivision === "geom")
     const geoCorrectCount =
       Array.isArray(variant.tasks)
         ? variant.tasks.filter((t) => t.subdivision === "geom" && (effectiveScores[t.id] || 0) > 0).length
         : 0;
-    /** Полностью верные задания: ч.1 — верный ответ; ч.2 — набран максимум баллов по заданию */
-    const fullyCorrectTaskCount = variant.tasks.filter((task) => {
-      if (inferPart(task) === 1) {
-        if (checkedTasks[task.id] !== undefined) return !!checkedTasks[task.id];
-        if (autoCheckUnchecked) return !!computeTaskCorrectness(task);
-        return false;
-      }
-      return (scores[task.id] ?? 0) >= getTaskMaxScore(task);
-    }).length;
+    const fullyCorrectTaskCount = hwScorePart1Only
+      ? part1ConfirmedCount
+      : variant.tasks.filter((task) => {
+          if (inferPart(task) === 1) {
+            if (checkedTasks[task.id] !== undefined) return !!checkedTasks[task.id];
+            if (autoCheckUnchecked) return !!computeTaskCorrectness(task);
+            return false;
+          }
+          return (scores[task.id] ?? 0) >= getTaskMaxScore(task);
+        }).length;
     return {
       effectiveCheckedTasks,
       effectiveScores,
@@ -1398,7 +1522,7 @@ function ExamPage() {
   }
 
   const { totalScore, fullyCorrectTaskCount } = getEffectiveResults();
-  const taskCountTotal = variant.tasks.length;
+  const taskCountTotal = hwScorePart1Only ? part1Tasks.length : variant.tasks.length;
   const sidebarProgressPct =
     mode === "test"
       ? Math.min(100, (fullyCorrectTaskCount / Math.max(1, taskCountTotal)) * 100)
@@ -1452,8 +1576,8 @@ function ExamPage() {
     let scoreComment = null;
     let markLevel = null;
 
-    // В режиме тренировки по номерам конвертация в баллы/оценку не нужна
-    if (mode !== "test") {
+    // В режиме тренировки по номерам конвертация в баллы/оценку не нужна; в ДЗ — только часть 1
+    if (mode !== "test" && !hwScorePart1Only) {
       const isOgeMath =
         String(level).toLowerCase() === "oge" && isMathLikeSubject(subject);
       const geoParam = isOgeMath ? `&geo_correct=${geoCorrectCount}` : "";
@@ -1474,7 +1598,10 @@ function ExamPage() {
     }
 
     // Для тренировки maxScore = кол-во задач в тесте (1 балл за задачу), для варианта — как обычно
-    const effectiveMaxScore = mode === "test" ? variant.tasks.length : maxScore;
+    const effectiveMaxScore = mode === "test"
+      ? (hwScorePart1Only ? part1Tasks.length : variant.tasks.length)
+      : maxScore;
+    const effectiveTaskCountTotal = hwScorePart1Only ? part1Tasks.length : variant.tasks.length;
 
     setResultsData({
       totalTimeFormatted,
@@ -1495,9 +1622,30 @@ function ExamPage() {
       subject,
       examMode: mode,
       fullyCorrectTaskCount: effFullyCorrect,
-      taskCountTotal: variant.tasks.length,
+      taskCountTotal: effectiveTaskCountTotal,
+      scorePart1Only: hwScorePart1Only,
     });
+
     setResultsOpen(true);
+  };
+
+  const homeworkSidebarFinishLabel = homeworkStudentMode ? "Отправить на проверку" : undefined;
+  const homeworkSidebarSubmittedMessage =
+    homeworkStudentMode && hRead
+      ? homeworkIsReviewed(hwSt)
+        ? "Работа проверена — редактирование недоступно"
+        : "Работа отправлена на проверку"
+      : "";
+  const handleSidebarFinish = () => {
+    if (lessonEmbedParams.embed && window.parent && window.parent !== window) {
+      window.parent.postMessage({ source: "exam-embedded-lesson", type: "lesson_finish_click" }, "*");
+      return;
+    }
+    if (homeworkStudentMode) {
+      runHomeworkSubmit();
+      return;
+    }
+    handleFinish();
   };
 
   const openPdf = async (variantId) => {
@@ -1556,7 +1704,7 @@ function ExamPage() {
   };
 
   const heroTitle =
-    isHomework && !isTeacherHomeworkView
+    (isEmbeddedHomework && !isTeacherHomeworkView) || hideHomeworkVariantChrome
       ? "Домашнее задание"
       : mode === "test"
         ? (() => {
@@ -1613,6 +1761,14 @@ function ExamPage() {
       (task.number === 26 || task.number === 27);
 
     if (p === 1) {
+      if (homeworkStudentMode) {
+        if (homeworkConfirmedTasks[task.id]) c += " is-pending";
+        else {
+          const ua = userAnswers[task.id];
+          if (ua != null && String(ua).trim() !== "") c += " is-pending";
+        }
+        return c;
+      }
       if (inf2627Ege) {
         const scInf = scores[task.id];
         if (scInf !== undefined && scInf !== null) {
@@ -1633,6 +1789,12 @@ function ExamPage() {
     }
 
     if (p === 2) {
+      if (hwScorePart1Only) {
+        const ua = userAnswers[task.id];
+        if (ua != null && String(ua).trim() !== "") c += " is-pending";
+        else if (boardPersistHasDraft(boardsByTask[String(task.id)])) c += " is-pending";
+        return c;
+      }
       const maxSc = getTaskMaxScore(task);
       const sc = scores[task.id] ?? 0;
       const p2Evaluated = selectedCriterionByTask[task.id] != null;
@@ -1716,7 +1878,7 @@ function ExamPage() {
                       <input
                         type="text"
                         className={`answer-input answer-table-input ev2-table-input${
-                          !isHomework && doneHere
+                          showAnswerFeedback && doneHere
                             ? checkedTasks[task.id]
                               ? " correct"
                               : " incorrect"
@@ -1743,7 +1905,7 @@ function ExamPage() {
             </tbody>
           </table>
         </div>
-        {!isHomework && doneHere && (
+        {showAnswerFeedback && doneHere && (
           <div
             className={
               checkedTasks[task.id] ? "exam-result exam-result--ok" : "exam-result exam-result--bad"
@@ -1775,7 +1937,16 @@ function ExamPage() {
             className="correct-answer-content"
           />
         </div>
-        {showP1Check && !doneHere && (
+        {showP1HomeworkConfirm(task) && (
+          <button
+            type="button"
+            className="exam-edu-btn exam-edu-btn--primary exam-edu-btn--full-mobile"
+            onClick={() => confirmHomeworkPart1Answer(task)}
+          >
+            Подтвердить ответ
+          </button>
+        )}
+        {showP1CheckNormal(task) && !doneHere && (
           <button
             type="button"
             className="exam-edu-btn exam-edu-btn--primary exam-edu-btn--full-mobile"
@@ -1804,7 +1975,7 @@ function ExamPage() {
 
   function ev2Part2Main(task) {
     const showSolBtn = (!isHomework || hSol) && task.answer != null && task.answer !== "";
-    const showCritBtn = task.task_list_id != null || task.number != null;
+    const showCritBtn = !hwScorePart1Only && (task.task_list_id != null || task.number != null);
     return (
       <>
         {(showSolBtn || showCritBtn) && (
@@ -1851,12 +2022,12 @@ function ExamPage() {
     </div>
     <div
       ref={mainRef}
-      className={`main-wrapper exam-page${isHomework ? " exam-page--homework" : ""}${showExamEducationShell ? " exam-page--edu" : ""}`}
+      className={`main-wrapper exam-page${isEmbeddedHomework ? " exam-page--homework" : ""}${showExamEducationShell ? " exam-page--edu" : ""}`}
       id="main-wrapper"
       data-level={level}
       data-subject={subject}
     >
-      {isHomework && (
+      {isEmbeddedHomework && (
         <div className="exam-homework-bar" role="region" aria-label="Домашнее задание">
           <div className="exam-homework-bar__inner">
             <div className="exam-homework-bar__title">
@@ -1906,8 +2077,8 @@ function ExamPage() {
           </div>
         </div>
       )}
-      {/* Фиксированный блок — только урок/ДЗ; в обычном варианте таймер и метрики в сайдбаре */}
-      {(lessonEmbedParams.embed || isHomework) && (
+      {/* Фиксированный блок — только урок/ДЗ в iframe; в обычном варианте таймер в сайдбаре */}
+      {isEmbeddedHomework && (
       <div
         ref={fixedCornerRef}
         className={`exam-fixed-corner${examFixedPanelOpen ? "" : " exam-fixed-corner--all-collapsed"}`}
@@ -1918,18 +2089,6 @@ function ExamPage() {
         }
       >
         <div className="exam-fixed-corner__header">
-          <button
-            type="button"
-            className="exam-fixed-corner__drag"
-            aria-label="Переместить блок с таймером"
-            title="Перетащить"
-            onPointerDown={onFixedCornerDragStart}
-            onPointerMove={onFixedCornerDragMove}
-            onPointerUp={onFixedCornerDragEnd}
-            onPointerCancel={onFixedCornerDragEnd}
-          >
-            <span className="exam-fixed-corner__drag-grip" aria-hidden />
-          </button>
           {examFixedPanelOpen ? (
             <button
               type="button"
@@ -1960,9 +2119,11 @@ function ExamPage() {
             <span className="variant-score-label">
               {mode === "test"
                 ? "Верно"
-                : part2Tasks.length > 0
-                  ? "Баллов"
-                  : "Правильных"}
+                : hwScorePart1Only
+                  ? "Ответов"
+                  : part2Tasks.length === 0
+                    ? "Правильных"
+                    : "Баллов"}
             </span>
             <span className="variant-score-val">
               {mode === "test" ? (
@@ -2061,7 +2222,7 @@ function ExamPage() {
                   <p className="exam-edu-hero__desc">
                     {showExamEducationShell ? heroLeadForEdu : heroLongDescription}
                   </p>
-                  {!(isHomework && !isTeacherHomeworkView) && (
+                  {!homeworkStudentMode && (
                     <div className="exam-edu-hero__actions">
                       <button
                         type="button"
@@ -2106,7 +2267,11 @@ function ExamPage() {
               const truthCfg = !useTable ? getTruthTableConfig(task, { level, subject }) : null;
               const rows = useTable ? INF_TABLE_ROWS : 0;
               const cols = useTable ? INF_TABLE_COLS : 0;
-              const p1Done = checkedTasks[task.id] !== undefined;
+              const p1Done = showHomeworkReviewedResults
+                ? checkedTasks[task.id] !== undefined
+                : homeworkStudentMode
+                  ? !!homeworkConfirmedTasks[task.id]
+                  : checkedTasks[task.id] !== undefined;
               const p1Stat = p1TaskStatusPill(
                 task,
                 subject,
@@ -2117,7 +2282,9 @@ function ExamPage() {
                 useTable,
                 rows,
                 cols,
-                getTableAnswerForCheck
+                getTableAnswerForCheck,
+                homeworkStudentMode && !showHomeworkReviewedResults,
+                homeworkConfirmedTasks
               );
 
               return (
@@ -2133,28 +2300,36 @@ function ExamPage() {
                       <div className="exam-task-card__num">{task.number}</div>
                       <div className="exam-task-card__title-text">
                         <strong>Задание {task.number}</strong>
-                        <span>
-                          ID {task.id} · Краткий ответ
-                        </span>
-                        {!task.answer || String(task.answer).trim() === "" ? (
-                          <span className="task-no-answer-badge">Пока без ответа</span>
-                        ) : null}
+                        {!hideHomeworkVariantChrome && (
+                          <>
+                            <span>
+                              ID {task.id} · Краткий ответ
+                            </span>
+                            {!task.answer || String(task.answer).trim() === "" ? (
+                              <span className="task-no-answer-badge">Пока без ответа</span>
+                            ) : null}
+                          </>
+                        )}
                       </div>
                     </div>
                     {showExamEducationShell ? (
                       <div className="exam-task-card__status-cluster">
-                        <span className={`exam-task-card__status exam-task-card__status--${p1Stat.key}`}>
-                          {p1Stat.label}
-                        </span>
+                        {!hideHomeworkVariantChrome && (
+                          <span className={`exam-task-card__status exam-task-card__status--${p1Stat.key}`}>
+                            {p1Stat.label}
+                          </span>
+                        )}
                         <ExamTaskDrawingHeaderButton 
                           onClick={() => setEduOpenBoardForTaskId(task.id)} 
                           hasDraft={boardPersistHasDraft(boardsByTask[task.id])}
                         />
                       </div>
                     ) : (
-                      <span className={`exam-task-card__status exam-task-card__status--${p1Stat.key}`}>
-                        {p1Stat.label}
-                      </span>
+                      !hideHomeworkVariantChrome && (
+                        <span className={`exam-task-card__status exam-task-card__status--${p1Stat.key}`}>
+                          {p1Stat.label}
+                        </span>
+                      )
                     )}
                   </div>
                   <ExamTaskDrawingShell
@@ -2195,7 +2370,7 @@ function ExamPage() {
                                       <input
                                         type="text"
                                         className={`answer-input answer-table-input ev2-table-input${
-                                          !isHomework && p1Done
+                                          showAnswerFeedback && p1Done
                                             ? checkedTasks[task.id]
                                               ? " correct"
                                               : " incorrect"
@@ -2223,7 +2398,7 @@ function ExamPage() {
                           </table>
                         </div>
 
-                        {!isHomework && p1Done && (
+                        {showAnswerFeedback && p1Done && (
                           <div
                             className={
                               checkedTasks[task.id] ? "exam-result exam-result--ok" : "exam-result exam-result--bad"
@@ -2249,7 +2424,16 @@ function ExamPage() {
                           </div>
                         )}
 
-                        {showP1Check && !p1Done && (
+                        {showP1HomeworkConfirm(task) && (
+                          <button
+                            type="button"
+                            className="exam-edu-btn exam-edu-btn--primary exam-edu-btn--full-mobile"
+                            onClick={() => confirmHomeworkPart1Answer(task)}
+                          >
+                            Подтвердить ответ
+                          </button>
+                        )}
+                        {showP1CheckNormal(task) && !p1Done && (
                           <button
                             type="button"
                             className="exam-edu-btn exam-edu-btn--primary exam-edu-btn--full-mobile"
@@ -2300,9 +2484,18 @@ function ExamPage() {
                           value={userAnswers[task.id] || ""}
                           autoComplete="off"
                         />
-                        {(showP1Check && !p1Done) || p1ShowHomeworkSave(task) ? (
+                        {(showP1HomeworkConfirm(task) || (showP1CheckNormal(task) && !p1Done) || p1ShowHomeworkSave(task)) ? (
                           <div className="task-actions truth-task-actions">
-                            {showP1Check && !p1Done && (
+                            {showP1HomeworkConfirm(task) && (
+                              <button
+                                type="button"
+                                className="check-btn"
+                                onClick={() => confirmHomeworkPart1Answer(task)}
+                              >
+                                Подтвердить ответ
+                              </button>
+                            )}
+                            {showP1CheckNormal(task) && !p1Done && (
                               <button
                                 type="button"
                                 className="check-btn"
@@ -2323,7 +2516,7 @@ function ExamPage() {
                             )}
                           </div>
                         ) : null}
-                        {!isHomework && p1Done && (
+                        {showAnswerFeedback && p1Done && (
                           <div
                             className={
                               checkedTasks[task.id] ? "exam-result exam-result--ok" : "exam-result exam-result--bad"
@@ -2359,7 +2552,7 @@ function ExamPage() {
                             id={`answer-${task.id}`}
                             type="text"
                             className={`exam-task-input${
-                              !isHomework && p1Done
+                              showAnswerFeedback && p1Done
                                 ? checkedTasks[task.id]
                                   ? " is-correct"
                                   : " is-incorrect"
@@ -2374,7 +2567,16 @@ function ExamPage() {
                             autoComplete="off"
                           />
 
-                          {showP1Check && !p1Done && (
+                          {showP1HomeworkConfirm(task) && (
+                            <button
+                              type="button"
+                              className="exam-edu-btn exam-edu-btn--primary exam-edu-btn--check-inline"
+                              onClick={() => confirmHomeworkPart1Answer(task)}
+                            >
+                              Подтвердить
+                            </button>
+                          )}
+                          {showP1CheckNormal(task) && !p1Done && (
                             <button
                               type="button"
                               className="exam-edu-btn exam-edu-btn--primary exam-edu-btn--check-inline"
@@ -2395,7 +2597,7 @@ function ExamPage() {
                           )}
                         </div>
 
-                        {!isHomework && p1Done && (
+                        {showAnswerFeedback && p1Done && (
                           <div
                             className={
                               checkedTasks[task.id] ? "exam-result exam-result--ok" : "exam-result exam-result--bad"
@@ -2432,11 +2634,22 @@ function ExamPage() {
                         className="correct-answer-content"
                       />
                     </div>
+                    {showHomeworkReviewedResults ? (
+                      <HomeworkTaskReviewNote
+                        task={task}
+                        result={hwResultPayload}
+                        level={level}
+                        subject={subject}
+                        part={1}
+                      />
+                    ) : null}
                   </div>
                   </ExamTaskDrawingShell>
+                  {!isHomework && (
                   <div className="task-report-error-wrap">
                     <TaskReportErrorButton taskId={task.id} taskNumber={task.number} onClick={handleReportErrorClick} />
                   </div>
+                  )}
                 </section>
               );
             })}
@@ -2460,7 +2673,14 @@ function ExamPage() {
                       const useTableHere = isTableAnswerTask(subject, task.number);
                       const rowsHere = useTableHere ? INF_TABLE_ROWS : 0;
                       const colsHere = useTableHere ? INF_TABLE_COLS : 0;
-                      const p2Stat = p2TaskStatusPill(task, selectedCriterionByTask, userAnswers);
+                      const p2Stat = p2TaskStatusPill(
+                        task,
+                        selectedCriterionByTask,
+                        userAnswers,
+                        hwScorePart1Only,
+                        scores,
+                        showHomeworkReviewedResults
+                      );
 
                       return (
                         <section
@@ -2474,28 +2694,36 @@ function ExamPage() {
                               <div className="exam-task-card__num">{task.number}</div>
                               <div className="exam-task-card__title-text">
                                 <strong>Задание {task.number}</strong>
-                                <span>
-                                  ID {task.id} · Развёрнутый ответ
-                                </span>
-                                {!task.answer || String(task.answer).trim() === "" ? (
-                                  <span className="task-no-answer-badge">Пока без ответа</span>
-                                ) : null}
+                                {!hideHomeworkVariantChrome && (
+                                  <>
+                                    <span>
+                                      ID {task.id} · Развёрнутый ответ
+                                    </span>
+                                    {!task.answer || String(task.answer).trim() === "" ? (
+                                      <span className="task-no-answer-badge">Пока без ответа</span>
+                                    ) : null}
+                                  </>
+                                )}
                               </div>
                             </div>
                             {showExamEducationShell ? (
                               <div className="exam-task-card__status-cluster">
-                                <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
-                                  {p2Stat.label}
-                                </span>
+                                {!hideHomeworkVariantChrome && (
+                                  <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
+                                    {p2Stat.label}
+                                  </span>
+                                )}
                                 <ExamTaskDrawingHeaderButton 
                                   onClick={() => setEduOpenBoardForTaskId(task.id)}
                                   hasDraft={boardPersistHasDraft(boardsByTask[task.id])}
                                 />
                               </div>
                             ) : (
-                              <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
-                                {p2Stat.label}
-                              </span>
+                              !hideHomeworkVariantChrome && (
+                                <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
+                                  {p2Stat.label}
+                                </span>
+                              )
                             )}
                           </div>
                           <ExamTaskDrawingShell
@@ -2513,11 +2741,11 @@ function ExamPage() {
                             html={task.text}
                             className="exam-task-card__text task-text"
                             ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
-                    ogeInf6Enhance={isOgeInformaticsTask(level, subject, task.number, 6)}
+                            ogeInf6Enhance={isOgeInformaticsTask(level, subject, task.number, 6)}
                             egeInfFileEnhance={isEgeInformaticsContext(level, subject)}
                             egeInf22Enhance={isEgeInfParallelProcessesTask(level, subject, task.number)}
-                    egeInf1Enhance={isEgeInfRoadGraphTask(level, subject, task.number)}
-                    egeInf2Enhance={isEgeInfTruthTableTask(level, subject, task.number)}
+                            egeInf1Enhance={isEgeInfRoadGraphTask(level, subject, task.number)}
+                            egeInf2Enhance={isEgeInfTruthTableTask(level, subject, task.number)}
                           />
                           {task.file && <TaskFileAttachment href={task.file} />}
                           {task.author && <div className="task-author">{task.author}</div>}
@@ -2536,13 +2764,28 @@ function ExamPage() {
                             lessonToken={lessonEmbedParams.token}
                             assignmentId={cabinetAssignmentId}
                             homeworkMode={isHomework}
+                            cabinetMode={showCabinetPart2SolutionUpload}
+                            allowDelete
+                            initialAttachments={homeworkTaskAttachments(hwPicked?.result, task.id, task.number)}
                             enabled={
-                              showLessonSolutionUpload && (!isHomework || (!hRead && !numLocked(task.number)))
+                              (showLessonSolutionUpload || showCabinetPart2SolutionUpload)
+                              && (!isHomework || (!hRead && !numLocked(task.number)))
                             }
                           />
+                          {showHomeworkReviewedResults ? (
+                            <HomeworkTaskReviewNote
+                              task={task}
+                              result={hwResultPayload}
+                              level={level}
+                              subject={subject}
+                              part={2}
+                            />
+                          ) : null}
+                          {!isHomework && (
                           <div className="task-report-error-wrap">
                             <TaskReportErrorButton taskId={task.id} taskNumber={task.number} onClick={handleReportErrorClick} />
                           </div>
+                          )}
                         </section>
                       );
                     })}
@@ -2553,7 +2796,14 @@ function ExamPage() {
                   const useTableHere = isTableAnswerTask(subject, task.number);
                   const rowsHere = useTableHere ? INF_TABLE_ROWS : 0;
                   const colsHere = useTableHere ? INF_TABLE_COLS : 0;
-                  const p2Stat = p2TaskStatusPill(task, selectedCriterionByTask, userAnswers);
+                  const p2Stat = p2TaskStatusPill(
+                    task,
+                    selectedCriterionByTask,
+                    userAnswers,
+                    hwScorePart1Only,
+                    scores,
+                    showHomeworkReviewedResults
+                  );
 
                   return (
                     <section
@@ -2567,28 +2817,36 @@ function ExamPage() {
                           <div className="exam-task-card__num">{task.number}</div>
                           <div className="exam-task-card__title-text">
                             <strong>Задание {task.number}</strong>
-                            <span>
-                              ID {task.id} · Развёрнутый ответ
-                            </span>
-                            {!task.answer || String(task.answer).trim() === "" ? (
-                              <span className="task-no-answer-badge">Пока без ответа</span>
-                            ) : null}
+                            {!hideHomeworkVariantChrome && (
+                              <>
+                                <span>
+                                  ID {task.id} · Развёрнутый ответ
+                                </span>
+                                {!task.answer || String(task.answer).trim() === "" ? (
+                                  <span className="task-no-answer-badge">Пока без ответа</span>
+                                ) : null}
+                              </>
+                            )}
                           </div>
                         </div>
                         {showExamEducationShell ? (
                           <div className="exam-task-card__status-cluster">
-                            <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
-                              {p2Stat.label}
-                            </span>
+                            {!hideHomeworkVariantChrome && (
+                              <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
+                                {p2Stat.label}
+                              </span>
+                            )}
                             <ExamTaskDrawingHeaderButton 
                               onClick={() => setEduOpenBoardForTaskId(task.id)}
                               hasDraft={boardPersistHasDraft(boardsByTask[task.id])}
                             />
                           </div>
                         ) : (
-                          <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
-                            {p2Stat.label}
-                          </span>
+                          !hideHomeworkVariantChrome && (
+                            <span className={`exam-task-card__status exam-task-card__status--${p2Stat.key}`}>
+                              {p2Stat.label}
+                            </span>
+                          )
                         )}
                       </div>
                       <ExamTaskDrawingShell
@@ -2606,11 +2864,11 @@ function ExamPage() {
                         html={task.text}
                         className="exam-task-card__text task-text"
                         ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
-                    ogeInf6Enhance={isOgeInformaticsTask(level, subject, task.number, 6)}
+                        ogeInf6Enhance={isOgeInformaticsTask(level, subject, task.number, 6)}
                         egeInfFileEnhance={isEgeInformaticsContext(level, subject)}
                         egeInf22Enhance={isEgeInfParallelProcessesTask(level, subject, task.number)}
-                    egeInf1Enhance={isEgeInfRoadGraphTask(level, subject, task.number)}
-                    egeInf2Enhance={isEgeInfTruthTableTask(level, subject, task.number)}
+                        egeInf1Enhance={isEgeInfRoadGraphTask(level, subject, task.number)}
+                        egeInf2Enhance={isEgeInfTruthTableTask(level, subject, task.number)}
                       />
                       {task.file && <TaskFileAttachment href={task.file} />}
                       {task.author && <div className="task-author">{task.author}</div>}
@@ -2629,17 +2887,33 @@ function ExamPage() {
                         lessonToken={lessonEmbedParams.token}
                         assignmentId={cabinetAssignmentId}
                         homeworkMode={isHomework}
+                        cabinetMode={showCabinetPart2SolutionUpload}
+                        allowDelete
+                        initialAttachments={homeworkTaskAttachments(hwPicked?.result, task.id, task.number)}
                         enabled={
-                          showLessonSolutionUpload && (!isHomework || (!hRead && !numLocked(task.number)))
+                          (showLessonSolutionUpload || showCabinetPart2SolutionUpload)
+                          && (!isHomework || (!hRead && !numLocked(task.number)))
                         }
                       />
+                      {showHomeworkReviewedResults ? (
+                        <HomeworkTaskReviewNote
+                          task={task}
+                          result={hwResultPayload}
+                          level={level}
+                          subject={subject}
+                          part={2}
+                        />
+                      ) : null}
+                      {!isHomework && (
                       <div className="task-report-error-wrap">
                         <TaskReportErrorButton taskId={task.id} taskNumber={task.number} onClick={handleReportErrorClick} />
                       </div>
+                      )}
                     </section>
                   );
                 })}
 
+                {!hwScorePart1Only && (
                 <div className="ev2-p2-summary">
                   <div className="ev2-p2-summary__left">
                     <div className="ev2-p2-summary__headline">
@@ -2666,6 +2940,7 @@ function ExamPage() {
                     </span>
                   </div>
                 </div>
+                )}
               </>
             )}
 
@@ -2696,56 +2971,12 @@ function ExamPage() {
               </div>
             )}
 
-            {showHomeworkReviewedResults && homeworkReviewData && (
-              <div className="exam-homework-reviewed">
-                <h3 className="exam-homework-reviewed__title">Результаты проверки</h3>
-                {homeworkReviewData.teacherComment ? (
-                  <div className="exam-homework-reviewed__teacher-comment">
-                    <b>Комментарий учителя:</b> {homeworkReviewData.teacherComment}
-                  </div>
-                ) : null}
-                <div className="exam-homework-reviewed__table-wrap">
-                  <table className="exam-homework-reviewed__table">
-                    <thead>
-                      <tr>
-                        <th>Задание</th>
-                        <th>Ваш ответ</th>
-                        <th>Статус</th>
-                        <th>Комментарий</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {homeworkReviewData.rows.map((row) => {
-                        const rowStatus =
-                          row.isCorrect === true
-                            ? "correct"
-                            : row.isCorrect === false
-                              ? "wrong"
-                              : "pending";
-                        const rowStatusText =
-                          row.isCorrect === true
-                            ? "Правильно"
-                            : row.isCorrect === false
-                              ? "Неправильно"
-                              : "Проверено";
-                        return (
-                          <tr key={row.id}>
-                            <td>{row.number}</td>
-                            <td>{row.answer || "—"}</td>
-                            <td>
-                              <span className={`exam-homework-reviewed__badge exam-homework-reviewed__badge--${rowStatus}`}>
-                                {rowStatusText}
-                              </span>
-                            </td>
-                            <td>{row.comment || "—"}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+            {showHomeworkReviewedResults && homeworkReviewData ? (
+              <HomeworkReviewResults
+                review={homeworkReviewData}
+                className="exam-homework-reviewed"
+              />
+            ) : null}
 
             {/* Кнопка Завершить — в обычном экзамене, не в ДЗ; в edu-режиме — в сайдбаре */}
             {!isHomework &&
@@ -2788,14 +3019,17 @@ function ExamPage() {
                     goToExamTask={goToExamTask}
                     supportItems={supportInfo.items}
                     onOpenSupport={() => setSupportInfo((s) => ({ ...s, open: true }))}
-                    hideFinish={isHomework || lessonEmbedParams.embed || lessonEmbedParams.token}
-                    onFinish={() => {
-                      if (lessonEmbedParams.embed && window.parent && window.parent !== window) {
-                        window.parent.postMessage({ source: "exam-embedded-lesson", type: "lesson_finish_click" }, "*");
-                        return;
-                      }
-                      handleFinish();
-                    }}
+                    hideFinish={
+                      lessonEmbedParams.embed
+                      || lessonEmbedParams.token
+                      || (homeworkStudentMode && hRead)
+                    }
+                    progressPart1Only={hwScorePart1Only}
+                    finishLabel={homeworkSidebarFinishLabel}
+                    finishDisabled={homeworkStudentMode && (hwActionBusy || hwLoading)}
+                    finishBusy={homeworkStudentMode && hwActionBusy}
+                    submittedMessage={homeworkSidebarSubmittedMessage}
+                    onFinish={handleSidebarFinish}
                   />
                 </aside>
               )}
@@ -2841,14 +3075,19 @@ function ExamPage() {
                       onAfterNavTask={() => setMobileVariantNavOpen(false)}
                       supportItems={supportInfo.items}
                       onOpenSupport={() => setSupportInfo((s) => ({ ...s, open: true }))}
-                      hideFinish={isHomework || lessonEmbedParams.embed || lessonEmbedParams.token}
+                      hideFinish={
+                        lessonEmbedParams.embed
+                        || lessonEmbedParams.token
+                        || (homeworkStudentMode && hRead)
+                      }
+                      progressPart1Only={hwScorePart1Only}
+                      finishLabel={homeworkSidebarFinishLabel}
+                      finishDisabled={homeworkStudentMode && (hwActionBusy || hwLoading)}
+                      finishBusy={homeworkStudentMode && hwActionBusy}
+                      submittedMessage={homeworkSidebarSubmittedMessage}
                       onFinish={() => {
                         setMobileVariantNavOpen(false);
-                        if (lessonEmbedParams.embed && window.parent && window.parent !== window) {
-                          window.parent.postMessage({ source: "exam-embedded-lesson", type: "lesson_finish_click" }, "*");
-                          return;
-                        }
-                        handleFinish();
+                        handleSidebarFinish();
                       }}
                     />
                   </div>
@@ -2887,11 +3126,16 @@ function ExamPage() {
         open={resultsOpen}
         onClose={() => setResultsOpen(false)}
         results={resultsData}
-        onRetry={() => {
-          setResultsOpen(false);
-          window.location.reload();
-        }}
+        onRetry={
+          homeworkStudentMode
+            ? undefined
+            : () => {
+                setResultsOpen(false);
+                window.location.reload();
+              }
+        }
       />
+      {!isHomework && (
       <ReportErrorModal
         open={reportErrorOpen}
         onClose={() => {
@@ -2901,6 +3145,7 @@ function ExamPage() {
         onSubmit={handleReportErrorSubmit}
         taskNumber={reportErrorTask?.taskNumber}
       />
+      )}
     </div>
     </>
   );

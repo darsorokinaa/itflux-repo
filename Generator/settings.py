@@ -2,8 +2,13 @@ from logging import DEBUG
 from pathlib import Path
 import os
 
+from dotenv import load_dotenv
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+load_dotenv(BASE_DIR / "Generator" / ".env")
+load_dotenv(BASE_DIR / ".env")
 
 # SECURITY WARNING: keep the secret key used in production secret!
 # Лучше: хранить в переменной окружения
@@ -28,6 +33,51 @@ LK_HOMEWORK_TOKEN_QUERY_PARAM = (os.environ.get("LK_HOMEWORK_TOKEN_QUERY_PARAM",
 LK_HOMEWORK_AUTHORIZATION_SCHEME = (os.environ.get("LK_HOMEWORK_AUTHORIZATION_SCHEME", "Bearer") or "Bearer").strip()
 # Вместо GET /api/homework/assignment/<id>/ — POST сюда с JSON {"token","assignment_id"} (как teacher-joined).
 LK_HOMEWORK_FETCH_URL = os.environ.get("LK_HOMEWORK_FETCH_URL", "").strip()
+
+# Яндекс Телемост — создание видеовстреч из кабинета (секреты только в env, не в коде).
+YANDEX_TELEMOST_CLIENT_ID = os.environ.get(
+    "YANDEX_TELEMOST_CLIENT_ID",
+    "21e10d82239446508ab6f2417c596fa2",
+).strip()
+YANDEX_TELEMOST_CLIENT_SECRET = os.environ.get("YANDEX_TELEMOST_CLIENT_SECRET", "").strip()
+YANDEX_TELEMOST_OAUTH_TOKEN = os.environ.get("YANDEX_TELEMOST_OAUTH_TOKEN", "").strip()
+YANDEX_TELEMOST_REFRESH_TOKEN = os.environ.get("YANDEX_TELEMOST_REFRESH_TOKEN", "").strip()
+YANDEX_TELEMOST_AUTH_CODE = os.environ.get("YANDEX_TELEMOST_AUTH_CODE", "").strip()
+YANDEX_TELEMOST_REDIRECT_URI = os.environ.get(
+    "YANDEX_TELEMOST_REDIRECT_URI",
+    "https://oauth.yandex.ru/verification_code",
+).strip()
+YANDEX_ACCOUNT_EMAIL = os.environ.get(
+    "YANDEX_ACCOUNT_EMAIL",
+    "darvitol.s@yandex.ru",
+).strip()
+YANDEX_TELEMOST_COHOST_EMAIL = os.environ.get(
+    "YANDEX_TELEMOST_COHOST_EMAIL",
+    YANDEX_ACCOUNT_EMAIL,
+).strip()
+YANDEX_TELEMOST_ALLOW_WEB_FALLBACK = os.environ.get(
+    "YANDEX_TELEMOST_ALLOW_WEB_FALLBACK", "true"
+).strip().lower() not in ("0", "false", "no", "off")
+YANDEX_TELEMOST_WEB_FALLBACK_URL = os.environ.get(
+    "YANDEX_TELEMOST_WEB_FALLBACK_URL",
+    "https://telemost.yandex.ru/",
+).strip()
+YANDEX_OAUTH_SCOPES = os.environ.get("YANDEX_OAUTH_SCOPES", "").strip()
+YANDEX_CALENDAR_ENABLED = os.environ.get(
+    "YANDEX_CALENDAR_ENABLED", "false"
+).strip().lower() not in ("0", "false", "no", "off")
+YANDEX_CALENDAR_LAYER_IDS = os.environ.get("YANDEX_CALENDAR_LAYER_IDS", "").strip()
+YANDEX_CALENDAR_TZ_ID = os.environ.get("YANDEX_CALENDAR_TZ_ID", "Europe/Moscow").strip()
+YANDEX_CALENDAR_EMBED_URL = os.environ.get("YANDEX_CALENDAR_EMBED_URL", "").strip()
+YANDEX_TELEMOST_AUTO_CREATE = os.environ.get(
+    "YANDEX_TELEMOST_AUTO_CREATE", "true"
+).strip().lower() not in ("0", "false", "no", "off")
+
+# VK notifications (optional — mock when token not set)
+VK_ACCESS_TOKEN = os.environ.get("VK_ACCESS_TOKEN", "").strip()
+VK_GROUP_ID = os.environ.get("VK_GROUP_ID", "").strip()
+VK_API_VERSION = os.environ.get("VK_API_VERSION", "5.131").strip()
+
 _gen_home_outer = os.environ.get("ITFLUX_PUBLIC_HOME_URL", "https://itflux.ru").strip().rstrip("/")
 ITFLUX_PUBLIC_HOME_URL = f"{_gen_home_outer}/"
 LOGOUT_REDIRECT_URL = ITFLUX_PUBLIC_HOME_URL
@@ -53,10 +103,12 @@ INSTALLED_APPS = [
     # your apps
     "Generator",
     "Board",
+    "Cabinet",
 
     # third-party
     "corsheaders",
     "django_ckeditor_5",
+    "rest_framework",
 ]
 
 CKEDITOR_5_CONFIGS = {
@@ -166,6 +218,15 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+}
 
 # CORS / CSRF
 # В варианте "Django раздаёт React" обычно CORS вообще не нужен для фронта,

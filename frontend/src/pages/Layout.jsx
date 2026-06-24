@@ -14,6 +14,12 @@ function Layout() {
   const pathNorm = (pathname || "").replace(/\/+$/, "") || "/";
   const isTasksPrepPicker = /^\/(oge|ege|vpr)\/[^/]+$/.test(pathNorm);
   const isLessonViewerPage = /^\/lessons\/[^/]+\/view$/.test(pathNorm);
+  const isInteractivePlayPage =
+    /^\/cabinet\/interactives\/[^/]+\/play$/.test(pathNorm)
+    || /^\/cabinet\/student\/interactives\/\d+\/play$/.test(pathNorm);
+  const isStudentCabinet = pathname.startsWith("/cabinet/student");
+  const isCabinetArea = pathname.startsWith("/cabinet");
+  const isChromelessPage = isLessonViewerPage || isInteractivePlayPage;
   /** Экзамен/вариант: своя залипающая панель действий снизу — нижнюю навигацию там не показываем. */
   const isExamVariantPage = /^\/(oge|ege|vpr)\/[^/]+\/variant\//.test(pathNorm);
   const isMarketingHome =
@@ -22,6 +28,9 @@ function Layout() {
     pathname === "/generator" ||
     pathname === "/lessons" ||
     pathname === "/teachers" ||
+    pathname === "/cabinet" ||
+    pathname === "/cabinet/login" ||
+    isStudentCabinet ||
     pathname.startsWith("/subject/") ||
     pathname.startsWith("/search/tasks") ||
     pathname.startsWith("/search-variant") ||
@@ -29,16 +38,15 @@ function Layout() {
     isTasksPrepPicker;
   const lessonJoinMode = pathname.startsWith("/lesson/join");
   const query = new URLSearchParams(search || "");
+  const isHomeworkQuery =
+    query.get("homework_mode") === "1" ||
+    String(query.get("cabinet_session") || "").toLowerCase() === "homework" ||
+    !!query.get("cabinet_assignment");
+  const isHomeworkContext = isHomeworkQuery;
   const isLessonOrHomeworkContext =
     lessonJoinMode ||
     query.get("lesson_embed") === "1" ||
-    query.get("homework_mode") === "1" ||
-    String(query.get("cabinet_session") || "").toLowerCase() === "homework" ||
-    !!query.get("cabinet_assignment");
-  const isHomeworkContext =
-    query.get("homework_mode") === "1" ||
-    String(query.get("cabinet_session") || "").toLowerCase() === "homework" ||
-    !!query.get("cabinet_assignment");
+    isHomeworkContext;
   const isLessonEmbedAny = query.get("lesson_embed") === "1";
   const isHomeworkEmbedContext =
     isLessonEmbedAny &&
@@ -132,11 +140,11 @@ function Layout() {
   }, [pathname]);
 
   const showMobileTabBar =
-    !isLessonOrHomeworkContext && !isLessonViewerPage && !isExamVariantPage;
+    !isLessonOrHomeworkContext && !isChromelessPage && !isExamVariantPage && !isCabinetArea;
 
   return (
     <div
-      className={`app-shell${isLessonViewerPage ? " app-shell--lesson-viewer" : ""}${showMobileTabBar ? " app-shell--has-tabbar" : ""}`}
+      className={`app-shell${isChromelessPage ? " app-shell--lesson-viewer" : ""}${showMobileTabBar ? " app-shell--has-tabbar" : ""}`}
     >
       <div
         className="app-shell-pattern"
@@ -153,7 +161,7 @@ function Layout() {
         />
       ) : null}
       <div className="app-shell-content">
-      {!isLessonOrHomeworkContext && !isLessonViewerPage && <Nav />}
+      {!isLessonOrHomeworkContext && !isChromelessPage && (!isCabinetArea || pathname === '/cabinet/login') && <Nav />}
       {/* !isMarketingHome ? (
       <header
         className={themeData?.headerBg ? "header--themed" : undefined}
@@ -190,11 +198,11 @@ function Layout() {
         {/* боковое меню */}
       </aside>
 
-      <main className={isMarketingHome || isLessonViewerPage ? "w-full" : "container mt-4"}>
+      <main className={isMarketingHome || isChromelessPage ? "w-full" : "container mt-4"}>
         <Outlet />
       </main>
 
-      {!isMarketingHome && !isLessonViewerPage ? (
+      {!isMarketingHome && !isChromelessPage ? (
       <footer className={`site-footer${isLessonOrHomeworkContext ? " site-footer--embed" : ""}`}>
         <div className="site-footer-inner">
           <span className="site-footer-copy">© 2026 Цифровой поток</span>
@@ -218,7 +226,7 @@ function Layout() {
       </footer>
       ) : null}
 
-      {!cookieAccepted && !isLessonOrHomeworkContext && !isLessonViewerPage && (
+      {!cookieAccepted && !isLessonOrHomeworkContext && !isChromelessPage && (
         <div className="cookie-banner" role="alertdialog" aria-label="Уведомление об использовании файлов cookie">
           <div className="cookie-banner-inner">
             <p className="cookie-banner-text">

@@ -4,9 +4,11 @@ import os
 import sys
 
 # Используем конфиг из Generator/ (как Generator/manage.py)
-_GENERATOR_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Generator')
-if _GENERATOR_DIR not in sys.path:
-    sys.path.insert(0, _GENERATOR_DIR)
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+_GENERATOR_DIR = os.path.join(_PROJECT_ROOT, "Generator")
+for _path in (_PROJECT_ROOT, _GENERATOR_DIR):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 
 def main():

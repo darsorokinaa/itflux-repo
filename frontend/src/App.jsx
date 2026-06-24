@@ -17,6 +17,39 @@ import LessonJoinBridge from "./pages/LessonJoinBridge";
 import ReadyLessonsPage from "./pages/ReadyLessonsPage";
 import LessonViewerPage from "./pages/LessonViewerPage";
 import ForTeachersPage from "./pages/ForTeachersPage";
+import CabinetAuthPage from "./pages/CabinetAuthPage";
+import CabinetJoinPage from "./cabinet/pages/CabinetJoinPage";
+import CabinetPage from "./pages/CabinetPage";
+import CabinetDashboard from "./cabinet/CabinetDashboard";
+import CabinetStudentsPage from "./cabinet/pages/CabinetStudentsPage";
+import CabinetLessonsPage from "./cabinet/pages/CabinetLessonsPage";
+import CabinetReviewPage from "./cabinet/pages/CabinetReviewPage";
+import CabinetReviewDetailPage from "./cabinet/pages/CabinetReviewDetailPage";
+import CabinetLibraryPage from "./cabinet/pages/CabinetLibraryPage";
+import CabinetSchedulePage from "./cabinet/pages/CabinetSchedulePage";
+import CabinetLessonPlansPage from "./cabinet/pages/CabinetLessonPlansPage";
+import CabinetLessonPlanDetailPage from "./cabinet/pages/CabinetLessonPlanDetailPage";
+import CabinetLessonPlanEditorPage from "./cabinet/pages/CabinetLessonPlanEditorPage";
+import CabinetInteractivesPage from "./cabinet/pages/CabinetInteractivesPage";
+import CabinetInteractiveCreatePage from "./cabinet/pages/CabinetInteractiveCreatePage";
+import CabinetInteractiveEditorPage from "./cabinet/pages/CabinetInteractiveEditorPage";
+import CabinetInteractiveDetailPage from "./cabinet/pages/CabinetInteractiveDetailPage";
+import CabinetInteractivePlayPage from "./cabinet/pages/CabinetInteractivePlayPage";
+import CabinetMorePage from "./cabinet/pages/CabinetMorePage";
+import CabinetAiPage from "./cabinet/CabinetAiPage";
+import CabinetUpgradePage from "./cabinet/pages/CabinetUpgradePage";
+import StudentCabinetPage from "./pages/StudentCabinetPage";
+import StudentDashboard from "./cabinet/student/pages/StudentDashboard";
+import StudentLessonsPage from "./cabinet/student/pages/StudentLessonsPage";
+import StudentLessonDetailPage from "./cabinet/student/pages/StudentLessonDetailPage";
+import StudentAssignmentsPage from "./cabinet/student/pages/StudentAssignmentsPage";
+import StudentAssignmentDetailPage from "./cabinet/student/pages/StudentAssignmentDetailPage";
+import StudentInteractivesPage from "./cabinet/student/pages/StudentInteractivesPage";
+import StudentInteractivePlayPage from "./cabinet/student/pages/StudentInteractivePlayPage";
+import StudentSchedulePage from "./cabinet/student/pages/StudentSchedulePage";
+import StudentMaterialsPage from "./cabinet/student/pages/StudentMaterialsPage";
+import StudentProfilePage from "./cabinet/student/pages/StudentProfilePage";
+import StudentMorePage from "./cabinet/student/pages/StudentMorePage";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ensureSiteFavicon } from "./utils/ensureSiteFavicon";
 
@@ -115,6 +148,49 @@ function App() {
           <Route path="/lessons/:slug/view" element={<LessonViewerPage />} />
           <Route path="/teachers" element={<ForTeachersPage />} />
           <Route path="/for-teachers" element={<Navigate to="/teachers" replace />} />
+          <Route path="/cabinet/login" element={<CabinetAuthPage />} />
+          <Route path="/cabinet/join/:token" element={<CabinetJoinPage />} />
+          <Route path="/cabinet/interactives/:id/play" element={<CabinetInteractivePlayPage />} />
+          <Route path="/cabinet/student" element={<StudentCabinetPage />}>
+            <Route index element={<StudentDashboard />} />
+            {/* === Основные вкладки MVP === */}
+            <Route path="lessons"          element={<StudentLessonsPage />} />
+            <Route path="lessons/:id"      element={<StudentLessonDetailPage />} />
+            <Route path="assignments"      element={<StudentAssignmentsPage />} />
+            <Route path="assignments/:id"  element={<StudentAssignmentDetailPage />} />
+            <Route path="profile"          element={<StudentProfilePage />} />
+            {/* === Интерактив плеер (полноэкранный, без шапки) === */}
+            <Route path="interactives/:id/play" element={<StudentInteractivePlayPage />} />
+            {/* === Редиректы удалённых разделов === */}
+            <Route path="interactives" element={<Navigate to="/cabinet/student/assignments" replace />} />
+            <Route path="schedule"     element={<Navigate to="/cabinet/student/lessons" replace />} />
+            <Route path="progress"     element={<Navigate to="/cabinet/student" replace />} />
+            <Route path="materials"    element={<Navigate to="/cabinet/student/lessons" replace />} />
+            <Route path="more"         element={<Navigate to="/cabinet/student" replace />} />
+          </Route>
+          <Route path="/cabinet" element={<CabinetPage />}>
+            <Route index element={<CabinetDashboard />} />
+            <Route path="students" element={<CabinetStudentsPage />} />
+            <Route path="lessons" element={<CabinetLessonsPage />} />
+            <Route path="plans" element={<CabinetLessonPlansPage />} />
+            <Route path="plans/new" element={<CabinetLessonPlanEditorPage />} />
+            <Route path="plans/:planId" element={<CabinetLessonPlanDetailPage />} />
+            <Route path="plans/:planId/edit" element={<CabinetLessonPlanEditorPage />} />
+            <Route path="interactives/new/:type" element={<CabinetInteractiveEditorPage />} />
+            <Route path="interactives/:id/edit" element={<CabinetInteractiveEditorPage />} />
+            <Route path="interactives/new" element={<CabinetInteractiveCreatePage />} />
+            <Route path="interactives/:id" element={<CabinetInteractiveDetailPage />} />
+            <Route path="interactives" element={<CabinetInteractivesPage />} />
+            <Route path="review/:reviewId" element={<CabinetReviewDetailPage />} />
+            <Route path="review" element={<CabinetReviewPage />} />
+            <Route path="reports" element={<Navigate to="/cabinet" replace />} />
+            <Route path="library" element={<CabinetLibraryPage />} />
+            <Route path="schedule" element={<CabinetSchedulePage />} />
+            <Route path="ai" element={<CabinetAiPage />} />
+            <Route path="more" element={<CabinetMorePage />} />
+            <Route path="upgrade" element={<CabinetUpgradePage />} />
+          </Route>
+          <Route path="/login" element={<Navigate to="/cabinet/login" replace />} />
           <Route path="/subject/:level" element={<SubjectPage />} />
 
           <Route path="/search/tasks" element={<SearchTaskWithKey />} />

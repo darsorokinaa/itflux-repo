@@ -1,0 +1,821 @@
+import json
+
+from datetime import datetime
+
+from django.utils.dateparse import parse_date
+
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
+from django.http import JsonResponse
+from django.utils import timezone
+from django.views.decorators.http import require_http_methods
+
+from .models import Profile, ScheduleEvent
+from .invitations import try_accept_invite_token
+from .schedule_events import (
+    list_schedule_events,
+    parse_local_event_id,
+    schedule_event_to_json,
+)
+from .telemost import (
+    create_telemost_link,
+    is_telemost_meeting_url,
+    telemost_auto_create_enabled,
+    telemost_is_configured,
+)
+from .yandex_calendar import (
+    calendar_authorize_url,
+    calendar_embed_config,
+    calendar_integration_enabled,
+    calendar_is_configured,
+    fetch_calendar_events,
+    profile_yandex_calendar_active,
+    resolve_yandex_account_email,
+)
+
+
+def _profile_payload(user):
+    profile = user.profile
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "name": profile.name,
+        "surname": profile.surname,
+        "role": profile.role,
+        "role_label": profile.get_role_display(),
+        "avatar": profile.avatar.url if profile.avatar else None,
+        "account_active": profile.account_active,
+        "email_confirmed": profile.email_confirmed,
+    }
+
+
+def _profile_access_error(profile):
+    if profile.account_blocked:
+        return "Аккаунт заблокирован"
+    if not profile.account_active:
+        return "Аккаунт неактивен"
+    return None
+
+
+def _load_json_body(request):
+    try:
+        return json.loads(request.body or b"{}")
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _find_user_by_login(login_id: str):
+    login_id = (login_id or "").strip()
+    if not login_id:
+        return None
+    user = User.objects.filter(username__iexact=login_id).first()
+    if user is None and "@" in login_id:
+        user = User.objects.filter(email__iexact=login_id).first()
+    return user
+
+
+@require_http_methods(["GET"])
+def api_me(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False})
+    return JsonResponse({"authenticated": True, "user": _profile_payload(request.user)})
+
+
+@require_http_methods(["POST"])
+def api_login(request):
+    data = _load_json_body(request)
+    if data is None:
+        return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
+
+    login_id = (data.get("login") or data.get("username") or data.get("email") or "").strip()
+    password = data.get("password") or ""
+
+    if not login_id or not password:
+        return JsonResponse({"ok": False, "error": "Введите логин и пароль"}, status=400)
+
+    user = _find_user_by_login(login_id)
+    if user is None:
+        return JsonResponse({"ok": False, "error": "Неверный логин или пароль"}, status=403)
+
+    auth_user = authenticate(request, username=user.username, password=password)
+    if auth_user is None:
+        return JsonResponse({"ok": False, "error": "Неверный логин или пароль"}, status=403)
+
+    access_error = _profile_access_error(auth_user.profile)
+    if access_error:
+        return JsonResponse({"ok": False, "error": access_error}, status=403)
+
+    login(request, auth_user)
+    Profile.objects.filter(pk=auth_user.profile.pk).update(last_activity=timezone.now())
+
+    invite_result = try_accept_invite_token(auth_user, data.get("invite_token"))
+    payload = {"ok": True, "user": _profile_payload(auth_user)}
+    if invite_result:
+        payload["invite_accepted"] = True
+        payload["student_id"] = invite_result.id
+    return JsonResponse(payload)
+
+
+@require_http_methods(["POST"])
+def api_register(request):
+    data = _load_json_body(request)
+    if data is None:
+        return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
+
+    username = (data.get("username") or "").strip()
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+    password_confirm = data.get("password_confirm") or password
+    name = (data.get("name") or "").strip()
+    surname = (data.get("surname") or "").strip()
+    role = (data.get("role") or Profile.Role.STUDENT).strip()
+    invite_token = (data.get("invite_token") or "").strip()
+    referral_code = (data.get("referral_code") or data.get("ref") or "").strip()
+
+    if invite_token:
+        role = Profile.Role.STUDENT
+
+    if not email:
+        return JsonResponse({"ok": False, "error": "Укажите email"}, status=400)
+    if not password:
+        return JsonResponse({"ok": False, "error": "Укажите пароль"}, status=400)
+    if password != password_confirm:
+        return JsonResponse({"ok": False, "error": "Пароли не совпадают"}, status=400)
+
+    if not username:
+        username = email.split("@", 1)[0]
+    base_username = username
+    suffix = 1
+    while User.objects.filter(username__iexact=username).exists():
+        username = f"{base_username}{suffix}"
+        suffix += 1
+
+    if User.objects.filter(email__iexact=email).exists():
+        return JsonResponse({"ok": False, "error": "Пользователь с таким email уже зарегистрирован"}, status=400)
+
+    if role not in Profile.Role.values:
+        role = Profile.Role.STUDENT
+
+    try:
+        validate_password(password)
+    except ValidationError as exc:
+        return JsonResponse({"ok": False, "error": " ".join(exc.messages)}, status=400)
+
+    user = User.objects.create_user(username=username, email=email, password=password)
+    profile = user.profile
+    profile.name = name
+    profile.surname = surname
+    profile.role = role
+    profile.save(update_fields=["name", "surname", "role"])
+
+    login(request, user)
+    invite_result = try_accept_invite_token(user, invite_token)
+
+    referral_result = None
+    if referral_code and role == Profile.Role.TEACHER:
+        from .referral_service import ReferralError, ReferralService
+        try:
+            referral_result = ReferralService.apply_on_registration(user, referral_code)
+        except ReferralError:
+            referral_result = None
+
+    payload = {"ok": True, "user": _profile_payload(user)}
+    if invite_result:
+        payload["invite_accepted"] = True
+        payload["student_id"] = invite_result.id
+    if referral_result:
+        payload["referral_applied"] = True
+        payload["referral_reward"] = referral_result
+    return JsonResponse(payload, status=201)
+
+
+@require_http_methods(["GET"])
+def api_referral_preview(request, code):
+    from .referral_service import ReferralError, ReferralService
+
+    try:
+        link = ReferralService.validate(code)
+        return JsonResponse(ReferralService.preview_payload(link))
+    except ReferralError as exc:
+        return JsonResponse(exc.to_dict(), status=404)
+
+
+@require_http_methods(["POST"])
+def api_logout(request):
+    logout(request)
+    return JsonResponse({"ok": True})
+
+
+def _require_authenticated_user(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"ok": False, "error": "Требуется авторизация"}, status=401)
+    access_error = _profile_access_error(request.user.profile)
+    if access_error:
+        return JsonResponse({"ok": False, "error": access_error}, status=403)
+    return None
+
+
+@require_http_methods(["GET"])
+def api_telemost_status(request):
+    auth_error = _require_authenticated_user(request)
+    if auth_error:
+        return auth_error
+
+    from .telemost import diagnose_telemost_config
+
+    report = diagnose_telemost_config()
+    return JsonResponse({
+        "ok": True,
+        "configured": report.get("configured"),
+        "authorize_url": report.get("authorize_url"),
+        "account_email": report.get("account_email"),
+        "token_email": report.get("token_email"),
+        "api_available": bool((report.get("api_test") or {}).get("ok")),
+        "caldav_fallback_enabled": report.get("caldav_fallback_enabled"),
+        "diagnostics": report,
+    })
+
+
+@require_http_methods(["POST"])
+def api_telemost_start(request):
+    auth_error = _require_authenticated_user(request)
+    if auth_error:
+        return auth_error
+
+    try:
+        payload = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+
+    event_id = (payload.get("event_id") or "").strip()
+
+    if event_id:
+        from django.core.cache import cache
+
+        cached = cache.get(f"telemost:event:{event_id}")
+        if cached and is_telemost_meeting_url(cached.get("join_url")):
+            join_url = cached["join_url"]
+            _persist_telemost_link(request.user, event_id, join_url)
+            return JsonResponse({
+                "ok": True,
+                "join_url": join_url,
+                "share_url": join_url,
+                "conference_id": cached.get("id"),
+                "cached": True,
+                "provider": "telemost",
+                "message": "Телемост открыт.",
+            })
+
+    from .telemost import create_telemost_link
+
+    event_title = (payload.get("title") or "").strip()
+    event_topic = (payload.get("topic") or "").strip()
+    starts_at = _parse_schedule_datetime(payload.get("starts_at"))
+    ends_at = _parse_schedule_datetime(payload.get("ends_at"))
+    if event_id and (not starts_at or not ends_at or not event_title):
+        local_event = _get_schedule_event(request.user, event_id)
+        if local_event:
+            starts_at = starts_at or local_event.starts_at
+            ends_at = ends_at or local_event.ends_at
+            event_title = event_title or local_event.title
+            event_topic = event_topic or local_event.topic
+
+    join_url, error = create_telemost_link(
+        title=event_title or "Онлайн-урок",
+        starts_at=starts_at,
+        ends_at=ends_at,
+        topic=event_topic,
+    )
+    if error or not is_telemost_meeting_url(join_url):
+        return JsonResponse({
+            "ok": False,
+            "error": error or "Не удалось создать встречу в Телемосте.",
+        }, status=502)
+
+    conference = {"join_url": join_url, "id": None}
+
+    if event_id:
+        from django.core.cache import cache
+
+        cache.set(
+            f"telemost:event:{event_id}",
+            {"join_url": join_url, "id": conference.get("id")},
+            timeout=86400,
+        )
+        _persist_telemost_link(request.user, event_id, join_url)
+
+    return JsonResponse({
+        "ok": True,
+        "join_url": join_url,
+        "share_url": join_url,
+        "conference_id": conference.get("id"),
+        "provider": "telemost",
+        "message": "Телемост открыт.",
+    })
+
+
+def _parse_range_param(value):
+    if not value:
+        return None
+    parsed = parse_date(value)
+    if parsed:
+        return parsed
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+def _persist_telemost_link(user, event_id, join_url):
+    pk = parse_local_event_id(event_id)
+    if not pk or not join_url:
+        return
+    ScheduleEvent.objects.filter(owner=user, pk=pk).update(telemost_url=join_url)
+
+
+def _create_telemost_link_for_user(user, *, title="", starts_at=None, ends_at=None, topic=""):
+    return create_telemost_link(
+        title=title,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        topic=topic,
+    )
+
+
+def _get_schedule_event(user, event_id):
+    pk = parse_local_event_id(event_id)
+    if not pk:
+        return None
+    return ScheduleEvent.objects.select_related("series").filter(owner=user, pk=pk).first()
+
+
+def _parse_schedule_datetime(value):
+    if not value:
+        return None
+    text = str(value).strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if timezone.is_naive(parsed):
+        return timezone.make_aware(parsed, timezone.get_current_timezone())
+    return parsed
+
+
+def _schedule_times_equal(left, right):
+    if left is None or right is None:
+        return left is right
+    local_left = timezone.localtime(left).replace(second=0, microsecond=0)
+    local_right = timezone.localtime(right).replace(second=0, microsecond=0)
+    return local_left == local_right
+
+
+@require_http_methods(["GET"])
+def api_schedule_events(request):
+    auth_error = _require_authenticated_user(request)
+    if auth_error:
+        return auth_error
+
+    date_from = _parse_range_param(request.GET.get("from"))
+    date_to = _parse_range_param(request.GET.get("to"))
+    if not date_from or not date_to:
+        return JsonResponse({
+            "ok": False,
+            "error": "Укажите параметры from и to в формате YYYY-MM-DD.",
+        }, status=400)
+
+    events = list_schedule_events(
+        user=request.user,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    return JsonResponse({
+        "ok": True,
+        "events": events,
+        "source": "local",
+    })
+
+
+@require_http_methods(["POST"])
+def api_schedule_create(request):
+    auth_error = _require_authenticated_user(request)
+    if auth_error:
+        return auth_error
+
+    data = _load_json_body(request)
+    if data is None:
+        return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
+
+    title = (data.get("title") or "").strip()
+    starts_at = _parse_schedule_datetime(data.get("starts_at"))
+    ends_at = _parse_schedule_datetime(data.get("ends_at"))
+    if not title:
+        return JsonResponse({"ok": False, "error": "Укажите название урока."}, status=400)
+    if not starts_at or not ends_at:
+        return JsonResponse({"ok": False, "error": "Укажите дату и время урока."}, status=400)
+    if ends_at <= starts_at:
+        return JsonResponse({"ok": False, "error": "Время окончания должно быть позже начала."}, status=400)
+
+    fmt = (data.get("format") or "online").strip().lower()
+    is_online = fmt in ("online", "онлайн")
+    telemost_url = (data.get("telemost_url") or data.get("link") or "").strip()
+
+    if is_online and not telemost_url and telemost_auto_create_enabled():
+        telemost_url, telemost_error = _create_telemost_link_for_user(
+            request.user,
+            title=title,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            topic=(data.get("topic") or "").strip(),
+        )
+        if telemost_error or not telemost_url:
+            return JsonResponse({
+                "ok": False,
+                "error": f"Не удалось создать ссылку на звонок: {telemost_error or 'нет ссылки'}",
+            }, status=502)
+
+    from datetime import datetime as dt
+
+    from .schedule_service import check_conflicts, create_series, create_single_event
+
+    recurrence_type = (data.get("recurrence_type") or data.get("repeat_type") or "none").strip()
+    student_ids = data.get("student_ids") or ([data["student_id"]] if data.get("student_id") else None)
+    extra_student_ids = data.get("extra_student_ids")
+    group_id = data.get("group_id")
+    notify = data.get("notify_participants", True)
+    force = data.get("force", False)
+
+    if not force:
+        conflicts = check_conflicts(
+            teacher=request.user,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            student_id=student_ids[0] if student_ids and len(student_ids) == 1 else None,
+            group_id=group_id,
+        )
+        if conflicts:
+            return JsonResponse({
+                "ok": False,
+                "error": "В это время уже есть занятие.",
+                "conflicts": conflicts,
+                "code": "schedule_conflict",
+            }, status=409)
+
+    event_type = (data.get("type") or data.get("event_type") or "group_lesson").strip()
+    if event_type in ("group", "individual"):
+        event_type = "group_lesson" if event_type == "group" else "individual_lesson"
+
+    if recurrence_type and recurrence_type != "none":
+        start_date = starts_at.date()
+        series_data = {
+            "title": title,
+            "description": (data.get("description") or "").strip(),
+            "topic": (data.get("topic") or "").strip(),
+            "event_type": event_type,
+            "lesson": data.get("lesson_id") or data.get("lesson"),
+            "lesson_plan_item": data.get("lesson_plan_item_id") or data.get("lesson_plan_item"),
+            "homework": data.get("homework_id") or data.get("homework"),
+            "timezone": data.get("timezone") or "Europe/Moscow",
+            "start_date": start_date,
+            "start_time": starts_at.time(),
+            "end_time": ends_at.time(),
+            "recurrence_type": recurrence_type,
+            "recurrence_interval": int(data.get("recurrence_interval") or data.get("repeat_interval") or 1),
+            "recurrence_weekdays": data.get("recurrence_weekdays") or data.get("repeat_weekdays") or [],
+            "recurrence_until": data.get("recurrence_until") or data.get("repeat_until"),
+            "recurrence_count": data.get("recurrence_count") or data.get("repeat_count"),
+            "meeting_url": telemost_url if is_online else "",
+            "meeting_provider": "yandex_telemost" if telemost_url else "none",
+            "format": "online" if is_online else "offline",
+            "teacher_comment": (data.get("teacher_comment") or data.get("comment") or "").strip(),
+            "materials": (data.get("materials") or "").strip(),
+            "reminder_minutes": data.get("reminder_minutes"),
+            "notify_participants": notify,
+        }
+        if series_data["recurrence_until"] and isinstance(series_data["recurrence_until"], str):
+            series_data["recurrence_until"] = dt.strptime(series_data["recurrence_until"], "%Y-%m-%d").date()
+        series, events = create_series(
+            teacher=request.user,
+            series_data=series_data,
+            student_ids=student_ids,
+            group_id=group_id,
+            extra_student_ids=extra_student_ids,
+            notify=notify,
+        )
+        first = events[0] if events else None
+        if not first:
+            return JsonResponse({"ok": False, "error": "Не удалось создать занятия серии."}, status=400)
+        return JsonResponse({
+            "ok": True,
+            "event": schedule_event_to_json(first),
+            "series_id": series.pk,
+            "events_created": len(events),
+        }, status=201)
+
+    event = create_single_event(
+        teacher=request.user,
+        data={
+            "title": title,
+            "description": (data.get("description") or "").strip(),
+            "topic": (data.get("topic") or "").strip(),
+            "starts_at": starts_at,
+            "ends_at": ends_at,
+            "event_type": event_type,
+            "format": ScheduleEvent.Format.ONLINE if is_online else ScheduleEvent.Format.OFFLINE,
+            "telemost_url": telemost_url if is_online else "",
+            "meeting_provider": "yandex_telemost" if telemost_url else "none",
+            "audience": (data.get("audience") or "").strip(),
+            "materials": (data.get("materials") or "").strip(),
+            "teacher_comment": (data.get("teacher_comment") or data.get("comment") or "").strip(),
+            "lesson": data.get("lesson_id") or data.get("lesson"),
+            "lesson_plan_item": data.get("lesson_plan_item_id") or data.get("lesson_plan_item"),
+            "homework": data.get("homework_id") or data.get("homework"),
+            "timezone": data.get("timezone") or "Europe/Moscow",
+            "reminder_minutes": data.get("reminder_minutes"),
+            "notify_participants": notify,
+        },
+        student_ids=student_ids,
+        group_id=group_id,
+        extra_student_ids=extra_student_ids,
+        notify=notify,
+    )
+    if data.get("audience"):
+        event.audience = data.get("audience")
+        event.save(update_fields=["audience"])
+    return JsonResponse({"ok": True, "event": schedule_event_to_json(event)}, status=201)
+
+
+@require_http_methods(["PATCH"])
+def api_schedule_update(request, event_id):
+    auth_error = _require_authenticated_user(request)
+    if auth_error:
+        return auth_error
+
+    event = _get_schedule_event(request.user, event_id)
+    if not event:
+        return JsonResponse({"ok": False, "error": "Урок не найден."}, status=404)
+
+    data = _load_json_body(request)
+    if data is None:
+        return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
+
+    from .schedule_service import (
+        apply_series_edit,
+        cancel_event_with_scope,
+        coerce_schedule_datetime,
+        move_event_with_scope,
+        normalize_series_scope,
+        update_event,
+    )
+
+    notify = data.get("notify_participants", True)
+    scope = normalize_series_scope(data.get("scope"))
+    original_start = event.starts_at
+    original_end = event.ends_at
+    time_rescheduled = False
+
+    if "starts_at" in data or "ends_at" in data:
+        new_start = original_start
+        new_end = original_end
+        if "starts_at" in data:
+            parsed = coerce_schedule_datetime(data.get("starts_at"))
+            if parsed is None:
+                return JsonResponse({"ok": False, "error": "Некорректная дата или время начала."}, status=400)
+            new_start = parsed
+        if "ends_at" in data:
+            parsed = coerce_schedule_datetime(data.get("ends_at"))
+            if parsed is None:
+                return JsonResponse({"ok": False, "error": "Некорректная дата или время окончания."}, status=400)
+            new_end = parsed
+        if not _schedule_times_equal(new_start, original_start) or not _schedule_times_equal(new_end, original_end):
+            force = data.get("force", False)
+            if not force:
+                from .schedule_service import check_conflicts, events_for_edit_scope
+
+                exclude_event_ids = [event.pk]
+                if scope in ("series", "following"):
+                    from .schedule_service import events_for_edit_scope
+
+                    exclude_event_ids = list(
+                        events_for_edit_scope(event, scope).values_list("pk", flat=True)
+                    )
+
+                conflicts = check_conflicts(
+                    teacher=request.user,
+                    starts_at=new_start,
+                    ends_at=new_end,
+                    student_id=event.student_id,
+                    group_id=event.group_id,
+                    exclude_event_ids=exclude_event_ids,
+                )
+                if conflicts:
+                    return JsonResponse({
+                        "ok": False,
+                        "error": "В это время уже есть занятие.",
+                        "conflicts": conflicts,
+                        "code": "schedule_conflict",
+                    }, status=409)
+            move_event_with_scope(
+                event,
+                starts_at=new_start,
+                ends_at=new_end,
+                changed_by=request.user,
+                scope=scope,
+                notify=notify,
+            )
+            time_rescheduled = True
+            event.refresh_from_db()
+
+    if data.get("status") == ScheduleEvent.Status.CANCELLED:
+        plan_cancel_action = (data.get("plan_cancel_action") or data.get("planOnCancel") or "").strip() or None
+        cancel_event_with_scope(
+            event,
+            changed_by=request.user,
+            scope=scope,
+            notify=notify,
+            plan_cancel_action=plan_cancel_action,
+        )
+        event.refresh_from_db()
+        return JsonResponse({"ok": True, "event": schedule_event_to_json(event)})
+
+    update_fields = {}
+    if "title" in data:
+        update_fields["title"] = (data.get("title") or "").strip() or event.title
+    if "topic" in data:
+        update_fields["topic"] = (data.get("topic") or "").strip()
+    if "type" in data:
+        event.event_type = (data.get("type") or event.event_type).strip()
+    if "format" in data:
+        fmt = (data.get("format") or "").strip().lower()
+        event.format = (
+            ScheduleEvent.Format.ONLINE
+            if fmt in ("online", "онлайн", "Онлайн".lower())
+            else ScheduleEvent.Format.OFFLINE
+        )
+    if "telemost_url" in data or "link" in data:
+        update_fields["telemost_url"] = (data.get("telemost_url") or data.get("link") or "").strip()
+    if "audience" in data:
+        event.audience = (data.get("audience") or "").strip()
+    if "materials" in data:
+        update_fields["materials"] = (data.get("materials") or "").strip()
+    if "teacher_comment" in data or "comment" in data:
+        update_fields["teacher_comment"] = (data.get("teacher_comment") or data.get("comment") or "").strip()
+    if "reminder_minutes" in data:
+        update_fields["reminder_minutes"] = data.get("reminder_minutes")
+    if "tags" in data and isinstance(data.get("tags"), list):
+        event.tags = data.get("tags")
+
+    notify_updates = notify and not time_rescheduled
+
+    if scope != "single":
+        apply_series_edit(event, scope=scope, changed_by=request.user, data={**data, **update_fields}, notify=notify_updates)
+    elif update_fields:
+        update_event(event, changed_by=request.user, data=update_fields, notify=notify_updates)
+    else:
+        event.save()
+
+    return JsonResponse({"ok": True, "event": schedule_event_to_json(event)})
+
+
+@require_http_methods(["POST"])
+def api_schedule_check_conflicts(request):
+    auth_error = _require_authenticated_user(request)
+    if auth_error:
+        return auth_error
+
+    data = _load_json_body(request)
+    if data is None:
+        return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
+
+    starts_at = _parse_schedule_datetime(data.get("starts_at"))
+    ends_at = _parse_schedule_datetime(data.get("ends_at"))
+    if not starts_at or not ends_at:
+        return JsonResponse({"ok": False, "error": "Укажите starts_at и ends_at."}, status=400)
+
+    from .schedule_events import parse_local_event_id
+    from .schedule_service import check_conflicts
+
+    exclude_id = data.get("exclude_event_id")
+    if exclude_id:
+        exclude_id = parse_local_event_id(exclude_id) or exclude_id
+
+    student_id = data.get("student_id")
+    student_ids = data.get("student_ids")
+    if not student_id and student_ids and len(student_ids) == 1:
+        student_id = student_ids[0]
+
+    conflicts = check_conflicts(
+        teacher=request.user,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        student_id=student_id,
+        group_id=data.get("group_id"),
+        exclude_event_id=exclude_id,
+    )
+    return JsonResponse({
+        "ok": True,
+        "conflicts": conflicts,
+        "has_conflicts": bool(conflicts),
+    })
+
+
+@require_http_methods(["DELETE"])
+def api_schedule_delete(request, event_id):
+    auth_error = _require_authenticated_user(request)
+    if auth_error:
+        return auth_error
+
+    event = _get_schedule_event(request.user, event_id)
+    if not event:
+        return JsonResponse({"ok": False, "error": "Урок не найден."}, status=404)
+
+    from .schedule_service import cancel_event_with_scope
+
+    data = _load_json_body(request) or {}
+    scope = data.get("scope") or request.GET.get("scope")
+    notify = data.get("notify_participants", True)
+    plan_cancel_action = (data.get("plan_cancel_action") or data.get("planOnCancel") or "").strip() or None
+
+    cancel_event_with_scope(
+        event,
+        changed_by=request.user,
+        scope=scope,
+        notify=notify,
+        plan_cancel_action=plan_cancel_action,
+    )
+    return JsonResponse({"ok": True})
+
+
+@require_http_methods(["GET"])
+def api_calendar_status(request):
+    auth_error = _require_authenticated_user(request)
+    if auth_error:
+        return auth_error
+
+    from .telemost import resolve_telemost_oauth_token
+
+    profile = request.user.profile
+    yandex_enabled = calendar_integration_enabled()
+    yandex_connected = profile_yandex_calendar_active(profile)
+    calendar_source = "yandex" if yandex_connected else "local"
+    embed = calendar_embed_config() if yandex_connected else {
+        "enabled": False,
+        "layer_ids": "",
+        "tz_id": "",
+        "embed_url": None,
+        "help_url": "",
+        "display_mode": "local",
+    }
+
+    account_email = (profile.yandex_account_email or "").strip()
+    if yandex_connected and not account_email:
+        token, _ = resolve_telemost_oauth_token()
+        account_email = resolve_yandex_account_email(token) or account_email
+
+    return JsonResponse({
+        "ok": True,
+        "configured": yandex_connected and calendar_is_configured(),
+        "authorize_url": calendar_authorize_url(),
+        "account_email": account_email or None,
+        "calendar_source": calendar_source,
+        "yandex_enabled": yandex_enabled,
+        "yandex_connected": yandex_connected,
+        "telemost_platform": telemost_is_configured(),
+        **embed,
+    })
+
+
+@require_http_methods(["GET"])
+def api_calendar_events(request):
+    auth_error = _require_authenticated_user(request)
+    if auth_error:
+        return auth_error
+
+    profile = request.user.profile
+    if not profile_yandex_calendar_active(profile):
+        return JsonResponse({
+            "ok": False,
+            "error": "Яндекс Календарь отключён. Используется расписание кабинета.",
+        }, status=400)
+
+    date_from = _parse_range_param(request.GET.get("from"))
+    date_to = _parse_range_param(request.GET.get("to"))
+    if not date_from or not date_to:
+        return JsonResponse({
+            "ok": False,
+            "error": "Укажите параметры from и to в формате YYYY-MM-DD.",
+        }, status=400)
+
+    events, error = fetch_calendar_events(date_from=date_from, date_to=date_to)
+    if error:
+        return JsonResponse({"ok": False, "error": error}, status=502)
+
+    return JsonResponse({
+        "ok": True,
+        "events": events,
+        "source": "yandex_calendar",
+    })
+

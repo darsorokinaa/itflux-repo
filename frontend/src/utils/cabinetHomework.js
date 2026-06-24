@@ -4,6 +4,8 @@
  * При варианте в уроке (есть lesson_token) запросы идут same-origin — прокси на бэке генератора, без CORS.
  */
 
+import { ensureCsrfCookie } from "./cabinetAuth";
+
 export function getLkPublicBase() {
   const u = (import.meta.env.VITE_LK_PUBLIC_URL || import.meta.env.VITE_LK_URL || "")
     .trim()
@@ -33,11 +35,15 @@ function buildHomeworkApiUrl(assignmentId, lkSubpath, opts) {
       : `/api/lesson/homework/assignment/${id}/`;
     return `${path}?${new URLSearchParams({ token: tok }).toString()}`;
   }
-  const base = getLkPublicBase();
-  if (!base) throw new Error("VITE_LK_PUBLIC_URL");
+  const legacyBase = getLkPublicBase();
+  if (legacyBase) {
+    return suffix
+      ? `${legacyBase}/api/homework/assignment/${id}/${suffix}`
+      : `${legacyBase}/api/homework/assignment/${id}/`;
+  }
   return suffix
-    ? `${base}/api/homework/assignment/${id}/${suffix}`
-    : `${base}/api/homework/assignment/${id}/`;
+    ? `/api/homework/assignment/${id}/${suffix}`
+    : `/api/homework/assignment/${id}/`;
 }
 
 /**
@@ -201,6 +207,141 @@ function safeJson(s) {
  * @param {Record<string, number>} scores
  * @param {Record<string, boolean>} [checkedTasks]
  */
+const HOMEWORK_ATTACHMENT_IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp|heic|heif)$/i;
+
+/**
+ * @param {unknown} result
+ * @param {number|string} taskId
+ * @param {number|string} taskNumber
+ * @returns {Array<{ url: string, filename: string, isImage: boolean }>}
+ */
+export function homeworkTaskAttachments(result, taskId, taskNumber) {
+  const o = typeof result === "string" ? safeJson(result) : result;
+  if (!o || typeof o !== "object") return [];
+  const r = /** @type {Record<string, unknown>} */ (o);
+  const byId =
+    /** @type {Record<string, unknown[]>|undefined} */ (
+      r.attachments_by_task_id || r.attachmentsByTaskId
+    );
+  const byNum =
+    /** @type {Record<string, unknown[]>|undefined} */ (
+      r.attachments_by_number || r.attachmentsByNumber
+    );
+  const list =
+    (byId && byId[String(taskId)]) ||
+    (byNum && byNum[String(taskNumber)]) ||
+    (byNum && byNum[String(Number(taskNumber))]) ||
+    [];
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const row = /** @type {{ url?: string, filename?: string }} */ (item);
+      const url = String(row.url || "").trim();
+      if (!url) return null;
+      const filename = String(row.filename || url.split("/").pop() || "Файл");
+      return {
+        url,
+        filename,
+        isImage: HOMEWORK_ATTACHMENT_IMAGE_RE.test(filename) || HOMEWORK_ATTACHMENT_IMAGE_RE.test(url),
+      };
+    })
+    .filter(Boolean);
+}
+
+/**
+ * Same-origin upload URL (native Cabinet API on генераторе, не прокси ЛК).
+ * @param {string} assignmentId
+ * @param {HomeworkLkRequestOpts} [opts]
+ */
+export function homeworkUploadAnswerUrl(assignmentId, opts) {
+  const id = encodeURIComponent(String(assignmentId).trim());
+  const tok = (opts && opts.lessonToken) || "";
+  const base = `/api/homework/assignment/${id}/upload-answer/`;
+  if (tok) {
+    return `${base}?${new URLSearchParams({ token: tok }).toString()}`;
+  }
+  return base;
+}
+
+function readCsrfToken() {
+  if (typeof document === "undefined") return "";
+  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+/**
+ * @param {string} assignmentId
+ * @param {FormData} formData
+ * @param {HomeworkLkRequestOpts} [opts]
+ */
+export async function uploadHomeworkAnswer(assignmentId, formData, opts) {
+  await ensureCsrfCookie();
+  const headers = {};
+  const csrf = readCsrfToken();
+  if (csrf) headers["X-CSRFToken"] = csrf;
+
+  const url = homeworkUploadAnswerUrl(assignmentId, opts);
+  const res = await fetch(url, {
+    method: "POST",
+    body: formData,
+    credentials: "include",
+    headers,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || (Object.prototype.hasOwnProperty.call(data, "ok") && !data.ok)) {
+    const err = new Error(
+      (typeof data.error === "string" && data.error)
+        || (typeof data.detail === "string" && data.detail)
+        || `Не удалось загрузить файл (${res.status || "ошибка"})`
+    );
+    /** @type {any} */ (err).status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+/**
+ * @param {string} assignmentId
+ * @param {{ url: string, taskNumber?: number|string, taskId?: number|string }} params
+ * @param {HomeworkLkRequestOpts} [opts]
+ */
+export async function deleteHomeworkAnswer(assignmentId, params, opts) {
+  await ensureCsrfCookie();
+  const headers = {};
+  const csrf = readCsrfToken();
+  if (csrf) headers["X-CSRFToken"] = csrf;
+
+  const qs = new URLSearchParams({ url: String(params.url || "").trim() });
+  if (params.taskNumber != null && String(params.taskNumber).trim() !== "") {
+    qs.set("task_number", String(params.taskNumber));
+  }
+  if (params.taskId != null && String(params.taskId).trim() !== "") {
+    qs.set("task_id", String(params.taskId));
+  }
+  if (opts?.lessonToken) {
+    qs.set("token", opts.lessonToken);
+  }
+
+  const id = encodeURIComponent(String(assignmentId).trim());
+  const res = await fetch(`/api/homework/assignment/${id}/upload-answer/?${qs.toString()}`, {
+    method: "DELETE",
+    credentials: "include",
+    headers,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || (Object.prototype.hasOwnProperty.call(data, "ok") && !data.ok)) {
+    const err = new Error(
+      (typeof data.error === "string" && data.error)
+        || (typeof data.detail === "string" && data.detail)
+        || `Не удалось удалить файл (${res.status || "ошибка"})`
+    );
+    /** @type {any} */ (err).status = res.status;
+    throw err;
+  }
+  return data;
+}
+
 export function buildHomeworkResultPayload(tasks, userAnswers, scores, checkedTasks) {
   const byNumber = {};
   const byTaskId = { ...userAnswers };
@@ -223,8 +364,6 @@ export function buildHomeworkResultPayload(tasks, userAnswers, scores, checkedTa
  * @param {HomeworkLkRequestOpts} [opts]
  */
 export async function saveHomeworkDraft(assignmentId, body, opts) {
-  const useProxy = !!(opts && opts.lessonToken);
-  if (!useProxy && !getLkPublicBase()) throw new Error("VITE_LK_PUBLIC_URL");
   const url = buildHomeworkApiUrl(assignmentId, "save-draft/", opts);
   const res = await fetch(url, {
     method: "POST",
@@ -247,8 +386,6 @@ export async function saveHomeworkDraft(assignmentId, body, opts) {
  * @param {HomeworkLkRequestOpts} [opts]
  */
 export async function submitHomework(assignmentId, body, opts) {
-  const useProxy = !!(opts && opts.lessonToken);
-  if (!useProxy && !getLkPublicBase()) throw new Error("VITE_LK_PUBLIC_URL");
   const url = buildHomeworkApiUrl(assignmentId, "submit/", opts);
   const res = await fetch(url, {
     method: "POST",
@@ -270,8 +407,6 @@ export async function submitHomework(assignmentId, body, opts) {
  * @param {HomeworkLkRequestOpts} [opts]
  */
 export async function fetchHomeworkAssignment(assignmentId, opts) {
-  const useProxy = !!(opts && opts.lessonToken);
-  if (!useProxy && !getLkPublicBase()) throw new Error("VITE_LK_PUBLIC_URL");
   const url = buildHomeworkApiUrl(assignmentId, "", opts);
   const res = await fetch(url, { method: "GET", credentials: "include" });
   if (!res.ok) {
@@ -316,6 +451,13 @@ export function homeworkIsReadonly(statusNorm, isTeacherView) {
   if (statusNorm === "submitted" || statusNorm === "reviewing" || statusNorm === "reviewed")
     return true;
   return false;
+}
+
+/**
+ * @param {string} statusNorm
+ */
+export function homeworkIsReviewed(statusNorm) {
+  return normalizeHomeworkStatus(statusNorm) === "reviewed";
 }
 
 /**

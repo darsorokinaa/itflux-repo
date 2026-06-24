@@ -4,6 +4,7 @@ from django.conf import settings
 from django.views.static import serve
 
 from . import views
+from Cabinet import homework_api
 
 
 urlpatterns = [
@@ -21,6 +22,52 @@ urlpatterns = [
     path("api/<str:level>/subject-task-counts/", views.api_level_subject_task_counts, name="api_level_subject_task_counts"),
     path("ckeditor/upload/", views.ckeditor_upload, name="ckeditor_upload"),
     path("api/lk-nav-unlock/", views.api_lk_nav_unlock, name="api_lk_nav_unlock"),
+    path("api/cabinet/", include("Cabinet.urls")),
+    path(
+        "api/homework/assignment/fetch-by-token/",
+        homework_api.HomeworkAssignmentFetchByTokenView.as_view(),
+        name="homework_assignment_fetch_by_token",
+    ),
+    path(
+        "api/homework/assignment/<int:homework_id>/save-draft/",
+        homework_api.HomeworkAssignmentSaveDraftView.as_view(),
+        name="homework_assignment_save_draft",
+    ),
+    path(
+        "api/homework/assignment/<int:homework_id>/submit/",
+        homework_api.HomeworkAssignmentSubmitView.as_view(),
+        name="homework_assignment_submit",
+    ),
+    path(
+        "api/homework/assignment/<int:homework_id>/upload-answer/",
+        homework_api.HomeworkAssignmentUploadAnswerView.as_view(),
+        name="homework_assignment_upload_answer",
+    ),
+    path(
+        "api/homework/assignment/<int:homework_id>/",
+        homework_api.HomeworkAssignmentDetailView.as_view(),
+        name="homework_assignment_detail",
+    ),
+    path(
+        "api/lesson/homework/assignment/<int:aid>/save-draft/",
+        views.api_lesson_homework_save_draft,
+        name="lesson_homework_save_draft",
+    ),
+    path(
+        "api/lesson/homework/assignment/<int:aid>/submit/",
+        views.api_lesson_homework_submit,
+        name="lesson_homework_submit",
+    ),
+    path(
+        "api/lesson/homework/assignment/<int:aid>/upload-answer/",
+        views.api_lesson_homework_upload_answer,
+        name="lesson_homework_upload_answer",
+    ),
+    path(
+        "api/lesson/homework/assignment/<int:aid>/",
+        views.api_lesson_homework_assignment,
+        name="lesson_homework_assignment",
+    ),
     path("api/updates/", views.api_updates, name="api_updates"),
     path("api/announcements/", views.api_announcements, name="api_announcements"),
     path("api/lessons/", views.api_lessons, name="api_lessons"),
