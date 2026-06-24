@@ -368,6 +368,7 @@ def diagnose_telemost_config():
         "has_oauth_token": bool((settings.YANDEX_TELEMOST_OAUTH_TOKEN or "").strip()),
         "has_refresh_token": bool((getattr(settings, "YANDEX_TELEMOST_REFRESH_TOKEN", "") or "").strip()),
         "has_auth_code": bool((settings.YANDEX_TELEMOST_AUTH_CODE or "").strip()),
+        "has_client_secret": bool((settings.YANDEX_TELEMOST_CLIENT_SECRET or "").strip()),
         "caldav_fallback_enabled": getattr(settings, "YANDEX_TELEMOST_ALLOW_WEB_FALLBACK", True),
         "token_ok": False,
         "token_email": None,
@@ -380,9 +381,13 @@ def diagnose_telemost_config():
     token, token_error = resolve_telemost_oauth_token()
     if not token:
         result["token_error"] = token_error
+        if not result["has_client_secret"]:
+            result["next_steps"].append(
+                "Задайте YANDEX_TELEMOST_CLIENT_SECRET (секрет приложения «Цифровой поток» в oauth.yandex.ru)."
+            )
         result["next_steps"].append(
-            "Получите OAuth-токен: откройте authorize_url под darvitol.s@yandex.ru "
-            "и сохраните access_token в YANDEX_TELEMOST_OAUTH_TOKEN."
+            f"Получите OAuth-токен: откройте authorize_url под {platform_email or 'аккаунтом организации'} "
+            "и сохраните access_token в YANDEX_TELEMOST_OAUTH_TOKEN (или код в YANDEX_TELEMOST_AUTH_CODE)."
         )
         return result
 

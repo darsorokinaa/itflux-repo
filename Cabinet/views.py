@@ -422,8 +422,9 @@ def api_schedule_create(request):
     fmt = (data.get("format") or "online").strip().lower()
     is_online = fmt in ("online", "онлайн")
     telemost_url = (data.get("telemost_url") or data.get("link") or "").strip()
+    telemost_auto = data.get("telemost_auto_create") is True
 
-    if is_online and not telemost_url and telemost_auto_create_enabled():
+    if is_online and not telemost_url and telemost_auto and telemost_auto_create_enabled():
         telemost_url, telemost_error = _create_telemost_link_for_user(
             request.user,
             title=title,

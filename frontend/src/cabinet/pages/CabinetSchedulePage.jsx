@@ -2079,8 +2079,8 @@ export default function CabinetSchedulePage() {
             </div>
           ) : null}
           {!yandexEmbedEnabled && calendarSource === "local" ? (
-            <div className="cb-sch-calendar-hint" title="Ссылка на Телемост создаётся при добавлении урока">
-              <p>Онлайн-уроки · Телемост</p>
+            <div className="cb-sch-calendar-hint" title="Автоматическое создание ссылки Телемост — скоро">
+              <p>Онлайн-уроки · Телемост (скоро)</p>
             </div>
           ) : null}
           {!yandexEmbedEnabled && calendarSource === "yandex" && yandexCalendarEnabled && !yandexLayerIds ? (

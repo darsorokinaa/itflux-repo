@@ -83,7 +83,7 @@ export default function CreateScheduleLessonModal({
   const [repeatEndMode, setRepeatEndMode] = useState("none");
   const [reminderMinutes, setReminderMinutes] = useState(15);
   const [notifyParticipants, setNotifyParticipants] = useState(true);
-  const [meetingMode, setMeetingMode] = useState("auto");
+  const [meetingMode, setMeetingMode] = useState("later");
   const [manualLink, setManualLink] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -182,7 +182,7 @@ export default function CreateScheduleLessonModal({
       payload.telemost_url = manualLink.trim();
       payload.link = manualLink.trim();
     }
-    if (meetingMode === "later") {
+    if (meetingMode === "later" || meetingMode === "auto") {
       payload.telemost_url = "";
     }
     return payload;
@@ -388,9 +388,9 @@ export default function CreateScheduleLessonModal({
                 <label className="cb-sch-field">
                   <span>Ссылка на встречу</span>
                   <select value={meetingMode} onChange={(e) => setMeetingMode(e.target.value)}>
-                    <option value="auto">Создать Телемост автоматически</option>
-                    <option value="manual">Ввести вручную</option>
                     <option value="later">Создать позже</option>
+                    <option value="manual">Ввести вручную</option>
+                    <option value="auto" disabled>Телемост автоматически (скоро)</option>
                   </select>
                 </label>
                 {meetingMode === "manual" ? (

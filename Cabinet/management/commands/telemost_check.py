@@ -13,10 +13,13 @@ class Command(BaseCommand):
         self.stdout.write(json.dumps(report, ensure_ascii=False, indent=2))
 
         self.stdout.write("")
-        if report.get("api_test", {}).get("ok"):
+        api_test = report.get("api_test") or {}
+        if api_test.get("ok"):
             self.stdout.write(self.style.SUCCESS("API Телемоста: OK"))
-        else:
+        elif report.get("token_ok"):
             self.stdout.write(self.style.ERROR("API Телемоста: недоступен"))
+        else:
+            self.stdout.write(self.style.ERROR("OAuth-токен: не получен"))
 
         for step in report.get("next_steps") or []:
             self.stdout.write(f"→ {step}")
