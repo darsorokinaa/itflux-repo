@@ -1,3 +1,4 @@
+import { getInteractiveDisplayTitle } from "./interactivesData";
 import { mapApiMaterial, mapApiPlanItem } from "./lessonPlansData";
 import { mapApiInteractiveAttachment, materialOpenUrl } from "./planItemAttachments";
 
@@ -93,7 +94,7 @@ export function sessionLessonAttachmentRows(session) {
     rows.push(attachmentRow({
       key: `li-${interactive.id}`,
       kind: "interactive",
-      label: interactive.title,
+      label: getInteractiveDisplayTitle(interactive),
       typeLabel: interactive.interactiveTypeLabel || "Интерактив",
       url: `/cabinet/interactives/${interactive.id}`,
       interactiveId: interactive.id,
@@ -134,7 +135,7 @@ export function sessionHomeworkAttachmentRows(session) {
     rows.push(attachmentRow({
       key: `hwi-${interactive.id}`,
       kind: "interactive",
-      label: interactive.title,
+      label: getInteractiveDisplayTitle(interactive),
       typeLabel: interactive.interactiveTypeLabel || "Интерактив",
       url: `/cabinet/interactives/${interactive.id}`,
       interactiveId: interactive.id,

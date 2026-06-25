@@ -29,6 +29,8 @@ from .models import (
     Notification,
     NotificationPreference,
     OrderingItem,
+    QuizQuestion,
+    WheelSegment,
     Payment,
     Profile,
     ReviewItem,
@@ -222,6 +224,16 @@ class OrderingItemInline(admin.TabularInline):
     extra = 0
 
 
+class QuizQuestionInline(admin.TabularInline):
+    model = QuizQuestion
+    extra = 0
+
+
+class WheelSegmentInline(admin.TabularInline):
+    model = WheelSegment
+    extra = 0
+
+
 @admin.register(InteractiveBackground)
 class InteractiveBackgroundAdmin(admin.ModelAdmin):
     list_display = ("name", "slug", "text_tone", "has_background_image", "is_default", "is_active", "sort_order")
@@ -261,9 +273,44 @@ class InteractiveCardStyleAdmin(admin.ModelAdmin):
 
 @admin.register(InteractiveSoundPack)
 class InteractiveSoundPackAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "is_default", "is_active", "sort_order")
+    list_display = ("name", "slug", "has_sound_files", "is_default", "is_active", "sort_order")
     list_filter = ("is_active", "is_default")
     ordering = ("sort_order", "id")
+    fieldsets = (
+        (None, {
+            "fields": ("slug", "name", "description", "sort_order", "is_active", "is_default"),
+        }),
+        ("Файлы звуков", {
+            "fields": (
+                "sound_flip",
+                "sound_correct",
+                "sound_wrong",
+                "sound_next",
+                "sound_end",
+                "sound_background",
+            ),
+            "description": (
+                "Загрузите mp3, wav или ogg. Если файл задан — он используется вместо синтеза. "
+                "События: переворот, правильно, неправильно, следующий, конец, фоновый."
+            ),
+        }),
+        ("Синтез (fallback)", {
+            "fields": ("config",),
+            "classes": ("collapse",),
+            "description": "JSON-профили, если файлы не загружены: flip, correct, wrong, next, end.",
+        }),
+    )
+
+    @admin.display(boolean=True, description="Есть файлы")
+    def has_sound_files(self, obj):
+        return any([
+            obj.sound_flip,
+            obj.sound_correct,
+            obj.sound_wrong,
+            obj.sound_next,
+            obj.sound_end,
+            obj.sound_background,
+        ])
 
 
 @admin.register(Interactive)
@@ -272,6 +319,13 @@ class InteractiveAdmin(admin.ModelAdmin):
     list_filter = ("interactive_type", "direction", "status")
     search_fields = ("title", "topic")
     ordering = ("-updated_at",)
+    inlines = [
+        FlashcardItemInline,
+        MatchingPairInline,
+        OrderingItemInline,
+        QuizQuestionInline,
+        WheelSegmentInline,
+    ]
 
 
 @admin.register(InteractiveAssignment)

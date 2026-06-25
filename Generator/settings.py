@@ -1,7 +1,8 @@
-from logging import DEBUG
-from pathlib import Path
 import os
+import sys
+from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -10,13 +11,26 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / "Generator" / ".env")
 load_dotenv(BASE_DIR / ".env")
 
+_TESTING = "test" in sys.argv
+_DEV_SECRET = "dev-insecure-secret-key-local-only"
+
 # SECURITY WARNING: keep the secret key used in production secret!
-# Лучше: хранить в переменной окружения
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-insecure-secret-key")
+_secret_env = (os.environ.get("DJANGO_SECRET_KEY") or os.environ.get("SECRET_KEY") or "").strip()
+_debug_raw = (os.environ.get("DJANGO_DEBUG") or os.environ.get("DEBUG") or "0").strip()
+DEBUG = _TESTING or _debug_raw.lower() in ("1", "true", "yes", "on")
+
+if DEBUG:
+    SECRET_KEY = _secret_env or _DEV_SECRET
+else:
+    if not _secret_env or _secret_env == _DEV_SECRET:
+        raise ImproperlyConfigured(
+            "Set DJANGO_SECRET_KEY (or SECRET_KEY) to a strong random value when DEBUG is off."
+        )
+    SECRET_KEY = _secret_env
 
 # Тот же секрет, что в ЛК (02_lk_generator): POST /api/lesson/token/ → ссылка на /lesson/join/
 LESSON_SECRET = os.environ.get("LESSON_SECRET", "").strip()
-TASKS_GET_SECRET = os.environ.get("LINK_SECRET_FOR_TASKS").strip()
+TASKS_GET_SECRET = (os.environ.get("LINK_SECRET_FOR_TASKS") or "").strip()
 # Ссылка «Личный кабинет» в шаблоне урока; должен совпадать с origin из сборки фронта (VITE_LK_PUBLIC_URL).
 LK_PUBLIC_URL = os.environ.get("LK_PUBLIC_URL", "http://lk.itflux.ru").rstrip("/")
 LK_DASHBOARD_URL = os.environ.get("LK_DASHBOARD_URL", "").strip().rstrip("/")
@@ -34,11 +48,8 @@ LK_HOMEWORK_AUTHORIZATION_SCHEME = (os.environ.get("LK_HOMEWORK_AUTHORIZATION_SC
 # Вместо GET /api/homework/assignment/<id>/ — POST сюда с JSON {"token","assignment_id"} (как teacher-joined).
 LK_HOMEWORK_FETCH_URL = os.environ.get("LK_HOMEWORK_FETCH_URL", "").strip()
 
-# Яндекс Телемост — создание видеовстреч из кабинета (секреты только в env, не в коде).
-YANDEX_TELEMOST_CLIENT_ID = os.environ.get(
-    "YANDEX_TELEMOST_CLIENT_ID",
-    "21e10d82239446508ab6f2417c596fa2",
-).strip()
+# Яндекс Телемост — секреты только из env.
+YANDEX_TELEMOST_CLIENT_ID = os.environ.get("YANDEX_TELEMOST_CLIENT_ID", "").strip()
 YANDEX_TELEMOST_CLIENT_SECRET = os.environ.get("YANDEX_TELEMOST_CLIENT_SECRET", "").strip()
 YANDEX_TELEMOST_OAUTH_TOKEN = os.environ.get("YANDEX_TELEMOST_OAUTH_TOKEN", "").strip()
 YANDEX_TELEMOST_REFRESH_TOKEN = os.environ.get("YANDEX_TELEMOST_REFRESH_TOKEN", "").strip()
@@ -47,13 +58,10 @@ YANDEX_TELEMOST_REDIRECT_URI = os.environ.get(
     "YANDEX_TELEMOST_REDIRECT_URI",
     "https://oauth.yandex.ru/verification_code",
 ).strip()
-YANDEX_ACCOUNT_EMAIL = os.environ.get(
-    "YANDEX_ACCOUNT_EMAIL",
-    "darvitol.s@yandex.ru",
-).strip()
+YANDEX_ACCOUNT_EMAIL = os.environ.get("YANDEX_ACCOUNT_EMAIL", "").strip()
 YANDEX_TELEMOST_COHOST_EMAIL = os.environ.get(
     "YANDEX_TELEMOST_COHOST_EMAIL",
-    YANDEX_ACCOUNT_EMAIL,
+    os.environ.get("YANDEX_ACCOUNT_EMAIL", ""),
 ).strip()
 YANDEX_TELEMOST_ALLOW_WEB_FALLBACK = os.environ.get(
     "YANDEX_TELEMOST_ALLOW_WEB_FALLBACK", "true"
@@ -83,11 +91,19 @@ ITFLUX_PUBLIC_HOME_URL = f"{_gen_home_outer}/"
 LOGOUT_REDIRECT_URL = ITFLUX_PUBLIC_HOME_URL
 
 # SECURITY WARNING: don't run with debug turned on in production!
-# DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
-DEBUG = False
+# DEBUG задаётся выше (DJANGO_DEBUG или test runner)
 
-# Для Replit домен не localhost, поэтому либо "*" (для демо), либо конкретный домен repl
-ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",")
+_hosts_raw = os.environ.get("DJANGO_ALLOWED_HOSTS", "")
+_hosts_list = [h.strip() for h in _hosts_raw.split(",") if h.strip() and h.strip() != "*"]
+
+if DEBUG or _TESTING:
+    ALLOWED_HOSTS = _hosts_list or ["localhost", "127.0.0.1", "testserver"]
+else:
+    if not _hosts_list:
+        raise ImproperlyConfigured(
+            "Set DJANGO_ALLOWED_HOSTS to your domain(s), comma-separated, in production."
+        )
+    ALLOWED_HOSTS = _hosts_list
 
 # Application definition
 INSTALLED_APPS = [
@@ -228,21 +244,62 @@ REST_FRAMEWORK = {
     ],
 }
 
-# CORS / CSRF
-# В варианте "Django раздаёт React" обычно CORS вообще не нужен для фронта,
-# потому что фронт и бэк на одном домене.
-# Но если вы ещё локально разрабатываете через vite dev server, оставляем.
-CORS_ALLOWED_ORIGINS = [
+# CORS / CSRF — см. блок production hardening ниже
+CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
 CORS_ALLOW_CREDENTIALS = True
 
-CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
-
 CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_HTTPONLY = False
 SESSION_COOKIE_SAMESITE = "Lax"
+
+# Production hardening (HTTPS behind nginx)
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "true").lower() in (
+        "1", "true", "yes", "on",
+    )
+    CSRF_COOKIE_SECURE = os.environ.get("CSRF_COOKIE_SECURE", "true").lower() in (
+        "1", "true", "yes", "on",
+    )
+    if os.environ.get("SECURE_HSTS_SECONDS", "").strip().isdigit():
+        SECURE_HSTS_SECONDS = int(os.environ["SECURE_HSTS_SECONDS"])
+        SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+
+_cors_env = [o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+if _cors_env:
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = _cors_env
+elif DEBUG:
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+    CORS_ALLOW_CREDENTIALS = True
+else:
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = []
+
+_csrf_extra = [o.strip() for o in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()]
+if _csrf_extra:
+    CSRF_TRUSTED_ORIGINS = CSRF_TRUSTED_ORIGINS + _csrf_extra
+
+# Cabinet uploads
+CABINET_MAX_UPLOAD_BYTES = int(os.environ.get("CABINET_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+
+# Cache for rate limiting (LocMem — один процесс; в prod лучше Redis)
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "itflux-cabinet-rl",
+    }
+}
+
+if not DEBUG and not _TESTING and not LESSON_SECRET:
+    import warnings
+    warnings.warn(
+        "LESSON_SECRET is not set — JWT for homework/lesson links will not be issued.",
+        stacklevel=1,
+    )

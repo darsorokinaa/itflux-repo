@@ -1,3 +1,4 @@
+import { getInteractiveDisplayTitle } from "../interactivesData";
 import CabinetModal from "./CabinetModal";
 import InteractivePlayer from "./InteractivePlayer";
 
@@ -14,7 +15,7 @@ export default function InteractivePreview({ interactive, onClose, inline = fals
 
   return (
     <CabinetModal
-      title={interactive.title || "Предпросмотр"}
+      title={getInteractiveDisplayTitle(interactive, "Предпросмотр")}
       onClose={onClose}
       wide
     >

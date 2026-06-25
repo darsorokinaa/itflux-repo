@@ -80,6 +80,20 @@ def get_invitation_by_token(token: str):
     return invitation
 
 
+def _mask_email_hint(email: str) -> str:
+    email = (email or "").strip()
+    if not email or "@" not in email:
+        return ""
+    local, domain = email.split("@", 1)
+    if len(local) <= 1:
+        masked_local = "*"
+    elif len(local) == 2:
+        masked_local = local[0] + "*"
+    else:
+        masked_local = local[0] + "*" * (len(local) - 2) + local[-1]
+    return f"{masked_local}@{domain}"
+
+
 def invitation_preview_payload(invitation: StudentInvitation):
     teacher_profile = invitation.teacher.profile
     teacher_name = teacher_profile.get_display_name() if teacher_profile else invitation.teacher.username
@@ -92,7 +106,7 @@ def invitation_preview_payload(invitation: StudentInvitation):
         "direction_label": invitation.get_direction_display(),
         "grade": invitation.grade,
         "message": invitation.message,
-        "email_hint": invitation.email,
+        "email_hint": _mask_email_hint(invitation.email),
         "expires_at": invitation.expires_at.isoformat() if invitation.expires_at else None,
         "join_path": invitation_join_path(invitation.token),
     }
@@ -112,21 +126,59 @@ def accept_student_invitation(token: str, user: User):
 
     first_name = (profile.name or user.first_name or user.username).strip()
     last_name = (profile.surname or user.last_name or "").strip()
+    invite_email = (invitation.email or user.email or "").strip().lower()
 
-    student, created = Student.objects.get_or_create(
-        teacher=invitation.teacher,
-        user=user,
-        defaults={
-            "first_name": first_name,
-            "last_name": last_name,
-            "email": (user.email or "").strip().lower(),
-            "direction": invitation.direction,
-            "grade": invitation.grade,
-            "status": StudentStatus.ACTIVE,
-        },
-    )
+    existing = None
+    if invite_email:
+        existing = (
+            Student.objects.filter(
+                teacher=invitation.teacher,
+                email__iexact=invite_email,
+                user__isnull=True,
+            )
+            .exclude(status=StudentStatus.ARCHIVED)
+            .first()
+        )
 
-    if not created:
+    if existing:
+        student = existing
+        created = False
+        update_fields = ["user"]
+        student.user = user
+        if invite_email and not student.email:
+            student.email = invite_email
+            update_fields.append("email")
+        if first_name and not student.first_name:
+            student.first_name = first_name
+            update_fields.append("first_name")
+        if last_name and not student.last_name:
+            student.last_name = last_name
+            update_fields.append("last_name")
+        if invitation.direction and student.direction != invitation.direction:
+            student.direction = invitation.direction
+            update_fields.append("direction")
+        if invitation.grade and student.grade != invitation.grade:
+            student.grade = invitation.grade
+            update_fields.append("grade")
+        if student.status == StudentStatus.ARCHIVED:
+            student.status = StudentStatus.ACTIVE
+            update_fields.append("status")
+        student.save(update_fields=list(dict.fromkeys(update_fields)) + ["updated_at"])
+    else:
+        student, created = Student.objects.get_or_create(
+            teacher=invitation.teacher,
+            user=user,
+            defaults={
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": invite_email or (user.email or "").strip().lower(),
+                "direction": invitation.direction,
+                "grade": invitation.grade,
+                "status": StudentStatus.ACTIVE,
+            },
+        )
+
+    if not created and not existing:
         update_fields = []
         if invitation.direction and student.direction != invitation.direction:
             student.direction = invitation.direction

@@ -5,9 +5,10 @@ import { fetchCabinetSession } from "../../utils/cabinetAuth";
 import InteractiveAssignModal from "../components/InteractiveAssignModal";
 import InteractiveLaunchScreen, { TemplateSwitcher } from "../components/InteractiveLaunchScreen";
 import {
+  InteractivePassport,
   LaunchInfoBar,
+  LaunchResultsSection,
   ParametersPanel,
-  ResultsPanel,
   VisualStylePicker,
 } from "../components/InteractiveLaunchPanels";
 import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
@@ -17,23 +18,43 @@ import {
   compressBackgroundImage,
 } from "../interactiveAppearance";
 import {
-  applyVisualTheme,
+  applyBackgroundSlug,
   canAssignInteractive,
   canShareInteractive,
+  deleteInteractive,
   duplicateInteractive,
+  getActiveBackgroundSlug,
   getInteractiveById,
-  getVisualThemeId,
+  getInteractiveDisplayTitle,
   upsertInteractive,
 } from "../interactivesData";
+import {
+  getInteractiveSummaryChips,
+  interactiveHasPlayableContent,
+} from "../interactivesEditorUtils";
 import "../styles/interactives-catalog.css";
 import "../styles/interactive-appearance.css";
 import "../styles/interactive-launch.css";
 
+function useMobileLaunch() {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    const handler = (e) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return isMobile;
+}
+
 export default function CabinetInteractiveDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const isMobile = useMobileLaunch();
   const { toast, notifySoon } = useSoonToast();
-  const { catalog } = useInteractiveAppearanceCatalog();
+  const { catalog, loading: catalogLoading } = useInteractiveAppearanceCatalog();
 
   const [interactive, setInteractive] = useState(() => getInteractiveById(id));
   const [started, setStarted] = useState(false);
@@ -49,9 +70,19 @@ export default function CabinetInteractiveDetailPage() {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    setInteractive(getInteractiveById(id));
+    setStarted(false);
+  }, [id]);
+
   const appearance = useMemo(
     () => (interactive ? resolveInteractiveAppearance(interactive, catalog) : null),
     [interactive, catalog],
+  );
+
+  const summaryChips = useMemo(
+    () => (interactive ? getInteractiveSummaryChips(interactive) : []),
+    [interactive],
   );
 
   const persist = useCallback((next) => {
@@ -63,10 +94,12 @@ export default function CabinetInteractiveDetailPage() {
     return <Navigate to="/cabinet/interactives" replace />;
   }
 
-  const themeId = getVisualThemeId(interactive);
+  const activeBackgroundSlug = getActiveBackgroundSlug(interactive);
+  const canStart = interactiveHasPlayableContent(interactive);
+  const editHref = `/cabinet/interactives/${interactive.id}/edit`;
 
-  const handleTheme = (nextThemeId) => {
-    persist(applyVisualTheme({ ...interactive, updatedAt: new Date().toISOString() }, nextThemeId));
+  const handleBackgroundSelect = (backgroundSlug) => {
+    persist(applyBackgroundSlug({ ...interactive, updatedAt: new Date().toISOString() }, backgroundSlug));
   };
 
   const handleImageUpload = async (file) => {
@@ -75,7 +108,6 @@ export default function CabinetInteractiveDetailPage() {
       persist({
         ...interactive,
         backgroundImage: dataUrl,
-        visualThemeId: "custom",
         backgroundImageTone: interactive.backgroundImageTone || "light",
         updatedAt: new Date().toISOString(),
       });
@@ -89,7 +121,6 @@ export default function CabinetInteractiveDetailPage() {
     persist({
       ...interactive,
       backgroundImage: null,
-      visualThemeId: getVisualThemeId({ ...interactive, backgroundImage: null }),
       updatedAt: new Date().toISOString(),
     });
   };
@@ -106,12 +137,6 @@ export default function CabinetInteractiveDetailPage() {
     persist({ ...interactive, params, updatedAt: new Date().toISOString() });
   };
 
-  const handleTitleChange = (title) => {
-    persist({ ...interactive, title, updatedAt: new Date().toISOString() });
-    setShareMsg("Название сохранено");
-    window.setTimeout(() => setShareMsg(""), 2200);
-  };
-
   const handlePublish = () => {
     persist({
       ...interactive,
@@ -119,6 +144,16 @@ export default function CabinetInteractiveDetailPage() {
       updatedAt: new Date().toISOString(),
     });
     setShareMsg("Интерактив опубликован");
+    window.setTimeout(() => setShareMsg(""), 2200);
+  };
+
+  const handleUnpublish = () => {
+    persist({
+      ...interactive,
+      status: "draft",
+      updatedAt: new Date().toISOString(),
+    });
+    setShareMsg("Публикация снята");
     window.setTimeout(() => setShareMsg(""), 2200);
   };
 
@@ -145,6 +180,12 @@ export default function CabinetInteractiveDetailPage() {
     if (copy) navigate(`/cabinet/interactives/${copy.id}`);
   };
 
+  const handleDelete = () => {
+    if (!window.confirm(`Удалить «${getInteractiveDisplayTitle(interactive, "интерактив")}»?`)) return;
+    deleteInteractive(interactive.id);
+    navigate("/cabinet/interactives");
+  };
+
   const handleShare = async () => {
     if (!canShareInteractive(interactive)) {
       setShareMsg("Сначала опубликуйте интерактив");
@@ -162,6 +203,13 @@ export default function CabinetInteractiveDetailPage() {
     }
   };
 
+  const scrollToHero = () => {
+    setStarted(true);
+    window.requestAnimationFrame(() => {
+      document.querySelector(".ix-launch-hero")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
   return (
     <CabinetPageShell className="cb-section--interactive-detail ix-page ix-launch-page">
       {toast}
@@ -170,15 +218,16 @@ export default function CabinetInteractiveDetailPage() {
       <p className="cb-editor-breadcrumb ix-launch-breadcrumb">
         <Link to="/cabinet/interactives">Интерактивы</Link>
         <span> / </span>
-        <span>{interactive.title || "Без названия"}</span>
+        <span>{getInteractiveDisplayTitle(interactive)}</span>
       </p>
 
-      <div className="ix-launch-top">
+      <div className="ix-launch-top ix-launch-top--v2">
         <InteractiveLaunchScreen
           interactive={interactive}
           appearance={appearance}
           started={started}
           onStart={() => setStarted(true)}
+          editHref={editHref}
           fullscreenHref={
             canShareInteractive(interactive)
               ? `/cabinet/interactives/${interactive.id}/play`
@@ -194,9 +243,11 @@ export default function CabinetInteractiveDetailPage() {
       <LaunchInfoBar
         interactive={interactive}
         authorName={authorName}
-        onTitleChange={handleTitleChange}
+        summaryChips={summaryChips}
+        canStart={canStart}
         onPublish={handlePublish}
-        onEdit={() => navigate(`/cabinet/interactives/${interactive.id}/edit`)}
+        onStart={scrollToHero}
+        onEdit={() => navigate(editHref)}
         onAssign={() => {
           if (!canAssignInteractive(interactive)) {
             setShareMsg("Сначала опубликуйте интерактив");
@@ -207,22 +258,56 @@ export default function CabinetInteractiveDetailPage() {
         }}
         onShare={handleShare}
         onDuplicate={handleDuplicate}
-        onMore={notifySoon}
+        onUnpublish={handleUnpublish}
+        onDelete={handleDelete}
+        onAccessSettings={() => navigate(editHref)}
       />
 
-      <div className="ix-launch-bottom">
+      <InteractivePassport interactive={interactive} />
+
+      <div className="ix-launch-bottom ix-launch-bottom--v2">
         <VisualStylePicker
-          activeId={themeId}
+          backgrounds={catalog.backgrounds}
+          loading={catalogLoading}
+          activeBackgroundSlug={activeBackgroundSlug}
           backgroundImage={interactive.backgroundImage}
           backgroundImageTone={interactive.backgroundImageTone}
-          onSelect={handleTheme}
+          onSelectBackground={handleBackgroundSelect}
           onImageUpload={handleImageUpload}
           onImageRemove={handleImageRemove}
           onImageToneChange={handleImageToneChange}
+          compact
         />
-        <ParametersPanel params={interactive.params} onChange={handleParams} />
-        <ResultsPanel results={interactive.results} />
+        <ParametersPanel
+          params={interactive.params}
+          onChange={handleParams}
+          mobileAccordion={isMobile}
+        />
       </div>
+
+      <LaunchResultsSection results={interactive.results} />
+
+      {isMobile ? (
+        <div className="ix-launch-mobile-bar">
+          {interactive.status === "draft" || interactive.status === "review" ? (
+            <button type="button" className="cb-btn cb-btn--primary cb-btn--pill" onClick={handlePublish}>
+              Опубликовать
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="cb-btn cb-btn--primary cb-btn--pill"
+              disabled={!canStart}
+              onClick={scrollToHero}
+            >
+              Начать
+            </button>
+          )}
+          <button type="button" className="cb-btn cb-btn--outline" onClick={() => navigate(editHref)}>
+            Редактировать
+          </button>
+        </div>
+      ) : null}
 
       {assignOpen ? (
         <InteractiveAssignModal

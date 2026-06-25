@@ -1,5 +1,10 @@
 """Предустановленные фоны, стили карточек и звуковые пакеты для интерактивов."""
 
+from pathlib import Path
+
+from django.conf import settings
+from django.core.files import File
+
 from Cabinet.models import InteractiveBackground, InteractiveCardStyle, InteractiveSoundPack
 
 BACKGROUNDS = [
@@ -59,6 +64,45 @@ BACKGROUNDS = [
     },
 ]
 
+IMAGE_BACKGROUNDS = [
+    {
+        "slug": "cosmos",
+        "name": "Космос",
+        "text_tone": "light",
+        "sort_order": 10,
+    },
+    {
+        "slug": "potok",
+        "name": "Цифровой поток",
+        "text_tone": "light",
+        "sort_order": 11,
+    },
+    {
+        "slug": "robots",
+        "name": "Роботы",
+        "text_tone": "light",
+        "sort_order": 12,
+    },
+    {
+        "slug": "school",
+        "name": "Школа",
+        "text_tone": "light",
+        "sort_order": 13,
+    },
+    {
+        "slug": "summer",
+        "name": "Лето",
+        "text_tone": "light",
+        "sort_order": 14,
+    },
+    {
+        "slug": "forrest",
+        "name": "Лес",
+        "text_tone": "light",
+        "sort_order": 15,
+    },
+]
+
 CARD_STYLES = [
     {
         "slug": "classic",
@@ -114,6 +158,8 @@ SOUND_PACKS = [
             "flip": {"freq": 520, "type": "sine", "duration": 0.08, "volume": 0.12},
             "correct": {"freq": 660, "type": "sine", "duration": 0.14, "volume": 0.16},
             "wrong": {"freq": 220, "type": "sine", "duration": 0.18, "volume": 0.14},
+            "next": {"freq": 440, "type": "sine", "duration": 0.04, "volume": 0.08},
+            "end": {"freq": 520, "type": "sine", "duration": 0.2, "volume": 0.14},
             "tap": {"freq": 440, "type": "sine", "duration": 0.04, "volume": 0.08},
         },
         "sort_order": 1,
@@ -127,6 +173,8 @@ SOUND_PACKS = [
             "flip": {"freq": 740, "type": "triangle", "duration": 0.05, "volume": 0.14},
             "correct": {"freq": 880, "type": "triangle", "duration": 0.1, "volume": 0.18},
             "wrong": {"freq": 180, "type": "triangle", "duration": 0.12, "volume": 0.16},
+            "next": {"freq": 600, "type": "triangle", "duration": 0.03, "volume": 0.1},
+            "end": {"freq": 660, "type": "triangle", "duration": 0.16, "volume": 0.16},
             "tap": {"freq": 600, "type": "triangle", "duration": 0.03, "volume": 0.1},
         },
         "sort_order": 2,
@@ -139,6 +187,8 @@ SOUND_PACKS = [
             "flip": {"freq": 420, "type": "square", "duration": 0.06, "volume": 0.1},
             "correct": {"freq": 784, "type": "square", "duration": 0.12, "volume": 0.14},
             "wrong": {"freq": 160, "type": "square", "duration": 0.2, "volume": 0.12},
+            "next": {"freq": 520, "type": "square", "duration": 0.04, "volume": 0.09},
+            "end": {"freq": 620, "type": "square", "duration": 0.18, "volume": 0.12},
             "tap": {"freq": 520, "type": "square", "duration": 0.04, "volume": 0.09},
         },
         "sort_order": 3,
@@ -153,6 +203,34 @@ SOUND_PACKS = [
 ]
 
 
+def _background_image_source_dirs():
+    media_root = Path(settings.MEDIA_ROOT)
+    legacy_root = Path(settings.BASE_DIR) / "Generator" / "media"
+    for root in (media_root, legacy_root):
+        candidate = root / "cabinet" / "interactive-backgrounds"
+        if candidate.is_dir():
+            yield candidate
+
+
+def _find_background_image_file(slug):
+    for base_dir in _background_image_source_dirs():
+        slug_dir = base_dir / slug
+        if not slug_dir.is_dir():
+            continue
+        for path in sorted(slug_dir.iterdir()):
+            if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+                return path
+    return None
+
+
+def _attach_background_image(background, slug):
+    source = _find_background_image_file(slug)
+    if not source:
+        return
+    with source.open("rb") as handle:
+        background.background_image.save(source.name, File(handle), save=True)
+
+
 def seed_interactive_appearance():
     """Создаёт или обновляет пресеты оформления интерактивов."""
     for item in BACKGROUNDS:
@@ -160,6 +238,16 @@ def seed_interactive_appearance():
             slug=item["slug"],
             defaults={k: v for k, v in item.items() if k != "slug"},
         )
+    for item in IMAGE_BACKGROUNDS:
+        background, created = InteractiveBackground.objects.update_or_create(
+            slug=item["slug"],
+            defaults={
+                **{k: v for k, v in item.items() if k != "slug"},
+                "css_background": "",
+            },
+        )
+        if created or not background.background_image:
+            _attach_background_image(background, item["slug"])
     for item in CARD_STYLES:
         InteractiveCardStyle.objects.update_or_create(
             slug=item["slug"],

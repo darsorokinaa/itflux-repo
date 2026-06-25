@@ -1,4 +1,6 @@
 import { DEFAULT_APPEARANCE } from "./interactiveAppearance";
+import { cloneQuestion, createEmptyQuestion } from "./quizUtils";
+import { DEFAULT_WHEEL_SETTINGS, createEmptySegment } from "./wheelUtils";
 
 export const INTERACTIVE_COVER_THEMES = {
   oge: {
@@ -13,12 +15,22 @@ export const INTERACTIVE_COVER_THEMES = {
     id: "school",
     gradient: "linear-gradient(135deg, #E05A00 0%, #FF8C38 100%)",
   },
+  quiz: {
+    id: "quiz",
+    gradient: "linear-gradient(135deg, #059669 0%, #10B981 100%)",
+  },
+  wheel: {
+    id: "wheel",
+    gradient: "linear-gradient(135deg, #5B21B6 0%, #7C3AED 100%)",
+  },
 };
 
 const TYPE_COVER_THEME = {
   flashcards: "ege",
   matching: "oge",
   sequence: "school",
+  quiz: "quiz",
+  wheel: "wheel",
 };
 
 export function getInteractiveCoverTheme(interactive) {
@@ -53,6 +65,7 @@ export const INTERACTIVE_TYPES = {
     color: "#C0284A",
     createLabel: "Создать",
     examples: ["AND ↔ лог. И"],
+    available: false,
   },
   sequence: {
     id: "sequence",
@@ -67,13 +80,43 @@ export const INTERACTIVE_TYPES = {
     createLabel: "Создать",
     examples: ["1 → 2 → 3"],
   },
+  quiz: {
+    id: "quiz",
+    label: "Викторина",
+    shortLabel: "Викторина",
+    description: "Один или несколько правильных ответов",
+    longDescription: "Вопросы с вариантами ответов",
+    icon: "quiz",
+    accent: "quiz",
+    coverTheme: "quiz",
+    color: "#10B981",
+    createLabel: "Создать",
+    examples: ["Выберите правильный ответ"],
+  },
+  wheel: {
+    id: "wheel",
+    label: "Колесо фортуны",
+    shortLabel: "Случайное колесо",
+    description: "Случайный выбор сектора",
+    longDescription: "Случайный выбор сектора",
+    icon: "wheel",
+    accent: "wheel",
+    coverTheme: "wheel",
+    color: "#7C3AED",
+    createLabel: "Создать",
+    examples: [],
+  },
 };
+
+export const INTERACTIVE_TYPE_LIST = ["flashcards", "matching", "sequence", "quiz", "wheel"];
 
 export const INTERACTIVE_FILTERS = [
   { id: "all", label: "Все" },
   { id: "flashcards", label: "Карточки" },
   { id: "matching", label: "Сопоставление" },
   { id: "sequence", label: "Порядок" },
+  { id: "quiz", label: "Викторина" },
+  { id: "wheel", label: "Колесо" },
   { id: "oge", label: "ОГЭ" },
   { id: "ege", label: "ЕГЭ" },
   { id: "python", label: "Python" },
@@ -101,28 +144,44 @@ export const DEFAULT_PARAMS = {
   timerSeconds: 0,
   maxAttempts: 0,
   shuffleQuestions: true,
+  shuffleOptions: true,
   showAnswersAtEnd: true,
+  showCorrectImmediately: false,
   showExplanationAfterAnswer: true,
   allowRetry: true,
   recordInReport: true,
 };
 
-export const VISUAL_THEMES = [
-  { id: "digital-flow", label: "Цифровой поток", backgroundSlug: "grid-blue", cardStyleSlug: "classic", preview: "linear-gradient(135deg, #2563EB, #4F46E5)" },
-  { id: "sky", label: "Небо", backgroundSlug: "soft-blue", cardStyleSlug: "rounded", preview: "linear-gradient(135deg, #DBEAFE, #E0E7FF)" },
-  { id: "space", label: "Космос", backgroundSlug: "navy-dark", cardStyleSlug: "glass", preview: "linear-gradient(135deg, #0F172A, #1E293B)" },
-  { id: "classic", label: "Классика", backgroundSlug: "light-gray", cardStyleSlug: "classic", preview: "linear-gradient(135deg, #F8FAFC, #E2E8F0)" },
-  { id: "pixel", label: "Пиксель", backgroundSlug: "grid-blue", cardStyleSlug: "bold", preview: "linear-gradient(135deg, #7C3AED, #2563EB)" },
-  { id: "minimal", label: "Минимализм", backgroundSlug: "light-gray", cardStyleSlug: "flat", preview: "linear-gradient(135deg, #FFFFFF, #F1F5F9)" },
-  { id: "summer", label: "Летний клуб", backgroundSlug: "warm-sand", cardStyleSlug: "rounded", preview: "linear-gradient(135deg, #FEF3C7, #FFEDD5)" },
-];
+export function applyBackgroundSlug(interactive, backgroundSlug) {
+  if (!backgroundSlug || backgroundSlug === "custom") return interactive;
+  return {
+    ...interactive,
+    backgroundSlug,
+    backgroundImage: null,
+  };
+}
+
+export function getActiveBackgroundSlug(interactive) {
+  if (interactive?.backgroundImage) return "custom";
+  return interactive?.backgroundSlug || "";
+}
+
+/** @deprecated используйте applyBackgroundSlug */
+export function applyVisualTheme(interactive, backgroundSlug) {
+  return applyBackgroundSlug(interactive, backgroundSlug);
+}
+
+/** @deprecated используйте getActiveBackgroundSlug */
+export function getVisualThemeId(interactive) {
+  return getActiveBackgroundSlug(interactive);
+}
 
 export const TEMPLATE_SWITCHER = [
   { id: "flashcards", label: "Карточки", type: "flashcards", available: true },
-  { id: "quiz", label: "Викторина", type: null, available: false },
+  { id: "quiz", label: "Викторина", type: "quiz", available: true },
   { id: "open-field", label: "Открой поле", type: null, available: false },
-  { id: "wheel", label: "Случайное колесо", type: null, available: false },
-  { id: "matching", label: "Найди пару", type: "matching", available: true },
+  { id: "wheel", label: "Случайное колесо", type: "wheel", available: true },
+  { id: "matching", label: "Найди пару", type: "matching", available: false },
   { id: "sequence", label: "Собери порядок", type: "sequence", available: true },
 ];
 
@@ -173,9 +232,11 @@ export function loadInteractives() {
   const normalized = items.map((item) => ({
     ...DEFAULT_APPEARANCE,
     params: { ...DEFAULT_PARAMS, ...item.params },
-    visualThemeId: item.visualThemeId || getVisualThemeId({ ...DEFAULT_APPEARANCE, ...item }),
+    visualThemeId: item.visualThemeId,
+    backgroundSlug: item.backgroundSlug || DEFAULT_APPEARANCE.backgroundSlug,
     backgroundImage: item.backgroundImage || null,
     backgroundImageTone: item.backgroundImageTone || "light",
+    customSounds: item.customSounds || {},
     ...item,
   }));
   if (stored === null) writeStorage(normalized);
@@ -219,6 +280,16 @@ export function duplicateInteractive(id) {
     results: [],
     updatedAt: new Date().toISOString(),
   };
+  if (source.type === "quiz" && source.questions) {
+    copy.questions = source.questions.map((q) => cloneQuestion(q));
+  }
+  if (source.type === "wheel" && source.segments) {
+    copy.segments = source.segments.map((segment) => ({
+      ...segment,
+      id: createEmptySegment().id,
+    }));
+    copy.wheelSettings = { ...(source.wheelSettings || DEFAULT_WHEEL_SETTINGS) };
+  }
   upsertInteractive(copy);
   return copy;
 }
@@ -236,29 +307,6 @@ export function sortInteractives(items, sortId) {
     return list.sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9));
   }
   return list.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-}
-
-export function applyVisualTheme(interactive, themeId) {
-  const theme = VISUAL_THEMES.find((t) => t.id === themeId);
-  if (!theme) return interactive;
-  return {
-    ...interactive,
-    visualThemeId: themeId,
-    backgroundSlug: theme.backgroundSlug,
-    cardStyleSlug: theme.cardStyleSlug,
-    backgroundImage: null,
-  };
-}
-
-export function getVisualThemeId(interactive) {
-  if (interactive.backgroundImage) return "custom";
-  if (interactive.visualThemeId && interactive.visualThemeId !== "custom") {
-    return interactive.visualThemeId;
-  }
-  const found = VISUAL_THEMES.find(
-    (t) => t.backgroundSlug === interactive.backgroundSlug && t.cardStyleSlug === interactive.cardStyleSlug,
-  );
-  return found?.id || "digital-flow";
 }
 
 export function createEmptyInteractive(type) {
@@ -279,7 +327,6 @@ export function createEmptyInteractive(type) {
     usedIn: [],
     results: [],
     params: { ...DEFAULT_PARAMS },
-    visualThemeId: "digital-flow",
     ...DEFAULT_APPEARANCE,
   };
 
@@ -297,6 +344,20 @@ export function createEmptyInteractive(type) {
       pairs: [{ left: "", right: "", explanation: "" }],
     };
   }
+  if (type === "quiz") {
+    return {
+      ...base,
+      instruction: "Выберите правильный ответ",
+      questions: [createEmptyQuestion()],
+    };
+  }
+  if (type === "wheel") {
+    return {
+      ...base,
+      segments: [],
+      wheelSettings: { ...DEFAULT_WHEEL_SETTINGS },
+    };
+  }
   return {
     ...base,
     allowMultipleAttempts: true,
@@ -308,6 +369,8 @@ export function createEmptyInteractive(type) {
 export function getItemCount(interactive) {
   if (interactive.type === "flashcards") return interactive.cards?.length || 0;
   if (interactive.type === "matching") return interactive.pairs?.length || 0;
+  if (interactive.type === "quiz") return interactive.questions?.length || 0;
+  if (interactive.type === "wheel") return interactive.segments?.length || 0;
   return interactive.steps?.length || 0;
 }
 
@@ -326,6 +389,22 @@ export function getInteractiveFirstSlide(interactive) {
     return { type: "matching", left: pair.left, right: pair.right };
   }
 
+  if (interactive.type === "quiz") {
+    const question = (interactive.questions || []).find((q) => q.text);
+    if (!question) return null;
+    return {
+      type: "quiz",
+      text: question.text,
+      answers: (question.answers || []).slice(0, 3).map((a) => a.text).filter(Boolean),
+    };
+  }
+
+  if (interactive.type === "wheel") {
+    const segment = (interactive.segments || []).find((s) => s.title?.trim());
+    if (!segment) return null;
+    return { type: "wheel", title: segment.title, color: segment.color };
+  }
+
   const step = (interactive.steps || []).find((s) => s.text) || interactive.steps?.[0];
   if (!step?.text) return null;
   return {
@@ -333,6 +412,52 @@ export function getInteractiveFirstSlide(interactive) {
     text: step.text,
     position: step.position ?? 1,
   };
+}
+
+function normalizeInteractiveTitleText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+export function getInteractiveTaskTitle(interactive) {
+  if (!interactive) return "";
+
+  const slide = getInteractiveFirstSlide(interactive);
+  if (slide) {
+    if (slide.type === "flashcards") {
+      return normalizeInteractiveTitleText(slide.front) || normalizeInteractiveTitleText(slide.back);
+    }
+    if (slide.type === "matching") {
+      return normalizeInteractiveTitleText(slide.left) || normalizeInteractiveTitleText(slide.right);
+    }
+    if (slide.type === "quiz" || slide.type === "sequence") {
+      return normalizeInteractiveTitleText(slide.text);
+    }
+    if (slide.type === "wheel") {
+      return normalizeInteractiveTitleText(slide.title);
+    }
+  }
+
+  if (interactive.type === "flashcards") {
+    const card = interactive.cards?.[0];
+    return normalizeInteractiveTitleText(card?.front) || normalizeInteractiveTitleText(card?.back);
+  }
+  if (interactive.type === "matching") {
+    const pair = interactive.pairs?.[0];
+    return normalizeInteractiveTitleText(pair?.left) || normalizeInteractiveTitleText(pair?.right);
+  }
+  if (interactive.type === "quiz") {
+    return normalizeInteractiveTitleText(interactive.questions?.[0]?.text);
+  }
+  if (interactive.type === "wheel") {
+    return normalizeInteractiveTitleText(interactive.segments?.[0]?.title);
+  }
+  return normalizeInteractiveTitleText(interactive.steps?.[0]?.text);
+}
+
+export function getInteractiveDisplayTitle(interactive, fallback = "Без названия") {
+  const explicit = normalizeInteractiveTitleText(interactive?.title);
+  if (explicit) return explicit;
+  return getInteractiveTaskTitle(interactive) || fallback;
 }
 
 export function formatUpdatedAt(iso) {
@@ -350,7 +475,7 @@ export function formatUpdatedAt(iso) {
 
 export function filterInteractives(items, filterId) {
   if (filterId === "all") return items;
-  if (filterId === "flashcards" || filterId === "matching" || filterId === "sequence") {
+  if (filterId === "flashcards" || filterId === "matching" || filterId === "sequence" || filterId === "quiz" || filterId === "wheel") {
     return items.filter((item) => item.type === filterId);
   }
   if (filterId === "oge") return items.filter((item) => item.exam === "ОГЭ");
@@ -372,6 +497,10 @@ export function getTypeMeta(type) {
   return INTERACTIVE_TYPES[type] || INTERACTIVE_TYPES.flashcards;
 }
 
+export function isInteractiveTypeAvailable(type) {
+  return getTypeMeta(type).available !== false;
+}
+
 export function getStatusMeta(status) {
   return INTERACTIVE_STATUS[status] || INTERACTIVE_STATUS.draft;
 }
@@ -389,6 +518,7 @@ const INTERACTIVE_COVER_TYPE = {
   flashcards: "general",
   matching: "logic",
   sequence: "python",
+  quiz: "general",
 };
 
 const INTERACTIVE_COVER_COLOR = {
@@ -412,7 +542,9 @@ export function mapInteractiveToHomeworkCard(interactive) {
     ? "карточек"
     : interactive.type === "matching"
       ? "пар"
-      : "элементов";
+      : interactive.type === "quiz"
+        ? "вопросов"
+        : "элементов";
 
   const examLabel = interactive.exam && interactive.exam !== "без экзамена"
     ? interactive.exam
@@ -433,7 +565,7 @@ export function mapInteractiveToHomeworkCard(interactive) {
     deadlineLabel: statusMeta.label,
     deadlineTone: INTERACTIVE_STATUS_TONE[interactive.status] || "default",
     subject: `${examLabel} · ${typeMeta.shortLabel}`,
-    title: interactive.title || "Без названия",
+    title: getInteractiveDisplayTitle(interactive),
     description: [
       `${count} ${itemLabel}`,
       interactive.topic || null,

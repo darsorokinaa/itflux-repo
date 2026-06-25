@@ -85,6 +85,8 @@ class InteractiveType(models.TextChoices):
     FLASHCARDS = "flashcards", "Карточки"
     MATCHING = "matching", "Сопоставление"
     ORDERING = "ordering", "Собери порядок"
+    QUIZ = "quiz", "Викторина"
+    WHEEL = "wheel", "Случайное колесо"
 
 
 class InteractiveStatus(models.TextChoices):

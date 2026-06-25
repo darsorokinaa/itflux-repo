@@ -31,8 +31,19 @@ load_dotenv(BASE_DIR.parent / ".env")
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
+_TESTING_NESTED = "test" in sys.argv
+DEBUG = _TESTING_NESTED or os.environ.get('DEBUG', 'false').lower() == 'true'
+
 # В production задайте SECRET_KEY через переменную окружения
-SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-)&u-i%%%7kr6y6kx11pcr$fq6e1ita5)%ykv1aluxmvtbaln#7')
+_secret_nested = (os.environ.get('SECRET_KEY') or os.environ.get('DJANGO_SECRET_KEY') or '').strip()
+_DEV_NESTED = 'django-insecure-nested-dev-only'
+if DEBUG or _TESTING_NESTED:
+    SECRET_KEY = _secret_nested or _DEV_NESTED
+else:
+    from django.core.exceptions import ImproperlyConfigured
+    if not _secret_nested or _secret_nested == _DEV_NESTED:
+        raise ImproperlyConfigured('Set SECRET_KEY or DJANGO_SECRET_KEY in production.')
+    SECRET_KEY = _secret_nested
 
 # Общий секрет с ЛК для JWT входа в урок (/lesson/join/). В .env: LESSON_SECRET=...
 LESSON_SECRET = os.environ.get("LESSON_SECRET", "").strip()
@@ -116,13 +127,22 @@ YANDEX_TELEMOST_AUTO_CREATE = os.environ.get(
 
 
 if _lk_nav_env is None:
-    LK_NAVIGATION_PASSWORD = "100326"
+    LK_NAVIGATION_PASSWORD = ""
 else:
     LK_NAVIGATION_PASSWORD = _lk_nav_env.strip()
 
-DEBUG = os.environ.get('DEBUG', 'true').lower() == 'true'
+import sys as _sys
+if _lk_nav_env is None:
+    LK_NAVIGATION_PASSWORD = ""
+else:
+    LK_NAVIGATION_PASSWORD = _lk_nav_env.strip()
+
 _allowed_hosts_env = os.environ.get('DJANGO_ALLOWED_HOSTS', '')
-ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_env.split(',') if h.strip()] or ["*"]
+_hosts_n = [h.strip() for h in _allowed_hosts_env.split(',') if h.strip() and h.strip() != '*']
+if DEBUG or _TESTING_NESTED:
+    ALLOWED_HOSTS = _hosts_n or ["localhost", "127.0.0.1", "testserver"]
+else:
+    ALLOWED_HOSTS = _hosts_n or []
 
 
 # Application definition
@@ -360,11 +380,8 @@ LOGOUT_REDIRECT_URL = ITFLUX_PUBLIC_HOME_URL
 # Telegram bot для отправки сообщений об ошибках.
 # Отправляем только одному пользователю в личку (TELEGRAM_CHAT_ID = его user_id).
 # Переменные окружения, если заданы, переопределяют значения по умолчанию.
-TELEGRAM_BOT_TOKEN = os.environ.get(
-    'TELEGRAM_BOT_TOKEN',
-    '8622825466:AAH-w-15rWafWzQhqjAOPEsHMMEmUsL9Ihw',
-)
-TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '791450487')
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '').strip()
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '').strip()
 # Для личных чатов топиков нет — оставляем None, чтобы не отправлять message_thread_id.
 TELEGRAM_TOPIC_ID = os.environ.get('TELEGRAM_TOPIC_ID', '') or None
 

@@ -35,6 +35,8 @@ from .models import (
     MatchingPair,
     Material,
     OrderingItem,
+    QuizQuestion,
+    WheelSegment,
     ReviewItem,
     ScheduleEvent,
     ScheduleEventChangeLog,
@@ -821,9 +823,26 @@ class InteractiveCardStyleSerializer(serializers.ModelSerializer):
 
 
 class InteractiveSoundPackSerializer(serializers.ModelSerializer):
+    sounds = serializers.SerializerMethodField()
+
     class Meta:
         model = InteractiveSoundPack
-        fields = ["id", "slug", "name", "description", "config", "is_default"]
+        fields = ["id", "slug", "name", "description", "config", "sounds", "is_default"]
+
+    def get_sounds(self, obj):
+        mapping = {
+            "flip": obj.sound_flip,
+            "correct": obj.sound_correct,
+            "wrong": obj.sound_wrong,
+            "next": obj.sound_next,
+            "end": obj.sound_end,
+            "background": obj.sound_background,
+        }
+        result = {}
+        for key, field in mapping.items():
+            if field:
+                result[key] = field.url
+        return result
 
 
 class InteractiveAppearanceCatalogSerializer(serializers.Serializer):
@@ -848,6 +867,28 @@ class OrderingItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrderingItem
         fields = ["id", "text", "correct_order", "explanation"]
+
+
+class QuizQuestionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = QuizQuestion
+        fields = [
+            "id",
+            "question_text",
+            "answers",
+            "answer_type",
+            "explanation",
+            "points",
+            "order",
+        ]
+
+
+class WheelSegmentSerializer(serializers.ModelSerializer):
+    id = serializers.CharField(source="external_id", required=False, allow_blank=True)
+
+    class Meta:
+        model = WheelSegment
+        fields = ["id", "title", "description", "color", "points", "order"]
 
 
 class InteractiveListSerializer(serializers.ModelSerializer):
@@ -891,6 +932,10 @@ class InteractiveListSerializer(serializers.ModelSerializer):
             return obj.matching_pairs.count()
         if obj.interactive_type == "ordering":
             return obj.ordering_items.count()
+        if obj.interactive_type == "quiz":
+            return obj.quiz_questions.count()
+        if obj.interactive_type == "wheel":
+            return obj.wheel_segments.count()
         return 0
 
 
@@ -898,12 +943,17 @@ class InteractiveDetailSerializer(InteractiveListSerializer):
     flashcards = FlashcardItemSerializer(many=True, read_only=True)
     matching_pairs = MatchingPairSerializer(many=True, read_only=True)
     ordering_items = OrderingItemSerializer(many=True, read_only=True)
+    quiz_questions = QuizQuestionSerializer(many=True, read_only=True)
+    wheel_segments = WheelSegmentSerializer(many=True, read_only=True)
 
     class Meta(InteractiveListSerializer.Meta):
         fields = InteractiveListSerializer.Meta.fields + [
+            "wheel_settings",
             "flashcards",
             "matching_pairs",
             "ordering_items",
+            "quiz_questions",
+            "wheel_segments",
         ]
 
 
@@ -911,6 +961,8 @@ class InteractiveWriteSerializer(serializers.ModelSerializer):
     flashcards = FlashcardItemSerializer(many=True, required=False)
     matching_pairs = MatchingPairSerializer(many=True, required=False)
     ordering_items = OrderingItemSerializer(many=True, required=False)
+    quiz_questions = QuizQuestionSerializer(many=True, required=False)
+    wheel_segments = WheelSegmentSerializer(many=True, required=False)
     background_slug = serializers.SlugRelatedField(
         slug_field="slug",
         queryset=InteractiveBackground.objects.filter(is_active=True),
@@ -950,16 +1002,21 @@ class InteractiveWriteSerializer(serializers.ModelSerializer):
             "card_style_slug",
             "sound_pack_slug",
             "sound_enabled",
+            "wheel_settings",
             "status",
             "flashcards",
             "matching_pairs",
             "ordering_items",
+            "quiz_questions",
+            "wheel_segments",
         ]
 
     def _save_items(self, interactive, validated_data):
         flashcards = validated_data.pop("flashcards", None)
         matching_pairs = validated_data.pop("matching_pairs", None)
         ordering_items = validated_data.pop("ordering_items", None)
+        quiz_questions = validated_data.pop("quiz_questions", None)
+        wheel_segments = validated_data.pop("wheel_segments", None)
 
         if flashcards is not None:
             interactive.flashcards.all().delete()
@@ -973,6 +1030,14 @@ class InteractiveWriteSerializer(serializers.ModelSerializer):
             interactive.ordering_items.all().delete()
             for item in ordering_items:
                 OrderingItem.objects.create(interactive=interactive, **item)
+        if quiz_questions is not None:
+            interactive.quiz_questions.all().delete()
+            for item in quiz_questions:
+                QuizQuestion.objects.create(interactive=interactive, **item)
+        if wheel_segments is not None:
+            interactive.wheel_segments.all().delete()
+            for item in wheel_segments:
+                WheelSegment.objects.create(interactive=interactive, **item)
 
     def create(self, validated_data):
         self._save_items_placeholder = validated_data
@@ -980,6 +1045,8 @@ class InteractiveWriteSerializer(serializers.ModelSerializer):
             "flashcards": validated_data.pop("flashcards", None),
             "matching_pairs": validated_data.pop("matching_pairs", None),
             "ordering_items": validated_data.pop("ordering_items", None),
+            "quiz_questions": validated_data.pop("quiz_questions", None),
+            "wheel_segments": validated_data.pop("wheel_segments", None),
         }
         interactive = Interactive.objects.create(**validated_data)
         self._save_items(interactive, items_data)
@@ -990,6 +1057,8 @@ class InteractiveWriteSerializer(serializers.ModelSerializer):
             "flashcards": validated_data.pop("flashcards", None),
             "matching_pairs": validated_data.pop("matching_pairs", None),
             "ordering_items": validated_data.pop("ordering_items", None),
+            "quiz_questions": validated_data.pop("quiz_questions", None),
+            "wheel_segments": validated_data.pop("wheel_segments", None),
         }
         for attr, value in validated_data.items():
             setattr(instance, attr, value)

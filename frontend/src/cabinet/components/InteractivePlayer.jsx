@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import SequenceOrderList from "./SequenceOrderList";
+import QuizPlayer from "./QuizPlayer";
+import WheelPlayer from "./WheelPlayer";
 import {
   resolveInteractiveAppearance,
 } from "../interactiveAppearance";
-import { playInteractiveSound, unlockInteractiveAudio } from "../interactiveSounds";
+import { getInteractiveDisplayTitle } from "../interactivesData";
+import { playInteractiveSound, unlockInteractiveAudio, startInteractiveBackgroundSound, stopInteractiveBackgroundSound } from "../interactiveSounds";
 
 function CompletionScreen({ scorePercent, onRestart }) {
   return (
@@ -17,22 +20,78 @@ function CompletionScreen({ scorePercent, onRestart }) {
   );
 }
 
+function FlashcardConsolidationPrompt({ count, onStart, onSkip }) {
+  return (
+    <div className="ix-flash-consolidate-prompt">
+      <p className="ix-flash-consolidate-prompt__label">Основной проход завершён</p>
+      <h3 className="ix-flash-consolidate-prompt__title">Закрепим материал?</h3>
+      <p className="ix-flash-consolidate-prompt__text">
+        {count === 1
+          ? "1 карточка отмечена для повторения"
+          : `${count} карточек отмечены для повторения`}
+      </p>
+      <div className="ix-flash-consolidate-prompt__actions">
+        <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={onStart}>
+          Да, повторим
+        </button>
+        <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={onSkip}>
+          Пропустить
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function FlashcardPlayer({ cards, bare, playing, appearance, onComplete }) {
+  const list = useMemo(
+    () => cards.filter((c) => c.front || c.back),
+    [cards],
+  );
+  const [phase, setPhase] = useState("main");
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const [known, setKnown] = useState(0);
-  const [done, setDone] = useState(false);
-  const list = cards.filter((c) => c.front || c.back);
-  const card = list[index] || { front: "", back: "" };
+  const [knownIndices, setKnownIndices] = useState(() => new Set());
+  const [repeatIndices, setRepeatIndices] = useState(() => new Set());
   const studyMode = bare || playing;
+
+  const consolidateQueue = useMemo(
+    () => [...repeatIndices].sort((a, b) => a - b),
+    [repeatIndices],
+  );
+
+  const activeOriginalIndex = phase === "consolidate"
+    ? consolidateQueue[index]
+    : index;
+
+  const card = list[activeOriginalIndex] || { front: "", back: "" };
+  const activeLength = phase === "consolidate" ? consolidateQueue.length : list.length;
+
+  const resetAll = () => {
+    setPhase("main");
+    setIndex(0);
+    setFlipped(false);
+    setKnownIndices(new Set());
+    setRepeatIndices(new Set());
+  };
+
+  const finishSession = useCallback((knownSet) => {
+    playInteractiveSound(appearance, "end");
+    const score = list.length > 0
+      ? Math.round((knownSet.size / list.length) * 100)
+      : 0;
+    setPhase("done");
+    onComplete?.(score);
+  }, [appearance, list.length, onComplete]);
 
   useEffect(() => {
     const onKey = (e) => {
+      if (phase === "consolidate-prompt" || phase === "done") return;
       if (e.key === "ArrowLeft" && index > 0) {
         setIndex((i) => i - 1);
         setFlipped(false);
       }
-      if (e.key === "ArrowRight" && index < list.length - 1) {
+      if (e.key === "ArrowRight" && index < activeLength - 1) {
+        playInteractiveSound(appearance, "next");
         setIndex((i) => i + 1);
         setFlipped(false);
       }
@@ -46,7 +105,7 @@ function FlashcardPlayer({ cards, bare, playing, appearance, onComplete }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [index, list.length, appearance]);
+  }, [index, activeLength, appearance, phase]);
 
   const flipCard = () => {
     setFlipped((v) => {
@@ -55,27 +114,68 @@ function FlashcardPlayer({ cards, bare, playing, appearance, onComplete }) {
     });
   };
 
-  const goNext = (countKnown = false) => {
-    const nextKnown = countKnown ? known + 1 : known;
-    if (countKnown) setKnown(nextKnown);
-    if (index >= list.length - 1) {
-      const score = Math.round((nextKnown / list.length) * 100);
-      setDone(true);
-      onComplete?.(score);
+  const goNext = (markedKnown) => {
+    const origIdx = activeOriginalIndex;
+    let nextKnown = knownIndices;
+    let nextRepeat = repeatIndices;
+
+    if (markedKnown) {
+      nextKnown = new Set(knownIndices);
+      nextKnown.add(origIdx);
+      setKnownIndices(nextKnown);
+    } else if (phase === "main") {
+      nextRepeat = new Set(repeatIndices);
+      nextRepeat.add(origIdx);
+      setRepeatIndices(nextRepeat);
+    }
+
+    if (index >= activeLength - 1) {
+      setFlipped(false);
+      if (phase === "main") {
+        if (nextRepeat.size > 0) {
+          setPhase("consolidate-prompt");
+          return;
+        }
+        finishSession(nextKnown);
+        return;
+      }
+      finishSession(nextKnown);
       return;
     }
+
+    playInteractiveSound(appearance, "next");
     setIndex((i) => i + 1);
     setFlipped(false);
   };
 
+  const startConsolidation = () => {
+    setIndex(0);
+    setFlipped(false);
+    setPhase("consolidate");
+  };
+
+  const skipConsolidation = () => {
+    finishSession(knownIndices);
+  };
+
   if (list.length === 0) return null;
 
-  if (done) {
-    const score = Math.round((known / list.length) * 100);
+  if (phase === "consolidate-prompt") {
+    return (
+      <FlashcardConsolidationPrompt
+        count={consolidateQueue.length}
+        onStart={startConsolidation}
+        onSkip={skipConsolidation}
+      />
+    );
+  }
+
+  if (phase === "done") {
+    const score = Math.round((knownIndices.size / list.length) * 100);
     return (
       <CompletionScreen
         scorePercent={score}
-        onRestart={() => { setIndex(0); setFlipped(false); setKnown(0); setDone(false); }}
+        onRestart={resetAll}
       />
     );
   }
@@ -83,7 +183,10 @@ function FlashcardPlayer({ cards, bare, playing, appearance, onComplete }) {
   return (
     <div className={`cb-preview-flash${studyMode ? " cb-preview-flash--bare" : ""}`}>
       {studyMode ? (
-        <p className="ix-play-progress">{index + 1} из {list.length}</p>
+        <p className="ix-play-progress">
+          {phase === "consolidate" ? "Закрепление · " : ""}
+          {index + 1} из {activeLength}
+        </p>
       ) : null}
       <button
         type="button"
@@ -128,12 +231,12 @@ function FlashcardPlayer({ cards, bare, playing, appearance, onComplete }) {
           >
             Назад
           </button>
-          <span className="cb-preview-nav__count">{index + 1} / {list.length}</span>
+          <span className="cb-preview-nav__count">{index + 1} / {activeLength}</span>
           <button
             type="button"
             className="cb-btn cb-btn--outline cb-btn--sm"
-            disabled={index >= list.length - 1}
-            onClick={() => { setIndex((i) => i + 1); setFlipped(false); }}
+            disabled={index >= activeLength - 1}
+            onClick={() => { playInteractiveSound(appearance, "next"); setIndex((i) => i + 1); setFlipped(false); }}
           >
             Далее
           </button>
@@ -209,10 +312,11 @@ function MatchingPlayer({ pairs, shuffle, bare, playing, appearance, onComplete 
 
   useEffect(() => {
     if (matched.length === pairs.length && pairs.length > 0 && !done) {
+      playInteractiveSound(appearance, "end");
       setDone(true);
       onComplete?.(100);
     }
-  }, [matched.length, pairs.length, done, onComplete]);
+  }, [appearance, matched.length, pairs.length, done, onComplete]);
 
   const handleLeft = (id) => {
     if (matched.includes(id.replace("l", ""))) return;
@@ -351,6 +455,7 @@ function SequencePlayer({ steps, shuffle, bare, playing, appearance, onComplete 
     setCheckOk(correct);
     playInteractiveSound(appearance, correct ? "correct" : "wrong");
     if (correct) {
+      playInteractiveSound(appearance, "end");
       setDone(true);
       onComplete?.(100);
     }
@@ -409,12 +514,16 @@ function PlayIntro({ interactive, onStart }) {
     ? "Карточки"
     : interactive.type === "matching"
       ? "Сопоставление"
-      : "Порядок";
+      : interactive.type === "quiz"
+        ? "Викторина"
+        : interactive.type === "wheel"
+          ? "Случайное колесо"
+          : "Порядок";
 
   return (
     <div className="ix-play-intro">
       <p className="ix-play-intro__type">{typeMeta}</p>
-      <h2 className="ix-play-intro__title">{interactive.title || "Интерактив"}</h2>
+      <h2 className="ix-play-intro__title">{getInteractiveDisplayTitle(interactive, "Интерактив")}</h2>
       <p className="ix-play-intro__text">
         {interactive.instruction || "Нажмите «Начать», чтобы пройти задание."}
       </p>
@@ -438,7 +547,7 @@ export default function InteractivePlayer({
     [appearanceProp, interactive],
   );
   const cardClass = appearance?.cardStyle?.css_class || "ix-cards--classic";
-  const needsIntro = showIntro ?? bare;
+  const needsIntro = interactive.type === "wheel" ? false : (showIntro ?? bare);
   const [started, setStarted] = useState(!needsIntro || playing);
 
   useEffect(() => {
@@ -448,6 +557,15 @@ export default function InteractivePlayer({
   useEffect(() => {
     if (playing) setStarted(true);
   }, [playing]);
+
+  useEffect(() => {
+    if (!started || !interactive) {
+      stopInteractiveBackgroundSound();
+      return undefined;
+    }
+    startInteractiveBackgroundSound(appearance);
+    return () => stopInteractiveBackgroundSound();
+  }, [started, interactive, appearance]);
 
   if (!interactive) return null;
 
@@ -486,6 +604,26 @@ export default function InteractivePlayer({
         <SequencePlayer
           steps={interactive.steps || []}
           shuffle={interactive.params?.shuffleQuestions !== false}
+          bare={bare}
+          playing={playing}
+          appearance={appearance}
+          onComplete={onComplete}
+        />
+      ) : null}
+      {interactive.type === "quiz" ? (
+        <QuizPlayer
+          questions={interactive.questions || []}
+          params={interactive.params || {}}
+          title={getInteractiveDisplayTitle(interactive, "")}
+          bare={bare}
+          playing={playing}
+          appearance={appearance}
+          onComplete={onComplete}
+        />
+      ) : null}
+      {interactive.type === "wheel" ? (
+        <WheelPlayer
+          interactive={interactive}
           bare={bare}
           playing={playing}
           appearance={appearance}

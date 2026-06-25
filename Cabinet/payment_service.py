@@ -26,11 +26,15 @@ class PaymentProviderService:
                        promo_code: str = None, discount_info: dict = None):
         """
         Создаёт запись платежа и возвращает payment_url.
-        В mock-режиме возвращает заглушку.
+        В mock-режиме возвращает заглушку (только при DEBUG).
         """
+        from django.conf import settings as django_settings
         from decimal import Decimal
         from .models import Payment, TeacherSubscription
         from .subscription_service import SubscriptionLimitService
+
+        if cls.PROVIDER == "mock" and not django_settings.DEBUG:
+            raise ValueError("Mock payments are disabled in production")
 
         original_amount = plan.price_year if billing_period == "year" else plan.price_month
         final_amount = Decimal(str(discount_info["final_amount"])) if discount_info else Decimal(str(original_amount))

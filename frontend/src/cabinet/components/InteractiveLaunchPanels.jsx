@@ -1,46 +1,130 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  ACCESS_OPTIONS,
   DEFAULT_PARAMS,
-  VISUAL_THEMES,
   canShareInteractive,
   canAssignInteractive,
-  formatUpdatedAt,
+  getInteractiveDisplayTitle,
   getStatusMeta,
   getTypeMeta,
 } from "../interactivesData";
+import { backgroundPreviewStyle } from "../interactiveAppearance";
+import { difficultyLabel } from "../interactivesEditorUtils";
+
+const TIMER_PRESETS = [
+  { id: "none", label: "Нет", mode: "none", minutes: 0, seconds: 0 },
+  { id: "3", label: "3 мин", mode: "countdown", minutes: 3, seconds: 0 },
+  { id: "5", label: "5 мин", mode: "countdown", minutes: 5, seconds: 0 },
+  { id: "10", label: "10 мин", mode: "countdown", minutes: 10, seconds: 0 },
+];
+
+function timerPresetId(params) {
+  const p = { ...DEFAULT_PARAMS, ...params };
+  if (p.timerMode === "none" || (!p.timerMinutes && !p.timerSeconds)) return "none";
+  const match = TIMER_PRESETS.find(
+    (item) => item.mode === p.timerMode
+      && item.minutes === p.timerMinutes
+      && item.seconds === p.timerSeconds,
+  );
+  return match?.id || "none";
+}
+
+function ToggleRow({ label, checked, onChange }) {
+  return (
+    <label className="ix-launch-toggle">
+      <span>{label}</span>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className="ix-launch-toggle__track" aria-hidden="true" />
+    </label>
+  );
+}
+
+export function InteractivePassport({ interactive }) {
+  const typeMeta = getTypeMeta(interactive.type);
+  const statusMeta = getStatusMeta(interactive.status);
+  const accessLabel = ACCESS_OPTIONS.find((o) => o.id === interactive.access)?.label || "—";
+
+  const entries = [
+    { label: "Тип", value: typeMeta.shortLabel },
+    { label: "Предмет", value: interactive.subject || "—" },
+    { label: "Экзамен", value: interactive.exam || "—" },
+    { label: "Тема", value: interactive.topic || "—" },
+    { label: "Сложность", value: difficultyLabel(interactive.difficulty) },
+    { label: "Статус", value: statusMeta.label, tone: statusMeta.tone },
+    { label: "Доступ", value: accessLabel },
+  ];
+
+  return (
+    <section className="ix-launch-passport">
+      <h3 className="ix-launch-passport__title">Паспорт</h3>
+      <dl className="ix-launch-passport__grid">
+        {entries.map((entry) => (
+          <div key={entry.label} className="ix-launch-passport__cell">
+            <dt>{entry.label}</dt>
+            <dd>
+              {entry.tone ? (
+                <span className={`ix-status-badge ix-status-badge--${entry.tone}`}>{entry.value}</span>
+              ) : (
+                entry.value
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+export function LaunchSummaryChips({ chips }) {
+  if (!chips?.length) return null;
+  return (
+    <div className="ix-launch-summary">
+      {chips.map((chip) => (
+        <span key={chip} className="ix-launch-summary__chip">{chip}</span>
+      ))}
+    </div>
+  );
+}
 
 export function VisualStylePicker({
-  activeId,
+  backgrounds = [],
+  loading = false,
+  activeBackgroundSlug,
   backgroundImage,
   backgroundImageTone = "light",
-  onSelect,
+  onSelectBackground,
   onImageUpload,
   onImageRemove,
   onImageToneChange,
+  compact = false,
 }) {
   const inputId = "ix-bg-image-upload";
+  const isCustom = activeBackgroundSlug === "custom" || Boolean(backgroundImage);
 
   return (
-    <section className="ix-launch-panel">
+    <section className={`ix-launch-panel ix-launch-panel--style${compact ? " ix-launch-panel--compact" : ""}`}>
       <h3 className="ix-launch-panel__title">Визуальный стиль</h3>
-      <div className="ix-visual-themes">
-        {VISUAL_THEMES.map((theme) => (
+      <div className="ix-visual-themes ix-visual-themes--compact">
+        {loading && !backgrounds.length ? (
+          <p className="ix-bg-upload-hint">Загрузка…</p>
+        ) : null}
+        {backgrounds.map((item) => (
           <button
-            key={theme.id}
+            key={item.slug}
             type="button"
-            className={`ix-visual-theme${activeId === theme.id ? " ix-visual-theme--active" : ""}`}
-            onClick={() => onSelect(theme.id)}
-            aria-pressed={activeId === theme.id}
+            className={`ix-visual-theme ix-visual-theme--compact${!isCustom && activeBackgroundSlug === item.slug ? " ix-visual-theme--active" : ""}`}
+            onClick={() => onSelectBackground?.(item.slug)}
+            aria-pressed={!isCustom && activeBackgroundSlug === item.slug}
           >
-            <span className="ix-visual-theme__preview" style={{ background: theme.preview }} />
-            <span className="ix-visual-theme__label">{theme.label}</span>
+            <span className="ix-visual-theme__preview" style={backgroundPreviewStyle(item)} />
+            <span className="ix-visual-theme__label">{item.name}</span>
           </button>
         ))}
         <button
           type="button"
-          className={`ix-visual-theme ix-visual-theme--custom${activeId === "custom" ? " ix-visual-theme--active" : ""}`}
+          className={`ix-visual-theme ix-visual-theme--compact ix-visual-theme--custom${isCustom ? " ix-visual-theme--active" : ""}`}
           onClick={() => document.getElementById(inputId)?.click()}
-          aria-pressed={activeId === "custom"}
+          aria-pressed={isCustom}
         >
           <span
             className="ix-visual-theme__preview ix-visual-theme__preview--image"
@@ -48,7 +132,7 @@ export function VisualStylePicker({
           >
             {!backgroundImage ? "+" : null}
           </span>
-          <span className="ix-visual-theme__label">Своя картинка</span>
+          <span className="ix-visual-theme__label">Своя</span>
         </button>
       </div>
 
@@ -65,153 +149,131 @@ export function VisualStylePicker({
       />
 
       {backgroundImage ? (
-        <div className="ix-bg-custom-controls">
-          <div className="ix-bg-custom-preview">
-            <img src={backgroundImage} alt="" />
-          </div>
+        <div className="ix-bg-custom-controls ix-bg-custom-controls--compact">
           <div className="ix-bg-custom-actions">
-            <label className="ix-param-row">
-              <span>Тон текста на фоне</span>
-              <select
-                value={backgroundImageTone}
-                onChange={(e) => onImageToneChange?.(e.target.value)}
-              >
-                <option value="light">Светлый</option>
-                <option value="dark">Тёмный</option>
-              </select>
-            </label>
-            <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={() => document.getElementById(inputId)?.click()}>
-              Заменить
-            </button>
+            <ChipGroupInline
+              options={[
+                { value: "light", label: "Светлый текст" },
+                { value: "dark", label: "Тёмный текст" },
+              ]}
+              value={backgroundImageTone}
+              onChange={onImageToneChange}
+            />
             <button type="button" className="cb-btn cb-btn--ghost cb-btn--sm" onClick={onImageRemove}>
               Убрать
             </button>
           </div>
         </div>
-      ) : (
-        <p className="ix-bg-upload-hint">JPG или PNG</p>
-      )}
+      ) : null}
     </section>
   );
 }
 
-function ToggleRow({ label, checked, onChange }) {
+function ChipGroupInline({ options, value, onChange }) {
   return (
-    <label className="ix-param-row ix-param-row--toggle">
-      <span>{label}</span>
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-    </label>
+    <div className="ix-launch-chips ix-launch-chips--inline">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          className={`ix-launch-chip${value === opt.value ? " is-active" : ""}`}
+          onClick={() => onChange?.(opt.value)}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
-export function ParametersPanel({ params, onChange }) {
+export function ParametersPanel({ params, onChange, mobileAccordion = false }) {
   const p = { ...DEFAULT_PARAMS, ...params };
+  const [open, setOpen] = useState(false);
+  const activeTimer = timerPresetId(p);
 
   const set = (field, value) => onChange({ ...p, [field]: value });
 
-  return (
-    <section className="ix-launch-panel">
-      <h3 className="ix-launch-panel__title">Параметры</h3>
-      <div className="ix-params">
-        <label className="ix-param-row">
-          <span>Таймер</span>
-          <select value={p.timerMode} onChange={(e) => set("timerMode", e.target.value)}>
-            <option value="none">Нет</option>
-            <option value="forward">Прямой счёт</option>
-            <option value="countdown">Обратный счёт</option>
-          </select>
-        </label>
-        {p.timerMode !== "none" ? (
-          <div className="ix-param-row ix-param-row--time">
-            <label>
-              <span>Мин</span>
-              <input
-                type="number"
-                min={0}
-                max={99}
-                value={p.timerMinutes}
-                onChange={(e) => set("timerMinutes", Number(e.target.value) || 0)}
-              />
-            </label>
-            <label>
-              <span>Сек</span>
-              <input
-                type="number"
-                min={0}
-                max={59}
-                value={p.timerSeconds}
-                onChange={(e) => set("timerSeconds", Number(e.target.value) || 0)}
-              />
-            </label>
-          </div>
-        ) : null}
-        <label className="ix-param-row">
-          <span>Попытки</span>
-          <input
-            type="number"
-            min={0}
-            value={p.maxAttempts}
-            onChange={(e) => set("maxAttempts", Number(e.target.value) || 0)}
-            placeholder="0 = ∞"
-          />
-        </label>
-        <ToggleRow label="Перемешивать" checked={p.shuffleQuestions} onChange={(v) => set("shuffleQuestions", v)} />
-        <ToggleRow label="Показывать ответы" checked={p.showAnswersAtEnd} onChange={(v) => set("showAnswersAtEnd", v)} />
-        <ToggleRow label="Пояснение после ответа" checked={p.showExplanationAfterAnswer} onChange={(v) => set("showExplanationAfterAnswer", v)} />
-        <ToggleRow label="Повторное прохождение" checked={p.allowRetry} onChange={(v) => set("allowRetry", v)} />
-        <ToggleRow label="Записывать результат" checked={p.recordInReport} onChange={(v) => set("recordInReport", v)} />
-      </div>
-    </section>
-  );
-}
+  const applyTimer = (preset) => {
+    onChange({
+      ...p,
+      timerMode: preset.mode,
+      timerMinutes: preset.minutes,
+      timerSeconds: preset.seconds,
+    });
+  };
 
-export function ResultsPanel({ results }) {
-  const rows = results || [];
-  const sorted = useMemo(
-    () => [...rows].sort((a, b) => (b.scorePercent || 0) - (a.scorePercent || 0)),
-    [rows],
-  );
-
-  if (rows.length === 0) {
-    return (
-      <section className="ix-launch-panel">
-        <h3 className="ix-launch-panel__title">Результаты</h3>
-        <div className="ix-results-empty">
-          Результатов пока нет
+  const body = (
+    <div className="ix-params ix-params--compact">
+      <div className="ix-launch-field">
+        <span className="ix-launch-field__label">Таймер</span>
+        <div className="ix-launch-chips">
+          {TIMER_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              className={`ix-launch-chip${activeTimer === preset.id ? " is-active" : ""}`}
+              onClick={() => applyTimer(preset)}
+            >
+              {preset.label}
+            </button>
+          ))}
         </div>
+      </div>
+      <ToggleRow label="Перемешивать" checked={p.shuffleQuestions !== false} onChange={(v) => set("shuffleQuestions", v)} />
+      <ToggleRow label="Показывать ответы" checked={p.showAnswersAtEnd !== false} onChange={(v) => set("showAnswersAtEnd", v)} />
+      <ToggleRow label="Пояснение после ответа" checked={p.showExplanationAfterAnswer !== false} onChange={(v) => set("showExplanationAfterAnswer", v)} />
+    </div>
+  );
+
+  if (mobileAccordion) {
+    return (
+      <section className="ix-launch-panel ix-launch-panel--params ix-launch-panel--accordion">
+        <button type="button" className="ix-launch-panel__accordion-head" onClick={() => setOpen((v) => !v)}>
+          <span>Параметры запуска</span>
+          <span aria-hidden="true">{open ? "▾" : "▸"}</span>
+        </button>
+        {open ? body : null}
       </section>
     );
   }
 
   return (
-    <section className="ix-launch-panel">
+    <section className="ix-launch-panel ix-launch-panel--params">
+      <h3 className="ix-launch-panel__title">Параметры запуска</h3>
+      {body}
+    </section>
+  );
+}
+
+export function LaunchResultsSection({ results }) {
+  const rows = Array.isArray(results) ? results : [];
+  return (
+    <section className="ix-launch-panel ix-launch-panel--results">
       <h3 className="ix-launch-panel__title">Результаты</h3>
-      <div className="cb-results-table-wrap ix-results-table-wrap">
-        <table className="cb-results-table ix-results-table">
-          <thead>
-            <tr>
-              <th>Место</th>
-              <th>Ученик</th>
-              <th>Баллы</th>
-              <th>Время</th>
-              <th>Дата</th>
-              <th>Попытка</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((row, index) => (
-              <tr key={`${row.student}-${row.completedAt}-${index}`}>
-                <td>{index + 1}</td>
-                <td>{row.student}</td>
-                <td>{row.scorePercent ?? "—"}%</td>
-                <td>{row.durationMin != null ? `${row.durationMin} мин` : "—"}</td>
-                <td>{formatUpdatedAt(row.completedAt)}</td>
-                <td>{row.attempts ?? 1}</td>
+      {rows.length === 0 ? (
+        <p className="ix-results-empty">Результатов пока нет</p>
+      ) : (
+        <div className="ix-results-table-wrap">
+          <table className="ix-results-table">
+            <thead>
+              <tr>
+                <th>Ученик</th>
+                <th>Результат</th>
+                <th>Дата</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={row.id || index}>
+                  <td data-label="Ученик">{row.student || row.studentName || "—"}</td>
+                  <td data-label="Результат">{row.score ?? row.result ?? "—"}</td>
+                  <td data-label="Дата">{row.date || row.completedAt || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }
@@ -219,93 +281,112 @@ export function ResultsPanel({ results }) {
 export function LaunchInfoBar({
   interactive,
   authorName,
-  onTitleChange,
+  summaryChips = [],
+  canStart = true,
   onPublish,
+  onStart,
   onEdit,
   onAssign,
   onShare,
   onDuplicate,
-  onMore,
+  onUnpublish,
+  onDelete,
+  onAccessSettings,
 }) {
   const typeMeta = getTypeMeta(interactive.type);
   const statusMeta = getStatusMeta(interactive.status);
-  const [titleDraft, setTitleDraft] = useState(interactive.title || "");
   const canPublish = interactive.status === "draft" || interactive.status === "review";
   const canShare = canShareInteractive(interactive);
   const canAssign = canAssignInteractive(interactive);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef(null);
 
   useEffect(() => {
-    setTitleDraft(interactive.title || "");
-  }, [interactive.title]);
-
-  const commitTitle = () => {
-    const next = titleDraft.trim();
-    if (next !== (interactive.title || "").trim()) {
-      onTitleChange?.(next);
-    }
-  };
+    if (!moreOpen) return undefined;
+    const close = (e) => {
+      if (moreRef.current && !moreRef.current.contains(e.target)) setMoreOpen(false);
+    };
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [moreOpen]);
 
   return (
-    <section className="ix-launch-info">
+    <section className="ix-launch-info ix-launch-info--v2">
       <div className="ix-launch-info__meta">
-        <input
-          className="ix-launch-info__title-input"
-          value={titleDraft}
-          onChange={(e) => setTitleDraft(e.target.value)}
-          onBlur={commitTitle}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              commitTitle();
-              e.currentTarget.blur();
-            }
-          }}
-          placeholder="Название интерактива"
-          aria-label="Название интерактива"
-        />
+        <h2 className="ix-launch-info__title">{getInteractiveDisplayTitle(interactive)}</h2>
         <p className="ix-launch-info__line">
-          <span>{typeMeta.label}</span>
+          <span>{typeMeta.shortLabel}</span>
           <span className="ix-launch-info__dot">·</span>
           <span>{authorName || "Учитель"}</span>
           <span className="ix-launch-info__dot">·</span>
-          <span className={`ix-status-badge ix-status-badge--${interactive.status === "published" ? "success" : interactive.status === "assigned" ? "info" : "gray"}`}>
+          <span className={`ix-status-badge ix-status-badge--${statusMeta.tone}`}>
             {statusMeta.label}
           </span>
         </p>
+        <LaunchSummaryChips chips={summaryChips} />
       </div>
-      <div className="ix-launch-info__actions">
+      <div className="ix-launch-info__actions ix-launch-info__actions--v2">
         {canPublish ? (
           <button type="button" className="cb-btn cb-btn--primary cb-btn--sm cb-btn--pill" onClick={onPublish}>
             Опубликовать
           </button>
-        ) : null}
-        <button
-          type="button"
-          className="cb-btn cb-btn--outline cb-btn--sm"
-          disabled={!canAssign}
-          title={canAssign ? "Выдать ученикам" : "Черновик нельзя выдать — сначала опубликуйте"}
-          onClick={onAssign}
-        >
-          Выдать
-        </button>
+        ) : (
+          <button
+            type="button"
+            className="cb-btn cb-btn--primary cb-btn--sm cb-btn--pill"
+            disabled={!canStart}
+            onClick={onStart}
+          >
+            Начать
+          </button>
+        )}
         <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={onEdit}>
           Редактировать
-        </button>
-        <button
-          type="button"
-          className="cb-btn cb-btn--ghost cb-btn--sm"
-          disabled={!canShare}
-          title={canShare ? "Скопировать ссылку для учеников" : "Доступно после публикации"}
-          onClick={onShare}
-        >
-          Поделиться
         </button>
         <button type="button" className="cb-btn cb-btn--ghost cb-btn--sm" onClick={onDuplicate}>
           Дублировать
         </button>
-        <button type="button" className="cb-btn cb-btn--ghost cb-btn--sm" onClick={onMore}>
-          Больше
-        </button>
+        <div className={`ix-launch-more${moreOpen ? " is-open" : ""}`} ref={moreRef}>
+          <button
+            type="button"
+            className="cb-btn cb-btn--ghost cb-btn--sm"
+            onClick={() => setMoreOpen((v) => !v)}
+            aria-expanded={moreOpen}
+          >
+            Больше
+          </button>
+          {moreOpen ? (
+            <div className="ix-launch-more__menu">
+              <button
+                type="button"
+                disabled={!canShare}
+                title={canShare ? "" : "Сначала опубликуйте интерактив"}
+                onClick={() => { setMoreOpen(false); onShare?.(); }}
+              >
+                Поделиться
+              </button>
+              <button
+                type="button"
+                disabled={!canAssign}
+                title={canAssign ? "" : "Сначала опубликуйте интерактив"}
+                onClick={() => { setMoreOpen(false); onAssign?.(); }}
+              >
+                Выдать
+              </button>
+              {!canPublish ? (
+                <button type="button" onClick={() => { setMoreOpen(false); onUnpublish?.(); }}>
+                  Снять с публикации
+                </button>
+              ) : null}
+              <button type="button" onClick={() => { setMoreOpen(false); onAccessSettings?.(); }}>
+                Настройки доступа
+              </button>
+              <button type="button" className="danger" onClick={() => { setMoreOpen(false); onDelete?.(); }}>
+                Удалить
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
     </section>
   );

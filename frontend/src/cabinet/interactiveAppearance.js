@@ -2,65 +2,7 @@ import { useEffect, useState } from "react";
 import { fetchInteractiveAppearance } from "../utils/cabinetAuth";
 
 export const FALLBACK_APPEARANCE_CATALOG = {
-  backgrounds: [
-    {
-      id: 1,
-      slug: "light-gray",
-      name: "Светло-серый",
-      css_background: "#E8EDF4",
-      text_tone: "dark",
-      is_default: true,
-    },
-    {
-      id: 2,
-      slug: "soft-blue",
-      name: "Нежно-голубой",
-      css_background: "linear-gradient(135deg, #DBEAFE 0%, #E0E7FF 100%)",
-      text_tone: "dark",
-      is_default: false,
-    },
-    {
-      id: 3,
-      slug: "soft-violet",
-      name: "Лавандовый",
-      css_background: "linear-gradient(135deg, #EDE9FE 0%, #F3E8FF 100%)",
-      text_tone: "dark",
-      is_default: false,
-    },
-    {
-      id: 4,
-      slug: "warm-sand",
-      name: "Тёплый песок",
-      css_background: "linear-gradient(135deg, #FEF3C7 0%, #FFEDD5 100%)",
-      text_tone: "dark",
-      is_default: false,
-    },
-    {
-      id: 5,
-      slug: "mint-fresh",
-      name: "Мятный",
-      css_background: "linear-gradient(135deg, #D1FAE5 0%, #ECFDF5 100%)",
-      text_tone: "dark",
-      is_default: false,
-    },
-    {
-      id: 6,
-      slug: "navy-dark",
-      name: "Тёмно-синий",
-      css_background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)",
-      text_tone: "light",
-      is_default: false,
-    },
-    {
-      id: 7,
-      slug: "grid-blue",
-      name: "Сетка",
-      css_background:
-        "linear-gradient(rgba(43, 82, 245, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(43, 82, 245, 0.05) 1px, transparent 1px), #F4F7FB",
-      text_tone: "dark",
-      is_default: false,
-    },
-  ],
+  backgrounds: [],
   card_styles: [
     {
       id: 1,
@@ -121,8 +63,11 @@ export const FALLBACK_APPEARANCE_CATALOG = {
         flip: { freq: 520, type: "sine", duration: 0.08, volume: 0.12 },
         correct: { freq: 660, type: "sine", duration: 0.14, volume: 0.16 },
         wrong: { freq: 220, type: "sine", duration: 0.18, volume: 0.14 },
+        next: { freq: 440, type: "sine", duration: 0.04, volume: 0.08 },
+        end: { freq: 520, type: "sine", duration: 0.2, volume: 0.14 },
         tap: { freq: 440, type: "sine", duration: 0.04, volume: 0.08 },
       },
+      sounds: {},
       is_default: true,
     },
     {
@@ -134,8 +79,11 @@ export const FALLBACK_APPEARANCE_CATALOG = {
         flip: { freq: 740, type: "triangle", duration: 0.05, volume: 0.14 },
         correct: { freq: 880, type: "triangle", duration: 0.1, volume: 0.18 },
         wrong: { freq: 180, type: "triangle", duration: 0.12, volume: 0.16 },
+        next: { freq: 600, type: "triangle", duration: 0.03, volume: 0.1 },
+        end: { freq: 660, type: "triangle", duration: 0.16, volume: 0.16 },
         tap: { freq: 600, type: "triangle", duration: 0.03, volume: 0.1 },
       },
+      sounds: {},
       is_default: false,
     },
     {
@@ -147,8 +95,11 @@ export const FALLBACK_APPEARANCE_CATALOG = {
         flip: { freq: 420, type: "square", duration: 0.06, volume: 0.1 },
         correct: { freq: 784, type: "square", duration: 0.12, volume: 0.14 },
         wrong: { freq: 160, type: "square", duration: 0.2, volume: 0.12 },
+        next: { freq: 520, type: "square", duration: 0.04, volume: 0.09 },
+        end: { freq: 620, type: "square", duration: 0.18, volume: 0.12 },
         tap: { freq: 520, type: "square", duration: 0.04, volume: 0.09 },
       },
+      sounds: {},
       is_default: false,
     },
     {
@@ -157,6 +108,7 @@ export const FALLBACK_APPEARANCE_CATALOG = {
       name: "Без звука",
       description: "Звуковые эффекты отключены",
       config: {},
+      sounds: {},
       is_default: false,
     },
   ],
@@ -169,10 +121,26 @@ export const DEFAULT_APPEARANCE = {
   soundEnabled: true,
   backgroundImage: null,
   backgroundImageTone: "light",
+  customSounds: {},
 };
 
 let catalogCache = null;
 let catalogPromise = null;
+
+function normalizeAppearanceCatalog(data) {
+  if (!data || typeof data !== "object") {
+    return { ...FALLBACK_APPEARANCE_CATALOG };
+  }
+  return {
+    backgrounds: Array.isArray(data.backgrounds) ? data.backgrounds : [],
+    card_styles: Array.isArray(data.card_styles)
+      ? data.card_styles
+      : FALLBACK_APPEARANCE_CATALOG.card_styles,
+    sound_packs: Array.isArray(data.sound_packs)
+      ? data.sound_packs
+      : FALLBACK_APPEARANCE_CATALOG.sound_packs,
+  };
+}
 
 export function loadAppearanceCatalog({ force = false } = {}) {
   if (!force && catalogCache) return Promise.resolve(catalogCache);
@@ -180,11 +148,11 @@ export function loadAppearanceCatalog({ force = false } = {}) {
 
   catalogPromise = fetchInteractiveAppearance()
     .then((data) => {
-      catalogCache = data;
-      return data;
+      catalogCache = normalizeAppearanceCatalog(data);
+      return catalogCache;
     })
     .catch(() => {
-      catalogCache = FALLBACK_APPEARANCE_CATALOG;
+      catalogCache = { ...FALLBACK_APPEARANCE_CATALOG, backgrounds: [] };
       return catalogCache;
     })
     .finally(() => {
@@ -196,6 +164,26 @@ export function loadAppearanceCatalog({ force = false } = {}) {
 
 export function getCachedAppearanceCatalog() {
   return catalogCache || FALLBACK_APPEARANCE_CATALOG;
+}
+
+export function backgroundPreviewStyle(item) {
+  if (!item) return undefined;
+  if (item.background_image_url) {
+    return backgroundImageStyle(
+      item.background_image_url,
+      item.text_tone === "light" ? "light" : "dark",
+    );
+  }
+  if (item.slug === "grid-blue" && item.css_background) {
+    return {
+      background: item.css_background,
+      backgroundSize: "16px 16px, 16px 16px, auto",
+    };
+  }
+  if (item.css_background) {
+    return { background: item.css_background };
+  }
+  return undefined;
 }
 
 function pickBySlug(list, slug, fallbackKey = "is_default") {
@@ -230,6 +218,7 @@ export function resolveInteractiveAppearance(interactive, catalog = getCachedApp
     soundEnabled: interactive?.soundEnabled !== false && soundPack?.slug !== "silent",
     customBackgroundImage,
     backgroundImageTone,
+    customSounds: interactive?.customSounds || {},
   };
 }
 
@@ -298,12 +287,18 @@ export function appearancePageStyle(appearance) {
   return { background: bg };
 }
 
+export function resolvePageTextTone(appearance) {
+  if (appearance?.customBackgroundImage) {
+    return appearance.backgroundImageTone === "light" ? "light" : "dark";
+  }
+  if (appearance?.background?.background_image_url) {
+    return appearance.background.text_tone === "light" ? "light" : "dark";
+  }
+  return appearance?.background?.text_tone === "light" ? "light" : "dark";
+}
+
 export function appearancePageClass(appearance) {
-  const tone = appearance?.customBackgroundImage
-    ? (appearance.backgroundImageTone === "light" ? "light" : "dark")
-    : appearance?.background?.background_image_url
-      ? (appearance.background.text_tone === "light" ? "light" : "dark")
-      : (appearance?.background?.text_tone === "light" ? "light" : "dark");
+  const tone = resolvePageTextTone(appearance);
   const cardClass = appearance?.cardStyle?.css_class || "ix-cards--classic";
   return [`ix-tone--${tone}`, cardClass].filter(Boolean).join(" ");
 }

@@ -1,10 +1,11 @@
+import { getInteractiveDisplayTitle } from "./interactivesData";
 import { getLessonOpenUrl } from "./lessonCardUtils";
 import { mapApiMaterial, mapApiPlanItem } from "./lessonPlansData";
 
 export function mapApiInteractiveAttachment(interactive) {
   return {
     id: interactive.id,
-    title: interactive.title,
+    title: getInteractiveDisplayTitle(interactive),
     interactiveType: interactive.interactive_type || interactive.interactiveType,
     interactiveTypeLabel:
       interactive.interactive_type_label
@@ -51,7 +52,7 @@ export function lessonResourceRows(item) {
     rows.push({
       key: `lesson-interactive-${interactive.id}`,
       kind: "interactive",
-      label: interactive.title,
+      label: getInteractiveDisplayTitle(interactive),
       typeLabel: interactive.interactiveTypeLabel || "Интерактив",
       url: `/cabinet/interactives/${interactive.id}`,
       interactiveId: interactive.id,
@@ -81,7 +82,7 @@ export function homeworkResourceRows(item) {
     rows.push({
       key: `hw-interactive-${interactive.id}`,
       kind: "interactive",
-      label: interactive.title,
+      label: getInteractiveDisplayTitle(interactive),
       typeLabel: interactive.interactiveTypeLabel || "Интерактив",
       url: `/cabinet/interactives/${interactive.id}`,
       interactiveId: interactive.id,

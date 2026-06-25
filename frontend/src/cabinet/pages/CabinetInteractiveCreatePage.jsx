@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { InteractiveTypeCard } from "../components/InteractivesUi";
+import { INTERACTIVE_TYPE_LIST } from "../interactivesData";
 import { CabinetPageShell, CabinetPageHeader } from "../CabinetSectionUi";
 import "../styles/interactives-catalog.css";
 
@@ -16,7 +17,7 @@ export default function CabinetInteractiveCreatePage() {
       />
 
       <div className="ix-type-grid ix-type-grid--select">
-        {["flashcards", "matching", "sequence"].map((type) => (
+        {INTERACTIVE_TYPE_LIST.map((type) => (
           <InteractiveTypeCard key={type} type={type} onCreate={(t) => navigate(`/cabinet/interactives/new/${t}`)} />
         ))}
       </div>

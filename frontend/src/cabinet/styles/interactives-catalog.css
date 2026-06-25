@@ -189,7 +189,7 @@
 /* Type cards */
 .ix-type-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 18px;
 }
 
@@ -217,6 +217,33 @@
 .ix-type-card--oge:hover { border-color: #C0284A; }
 .ix-type-card--ege:hover { border-color: #1550D8; }
 .ix-type-card--school:hover { border-color: #E05A00; }
+.ix-type-card--quiz:hover { border-color: #10B981; }
+.ix-type-card--wheel:hover { border-color: #7C3AED; }
+
+.ix-type-card--soon {
+  opacity: 0.72;
+}
+
+.ix-type-card--soon:hover {
+  transform: none;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+}
+
+.ix-type-card--soon .ix-type-card__btn {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.ix-type-card--soon .ix-type-card__btn:hover {
+  transform: none;
+}
+
+.ix-type-card__headline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 
 .ix-type-card__cover {
   height: 112px;
@@ -248,6 +275,8 @@
 .ix-type-card__icon--ege { color: #1550D8; }
 .ix-type-card__icon--oge { color: #C0284A; }
 .ix-type-card__icon--school { color: #E05A00; }
+.ix-type-card__icon--quiz { color: #10B981; }
+.ix-type-card__icon--wheel { color: #7C3AED; }
 
 .ix-type-card__title {
   margin: 0;
@@ -292,6 +321,62 @@
 .ix-type-card__btn--oge:hover { background: #7B1226; }
 .ix-type-card__btn--school { background: #E05A00; color: #FFFFFF; }
 .ix-type-card__btn--school:hover { background: #C2410C; }
+.ix-type-card__btn--quiz { background: #10B981; color: #FFFFFF; }
+.ix-type-card__btn--quiz:hover { background: #059669; }
+.ix-type-card__btn--wheel { background: #7C3AED; color: #FFFFFF; }
+.ix-type-card__btn--wheel:hover { background: #5B21B6; }
+
+.ix-cover--quiz {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ix-cover__quiz-q {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #047857;
+}
+
+.ix-cover__quiz-a {
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.75);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: #475569;
+}
+
+.ix-cover__quiz-a--ok {
+  background: #ECFDF5;
+  color: #047857;
+}
+
+.ix-cover-slide--quiz {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.ix-cover-slide__quiz-text {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #0F172A;
+  line-height: 1.35;
+}
+
+.ix-cover-slide__quiz-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ix-template-card__type--quiz { color: #10B981; }
 
 /* Cover themes — ОГЭ / ЕГЭ / школьная база */
 .ix-cover-theme {
@@ -335,6 +420,14 @@
 
 .ix-cover-theme--school {
   background: linear-gradient(135deg, #E05A00 0%, #FF8C38 100%);
+}
+
+.ix-cover-theme--quiz {
+  background: linear-gradient(135deg, #059669 0%, #10B981 100%);
+}
+
+.ix-cover-theme--wheel {
+  background: linear-gradient(135deg, #5B21B6 0%, #7C3AED 100%);
 }
 
 .ix-cover-theme__icon {
@@ -474,7 +567,7 @@
 .ix-activity-grid,
 .ix-template-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 320px));
   gap: 18px;
 }
 
@@ -501,6 +594,10 @@
   box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
 }
 
+.ix-activity-card--clickable {
+  cursor: pointer;
+}
+
 .ix-activity-card__cover,
 .ix-template-card__cover {
   position: relative;
@@ -517,6 +614,15 @@
   align-items: center;
   justify-content: center;
   padding: 14px 16px;
+}
+
+.ix-activity-card__cover--icon {
+  align-items: center;
+  justify-content: center;
+}
+
+.ix-activity-card__cover--icon .ix-cover-theme__icon {
+  margin: 0 auto;
 }
 
 .ix-cover-slide {
@@ -630,23 +736,6 @@
 .ix-activity-card__cover--slide.ix-tone--light .ix-cover-slide__chip,
 .ix-activity-card__cover--slide.ix-tone--light .ix-cover-slide--sequence {
   background: rgba(255, 255, 255, 0.94);
-}
-
-.ix-activity-card__cover--slide.ix-tone--dark .ix-cover-slide__flash-card,
-.ix-activity-card__cover--slide.ix-tone--dark .ix-cover-slide__chip,
-.ix-activity-card__cover--slide.ix-tone--dark .ix-cover-slide--sequence {
-  background: rgba(15, 23, 42, 0.72);
-  border-color: rgba(255, 255, 255, 0.12);
-}
-
-.ix-activity-card__cover--slide.ix-tone--dark .ix-cover-slide__flash-card p,
-.ix-activity-card__cover--slide.ix-tone--dark .ix-cover-slide__chip,
-.ix-activity-card__cover--slide.ix-tone--dark .ix-cover-slide__text {
-  color: #FFFFFF;
-}
-
-.ix-activity-card__cover--slide.ix-tone--dark .ix-cover-slide__dash {
-  color: rgba(255, 255, 255, 0.55);
 }
 
 .ix-activity-card__type,

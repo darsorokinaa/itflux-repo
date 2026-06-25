@@ -124,6 +124,10 @@ class ReferralService:
         if ReferralLinkRegistration.objects.filter(user=user).exists():
             raise ReferralError("REFERRAL_ALREADY_USED", "Реферальный бонус уже был получен")
 
+        email = (user.email or "").strip().lower()
+        if email and ReferralLinkRegistration.objects.filter(user__email__iexact=email).exists():
+            raise ReferralError("REFERRAL_EMAIL_USED", "Бонус по этому email уже был получен")
+
         link = ReferralService.validate(code_str)
         plan = ReferralService.resolve_reward_plan(link)
         sub, expires_at = ReferralService.grant_subscription(user, plan, link.reward_months)

@@ -14,6 +14,7 @@ from django.views.decorators.http import require_http_methods
 
 from .models import Profile, ScheduleEvent
 from .invitations import try_accept_invite_token
+from .rate_limit import rate_limit_check, rate_limit_json_response
 from .schedule_events import (
     list_schedule_events,
     parse_local_event_id,
@@ -86,6 +87,9 @@ def api_me(request):
 
 @require_http_methods(["POST"])
 def api_login(request):
+    if not rate_limit_check(request, "auth_login", 10, 900):
+        return rate_limit_json_response()
+
     data = _load_json_body(request)
     if data is None:
         return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
@@ -121,6 +125,9 @@ def api_login(request):
 
 @require_http_methods(["POST"])
 def api_register(request):
+    if not rate_limit_check(request, "auth_register", 10, 900):
+        return rate_limit_json_response()
+
     data = _load_json_body(request)
     if data is None:
         return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
@@ -194,6 +201,12 @@ def api_register(request):
 
 @require_http_methods(["GET"])
 def api_referral_preview(request, code):
+    if not rate_limit_check(request, "referral_preview", 60, 3600):
+        return JsonResponse(
+            {"code": "RATE_LIMITED", "message": "Слишком много запросов.", "valid": False},
+            status=429,
+        )
+
     from .referral_service import ReferralError, ReferralService
 
     try:

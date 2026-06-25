@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import InteractivePlayer from "../../components/InteractivePlayer";
+import { getInteractiveDisplayTitle } from "../../interactivesData";
 import {
   appearancePageClass,
   appearancePageStyle,
@@ -34,9 +35,21 @@ export default function StudentInteractivePlayPage() {
     [interactive, catalog],
   );
 
-  const handleComplete = useCallback(async (score) => {
+  const handleComplete = useCallback(async (score, details) => {
     try {
-      await submitStudentInteractiveAttempt(id, { score_percent: score });
+      await submitStudentInteractiveAttempt(id, {
+        score_percent: score,
+        raw_answers: details ? {
+          spins_count: details.spins_count,
+          results: details.results,
+          answers: details.answers,
+          score: details.score,
+          max_score: details.max_score,
+          percent: details.percent,
+          duration_sec: details.duration_sec,
+        } : {},
+        mistakes: details?.mistakes || [],
+      });
     } catch { /* ignore */ }
   }, [id]);
 
@@ -60,7 +73,7 @@ export default function StudentInteractivePlayPage() {
     >
       <div className="st-play-topbar">
         <Link to="/cabinet/student/interactives" className="st-play-back">← Назад</Link>
-        <span>{payload.assignment?.title || interactive.title}</span>
+        <span>{payload.assignment?.title || getInteractiveDisplayTitle(interactive)}</span>
       </div>
       <InteractivePlayer
         interactive={interactive}

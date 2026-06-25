@@ -747,15 +747,56 @@ class InteractiveCardStyle(models.Model):
         return self.name
 
 
+def interactive_sound_upload_to(instance, filename):
+    return f"cabinet/interactive-sounds/{instance.slug or 'new'}/{filename}"
+
+
 class InteractiveSoundPack(models.Model):
     slug = models.SlugField("Код", max_length=40, unique=True)
     name = models.CharField("Название", max_length=120)
     description = models.CharField("Описание", max_length=255, blank=True)
     config = models.JSONField(
-        "Настройки звуков",
+        "Настройки звуков (синтез)",
         default=dict,
         blank=True,
-        help_text="Профили звуков для flip/correct/wrong/tap",
+        help_text="Fallback-профили: flip, correct, wrong, next, end (freq/type/duration/volume)",
+    )
+    sound_flip = models.FileField(
+        "Переворот",
+        upload_to=interactive_sound_upload_to,
+        blank=True,
+        null=True,
+    )
+    sound_correct = models.FileField(
+        "Правильно",
+        upload_to=interactive_sound_upload_to,
+        blank=True,
+        null=True,
+    )
+    sound_wrong = models.FileField(
+        "Неправильно",
+        upload_to=interactive_sound_upload_to,
+        blank=True,
+        null=True,
+    )
+    sound_next = models.FileField(
+        "Следующий",
+        upload_to=interactive_sound_upload_to,
+        blank=True,
+        null=True,
+    )
+    sound_end = models.FileField(
+        "Конец",
+        upload_to=interactive_sound_upload_to,
+        blank=True,
+        null=True,
+    )
+    sound_background = models.FileField(
+        "Фоновый",
+        upload_to=interactive_sound_upload_to,
+        blank=True,
+        null=True,
+        help_text="Фоновая музыка или ambient — проигрывается по кругу во время интерактива",
     )
     sort_order = models.PositiveSmallIntegerField("Порядок", default=0)
     is_active = models.BooleanField("Активен", default=True)
@@ -826,6 +867,11 @@ class Interactive(models.Model):
         verbose_name="Звуковой пакет",
     )
     sound_enabled = models.BooleanField("Звук включён", default=True)
+    wheel_settings = models.JSONField(
+        "Настройки колеса",
+        default=dict,
+        blank=True,
+    )
     status = models.CharField(
         "Статус",
         max_length=20,
@@ -840,8 +886,44 @@ class Interactive(models.Model):
         verbose_name_plural = "Интерактивы"
         ordering = ["-updated_at"]
 
+    def get_display_title(self, fallback="Без названия"):
+        title = (self.title or "").strip()
+        if title:
+            return title
+        if self.interactive_type == "flashcards":
+            card = self.flashcards.order_by("order", "id").first()
+            if card:
+                text = (card.front_text or card.back_text or "").strip()
+                if text:
+                    return text
+        elif self.interactive_type == "matching":
+            pair = self.matching_pairs.order_by("order", "id").first()
+            if pair:
+                text = (pair.left_text or pair.right_text or "").strip()
+                if text:
+                    return text
+        elif self.interactive_type == "quiz":
+            question = self.quiz_questions.order_by("order", "id").first()
+            if question:
+                text = (question.question_text or "").strip()
+                if text:
+                    return text
+        elif self.interactive_type == "wheel":
+            segment = self.wheel_segments.order_by("order", "id").first()
+            if segment:
+                text = (segment.title or "").strip()
+                if text:
+                    return text
+        elif self.interactive_type == "ordering":
+            step = self.ordering_items.order_by("correct_order", "id").first()
+            if step:
+                text = (step.text or "").strip()
+                if text:
+                    return text
+        return fallback
+
     def __str__(self):
-        return self.title
+        return self.get_display_title("Интерактив")
 
 
 class FlashcardItem(models.Model):
@@ -905,6 +987,69 @@ class OrderingItem(models.Model):
 
     def __str__(self):
         return self.text[:50]
+
+
+class QuizQuestion(models.Model):
+    ANSWER_TYPE_SINGLE = "single"
+    ANSWER_TYPE_MULTIPLE = "multiple"
+    ANSWER_TYPE_CHOICES = [
+        (ANSWER_TYPE_SINGLE, "Один правильный"),
+        (ANSWER_TYPE_MULTIPLE, "Несколько правильных"),
+    ]
+
+    interactive = models.ForeignKey(
+        Interactive,
+        on_delete=models.CASCADE,
+        related_name="quiz_questions",
+        verbose_name="Интерактив",
+    )
+    question_text = models.TextField("Вопрос")
+    answers = models.JSONField(
+        "Варианты ответов",
+        default=list,
+        blank=True,
+        help_text='[{"id": "a1", "text": "...", "is_correct": true}]',
+    )
+    answer_type = models.CharField(
+        "Тип ответа",
+        max_length=10,
+        choices=ANSWER_TYPE_CHOICES,
+        default=ANSWER_TYPE_SINGLE,
+    )
+    explanation = models.TextField("Пояснение", blank=True)
+    points = models.PositiveSmallIntegerField("Баллы", default=1)
+    order = models.PositiveIntegerField("Порядок", default=0)
+
+    class Meta:
+        verbose_name = "Вопрос викторины"
+        verbose_name_plural = "Вопросы викторины"
+        ordering = ["order", "id"]
+
+    def __str__(self):
+        return self.question_text[:50]
+
+
+class WheelSegment(models.Model):
+    interactive = models.ForeignKey(
+        Interactive,
+        on_delete=models.CASCADE,
+        related_name="wheel_segments",
+        verbose_name="Интерактив",
+    )
+    external_id = models.CharField("ID сектора", max_length=64, blank=True)
+    title = models.CharField("Название", max_length=255)
+    description = models.TextField("Описание", blank=True)
+    color = models.CharField("Цвет", max_length=20, default="#2563EB")
+    points = models.IntegerField("Баллы", default=1)
+    order = models.PositiveIntegerField("Порядок", default=0)
+
+    class Meta:
+        verbose_name = "Сектор колеса"
+        verbose_name_plural = "Сектора колеса"
+        ordering = ["order", "id"]
+
+    def __str__(self):
+        return self.title[:50]
 
 
 class InteractiveAssignment(models.Model):

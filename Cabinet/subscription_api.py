@@ -176,13 +176,16 @@ class SubscriptionCreatePaymentView(APIView):
             except PromoCodeError as exc:
                 return Response(exc.to_dict(), status=400)
 
-        result = PaymentProviderService.create_payment(
-            teacher=request.user,
-            plan=plan,
-            billing_period=billing_period,
-            promo_code=promo_code or None,
-            discount_info=discount_info,
-        )
+        try:
+            result = PaymentProviderService.create_payment(
+                teacher=request.user,
+                plan=plan,
+                billing_period=billing_period,
+                promo_code=promo_code or None,
+                discount_info=discount_info,
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc), "code": "PAYMENT_UNAVAILABLE"}, status=503)
         return Response(result, status=201)
 
 

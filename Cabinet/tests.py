@@ -1570,3 +1570,95 @@ class ReferralLinkTests(TestCase):
         self.assertEqual(ReferralLinkRegistration.objects.count(), 0)
         self.referral.refresh_from_db()
         self.assertEqual(self.referral.registrations_count, 0)
+
+
+class SecurityHardeningTests(TestCase):
+    def setUp(self):
+        from decimal import Decimal
+        from Cabinet.models import ReferralLink, Student, TariffPlan
+
+        self.teacher = User.objects.create_user(username="sec_teacher", password="pass")
+        self.pro_plan, _ = TariffPlan.objects.get_or_create(
+            slug="pro",
+            defaults={"name": "Профи", "price_month": Decimal("1990"), "sort_order": 2},
+        )
+        ReferralLink.objects.create(code="SEC3M", reward_plan=self.pro_plan, reward_months=3)
+        Student.objects.create(
+            teacher=self.teacher,
+            first_name="Legacy",
+            last_name="Pupil",
+            email="legacy@test.ru",
+            user=None,
+        )
+
+    def test_student_cannot_access_roster_by_email_only(self):
+        from django.test import Client
+        from Cabinet.student_api import resolve_roster_students
+
+        attacker = User.objects.create_user(
+            username="attacker",
+            password="StrongPass123!",
+            email="legacy@test.ru",
+        )
+        attacker.profile.role = "student"
+        attacker.profile.save(update_fields=["role"])
+        self.assertEqual(resolve_roster_students(attacker).count(), 0)
+
+    def test_invitation_links_existing_student_card(self):
+        from django.test import Client
+        from Cabinet.invitations import create_student_invitation
+
+        invitation = create_student_invitation(
+            self.teacher,
+            email="legacy@test.ru",
+            direction="ege",
+        )
+        client = Client()
+        response = client.post(
+            "/api/cabinet/register/",
+            data={
+                "email": "legacy@test.ru",
+                "password": "StrongPass123!",
+                "password_confirm": "StrongPass123!",
+                "role": "student",
+                "invite_token": invitation.token,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        from Cabinet.models import Student
+        student = Student.objects.get(email="legacy@test.ru", teacher=self.teacher)
+        self.assertIsNotNone(student.user_id)
+
+    def test_auth_rate_limit_returns_429(self):
+        from django.core.cache import cache
+        from django.test import Client
+
+        cache.clear()
+        client = Client()
+        for i in range(11):
+            response = client.post(
+                "/api/cabinet/login/",
+                data={"login": f"user{i}@test.ru", "password": "wrong"},
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 429)
+
+    def test_upload_rejects_executable_extension(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.test import Client
+        from Cabinet.models import Homework, Student
+        from Cabinet.upload_validation import UploadValidationError, validate_uploaded_file
+
+        with self.assertRaises(UploadValidationError):
+            validate_uploaded_file(
+                SimpleUploadedFile("virus.exe", b"MZ", content_type="application/octet-stream")
+            )
+
+    def test_invitation_preview_masks_email(self):
+        from Cabinet.invitations import create_student_invitation, invitation_preview_payload
+
+        invitation = create_student_invitation(self.teacher, email="student@example.com")
+        payload = invitation_preview_payload(invitation)
+        self.assertIn("*", payload["email_hint"])
+        self.assertNotEqual(payload["email_hint"], "student@example.com")

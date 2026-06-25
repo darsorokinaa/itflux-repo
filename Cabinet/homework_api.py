@@ -23,6 +23,7 @@ from rest_framework.views import APIView
 from .choices import SubmissionStatus
 from .models import Homework, HomeworkSubmission, HomeworkTask, Profile, Student
 from .student_api import _homework_qs, _pick_student, resolve_roster_students
+from .upload_validation import UploadValidationError, validate_uploaded_file
 
 logger = logging.getLogger(__name__)
 
@@ -590,6 +591,11 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
         uploaded = request.FILES.get("file")
         if not uploaded:
             return Response({"error": "file required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            validate_uploaded_file(uploaded)
+        except UploadValidationError as exc:
+            return Response({"error": exc.message, "code": exc.code}, status=status.HTTP_400_BAD_REQUEST)
 
         task_number = str(
             request.data.get("task_number") or request.POST.get("task_number") or ""

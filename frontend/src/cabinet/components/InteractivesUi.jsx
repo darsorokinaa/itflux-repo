@@ -4,16 +4,19 @@ import {
   appearancePageClass,
   appearancePageStyle,
   resolveInteractiveAppearance,
+  useInteractiveAppearanceCatalog,
 } from "../interactiveAppearance";
 import {
   INTERACTIVE_TYPES,
-  getInteractiveCoverTheme,
+  getInteractiveDisplayTitle,
   getInteractiveFirstSlide,
   getItemCount,
   getStatusMeta,
   getTypeMeta,
+  isInteractiveTypeAvailable,
   canAssignInteractive,
 } from "../interactivesData";
+import { CabinetSoonBadge } from "../CabinetSectionUi";
 
 export function TypeCoverArt({ type }) {
   if (type === "flashcards") {
@@ -39,6 +42,22 @@ export function TypeCoverArt({ type }) {
           <div className="ix-cover__chip">лог. И</div>
           <div className="ix-cover__chip">10₁₀</div>
         </div>
+      </div>
+    );
+  }
+  if (type === "quiz") {
+    return (
+      <div className="ix-cover ix-cover--quiz" aria-hidden="true">
+        <div className="ix-cover__quiz-q">AND?</div>
+        <div className="ix-cover__quiz-a ix-cover__quiz-a--ok">✓</div>
+        <div className="ix-cover__quiz-a">OR</div>
+      </div>
+    );
+  }
+  if (type === "wheel") {
+    return (
+      <div className="ix-cover ix-cover--wheel" aria-hidden="true">
+        <div className="ix-cover__wheel" />
       </div>
     );
   }
@@ -90,25 +109,30 @@ export function InteractivesHero({ onCreate, onTemplates }) {
 
 export function InteractiveTypeCard({ type, onCreate, compact = false }) {
   const meta = INTERACTIVE_TYPES[type];
+  const available = isInteractiveTypeAvailable(type);
   return (
-    <article className={`ix-type-card ix-type-card--${meta.accent}${compact ? " ix-type-card--compact" : ""}`}>
+    <article className={`ix-type-card ix-type-card--${meta.accent}${compact ? " ix-type-card--compact" : ""}${available ? "" : " ix-type-card--soon"}`}>
       <div className={`ix-type-card__cover ix-cover-theme ix-cover-theme--${meta.coverTheme}`}>
         <div className="ix-cover-theme__icon">
           <CabinetIcon name={meta.icon} />
         </div>
       </div>
       <div className="ix-type-card__body">
-        <div className={`ix-type-card__icon ix-type-card__icon--${meta.accent}`}>
-          <CabinetIcon name={meta.icon} />
+        <div className="ix-type-card__headline">
+          <div className={`ix-type-card__icon ix-type-card__icon--${meta.accent}`}>
+            <CabinetIcon name={meta.icon} />
+          </div>
+          {!available ? <CabinetSoonBadge /> : null}
         </div>
         <h3 className="ix-type-card__title">{meta.label}</h3>
         <p className="ix-type-card__desc">{meta.description}</p>
         <button
           type="button"
           className={`ix-type-card__btn ix-type-card__btn--${meta.accent}`}
-          onClick={() => onCreate(type)}
+          disabled={!available}
+          onClick={() => available && onCreate(type)}
         >
-          {meta.createLabel}
+          {available ? meta.createLabel : "скоро"}
         </button>
       </div>
     </article>
@@ -167,6 +191,32 @@ function InteractiveCoverSlide({ slide, cardClass }) {
     );
   }
 
+  if (slide.type === "quiz") {
+    return (
+      <div className={`ix-cover-slide ix-cover-slide--quiz ${cardClass || ""}`} aria-hidden="true">
+        <p className="ix-cover-slide__quiz-text">{slide.text || "—"}</p>
+        <div className="ix-cover-slide__quiz-options">
+          {(slide.answers || []).slice(0, 2).map((a, i) => (
+            <span key={i} className="ix-cover-slide__chip">{a || "—"}</span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (slide.type === "wheel") {
+    return (
+      <div className={`ix-cover-slide ix-cover-slide--wheel ${cardClass || ""}`} aria-hidden="true">
+        <span
+          className="ix-cover-slide__chip ix-cover-slide__chip--wheel"
+          style={slide.color ? { borderColor: slide.color, color: slide.color } : undefined}
+        >
+          {slide.title || "—"}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className={`ix-cover-slide ix-cover-slide--sequence ${cardClass || ""}`} aria-hidden="true">
       <span className="ix-cover-slide__num">{slide.position}</span>
@@ -184,11 +234,11 @@ export function InteractiveActivityCard({
   onDelete,
 }) {
   const typeMeta = getTypeMeta(interactive.type);
-  const coverTheme = getInteractiveCoverTheme(interactive);
   const firstSlide = useMemo(() => getInteractiveFirstSlide(interactive), [interactive]);
+  const { catalog } = useInteractiveAppearanceCatalog();
   const appearance = useMemo(
-    () => resolveInteractiveAppearance(interactive),
-    [interactive],
+    () => resolveInteractiveAppearance(interactive, catalog),
+    [interactive, catalog],
   );
   const hasSlidePreview = Boolean(firstSlide);
   const statusMeta = getStatusMeta(interactive.status);
@@ -197,12 +247,16 @@ export function InteractiveActivityCard({
     ? "карточек"
     : interactive.type === "matching"
       ? "пар"
-      : "элементов";
+      : interactive.type === "quiz"
+        ? "вопросов"
+        : interactive.type === "wheel"
+          ? "секторов"
+          : "элементов";
 
   const metaLine = [
-    typeMeta.shortLabel,
     `${count} ${itemLabel}`,
     interactive.exam !== "без экзамена" ? interactive.exam : null,
+    interactive.topic || null,
   ].filter(Boolean).join(" · ");
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -219,15 +273,25 @@ export function InteractiveActivityCard({
   }, [menuOpen]);
 
   return (
-    <article className="ix-activity-card">
+    <article
+      className="ix-activity-card ix-activity-card--clickable"
+      onClick={() => onOpen?.()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen?.();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+    >
       <div
         className={[
           "ix-activity-card__cover",
-          hasSlidePreview
-            ? `ix-activity-card__cover--slide ${appearancePageClass(appearance)}`
-            : `ix-cover-theme ix-cover-theme--${coverTheme}`,
+          hasSlidePreview ? "ix-activity-card__cover--slide" : "ix-activity-card__cover--icon",
+          appearancePageClass(appearance),
         ].join(" ")}
-        style={hasSlidePreview ? appearancePageStyle(appearance) : undefined}
+        style={appearancePageStyle(appearance)}
       >
         {hasSlidePreview ? (
           <InteractiveCoverSlide
@@ -245,7 +309,7 @@ export function InteractiveActivityCard({
       </div>
       <div className="ix-activity-card__body">
         <div className="ix-activity-card__head">
-          <h3 className="ix-activity-card__title">{interactive.title || "Без названия"}</h3>
+          <h3 className="ix-activity-card__title">{getInteractiveDisplayTitle(interactive)}</h3>
           <div
             className={`ix-activity-card__menu-wrap${menuOpen ? " is-open" : ""}`}
             ref={menuRef}
@@ -260,18 +324,18 @@ export function InteractiveActivityCard({
             </button>
             {menuOpen ? (
               <div className="ix-activity-card__dropdown">
-                <button type="button" onClick={() => { setMenuOpen(false); onOpen?.(); }}>Открыть</button>
-                <button type="button" onClick={() => { setMenuOpen(false); onEdit?.(); }}>Редактировать</button>
-                <button type="button" onClick={() => { setMenuOpen(false); onDuplicate?.(); }}>Дублировать</button>
+                <button type="button" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onOpen?.(); }}>Открыть</button>
+                <button type="button" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit?.(); }}>Редактировать</button>
+                <button type="button" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDuplicate?.(); }}>Дублировать</button>
                 <button
                   type="button"
                   disabled={!canAssign}
                   title={canAssign ? "" : "Сначала опубликуйте"}
-                  onClick={() => { if (!canAssign) return; setMenuOpen(false); onAssign?.(); }}
+                  onClick={(e) => { e.stopPropagation(); if (!canAssign) return; setMenuOpen(false); onAssign?.(); }}
                 >
                   Выдать
                 </button>
-                <button type="button" className="danger" onClick={() => { setMenuOpen(false); onDelete?.(); }}>Удалить</button>
+                <button type="button" className="danger" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDelete?.(); }}>Удалить</button>
               </div>
             ) : null}
           </div>
@@ -285,29 +349,6 @@ export function InteractiveActivityCard({
   );
 }
 
-export function InteractiveTemplateCard({ template, copyHref }) {
-  const typeMeta = getTypeMeta(template.type);
-  return (
-    <article className="ix-template-card">
-      <div className={`ix-template-card__cover ix-cover-theme ix-cover-theme--${typeMeta.coverTheme}`}>
-        <div className="ix-cover-theme__icon">
-          <CabinetIcon name={typeMeta.icon} />
-        </div>
-      </div>
-      <div className="ix-template-card__body">
-        <span className={`ix-template-card__type ix-template-card__type--${typeMeta.accent}`}>
-          {typeMeta.shortLabel}
-        </span>
-        <h3 className="ix-template-card__title">{template.title}</h3>
-        <p className="ix-template-card__meta">{template.topic} · {template.items} эл.</p>
-        <Link to={copyHref} className="ix-activity-card__btn ix-activity-card__btn--primary">
-          Скопировать
-        </Link>
-      </div>
-    </article>
-  );
-}
-
 export function InteractivesEmptyState({ onCreate, onTemplates }) {
   return (
     <div className="ix-empty">
@@ -316,7 +357,7 @@ export function InteractivesEmptyState({ onCreate, onTemplates }) {
       </div>
       <h3 className="ix-empty__title">Интерактивов пока нет</h3>
       <p className="ix-empty__text">
-        Создайте первое задание — карточки, сопоставление или порядок.
+        Создайте первое задание — карточки, сопоставление, порядок или викторина.
       </p>
       <div className="ix-empty__actions">
         <button type="button" className="cb-btn cb-btn--primary cb-btn--pill" onClick={onCreate}>

@@ -19,6 +19,7 @@ from .models import (
     MatchingPair,
     Material,
     OrderingItem,
+    QuizQuestion,
     Profile,
     ScheduleEvent,
     Student,
@@ -34,36 +35,12 @@ def resolve_roster_students(user):
     if not profile or profile.role != Profile.Role.STUDENT:
         return Student.objects.none()
 
-    linked = (
+    return (
         Student.objects.filter(user=user)
         .exclude(status=StudentStatus.ARCHIVED)
         .select_related("teacher", "teacher__profile")
         .order_by("id")
     )
-    if linked.exists():
-        return linked
-
-    email = (user.email or "").strip()
-    if email:
-        legacy = (
-            Student.objects.filter(email__iexact=email, user__isnull=True)
-            .exclude(status=StudentStatus.ARCHIVED)
-            .select_related("teacher", "teacher__profile")
-        )
-        if legacy.exists():
-            return legacy.order_by("id")
-
-    first = (profile.name or "").strip()
-    last = (profile.surname or "").strip()
-    if first:
-        qs = Student.objects.filter(first_name__iexact=first, user__isnull=True).exclude(
-            status=StudentStatus.ARCHIVED
-        ).select_related("teacher", "teacher__profile")
-        if last:
-            qs = qs.filter(last_name__iexact=last)
-        if qs.exists():
-            return qs.order_by("id")
-    return Student.objects.none()
 
 
 def resolve_roster_student(user, teacher_id=None):
@@ -395,7 +372,7 @@ def _interactive_to_player_payload(interactive):
     payload = {
         "id": str(interactive.id),
         "type": itype,
-        "title": interactive.title,
+        "title": interactive.get_display_title(),
         "instruction": interactive.instruction or "",
         "exam": interactive.get_exam_type_display() if interactive.exam_type else "без экзамена",
         "topic": interactive.topic or "",
@@ -405,7 +382,10 @@ def _interactive_to_player_payload(interactive):
         "soundEnabled": interactive.sound_enabled,
         "params": {
             "shuffleQuestions": True,
+            "shuffleOptions": True,
             "showAnswersAtEnd": True,
+            "showCorrectImmediately": False,
+            "showExplanationAfterAnswer": True,
             "allowRetry": True,
         },
     }
@@ -425,6 +405,31 @@ def _interactive_to_player_payload(interactive):
             for p in MatchingPair.objects.filter(interactive=interactive).order_by("order", "id")
         ]
         payload["shufflePairs"] = True
+    elif interactive.interactive_type == "quiz":
+        payload["questions"] = [
+            {
+                "id": str(q.id),
+                "text": q.question_text,
+                "answer_type": q.answer_type,
+                "answers": q.answers,
+                "explanation": q.explanation,
+                "points": q.points,
+            }
+            for q in QuizQuestion.objects.filter(interactive=interactive).order_by("order", "id")
+        ]
+    elif interactive.interactive_type == "wheel":
+        payload["segments"] = [
+            {
+                "id": s.external_id or str(s.id),
+                "title": s.title,
+                "description": s.description,
+                "color": s.color,
+                "points": s.points,
+                "order": s.order,
+            }
+            for s in interactive.wheel_segments.all().order_by("order", "id")
+        ]
+        payload["wheelSettings"] = interactive.wheel_settings or {}
     else:
         payload["steps"] = [
             {"text": s.text, "explanation": s.explanation, "position": s.correct_order}
@@ -455,6 +460,7 @@ def _serialize_interactive_card(assignment, students):
         "flashcards": "Карточки",
         "matching": "Сопоставление",
         "ordering": "Порядок",
+        "quiz": "Викторина",
     }
     itype = interactive.interactive_type
     if itype == "ordering":
@@ -464,13 +470,23 @@ def _serialize_interactive_card(assignment, students):
         count = interactive.flashcards.count()
     elif interactive.interactive_type == "matching":
         count = interactive.matching_pairs.count()
+    elif interactive.interactive_type == "quiz":
+        count = interactive.quiz_questions.count()
     else:
         count = interactive.ordering_items.count()
+
+    cover_theme = "ege"
+    if interactive.interactive_type == "matching":
+        cover_theme = "oge"
+    elif interactive.interactive_type == "ordering":
+        cover_theme = "school"
+    elif interactive.interactive_type == "quiz":
+        cover_theme = "quiz"
 
     return {
         "id": assignment.id,
         "interactive_id": interactive.id,
-        "title": interactive.title,
+        "title": interactive.get_display_title(),
         "type": itype,
         "type_label": type_labels.get(interactive.interactive_type, "Интерактив"),
         "items_count": count,
@@ -478,9 +494,7 @@ def _serialize_interactive_card(assignment, students):
         "status_label": slabel,
         "action": action,
         "score_percent": float(attempt.score_percent) if attempt and attempt.score_percent is not None else None,
-        "cover_theme": "oge" if interactive.interactive_type == "matching" else (
-            "school" if interactive.interactive_type == "ordering" else "ege"
-        ),
+        "cover_theme": cover_theme,
     }
 
 
@@ -896,6 +910,9 @@ class StudentAssignmentDetailView(StudentScopedView):
             submission.attached_file = attached_file
         submission.submitted_at = timezone.now()
         submission.save()
+        from .homework_api import _ensure_review_item
+
+        _ensure_review_item(submission)
         return Response({"ok": True, "status": "submitted"})
 
 
@@ -935,6 +952,10 @@ class StudentInteractiveDetailView(StudentScopedView):
             return Response({"error": "Интерактив не найден."}, status=status.HTTP_404_NOT_FOUND)
         roster = _pick_student(students, assignment.teacher)
         score = request.data.get("score_percent")
+        prior_attempts = InteractiveAttempt.objects.filter(
+            assignment=assignment,
+            student=roster,
+        ).count()
         attempt = InteractiveAttempt.objects.create(
             assignment=assignment,
             student=roster,
@@ -943,6 +964,7 @@ class StudentInteractiveDetailView(StudentScopedView):
             completed_at=timezone.now(),
             raw_answers=request.data.get("raw_answers") or {},
             mistakes=request.data.get("mistakes") or [],
+            attempts_count=prior_attempts + 1,
         )
         return Response({"ok": True, "attempt_id": attempt.id, "score_percent": score})
 

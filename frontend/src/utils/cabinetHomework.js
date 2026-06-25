@@ -1,7 +1,7 @@
 /**
- * Домашнее задание из ЛК: API на origin ЛК, cookies через credentials: 'include'.
- * База URL: VITE_LK_PUBLIC_URL (приоритет) или VITE_LK_URL — тот же origin, что LK_PUBLIC_URL в Django.
- * При варианте в уроке (есть lesson_token) запросы идут same-origin — прокси на бэке генератора, без CORS.
+ * Домашнее задание из ЛК: API `/api/homework/assignment/…` на том же origin, что и вариант.
+ * JWT в query (`lesson_token` → `token`) — без прокси `/api/lesson/homework/…`.
+ * Без токена — cross-origin только если VITE_LK_PUBLIC_URL на другом origin.
  */
 
 import { ensureCsrfCookie } from "./cabinetAuth";
@@ -29,21 +29,29 @@ function buildHomeworkApiUrl(assignmentId, lkSubpath, opts) {
   const suffix = String(lkSubpath || "")
     .trim()
     .replace(/^\//, "");
-  if (tok) {
-    const path = suffix
-      ? `/api/lesson/homework/assignment/${id}/${suffix}`
-      : `/api/lesson/homework/assignment/${id}/`;
-    return `${path}?${new URLSearchParams({ token: tok }).toString()}`;
-  }
-  const legacyBase = getLkPublicBase();
-  if (legacyBase) {
-    return suffix
-      ? `${legacyBase}/api/homework/assignment/${id}/${suffix}`
-      : `${legacyBase}/api/homework/assignment/${id}/`;
-  }
-  return suffix
+  const path = suffix
     ? `/api/homework/assignment/${id}/${suffix}`
     : `/api/homework/assignment/${id}/`;
+
+  if (tok) {
+    return `${path}?${new URLSearchParams({ token: tok }).toString()}`;
+  }
+
+  const legacyBase = getLkPublicBase();
+  if (legacyBase && typeof window !== "undefined") {
+    try {
+      const lkOrigin = new URL(legacyBase).origin;
+      if (lkOrigin !== window.location.origin) {
+        return suffix
+          ? `${legacyBase}/api/homework/assignment/${id}/${suffix}`
+          : `${legacyBase}/api/homework/assignment/${id}/`;
+      }
+    } catch {
+      /* ignore bad VITE_LK_PUBLIC_URL */
+    }
+  }
+
+  return path;
 }
 
 /**
@@ -365,10 +373,14 @@ export function buildHomeworkResultPayload(tasks, userAnswers, scores, checkedTa
  */
 export async function saveHomeworkDraft(assignmentId, body, opts) {
   const url = buildHomeworkApiUrl(assignmentId, "save-draft/", opts);
+  if (!opts?.lessonToken) await ensureCsrfCookie();
+  const headers = { "Content-Type": "application/json" };
+  const csrf = readCsrfToken();
+  if (csrf) headers["X-CSRFToken"] = csrf;
   const res = await fetch(url, {
     method: "POST",
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body && typeof body === "object" ? body : {}),
   });
   if (!res.ok) {
@@ -387,10 +399,14 @@ export async function saveHomeworkDraft(assignmentId, body, opts) {
  */
 export async function submitHomework(assignmentId, body, opts) {
   const url = buildHomeworkApiUrl(assignmentId, "submit/", opts);
+  if (!opts?.lessonToken) await ensureCsrfCookie();
+  const headers = { "Content-Type": "application/json" };
+  const csrf = readCsrfToken();
+  if (csrf) headers["X-CSRFToken"] = csrf;
   const res = await fetch(url, {
     method: "POST",
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body && typeof body === "object" ? body : {}),
   });
   if (!res.ok) {

@@ -15,9 +15,11 @@ import { useSubscription } from "../hooks/useSubscription";
 import { useLimitModal } from "../hooks/useLimitModal";
 import {
   SORT_OPTIONS,
+  INTERACTIVE_TYPE_LIST,
   deleteInteractive,
   duplicateInteractive,
   canAssignInteractive,
+  isInteractiveTypeAvailable,
   loadInteractives,
   sortInteractives,
   upsertInteractive,
@@ -33,7 +35,7 @@ export default function CabinetInteractivesPage() {
   const [showTypeModal, setShowTypeModal] = useState(false);
   const [assignTarget, setAssignTarget] = useState(null);
   const [notice, setNotice] = useState("");
-  const { toast } = useSoonToast();
+  const { toast, notifySoon } = useSoonToast();
   const subscription = useSubscription();
   const { limitModalProps, upgradeModalProps, handleApiLimitError } = useLimitModal(subscription.currentPlan);
 
@@ -47,6 +49,10 @@ export default function CabinetInteractivesPage() {
   }, []);
 
   const handleTypeSelect = (type) => {
+    if (!isInteractiveTypeAvailable(type)) {
+      notifySoon();
+      return;
+    }
     if (!subscription.loading && !subscription.canCreateInteractive) {
       handleApiLimitError({
         code: "INTERACTIVE_LIMIT_REACHED",
@@ -92,7 +98,7 @@ export default function CabinetInteractivesPage() {
       <section className="ix-section">
         <h2 className="ix-section__title">Типы</h2>
         <div className="ix-type-grid">
-          {["flashcards", "matching", "sequence"].map((type) => (
+          {INTERACTIVE_TYPE_LIST.map((type) => (
             <InteractiveTypeCard key={type} type={type} onCreate={handleTypeSelect} />
           ))}
         </div>

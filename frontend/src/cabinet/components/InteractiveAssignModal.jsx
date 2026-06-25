@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getInteractiveDisplayTitle } from "../interactivesData";
 import CabinetModal from "./CabinetModal";
 
 // Списки учеников/групп загружаются из реального API при открытии
@@ -33,7 +34,7 @@ export default function InteractiveAssignModal({ interactive, onClose, onAssign 
     <CabinetModal title="Выдать интерактив" onClose={onClose}>
       {interactive ? (
         <p className="cb-modal__hint">
-          «{interactive.title || "Без названия"}» · {interactive.topic || "без темы"}
+          «{getInteractiveDisplayTitle(interactive)}» · {interactive.topic || "без темы"}
         </p>
       ) : null}
       <form className="cb-assign-form" onSubmit={handleSubmit}>

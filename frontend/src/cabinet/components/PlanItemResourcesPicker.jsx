@@ -5,6 +5,7 @@ import PlanItemCustomMaterialForm from "./PlanItemCustomMaterialForm";
 import { getLessonOpenUrl, lessonSubjectLine } from "../lessonCardUtils";
 import { buildLibraryLessonMaterialPayload } from "../planItemAttachments";
 import { fetchInteractives, createTeacherMaterial } from "../../utils/cabinetAuth";
+import { getInteractiveDisplayTitle } from "../interactivesData";
 
 function normalizeList(data) {
   if (Array.isArray(data)) return data;
@@ -260,7 +261,10 @@ export default function PlanItemResourcesPicker({
             <ResourcePickRow
               key={interactive.id}
               icon="interactive"
-              title={interactive.title}
+              title={getInteractiveDisplayTitle({
+                ...interactive,
+                type: interactive.interactive_type || interactive.type,
+              })}
               meta={interactive.interactive_type_label || interactive.interactiveTypeLabel || "Интерактив"}
               attached={interactiveSet.has(interactive.id)}
               disabled={saving}

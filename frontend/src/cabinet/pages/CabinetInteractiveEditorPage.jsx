@@ -1,286 +1,444 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import InteractivePlayer from "../components/InteractivePlayer";
+import InteractiveEditorPreview from "../components/InteractiveEditorPreview";
+import InteractiveEditorSettings from "../components/InteractiveEditorSettings";
+import QuizEditor from "../components/QuizEditor";
+import WheelEditor from "../components/WheelEditor";
 import { CabinetPageShell } from "../CabinetSectionUi";
+import { useInteractiveAppearanceCatalog } from "../interactiveAppearance";
 import {
-  appearancePageClass,
-  appearancePageStyle,
-  resolveInteractiveAppearance,
-  useInteractiveAppearanceCatalog,
-} from "../interactiveAppearance";
-import {
-  ACCESS_OPTIONS,
-  DIFFICULTY_OPTIONS,
-  EXAM_OPTIONS,
   createEmptyInteractive,
   getInteractiveById,
-  getStatusMeta,
-  getTypeMeta,
+  getInteractiveDisplayTitle,
+  isInteractiveTypeAvailable,
   upsertInteractive,
 } from "../interactivesData";
+import {
+  editorTypeSubtitle,
+  reorderList,
+} from "../interactivesEditorUtils";
+import { wheelCanPublish, wheelPublishError } from "../wheelUtils";
 import "../styles/interactives-catalog.css";
 import "../styles/interactive-appearance.css";
-import "../styles/interactive-launch.css";
+import "../styles/interactive-editor.css";
+import "../styles/interactive-wheel.css";
 
-function EditorAccordion({ title, children, defaultOpen = false }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="ix-editor-accordion">
-      <button type="button" className="ix-editor-accordion__head" onClick={() => setOpen((v) => !v)}>
-        <span>{title}</span>
-        <span aria-hidden="true">{open ? "▾" : "▸"}</span>
-      </button>
-      {open ? <div className="ix-editor-accordion__body">{children}</div> : null}
-    </div>
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia(query).matches : false,
   );
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const handler = (e) => setMatches(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [query]);
+  return matches;
 }
 
-function CommonFields({ data, onChange }) {
-  return (
-    <div className="cb-interactive-editor__common">
-      <h2 className="cb-interactive-editor__section-title">Настройки</h2>
-      <div className="ix-editor-compact-grid">
-        <label className="cb-field">
-          <span>Тип</span>
-          <input value={getTypeMeta(data.type).label} readOnly disabled />
-        </label>
-        <label className="cb-field">
-          <span>Предмет</span>
-          <input value={data.subject} onChange={(e) => onChange("subject", e.target.value)} />
-        </label>
-        <label className="cb-field">
-          <span>Экзамен</span>
-          <select value={data.exam} onChange={(e) => onChange("exam", e.target.value)}>
-            {EXAM_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
-          </select>
-        </label>
-        <label className="cb-field">
-          <span>Тема</span>
-          <input value={data.topic} onChange={(e) => onChange("topic", e.target.value)} />
-        </label>
-        <label className="cb-field">
-          <span>Сложность</span>
-          <select value={data.difficulty} onChange={(e) => onChange("difficulty", e.target.value)}>
-            {DIFFICULTY_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
-          </select>
-        </label>
-        <label className="cb-field">
-          <span>Статус</span>
-          <select value={data.status} onChange={(e) => onChange("status", e.target.value)}>
-            <option value="draft">Черновик</option>
-            <option value="published">Опубликован</option>
-          </select>
-        </label>
-        <label className="cb-field">
-          <span>Доступ</span>
-          <select value={data.access} onChange={(e) => onChange("access", e.target.value)}>
-            {ACCESS_OPTIONS.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
-          </select>
-        </label>
-      </div>
-      <EditorAccordion title="Дополнительно">
-        <div className="ix-editor-compact-grid">
-          <label className="cb-field">
-            <span>Подтема</span>
-            <input value={data.subtopic} onChange={(e) => onChange("subtopic", e.target.value)} />
-          </label>
-          <label className="cb-field">
-            <span>№ задания</span>
-            <input value={data.taskNumber} onChange={(e) => onChange("taskNumber", e.target.value)} />
-          </label>
-          <label className="cb-field cb-field--wide">
-            <span>Инструкция для ученика</span>
-            <textarea rows={2} value={data.instruction} onChange={(e) => onChange("instruction", e.target.value)} placeholder="Короткая подсказка перед началом" />
-          </label>
-        </div>
-      </EditorAccordion>
-    </div>
-  );
-}
-
-function FlashcardItem({ card, index, onUpdate, onDuplicate, onRemove, canRemove }) {
-  const [open, setOpen] = useState(!(card.front || card.back));
-  const summary = card.front && card.back
-    ? `${card.front} → ${card.back}`
-    : card.front || card.back || `Карточка ${index + 1}`;
+function EditorItemShell({
+  index,
+  title,
+  summary,
+  hint,
+  open,
+  onToggle,
+  onDuplicate,
+  onRemove,
+  canRemove,
+  onMoveUp,
+  onMoveDown,
+  canMoveUp,
+  canMoveDown,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  dragging,
+  dragOver,
+  isMobile = false,
+  children,
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <div className={`ix-item-card${open ? " ix-item-card--open" : ""}`}>
-      <div className="ix-item-card__head">
-        <button type="button" className="ix-item-card__toggle" onClick={() => setOpen((v) => !v)}>
-          <span aria-hidden="true">{open ? "▾" : "▸"}</span>
-          <span className="ix-item-card__summary">{summary}</span>
-        </button>
-        <div className="cb-session-editor__tools">
-          <button type="button" className="cb-icon-btn" onClick={() => onDuplicate(index)} aria-label="Дублировать">⧉</button>
-          {canRemove ? (
-            <button type="button" className="cb-icon-btn cb-icon-btn--danger" onClick={() => onRemove(index)} aria-label="Удалить">×</button>
+    <div
+      className={[
+        "ix-ed-item",
+        open ? "ix-ed-item--open" : "",
+        dragging ? "ix-ed-item--dragging" : "",
+        dragOver ? "ix-ed-item--over" : "",
+      ].filter(Boolean).join(" ")}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      <div className="ix-ed-item__head">
+        {!isMobile ? (
+          <button
+            type="button"
+            className="ix-ed-item__drag"
+            draggable
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            aria-label="Перетащить"
+          >
+            ⋮⋮
+          </button>
+        ) : null}
+        <button type="button" className="ix-ed-item__toggle" onClick={onToggle}>
+          <span className="ix-ed-item__chevron" aria-hidden="true">{open ? "▾" : "▸"}</span>
+          <span className="ix-ed-item__title">{title}</span>
+          {!open ? (
+            <span className="ix-ed-item__summary">{summary}</span>
           ) : null}
+          {!open && hint ? (
+            <span className="ix-ed-item__hint">{hint}</span>
+          ) : null}
+        </button>
+        <div className="ix-ed-item__tools">
+          {isMobile ? (
+            <div className={`ix-ed-item__menu${menuOpen ? " is-open" : ""}`}>
+              <button type="button" className="ix-ed-icon-btn" onClick={() => setMenuOpen((v) => !v)} aria-label="Меню">⋯</button>
+              {menuOpen ? (
+                <div className="ix-ed-item__menu-pop">
+                  <button type="button" disabled={!canMoveUp} onClick={() => { onMoveUp(); setMenuOpen(false); }}>Выше</button>
+                  <button type="button" disabled={!canMoveDown} onClick={() => { onMoveDown(); setMenuOpen(false); }}>Ниже</button>
+                  <button type="button" onClick={() => { onDuplicate(); setMenuOpen(false); }}>Дублировать</button>
+                  {canRemove ? (
+                    <button type="button" className="danger" onClick={() => { onRemove(); setMenuOpen(false); }}>Удалить</button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              <button type="button" className="ix-ed-icon-btn" onClick={onDuplicate} aria-label="Дублировать">⧉</button>
+              {canRemove ? (
+                <button type="button" className="ix-ed-icon-btn ix-ed-icon-btn--danger" onClick={onRemove} aria-label="Удалить">×</button>
+              ) : null}
+            </>
+          )}
         </div>
       </div>
-      {open ? (
-        <div className="ix-editor-compact-grid">
-          <label className="cb-field">
-            <span>Лицевая сторона</span>
-            <input value={card.front} placeholder="Введите термин" onChange={(e) => onUpdate(index, "front", e.target.value)} />
-          </label>
-          <label className="cb-field">
-            <span>Обратная сторона</span>
-            <input value={card.back} placeholder="Введите ответ" onChange={(e) => onUpdate(index, "back", e.target.value)} />
-          </label>
-          <label className="cb-field">
-            <span>Подсказка</span>
-            <input value={card.hint} placeholder="Подсказка" onChange={(e) => onUpdate(index, "hint", e.target.value)} />
-          </label>
-          <label className="cb-field">
-            <span>Пояснение</span>
-            <input value={card.explanation} placeholder="Пояснение" onChange={(e) => onUpdate(index, "explanation", e.target.value)} />
-          </label>
-        </div>
-      ) : null}
+      {open ? <div className="ix-ed-item__body">{children}</div> : null}
     </div>
   );
 }
 
-function FlashcardsEditor({ data, onCardsChange }) {
+function FlashcardsEditor({ data, onCardsChange, openIndex, setOpenIndex, isMobile }) {
+  const [dragIndex, setDragIndex] = useState(null);
+  const [overIndex, setOverIndex] = useState(null);
+
   const updateCard = (index, field, value) => {
     const cards = [...data.cards];
     cards[index] = { ...cards[index], [field]: value };
     onCardsChange(cards);
   };
 
-  const addCard = () => onCardsChange([...data.cards, { front: "", back: "", hint: "", explanation: "" }]);
+  const addCard = () => {
+    onCardsChange([...data.cards, { front: "", back: "", hint: "", explanation: "" }]);
+    setOpenIndex(data.cards.length);
+  };
+
   const duplicateCard = (index) => {
     const cards = [...data.cards];
     cards.splice(index + 1, 0, { ...cards[index] });
     onCardsChange(cards);
+    setOpenIndex(index + 1);
   };
+
   const removeCard = (index) => {
     if (data.cards.length <= 1) return;
     onCardsChange(data.cards.filter((_, i) => i !== index));
+    setOpenIndex((prev) => (prev >= index ? Math.max(0, prev - 1) : prev));
+  };
+
+  const moveCard = (from, to) => {
+    onCardsChange(reorderList(data.cards, from, to));
+    setOpenIndex(to);
   };
 
   return (
-    <div className="cb-interactive-editor__type">
-      <h2 className="cb-interactive-editor__section-title">Карточки</h2>
-      {data.cards.map((card, index) => (
-        <FlashcardItem
-          key={index}
-          card={card}
-          index={index}
-          onUpdate={updateCard}
-          onDuplicate={duplicateCard}
-          onRemove={removeCard}
-          canRemove={data.cards.length > 1}
-        />
-      ))}
-      <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={addCard}>Добавить</button>
-    </div>
+    <section className="ix-ed-panel ix-ed-panel--work">
+      <header className="ix-ed-panel__head ix-ed-panel__head--row">
+        <div>
+          <h2 className="ix-ed-panel__title">Карточки</h2>
+          <p className="ix-ed-panel__hint">Главный рабочий блок: термины, ответы и пояснения.</p>
+        </div>
+        <button type="button" className="cb-btn cb-btn--primary cb-btn--sm cb-btn--pill" onClick={addCard}>
+          + Добавить
+        </button>
+      </header>
+      <div className="ix-ed-panel__body ix-ed-panel__body--stack">
+        {data.cards.map((card, index) => {
+          const summary = card.front && card.back
+            ? `${card.front} → ${card.back}`
+            : card.front || card.back || "Пустая карточка";
+          const hint = card.hint ? `Подсказка: ${card.hint}` : "";
+          return (
+            <EditorItemShell
+              key={index}
+              index={index}
+              title={`Карточка ${index + 1}`}
+              summary={summary}
+              hint={hint}
+              open={openIndex === index}
+              onToggle={() => setOpenIndex(openIndex === index ? -1 : index)}
+              onDuplicate={() => duplicateCard(index)}
+              onRemove={() => removeCard(index)}
+              canRemove={data.cards.length > 1}
+              onMoveUp={() => moveCard(index, index - 1)}
+              onMoveDown={() => moveCard(index, index + 1)}
+              canMoveUp={index > 0}
+              canMoveDown={index < data.cards.length - 1}
+              dragging={dragIndex === index}
+              dragOver={overIndex === index && dragIndex !== index}
+              onDragStart={(e) => {
+                e.dataTransfer.setData("text/plain", String(index));
+                e.dataTransfer.effectAllowed = "move";
+                setDragIndex(index);
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setOverIndex(index);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const from = Number(e.dataTransfer.getData("text/plain"));
+                moveCard(from, index);
+                setDragIndex(null);
+                setOverIndex(null);
+              }}
+              onDragEnd={() => {
+                setDragIndex(null);
+                setOverIndex(null);
+              }}
+              isMobile={isMobile}
+            >
+              <div className="ix-ed-fields">
+                <label className="ix-ed-field">
+                  <span>Лицевая сторона</span>
+                  <input value={card.front} placeholder="Термин" onChange={(e) => updateCard(index, "front", e.target.value)} />
+                </label>
+                <label className="ix-ed-field">
+                  <span>Обратная сторона</span>
+                  <input value={card.back} placeholder="Ответ" onChange={(e) => updateCard(index, "back", e.target.value)} />
+                </label>
+                <label className="ix-ed-field">
+                  <span>Подсказка</span>
+                  <input value={card.hint} placeholder="Необязательно" onChange={(e) => updateCard(index, "hint", e.target.value)} />
+                </label>
+                <label className="ix-ed-field ix-ed-field--wide">
+                  <span>Пояснение</span>
+                  <input value={card.explanation} placeholder="Необязательно" onChange={(e) => updateCard(index, "explanation", e.target.value)} />
+                </label>
+              </div>
+            </EditorItemShell>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
-function MatchingEditor({ data, onChange, onPairsChange }) {
+function MatchingEditor({ data, onPairsChange, openIndex, setOpenIndex, isMobile }) {
+  const [dragIndex, setDragIndex] = useState(null);
+  const [overIndex, setOverIndex] = useState(null);
+
   const updatePair = (index, field, value) => {
     const pairs = [...data.pairs];
     pairs[index] = { ...pairs[index], [field]: value };
     onPairsChange(pairs);
   };
-  const addPair = () => onPairsChange([...data.pairs, { left: "", right: "", explanation: "" }]);
+
+  const addPair = () => {
+    onPairsChange([...data.pairs, { left: "", right: "", explanation: "" }]);
+    setOpenIndex(data.pairs.length);
+  };
+
   const removePair = (index) => {
     if (data.pairs.length <= 1) return;
     onPairsChange(data.pairs.filter((_, i) => i !== index));
+    setOpenIndex((prev) => (prev >= index ? Math.max(0, prev - 1) : prev));
+  };
+
+  const duplicatePair = (index) => {
+    const pairs = [...data.pairs];
+    pairs.splice(index + 1, 0, { ...pairs[index] });
+    onPairsChange(pairs);
+    setOpenIndex(index + 1);
+  };
+
+  const movePair = (from, to) => {
+    onPairsChange(reorderList(data.pairs, from, to));
+    setOpenIndex(to);
   };
 
   return (
-    <div className="cb-interactive-editor__type">
-      <h2 className="cb-interactive-editor__section-title">Пары</h2>
-      <div className="cb-interactive-editor__toggles">
-        <label className="cb-toggle">
-          <input type="checkbox" checked={data.shufflePairs} onChange={(e) => onChange("shufflePairs", e.target.checked)} />
-          <span>Перемешивать</span>
-        </label>
-        <label className="cb-toggle">
-          <input type="checkbox" checked={data.showResultImmediately} onChange={(e) => onChange("showResultImmediately", e.target.checked)} />
-          <span>Результат сразу</span>
-        </label>
-      </div>
-      {data.pairs.map((pair, index) => (
-        <div key={index} className="ix-item-card">
-          <div className="ix-item-card__head">
-            <span>Пара {index + 1}</span>
-            <button type="button" className="cb-icon-btn cb-icon-btn--danger" onClick={() => removePair(index)} aria-label="Удалить">×</button>
-          </div>
-          <div className="ix-editor-compact-grid">
-            <label className="cb-field">
-              <span>Слева</span>
-              <input value={pair.left} onChange={(e) => updatePair(index, "left", e.target.value)} />
-            </label>
-            <label className="cb-field">
-              <span>Справа</span>
-              <input value={pair.right} onChange={(e) => updatePair(index, "right", e.target.value)} />
-            </label>
-            <label className="cb-field cb-field--wide">
-              <span>Пояснение</span>
-              <input value={pair.explanation} onChange={(e) => updatePair(index, "explanation", e.target.value)} />
-            </label>
-          </div>
+    <section className="ix-ed-panel ix-ed-panel--work">
+      <header className="ix-ed-panel__head ix-ed-panel__head--row">
+        <div>
+          <h2 className="ix-ed-panel__title">Пары</h2>
+          <p className="ix-ed-panel__hint">Сопоставьте понятие и ответ.</p>
         </div>
-      ))}
-      <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={addPair}>Добавить</button>
-    </div>
+        <button type="button" className="cb-btn cb-btn--primary cb-btn--sm cb-btn--pill" onClick={addPair}>
+          + Добавить
+        </button>
+      </header>
+      <div className="ix-ed-panel__body ix-ed-panel__body--stack">
+        {data.pairs.map((pair, index) => {
+          const summary = pair.left && pair.right
+            ? `${pair.left} ↔ ${pair.right}`
+            : pair.left || pair.right || "Пустая пара";
+          return (
+            <EditorItemShell
+              key={index}
+              index={index}
+              title={`Пара ${index + 1}`}
+              summary={summary}
+              open={openIndex === index}
+              onToggle={() => setOpenIndex(openIndex === index ? -1 : index)}
+              onDuplicate={() => duplicatePair(index)}
+              onRemove={() => removePair(index)}
+              canRemove={data.pairs.length > 1}
+              onMoveUp={() => movePair(index, index - 1)}
+              onMoveDown={() => movePair(index, index + 1)}
+              canMoveUp={index > 0}
+              canMoveDown={index < data.pairs.length - 1}
+              dragging={dragIndex === index}
+              dragOver={overIndex === index && dragIndex !== index}
+              onDragStart={(e) => {
+                e.dataTransfer.setData("text/plain", String(index));
+                setDragIndex(index);
+              }}
+              onDragOver={(e) => { e.preventDefault(); setOverIndex(index); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                movePair(Number(e.dataTransfer.getData("text/plain")), index);
+                setDragIndex(null);
+                setOverIndex(null);
+              }}
+              onDragEnd={() => { setDragIndex(null); setOverIndex(null); }}
+              isMobile={isMobile}
+            >
+              <div className="ix-ed-fields">
+                <label className="ix-ed-field">
+                  <span>Слева</span>
+                  <input value={pair.left} onChange={(e) => updatePair(index, "left", e.target.value)} />
+                </label>
+                <label className="ix-ed-field">
+                  <span>Справа</span>
+                  <input value={pair.right} onChange={(e) => updatePair(index, "right", e.target.value)} />
+                </label>
+                <label className="ix-ed-field ix-ed-field--wide">
+                  <span>Пояснение</span>
+                  <input value={pair.explanation} onChange={(e) => updatePair(index, "explanation", e.target.value)} />
+                </label>
+              </div>
+            </EditorItemShell>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
-function SequenceEditor({ data, onChange, onStepsChange }) {
+function SequenceEditor({ data, onStepsChange, openIndex, setOpenIndex, isMobile }) {
+  const [dragIndex, setDragIndex] = useState(null);
+  const [overIndex, setOverIndex] = useState(null);
+
   const updateStep = (index, field, value) => {
     const steps = [...data.steps];
     steps[index] = { ...steps[index], [field]: value };
     if (field === "position") steps[index].position = Number(value) || index + 1;
     onStepsChange(steps);
   };
-  const addStep = () => onStepsChange([...data.steps, { text: "", explanation: "", position: data.steps.length + 1 }]);
+
+  const addStep = () => {
+    onStepsChange([...data.steps, { text: "", explanation: "", position: data.steps.length + 1 }]);
+    setOpenIndex(data.steps.length);
+  };
+
   const removeStep = (index) => {
     if (data.steps.length <= 1) return;
     onStepsChange(data.steps.filter((_, i) => i !== index).map((s, i) => ({ ...s, position: i + 1 })));
+    setOpenIndex((prev) => (prev >= index ? Math.max(0, prev - 1) : prev));
+  };
+
+  const duplicateStep = (index) => {
+    const steps = [...data.steps];
+    steps.splice(index + 1, 0, { ...steps[index], position: index + 2 });
+    onStepsChange(steps.map((s, i) => ({ ...s, position: i + 1 })));
+    setOpenIndex(index + 1);
+  };
+
+  const moveStep = (from, to) => {
+    const next = reorderList(data.steps, from, to).map((s, i) => ({ ...s, position: i + 1 }));
+    onStepsChange(next);
+    setOpenIndex(to);
   };
 
   return (
-    <div className="cb-interactive-editor__type">
-      <h2 className="cb-interactive-editor__section-title">Порядок</h2>
-      <div className="cb-interactive-editor__toggles">
-        <label className="cb-toggle">
-          <input type="checkbox" checked={data.allowMultipleAttempts} onChange={(e) => onChange("allowMultipleAttempts", e.target.checked)} />
-          <span>Несколько попыток</span>
-        </label>
-        <label className="cb-toggle">
-          <input type="checkbox" checked={data.showAnswerOnError} onChange={(e) => onChange("showAnswerOnError", e.target.checked)} />
-          <span>Ответ при ошибке</span>
-        </label>
-      </div>
-      {data.steps.map((step, index) => (
-        <div key={index} className="ix-item-card">
-          <div className="ix-item-card__head">
-            <span>Шаг {index + 1}</span>
-            <button type="button" className="cb-icon-btn cb-icon-btn--danger" onClick={() => removeStep(index)} aria-label="Удалить">×</button>
-          </div>
-          <div className="ix-editor-compact-grid">
-            <label className="cb-field cb-field--wide">
-              <span>Текст</span>
-              <input value={step.text} onChange={(e) => updateStep(index, "text", e.target.value)} />
-            </label>
-            <label className="cb-field">
-              <span>Позиция</span>
-              <input type="number" min={1} value={step.position} onChange={(e) => updateStep(index, "position", e.target.value)} />
-            </label>
-            <label className="cb-field cb-field--wide">
-              <span>Пояснение</span>
-              <input value={step.explanation} onChange={(e) => updateStep(index, "explanation", e.target.value)} />
-            </label>
-          </div>
+    <section className="ix-ed-panel ix-ed-panel--work">
+      <header className="ix-ed-panel__head ix-ed-panel__head--row">
+        <div>
+          <h2 className="ix-ed-panel__title">Порядок</h2>
+          <p className="ix-ed-panel__hint">Шаги, которые ученик расставит по порядку.</p>
         </div>
-      ))}
-      <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={addStep}>Добавить</button>
-    </div>
+        <button type="button" className="cb-btn cb-btn--primary cb-btn--sm cb-btn--pill" onClick={addStep}>
+          + Добавить
+        </button>
+      </header>
+      <div className="ix-ed-panel__body ix-ed-panel__body--stack">
+        {data.steps.map((step, index) => (
+          <EditorItemShell
+            key={index}
+            index={index}
+            title={`Шаг ${index + 1}`}
+            summary={step.text || "Пустой шаг"}
+            open={openIndex === index}
+            onToggle={() => setOpenIndex(openIndex === index ? -1 : index)}
+            onDuplicate={() => duplicateStep(index)}
+            onRemove={() => removeStep(index)}
+            canRemove={data.steps.length > 1}
+            onMoveUp={() => moveStep(index, index - 1)}
+            onMoveDown={() => moveStep(index, index + 1)}
+            canMoveUp={index > 0}
+            canMoveDown={index < data.steps.length - 1}
+            dragging={dragIndex === index}
+            dragOver={overIndex === index && dragIndex !== index}
+            onDragStart={(e) => {
+              e.dataTransfer.setData("text/plain", String(index));
+              setDragIndex(index);
+            }}
+            onDragOver={(e) => { e.preventDefault(); setOverIndex(index); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              moveStep(Number(e.dataTransfer.getData("text/plain")), index);
+              setDragIndex(null);
+              setOverIndex(null);
+            }}
+            onDragEnd={() => { setDragIndex(null); setOverIndex(null); }}
+            isMobile={isMobile}
+          >
+            <div className="ix-ed-fields">
+              <label className="ix-ed-field ix-ed-field--wide">
+                <span>Текст</span>
+                <input value={step.text} onChange={(e) => updateStep(index, "text", e.target.value)} />
+              </label>
+              <label className="ix-ed-field">
+                <span>Позиция</span>
+                <input type="number" min={1} value={step.position} onChange={(e) => updateStep(index, "position", e.target.value)} />
+              </label>
+              <label className="ix-ed-field ix-ed-field--wide">
+                <span>Пояснение</span>
+                <input value={step.explanation} onChange={(e) => updateStep(index, "explanation", e.target.value)} />
+              </label>
+            </div>
+          </EditorItemShell>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -288,13 +446,15 @@ export default function CabinetInteractiveEditorPage() {
   const { type, id } = useParams();
   const navigate = useNavigate();
   const isEdit = Boolean(id);
+  const isMobile = useMediaQuery("(max-width: 768px)");
 
   const initial = useMemo(() => {
     if (isEdit) {
       const existing = getInteractiveById(id);
       return existing ? { ...existing } : null;
     }
-    if (type && ["flashcards", "matching", "sequence"].includes(type)) {
+    if (type && ["flashcards", "matching", "sequence", "quiz", "wheel"].includes(type)) {
+      if (!isInteractiveTypeAvailable(type)) return null;
       return createEmptyInteractive(type);
     }
     return null;
@@ -302,28 +462,41 @@ export default function CabinetInteractiveEditorPage() {
 
   const [data, setData] = useState(initial);
   const [saved, setSaved] = useState(false);
+  const [publishError, setPublishError] = useState("");
+  const [openItemIndex, setOpenItemIndex] = useState(0);
   const { catalog } = useInteractiveAppearanceCatalog();
-  const previewAppearance = useMemo(
-    () => resolveInteractiveAppearance(data, catalog),
-    [data, catalog],
-  );
 
   useEffect(() => {
     setData(initial);
+    setOpenItemIndex(0);
   }, [initial]);
 
   if (!data) {
     return <Navigate to="/cabinet/interactives/new" replace />;
   }
 
-  const statusMeta = getStatusMeta(data.status);
+  const subtitle = editorTypeSubtitle(data.type);
 
   const onChange = (field, value) => {
     setData((prev) => ({ ...prev, [field]: value }));
     setSaved(false);
   };
 
-  const persist = (status) => {
+  const onParamsChange = (params) => {
+    setData((prev) => ({ ...prev, params }));
+    setSaved(false);
+  };
+
+  const handlePublish = () => {
+    if (data.type === "wheel" && !wheelCanPublish(data)) {
+      setPublishError(wheelPublishError(data));
+      return;
+    }
+    setPublishError("");
+    persist("published");
+  };
+
+  const persist = useCallback((status) => {
     const next = {
       ...data,
       status: status || data.status,
@@ -335,90 +508,109 @@ export default function CabinetInteractiveEditorPage() {
     if (!isEdit) {
       navigate(`/cabinet/interactives/${next.id}/edit`, { replace: true });
     }
-  };
+  }, [data, isEdit, navigate]);
 
   const goToLaunch = () => {
     const next = { ...data, updatedAt: new Date().toISOString() };
     upsertInteractive(next);
-    setData(next);
-    if (!isEdit) {
-      navigate(`/cabinet/interactives/${next.id}`, { replace: true });
-    } else {
-      navigate(`/cabinet/interactives/${next.id}`);
-    }
+    navigate(`/cabinet/interactives/${next.id}`);
   };
 
   return (
-    <CabinetPageShell className="cb-section--interactive-editor">
-      <header className="cb-page-header ix-editor-header">
-        <div className="cb-page-header__text">
-          <p className="cb-editor-breadcrumb">
-            <Link to="/cabinet/interactives">Интерактивы</Link>
-            <span> / </span>
-            <span>{isEdit ? "Редактирование" : "Создание"}</span>
-          </p>
-          <div className="ix-editor-header__title-row">
-            <input
-              className="ix-editor-header__title-input"
-              value={data.title}
-              onChange={(e) => onChange("title", e.target.value)}
-              placeholder="Название интерактива"
-            />
-            <span className={`ix-status-badge ix-status-badge--${data.status === "published" ? "success" : data.status === "assigned" ? "info" : "gray"}`}>
-              {statusMeta.label}
-            </span>
+    <CabinetPageShell className="cb-section--interactive-editor ix-ed-page">
+      <header className="ix-ed-topbar">
+        <div className="ix-ed-topbar__left">
+          <Link to="/cabinet/interactives" className="ix-ed-back">← Назад</Link>
+          <div className="ix-ed-topbar__copy">
+            <p className="ix-ed-topbar__title">{getInteractiveDisplayTitle(data)}</p>
+            <p className="ix-ed-topbar__subtitle">
+              Редактор интерактива · {subtitle}
+            </p>
           </div>
         </div>
-        <div className="cb-page-actions">
-          <button type="button" className="cb-btn cb-btn--outline" onClick={goToLaunch}>Предпросмотр</button>
+        <div className="ix-ed-topbar__actions ix-ed-topbar__actions--desktop">
+          <button type="button" className="cb-btn cb-btn--ghost" onClick={goToLaunch}>Предпросмотр</button>
           <button type="button" className="cb-btn cb-btn--outline" onClick={() => persist("draft")}>Сохранить</button>
-          <button type="button" className="cb-btn cb-btn--primary cb-btn--pill" onClick={() => persist("published")}>Опубликовать</button>
+          <button type="button" className="cb-btn cb-btn--primary cb-btn--pill" onClick={handlePublish}>Опубликовать</button>
         </div>
       </header>
 
-      {saved ? <p className="cb-editor-saved" role="status">Сохранено</p> : null}
+      {saved ? <p className="ix-ed-saved" role="status">Сохранено</p> : null}
+      {publishError ? <p className="ix-ed-error" role="alert">{publishError}</p> : null}
 
-      <div className="ix-editor-layout">
-        <div className="ix-editor-layout__form">
-          <CommonFields data={data} onChange={onChange} />
+      <div className="ix-ed-layout">
+        <div className="ix-ed-layout__main">
+          <InteractiveEditorSettings
+            data={data}
+            onChange={onChange}
+            onParamsChange={onParamsChange}
+            typeLocked
+            onPublish={() => persist("published")}
+            onUnpublish={() => persist("draft")}
+          />
+
           {data.type === "flashcards" ? (
-            <FlashcardsEditor data={data} onCardsChange={(cards) => onChange("cards", cards)} />
+            <FlashcardsEditor
+              data={data}
+              onCardsChange={(cards) => onChange("cards", cards)}
+              openIndex={openItemIndex}
+              setOpenIndex={setOpenItemIndex}
+              isMobile={isMobile}
+            />
           ) : null}
           {data.type === "matching" ? (
-            <MatchingEditor data={data} onChange={onChange} onPairsChange={(pairs) => onChange("pairs", pairs)} />
+            <MatchingEditor
+              data={data}
+              onPairsChange={(pairs) => onChange("pairs", pairs)}
+              openIndex={openItemIndex}
+              setOpenIndex={setOpenItemIndex}
+              isMobile={isMobile}
+            />
           ) : null}
           {data.type === "sequence" ? (
-            <SequenceEditor data={data} onChange={onChange} onStepsChange={(steps) => onChange("steps", steps)} />
+            <SequenceEditor
+              data={data}
+              onStepsChange={(steps) => onChange("steps", steps)}
+              openIndex={openItemIndex}
+              setOpenIndex={setOpenItemIndex}
+              isMobile={isMobile}
+            />
+          ) : null}
+          {data.type === "quiz" ? (
+            <QuizEditor
+              data={data}
+              onQuestionsChange={(questions) => onChange("questions", questions)}
+              openIndex={openItemIndex}
+              setOpenIndex={setOpenItemIndex}
+              isMobile={isMobile}
+              EditorItemShell={EditorItemShell}
+            />
+          ) : null}
+          {data.type === "wheel" ? (
+            <WheelEditor
+              data={data}
+              onSegmentsChange={(segments) => onChange("segments", segments)}
+              onSettingsChange={(wheelSettings) => onChange("wheelSettings", wheelSettings)}
+              openIndex={openItemIndex}
+              setOpenIndex={setOpenItemIndex}
+              isMobile={isMobile}
+              EditorItemShell={EditorItemShell}
+            />
+          ) : null}
+
+          {isMobile ? (
+            <InteractiveEditorPreview data={data} catalog={catalog} />
           ) : null}
         </div>
 
-        <aside className="ix-editor-layout__preview">
-          <div className="ix-editor-preview">
-            <div className="ix-editor-preview__head">
-              <h3 className="ix-editor-preview__title">Предпросмотр</h3>
-              <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={goToLaunch}>
-                Открыть
-              </button>
-            </div>
-            <div
-              className={`ix-editor-preview__frame ix-launch-hero ix-launch-hero--playing ${appearancePageClass(previewAppearance)}`}
-              style={{ ...appearancePageStyle(previewAppearance), minHeight: 360 }}
-            >
-              <div className="ix-launch-hero__player">
-                <InteractivePlayer interactive={data} appearance={previewAppearance} playing />
-              </div>
-            </div>
-          </div>
-        </aside>
+        {!isMobile ? (
+          <InteractiveEditorPreview data={data} catalog={catalog} />
+        ) : null}
       </div>
 
-      <div className="cb-interactive-editor__footer">
-        <Link to="/cabinet/interactives" className="cb-btn cb-btn--outline">К списку</Link>
-        <div className="cb-interactive-editor__footer-actions">
-          <button type="button" className="cb-btn cb-btn--outline" onClick={goToLaunch}>Предпросмотр</button>
-          <button type="button" className="cb-btn cb-btn--outline" onClick={() => persist("draft")}>Сохранить</button>
-          <button type="button" className="cb-btn cb-btn--primary cb-btn--pill" onClick={() => persist("published")}>Опубликовать</button>
-        </div>
+      <div className="ix-ed-mobile-bar">
+        <button type="button" className="cb-btn cb-btn--outline" onClick={() => persist("draft")}>Сохранить</button>
+        <button type="button" className="cb-btn cb-btn--primary cb-btn--pill" onClick={handlePublish}>Опубликовать</button>
       </div>
     </CabinetPageShell>
   );

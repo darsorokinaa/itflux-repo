@@ -9,6 +9,7 @@ import {
 } from "../interactiveAppearance";
 import { getInteractiveById, canShareInteractive } from "../interactivesData";
 import "../styles/interactive-play.css";
+import "../styles/interactive-wheel.css";
 import "../styles/interactive-appearance.css";
 
 export default function CabinetInteractivePlayPage() {

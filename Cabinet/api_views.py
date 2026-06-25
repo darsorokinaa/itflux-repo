@@ -880,6 +880,13 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         if not uploaded:
             return Response({"error": "file required"}, status=status.HTTP_400_BAD_REQUEST)
 
+        from .upload_validation import UploadValidationError, validate_uploaded_file
+
+        try:
+            validate_uploaded_file(uploaded)
+        except UploadValidationError as exc:
+            return Response({"error": exc.message, "code": exc.code}, status=status.HTTP_400_BAD_REQUEST)
+
         task_number = str(
             request.data.get("task_number") or request.POST.get("task_number") or ""
         ).strip()
