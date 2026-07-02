@@ -14,6 +14,7 @@ import {
   isStudentNavActive,
 } from "./studentNav";
 import "../../styles/cabinet-dashboard.css";
+import "../../styles/cabinet-mobile-system.css";
 import "./styles/student-cabinet.css";
 
 const PAGE_TITLE = "Кабинет ученика — Цифровой поток";

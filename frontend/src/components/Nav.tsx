@@ -1,12 +1,6 @@
 import { type MouseEvent, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { getActiveNavTab, GENERATOR_HASH, NAV_TABS } from "../config/navTabs";
-import {
-  SUMMER_CLUB_NAV_LABEL,
-  SUMMER_CLUB_SEASON_BADGE,
-  SUMMER_CLUB_TAGLINE,
-  SUMMER_CLUB_URL,
-} from "../config/summerClub";
 import { fetchCabinetSession } from "../utils/cabinetAuth";
 
 function LogoMark() {
@@ -171,34 +165,6 @@ export default function Nav() {
             </div>
 
             <CabinetNavButton onNavigate={() => setMenuOpen(false)} />
-
-            {/* Главный CTA шапки — летний IT-клуб в стиле summerclub-лендинга. */}
-            <a
-              href={SUMMER_CLUB_URL}
-              className="summer-club-nav-button"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {SUMMER_CLUB_NAV_LABEL}
-            </a>
-
-            {/* Мобильное меню: отдельная промо-карточка клуба вместо обычной строки. */}
-            <a
-              href={SUMMER_CLUB_URL}
-              className="mobile-summer-club-card"
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setMenuOpen(false)}
-            >
-              <span className="mobile-summer-club-card__badge">{SUMMER_CLUB_SEASON_BADGE}</span>
-              <strong className="mobile-summer-club-card__title">
-                {SUMMER_CLUB_NAV_LABEL}
-              </strong>
-              <p className="mobile-summer-club-card__text">{SUMMER_CLUB_TAGLINE}</p>
-              <span className="mobile-summer-club-card__button" aria-hidden="true">
-                {SUMMER_CLUB_NAV_LABEL}
-              </span>
-            </a>
           </div>
         </div>
       </nav>

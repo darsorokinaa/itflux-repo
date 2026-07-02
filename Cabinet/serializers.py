@@ -662,6 +662,7 @@ class LessonPlanItemEditorSerializer(LessonPlanItemWriteSerializer):
 
 class LessonPlanListSerializer(serializers.ModelSerializer):
     direction_label = serializers.CharField(source="get_direction_display", read_only=True)
+    subject_label = serializers.CharField(source="get_subject_display", read_only=True)
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     progress_percent = serializers.IntegerField(read_only=True)
     items_count = serializers.IntegerField(read_only=True)
@@ -676,6 +677,8 @@ class LessonPlanListSerializer(serializers.ModelSerializer):
             "goal",
             "direction",
             "direction_label",
+            "subject",
+            "subject_label",
             "exam_type",
             "grade",
             "lessons_count",
@@ -700,18 +703,24 @@ class LessonPlanDetailSerializer(LessonPlanListSerializer):
 
 
 class LessonPlanWriteSerializer(serializers.ModelSerializer):
+    is_public = serializers.BooleanField(required=False, write_only=True)
+
     class Meta:
         model = LessonPlan
         fields = [
+            "id",
             "title",
             "description",
             "goal",
             "direction",
+            "subject",
             "exam_type",
             "grade",
             "lessons_count",
             "status",
+            "is_public",
         ]
+        read_only_fields = ["id"]
 
 
 class LessonPlanEnrollmentSerializer(serializers.ModelSerializer):

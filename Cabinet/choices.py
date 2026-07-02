@@ -66,6 +66,12 @@ class PlanStatus(models.TextChoices):
     ARCHIVED = "archived", "В архиве"
 
 
+class PlanSubject(models.TextChoices):
+    INFORMATICS = "informatics", "Информатика"
+    MATH = "math", "Математика"
+    OTHER = "other", "Другое"
+
+
 class EnrollmentStatus(models.TextChoices):
     ACTIVE = "active", "Активно"
     PAUSED = "paused", "На паузе"

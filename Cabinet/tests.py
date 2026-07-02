@@ -170,6 +170,51 @@ class ScheduleServiceTests(TestCase):
         cancelled = ScheduleEvent.objects.filter(series=series, status=ScheduleEvent.Status.CANCELLED).count()
         self.assertEqual(cancelled, len(events))
 
+    def test_cancel_series_sends_single_notification_per_recipient(self):
+        student_user = User.objects.create_user(username="stu_cancel_series", password="pass")
+        student = Student.objects.create(
+            teacher=self.teacher,
+            user=student_user,
+            first_name="Monica",
+            last_name="Geller",
+        )
+        series, events = create_series(
+            teacher=self.teacher,
+            series_data={
+                "title": "Monica Geller",
+                "event_type": "group_lesson",
+                "timezone": "Europe/Moscow",
+                "start_date": self.starts.date(),
+                "start_time": self.starts.time(),
+                "end_time": self.ends.time(),
+                "recurrence_type": "weekly",
+                "recurrence_count": 4,
+                "notify_participants": False,
+            },
+            student_ids=[student.pk],
+            notify=False,
+        )
+        self.assertGreaterEqual(len(events), 2)
+
+        cancel_event_with_scope(events[0], changed_by=self.teacher, scope="series", notify=True)
+
+        notes = list(
+            Notification.objects.filter(
+                recipient_user=student_user,
+                channel=NotificationChannel.IN_APP,
+                title="Занятия отменены",
+            )
+        )
+        self.assertEqual(len(notes), 1)
+        self.assertIn(str(len(events)), notes[0].message)
+
+        teacher_notes = Notification.objects.filter(
+            recipient_user=self.teacher,
+            channel=NotificationChannel.IN_APP,
+            title__icontains="отмен",
+        ).count()
+        self.assertEqual(teacher_notes, 0)
+
     def test_generate_events_no_duplicates(self):
         series, events = create_series(
             teacher=self.teacher,
@@ -563,6 +608,100 @@ class LessonPlanCatalogTests(TestCase):
         self.assertEqual(copied.teacher_id, self.teacher.id)
         self.assertEqual(copied.items.count(), 1)
         self.assertEqual(copied.items.first().title, "Логика")
+
+    def test_teacher_can_duplicate_own_plan(self):
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        response = client.post(f"/api/cabinet/lesson-plans/{self.my_plan.pk}/copy/")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["title"], "Мой черновик (копия)")
+        self.assertEqual(response.data["status"], "draft")
+        copied = LessonPlan.objects.get(pk=response.data["id"])
+        self.assertEqual(copied.teacher_id, self.teacher.id)
+        self.assertNotEqual(copied.pk, self.my_plan.pk)
+
+    def test_teacher_can_delete_own_plan(self):
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        plan_id = self.my_plan.pk
+        response = client.delete(f"/api/cabinet/lesson-plans/{plan_id}/")
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(LessonPlan.objects.filter(pk=plan_id).exists())
+
+    def test_catalog_publisher_can_create_public_plan(self):
+        from rest_framework.test import APIClient
+
+        publisher = User.objects.create_user(
+            username="catalog_publisher",
+            email="dv_sorokina@mail.ru",
+            password="pass",
+        )
+        publisher.profile.role = Profile.Role.TEACHER
+        publisher.profile.save()
+
+        client = APIClient()
+        client.force_login(publisher)
+        response = client.post(
+            "/api/cabinet/lesson-plans/",
+            {
+                "title": "Общий шаблон",
+                "direction": "oge",
+                "status": "draft",
+                "is_public": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        plan = LessonPlan.objects.get(pk=response.data["id"])
+        self.assertIsNone(plan.teacher_id)
+        self.assertEqual(plan.status, "published")
+
+    def test_teacher_can_update_own_published_plan(self):
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        response = client.patch(
+            f"/api/cabinet/lesson-plans/{self.my_published.pk}/",
+            {"title": "Обновлённый опубликованный"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.my_published.refresh_from_db()
+        self.assertEqual(self.my_published.title, "Обновлённый опубликованный")
+        self.assertEqual(self.my_published.status, "published")
+
+    def test_teacher_cannot_update_public_plan_without_publisher_rights(self):
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        response = client.patch(
+            f"/api/cabinet/lesson-plans/{self.public_plan.pk}/",
+            {"title": "Попытка изменить шаблон"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_regular_teacher_cannot_create_public_plan(self):
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        response = client.post(
+            "/api/cabinet/lesson-plans/",
+            {
+                "title": "Чужой шаблон",
+                "direction": "oge",
+                "is_public": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403)
 
 
 class LessonPlanEnrollmentAttachTests(TestCase):
@@ -1052,6 +1191,63 @@ class StudentReleaseTests(TestCase):
         self.event.save(update_fields=["status", "updated_at"])
         StudentReleaseService.release_for_event(self.event)
         self.assertTrue(LessonAssignment.objects.filter(student=self.student).exists())
+
+    def test_homework_options_lists_plan_items(self):
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        response = client.get(f"/api/cabinet/students/{self.student.pk}/homework-options/")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["plan_id"], self.plan.pk)
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["items"][0]["title"], "Логика")
+        self.assertFalse(data["items"][0]["assigned"])
+
+    def test_teacher_can_assign_homework_manually(self):
+        from rest_framework.test import APIClient
+        from Cabinet.models import Homework
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        response = client.post(
+            f"/api/cabinet/students/{self.student.pk}/assign-homework/",
+            {"plan_item_id": self.plan_item.pk},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        homework = Homework.objects.filter(student=self.student, lesson_plan_item=self.plan_item).first()
+        self.assertIsNotNone(homework)
+        self.assertEqual(homework.status, "assigned")
+        self.assertEqual(homework.tasks.count(), 1)
+
+        options = client.get(f"/api/cabinet/students/{self.student.pk}/homework-options/").json()
+        self.assertTrue(options["items"][0]["assigned"])
+
+    def test_teacher_can_assign_custom_homework(self):
+        from rest_framework.test import APIClient
+        from Cabinet.models import Homework
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        response = client.post(
+            f"/api/cabinet/students/{self.student.pk}/assign-homework/",
+            {
+                "title": "Дополнительный вариант",
+                "description": "Решите задачи 1–5",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        homework = Homework.objects.filter(
+            student=self.student,
+            title="Дополнительный вариант",
+            lesson_plan_item__isnull=True,
+        ).first()
+        self.assertIsNotNone(homework)
+        self.assertEqual(homework.status, "assigned")
+        self.assertEqual(homework.tasks.count(), 1)
 
 
 class HomeworkSubmissionApiTests(TestCase):
@@ -1548,7 +1744,7 @@ class ReferralLinkTests(TestCase):
         self.referral.refresh_from_db()
         self.assertEqual(self.referral.registrations_count, 1)
 
-    def test_student_registration_ignores_referral(self):
+    def test_referral_code_forces_teacher_registration(self):
         from django.test import Client
         from Cabinet.models import ReferralLinkRegistration
 
@@ -1566,10 +1762,11 @@ class ReferralLinkTests(TestCase):
         )
         self.assertEqual(response.status_code, 201, response.content)
         data = response.json()
-        self.assertFalse(data.get("referral_applied"))
-        self.assertEqual(ReferralLinkRegistration.objects.count(), 0)
+        self.assertEqual(data["user"]["role"], "teacher")
+        self.assertTrue(data.get("referral_applied"))
+        self.assertEqual(ReferralLinkRegistration.objects.count(), 1)
         self.referral.refresh_from_db()
-        self.assertEqual(self.referral.registrations_count, 0)
+        self.assertEqual(self.referral.registrations_count, 1)
 
 
 class SecurityHardeningTests(TestCase):

@@ -14,6 +14,7 @@ import { CabinetCallProvider } from "./CabinetCallContext";
 import CabinetGlobalSearch from "./components/CabinetGlobalSearch";
 import CabinetNotificationsBell from "./components/CabinetNotificationsBell";
 import "../styles/cabinet-dashboard.css";
+import "../styles/cabinet-mobile-system.css";
 
 const PAGE_TITLE = "Кабинет учителя — Цифровой поток";
 

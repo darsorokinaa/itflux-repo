@@ -2,6 +2,7 @@ from django.db.models import Count, Prefetch, Q
 from django.core.files.storage import default_storage
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -19,6 +20,7 @@ from .choices import (
     SubmissionStatus,
 )
 from .subscription_service import LimitExceeded, SubscriptionLimitService
+from .plan_catalog import can_publish_catalog_lesson_plan
 from .invitations import (
     accept_student_invitation,
     create_student_invitation,
@@ -102,7 +104,7 @@ class TeacherScopedMixin:
 
 
 class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
-    http_method_names = ["get", "put", "patch", "delete", "head", "options"]
+    http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
         qs = Student.objects.filter(teacher=self.get_teacher()).prefetch_related("groups")
@@ -169,6 +171,76 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         student.status = StudentStatus.ARCHIVED
         student.save(update_fields=["status", "updated_at"])
         return Response(StudentDetailSerializer(student).data)
+
+    @action(detail=True, methods=["get"], url_path="homework-options")
+    def homework_options(self, request, pk=None):
+        """Пункты плана с ДЗ, доступные для выдачи ученику."""
+        student = self.get_object()
+        from .student_release import homework_options_for_student
+
+        return Response(homework_options_for_student(teacher=self.get_teacher(), student=student))
+
+    @action(detail=True, methods=["post"], url_path="assign-homework")
+    def assign_homework(self, request, pk=None):
+        """Выдать ДЗ ученику из плана или дополнительное задание."""
+        student = self.get_object()
+        from .student_release import (
+            assign_custom_homework,
+            assign_homework_manually,
+            homework_options_for_student,
+        )
+
+        due_at_raw = request.data.get("due_at")
+        due_at = None
+        if due_at_raw:
+            due_at = parse_datetime(str(due_at_raw))
+            if due_at is None:
+                date_val = parse_date(str(due_at_raw))
+                if date_val:
+                    due_at = timezone.make_aware(
+                        timezone.datetime.combine(date_val, timezone.datetime.min.time().replace(hour=23, minute=59)),
+                        timezone.get_current_timezone(),
+                    )
+            elif timezone.is_naive(due_at):
+                due_at = timezone.make_aware(due_at, timezone.get_current_timezone())
+
+        plan_item_id = request.data.get("plan_item_id")
+        try:
+            if plan_item_id:
+                plan_item = get_object_or_404(
+                    LessonPlanItem.objects.select_related("plan"),
+                    pk=plan_item_id,
+                )
+                options = homework_options_for_student(teacher=self.get_teacher(), student=student)
+                if not options.get("plan_id") or plan_item.plan_id != options["plan_id"]:
+                    return Response(
+                        {"detail": "Пункт не принадлежит плану, назначенному ученику."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                homework = assign_homework_manually(
+                    teacher=self.get_teacher(),
+                    student=student,
+                    plan_item=plan_item,
+                    due_at=due_at,
+                )
+            else:
+                homework = assign_custom_homework(
+                    teacher=self.get_teacher(),
+                    student=student,
+                    title=request.data.get("title"),
+                    description=request.data.get("description", ""),
+                    material_ids=request.data.get("material_ids"),
+                    interactive_ids=request.data.get("interactive_ids"),
+                    due_at=due_at,
+                )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except PermissionError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+
+        from .serializers import HomeworkListSerializer
+
+        return Response(HomeworkListSerializer(homework).data, status=status.HTTP_201_CREATED)
 
 
 class StudentInvitationViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.GenericViewSet):
@@ -388,6 +460,7 @@ def _copy_lesson_plan(source, teacher):
         description=source.description,
         goal=source.goal,
         direction=source.direction,
+        subject=source.subject,
         exam_type=source.exam_type,
         grade=source.grade,
         lessons_count=0,
@@ -456,37 +529,65 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         return LessonPlanListSerializer
 
     def perform_create(self, serializer):
-        serializer.save(teacher=self.get_teacher())
+        is_public = serializer.validated_data.pop("is_public", False)
+        teacher = self.get_teacher()
+        if is_public and not can_publish_catalog_lesson_plan(teacher):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Нет прав на публикацию шаблона в каталог.")
+        if is_public:
+            plan = serializer.save(teacher=None, status=PlanStatus.PUBLISHED)
+        else:
+            plan = serializer.save(teacher=teacher)
+        return plan
+
+    def perform_update(self, serializer):
+        is_public = serializer.validated_data.pop("is_public", None)
+        teacher = self.get_teacher()
+        if is_public is True and not can_publish_catalog_lesson_plan(teacher):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Нет прав на публикацию шаблона в каталог.")
+        plan = serializer.instance
+        if is_public is True:
+            serializer.save(teacher=None, status=PlanStatus.PUBLISHED)
+        elif is_public is False and plan.teacher is None:
+            serializer.save(teacher=teacher, status=PlanStatus.DRAFT)
+        else:
+            serializer.save()
 
     def update(self, request, *args, **kwargs):
         plan = self.get_object()
-        # Нельзя редактировать публичные планы через кабинет учителя
+        publisher = can_publish_catalog_lesson_plan(self.get_teacher())
         if plan.teacher is None:
-            return Response(
-                {"detail": "Публичный план нельзя изменить. Сделайте копию для редактирования."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        if plan.teacher_id != self.get_teacher().id:
+            if not publisher:
+                return Response(
+                    {"detail": "Публичный план нельзя изменить. Сделайте копию для редактирования."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        elif plan.teacher_id != self.get_teacher().id:
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
         plan = self.get_object()
-        if plan.teacher is None or plan.teacher_id != self.get_teacher().id:
+        publisher = can_publish_catalog_lesson_plan(self.get_teacher())
+        if plan.teacher is None:
+            if not publisher:
+                return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
+        elif plan.teacher_id != self.get_teacher().id:
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=["post"], url_path="copy")
     def copy(self, request, pk=None):
-        """Сохранить публичный или чужой план в личный кабинет учителя."""
+        """Скопировать план: свой — дубликат с «(копия)», чужой/публичный — в личный кабинет."""
         source = self.get_object()
         teacher = self.get_teacher()
-        if source.teacher_id == teacher.id:
-            return Response(
-                {"detail": "Это уже ваш план."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         new_plan = _copy_lesson_plan(source, teacher)
+        if source.teacher_id == teacher.id:
+            base_title = (source.title or "").strip() or "План уроков"
+            if not base_title.endswith("(копия)"):
+                new_plan.title = f"{base_title} (копия)"
+                new_plan.save(update_fields=["title", "updated_at"])
         new_plan = self.get_queryset().filter(pk=new_plan.pk).first() or new_plan
         return Response(
             LessonPlanDetailSerializer(new_plan).data,

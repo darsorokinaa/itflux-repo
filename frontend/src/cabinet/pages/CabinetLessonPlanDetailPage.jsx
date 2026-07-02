@@ -10,10 +10,17 @@ import {
   planStatusTone,
   planSubjectLabel,
 } from "../lessonPlansData";
-import { fetchLessonPlan, copyLessonPlan, updateLessonPlan } from "../../utils/cabinetAuth";
+import { canPublishCatalogPlans } from "../planCatalogPublish";
+import {
+  copyLessonPlan,
+  deleteLessonPlan,
+  fetchCabinetSession,
+  fetchLessonPlan,
+  updateLessonPlan,
+} from "../../utils/cabinetAuth";
 
 function LessonPlanItemCard({ item, plan, onOpen }) {
-  const subject = planSubjectLabel(plan.direction);
+  const subject = planSubjectLabel(plan);
   const exam = planExamLabel(plan);
   const meta = [exam, subject].filter(Boolean).join(" · ");
   const materialsCount = item.materials?.length || 0;
@@ -65,8 +72,18 @@ export default function CabinetLessonPlanDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [copying, setCopying] = useState(false);
-  const [copyError, setCopyError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [actionError, setActionError] = useState("");
   const [publishing, setPublishing] = useState(false);
+  const [canPublishCatalog, setCanPublishCatalog] = useState(false);
+
+  useEffect(() => {
+    fetchCabinetSession()
+      .then((data) => {
+        if (data?.user) setCanPublishCatalog(canPublishCatalogPlans(data.user));
+      })
+      .catch(() => {});
+  }, []);
 
   const handleOpen = useCallback((item) => {
     setSelectedItem(item);
@@ -100,25 +117,41 @@ export default function CabinetLessonPlanDetailPage() {
 
   const handleCopyPlan = async () => {
     setCopying(true);
-    setCopyError("");
+    setActionError("");
     try {
       const copied = await copyLessonPlan(planId);
       navigate(`/cabinet/plans/${copied.id}/edit`);
     } catch (err) {
-      setCopyError(err.message || "Не удалось сохранить план");
+      setActionError(err.message || "Не удалось скопировать план");
     } finally {
       setCopying(false);
     }
   };
 
+  const handleDeletePlan = async () => {
+    if (!window.confirm(`Удалить план «${plan?.title || "без названия"}»? Это действие нельзя отменить.`)) {
+      return;
+    }
+    setDeleting(true);
+    setActionError("");
+    try {
+      await deleteLessonPlan(planId);
+      navigate("/cabinet/plans");
+    } catch (err) {
+      setActionError(err.message || "Не удалось удалить план");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handlePublish = async () => {
     setPublishing(true);
-    setCopyError("");
+    setActionError("");
     try {
       await updateLessonPlan(planId, { status: "published" });
       await load();
     } catch (err) {
-      setCopyError(err.message || "Не удалось опубликовать план");
+      setActionError(err.message || "Не удалось опубликовать план");
     } finally {
       setPublishing(false);
     }
@@ -150,33 +183,77 @@ export default function CabinetLessonPlanDetailPage() {
               </div>
             </div>
             {plan.description && <p className="cb-page-sub">{plan.description}</p>}
-            {copyError ? <p className="cb-inline-error" role="alert">{copyError}</p> : null}
+            {plan.isPublic && !canPublishCatalog ? (
+              <p className="cb-plan-detail-hint">
+                Публичный шаблон нельзя менять напрямую — нажмите «Сохранить себе и редактировать»,
+                чтобы создать личную копию. Изменения будут только у вас.
+              </p>
+            ) : null}
+            {actionError ? <p className="cb-inline-error" role="alert">{actionError}</p> : null}
           </div>
           <div className="cb-page-actions">
-            {plan.isPublic ? (
+            {plan.isPublic && !canPublishCatalog ? (
               <button
                 type="button"
                 className="cb-btn cb-btn--primary"
                 onClick={handleCopyPlan}
                 disabled={copying}
               >
-                {copying ? "…" : "Сохранить себе"}
+                {copying ? "…" : "Сохранить себе и редактировать"}
               </button>
+            ) : plan.isPublic && canPublishCatalog ? (
+              <>
+                <Link to={`/cabinet/plans/${planId}/edit`} className="cb-btn cb-btn--outline">
+                  <CabinetIcon name="pencil" /> Изменить
+                </Link>
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--outline"
+                  onClick={handleCopyPlan}
+                  disabled={copying || deleting}
+                >
+                  {copying ? "…" : "Дублировать"}
+                </button>
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--danger"
+                  onClick={handleDeletePlan}
+                  disabled={deleting || copying}
+                >
+                  {deleting ? "…" : "Удалить"}
+                </button>
+              </>
             ) : (
               <>
                 <Link to={`/cabinet/plans/${planId}/edit`} className="cb-btn cb-btn--outline">
                   <CabinetIcon name="pencil" /> Изменить
                 </Link>
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--outline"
+                  onClick={handleCopyPlan}
+                  disabled={copying || deleting}
+                >
+                  {copying ? "…" : "Дублировать"}
+                </button>
                 {plan.status === "draft" ? (
                   <button
                     type="button"
                     className="cb-btn cb-btn--primary"
                     onClick={handlePublish}
-                    disabled={publishing}
+                    disabled={publishing || deleting}
                   >
                     {publishing ? "…" : "Опубликовать"}
                   </button>
                 ) : null}
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--danger"
+                  onClick={handleDeletePlan}
+                  disabled={deleting || copying || publishing}
+                >
+                  {deleting ? "…" : "Удалить"}
+                </button>
               </>
             )}
           </div>
@@ -213,6 +290,7 @@ export default function CabinetLessonPlanDetailPage() {
           <div className="cb-plan-summary">
             <h3 className="cb-plan-summary__title">Сводка</h3>
             <dl className="cb-plan-summary__list">
+              {plan.subjectLabel && <div><dt>Предмет</dt><dd>{plan.subjectLabel}</dd></div>}
               {plan.directionLabel && <div><dt>Направление</dt><dd>{plan.directionLabel}</dd></div>}
               {plan.grade && <div><dt>Класс</dt><dd>{plan.grade}</dd></div>}
               <div><dt>Занятий</dt><dd>{plan.lessonsCount || totalItems}</dd></div>

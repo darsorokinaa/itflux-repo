@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import InteractiveAssignModal from "../components/InteractiveAssignModal";
 import {
@@ -16,14 +16,23 @@ import { useLimitModal } from "../hooks/useLimitModal";
 import {
   SORT_OPTIONS,
   INTERACTIVE_TYPE_LIST,
-  deleteInteractive,
-  duplicateInteractive,
   canAssignInteractive,
   isInteractiveTypeAvailable,
-  loadInteractives,
   sortInteractives,
-  upsertInteractive,
 } from "../interactivesData";
+import {
+  buildInteractiveWritePayload,
+  mapApiInteractiveDetail,
+  mapApiInteractiveListItem,
+  normalizeInteractivesList,
+} from "../interactivesApi";
+import {
+  assignInteractive,
+  createInteractive,
+  deleteInteractiveApi,
+  fetchInteractive,
+  fetchInteractives,
+} from "../../utils/cabinetAuth";
 import "../styles/interactives-catalog.css";
 import "../styles/interactive-launch.css";
 
@@ -31,7 +40,9 @@ export default function CabinetInteractivesPage() {
   const navigate = useNavigate();
   const listRef = useRef(null);
   const [sort, setSort] = useState("updated");
-  const [items, setItems] = useState(() => loadInteractives());
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [showTypeModal, setShowTypeModal] = useState(false);
   const [assignTarget, setAssignTarget] = useState(null);
   const [notice, setNotice] = useState("");
@@ -44,9 +55,23 @@ export default function CabinetInteractivesPage() {
     [items, sort],
   );
 
-  const refresh = useCallback(() => {
-    setItems(loadInteractives());
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const data = await fetchInteractives();
+      setItems(normalizeInteractivesList(data).map(mapApiInteractiveListItem));
+    } catch (err) {
+      setLoadError(err?.message || "Не удалось загрузить интерактивы");
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const handleTypeSelect = (type) => {
     if (!isInteractiveTypeAvailable(type)) {
@@ -65,19 +90,25 @@ export default function CabinetInteractivesPage() {
     navigate(`/cabinet/interactives/new/${type}`);
   };
 
-  const handleAssign = (payload) => {
+  const handleAssign = async (payload) => {
     const item = items.find((i) => i.id === payload.interactiveId);
     if (!item) return;
-    const target = payload.targetType === "student"
-      ? `Ученик: ${payload.targetId}`
-      : `Группа: ${payload.targetId}`;
-    upsertInteractive({
-      ...item,
-      status: "assigned",
-      usedIn: [...(item.usedIn || []), target],
-      updatedAt: new Date().toISOString(),
-    });
-    refresh();
+    try {
+      await assignInteractive(item.id, {
+        student: payload.targetType === "student" ? Number(payload.targetId) : null,
+        group: payload.targetType === "group" ? Number(payload.targetId) : null,
+        due_at: payload.deadline ? `${payload.deadline}T23:59:59` : null,
+        attempts_allowed: payload.attempts === "single" ? 1 : 3,
+        show_result_immediately: payload.showResult !== false,
+        comment: payload.comment || "",
+      });
+      setNotice("Интерактив выдан");
+      window.setTimeout(() => setNotice(""), 2800);
+      await refresh();
+    } catch (err) {
+      setNotice(err?.message || "Не удалось выдать интерактив");
+      window.setTimeout(() => setNotice(""), 3200);
+    }
   };
 
   const scrollToList = () => {
@@ -91,12 +122,17 @@ export default function CabinetInteractivesPage() {
       {upgradeModalProps && <CompactUpgradeModal {...upgradeModalProps} />}
       {notice ? <div className="cb-soon-toast" role="status">{notice}</div> : null}
 
-      <div className="cb-limit-row cb-limit-row--standalone">
+      <div className="cb-limit-row cb-limit-row--standalone ix-page__limit">
         <LimitBadge label="Интерактивы" used={subscription.usage.interactives} limit={subscription.limits.interactives} loading={subscription.loading} />
       </div>
 
-      <section className="ix-section">
-        <h2 className="ix-section__title">Типы</h2>
+      <section className="ix-section ix-section--types" aria-labelledby="ix-types-title">
+        <div className="ix-section__intro">
+          <h2 id="ix-types-title" className="ix-section__title">Типы</h2>
+          <p className="ix-section__sub">
+            Выберите формат задания — каждый тип подходит для своей задачи на уроке.
+          </p>
+        </div>
         <div className="ix-type-grid">
           {INTERACTIVE_TYPE_LIST.map((type) => (
             <InteractiveTypeCard key={type} type={type} onCreate={handleTypeSelect} />
@@ -104,9 +140,14 @@ export default function CabinetInteractivesPage() {
         </div>
       </section>
 
-      <section ref={listRef} className="ix-section">
+      <section ref={listRef} className="ix-section ix-section--mine" aria-labelledby="ix-mine-title">
         <div className="ix-section__head">
-          <h2 className="ix-section__title">Мои интерактивы</h2>
+          <div className="ix-section__intro">
+            <h2 id="ix-mine-title" className="ix-section__title">Мои интерактивы</h2>
+            {items.length === 0 && !loading ? (
+              <p className="ix-section__sub">Здесь появятся созданные задания — начните с любого типа выше.</p>
+            ) : null}
+          </div>
           {items.length > 0 ? (
             <button type="button" className="ix-section__link" onClick={scrollToList}>
               Смотреть все
@@ -123,8 +164,15 @@ export default function CabinetInteractivesPage() {
           </div>
         ) : null}
 
-        {items.length === 0 ? (
-          <InteractivesEmptyState onCreate={() => setShowTypeModal(true)} />
+        {loading ? (
+          <p className="cb-loading">Загрузка…</p>
+        ) : loadError ? (
+          <p className="cb-inline-error" role="alert">{loadError}</p>
+        ) : items.length === 0 ? (
+          <InteractivesEmptyState
+            onCreate={() => setShowTypeModal(true)}
+            onQuickCreate={handleTypeSelect}
+          />
         ) : (
           <div className="ix-activity-grid">
             {sorted.map((item) => (
@@ -141,14 +189,27 @@ export default function CabinetInteractivesPage() {
                   }
                   setAssignTarget(item);
                 }}
-                onDuplicate={() => {
-                  const copy = duplicateInteractive(item.id);
-                  if (copy) refresh();
+                onDuplicate={async () => {
+                  try {
+                    const detail = await fetchInteractive(item.id);
+                    const copy = mapApiInteractiveDetail(detail);
+                    copy.title = copy.title ? `${copy.title} (копия)` : "Копия";
+                    copy.status = "draft";
+                    await createInteractive(buildInteractiveWritePayload(copy, "draft"));
+                    await refresh();
+                  } catch (err) {
+                    setNotice(err?.message || "Не удалось создать копию");
+                    window.setTimeout(() => setNotice(""), 3200);
+                  }
                 }}
-                onDelete={() => {
-                  if (window.confirm(`Удалить «${item.title || "интерактив"}»?`)) {
-                    deleteInteractive(item.id);
-                    refresh();
+                onDelete={async () => {
+                  if (!window.confirm(`Удалить «${item.title || "интерактив"}»?`)) return;
+                  try {
+                    await deleteInteractiveApi(item.id);
+                    await refresh();
+                  } catch (err) {
+                    setNotice(err?.message || "Не удалось удалить");
+                    window.setTimeout(() => setNotice(""), 3200);
                   }
                 }}
               />

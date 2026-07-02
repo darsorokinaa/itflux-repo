@@ -70,6 +70,15 @@ CABINET_API_BASE = (
     os.environ.get("CABINET_API_BASE", "").strip().rstrip("/")
     or LK_PUBLIC_URL
 )
+# Email учителей, которые могут публиковать планы в общий каталог «Готовые».
+LESSON_PLAN_CATALOG_PUBLISHER_EMAILS = tuple(
+    email.strip().lower()
+    for email in os.environ.get(
+        "LESSON_PLAN_CATALOG_PUBLISHER_EMAILS",
+        "dv_sorokina@mail.ru",
+    ).split(",")
+    if email.strip()
+)
 # Полный URL страницы после входа (дашборд). Если пусто — кнопка «Личный кабинет» ведёт на LK_PUBLIC_URL.
 # Пример: http://lk.example.com/dashboard или http://lk.example.com/app/
 LK_DASHBOARD_URL = os.environ.get("LK_DASHBOARD_URL", "").strip().rstrip("/")

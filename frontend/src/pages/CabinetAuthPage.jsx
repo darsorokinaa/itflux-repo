@@ -101,18 +101,23 @@ export default function CabinetAuthPage() {
     navigate(target, { replace: true });
   };
 
+  const storedReferralCode = () => {
+    if (referralCode) return referralCode;
+    try {
+      return sessionStorage.getItem("cabinet_referral_code") || "";
+    } catch {
+      return "";
+    }
+  };
+
+  const hasReferralSignup = Boolean(!inviteToken && storedReferralCode());
+
   const authPayload = (payload) => {
     let next = payload;
     if (inviteToken) {
       next = { ...next, invite_token: inviteToken };
     }
-    const ref = referralCode || (() => {
-      try {
-        return sessionStorage.getItem("cabinet_referral_code") || "";
-      } catch {
-        return "";
-      }
-    })();
+    const ref = storedReferralCode();
     if (ref && !inviteToken) {
       next = { ...next, referral_code: ref };
     }
@@ -140,7 +145,7 @@ export default function CabinetAuthPage() {
     try {
       const payload = authPayload({
         ...registerForm,
-        role: inviteToken ? "student" : (referralPreview ? "teacher" : registerForm.role),
+        role: inviteToken ? "student" : (hasReferralSignup || referralPreview ? "teacher" : registerForm.role),
       });
       await registerCabinet(payload);
       try {
@@ -291,8 +296,8 @@ export default function CabinetAuthPage() {
             <label className="cabinet-auth-field">
               <span>Роль</span>
               <select
-                value={inviteToken ? "student" : (referralPreview ? "teacher" : registerForm.role)}
-                disabled={Boolean(inviteToken) || Boolean(referralPreview)}
+                value={inviteToken ? "student" : (hasReferralSignup || referralPreview ? "teacher" : registerForm.role)}
+                disabled={Boolean(inviteToken) || Boolean(referralPreview) || hasReferralSignup}
                 onChange={(e) => setRegisterForm((prev) => ({ ...prev, role: e.target.value }))}
               >
                 {ROLE_OPTIONS.map((opt) => (

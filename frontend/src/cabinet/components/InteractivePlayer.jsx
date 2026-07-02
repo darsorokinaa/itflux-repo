@@ -430,7 +430,12 @@ function SequencePlayer({ steps, shuffle, bare, playing, appearance, onComplete 
   const [done, setDone] = useState(false);
   const studyMode = bare || playing;
 
-  const correctOrder = steps.map((s, i) => s.text || `Шаг ${i + 1}`);
+  const sortedSteps = useMemo(
+    () => [...steps].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+    [steps],
+  );
+
+  const correctOrder = sortedSteps.map((s, i) => s.text || `Шаг ${i + 1}`);
 
   const shuffled = useMemo(() => {
     const items = steps.map((s, i) => ({ id: `s${i}`, text: s.text || `Шаг ${i + 1}` }));

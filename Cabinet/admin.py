@@ -137,8 +137,8 @@ class LessonPlanItemInline(admin.StackedInline):
 
 @admin.register(LessonPlan)
 class LessonPlanAdmin(admin.ModelAdmin):
-    list_display = ("title", "is_public", "teacher", "direction", "grade", "exam_type", "status", "lessons_count", "updated_at")
-    list_filter = ("direction", "exam_type", "status")
+    list_display = ("title", "is_public", "teacher", "subject", "direction", "grade", "exam_type", "status", "lessons_count", "updated_at")
+    list_filter = ("subject", "direction", "exam_type", "status")
     search_fields = ("title", "goal", "teacher__username")
     inlines = [LessonPlanItemInline]
     ordering = ("-updated_at",)
@@ -153,7 +153,7 @@ class LessonPlanAdmin(admin.ModelAdmin):
             "description": "Оставьте «Учитель» пустым, чтобы план был доступен всем учителям.",
         }),
         ("Параметры", {
-            "fields": ("direction", "exam_type", "grade"),
+            "fields": ("subject", "direction", "exam_type", "grade"),
         }),
         ("Описание", {
             "fields": ("goal", "description"),

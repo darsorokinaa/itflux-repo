@@ -10157,6 +10157,15 @@ header.header--themed .theme-toggle > span {
     text-decoration: underline;
 }
 
+.site-footer-link--summer-club {
+    font-weight: 700;
+    color: #b97f47;
+}
+
+.site-footer-link--summer-club:hover {
+    color: #8a541b;
+}
+
 .site-footer-sep {
     color: var(--text-muted, #94a3b8);
     font-size: 0.85rem;

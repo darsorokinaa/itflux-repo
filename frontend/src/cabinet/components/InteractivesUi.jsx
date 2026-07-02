@@ -15,8 +15,8 @@ import {
   getTypeMeta,
   isInteractiveTypeAvailable,
   canAssignInteractive,
+  INTERACTIVE_TYPE_LIST,
 } from "../interactivesData";
-import { CabinetSoonBadge } from "../CabinetSectionUi";
 
 export function TypeCoverArt({ type }) {
   if (type === "flashcards") {
@@ -110,30 +110,41 @@ export function InteractivesHero({ onCreate, onTemplates }) {
 export function InteractiveTypeCard({ type, onCreate, compact = false }) {
   const meta = INTERACTIVE_TYPES[type];
   const available = isInteractiveTypeAvailable(type);
+
   return (
-    <article className={`ix-type-card ix-type-card--${meta.accent}${compact ? " ix-type-card--compact" : ""}${available ? "" : " ix-type-card--soon"}`}>
-      <div className={`ix-type-card__cover ix-cover-theme ix-cover-theme--${meta.coverTheme}`}>
-        <div className="ix-cover-theme__icon">
-          <CabinetIcon name={meta.icon} />
-        </div>
-      </div>
+    <article
+      className={[
+        "ix-type-card",
+        `ix-type-card--${meta.accent}`,
+        compact ? "ix-type-card--compact" : "",
+        available ? "ix-type-card--active" : "ix-type-card--soon",
+      ].filter(Boolean).join(" ")}
+    >
+      <div className="ix-type-card__accent" aria-hidden="true" />
       <div className="ix-type-card__body">
-        <div className="ix-type-card__headline">
+        <header className="ix-type-card__head">
           <div className={`ix-type-card__icon ix-type-card__icon--${meta.accent}`}>
             <CabinetIcon name={meta.icon} />
           </div>
-          {!available ? <CabinetSoonBadge /> : null}
-        </div>
+          {!available ? (
+            <span className="ix-type-card__soon-badge">Скоро</span>
+          ) : null}
+        </header>
+
         <h3 className="ix-type-card__title">{meta.label}</h3>
         <p className="ix-type-card__desc">{meta.description}</p>
-        <button
-          type="button"
-          className={`ix-type-card__btn ix-type-card__btn--${meta.accent}`}
-          disabled={!available}
-          onClick={() => available && onCreate(type)}
-        >
-          {available ? meta.createLabel : "скоро"}
-        </button>
+
+        {available ? (
+          <button
+            type="button"
+            className={`ix-type-card__btn ix-type-card__btn--${meta.accent}`}
+            onClick={() => onCreate(type)}
+          >
+            {meta.createLabel}
+          </button>
+        ) : (
+          <p className="ix-type-card__muted">Формат в разработке</p>
+        )}
       </div>
     </article>
   );
@@ -349,25 +360,59 @@ export function InteractiveActivityCard({
   );
 }
 
-export function InteractivesEmptyState({ onCreate, onTemplates }) {
+export function InteractivesEmptyState({ onCreate, onQuickCreate, onTemplates }) {
+  const quickTypes = INTERACTIVE_TYPE_LIST.filter(isInteractiveTypeAvailable);
+
   return (
-    <div className="ix-empty">
-      <div className="ix-empty__icon" aria-hidden="true">
-        <CabinetIcon name="interactives" />
-      </div>
-      <h3 className="ix-empty__title">Интерактивов пока нет</h3>
-      <p className="ix-empty__text">
-        Создайте первое задание — карточки, сопоставление, порядок или викторина.
-      </p>
-      <div className="ix-empty__actions">
-        <button type="button" className="cb-btn cb-btn--primary cb-btn--pill" onClick={onCreate}>
-          Создать
-        </button>
-        {onTemplates ? (
-          <button type="button" className="cb-btn cb-btn--outline" onClick={onTemplates}>
-            Шаблоны
-          </button>
+    <div className="ix-empty ix-empty--rich">
+      <div className="ix-empty__panel">
+        <div className="ix-empty__icon" aria-hidden="true">
+          <CabinetIcon name="interactives" />
+        </div>
+        <h3 className="ix-empty__title">Создайте первый интерактив</h3>
+        <p className="ix-empty__text">
+          Интерактивы помогают закрепить материал: карточки для терминов,
+          викторина для проверки, порядок шагов для алгоритмов.
+        </p>
+
+        <ol className="ix-empty__steps">
+          <li>Выберите тип задания</li>
+          <li>Добавьте вопросы или пары</li>
+          <li>Опубликуйте и выдайте ученикам</li>
+        </ol>
+
+        {quickTypes.length > 0 ? (
+          <div className="ix-empty__quick">
+            <span className="ix-empty__quick-label">Быстрый старт</span>
+            <div className="ix-empty__quick-list">
+              {quickTypes.map((type) => {
+                const meta = INTERACTIVE_TYPES[type];
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    className={`ix-empty__quick-chip ix-empty__quick-chip--${meta.accent}`}
+                    onClick={() => (onQuickCreate ? onQuickCreate(type) : onCreate())}
+                  >
+                    <CabinetIcon name={meta.icon} />
+                    {meta.shortLabel || meta.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         ) : null}
+
+        <div className="ix-empty__actions">
+          <button type="button" className="ix-empty__cta" onClick={onCreate}>
+            Создать интерактив
+          </button>
+          {onTemplates ? (
+            <button type="button" className="ix-empty__cta ix-empty__cta--ghost" onClick={onTemplates}>
+              Шаблоны
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   );

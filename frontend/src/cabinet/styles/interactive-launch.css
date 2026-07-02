@@ -1185,12 +1185,13 @@
   .ix-launch-mobile-bar {
     display: flex;
     position: sticky;
-    bottom: 0;
-    z-index: 20;
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    z-index: 1190;
     gap: 8px;
-    padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px));
-    margin-top: 4px;
-    background: linear-gradient(180deg, rgba(244, 247, 251, 0), #F4F7FB 24%);
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+    margin: 4px -14px 0;
+    background: rgba(244, 247, 251, 0.98);
+    border-top: 1px solid #E2E8F0;
   }
 
   .ix-launch-mobile-bar .cb-btn {

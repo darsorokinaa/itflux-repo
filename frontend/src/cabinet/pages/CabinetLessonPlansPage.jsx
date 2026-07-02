@@ -15,7 +15,7 @@ import {
   mapApiPlan,
   mapPlanToHomeworkCard,
 } from "../lessonPlansData";
-import { copyLessonPlan, fetchLessonPlans } from "../../utils/cabinetAuth";
+import { copyLessonPlan, deleteLessonPlan, fetchLessonPlans } from "../../utils/cabinetAuth";
 
 export default function CabinetLessonPlansPage() {
   const navigate = useNavigate();
@@ -24,6 +24,7 @@ export default function CabinetLessonPlansPage() {
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [copyingId, setCopyingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -58,7 +59,7 @@ export default function CabinetLessonPlansPage() {
 
   const handleOpenPlan = (item) => {
     const planId = item.plan?.id || item.id;
-    if (scope === "mine" && item.plan?.status === "draft") {
+    if (scope === "mine") {
       navigate(`/cabinet/plans/${planId}/edit`);
       return;
     }
@@ -73,9 +74,27 @@ export default function CabinetLessonPlansPage() {
       const copied = await copyLessonPlan(planId);
       navigate(`/cabinet/plans/${copied.id}/edit`);
     } catch (err) {
-      setError(err.message || "Не удалось сохранить план");
+      setError(err.message || "Не удалось скопировать план");
     } finally {
       setCopyingId(null);
+    }
+  };
+
+  const handleDeletePlan = async (item) => {
+    const planId = item.plan?.id || item.id;
+    const title = item.title || item.plan?.title || "без названия";
+    if (!window.confirm(`Удалить план «${title}»? Это действие нельзя отменить.`)) {
+      return;
+    }
+    setDeletingId(planId);
+    setError("");
+    try {
+      await deleteLessonPlan(planId);
+      await load();
+    } catch (err) {
+      setError(err.message || "Не удалось удалить план");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -116,29 +135,43 @@ export default function CabinetLessonPlansPage() {
         />
       ) : (
         <div className="cb-hw-grid">
-          {visible.map((item) => (
-            <CabinetHomeworkCard
-              key={item.id}
-              deadlineLabel={item.deadlineLabel}
-              deadlineTone={item.deadlineTone}
-              subject={item.subject}
-              title={item.title}
-              description={item.description}
-              progressLabel={item.progressLabel}
-              progressPercent={item.progressPercent}
-              progressTone={item.progressTone}
-              hideProgressBar={item.hideProgressBar}
-              actionLabel={copyingId === item.id ? "…" : item.actionLabel}
-              actionPrimary={item.actionPrimary}
-              secondaryActionLabel={copyingId === item.id ? undefined : item.secondaryActionLabel}
-              onAction={() => handleOpenPlan(item)}
-              onSecondaryAction={
-                item.secondaryActionLabel && copyingId !== item.id
-                  ? () => handleCopyPlan(item)
-                  : undefined
-              }
-            />
-          ))}
+          {visible.map((item) => {
+            const planId = item.plan?.id || item.id;
+            const busy = copyingId === planId || deletingId === planId;
+            const secondaryLabel = scope === "mine"
+              ? "Дублировать"
+              : item.secondaryActionLabel;
+            return (
+              <CabinetHomeworkCard
+                key={item.id}
+                coverVariant={item.coverVariant}
+                deadlineLabel={item.deadlineLabel}
+                deadlineTone={item.deadlineTone}
+                subject={item.subject}
+                title={item.title}
+                description={item.description}
+                progressLabel={item.progressLabel}
+                progressPercent={item.progressPercent}
+                progressTone={item.progressTone}
+                hideProgressBar={item.hideProgressBar}
+                actionLabel={busy ? "…" : item.actionLabel}
+                actionPrimary={item.actionPrimary}
+                secondaryActionLabel={busy ? undefined : secondaryLabel}
+                dangerActionLabel={scope === "mine" && !busy ? "Удалить" : undefined}
+                onAction={() => handleOpenPlan(item)}
+                onSecondaryAction={
+                  secondaryLabel && !busy
+                    ? () => handleCopyPlan(item)
+                    : undefined
+                }
+                onDangerAction={
+                  scope === "mine" && !busy
+                    ? () => handleDeletePlan(item)
+                    : undefined
+                }
+              />
+            );
+          })}
         </div>
       )}
     </CabinetPageShell>

@@ -1,11 +1,37 @@
 import "../styles/cabinet-homework-card.css";
 
-const DEADLINE_TONES = ["default", "today", "overdue", "review", "completed", "draft"];
+const DEADLINE_TONES = ["default", "today", "overdue", "review", "completed", "draft", "info"];
 
 const PROGRESS_TONES = ["default", "overdue", "completed", "review"];
 
-function HomeworkCover({ deadlineLabel, deadlineTone, coverImageUrl, coverBgColor }) {
+export const HW_COVER_VARIANTS = [
+  "ocean",
+  "sunset",
+  "forest",
+  "lavender",
+  "violet",
+  "coral",
+  "mint",
+  "amber",
+  "sky",
+  "rose",
+  "indigo",
+];
+
+/** Стабильный цвет обложки по id / заголовку карточки */
+export function pickCoverVariant(seed, pool = HW_COVER_VARIANTS) {
+  const variants = pool?.length ? pool : HW_COVER_VARIANTS;
+  const str = String(seed ?? "default");
+  let hash = 0;
+  for (let i = 0; i < str.length; i += 1) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+  }
+  return variants[Math.abs(hash) % variants.length];
+}
+
+function HomeworkCover({ deadlineLabel, deadlineTone, coverImageUrl, coverBgColor, coverVariant }) {
   const safeTone = DEADLINE_TONES.includes(deadlineTone) ? deadlineTone : "default";
+  const safeVariant = HW_COVER_VARIANTS.includes(coverVariant) ? coverVariant : "ocean";
   const coverStyle = {};
   if (!coverImageUrl && coverBgColor) {
     coverStyle.background = coverBgColor;
@@ -13,7 +39,7 @@ function HomeworkCover({ deadlineLabel, deadlineTone, coverImageUrl, coverBgColo
 
   return (
     <div
-      className={`cb-hw-cover cb-hw-cover--status-${safeTone}${coverImageUrl ? " cb-hw-cover--image" : ""}`}
+      className={`cb-hw-cover cb-hw-cover--variant-${safeVariant}${coverImageUrl ? " cb-hw-cover--image" : ""}`}
       style={Object.keys(coverStyle).length ? coverStyle : undefined}
     >
       {deadlineLabel ? (
@@ -50,6 +76,7 @@ function HomeworkCoverWaves() {
  * Карточка домашнего задания для личного кабинета учителя.
  *
  * @param {object} props
+ * @param {string} [props.coverVariant] — палитра волн (ocean, sunset, …)
  * @param {'exam'|'python'|'logic'|'general'} [props.coverType]
  * @param {string} props.deadlineLabel — бейдж на обложке
  * @param {'default'|'today'|'overdue'|'review'|'completed'|'draft'} [props.deadlineTone]
@@ -69,8 +96,11 @@ function HomeworkCoverWaves() {
  * @param {() => void} [props.onAction]
  * @param {string} [props.secondaryActionLabel]
  * @param {() => void} [props.onSecondaryAction]
+ * @param {string} [props.dangerActionLabel]
+ * @param {() => void} [props.onDangerAction]
  */
 export default function CabinetHomeworkCard({
+  coverVariant,
   coverType = "general",
   coverImageUrl,
   coverBgColor,
@@ -90,10 +120,13 @@ export default function CabinetHomeworkCard({
   onAction,
   secondaryActionLabel,
   onSecondaryAction,
+  dangerActionLabel,
+  onDangerAction,
 }) {
   const safeDeadline = DEADLINE_TONES.includes(deadlineTone) ? deadlineTone : "default";
   const safeProgress = PROGRESS_TONES.includes(progressTone) ? progressTone : "default";
   const pct = Math.max(0, Math.min(100, progressPercent));
+  const resolvedCoverVariant = coverVariant || pickCoverVariant(title);
 
   return (
     <article className="cb-hw-card">
@@ -102,6 +135,7 @@ export default function CabinetHomeworkCard({
         deadlineTone={safeDeadline}
         coverImageUrl={coverImageUrl}
         coverBgColor={coverBgColor}
+        coverVariant={resolvedCoverVariant}
       />
 
       <div className="cb-hw-card__body">
@@ -152,6 +186,15 @@ export default function CabinetHomeworkCard({
             )}
 
             <div className="cb-hw-card__footer-actions">
+              {dangerActionLabel ? (
+                <button
+                  type="button"
+                  className="cb-hw-card__btn cb-hw-card__btn--danger"
+                  onClick={onDangerAction}
+                >
+                  {dangerActionLabel}
+                </button>
+              ) : null}
               {secondaryActionLabel ? (
                 <button
                   type="button"

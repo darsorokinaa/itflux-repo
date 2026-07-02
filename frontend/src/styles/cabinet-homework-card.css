@@ -24,7 +24,7 @@
   box-shadow: 0 16px 32px rgba(15, 23, 42, 0.10);
 }
 
-/* ---------- Cover — abstract waves (цвет по статусу) ---------- */
+/* ---------- Cover — разноцветные волны по варианту карточки ---------- */
 .cb-hw-cover {
   position: relative;
   height: 96px;
@@ -34,44 +34,82 @@
   background: linear-gradient(145deg, #F8FAFC 0%, #EFF6FF 55%, #DBEAFE 100%);
 }
 
-.cb-hw-cover--status-default .cb-hw-cover__wave--1 path { fill: rgba(37, 99, 235, 0.14); }
-.cb-hw-cover--status-default .cb-hw-cover__wave--2 path { fill: rgba(37, 99, 235, 0.22); }
-.cb-hw-cover--status-default .cb-hw-cover__wave--3 path { fill: rgba(59, 130, 246, 0.1); }
-
-.cb-hw-cover--status-today {
-  background: linear-gradient(145deg, #FFFBEB 0%, #FEF3C7 55%, #FDE68A 100%);
+.cb-hw-cover--variant-ocean {
+  background: linear-gradient(145deg, #EFF6FF 0%, #DBEAFE 52%, #93C5FD 100%);
 }
-.cb-hw-cover--status-today .cb-hw-cover__wave--1 path { fill: rgba(245, 158, 11, 0.16); }
-.cb-hw-cover--status-today .cb-hw-cover__wave--2 path { fill: rgba(217, 119, 6, 0.22); }
-.cb-hw-cover--status-today .cb-hw-cover__wave--3 path { fill: rgba(251, 191, 36, 0.12); }
+.cb-hw-cover--variant-ocean .cb-hw-cover__wave--1 path { fill: rgba(37, 99, 235, 0.28); }
+.cb-hw-cover--variant-ocean .cb-hw-cover__wave--2 path { fill: rgba(59, 130, 246, 0.38); }
+.cb-hw-cover--variant-ocean .cb-hw-cover__wave--3 path { fill: rgba(96, 165, 250, 0.22); }
 
-.cb-hw-cover--status-review {
-  background: linear-gradient(145deg, #FFF7ED 0%, #FFEDD5 55%, #FED7AA 100%);
+.cb-hw-cover--variant-sunset {
+  background: linear-gradient(145deg, #FFF7ED 0%, #FFEDD5 52%, #FDBA74 100%);
 }
-.cb-hw-cover--status-review .cb-hw-cover__wave--1 path { fill: rgba(245, 158, 11, 0.15); }
-.cb-hw-cover--status-review .cb-hw-cover__wave--2 path { fill: rgba(234, 88, 12, 0.2); }
-.cb-hw-cover--status-review .cb-hw-cover__wave--3 path { fill: rgba(251, 146, 60, 0.11); }
+.cb-hw-cover--variant-sunset .cb-hw-cover__wave--1 path { fill: rgba(249, 115, 22, 0.26); }
+.cb-hw-cover--variant-sunset .cb-hw-cover__wave--2 path { fill: rgba(234, 88, 12, 0.36); }
+.cb-hw-cover--variant-sunset .cb-hw-cover__wave--3 path { fill: rgba(251, 146, 60, 0.24); }
 
-.cb-hw-cover--status-overdue {
-  background: linear-gradient(145deg, #FEF2F2 0%, #FEE2E2 55%, #FECACA 100%);
+.cb-hw-cover--variant-forest {
+  background: linear-gradient(145deg, #ECFDF5 0%, #A7F3D0 52%, #6EE7B7 100%);
 }
-.cb-hw-cover--status-overdue .cb-hw-cover__wave--1 path { fill: rgba(239, 68, 68, 0.14); }
-.cb-hw-cover--status-overdue .cb-hw-cover__wave--2 path { fill: rgba(220, 38, 38, 0.2); }
-.cb-hw-cover--status-overdue .cb-hw-cover__wave--3 path { fill: rgba(248, 113, 113, 0.1); }
+.cb-hw-cover--variant-forest .cb-hw-cover__wave--1 path { fill: rgba(16, 185, 129, 0.26); }
+.cb-hw-cover--variant-forest .cb-hw-cover__wave--2 path { fill: rgba(5, 150, 105, 0.34); }
+.cb-hw-cover--variant-forest .cb-hw-cover__wave--3 path { fill: rgba(52, 211, 153, 0.22); }
 
-.cb-hw-cover--status-completed {
-  background: linear-gradient(145deg, #ECFDF5 0%, #D1FAE5 55%, #A7F3D0 100%);
+.cb-hw-cover--variant-lavender {
+  background: linear-gradient(145deg, #FAF5FF 0%, #E9D5FF 52%, #C4B5FD 100%);
 }
-.cb-hw-cover--status-completed .cb-hw-cover__wave--1 path { fill: rgba(16, 185, 129, 0.14); }
-.cb-hw-cover--status-completed .cb-hw-cover__wave--2 path { fill: rgba(5, 150, 105, 0.2); }
-.cb-hw-cover--status-completed .cb-hw-cover__wave--3 path { fill: rgba(52, 211, 153, 0.1); }
+.cb-hw-cover--variant-lavender .cb-hw-cover__wave--1 path { fill: rgba(139, 92, 246, 0.26); }
+.cb-hw-cover--variant-lavender .cb-hw-cover__wave--2 path { fill: rgba(124, 58, 237, 0.34); }
+.cb-hw-cover--variant-lavender .cb-hw-cover__wave--3 path { fill: rgba(167, 139, 250, 0.22); }
 
-.cb-hw-cover--status-draft {
-  background: linear-gradient(145deg, #F8FAFC 0%, #F1F5F9 55%, #E2E8F0 100%);
+.cb-hw-cover--variant-violet {
+  background: linear-gradient(145deg, #F5F3FF 0%, #DDD6FE 52%, #A78BFA 100%);
 }
-.cb-hw-cover--status-draft .cb-hw-cover__wave--1 path { fill: rgba(100, 116, 139, 0.12); }
-.cb-hw-cover--status-draft .cb-hw-cover__wave--2 path { fill: rgba(148, 163, 184, 0.18); }
-.cb-hw-cover--status-draft .cb-hw-cover__wave--3 path { fill: rgba(203, 213, 225, 0.14); }
+.cb-hw-cover--variant-violet .cb-hw-cover__wave--1 path { fill: rgba(109, 40, 217, 0.24); }
+.cb-hw-cover--variant-violet .cb-hw-cover__wave--2 path { fill: rgba(91, 33, 182, 0.32); }
+.cb-hw-cover--variant-violet .cb-hw-cover__wave--3 path { fill: rgba(139, 92, 246, 0.2); }
+
+.cb-hw-cover--variant-coral {
+  background: linear-gradient(145deg, #FFF1F2 0%, #FECDD3 52%, #FDA4AF 100%);
+}
+.cb-hw-cover--variant-coral .cb-hw-cover__wave--1 path { fill: rgba(244, 63, 94, 0.24); }
+.cb-hw-cover--variant-coral .cb-hw-cover__wave--2 path { fill: rgba(225, 29, 72, 0.32); }
+.cb-hw-cover--variant-coral .cb-hw-cover__wave--3 path { fill: rgba(251, 113, 133, 0.2); }
+
+.cb-hw-cover--variant-mint {
+  background: linear-gradient(145deg, #F0FDFA 0%, #99F6E4 52%, #5EEAD4 100%);
+}
+.cb-hw-cover--variant-mint .cb-hw-cover__wave--1 path { fill: rgba(20, 184, 166, 0.24); }
+.cb-hw-cover--variant-mint .cb-hw-cover__wave--2 path { fill: rgba(13, 148, 136, 0.32); }
+.cb-hw-cover--variant-mint .cb-hw-cover__wave--3 path { fill: rgba(45, 212, 191, 0.2); }
+
+.cb-hw-cover--variant-amber {
+  background: linear-gradient(145deg, #FFFBEB 0%, #FDE68A 52%, #FBBF24 100%);
+}
+.cb-hw-cover--variant-amber .cb-hw-cover__wave--1 path { fill: rgba(245, 158, 11, 0.26); }
+.cb-hw-cover--variant-amber .cb-hw-cover__wave--2 path { fill: rgba(217, 119, 6, 0.34); }
+.cb-hw-cover--variant-amber .cb-hw-cover__wave--3 path { fill: rgba(251, 191, 36, 0.22); }
+
+.cb-hw-cover--variant-sky {
+  background: linear-gradient(145deg, #F0F9FF 0%, #BAE6FD 52%, #38BDF8 100%);
+}
+.cb-hw-cover--variant-sky .cb-hw-cover__wave--1 path { fill: rgba(14, 165, 233, 0.26); }
+.cb-hw-cover--variant-sky .cb-hw-cover__wave--2 path { fill: rgba(2, 132, 199, 0.34); }
+.cb-hw-cover--variant-sky .cb-hw-cover__wave--3 path { fill: rgba(56, 189, 248, 0.22); }
+
+.cb-hw-cover--variant-rose {
+  background: linear-gradient(145deg, #FDF2F8 0%, #FBCFE8 52%, #F472B6 100%);
+}
+.cb-hw-cover--variant-rose .cb-hw-cover__wave--1 path { fill: rgba(236, 72, 153, 0.24); }
+.cb-hw-cover--variant-rose .cb-hw-cover__wave--2 path { fill: rgba(219, 39, 119, 0.32); }
+.cb-hw-cover--variant-rose .cb-hw-cover__wave--3 path { fill: rgba(244, 114, 182, 0.2); }
+
+.cb-hw-cover--variant-indigo {
+  background: linear-gradient(145deg, #EEF2FF 0%, #C7D2FE 52%, #818CF8 100%);
+}
+.cb-hw-cover--variant-indigo .cb-hw-cover__wave--1 path { fill: rgba(79, 70, 229, 0.26); }
+.cb-hw-cover--variant-indigo .cb-hw-cover__wave--2 path { fill: rgba(67, 56, 202, 0.34); }
+.cb-hw-cover--variant-indigo .cb-hw-cover__wave--3 path { fill: rgba(129, 140, 248, 0.22); }
 
 .cb-hw-cover--image {
   background: #E2E8F0;
@@ -141,6 +179,11 @@
 .cb-hw-cover__badge--draft {
   border-color: #CBD5E1;
   color: #64748B;
+}
+
+.cb-hw-cover__badge--info {
+  border-color: rgba(37, 99, 235, 0.35);
+  color: #2563EB;
 }
 
 /* ---------- Body ---------- */
@@ -262,6 +305,38 @@
   min-width: 0;
 }
 
+/* 2+ кнопки — сетка на всю ширину карточки (планы: Удалить / Дублировать / Редактировать) */
+.cb-hw-card__footer:has(.cb-hw-card__footer-actions .cb-hw-card__btn:nth-child(2)) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.cb-hw-card__footer:has(.cb-hw-card__footer-actions .cb-hw-card__btn:nth-child(2)) .cb-hw-card__footer-spacer {
+  display: none;
+}
+
+.cb-hw-card__footer-actions:has(.cb-hw-card__btn:nth-child(2)) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.cb-hw-card__footer-actions:has(.cb-hw-card__btn:nth-child(2)) .cb-hw-card__btn {
+  flex-shrink: 1;
+  width: 100%;
+  min-width: 0;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cb-hw-card__footer-actions:has(.cb-hw-card__btn:nth-child(3)) .cb-hw-card__btn:last-child {
+  grid-column: 1 / -1;
+}
+
 .cb-hw-avatars {
   display: flex;
   align-items: center;
@@ -339,6 +414,16 @@
   color: #2563EB;
 }
 
+.cb-hw-card__btn--danger {
+  background: #FFFFFF;
+  border: 1px solid #FECACA;
+  color: #DC2626;
+}
+.cb-hw-card__btn--danger:hover {
+  background: #FEF2F2;
+  border-color: #F87171;
+}
+
 /* ---------- Grid helper ---------- */
 .cb-hw-grid {
   display: grid;
@@ -351,9 +436,22 @@
 @media (max-width: 640px) {
   .cb-hw-card {
     max-width: none;
+    width: 100%;
   }
 
   .cb-hw-grid {
     grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .cb-hw-card__actions {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .cb-hw-card__btn {
+    width: 100%;
+    justify-content: center;
+    min-height: 44px;
   }
 }

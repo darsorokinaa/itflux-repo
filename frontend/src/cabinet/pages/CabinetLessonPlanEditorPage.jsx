@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
@@ -11,12 +11,14 @@ import {
   createLessonPlan,
   createScheduleEvent,
   deleteLessonPlanItem,
+  fetchCabinetSession,
   fetchLessonPlan,
   reorderLessonPlanItems,
   updateLessonPlan,
   updateLessonPlanItem,
 } from "../../utils/cabinetAuth";
-import { mapApiMaterial, PLAN_STATUS_LABELS } from "../lessonPlansData";
+import { canPublishCatalogPlans } from "../planCatalogPublish";
+import { mapApiMaterial, PLAN_STATUS_LABELS, PLAN_SUBJECTS, defaultSubjectForDirection, planSubjectLabelFromId } from "../lessonPlansData";
 import { mapApiInteractiveAttachment } from "../planItemAttachments";
 import {
   EMPTY_PLAN_SESSION,
@@ -30,6 +32,7 @@ import {
   sessionLessonAttachmentRows,
   sessionResourceSummary,
 } from "../planEditorSession";
+import { useAutoSave } from "../hooks/useAutoSave";
 
 const PLAN_TYPES = [
   { id: "oge", label: "ОГЭ" },
@@ -41,6 +44,10 @@ const PLAN_TYPES = [
 
 function planTypeLabel(id) {
   return PLAN_TYPES.find((t) => t.id === id)?.label || id;
+}
+
+function planSubjectLabel(id) {
+  return planSubjectLabelFromId(id) || id;
 }
 
 function calculateProgress({ title, sessions }) {
@@ -244,6 +251,7 @@ function PlanEditorSummary({
   progress,
   stats,
   directionLabel,
+  subjectLabel,
   grade,
   saving,
   isNew,
@@ -272,6 +280,7 @@ function PlanEditorSummary({
           <div><dt>Занятий</dt><dd>{stats.sessions}</dd></div>
           <div><dt>Материалов</dt><dd>{stats.materials}</dd></div>
           <div><dt>ДЗ</dt><dd>{stats.homework}</dd></div>
+          <div><dt>Предмет</dt><dd>{subjectLabel}</dd></div>
           <div><dt>Направление</dt><dd>{directionLabel}</dd></div>
           {grade ? <div><dt>Класс</dt><dd>{grade}</dd></div> : null}
         </dl>
@@ -321,6 +330,7 @@ export default function CabinetLessonPlanEditorPage() {
 
   const [title, setTitle] = useState("");
   const [type, setType] = useState("oge");
+  const [subject, setSubject] = useState("informatics");
   const [goal, setGoal] = useState("");
   const [description, setDescription] = useState("");
   const [grade, setGrade] = useState("");
@@ -338,24 +348,51 @@ export default function CabinetLessonPlanEditorPage() {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleDraft, setScheduleDraft] = useState(null);
   const [schedulingFirst, setSchedulingFirst] = useState(false);
+  const [makePublic, setMakePublic] = useState(false);
+  const [canPublishCatalog, setCanPublishCatalog] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [autoSavedAt, setAutoSavedAt] = useState(null);
+  const skipDirtyRef = useRef(false);
+  const hydratedRef = useRef(false);
 
   useEffect(() => {
-    if (isNew) return;
+    let cancelled = false;
+    fetchCabinetSession()
+      .then((data) => {
+        if (!cancelled && data?.user) {
+          setCanPublishCatalog(canPublishCatalogPlans(data.user));
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setSessionReady(true);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!sessionReady || isNew) {
+      if (isNew && sessionReady) setLoadingExisting(false);
+      return;
+    }
     fetchLessonPlan(planId)
       .then((data) => {
-        if (data.is_public) {
+        if (data.is_public && !canPublishCatalog) {
           navigate(`/cabinet/plans/${planId}`, { replace: true });
           return;
         }
         setTitle(data.title || "");
         setType(data.direction || "oge");
+        setSubject(data.subject || defaultSubjectForDirection(data.direction || "oge"));
         setGoal(data.goal || "");
         setDescription(data.description || "");
         setGrade(data.grade || "");
         setPlanStatus(data.status || "draft");
+        setMakePublic(Boolean(data.is_public));
         setExtraOpen(Boolean(data.goal?.trim() || data.description?.trim()));
         if (data.items?.length) {
-          setSessions(data.items.map(mapPlanItemToEditorSession));
+          setSessions(data.items.map((item) => mapApiItemResponseToSession(item)));
           setExpandedIndex(0);
         } else {
           setSessions([{ ...EMPTY_PLAN_SESSION }]);
@@ -364,7 +401,7 @@ export default function CabinetLessonPlanEditorPage() {
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoadingExisting(false));
-  }, [isNew, planId, navigate]);
+  }, [canPublishCatalog, isNew, planId, navigate, sessionReady]);
 
   const progress = useMemo(
     () => calculateProgress({ title, sessions }),
@@ -377,13 +414,15 @@ export default function CabinetLessonPlanEditorPage() {
     id: activePlanId || planId,
     title: title.trim() || "Без названия",
     direction: type,
+    subject,
     grade,
     goal,
     description,
     items: sessions.map((session, index) => editorSessionToPlanItem(session, index + 1)),
-  }), [activePlanId, description, goal, grade, planId, sessions, title, type]);
+  }), [activePlanId, description, goal, grade, planId, sessions, subject, title, type]);
 
   const replaceSession = useCallback((index, nextSession) => {
+    skipDirtyRef.current = true;
     setSessions((prev) => prev.map((s, i) => (i === index ? nextSession : s)));
   }, []);
 
@@ -531,11 +570,13 @@ export default function CabinetLessonPlanEditorPage() {
     const created = await createLessonPlan({
       title: title.trim(),
       direction: type,
+      subject,
       goal,
       description,
       grade,
       lessons_count: sessions.length,
-      status: planStatus || "draft",
+      status: makePublic ? "published" : (planStatus || "draft"),
+      ...(canPublishCatalog ? { is_public: makePublic } : {}),
     });
     const nextId = String(created.id);
     setActivePlanId(nextId);
@@ -543,7 +584,7 @@ export default function CabinetLessonPlanEditorPage() {
       navigate(`/cabinet/plans/${nextId}/edit`, { replace: true });
     }
     return nextId;
-  }, [activePlanId, description, goal, grade, isNew, navigate, planId, planStatus, sessions.length, title, type]);
+  }, [activePlanId, canPublishCatalog, description, goal, grade, isNew, makePublic, navigate, planId, planStatus, sessions.length, subject, title, type]);
 
   const saveSession = useCallback(async (index) => {
     const session = sessions[index];
@@ -696,6 +737,87 @@ export default function CabinetLessonPlanEditorPage() {
     setDragIndex(null);
   }, [dragIndex]);
 
+  useEffect(() => {
+    if (loadingExisting) return;
+    if (!hydratedRef.current) {
+      hydratedRef.current = true;
+      return;
+    }
+    if (skipDirtyRef.current) {
+      skipDirtyRef.current = false;
+      return;
+    }
+    setAutoSavedAt(null);
+  }, [title, type, subject, goal, description, grade, sessions, makePublic, planStatus, loadingExisting]);
+
+  const persistPlanDraft = useCallback(async () => {
+    if (!title.trim() || saving || autoSaving) return false;
+
+    setAutoSaving(true);
+    try {
+      const payload = {
+        title: title.trim(),
+        direction: type,
+        subject,
+        goal,
+        description,
+        grade,
+        lessons_count: sessions.length,
+        status: makePublic ? "published" : (planStatus || "draft"),
+        ...(canPublishCatalog ? { is_public: makePublic } : {}),
+      };
+
+      const targetPlanId = await ensurePlanId();
+      await updateLessonPlan(targetPlanId, payload);
+
+      const nextSessions = [...sessions];
+      const savedItemIds = [];
+      for (let i = 0; i < nextSessions.length; i += 1) {
+        const session = nextSessions[i];
+        if (!session.title.trim()) continue;
+        const itemPayload = buildPlanItemApiPayload(session, i + 1);
+        const data = session.id
+          ? await updateLessonPlanItem(session.id, itemPayload)
+          : await addLessonPlanItem(targetPlanId, itemPayload);
+        nextSessions[i] = mapApiItemResponseToSession(data);
+        savedItemIds.push(data.id);
+      }
+
+      skipDirtyRef.current = true;
+      setSessions(nextSessions);
+      if (savedItemIds.length > 1) {
+        await reorderLessonPlanItems(savedItemIds.map((id, order) => ({ id, order: order + 1 })));
+      }
+      setAutoSavedAt(Date.now());
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setAutoSaving(false);
+    }
+  }, [
+    autoSaving,
+    canPublishCatalog,
+    description,
+    ensurePlanId,
+    goal,
+    grade,
+    makePublic,
+    planStatus,
+    saving,
+    sessions,
+    subject,
+    title,
+    type,
+  ]);
+
+  useAutoSave({
+    enabled: !loadingExisting && Boolean(title.trim()),
+    isDirty: true,
+    isSaving: saving || autoSaving || schedulingFirst,
+    onSave: persistPlanDraft,
+  });
+
   const handleSave = async () => {
     if (!title.trim()) return;
     setSaving(true);
@@ -703,11 +825,13 @@ export default function CabinetLessonPlanEditorPage() {
       const payload = {
         title: title.trim(),
         direction: type,
+        subject,
         goal,
         description,
         grade,
         lessons_count: sessions.length,
-        status: "draft",
+        status: makePublic ? "published" : (planStatus || "draft"),
+        ...(canPublishCatalog ? { is_public: makePublic } : {}),
       };
       let savedPlanId = activePlanId || planId;
 
@@ -740,8 +864,8 @@ export default function CabinetLessonPlanEditorPage() {
         }
       }
       navigate(`/cabinet/plans/${savedPlanId}`);
-    } catch {
-      /* ошибка */
+    } catch (err) {
+      showToast(err?.message || "Не удалось сохранить план");
     } finally {
       setSaving(false);
     }
@@ -778,6 +902,11 @@ export default function CabinetLessonPlanEditorPage() {
           </div>
         </div>
         <div className="cb-pe-header__actions">
+          {autoSaving ? (
+            <span className="cb-pe-header__autosave" role="status">Сохранение…</span>
+          ) : autoSavedAt ? (
+            <span className="cb-pe-header__autosave" role="status">Сохранено автоматически</span>
+          ) : null}
           <button type="button" className="cb-pe-btn cb-pe-btn--ghost" onClick={() => navigate(-1)}>
             Отмена
           </button>
@@ -807,8 +936,25 @@ export default function CabinetLessonPlanEditorPage() {
               </label>
               <div className="cb-pe-params__row">
                 <label className="cb-pe-field">
+                  <span>Предмет</span>
+                  <select value={subject} onChange={(e) => setSubject(e.target.value)}>
+                    {PLAN_SUBJECTS.map((item) => (
+                      <option key={item.id} value={item.id}>{item.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="cb-pe-field">
                   <span>Направление</span>
-                  <select value={type} onChange={(e) => setType(e.target.value)}>
+                  <select
+                    value={type}
+                    onChange={(e) => {
+                      const nextType = e.target.value;
+                      setType(nextType);
+                      setSubject((prev) => (
+                        prev === defaultSubjectForDirection(type) ? defaultSubjectForDirection(nextType) : prev
+                      ));
+                    }}
+                  >
                     {PLAN_TYPES.map((t) => (
                       <option key={t.id} value={t.id}>{t.label}</option>
                     ))}
@@ -819,6 +965,20 @@ export default function CabinetLessonPlanEditorPage() {
                   <input value={grade} onChange={(e) => setGrade(e.target.value)} placeholder="9" />
                 </label>
               </div>
+
+              {canPublishCatalog ? (
+                <label className="cb-pe-field cb-pe-field--wide cb-pe-field--checkbox">
+                  <input
+                    type="checkbox"
+                    checked={makePublic}
+                    onChange={(e) => setMakePublic(e.target.checked)}
+                  />
+                  <span>
+                    <strong>Сделать публичным шаблоном</strong>
+                    <small>План появится в разделе «Готовые» у всех учителей</small>
+                  </span>
+                </label>
+              ) : null}
 
               <div className="cb-pe-accordion">
                 <button
@@ -910,6 +1070,7 @@ export default function CabinetLessonPlanEditorPage() {
           progress={progress}
           stats={stats}
           directionLabel={planTypeLabel(type)}
+          subjectLabel={planSubjectLabel(subject)}
           grade={grade}
           saving={saving}
           isNew={isNew}

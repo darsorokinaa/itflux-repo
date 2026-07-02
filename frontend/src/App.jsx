@@ -176,11 +176,11 @@ function App() {
             <Route path="plans/new" element={<CabinetLessonPlanEditorPage />} />
             <Route path="plans/:planId" element={<CabinetLessonPlanDetailPage />} />
             <Route path="plans/:planId/edit" element={<CabinetLessonPlanEditorPage />} />
+            <Route path="interactives" element={<CabinetInteractivesPage />} />
+            <Route path="interactives/new" element={<CabinetInteractiveCreatePage />} />
             <Route path="interactives/new/:type" element={<CabinetInteractiveEditorPage />} />
             <Route path="interactives/:id/edit" element={<CabinetInteractiveEditorPage />} />
-            <Route path="interactives/new" element={<CabinetInteractiveCreatePage />} />
             <Route path="interactives/:id" element={<CabinetInteractiveDetailPage />} />
-            <Route path="interactives" element={<CabinetInteractivesPage />} />
             <Route path="review/:reviewId" element={<CabinetReviewDetailPage />} />
             <Route path="review" element={<CabinetReviewPage />} />
             <Route path="reports" element={<Navigate to="/cabinet" replace />} />

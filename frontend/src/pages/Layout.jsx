@@ -5,6 +5,7 @@ import {
 } from "../utils/themeStorage";
 import Nav from "../components/Nav";
 import MobileTabBar from "../components/MobileTabBar";
+import { SUMMER_CLUB_NAV_LABEL, SUMMER_CLUB_URL } from "../config/summerClub";
 
 const COOKIE_CONSENT_KEY = "cookie_consent_accepted";
 
@@ -142,6 +143,11 @@ function Layout() {
   const showMobileTabBar =
     !isLessonOrHomeworkContext && !isChromelessPage && !isExamVariantPage && !isCabinetArea;
 
+  const showSiteFooter =
+    !isChromelessPage &&
+    !isLessonOrHomeworkContext &&
+    (!isCabinetArea || pathname === "/cabinet/login");
+
   return (
     <div
       className={`app-shell${isChromelessPage ? " app-shell--lesson-viewer" : ""}${showMobileTabBar ? " app-shell--has-tabbar" : ""}`}
@@ -202,19 +208,19 @@ function Layout() {
         <Outlet />
       </main>
 
-      {!isMarketingHome && !isChromelessPage ? (
+      {showSiteFooter ? (
       <footer className={`site-footer${isLessonOrHomeworkContext ? " site-footer--embed" : ""}`}>
         <div className="site-footer-inner">
           <span className="site-footer-copy">© 2026 Цифровой поток</span>
           {!isLessonOrHomeworkContext && (
           <div className="site-footer-links">
             <a
-              href="https://summerclub.itflux-academy.ru"
-              className="site-footer-link"
+              href={SUMMER_CLUB_URL}
+              className="site-footer-link site-footer-link--summer-club"
               target="_blank"
               rel="noopener noreferrer"
             >
-              Летний IT-клуб
+              {SUMMER_CLUB_NAV_LABEL}
             </a>
             <span className="site-footer-sep" aria-hidden="true">·</span>
             <Link to="/privacy" className="site-footer-link">Политика конфиденциальности</Link>

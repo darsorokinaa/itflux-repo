@@ -3,6 +3,7 @@ ReferralService — реферальные ссылки и бонусная по
 """
 
 import calendar
+import logging
 from typing import Optional
 
 from django.contrib.auth.models import User
@@ -11,6 +12,8 @@ from django.utils import timezone
 
 from .models import Profile, ReferralLink, ReferralLinkRegistration, TariffPlan, TeacherSubscription
 from .subscription_service import SubscriptionLimitService
+
+logger = logging.getLogger(__name__)
 
 
 class ReferralError(Exception):
@@ -98,22 +101,58 @@ class ReferralService:
         }
 
     @staticmethod
+    def registration_started_at(user: User):
+        profile = getattr(user, "profile", None)
+        if profile and profile.reg_date:
+            return profile.reg_date
+        if user.date_joined:
+            return user.date_joined
+        return timezone.now()
+
+    @staticmethod
     @transaction.atomic
-    def grant_subscription(teacher: User, plan: TariffPlan, months: int):
+    def grant_subscription(teacher: User, plan: TariffPlan, months: int, started_at=None):
         sub = SubscriptionLimitService.get_or_create_subscription(teacher)
-        now = timezone.now()
-        base = sub.expires_at if sub.expires_at and sub.expires_at > now else now
-        expires_at = add_months(base, months)
+        base_start = started_at or ReferralService.registration_started_at(teacher)
+        expires_at = add_months(base_start, months)
 
         sub.plan = plan
         sub.status = TeacherSubscription.Status.TRIAL
+        sub.started_at = base_start
         sub.expires_at = expires_at
         sub.auto_renew = False
         sub.billing_period = TeacherSubscription.BillingPeriod.MONTH
         sub.save(update_fields=[
-            "plan", "status", "expires_at", "auto_renew", "billing_period", "updated_at",
+            "plan", "status", "started_at", "expires_at", "auto_renew", "billing_period", "updated_at",
         ])
         return sub, expires_at
+
+    @staticmethod
+    @transaction.atomic
+    def record_registration(user: User, link: ReferralLink, plan: TariffPlan, expires_at, started_at=None):
+        started_at = started_at or ReferralService.registration_started_at(user)
+        registration, created = ReferralLinkRegistration.objects.get_or_create(
+            user=user,
+            defaults={
+                "referral_link": link,
+                "reward_plan": plan,
+                "reward_months": link.reward_months,
+                "expires_at": expires_at,
+            },
+        )
+        if not created:
+            registration.referral_link = link
+            registration.reward_plan = plan
+            registration.reward_months = link.reward_months
+            registration.expires_at = expires_at
+            registration.save(update_fields=[
+                "referral_link", "reward_plan", "reward_months", "expires_at",
+            ])
+        else:
+            ReferralLinkRegistration.objects.filter(pk=registration.pk).update(registered_at=started_at)
+            link.registrations_count = link.registrations_count + 1
+            link.save(update_fields=["registrations_count", "updated_at"])
+        return registration
 
     @staticmethod
     @transaction.atomic
@@ -130,17 +169,11 @@ class ReferralService:
 
         link = ReferralService.validate(code_str)
         plan = ReferralService.resolve_reward_plan(link)
-        sub, expires_at = ReferralService.grant_subscription(user, plan, link.reward_months)
-
-        ReferralLinkRegistration.objects.create(
-            referral_link=link,
-            user=user,
-            reward_plan=plan,
-            reward_months=link.reward_months,
-            expires_at=expires_at,
+        started_at = ReferralService.registration_started_at(user)
+        sub, expires_at = ReferralService.grant_subscription(
+            user, plan, link.reward_months, started_at=started_at,
         )
-        link.registrations_count = link.registrations_count + 1
-        link.save(update_fields=["registrations_count", "updated_at"])
+        ReferralService.record_registration(user, link, plan, expires_at, started_at=started_at)
 
         return {
             "code": link.code,

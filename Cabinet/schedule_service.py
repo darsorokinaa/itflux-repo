@@ -486,7 +486,8 @@ def cancel_event(event, *, changed_by, notify=True, plan_cancel_action=None):
         new_data=event_snapshot(event),
     )
     if notify:
-        NotificationService.notify_event_cancelled(event)
+        skip_user_id = changed_by.pk if changed_by else None
+        NotificationService.notify_event_cancelled(event, skip_user_id=skip_user_id)
     return event
 
 
@@ -516,9 +517,21 @@ def cancel_series(series, *, changed_by, from_date=None, notify=True, plan_cance
         qs = qs.filter(starts_at__date__gte=from_date)
     events = list(qs.order_by("starts_at", "pk"))
     for event in events:
-        cancel_event(event, changed_by=changed_by, notify=notify, plan_cancel_action=plan_cancel_action)
+        cancel_event(
+            event,
+            changed_by=changed_by,
+            notify=False,
+            plan_cancel_action=plan_cancel_action,
+        )
     series.status = SeriesStatus.CANCELLED
     series.save(update_fields=["status", "updated_at"])
+    if notify and events:
+        skip_user_id = changed_by.pk if changed_by else None
+        NotificationService.notify_event_cancelled(
+            events[0],
+            events_count=len(events),
+            skip_user_id=skip_user_id,
+        )
     return events
 
 

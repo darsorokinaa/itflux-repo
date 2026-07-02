@@ -1,3 +1,5 @@
+import { pickCoverVariant } from "./CabinetHomeworkCard";
+
 export const PLAN_FILTERS = [
   { id: "all", label: "Все" },
   { id: "math", label: "Математика" },
@@ -50,6 +52,27 @@ const PLAN_DIRECTION_LABELS = {
   other: "Другое",
 };
 
+export const PLAN_SUBJECTS = [
+  { id: "informatics", label: "Информатика" },
+  { id: "math", label: "Математика" },
+  { id: "other", label: "Другое" },
+];
+
+const PLAN_SUBJECT_LABELS = {
+  informatics: "Информатика",
+  math: "Математика",
+  other: "Другое",
+};
+
+export function planSubjectLabelFromId(subjectId) {
+  return PLAN_SUBJECT_LABELS[subjectId] || "";
+}
+
+export function defaultSubjectForDirection(direction) {
+  if (direction === "school") return "math";
+  return "informatics";
+}
+
 const PLAN_STATUS_TONES = {
   draft: "draft",
   published: "default",
@@ -64,6 +87,8 @@ export function planStatusTone(status) {
 
 export function planSubjectLine(plan) {
   const parts = [];
+  const subject = plan.subjectLabel || planSubjectLabelFromId(plan.subject);
+  if (subject) parts.push(subject);
   const direction = PLAN_DIRECTION_LABELS[plan.direction] || plan.directionLabel;
   if (direction) parts.push(direction);
   if (plan.grade) parts.push(`${plan.grade} класс`);
@@ -84,7 +109,20 @@ export function planProgressLabel(plan) {
     const done = Math.round((total * plan.progressPercent) / 100);
     return `${done} из ${total} занятий`;
   }
-  return `${total} занятий`;
+  return `${total} ${total === 1 ? "занятие" : total >= 2 && total <= 4 ? "занятия" : "занятий"}`;
+}
+
+const PLAN_COVER_VARIANT_POOLS = {
+  oge: ["ocean", "sky", "indigo", "lavender"],
+  ege: ["lavender", "indigo", "violet", "rose"],
+  python: ["mint", "forest", "amber", "sky"],
+  school: ["coral", "sunset", "rose", "amber"],
+  other: ["ocean", "sunset", "forest", "lavender", "coral", "mint", "amber", "sky", "rose", "indigo"],
+};
+
+export function planCoverVariant(plan) {
+  const pool = PLAN_COVER_VARIANT_POOLS[plan?.direction] || PLAN_COVER_VARIANT_POOLS.other;
+  return pickCoverVariant(plan?.id ?? plan?.title, pool);
 }
 
 export function mapPlanToHomeworkCard(plan, options = {}) {
@@ -106,17 +144,22 @@ export function mapPlanToHomeworkCard(plan, options = {}) {
     progressPercent: plan.progressPercent || 0,
     progressTone: plan.progressPercent >= 100 ? "completed" : "default",
     hideProgressBar: isCatalog || !plan.progressPercent,
-    actionLabel: isCatalog
-      ? "Открыть"
-      : (plan.status === "draft" ? "Редактировать" : "Открыть"),
+    actionLabel: isCatalog ? "Открыть" : "Редактировать",
     secondaryActionLabel: isCatalog ? "Сохранить себе" : undefined,
     actionPrimary: true,
+    coverVariant: planCoverVariant(plan),
     plan,
   };
 }
 
-export function planSubjectLabel(direction) {
-  if (direction === "school") return "Математика";
+export function planSubjectLabel(planOrDirection) {
+  if (planOrDirection && typeof planOrDirection === "object") {
+    const explicit = planOrDirection.subjectLabel
+      || planSubjectLabelFromId(planOrDirection.subject);
+    if (explicit) return explicit;
+    return planSubjectLabel(planOrDirection.direction);
+  }
+  if (planOrDirection === "school") return "Математика";
   return "Информатика";
 }
 
@@ -147,6 +190,9 @@ const INFORMATICS_KEYWORDS = /информат|логик|алгоритм|pytho
 const MATH_KEYWORDS = /математ|алгебр|геометр|уравнен|функци|график|теорем|тригоном/i;
 
 function planSubjectKind(plan) {
+  if (plan.subject && plan.subject !== "other") {
+    return plan.subject;
+  }
   const hay = `${plan.title || ""} ${plan.description || ""} ${plan.goal || ""}`;
 
   if (MATH_DIRECTIONS.has(plan.direction) || MATH_KEYWORDS.test(hay)) {
@@ -178,6 +224,8 @@ export function mapApiPlan(plan) {
     goal: plan.goal || "",
     direction: plan.direction,
     directionLabel: plan.direction_label || plan.direction,
+    subject: plan.subject || defaultSubjectForDirection(plan.direction),
+    subjectLabel: plan.subject_label || planSubjectLabelFromId(plan.subject),
     examType: plan.exam_type,
     grade: plan.grade || "",
     lessonsCount: plan.lessons_count || 0,

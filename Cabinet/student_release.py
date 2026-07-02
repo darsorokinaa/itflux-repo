@@ -189,36 +189,28 @@ def ensure_lesson_from_plan_item(plan_item, teacher):
     return _sync_lesson_content(lesson, plan_item)
 
 
-def _sync_homework_tasks(homework, plan_item):
-    order = 0
-    description = (plan_item.homework_description or "").strip()
-    if description:
-        task, created = HomeworkTask.objects.get_or_create(
-            homework=homework,
-            task_type=HomeworkTaskType.TEXT,
-            title="Домашнее задание",
-            defaults={"description": description, "order": order},
-        )
-        if not created and task.description != description:
-            task.description = description
-            task.save(update_fields=["description"])
-        order += 1
+def _material_homework_task_type(material):
+    if material.material_type == "task_set" or (
+        material.external_url and "/variant/" in material.external_url
+    ):
+        return HomeworkTaskType.GENERATED_TASK
+    if material.file:
+        return HomeworkTaskType.FILE
+    return HomeworkTaskType.EXTERNAL_LINK
 
-    for material in plan_item.homework_materials.all():
-        if material.material_type == "task_set" or (
-            material.external_url and "/variant/" in material.external_url
-        ):
-            task_type = HomeworkTaskType.GENERATED_TASK
-        elif material.file:
-            task_type = HomeworkTaskType.FILE
-        else:
-            task_type = HomeworkTaskType.EXTERNAL_LINK
-        if material.file:
-            resource_url = material.file.url
-        elif material.external_url:
-            resource_url = material.external_url.strip()
-        else:
-            resource_url = (material.topic or "").strip()
+
+def _material_resource_url(material):
+    if material.file:
+        return material.file.url
+    if material.external_url:
+        return material.external_url.strip()
+    return (material.topic or "").strip()
+
+
+def _add_material_homework_task(homework, material, order, *, sync_existing=False):
+    task_type = _material_homework_task_type(material)
+    resource_url = _material_resource_url(material)
+    if sync_existing:
         task, created = HomeworkTask.objects.get_or_create(
             homework=homework,
             title=material.title,
@@ -241,9 +233,19 @@ def _sync_homework_tasks(homework, plan_item):
                 updates.append("order")
         if updates:
             task.save(update_fields=updates + ["updated_at"])
-        order += 1
+    else:
+        HomeworkTask.objects.create(
+            homework=homework,
+            title=material.title,
+            task_type=task_type,
+            description=resource_url,
+            order=order,
+        )
+    return order + 1
 
-    for interactive in plan_item.homework_interactives.all():
+
+def _add_interactive_homework_task(homework, interactive, order, *, sync_existing=False):
+    if sync_existing:
         HomeworkTask.objects.get_or_create(
             homework=homework,
             task_type=HomeworkTaskType.INTERACTIVE,
@@ -251,7 +253,37 @@ def _sync_homework_tasks(homework, plan_item):
             title=interactive.title,
             defaults={"order": order},
         )
+    else:
+        HomeworkTask.objects.create(
+            homework=homework,
+            task_type=HomeworkTaskType.INTERACTIVE,
+            interactive=interactive,
+            title=interactive.title,
+            order=order,
+        )
+    return order + 1
+
+
+def _sync_homework_tasks(homework, plan_item):
+    order = 0
+    description = (plan_item.homework_description or "").strip()
+    if description:
+        task, created = HomeworkTask.objects.get_or_create(
+            homework=homework,
+            task_type=HomeworkTaskType.TEXT,
+            title="Домашнее задание",
+            defaults={"description": description, "order": order},
+        )
+        if not created and task.description != description:
+            task.description = description
+            task.save(update_fields=["description"])
         order += 1
+
+    for material in plan_item.homework_materials.all():
+        order = _add_material_homework_task(homework, material, order, sync_existing=True)
+
+    for interactive in plan_item.homework_interactives.all():
+        order = _add_interactive_homework_task(homework, interactive, order, sync_existing=True)
 
 
 def _ensure_interactive_assignment(*, teacher, interactive, student, lesson, plan_item):
@@ -278,6 +310,247 @@ def _ensure_interactive_assignment(*, teacher, interactive, student, lesson, pla
         if updates:
             updates.append("updated_at")
             assignment.save(update_fields=updates)
+
+
+def assign_homework_manually(*, teacher, student, plan_item, due_at=None):
+    """
+    Выдать ДЗ ученику из пункта плана без завершённого занятия в расписании.
+    """
+    plan_item = (
+        LessonPlanItem.objects.select_related("plan", "linked_lesson")
+        .prefetch_related(
+            "homework_materials",
+            "homework_interactives",
+            "attached_interactives",
+        )
+        .get(pk=plan_item.pk)
+    )
+    plan = plan_item.plan
+    if plan.teacher_id and plan.teacher_id != teacher.id:
+        raise PermissionError("Нет доступа к этому пункту плана.")
+
+    if not _plan_item_has_homework(plan_item):
+        raise ValueError("В выбранном занятии нет домашнего задания.")
+
+    lesson = ensure_lesson_from_plan_item(plan_item, teacher)
+
+    homework, hw_created = Homework.objects.get_or_create(
+        teacher=teacher,
+        lesson_plan_item=plan_item,
+        student=student,
+        defaults={
+            "title": f"ДЗ: {plan_item.title}",
+            "description": plan_item.homework_description or "",
+            "lesson": lesson,
+            "status": HomeworkStatus.ASSIGNED,
+            "due_at": due_at,
+        },
+    )
+    if not hw_created:
+        homework.title = f"ДЗ: {plan_item.title}"
+        homework.description = plan_item.homework_description or homework.description
+        homework.lesson = lesson
+        homework.due_at = due_at
+        if homework.status == HomeworkStatus.DRAFT:
+            homework.status = HomeworkStatus.ASSIGNED
+        homework.save(
+            update_fields=[
+                "title",
+                "description",
+                "lesson",
+                "due_at",
+                "status",
+                "updated_at",
+            ]
+        )
+    _sync_homework_tasks(homework, plan_item)
+
+    for interactive in plan_item.attached_interactives.all():
+        _ensure_interactive_assignment(
+            teacher=teacher,
+            interactive=interactive,
+            student=student,
+            lesson=lesson,
+            plan_item=plan_item,
+        )
+    for interactive in plan_item.homework_interactives.all():
+        _ensure_interactive_assignment(
+            teacher=teacher,
+            interactive=interactive,
+            student=student,
+            lesson=lesson,
+            plan_item=plan_item,
+        )
+
+    return homework
+
+
+def assign_custom_homework(
+    *,
+    teacher,
+    student,
+    title,
+    description="",
+    material_ids=None,
+    interactive_ids=None,
+    due_at=None,
+):
+    """Выдать дополнительное ДЗ ученику без привязки к плану."""
+    from .models import Interactive, Material
+
+    title = (title or "").strip()
+    description = (description or "").strip()
+    material_ids = [int(pk) for pk in (material_ids or []) if pk]
+    interactive_ids = [int(pk) for pk in (interactive_ids or []) if pk]
+
+    if not title:
+        raise ValueError("Укажите название задания.")
+
+    if not description and not material_ids and not interactive_ids:
+        raise ValueError("Добавьте описание или материалы к заданию.")
+
+    materials = []
+    if material_ids:
+        materials = list(
+            Material.objects.filter(pk__in=material_ids).filter(
+                Q(is_public=True) | Q(teacher=teacher) | Q(teacher__isnull=True, is_public=True)
+            )
+        )
+        if len(materials) != len(set(material_ids)):
+            raise ValueError("Некоторые материалы недоступны.")
+
+    interactives = []
+    if interactive_ids:
+        interactives = list(
+            Interactive.objects.filter(pk__in=interactive_ids, teacher=teacher).exclude(
+                status=InteractiveStatus.ARCHIVED
+            )
+        )
+        if len(interactives) != len(set(interactive_ids)):
+            raise ValueError("Некоторые интерактивы недоступны.")
+
+    homework = Homework.objects.create(
+        teacher=teacher,
+        student=student,
+        title=title,
+        description=description,
+        status=HomeworkStatus.ASSIGNED,
+        due_at=due_at,
+    )
+
+    order = 0
+    if description:
+        HomeworkTask.objects.create(
+            homework=homework,
+            task_type=HomeworkTaskType.TEXT,
+            title="Домашнее задание",
+            description=description,
+            order=order,
+        )
+        order += 1
+
+    for material in materials:
+        order = _add_material_homework_task(homework, material, order)
+
+    for interactive in interactives:
+        order = _add_interactive_homework_task(homework, interactive, order)
+        _ensure_interactive_assignment(
+            teacher=teacher,
+            interactive=interactive,
+            student=student,
+            lesson=None,
+            plan_item=None,
+        )
+
+    return homework
+
+
+def homework_options_for_student(*, teacher, student):
+    """Пункты плана с ДЗ для выдачи конкретному ученику."""
+    from .choices import EnrollmentStatus, GroupStatus
+    from .models import LessonPlanEnrollment
+
+    enrollment = (
+        LessonPlanEnrollment.objects.filter(
+            teacher=teacher,
+            student=student,
+        )
+        .exclude(status__in=[EnrollmentStatus.CANCELLED, EnrollmentStatus.COMPLETED])
+        .select_related("plan")
+        .order_by("-created_at")
+        .first()
+    )
+    if not enrollment:
+        group_ids = list(
+            student.groups.filter(status=GroupStatus.ACTIVE).values_list("pk", flat=True)
+        )
+        if group_ids:
+            enrollment = (
+                LessonPlanEnrollment.objects.filter(
+                    teacher=teacher,
+                    group_id__in=group_ids,
+                )
+                .exclude(status__in=[EnrollmentStatus.CANCELLED, EnrollmentStatus.COMPLETED])
+                .select_related("plan")
+                .order_by("-created_at")
+                .first()
+            )
+
+    if not enrollment:
+        return {
+            "enrollment_id": None,
+            "plan_id": None,
+            "plan_title": "",
+            "items": [],
+            "allow_custom": True,
+        }
+
+    assigned = {
+        hw.lesson_plan_item_id: hw
+        for hw in Homework.objects.filter(
+            teacher=teacher,
+            student=student,
+            lesson_plan_item__plan=enrollment.plan,
+        ).exclude(status=HomeworkStatus.ARCHIVED)
+    }
+
+    items = []
+    plan_items = (
+        enrollment.plan.items.prefetch_related("homework_materials", "homework_interactives")
+        .order_by("order")
+    )
+    for plan_item in plan_items:
+        if not _plan_item_has_homework(plan_item):
+            continue
+        hw = assigned.get(plan_item.pk)
+        summary = (plan_item.homework_description or "").strip()
+        if not summary:
+            parts = []
+            mat_count = plan_item.homework_materials.count()
+            int_count = plan_item.homework_interactives.count()
+            if mat_count:
+                parts.append(f"{mat_count} материал(ов)")
+            if int_count:
+                parts.append(f"{int_count} интерактив(ов)")
+            summary = ", ".join(parts) if parts else "Домашнее задание"
+        items.append({
+            "id": plan_item.pk,
+            "order": plan_item.order,
+            "title": plan_item.title,
+            "topic": plan_item.topic or "",
+            "homework_summary": summary[:200],
+            "assigned": hw is not None,
+            "homework_id": hw.pk if hw else None,
+            "homework_status": hw.status if hw else None,
+        })
+
+    return {
+        "enrollment_id": enrollment.pk,
+        "plan_id": enrollment.plan_id,
+        "plan_title": enrollment.plan.title,
+        "items": items,
+        "allow_custom": True,
+    }
 
 
 def release_for_student(event, student, plan_item, lesson):

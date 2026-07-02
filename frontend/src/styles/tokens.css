@@ -40,9 +40,13 @@
   --page-gutter: 24px;
   --page-gutter-mobile: 16px;
   --tap-target: 44px;
+  /* Cabinet breakpoints (use same px values in @media queries) */
   --bp-mobile: 480px;
+  --bp-cabinet-mobile: 768px;
+  --bp-cabinet-tablet: 900px;
   --bp-tablet: 768px;
   --bp-laptop: 1024px;
+  --bp-cabinet-desktop: 1200px;
 
   --font-display: "Bounded", system-ui, sans-serif;
   --font-body: "TikTok Sans", "Manrope", "Nunito", system-ui, sans-serif;

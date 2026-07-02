@@ -816,7 +816,7 @@
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .st-layout .cabinet-header {
     padding: 10px 14px;
     min-height: 56px;
@@ -2377,7 +2377,7 @@
    Mobile override for new components
    ============================================================ */
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   /* 4-col student nav */
   .st-mobile-nav,
   .cb-mobile-nav.st-mobile-nav {
@@ -2394,9 +2394,22 @@
     font-size: 1.15rem;
   }
 
-  /* Progress row stays 3 cols on mobile */
+  /* Progress row: 3 compact stats on mobile */
   .st-progress-row {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .st-progress-stat {
+    padding: 10px 6px;
+  }
+
+  .st-progress-stat strong {
+    font-size: 1.15rem;
+  }
+
+  .st-progress-stat span {
+    font-size: 0.58rem;
   }
 
   /* Cards stay full-width column */
@@ -2501,16 +2514,34 @@
   }
 
   .st-progress-row {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 6px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .st-progress-stat {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 14px;
+    text-align: left;
   }
 
   .st-progress-stat strong {
-    font-size: 1.2rem;
+    font-size: 1.25rem;
+  }
+
+  .st-progress-stat span {
+    font-size: 0.72rem;
+    max-width: 55%;
+    text-align: right;
   }
 
   .st-summary-card {
     flex-wrap: wrap;
+  }
+
+  .st-lessons-summary__chips {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -2922,7 +2953,7 @@
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .st-dash-hero {
     flex-direction: column;
     align-items: flex-start;
@@ -3477,6 +3508,17 @@
 
 .st-hw-file-link a:hover {
   text-decoration: underline;
+}
+
+@media (max-width: 900px) {
+  .st-hw-submit--mobile {
+    bottom: calc(64px + env(safe-area-inset-bottom));
+    z-index: 1190;
+  }
+
+  .st-hw-page {
+    padding-bottom: calc(136px + env(safe-area-inset-bottom));
+  }
 }
 
 @media (max-width: 960px) {

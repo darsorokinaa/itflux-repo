@@ -8,16 +8,25 @@ import { CabinetPageShell } from "../CabinetSectionUi";
 import { useInteractiveAppearanceCatalog } from "../interactiveAppearance";
 import {
   createEmptyInteractive,
-  getInteractiveById,
   getInteractiveDisplayTitle,
   isInteractiveTypeAvailable,
-  upsertInteractive,
 } from "../interactivesData";
+import {
+  buildInteractiveWritePayload,
+  mapApiInteractiveDetail,
+} from "../interactivesApi";
+import {
+  createInteractive,
+  fetchInteractive,
+  publishInteractive,
+  updateInteractive,
+} from "../../utils/cabinetAuth";
 import {
   editorTypeSubtitle,
   reorderList,
 } from "../interactivesEditorUtils";
 import { wheelCanPublish, wheelPublishError } from "../wheelUtils";
+import { useAutoSave } from "../hooks/useAutoSave";
 import "../styles/interactives-catalog.css";
 import "../styles/interactive-appearance.css";
 import "../styles/interactive-editor.css";
@@ -448,28 +457,105 @@ export default function CabinetInteractiveEditorPage() {
   const isEdit = Boolean(id);
   const isMobile = useMediaQuery("(max-width: 768px)");
 
-  const initial = useMemo(() => {
-    if (isEdit) {
-      const existing = getInteractiveById(id);
-      return existing ? { ...existing } : null;
-    }
-    if (type && ["flashcards", "matching", "sequence", "quiz", "wheel"].includes(type)) {
-      if (!isInteractiveTypeAvailable(type)) return null;
-      return createEmptyInteractive(type);
-    }
-    return null;
-  }, [id, isEdit, type]);
+  const newInteractive = useMemo(() => {
+    if (isEdit) return null;
+    if (!type || !["flashcards", "matching", "sequence", "quiz", "wheel"].includes(type)) return null;
+    if (!isInteractiveTypeAvailable(type)) return null;
+    return createEmptyInteractive(type);
+  }, [isEdit, type]);
 
-  const [data, setData] = useState(initial);
+  const [data, setData] = useState(newInteractive);
+  const [loading, setLoading] = useState(isEdit);
+  const [loadError, setLoadError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [publishError, setPublishError] = useState("");
   const [openItemIndex, setOpenItemIndex] = useState(0);
   const { catalog } = useInteractiveAppearanceCatalog();
 
   useEffect(() => {
-    setData(initial);
+    let cancelled = false;
+    if (isEdit) {
+      setLoading(true);
+      setLoadError("");
+      fetchInteractive(id)
+        .then((apiData) => {
+          if (!cancelled) {
+            setData(mapApiInteractiveDetail(apiData));
+            setOpenItemIndex(0);
+            setSaved(true);
+          }
+        })
+        .catch((err) => {
+          if (!cancelled) setLoadError(err?.message || "Не удалось загрузить интерактив");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      return () => { cancelled = true; };
+    }
+    setData(newInteractive);
     setOpenItemIndex(0);
-  }, [initial]);
+    setSaved(true);
+    setLoading(false);
+    return undefined;
+  }, [id, isEdit, newInteractive]);
+
+  const persist = useCallback(async (status) => {
+    setSaving(true);
+    setPublishError("");
+    try {
+      const current = data;
+      if (!current) return;
+      const payload = buildInteractiveWritePayload(current, status || current.status);
+      let apiData;
+      if (isEdit && current.id) {
+        if (status === "published") {
+          await updateInteractive(current.id, payload);
+          apiData = await publishInteractive(current.id);
+        } else {
+          apiData = await updateInteractive(current.id, payload);
+        }
+      } else {
+        apiData = await createInteractive(payload);
+      }
+      const next = mapApiInteractiveDetail(apiData);
+      setData(next);
+      setSaved(true);
+      if (!isEdit) {
+        navigate(`/cabinet/interactives/${next.id}/edit`, { replace: true });
+      }
+    } catch (err) {
+      setPublishError(err?.message || "Не удалось сохранить");
+    } finally {
+      setSaving(false);
+    }
+  }, [data, isEdit, navigate]);
+
+  const autoSave = useCallback(async () => {
+    const current = data;
+    if (!current || saving) return;
+    await persist(current.status || "draft");
+  }, [data, persist, saving]);
+
+  useAutoSave({
+    enabled: Boolean(data) && !loading,
+    isDirty: !saved,
+    isSaving: saving,
+    onSave: autoSave,
+  });
+
+  if (loading) {
+    return (
+      <CabinetPageShell className="cb-section--interactive-editor ix-ed-page">
+        <p className="cb-loading">Загрузка…</p>
+      </CabinetPageShell>
+    );
+  }
+
+  if (loadError) {
+    return <Navigate to="/cabinet/interactives" replace state={{ error: loadError }} />;
+  }
 
   if (!data) {
     return <Navigate to="/cabinet/interactives/new" replace />;
@@ -487,33 +573,33 @@ export default function CabinetInteractiveEditorPage() {
     setSaved(false);
   };
 
-  const handlePublish = () => {
+  const handlePublish = async () => {
     if (data.type === "wheel" && !wheelCanPublish(data)) {
       setPublishError(wheelPublishError(data));
       return;
     }
     setPublishError("");
-    persist("published");
+    await persist("published");
   };
 
-  const persist = useCallback((status) => {
-    const next = {
-      ...data,
-      status: status || data.status,
-      updatedAt: new Date().toISOString(),
-    };
-    upsertInteractive(next);
-    setData(next);
-    setSaved(true);
-    if (!isEdit) {
-      navigate(`/cabinet/interactives/${next.id}/edit`, { replace: true });
+  const goToLaunch = async () => {
+    let targetId = isEdit ? data.id : null;
+    if (!targetId) {
+      setSaving(true);
+      try {
+        const apiData = await createInteractive(buildInteractiveWritePayload(data, "draft"));
+        const next = mapApiInteractiveDetail(apiData);
+        setData(next);
+        targetId = next.id;
+        navigate(`/cabinet/interactives/${targetId}/edit`, { replace: true });
+      } catch (err) {
+        setPublishError(err?.message || "Не удалось сохранить");
+        return;
+      } finally {
+        setSaving(false);
+      }
     }
-  }, [data, isEdit, navigate]);
-
-  const goToLaunch = () => {
-    const next = { ...data, updatedAt: new Date().toISOString() };
-    upsertInteractive(next);
-    navigate(`/cabinet/interactives/${next.id}`);
+    navigate(`/cabinet/interactives/${targetId}`);
   };
 
   return (
@@ -529,9 +615,13 @@ export default function CabinetInteractiveEditorPage() {
           </div>
         </div>
         <div className="ix-ed-topbar__actions ix-ed-topbar__actions--desktop">
-          <button type="button" className="cb-btn cb-btn--ghost" onClick={goToLaunch}>Предпросмотр</button>
-          <button type="button" className="cb-btn cb-btn--outline" onClick={() => persist("draft")}>Сохранить</button>
-          <button type="button" className="cb-btn cb-btn--primary cb-btn--pill" onClick={handlePublish}>Опубликовать</button>
+          <button type="button" className="cb-btn cb-btn--ghost" onClick={goToLaunch} disabled={saving}>Предпросмотр</button>
+          <button type="button" className="cb-btn cb-btn--outline" onClick={() => persist("draft")} disabled={saving}>
+            {saving ? "Сохранение…" : "Сохранить"}
+          </button>
+          <button type="button" className="cb-btn cb-btn--primary cb-btn--pill" onClick={handlePublish} disabled={saving}>
+            {saving ? "…" : "Опубликовать"}
+          </button>
         </div>
       </header>
 
@@ -609,8 +699,12 @@ export default function CabinetInteractiveEditorPage() {
       </div>
 
       <div className="ix-ed-mobile-bar">
-        <button type="button" className="cb-btn cb-btn--outline" onClick={() => persist("draft")}>Сохранить</button>
-        <button type="button" className="cb-btn cb-btn--primary cb-btn--pill" onClick={handlePublish}>Опубликовать</button>
+        <button type="button" className="cb-btn cb-btn--outline" onClick={() => persist("draft")} disabled={saving}>
+          {saving ? "…" : "Сохранить"}
+        </button>
+        <button type="button" className="cb-btn cb-btn--primary cb-btn--pill" onClick={handlePublish} disabled={saving}>
+          {saving ? "…" : "Опубликовать"}
+        </button>
       </div>
     </CabinetPageShell>
   );

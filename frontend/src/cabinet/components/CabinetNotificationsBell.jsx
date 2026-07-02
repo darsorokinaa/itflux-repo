@@ -28,7 +28,15 @@ export default function CabinetNotificationsBell({ studentMode = false }) {
     setLoading(true);
     try {
       const data = await fetchNotifications({ student: studentMode });
-      setItems(data?.items || data?.results || []);
+      const raw = data?.items || data?.results || [];
+      const seen = new Set();
+      const deduped = raw.filter((n) => {
+        const key = `${n.id ?? ""}|${n.title}|${n.message}|${(n.created_at || "").slice(0, 16)}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      setItems(deduped);
       setUnread(data?.unread_count ?? data?.count ?? 0);
     } catch {
       setItems([]);

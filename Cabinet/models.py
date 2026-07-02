@@ -25,6 +25,7 @@ from .choices import (
     PlanFormat,
     PlanItemStatus,
     PlanStatus,
+    PlanSubject,
     RecurrenceType,
     ReviewPriority,
     ReviewSourceType,
@@ -483,6 +484,12 @@ class LessonPlan(models.Model):
         max_length=20,
         choices=Direction.choices,
         default=Direction.OTHER,
+    )
+    subject = models.CharField(
+        "Предмет",
+        max_length=20,
+        choices=PlanSubject.choices,
+        default=PlanSubject.INFORMATICS,
     )
     exam_type = models.CharField(
         "Тип экзамена",

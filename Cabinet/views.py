@@ -14,6 +14,7 @@ from django.views.decorators.http import require_http_methods
 
 from .models import Profile, ScheduleEvent
 from .invitations import try_accept_invite_token
+from .plan_catalog import can_publish_catalog_lesson_plan
 from .rate_limit import rate_limit_check, rate_limit_json_response
 from .schedule_events import (
     list_schedule_events,
@@ -50,6 +51,7 @@ def _profile_payload(user):
         "avatar": profile.avatar.url if profile.avatar else None,
         "account_active": profile.account_active,
         "email_confirmed": profile.email_confirmed,
+        "can_publish_catalog_plans": can_publish_catalog_lesson_plan(user),
     }
 
 
@@ -171,6 +173,9 @@ def api_register(request):
     except ValidationError as exc:
         return JsonResponse({"ok": False, "error": " ".join(exc.messages)}, status=400)
 
+    if referral_code and not invite_token:
+        role = Profile.Role.TEACHER
+
     user = User.objects.create_user(username=username, email=email, password=password)
     profile = user.profile
     profile.name = name
@@ -186,7 +191,14 @@ def api_register(request):
         from .referral_service import ReferralError, ReferralService
         try:
             referral_result = ReferralService.apply_on_registration(user, referral_code)
-        except ReferralError:
+        except ReferralError as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Referral not applied for %s (%s): %s",
+                email or username,
+                referral_code,
+                exc.message,
+            )
             referral_result = None
 
     payload = {"ok": True, "user": _profile_payload(user)}

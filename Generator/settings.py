@@ -289,6 +289,15 @@ if _csrf_extra:
 # Cabinet uploads
 CABINET_MAX_UPLOAD_BYTES = int(os.environ.get("CABINET_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
 
+LESSON_PLAN_CATALOG_PUBLISHER_EMAILS = tuple(
+    email.strip().lower()
+    for email in os.environ.get(
+        "LESSON_PLAN_CATALOG_PUBLISHER_EMAILS",
+        "dv_sorokina@mail.ru",
+    ).split(",")
+    if email.strip()
+)
+
 # Cache for rate limiting (LocMem — один процесс; в prod лучше Redis)
 CACHES = {
     "default": {

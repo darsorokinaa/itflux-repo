@@ -92,7 +92,7 @@ def _dispatch_to_user(user, participant, title, message, payload, vk_formatter=N
     return notifications
 
 
-def _notify_all(event, title, message, vk_formatter=None, change_type=None):
+def _notify_all(event, title, message, vk_formatter=None, change_type=None, skip_user_id=None):
     if change_type:
         prefs_check = {
             "created": "notify_lesson_created",
@@ -104,6 +104,8 @@ def _notify_all(event, title, message, vk_formatter=None, change_type=None):
     payload = _event_payload(event)
     all_notes = []
     for user, participant in _iter_recipients(event):
+        if skip_user_id and user.pk == skip_user_id:
+            continue
         if change_type:
             field = prefs_check.get(change_type)
             if field and not getattr(get_or_create_preferences(user), field, True):
@@ -143,15 +145,20 @@ class NotificationService:
         )
 
     @staticmethod
-    def notify_event_cancelled(event):
-        title = "Занятие отменено"
-        message = VKNotificationService.format_lesson_cancelled(event)
+    def notify_event_cancelled(event, *, events_count=1, skip_user_id=None):
+        if events_count > 1:
+            title = "Занятия отменены"
+            message = f'Занятия «{event.title}» отменены ({events_count} шт.).'
+        else:
+            title = "Занятие отменено"
+            message = VKNotificationService.format_lesson_cancelled(event)
         return _notify_all(
             event,
             title,
             message,
-            vk_formatter=lambda: VKNotificationService.format_lesson_cancelled(event),
+            vk_formatter=lambda: message,
             change_type="cancelled",
+            skip_user_id=skip_user_id,
         )
 
     @staticmethod

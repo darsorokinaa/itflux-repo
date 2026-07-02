@@ -1,0 +1,422 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import CabinetIcon from "../CabinetIcons";
+import CabinetModal from "./CabinetModal";
+import PlanItemResourcesPicker from "./PlanItemResourcesPicker";
+import { getInteractiveDisplayTitle } from "../interactivesData";
+import { assignStudentHomework, fetchStudentHomeworkOptions } from "../../utils/cabinetAuth";
+
+function HomeworkPickItem({ item, selected, onSelect, disabled }) {
+  return (
+    <button
+      type="button"
+      className={`cb-attach-item cb-hw-assign-item${selected ? " cb-hw-assign-item--selected" : ""}${disabled ? " cb-attach-item--disabled" : ""}`}
+      onClick={() => !disabled && onSelect(item.id)}
+      disabled={disabled}
+    >
+      <CabinetIcon name="tasks" />
+      <span className="cb-attach-item__body">
+        <span className="cb-attach-item__title">
+          {item.order ? `${item.order}. ` : ""}
+          {item.title}
+        </span>
+        <span className="cb-attach-item__meta">
+          {item.assigned ? "Уже выдано · " : ""}
+          {item.homework_summary}
+        </span>
+      </span>
+      {item.assigned ? (
+        <span className="cb-hw-assign-item__badge">Выдано</span>
+      ) : null}
+    </button>
+  );
+}
+
+function AttachedResourceRow({ icon, title, meta, onRemove, disabled }) {
+  return (
+    <div className="cb-hw-assign-resource">
+      <CabinetIcon name={icon} />
+      <span className="cb-hw-assign-resource__body">
+        <span className="cb-hw-assign-resource__title">{title}</span>
+        {meta ? <span className="cb-hw-assign-resource__meta">{meta}</span> : null}
+      </span>
+      <button
+        type="button"
+        className="cb-hw-assign-resource__remove"
+        onClick={onRemove}
+        disabled={disabled}
+        aria-label="Удалить"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+export default function HomeworkAssignModal({
+  student,
+  enrollment,
+  onClose,
+  onAssigned,
+  onAttachPlan,
+}) {
+  const [options, setOptions] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [mode, setMode] = useState("plan");
+  const [selectedId, setSelectedId] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [customTitle, setCustomTitle] = useState("");
+  const [customDescription, setCustomDescription] = useState("");
+  const [customMaterials, setCustomMaterials] = useState([]);
+  const [customInteractives, setCustomInteractives] = useState([]);
+  const [resourcePickerOpen, setResourcePickerOpen] = useState(false);
+
+  const loadOptions = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await fetchStudentHomeworkOptions(student.id);
+      setOptions(data || null);
+      const first = (data?.items || []).find((item) => !item.assigned) || (data?.items || [])[0];
+      setSelectedId(first ? String(first.id) : "");
+    } catch (err) {
+      setError(err.message || "Не удалось загрузить занятия");
+      setOptions(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [student.id]);
+
+  useEffect(() => {
+    loadOptions();
+  }, [loadOptions]);
+
+  const planTitle = options?.plan_title || enrollment?.planTitle || "";
+  const hasPlan = Boolean(options?.plan_id || enrollment?.planId);
+  const items = options?.items || [];
+  const hasPlanItems = items.length > 0;
+
+  useEffect(() => {
+    if (loading) return;
+    if (hasPlan && hasPlanItems) {
+      setMode("plan");
+    } else {
+      setMode("custom");
+    }
+  }, [loading, hasPlan, hasPlanItems]);
+
+  const customMaterialIds = useMemo(
+    () => customMaterials.map((item) => item.id).filter(Boolean),
+    [customMaterials],
+  );
+  const customInteractiveIds = useMemo(
+    () => customInteractives.map((item) => item.id).filter(Boolean),
+    [customInteractives],
+  );
+
+  const handlePlanSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedId) {
+      setError("Выберите занятие");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      await assignStudentHomework(student.id, {
+        plan_item_id: Number(selectedId),
+        due_at: deadline || undefined,
+      });
+      onAssigned?.();
+      onClose?.();
+    } catch (err) {
+      setError(err.message || "Не удалось выдать ДЗ");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCustomSubmit = async (e) => {
+    e.preventDefault();
+    const title = customTitle.trim();
+    const description = customDescription.trim();
+    if (!title) {
+      setError("Укажите название задания");
+      return;
+    }
+    if (!description && customMaterialIds.length === 0 && customInteractiveIds.length === 0) {
+      setError("Добавьте описание или материалы");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      await assignStudentHomework(student.id, {
+        title,
+        description,
+        material_ids: customMaterialIds,
+        interactive_ids: customInteractiveIds,
+        due_at: deadline || undefined,
+      });
+      onAssigned?.();
+      onClose?.();
+    } catch (err) {
+      setError(err.message || "Не удалось выдать ДЗ");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleAttachMaterial = async (material) => {
+    if (!material?.id) return;
+    setCustomMaterials((prev) => (
+      prev.some((item) => item.id === material.id) ? prev : [...prev, material]
+    ));
+    setResourcePickerOpen(false);
+  };
+
+  const handleAttachInteractive = async (interactive) => {
+    if (!interactive?.id) return;
+    setCustomInteractives((prev) => (
+      prev.some((item) => item.id === interactive.id) ? prev : [...prev, interactive]
+    ));
+    setResourcePickerOpen(false);
+  };
+
+  const showModeTabs = hasPlan || hasPlanItems;
+
+  return (
+    <>
+      <CabinetModal title={`Задать ДЗ — ${student.name}`} onClose={onClose}>
+        <form
+          className="cb-modal-form cb-hw-assign-form"
+          onSubmit={mode === "plan" ? handlePlanSubmit : handleCustomSubmit}
+        >
+          {error ? <p className="cb-modal-form__error" role="alert">{error}</p> : null}
+
+          {showModeTabs ? (
+            <div className="cb-hw-assign-mode" role="tablist" aria-label="Способ выдачи ДЗ">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "plan"}
+                className={`cb-hw-assign-mode__btn${mode === "plan" ? " cb-hw-assign-mode__btn--active" : ""}`}
+                onClick={() => setMode("plan")}
+                disabled={submitting || !hasPlanItems}
+              >
+                Из плана
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "custom"}
+                className={`cb-hw-assign-mode__btn${mode === "custom" ? " cb-hw-assign-mode__btn--active" : ""}`}
+                onClick={() => setMode("custom")}
+                disabled={submitting}
+              >
+                Дополнительное
+              </button>
+            </div>
+          ) : null}
+
+          {mode === "plan" ? (
+            <>
+              {!hasPlan && !loading ? (
+                <div className="cb-hw-assign-empty">
+                  <p className="cabinet-auth-muted">
+                    Привяжите план уроков или выдайте дополнительное задание на вкладке «Дополнительное».
+                  </p>
+                  {onAttachPlan ? (
+                    <button
+                      type="button"
+                      className="cb-btn cb-btn--primary cb-btn--sm"
+                      onClick={() => onAttachPlan(student)}
+                    >
+                      Привязать план
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {hasPlan ? (
+                <>
+                  {planTitle ? (
+                    <div className="cb-entity-plan-current">
+                      <div className="cb-entity-plan-current__body">
+                        <span className="cb-entity-plan-current__label">План</span>
+                        {options?.plan_id ? (
+                          <Link to={`/cabinet/plans/${options.plan_id}`} className="cb-entity-plan-current__title">
+                            {planTitle}
+                          </Link>
+                        ) : (
+                          <span className="cb-entity-plan-current__title">{planTitle}</span>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="cb-attach-section">
+                    <h3 className="cb-attach-section__title">Занятие с ДЗ</h3>
+                    {loading ? (
+                      <p className="cabinet-auth-muted">Загрузка…</p>
+                    ) : items.length === 0 ? (
+                      <p className="cabinet-auth-muted">
+                        В плане пока нет занятий с домашним заданием. Добавьте ДЗ в редакторе плана или выдайте дополнительное задание.
+                      </p>
+                    ) : (
+                      <div className="cb-attach-list">
+                        {items.map((item) => (
+                          <HomeworkPickItem
+                            key={item.id}
+                            item={item}
+                            selected={String(selectedId) === String(item.id)}
+                            onSelect={setSelectedId}
+                            disabled={submitting}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {items.length > 0 ? (
+                    <>
+                      <label className="cb-field">
+                        <span>Срок выполнения</span>
+                        <input
+                          type="date"
+                          value={deadline}
+                          onChange={(e) => setDeadline(e.target.value)}
+                          disabled={submitting}
+                        />
+                      </label>
+                      <div className="cb-modal-form__actions">
+                        <div className="cb-modal-form__actions-main">
+                          <button type="button" className="cb-btn cb-btn--outline" onClick={onClose} disabled={submitting}>
+                            Отмена
+                          </button>
+                          <button type="submit" className="cb-btn cb-btn--primary" disabled={submitting || loading || !selectedId}>
+                            {submitting ? "Выдаём…" : "Выдать ДЗ"}
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="cb-modal-form__actions">
+                      <div className="cb-modal-form__actions-main">
+                        <button type="button" className="cb-btn cb-btn--outline" onClick={onClose}>
+                          Закрыть
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : loading ? (
+                <p className="cabinet-auth-muted">Загрузка…</p>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <label className="cb-field">
+                <span>Название</span>
+                <input
+                  type="text"
+                  value={customTitle}
+                  onChange={(e) => setCustomTitle(e.target.value)}
+                  placeholder="Например, Дополнительный вариант"
+                  disabled={submitting}
+                  required
+                />
+              </label>
+
+              <label className="cb-field cb-field--wide">
+                <span>Описание</span>
+                <textarea
+                  rows={4}
+                  value={customDescription}
+                  onChange={(e) => setCustomDescription(e.target.value)}
+                  placeholder="Что нужно сделать ученику"
+                  disabled={submitting}
+                />
+              </label>
+
+              <div className="cb-attach-section">
+                <div className="cb-hw-assign-section-head">
+                  <h3 className="cb-attach-section__title">Материалы</h3>
+                  <button
+                    type="button"
+                    className="cb-btn cb-btn--outline cb-btn--sm"
+                    onClick={() => setResourcePickerOpen(true)}
+                    disabled={submitting}
+                  >
+                    Добавить
+                  </button>
+                </div>
+                {customMaterials.length === 0 && customInteractives.length === 0 ? (
+                  <p className="cabinet-auth-muted">
+                    Можно прикрепить интерактив, файлы или вариант по номеру.
+                  </p>
+                ) : (
+                  <div className="cb-hw-assign-resource-list">
+                    {customMaterials.map((material) => (
+                      <AttachedResourceRow
+                        key={`material-${material.id}`}
+                        icon="file"
+                        title={material.title}
+                        meta={material.material_type === "task_set" ? "Вариант" : "Материал"}
+                        disabled={submitting}
+                        onRemove={() => setCustomMaterials((prev) => prev.filter((item) => item.id !== material.id))}
+                      />
+                    ))}
+                    {customInteractives.map((interactive) => (
+                      <AttachedResourceRow
+                        key={`interactive-${interactive.id}`}
+                        icon="interactive"
+                        title={getInteractiveDisplayTitle(interactive)}
+                        meta={interactive.topic || "Интерактив"}
+                        disabled={submitting}
+                        onRemove={() => setCustomInteractives((prev) => prev.filter((item) => item.id !== interactive.id))}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <label className="cb-field">
+                <span>Срок выполнения</span>
+                <input
+                  type="date"
+                  value={deadline}
+                  onChange={(e) => setDeadline(e.target.value)}
+                  disabled={submitting}
+                />
+              </label>
+
+              <div className="cb-modal-form__actions">
+                <div className="cb-modal-form__actions-main">
+                  <button type="button" className="cb-btn cb-btn--outline" onClick={onClose} disabled={submitting}>
+                    Отмена
+                  </button>
+                  <button type="submit" className="cb-btn cb-btn--primary" disabled={submitting}>
+                    {submitting ? "Выдаём…" : "Выдать ДЗ"}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </form>
+      </CabinetModal>
+
+      <PlanItemResourcesPicker
+        scope="homework"
+        open={resourcePickerOpen}
+        attachedMaterialIds={customMaterialIds}
+        attachedInteractiveIds={customInteractiveIds}
+        onClose={() => setResourcePickerOpen(false)}
+        onAttachMaterial={handleAttachMaterial}
+        onAttachInteractive={handleAttachInteractive}
+      />
+    </>
+  );
+}

@@ -1,10 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getInteractiveDisplayTitle } from "../interactivesData";
+import { fetchGroups, fetchStudents } from "../../utils/cabinetAuth";
 import CabinetModal from "./CabinetModal";
-
-// Списки учеников/групп загружаются из реального API при открытии
-const ATTACH_STUDENTS = [];
-const ATTACH_GROUPS = [];
 
 export default function InteractiveAssignModal({ interactive, onClose, onAssign }) {
   const [targetType, setTargetType] = useState("student");
@@ -13,21 +10,63 @@ export default function InteractiveAssignModal({ interactive, onClose, onAssign 
   const [attempts, setAttempts] = useState("multiple");
   const [showResult, setShowResult] = useState("yes");
   const [comment, setComment] = useState("");
+  const [students, setStudents] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
-  const targets = targetType === "student" ? ATTACH_STUDENTS : ATTACH_GROUPS;
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([
+      fetchStudents({ status: "active" }),
+      fetchGroups({ status: "active" }),
+    ])
+      .then(([studentsData, groupsData]) => {
+        if (cancelled) return;
+        const studentList = Array.isArray(studentsData) ? studentsData : (studentsData?.results || []);
+        const groupList = Array.isArray(groupsData) ? groupsData : (groupsData?.results || []);
+        setStudents(studentList.map((s) => ({
+          id: s.id,
+          label: [s.last_name, s.first_name].filter(Boolean).join(" ") || s.display_name || `Ученик #${s.id}`,
+        })));
+        setGroups(groupList.map((g) => ({
+          id: g.id,
+          label: g.name || g.title || `Группа #${g.id}`,
+        })));
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err?.message || "Не удалось загрузить списки");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
-  const handleSubmit = (e) => {
+  const targets = targetType === "student" ? students : groups;
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    onAssign?.({
-      interactiveId: interactive?.id,
-      targetType,
-      targetId,
-      deadline,
-      attempts,
-      showResult: showResult === "yes",
-      comment,
-    });
-    onClose();
+    setSubmitting(true);
+    setError("");
+    try {
+      await onAssign?.({
+        interactiveId: interactive?.id,
+        targetType,
+        targetId,
+        deadline,
+        attempts,
+        showResult: showResult === "yes",
+        comment,
+      });
+      onClose();
+    } catch (err) {
+      setError(err?.message || "Не удалось выдать интерактив");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -37,6 +76,7 @@ export default function InteractiveAssignModal({ interactive, onClose, onAssign 
           «{getInteractiveDisplayTitle(interactive)}» · {interactive.topic || "без темы"}
         </p>
       ) : null}
+      {error ? <p className="cb-modal-form__error" role="alert">{error}</p> : null}
       <form className="cb-assign-form" onSubmit={handleSubmit}>
         <label className="cb-field">
           <span>Кому выдать</span>
@@ -47,8 +87,8 @@ export default function InteractiveAssignModal({ interactive, onClose, onAssign 
         </label>
         <label className="cb-field">
           <span>{targetType === "student" ? "Выберите ученика" : "Выберите группу"}</span>
-          <select value={targetId} onChange={(e) => setTargetId(e.target.value)} required>
-            <option value="">—</option>
+          <select value={targetId} onChange={(e) => setTargetId(e.target.value)} required disabled={loading}>
+            <option value="">{loading ? "Загрузка…" : "—"}</option>
             {targets.map((t) => (
               <option key={t.id} value={t.id}>{t.label}</option>
             ))}
@@ -78,7 +118,9 @@ export default function InteractiveAssignModal({ interactive, onClose, onAssign 
         </label>
         <div className="cb-assign-form__actions">
           <button type="button" className="cb-btn cb-btn--outline" onClick={onClose}>Отмена</button>
-          <button type="submit" className="cb-btn cb-btn--primary cb-btn--pill">Выдать</button>
+          <button type="submit" className="cb-btn cb-btn--primary cb-btn--pill" disabled={submitting || loading}>
+            {submitting ? "…" : "Выдать"}
+          </button>
         </div>
       </form>
     </CabinetModal>

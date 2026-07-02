@@ -241,6 +241,17 @@ export function archiveStudent(id) {
   return cabinetFetch(`/students/${id}/archive/`, { method: "PATCH" });
 }
 
+export function fetchStudentHomeworkOptions(studentId) {
+  return cabinetFetch(`/students/${studentId}/homework-options/`, { method: "GET" });
+}
+
+export function assignStudentHomework(studentId, payload) {
+  return cabinetFetch(`/students/${studentId}/assign-homework/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function fetchGroups(params = {}) {
   const qs = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -493,6 +504,39 @@ export function fetchInteractives(params = {}) {
   });
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return cabinetFetch(`/interactives/${suffix}`, { method: "GET" });
+}
+
+export function fetchInteractive(id) {
+  return cabinetFetch(`/interactives/${id}/`, { method: "GET" });
+}
+
+export function createInteractive(payload) {
+  return cabinetFetch("/interactives/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateInteractive(id, payload) {
+  return cabinetFetch(`/interactives/${id}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteInteractiveApi(id) {
+  return cabinetFetch(`/interactives/${id}/`, { method: "DELETE" });
+}
+
+export function publishInteractive(id) {
+  return cabinetFetch(`/interactives/${id}/publish/`, { method: "POST" });
+}
+
+export function assignInteractive(interactiveId, payload) {
+  return cabinetFetch(`/interactives/${interactiveId}/assign/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function fetchInteractiveAppearance() {

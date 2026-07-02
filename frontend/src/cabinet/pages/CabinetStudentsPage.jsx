@@ -10,6 +10,7 @@ import {
 import { mapApiGroup, mapApiStudent } from "../cabinetMappers";
 import { GroupFormModal, InviteFormModal, StudentFormModal } from "../components/StudentGroupModals";
 import PlanAttachModal from "../components/PlanAttachModal";
+import HomeworkAssignModal from "../components/HomeworkAssignModal";
 import LimitBadge from "../components/LimitBadge";
 import UpgradeLimitModal from "../components/UpgradeLimitModal";
 import CompactUpgradeModal from "../components/CompactUpgradeModal";
@@ -100,7 +101,7 @@ function formatGrade(grade) {
   return `${grade} класс`;
 }
 
-function StudentChip({ student, enrollment, dragging, onDragStart, onDragEnd, onOpen, onAttachPlan }) {
+function StudentChip({ student, enrollment, dragging, onDragStart, onDragEnd, onOpen, onAssignHomework }) {
   const tone = avatarTone(student);
 
   return (
@@ -137,17 +138,31 @@ function StudentChip({ student, enrollment, dragging, onDragStart, onDragEnd, on
         </span>
         <span className={`cb-student-chip__status cb-student-chip__status--${student.status}`} title={STATUS_LABELS[student.status]} />
       </button>
-      <button
-        type="button"
-        className="cb-student-chip__plan-btn"
-        onClick={() => onAttachPlan?.(student)}
-        onMouseDown={(e) => e.stopPropagation()}
-        onDragStart={(e) => e.preventDefault()}
-        title={enrollment ? "Сменить план" : "Привязать план"}
-        aria-label={enrollment ? "Сменить план" : "Привязать план"}
-      >
-        <CabinetIcon name="plan" />
-      </button>
+      <div className="cb-student-chip__actions">
+        <button
+          type="button"
+          className="cb-student-chip__action-btn cb-student-chip__action-btn--hw"
+          onClick={() => onAssignHomework?.(student)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDragStart={(e) => e.preventDefault()}
+          aria-label="Задать ДЗ"
+        >
+          <CabinetIcon name="tasks" />
+          <span>Задать ДЗ</span>
+        </button>
+        <button
+          type="button"
+          className="cb-student-chip__action-btn cb-student-chip__action-btn--edit"
+          onClick={() => onOpen?.(student)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDragStart={(e) => e.preventDefault()}
+          aria-label="Редактировать ученика"
+          title="Редактировать ученика"
+        >
+          <CabinetIcon name="pencil" />
+          <span>Изменить</span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -169,6 +184,8 @@ function GroupCard({
   onInviteGroup,
   onAttachPlan,
   onAttachPlanStudent,
+  onAssignHomeworkStudent,
+  enrollmentsByStudent,
 }) {
   const dirClass = group.direction === "ОГЭ" ? "oge" : "ege";
 
@@ -246,7 +263,7 @@ function GroupCard({
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
               onOpen={() => onOpenStudent(st)}
-              onAttachPlan={onAttachPlanStudent}
+              onAssignHomework={onAssignHomeworkStudent}
             />
           ))
         )}
@@ -376,6 +393,7 @@ export default function CabinetStudentsPage() {
   const [enrollmentsByStudent, setEnrollmentsByStudent] = useState({});
   const [enrollmentsByGroup, setEnrollmentsByGroup] = useState({});
   const [planAttachModal, setPlanAttachModal] = useState(null);
+  const [homeworkAssignModal, setHomeworkAssignModal] = useState(null);
 
   const { toast, showToast } = useSoonToast();
   const subscription = useSubscription();
@@ -598,6 +616,16 @@ export default function CabinetStudentsPage() {
     });
   };
   const closePlanAttachModal = () => setPlanAttachModal(null);
+  const openAssignHomeworkForStudent = (student) => {
+    setHomeworkAssignModal({
+      student,
+      enrollment: enrollmentsByStudent[student.id] || null,
+    });
+  };
+  const closeHomeworkAssignModal = () => setHomeworkAssignModal(null);
+  const handleHomeworkAssigned = () => {
+    showToast("Домашнее задание выдано");
+  };
   const handlePlanAttached = async () => {
     await loadEnrollments();
     showToast("План обновлён");
@@ -822,6 +850,8 @@ export default function CabinetStudentsPage() {
                     onInviteGroup={() => openInviteToGroup(group)}
                     onAttachPlan={openAttachPlanForGroup}
                     onAttachPlanStudent={openAttachPlanForStudent}
+                    onAssignHomeworkStudent={openAssignHomeworkForStudent}
+                    enrollmentsByStudent={enrollmentsByStudent}
                     {...drop}
                   />
                 );
@@ -855,7 +885,7 @@ export default function CabinetStudentsPage() {
                     onDragStart={handleDragStart}
                     onDragEnd={handleDragEnd}
                     onOpen={() => openEditStudent(st)}
-                    onAttachPlan={openAttachPlanForStudent}
+                    onAssignHomework={openAssignHomeworkForStudent}
                   />
                 ))}
                 <AddStudentCard onClick={openCreateStudent} />
@@ -892,6 +922,18 @@ export default function CabinetStudentsPage() {
           enrollment={planAttachModal.enrollment}
           onClose={closePlanAttachModal}
           onAttached={handlePlanAttached}
+        />
+      ) : null}
+      {homeworkAssignModal ? (
+        <HomeworkAssignModal
+          student={homeworkAssignModal.student}
+          enrollment={homeworkAssignModal.enrollment}
+          onClose={closeHomeworkAssignModal}
+          onAssigned={handleHomeworkAssigned}
+          onAttachPlan={(student) => {
+            closeHomeworkAssignModal();
+            openAttachPlanForStudent(student);
+          }}
         />
       ) : null}
       {inviteModal ? (

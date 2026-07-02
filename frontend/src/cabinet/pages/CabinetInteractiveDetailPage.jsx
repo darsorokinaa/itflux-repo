@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { displayName } from "../../pages/CabinetAuthPage";
-import { fetchCabinetSession } from "../../utils/cabinetAuth";
+import {
+  assignInteractive,
+  createInteractive,
+  deleteInteractiveApi,
+  fetchCabinetSession,
+  fetchInteractive,
+  publishInteractive,
+  updateInteractive,
+} from "../../utils/cabinetAuth";
 import InteractiveAssignModal from "../components/InteractiveAssignModal";
 import InteractiveLaunchScreen, { TemplateSwitcher } from "../components/InteractiveLaunchScreen";
 import {
@@ -21,13 +29,13 @@ import {
   applyBackgroundSlug,
   canAssignInteractive,
   canShareInteractive,
-  deleteInteractive,
-  duplicateInteractive,
   getActiveBackgroundSlug,
-  getInteractiveById,
   getInteractiveDisplayTitle,
-  upsertInteractive,
 } from "../interactivesData";
+import {
+  buildInteractiveWritePayload,
+  mapApiInteractiveDetail,
+} from "../interactivesApi";
 import {
   getInteractiveSummaryChips,
   interactiveHasPlayableContent,
@@ -56,7 +64,8 @@ export default function CabinetInteractiveDetailPage() {
   const { toast, notifySoon } = useSoonToast();
   const { catalog, loading: catalogLoading } = useInteractiveAppearanceCatalog();
 
-  const [interactive, setInteractive] = useState(() => getInteractiveById(id));
+  const [interactive, setInteractive] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [started, setStarted] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
   const [authorName, setAuthorName] = useState("Учитель");
@@ -71,8 +80,22 @@ export default function CabinetInteractiveDetailPage() {
   }, []);
 
   useEffect(() => {
-    setInteractive(getInteractiveById(id));
-    setStarted(false);
+    let cancelled = false;
+    setLoading(true);
+    fetchInteractive(id)
+      .then((data) => {
+        if (!cancelled) {
+          setInteractive(mapApiInteractiveDetail(data));
+          setStarted(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setInteractive(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, [id]);
 
   const appearance = useMemo(
@@ -85,10 +108,30 @@ export default function CabinetInteractiveDetailPage() {
     [interactive],
   );
 
-  const persist = useCallback((next) => {
-    upsertInteractive(next);
+  const persistToApi = useCallback(async (next, statusOverride) => {
+    const payload = buildInteractiveWritePayload(next, statusOverride || next.status);
+    const data = await updateInteractive(next.id, payload);
+    const mapped = mapApiInteractiveDetail(data);
+    setInteractive({
+      ...mapped,
+      backgroundImage: next.backgroundImage ?? mapped.backgroundImage,
+      backgroundImageTone: next.backgroundImageTone ?? mapped.backgroundImageTone,
+      params: next.params ?? mapped.params,
+    });
+    return mapped;
+  }, []);
+
+  const persistLocal = useCallback((next) => {
     setInteractive(next);
   }, []);
+
+  if (loading) {
+    return (
+      <CabinetPageShell className="cb-section--interactive-detail ix-page ix-launch-page">
+        <p className="cb-loading">Загрузка…</p>
+      </CabinetPageShell>
+    );
+  }
 
   if (!interactive) {
     return <Navigate to="/cabinet/interactives" replace />;
@@ -98,18 +141,23 @@ export default function CabinetInteractiveDetailPage() {
   const canStart = interactiveHasPlayableContent(interactive);
   const editHref = `/cabinet/interactives/${interactive.id}/edit`;
 
-  const handleBackgroundSelect = (backgroundSlug) => {
-    persist(applyBackgroundSlug({ ...interactive, updatedAt: new Date().toISOString() }, backgroundSlug));
+  const handleBackgroundSelect = async (backgroundSlug) => {
+    const next = applyBackgroundSlug({ ...interactive }, backgroundSlug);
+    try {
+      await persistToApi(next);
+    } catch (err) {
+      setShareMsg(err?.message || "Не удалось сохранить фон");
+      window.setTimeout(() => setShareMsg(""), 2800);
+    }
   };
 
   const handleImageUpload = async (file) => {
     try {
       const dataUrl = await compressBackgroundImage(file);
-      persist({
+      persistLocal({
         ...interactive,
         backgroundImage: dataUrl,
         backgroundImageTone: interactive.backgroundImageTone || "light",
-        updatedAt: new Date().toISOString(),
       });
     } catch (err) {
       setShareMsg(err?.message || "Не удалось загрузить изображение");
@@ -118,72 +166,93 @@ export default function CabinetInteractiveDetailPage() {
   };
 
   const handleImageRemove = () => {
-    persist({
+    persistLocal({
       ...interactive,
       backgroundImage: null,
-      updatedAt: new Date().toISOString(),
     });
   };
 
   const handleImageToneChange = (tone) => {
-    persist({
+    persistLocal({
       ...interactive,
       backgroundImageTone: tone,
-      updatedAt: new Date().toISOString(),
     });
   };
 
   const handleParams = (params) => {
-    persist({ ...interactive, params, updatedAt: new Date().toISOString() });
+    persistLocal({ ...interactive, params });
   };
 
-  const handlePublish = () => {
-    persist({
-      ...interactive,
-      status: "published",
-      updatedAt: new Date().toISOString(),
-    });
-    setShareMsg("Интерактив опубликован");
-    window.setTimeout(() => setShareMsg(""), 2200);
+  const handlePublish = async () => {
+    try {
+      await updateInteractive(interactive.id, buildInteractiveWritePayload(interactive, "published"));
+      const data = await publishInteractive(interactive.id);
+      setInteractive(mapApiInteractiveDetail(data));
+      setShareMsg("Интерактив опубликован");
+      window.setTimeout(() => setShareMsg(""), 2200);
+    } catch (err) {
+      setShareMsg(err?.message || "Не удалось опубликовать");
+      window.setTimeout(() => setShareMsg(""), 2800);
+    }
   };
 
-  const handleUnpublish = () => {
-    persist({
-      ...interactive,
-      status: "draft",
-      updatedAt: new Date().toISOString(),
-    });
-    setShareMsg("Публикация снята");
-    window.setTimeout(() => setShareMsg(""), 2200);
+  const handleUnpublish = async () => {
+    try {
+      await persistToApi({ ...interactive }, "draft");
+      setShareMsg("Публикация снята");
+      window.setTimeout(() => setShareMsg(""), 2200);
+    } catch (err) {
+      setShareMsg(err?.message || "Не удалось снять публикацию");
+      window.setTimeout(() => setShareMsg(""), 2800);
+    }
   };
 
-  const handleAssign = (payload) => {
+  const handleAssign = async (payload) => {
     if (!canAssignInteractive(interactive)) {
       setShareMsg("Сначала опубликуйте интерактив");
       window.setTimeout(() => setShareMsg(""), 2800);
       return;
     }
-    const target = payload.targetType === "student"
-      ? `Ученик: ${payload.targetId}`
-      : `Группа: ${payload.targetId}`;
-    persist({
-      ...interactive,
-      status: "assigned",
-      usedIn: [...(interactive.usedIn || []), target],
-      updatedAt: new Date().toISOString(),
-    });
-    setAssignOpen(false);
+    try {
+      await assignInteractive(interactive.id, {
+        student: payload.targetType === "student" ? Number(payload.targetId) : null,
+        group: payload.targetType === "group" ? Number(payload.targetId) : null,
+        due_at: payload.deadline ? `${payload.deadline}T23:59:59` : null,
+        attempts_allowed: payload.attempts === "single" ? 1 : 3,
+        show_result_immediately: payload.showResult !== false,
+        comment: payload.comment || "",
+      });
+      setShareMsg("Интерактив выдан");
+      window.setTimeout(() => setShareMsg(""), 2800);
+      setAssignOpen(false);
+    } catch (err) {
+      setShareMsg(err?.message || "Не удалось выдать интерактив");
+      window.setTimeout(() => setShareMsg(""), 3200);
+    }
   };
 
-  const handleDuplicate = () => {
-    const copy = duplicateInteractive(interactive.id);
-    if (copy) navigate(`/cabinet/interactives/${copy.id}`);
+  const handleDuplicate = async () => {
+    try {
+      const copy = mapApiInteractiveDetail(await fetchInteractive(interactive.id));
+      copy.title = copy.title ? `${copy.title} (копия)` : "Копия";
+      copy.status = "draft";
+      const created = await createInteractive(buildInteractiveWritePayload(copy, "draft"));
+      navigate(`/cabinet/interactives/${created.id}`);
+    } catch (err) {
+      setShareMsg(err?.message || "Не удалось создать копию");
+      window.setTimeout(() => setShareMsg(""), 3200);
+    }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!window.confirm(`Удалить «${getInteractiveDisplayTitle(interactive, "интерактив")}»?`)) return;
-    deleteInteractive(interactive.id);
-    navigate("/cabinet/interactives");
+    try {
+      await deleteInteractiveApi(interactive.id);
+      navigate("/cabinet/interactives");
+    } catch (err) {
+      setShareMsg(err?.message || "Не удалось удалить");
+      window.setTimeout(() => setShareMsg(""), 3200);
+    }
   };
 
   const handleShare = async () => {
