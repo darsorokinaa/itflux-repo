@@ -175,14 +175,41 @@ button,
     justify-content: flex-start;
   }
 
-  .site-nav__tabs {
+  .site-nav__panel.is-open .site-nav__tabs {
     width: 100%;
-    overflow-x: auto;
-    padding-bottom: 4px;
-    -webkit-overflow-scrolling: touch;
+    overflow: visible;
+    padding-bottom: 0;
+    -webkit-overflow-scrolling: auto;
     justify-content: flex-start;
-    order: 3;
-    margin-top: 4px;
+    order: initial;
+    margin-top: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .site-nav__panel.is-open .site-nav__tab {
+    width: 100%;
+    margin-left: 0 !important;
+    border-radius: 12px !important;
+    border: 1px solid rgba(21, 80, 216, 0.12) !important;
+    background: #f8fafc !important;
+    justify-content: flex-start;
+  }
+
+  .site-nav__panel.is-open .site-nav__tab--active {
+    background: #eff6ff !important;
+    border-color: rgba(37, 99, 235, 0.35) !important;
+  }
+
+  .site-nav__panel.is-open .site-nav__tab + .site-nav__tab {
+    margin-left: 0 !important;
+  }
+
+  .site-nav__panel.is-open .cabinet-nav-button {
+    width: 100%;
+    margin-left: 0 !important;
+    justify-content: flex-start;
   }
 
   .site-nav__search {
@@ -2497,15 +2524,20 @@ body,
 
   .site-nav__panel.is-open {
     display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
   }
 
-  .site-nav__tabs {
+  .site-nav__panel.is-open .site-nav__tabs {
     order: initial !important;
     margin-top: 0 !important;
+    flex-direction: column !important;
+    overflow: visible !important;
   }
 
-  .site-nav__tab + .site-nav__tab {
-    margin-left: 10px !important;
+  .site-nav__panel.is-open .site-nav__tab + .site-nav__tab {
+    margin-left: 0 !important;
   }
 
   /* Полей поиска в шапке больше нет — поиск перенесён на страницы

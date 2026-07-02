@@ -385,8 +385,8 @@
 }
 
 @media (max-width: 900px) {
-  .cabinet-nav-button {
+  .site-nav__panel.is-open .cabinet-nav-button {
     width: 100%;
-    justify-content: center;
+    justify-content: flex-start;
   }
 }
