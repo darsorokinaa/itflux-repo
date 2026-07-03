@@ -344,12 +344,24 @@ function formatFromTaskHtmlBlocks(root) {
   return buildChoiceMarkup(questionHtml, choices);
 }
 
-/** Крошечные gif с ФИПИ (innerimg0…) — не растягивать по ширине карточки. */
+/** Крошечные gif/PNG ФИПИ — дроби в строке условия vs числовая прямая. */
 function decorateFipiBitmapImages(root, mode) {
   if (!root) return;
   root.querySelectorAll("img").forEach((img) => {
     if (img.classList.contains("ege-inf-1-graph-img")) return;
     const src = (img.getAttribute("src") || "").toLowerCase();
+    const parent = img.parentElement;
+    const inlineFrac =
+      mode === "question" &&
+      src.includes("xs3qstsrc") &&
+      parent?.tagName === "SPAN" &&
+      parent.childElementCount <= 1;
+    if (inlineFrac) {
+      img.classList.add("oge-math-fipi-inline-frac");
+      img.removeAttribute("width");
+      img.removeAttribute("height");
+      return;
+    }
     if (!src.endsWith(".gif")) return;
     img.classList.add("oge-math-fipi-bitmap");
     img.removeAttribute("width");
@@ -502,6 +514,7 @@ function stripDuplicateChoiceMediaFromQuestion(questionHtml, choices) {
 }
 
 const CHOICE_FOOTER_TEXT_RE = /^В\s+ответ/i;
+const CHOICE_PROMPT_TEXT_RE = /^Какое это\s+число\??$/i;
 
 function isChoiceFooterElement(el) {
   if (!el) return false;
@@ -539,6 +552,76 @@ function extractChoiceFooter(root) {
   return footerHtml;
 }
 
+function extractChoiceQuestionPrompt(root) {
+  let prompt = "";
+  for (const p of [...root.querySelectorAll("p")]) {
+    const t = normalizeCellText(p);
+    if (!CHOICE_PROMPT_TEXT_RE.test(t)) continue;
+    if (!prompt) prompt = t.endsWith("?") ? t : `${t}?`;
+    p.remove();
+  }
+  return prompt;
+}
+
+function repairFipiSlashlessFracSpans(root) {
+  const nodes = root.querySelectorAll(
+    "p, span, div.task-html-block, li, .oge-math-choice-option__body"
+  );
+  for (const el of nodes) {
+    const text = normalizeCellText(el);
+    const solo = text.match(/^(\d{2})(\d{1,2})$/);
+    if (
+      solo &&
+      Number(solo[2]) >= 2 &&
+      Number(solo[2]) <= 99 &&
+      !el.querySelector("img, mjx-container, .math-inline, .math-display")
+    ) {
+      el.innerHTML = `$\\frac{${solo[1]}}{${solo[2]}}$`;
+      continue;
+    }
+
+    const spans = [...el.querySelectorAll(":scope span")];
+    const fracSpans = spans.filter((span) => /^\d{2}\d{1,2}$/.test(normalizeCellText(span)));
+    if (fracSpans.length < 2) continue;
+    for (const span of fracSpans) {
+      const t = normalizeCellText(span);
+      const m = t.match(/^(\d{2})(\d{1,2})$/);
+      if (!m) continue;
+      const num = Number(m[1]);
+      const den = Number(m[2]);
+      if (den < 2 || den > 99) continue;
+      span.outerHTML = `$\\frac{${num}}{${den}}$`;
+    }
+  }
+}
+
+function repairFipiSlashlessFracHtml(html) {
+  const root = parseHtmlFragment(html);
+  if (!root) return html || "";
+  repairFipiSlashlessFracSpans(root);
+  return root.innerHTML.trim();
+}
+
+function flattenChoiceOptionBodyHtml(bodyHtml) {
+  const root = parseHtmlFragment(bodyHtml);
+  if (!root) return bodyHtml || "";
+  root.querySelectorAll("p").forEach((p) => {
+    const imgs = [...p.querySelectorAll("img")];
+    if (imgs.length !== 1) return;
+    if (normalizeCellText(p)) return;
+    if (p.querySelector("mjx-container, .math-inline, .math-display")) return;
+    p.replaceWith(imgs[0]);
+  });
+  root.querySelectorAll("span").forEach((span) => {
+    if (span.attributes.length > 0) return;
+    const imgs = [...span.querySelectorAll(":scope > img")];
+    if (imgs.length !== 1 || span.childNodes.length !== 1) return;
+    span.replaceWith(imgs[0]);
+  });
+  pruneEmptyNodes(root);
+  return root.innerHTML.trim();
+}
+
 function unwrapLayoutTablesInQuestion(root) {
   let changed = true;
   while (changed) {
@@ -560,9 +643,10 @@ function unwrapLayoutTablesInQuestion(root) {
 
 function prepareChoiceQuestionHtml(questionHtml) {
   const root = parseHtmlFragment(questionHtml);
-  if (!root) return { questionHtml: questionHtml || "", footerHtml: "" };
+  if (!root) return { questionHtml: questionHtml || "", footerHtml: "", promptText: "" };
 
   const footerHtml = extractChoiceFooter(root);
+  const promptText = extractChoiceQuestionPrompt(root);
   scrubChoiceQuestionDebris(root);
   stripTrailingEmptyTableRows(root);
   unwrapRedundantSingleCellTables(root);
@@ -570,8 +654,13 @@ function prepareChoiceQuestionHtml(questionHtml) {
   pruneEmptyNodes(root);
   stripTrailingEmptyTableRows(root);
   pruneEmptyNodes(root);
+  repairFipiSlashlessFracSpans(root);
 
-  return { questionHtml: root.innerHTML.trim(), footerHtml };
+  return {
+    questionHtml: root.innerHTML.trim(),
+    footerHtml,
+    promptText,
+  };
 }
 
 function buildChoiceMarkup(questionHtml, choices) {
@@ -592,6 +681,7 @@ function buildChoiceMarkup(questionHtml, choices) {
   const prepared = prepareChoiceQuestionHtml(qHtml);
   qHtml = prepared.questionHtml;
   const footerHtml = prepared.footerHtml;
+  const promptText = prepared.promptText;
 
   if (qHtml && htmlHasVisibleText(qHtml)) {
     const q = document.createElement("div");
@@ -616,7 +706,7 @@ function buildChoiceMarkup(questionHtml, choices) {
 
     const body = document.createElement("span");
     body.className = "oge-math-choice-option__body";
-    body.innerHTML = bodyHtml;
+    body.innerHTML = flattenChoiceOptionBodyHtml(repairFipiSlashlessFracHtml(bodyHtml));
     decorateFipiBitmapImages(body, "option");
 
     li.appendChild(numEl);
@@ -625,6 +715,13 @@ function buildChoiceMarkup(questionHtml, choices) {
   }
 
   wrap.appendChild(list);
+
+  if (promptText) {
+    const prompt = document.createElement("p");
+    prompt.className = "oge-math-choice-footer oge-math-choice-prompt";
+    prompt.textContent = promptText;
+    wrap.insertBefore(prompt, list);
+  }
 
   if (footerHtml && htmlHasVisibleText(footerHtml)) {
     const foot = document.createElement("p");

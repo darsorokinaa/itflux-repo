@@ -557,6 +557,41 @@
   color: var(--blue-dark, #1e3ebd);
 }
 
+.all-tasks-item__foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 16px 14px;
+  border-top: 1px solid rgba(43, 82, 245, 0.08);
+}
+
+.all-tasks-item__workbook-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 7px 13px;
+  border: 1.5px solid rgba(43, 82, 245, 0.28);
+  border-radius: var(--r-pill, 100px);
+  background: #fff;
+  color: var(--blue-hero, #2b52f5);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.all-tasks-item__workbook-check input {
+  margin: 0;
+  accent-color: var(--blue-hero, #2b52f5);
+}
+
+.all-tasks-item--in-workbook .all-tasks-item__card {
+  box-shadow: inset 0 0 0 2px rgba(43, 82, 245, 0.35);
+}
+
 .all-tasks-item__actions .exam-task-draw-fab {
   position: static;
   right: auto;
@@ -3981,29 +4016,86 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   width: auto !important;
   max-width: 100% !important;
   height: auto !important;
-  margin: 0.25rem 0 !important;
+  margin: 0 !important;
   object-fit: contain !important;
   image-rendering: -webkit-optimize-contrast;
   image-rendering: crisp-edges;
 }
 
+/* Дроби в строке условия (PNG xs3qstsrc внутри span) */
+.exam-page .task-text .oge-math-choice-question .oge-math-fipi-inline-frac,
+.exam-task-card__text .oge-math-choice-question .oge-math-fipi-inline-frac,
+.all-tasks-item__html .oge-math-choice-question .oge-math-fipi-inline-frac,
+.exam-page .task-text .oge-math-choice-question p span > img[src*="xs3qstsrc"],
+.exam-task-card__text .oge-math-choice-question p span > img[src*="xs3qstsrc"],
+.all-tasks-item__html .oge-math-choice-question p span > img[src*="xs3qstsrc"] {
+  display: inline-block !important;
+  vertical-align: middle;
+  width: auto !important;
+  max-width: none !important;
+  height: auto !important;
+  max-height: 1.55em !important;
+  margin: 0 0.06em !important;
+  border: none !important;
+}
+
 .exam-page .task-text .oge-math-choice-question .oge-math-fipi-formula,
 .exam-task-card__text .oge-math-choice-question .oge-math-fipi-formula,
 .all-tasks-item__html .oge-math-choice-question .oge-math-fipi-formula {
-  display: block;
-  margin: 0.2rem 0 0.85rem;
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 0.06em;
   overflow: visible;
-  line-height: 0;
+  line-height: 1;
 }
 
 .exam-page .task-text .oge-math-choice-question .oge-math-fipi-formula img,
 .exam-task-card__text .oge-math-choice-question .oge-math-fipi-formula img,
 .all-tasks-item__html .oge-math-choice-question .oge-math-fipi-formula img {
   transform: none !important;
-  max-width: 100% !important;
+  max-width: none !important;
   width: auto !important;
   height: auto !important;
-  margin-bottom: 0.35rem;
+  max-height: 1.55em !important;
+  margin: 0 !important;
+  display: inline-block !important;
+  vertical-align: middle;
+}
+
+/* Числовая прямая — только отдельный абзац с одной картинкой */
+.exam-page .task-text .oge-math-choice-question > p:has(> img[src*="xs3qstsrc"]:only-child) > img[src*="xs3qstsrc"],
+.exam-task-card__text .oge-math-choice-question > p:has(> img[src*="xs3qstsrc"]:only-child) > img[src*="xs3qstsrc"],
+.all-tasks-item__html .oge-math-choice-question > p:has(> img[src*="xs3qstsrc"]:only-child) > img[src*="xs3qstsrc"] {
+  display: block !important;
+  width: auto !important;
+  max-width: 100% !important;
+  height: auto !important;
+  max-height: none !important;
+  margin: 0.35rem 0 0.5rem !important;
+  border: none !important;
+}
+
+.all-tasks-item__html .oge-math-choice-question .task-html-block,
+.exam-task-card__text .oge-math-choice-question .task-html-block,
+.exam-page .task-text .oge-math-choice-question .task-html-block {
+  display: inline;
+  margin: 0;
+  padding: 0;
+}
+
+.all-tasks-item__html .oge-math-choice-question .task-html-block:has(> img:only-child),
+.exam-task-card__text .oge-math-choice-question .task-html-block:has(> img:only-child),
+.exam-page .task-text .oge-math-choice-question .task-html-block:has(> img:only-child) {
+  display: block;
+  margin: 0.35rem 0 0.5rem;
+}
+
+.all-tasks-item__html .oge-math-choice-question mjx-container[jax="CHTML"],
+.exam-task-card__text .oge-math-choice-question mjx-container[jax="CHTML"],
+.exam-page .task-text .oge-math-choice-question mjx-container[jax="CHTML"] {
+  display: inline-block !important;
+  vertical-align: middle;
+  margin: 0 0.04em !important;
 }
 
 .exam-page .task-text .oge-math-choice-option__body .oge-math-fipi-bitmap,
@@ -4011,16 +4103,6 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
 .all-tasks-item__html .oge-math-choice-option__body .oge-math-fipi-bitmap {
   transform: none !important;
   max-width: 100% !important;
-}
-
-/* Числовая прямая (ФИПИ PNG xs3qstsrc*): нативная ширина, без рамки таблицы */
-.all-tasks-item__html .oge-math-choice-question img[src*="xs3qstsrc"] {
-  display: block;
-  width: auto !important;
-  max-width: 100% !important;
-  height: auto !important;
-  margin: 0.5rem 0 0.75rem !important;
-  border: none !important;
 }
 
 /* Варианты с числовой прямой (ФИПИ PNG xs3qvrsrc*) */
@@ -4037,12 +4119,26 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
 
 .task-text .oge-math-choice-footer,
 .exam-task-card__text .oge-math-choice-footer,
-.all-tasks-item__html .oge-math-choice-footer {
-  margin: 10px 0 0;
+.all-tasks-item__html .oge-math-choice-footer,
+.task-text .oge-math-choice-prompt,
+.exam-task-card__text .oge-math-choice-prompt,
+.all-tasks-item__html .oge-math-choice-prompt {
+  margin: 6px 0 0;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.35;
   color: var(--text-muted);
   text-align: left;
+}
+
+.all-tasks-item__html .oge-math-choice-option__body img,
+.all-tasks-item__html .oge-math-choice-option__body .oge-math-fipi-bitmap {
+  display: inline-block;
+  vertical-align: middle;
+  width: auto;
+  height: auto;
+  max-height: 1.5em;
+  max-width: none;
+  margin: 0;
 }
 
 .all-tasks-item__html .oge-math-choice-footer {

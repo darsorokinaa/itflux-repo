@@ -21,7 +21,8 @@ import {
   type SubjectId,
 } from "../data/subjects";
 import { formatTasksCount } from "../utils/formatTasksCount";
-import { openWorkbook } from "../utils/buildWorkbookHtml";
+import WorkbookCreateBar from "../components/WorkbookCreateBar";
+import type { WorkbookTask } from "../utils/buildWorkbookHtml";
 import { isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
 import type { TaskFileSource } from "../components/InformaticsCodeEditor/types";
 
@@ -237,6 +238,8 @@ export default function AllTasksPage() {
   const [openBoardForTaskId, setOpenBoardForTaskId] = useState<number | null>(null);
   const [boardsByTask, setBoardsByTask] = useState<Record<string, any>>({});
   const [openAnswers, setOpenAnswers] = useState<Record<number, boolean>>({});
+  const [workbookDraft, setWorkbookDraft] = useState<WorkbookTask[]>([]);
+  const [workbookMode, setWorkbookMode] = useState(false);
 
   const toggleAnswer = useCallback((taskId: number) => {
     setOpenAnswers((prev) => ({ ...prev, [taskId]: !prev[taskId] }));
@@ -430,6 +433,11 @@ export default function AllTasksPage() {
     setOpenAnswers({});
   }, [level, subject, vprGrade, taskListId, subtopicId, onlyFipi, page]);
 
+  useEffect(() => {
+    setWorkbookMode(false);
+    setWorkbookDraft([]);
+  }, [level, subject]);
+
   const selectedSubtopicTitle = useMemo(() => {
     if (!subtopicId) return "";
     if (subtopicId === SUBTOPIC_NO_ANSWER) return "Без ответов";
@@ -456,9 +464,12 @@ export default function AllTasksPage() {
 
   const canBuildWorkbook = Boolean(!loading && !error && visibleTasks.length);
 
-  const handleCreateWorkbook = useCallback(() => {
-    if (!visibleTasks.length) return;
+  const workbookDraftIds = useMemo(
+    () => new Set(workbookDraft.map((task) => task.id)),
+    [workbookDraft]
+  );
 
+  const workbookMeta = useMemo(() => {
     const subjectTitle =
       subjects.find((s) => s.id === subject)?.title ?? subject;
     const subtitleParts = [levelDef?.label ?? level.toUpperCase(), subjectTitle];
@@ -484,21 +495,11 @@ export default function AllTasksPage() {
       subtitleParts.push(selectedSubtopicTitle);
     }
 
-    openWorkbook(
-      visibleTasks.map((task) => ({
-        id: task.id,
-        task_number: task.task_number,
-        text: task.text,
-        subtopic: task.subtopic,
-        task_title: task.task_title,
-      })),
-      {
-        title: "Рабочая тетрадь",
-        subtitle: subtitleParts.join(" · "),
-      }
-    );
+    return {
+      title: "Рабочая тетрадь",
+      subtitle: subtitleParts.join(" · "),
+    };
   }, [
-    visibleTasks,
     filterOptions?.task_numbers,
     level,
     levelDef?.label,
@@ -508,6 +509,62 @@ export default function AllTasksPage() {
     taskListId,
     vprGrade,
   ]);
+
+  const toggleWorkbookTask = useCallback((task: BankTask, checked: boolean) => {
+    if (checked) {
+      setWorkbookDraft((prev) => {
+        if (prev.some((item) => item.id === task.id)) return prev;
+        return [
+          ...prev,
+          {
+            id: task.id,
+            task_number: task.task_number,
+            text: task.text,
+            subtopic: task.subtopic,
+            task_title: task.task_title,
+          },
+        ];
+      });
+      return;
+    }
+    setWorkbookDraft((prev) => prev.filter((item) => item.id !== task.id));
+  }, []);
+
+  const startWorkbookMode = useCallback(() => {
+    setWorkbookDraft([]);
+    setWorkbookMode(true);
+  }, []);
+
+  const exitWorkbookMode = useCallback(() => {
+    setWorkbookMode(false);
+    setWorkbookDraft([]);
+  }, []);
+
+  const allVisibleInWorkbook = useMemo(
+    () =>
+      visibleTasks.length > 0 &&
+      visibleTasks.every((task) => workbookDraftIds.has(task.id)),
+    [visibleTasks, workbookDraftIds]
+  );
+
+  const addAllVisibleToWorkbook = useCallback(() => {
+    setWorkbookDraft((prev) => {
+      const existing = new Set(prev.map((task) => task.id));
+      const next = [...prev];
+      for (const task of visibleTasks) {
+        if (existing.has(task.id)) continue;
+        existing.add(task.id);
+        next.push({
+          id: task.id,
+          task_number: task.task_number,
+          text: task.text,
+          subtopic: task.subtopic,
+          task_title: task.task_title,
+        });
+      }
+      return next;
+    });
+  }, [visibleTasks]);
 
   const resetPage = () => setPage(1);
 
@@ -529,7 +586,7 @@ export default function AllTasksPage() {
       <div
         className={`digital-flow-page__wrap${showCodeSidebar ? " digital-flow-page__wrap--with-code-sidebar" : ""}`}
       >
-        <main className="all-tasks-page">
+        <main className={`all-tasks-page${workbookMode ? " all-tasks-page--workbook-mode" : ""}`}>
           <header className="section-head section-head--page">
             <h1 className="section-head__title">Все задачи</h1>
             <p className="section-head__lead">
@@ -739,13 +796,22 @@ export default function AllTasksPage() {
                         {selectedSubtopic.title}
                       </span>
                     ) : null}
-                    {canBuildWorkbook ? (
+                    {canBuildWorkbook && !workbookMode ? (
                       <button
                         type="button"
                         className="all-tasks-workbook-btn"
-                        onClick={handleCreateWorkbook}
+                        onClick={startWorkbookMode}
                       >
                         Создать рабочую тетрадь
+                      </button>
+                    ) : null}
+                    {workbookMode ? (
+                      <button
+                        type="button"
+                        className="all-tasks-workbook-btn all-tasks-workbook-btn--cancel"
+                        onClick={exitWorkbookMode}
+                      >
+                        Отмена
                       </button>
                     ) : null}
                   </div>
@@ -779,6 +845,23 @@ export default function AllTasksPage() {
             </p>
           ) : null}
 
+          {workbookMode ? (
+            <div className="all-tasks-workbook-hint" role="status">
+              <p className="all-tasks-workbook-hint__text">
+                Отметьте галочкой задания для тетради, затем нажмите «Создать тетрадь» внизу
+                справа.
+              </p>
+              <button
+                type="button"
+                className="all-tasks-workbook-hint__add-all"
+                onClick={addAllVisibleToWorkbook}
+                disabled={!visibleTasks.length || allVisibleInWorkbook}
+              >
+                Добавить все
+              </button>
+            </div>
+          ) : null}
+
           <ul className="all-tasks-list">
             {visibleTasks.map((t, i) => {
               const ordinal = i + 1;
@@ -787,10 +870,16 @@ export default function AllTasksPage() {
               const hasTaskBoardDraft = boardPersistHasDraft(taskBoardPersist);
               const answerOpen = !!openAnswers[t.id];
               const answerHtml = (t.answer || "").trim();
+              const inWorkbook = workbookDraftIds.has(t.id);
               return (
                 <li key={t.id} className="all-tasks-list__item">
                   <article
-                    className="all-tasks-item"
+                    className={[
+                      "all-tasks-item",
+                      workbookMode && inWorkbook ? "all-tasks-item--in-workbook" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
                     data-task-id={t.id}
                     data-task-number={t.task_number ?? undefined}
                   >
@@ -823,6 +912,16 @@ export default function AllTasksPage() {
                           ) : null}
                         </p>
                         <div className="all-tasks-item__actions">
+                          {workbookMode ? (
+                            <label className="all-tasks-item__workbook-check">
+                              <input
+                                type="checkbox"
+                                checked={inWorkbook}
+                                onChange={(e) => toggleWorkbookTask(t, e.target.checked)}
+                              />
+                              <span>Добавить</span>
+                            </label>
+                          ) : null}
                           {answerHtml ? (
                             <button
                               type="button"
@@ -896,6 +995,13 @@ export default function AllTasksPage() {
           </Suspense>
         ) : null}
       </div>
+
+      <WorkbookCreateBar
+        active={workbookMode}
+        tasks={workbookDraft}
+        meta={workbookMeta}
+        onCreated={exitWorkbookMode}
+      />
     </div>
   );
 }

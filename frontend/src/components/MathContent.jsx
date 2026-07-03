@@ -1015,3 +1015,4 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
 
 export const MathContent = memo(MathContentInner);
 export default MathContent;
+export { preparePlainBankTaskHtml };

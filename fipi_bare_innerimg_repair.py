@@ -20,8 +20,16 @@ _RE_BARE_INNERIMG = re.compile(
     r'task_files/innerimg([0-4])\.gif',
     re.IGNORECASE,
 )
+_RE_BARE_INNERIMG_PNG = re.compile(
+    r"task_files/innerimg(\d+)\.png",
+    re.IGNORECASE,
+)
 _RE_FIPI_INNERIMG_URL = re.compile(
     r'https?://[^"\']+/questions/([A-F0-9]{32})/innerimg([0-4])\.gif',
+    re.IGNORECASE,
+)
+_RE_FIPI_INNERIMG_PNG_URL = re.compile(
+    r'https?://[^"\']+/questions/([A-F0-9]{32})/innerimg(\d+)\.png',
     re.IGNORECASE,
 )
 _RE_FIPI_FOLDER = re.compile(
@@ -35,14 +43,18 @@ _RE_FIPI_DOCS_BASE = re.compile(
 
 
 def html_has_bare_fipi_innerimg(html: str) -> bool:
-    return bool(html and _RE_BARE_INNERIMG.search(html))
+    return bool(html and (_RE_BARE_INNERIMG.search(html) or _RE_BARE_INNERIMG_PNG.search(html)))
+
+
+def html_has_bare_fipi_innerimg_png(html: str) -> bool:
+    return bool(html and _RE_BARE_INNERIMG_PNG.search(html))
 
 
 def html_has_remote_fipi_innerimg(html: str) -> bool:
     return bool(
         html
         and re.search(
-            r'https?://[^"\']+/questions/[A-F0-9]{32}/innerimg[0-4]\.gif',
+            r'https?://[^"\']+/questions/[A-F0-9]{32}/innerimg[0-9]+\.(?:gif|png)',
             html,
             re.IGNORECASE,
         )
@@ -53,6 +65,8 @@ def html_needs_fipi_choice_repair(html: str) -> bool:
     if not html:
         return False
     if html_has_bare_fipi_innerimg(html) or html_has_remote_fipi_innerimg(html):
+        return True
+    if html_has_bare_fipi_innerimg_png(html):
         return True
     from fipi_html_normalize import html_has_choice_options_table
 
@@ -139,6 +153,163 @@ def normalized_text_choice_sig(html: str) -> tuple[str, ...] | None:
         if norm:
             texts.append(norm)
     return tuple(texts) if len(texts) >= 2 else None
+
+
+def latex_frac_signature(html: str) -> tuple[str, ...] | None:
+    fracs = re.findall(r"\\frac\{(\d+)\}\{(\d+)\}", html or "")
+    if len(fracs) < 2:
+        return None
+    return tuple(f"{num}/{den}" for num, den in fracs)
+
+
+def _frac_sigs_from_json_row(row: dict) -> set[tuple[str, ...]]:
+    sigs: set[tuple[str, ...]] = set()
+    html_sig = latex_frac_signature(row.get("task_html") or "")
+    if html_sig:
+        sigs.add(html_sig)
+
+    chunks = re.findall(r"\d+", row.get("text_plain") or "")
+    for den in (7, 9, 13, 15, 17):
+        den_s = str(den)
+        parts: list[str] = []
+        for ch in chunks:
+            if ch.endswith(den_s) and len(ch) > len(den_s):
+                parts.append(f"{ch[: -len(den_s)]}/{den_s}")
+        if len(parts) >= 2:
+            sigs.add(tuple(parts))
+    return sigs
+
+
+@lru_cache(maxsize=1)
+def _json_by_latex_frac_sig() -> dict[tuple[str, ...], dict]:
+    idx: dict[tuple[str, ...], dict] = {}
+    for row in _load_all_json_rows():
+        for sig in _frac_sigs_from_json_row(row):
+            idx.setdefault(sig, row)
+    return idx
+
+
+def _bare_innerimg_png_nums(html: str) -> set[int]:
+    return {int(m.group(1)) for m in _RE_BARE_INNERIMG_PNG.finditer(html or "")}
+
+
+def _coord_innerimg4_layout(html: str) -> str | None:
+    if not html_has_bare_fipi_innerimg_png(html):
+        return None
+    if len(_bare_innerimg_png_nums(html)) < 8:
+        return None
+    if not re.search(r"координат", html or "", re.IGNORECASE):
+        return None
+    if re.search(r"<p>\s*<img[^>]+innerimg4\.png", html, re.IGNORECASE):
+        return "bare"
+    if re.search(r"<p>\s*<span>\s*<img[^>]+innerimg4\.png", html, re.IGNORECASE):
+        return "span"
+    return None
+
+
+def _json_coord_innerimg4_layout(row: dict) -> str | None:
+    imgs = row.get("images") or []
+    if len(imgs) != 10 or not all("innerimg" in i and ".png" in i.lower() for i in imgs):
+        return None
+    html = row.get("task_html") or ""
+    if not re.search(r"координат", html, re.IGNORECASE):
+        return None
+    if re.search(r"<p>\s*<img[^>]+innerimg4\.png", html, re.IGNORECASE):
+        return "bare"
+    if re.search(r"<p>\s*<span>\s*<img[^>]+innerimg4\.png", html, re.IGNORECASE):
+        return "span"
+    return None
+
+
+@lru_cache(maxsize=1)
+def _json_coord_10png_rows_by_layout() -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {"bare": [], "span": []}
+    for row in _load_all_json_rows():
+        layout = _json_coord_innerimg4_layout(row)
+        if layout:
+            grouped[layout].append(row)
+    for layout in grouped:
+        grouped[layout].sort(key=lambda r: (_fipi_folder_from_row(r) or ""))
+    return grouped
+
+
+@lru_cache(maxsize=64)
+def _coord_10png_db_ids(
+    task_list_id: int,
+    subtopic_id: int | None,
+    layout: str,
+) -> tuple[int, ...]:
+    import psycopg2
+
+    db = {
+        "dbname": os.environ.get("PGDATABASE", "itflux"),
+        "user": os.environ.get("PGUSER", "postgres"),
+        "password": os.environ.get("PGPASSWORD", "postgres"),
+        "host": os.environ.get("PGHOST", "localhost"),
+        "port": os.environ.get("PGPORT", "5432"),
+    }
+    try:
+        conn = psycopg2.connect(**db)
+        cur = conn.cursor()
+        if subtopic_id is None:
+            cur.execute(
+                """
+                SELECT id, task_template FROM "Generator_task"
+                WHERE is_active = TRUE AND task_id = %s AND subtopic_id IS NULL
+                ORDER BY id
+                """,
+                (task_list_id,),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id, task_template FROM "Generator_task"
+                WHERE is_active = TRUE AND task_id = %s AND subtopic_id = %s
+                ORDER BY id
+                """,
+                (task_list_id, subtopic_id),
+            )
+        ids: list[int] = []
+        for row_id, tpl in cur.fetchall():
+            if _coord_innerimg4_layout(tpl or "") == layout:
+                ids.append(row_id)
+        cur.close()
+        conn.close()
+        return tuple(ids)
+    except Exception:
+        return ()
+
+
+def _match_coord_10png_row(
+    html: str,
+    *,
+    task_db_id: int | None,
+    task_list_id: int | None,
+    subtopic_id: int | None,
+) -> tuple[dict | None, str]:
+    layout = _coord_innerimg4_layout(html)
+    if not layout:
+        return None, ""
+
+    rows = _json_coord_10png_rows_by_layout().get(layout) or []
+    if not rows:
+        return None, ""
+
+    if layout == "bare" and len(rows) == 1:
+        return rows[0], "coord-10png-bare"
+
+    if (
+        task_db_id is not None
+        and task_list_id is not None
+        and layout == "span"
+    ):
+        db_ids = _coord_10png_db_ids(task_list_id, subtopic_id, layout)
+        if db_ids and task_db_id in db_ids:
+            idx = db_ids.index(task_db_id)
+            if idx < len(rows):
+                return rows[idx], "coord-10png-span"
+
+    return None, ""
 
 
 @lru_cache(maxsize=1)
@@ -281,7 +452,14 @@ def _ordinal_json_row(task_db_id: int, task_list_id: int, subtopic_id: int | Non
 
 
 def _should_full_replace(how: str) -> bool:
-    return how in ("png", "gif-folder", "text-norm") or (how or "").startswith("gif-neighbor")
+    return how in (
+        "png",
+        "gif-folder",
+        "text-norm",
+        "latex-frac",
+        "coord-10png-bare",
+        "coord-10png-span",
+    ) or (how or "").startswith("gif-neighbor")
 
 
 def _resolve_json_row(
@@ -299,8 +477,23 @@ def _resolve_json_row(
     if row:
         return row, how or "match"
 
+    frac_sig = latex_frac_signature(html)
+    if frac_sig:
+        row = _json_by_latex_frac_sig().get(frac_sig)
+        if row:
+            return row, "latex-frac"
+
+    coord_row, coord_how = _match_coord_10png_row(
+        html,
+        task_db_id=task_db_id,
+        task_list_id=task_list_id,
+        subtopic_id=subtopic_id,
+    )
+    if coord_row:
+        return coord_row, coord_how
+
     nsig = normalized_text_choice_sig(html)
-    if nsig:
+    if nsig and not (len(set(nsig)) == 1 and next(iter(set(nsig))).lower() in ("точка", "point")):
         row = _json_by_normalized_text().get(nsig)
         if row:
             return row, "text-norm"
@@ -345,7 +538,12 @@ def _innerimg_urls_from_json_row(row: dict, *, only_nums: set[int] | None = None
         m = _RE_FIPI_INNERIMG_URL.search(str(src))
         if m:
             urls[int(m.group(2))] = m.group(0)
+        m_png = _RE_FIPI_INNERIMG_PNG_URL.search(str(src))
+        if m_png:
+            urls[int(m_png.group(2))] = m_png.group(0)
     for m in _RE_FIPI_INNERIMG_URL.finditer(row.get("task_html") or ""):
+        urls[int(m.group(2))] = m.group(0)
+    for m in _RE_FIPI_INNERIMG_PNG_URL.finditer(row.get("task_html") or ""):
         urls[int(m.group(2))] = m.group(0)
 
     need = only_nums if only_nums is not None else set(range(5))
@@ -355,13 +553,18 @@ def _innerimg_urls_from_json_row(row: dict, *, only_nums: set[int] | None = None
             f"https://oge.fipi.ru/docs/DE0E276E497AB3784C3FC4CC20248DC0/questions/{folder}"
         )
         for n in need:
-            urls.setdefault(n, f"{base}/innerimg{n}.gif")
+            if n in urls:
+                continue
+            ext = "png" if n > 4 or any(f"innerimg{n}.png" in str(s).lower() for s in row.get("images") or []) else "gif"
+            urls.setdefault(n, f"{base}/innerimg{n}.{ext}")
     return {k: v for k, v in urls.items() if k in need}
 
 
 def _bare_innerimg_nums(html: str) -> set[int]:
     nums: set[int] = set()
     for m in _RE_BARE_INNERIMG.finditer(html or ""):
+        nums.add(int(m.group(1)))
+    for m in _RE_BARE_INNERIMG_PNG.finditer(html or ""):
         nums.add(int(m.group(1)))
     return nums
 
@@ -407,12 +610,24 @@ def rewrite_bare_innerimg_srcs(
             out,
             flags=re.IGNORECASE,
         )
+        out = re.sub(
+            rf'((?:src|href)\s*=\s*["\'])([^"\']*task_files/)innerimg{num}\.png(["\'])',
+            _repl_bare,
+            out,
+            flags=re.IGNORECASE,
+        )
 
         def _repl_remote(m: re.Match[str], fname: str = filename) -> str:
             return f'{m.group(1)}/media/task_files/{fname}{m.group(2)}'
 
         out = re.sub(
             rf'((?:src|href)\s*=\s*["\'])https?://[^"\']+/questions/[A-F0-9]{{32}}/innerimg{num}\.gif(["\'])',
+            _repl_remote,
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(
+            rf'((?:src|href)\s*=\s*["\'])https?://[^"\']+/questions/[A-F0-9]{{32}}/innerimg{num}\.png(["\'])',
             _repl_remote,
             out,
             flags=re.IGNORECASE,
