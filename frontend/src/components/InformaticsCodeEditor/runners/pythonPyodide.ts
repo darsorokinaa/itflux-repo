@@ -1,13 +1,13 @@
+import { formatEducationalError } from "../errorFormatter";
 import { RUN_LIMITS } from "../limits";
 import type { StdinOptions } from "../stdinProvider";
 import type { RunResult } from "../types";
-import type { VirtualFs } from "../virtualFs";
 
 export type RunOptions = StdinOptions & {
-  /** Вызывается, когда среда выполнения загрузилась и программа стартовала */
   onReady?: () => void;
-  /** Вызывается на каждый кусок вывода — для печати «вживую» */
   onOutput?: (chunk: string, stream: "stdout" | "stderr") => void;
+  stdinRequired?: number;
+  allFiles?: Record<string, string>;
 };
 
 const TRUNCATED_MESSAGE =
@@ -24,7 +24,6 @@ function getWorker(): Worker {
   return worker;
 }
 
-/** Принудительно убивает воркер: единственный способ прервать синхронный код */
 function killWorker() {
   if (worker) {
     worker.terminate();
@@ -32,20 +31,47 @@ function killWorker() {
   }
 }
 
+function resultFromError(
+  stdout: string,
+  stderr: string,
+  rawError: string,
+  extras: Partial<RunResult> = {}
+): RunResult {
+  const edu = formatEducationalError(rawError);
+  return {
+    stdout,
+    stderr,
+    error: `${edu.type}: ${edu.message}${edu.line != null ? `\nСтрока ${edu.line}` : ""}${edu.hint ? `\n${edu.hint}` : ""}`,
+    educationalError: {
+      type: edu.type,
+      message: edu.message,
+      line: edu.line,
+      hint: edu.hint,
+    },
+    errorLine: edu.line,
+    ...extras,
+  };
+}
+
 export async function runPythonPyodide(
   code: string,
-  vfs: VirtualFs,
+  files: Record<string, string>,
   signal?: AbortSignal,
   options: RunOptions = {}
 ): Promise<RunResult> {
   if (signal?.aborted) {
-    return { stdout: "", stderr: "", error: "Отменено" };
+    return resultFromError("", "", "Выполнение остановлено.");
   }
 
   const activeWorker = getWorker();
   let stdout = "";
   let stderr = "";
   let truncated = false;
+
+  const mergedFiles = { ...files };
+  if (options.allFiles) {
+    Object.assign(mergedFiles, options.allFiles);
+  }
 
   return new Promise<RunResult>((resolve) => {
     let settled = false;
@@ -86,12 +112,11 @@ export async function runPythonPyodide(
           options.onReady?.();
           execTimer = setTimeout(() => {
             killWorker();
-            finish({
-              stdout,
-              stderr,
-              timedOut: true,
-              error: `Превышено время выполнения (${RUN_LIMITS.pythonTimeoutSec} с).`,
-            });
+            finish(
+              resultFromError(stdout, stderr, `Превышено время выполнения (${RUN_LIMITS.pythonTimeoutSec} с).`, {
+                timedOut: true,
+              })
+            );
           }, RUN_LIMITS.pythonTimeoutSec * 1000);
           break;
         case "stdout":
@@ -110,64 +135,59 @@ export async function runPythonPyodide(
             stdout,
             stderr,
             ...(truncated || message.truncated
-              ? { error: TRUNCATED_MESSAGE }
+              ? { error: TRUNCATED_MESSAGE, truncated: true }
               : {}),
           });
           break;
         case "run-error":
-          finish({
-            stdout,
-            stderr,
-            error: message.message,
-            ...(truncated || message.truncated
-              ? { error: `${message.message}\n\n${TRUNCATED_MESSAGE}` }
-              : {}),
-          });
+          finish(
+            resultFromError(stdout, stderr, message.message, {
+              ...(truncated || message.truncated
+                ? { truncated: true }
+                : {}),
+            })
+          );
           break;
         case "error":
           killWorker();
-          finish({ stdout, stderr, error: message.message });
+          finish(resultFromError(stdout, stderr, message.message));
           break;
       }
     };
 
     const onError = (event: ErrorEvent) => {
       killWorker();
-      finish({
-        stdout,
-        stderr,
-        error: event.message || "Ошибка среды выполнения.",
-      });
+      finish(
+        resultFromError(stdout, stderr, event.message || "Ошибка среды выполнения.")
+      );
     };
 
     const onAbort = () => {
       killWorker();
-      finish({ stdout, stderr, error: "Выполнение остановлено." });
+      finish(resultFromError(stdout, stderr, "Выполнение остановлено."));
     };
 
     activeWorker.addEventListener("message", onMessage);
     activeWorker.addEventListener("error", onError);
     signal?.addEventListener("abort", onAbort, { once: true });
 
-    // Загрузка Pyodide (~15 МБ) при первом запуске может занять до ~90 с
     loadTimer = setTimeout(() => {
       killWorker();
-      finish({
-        stdout,
-        stderr,
-        error: "Среда выполнения не загрузилась за отведённое время.",
-      });
+      finish(
+        resultFromError(stdout, stderr, "Среда выполнения не загрузилась за отведённое время.")
+      );
     }, 90_000);
 
     activeWorker.postMessage({
       type: "run",
       code,
-      files: vfs.toRecord(),
+      files: mergedFiles,
       stdinLines: options.lines ?? [],
+      stdinRequired: options.stdinRequired ?? 0,
     });
   });
 }
 
 export function preloadPyodide() {
-  /* Pyodide (~15 МБ) грузится только по кнопке «Запустить» */
+  /* Pyodide грузится по кнопке «Запустить» */
 }

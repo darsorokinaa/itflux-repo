@@ -8,19 +8,28 @@
  * - Классы oge-math-choice-* в редактор не сохраняйте — после сохранения разметка снова таблицами.
  */
 
-const CHOICE_NUM_RE = /^(\d+)\)\s*$/;
+const CHOICE_NUM_RE = /^(\d+)(?:\\)?\)\s*$/;
 
 const formatCache = new Map();
 const FORMAT_CACHE_MAX = 48;
 
+/** process_latex иногда превращает «2)» в «2\)» внутри <b> — без этого варианты не распознаются. */
+function repairLatexEscapedChoiceLabels(html) {
+  if (!html || typeof html !== "string") return html;
+  return html.replace(
+    /(<(?:b|strong)[^>]*>\s*)(\d+)\\\)(\s*<\/(?:b|strong)>)/gi,
+    "$1$2)$3"
+  );
+}
+
 function mightBeChoiceTaskHtml(html) {
   if (!/<table\b/i.test(html)) return false;
   const boldChoice = (n) =>
-    new RegExp(`<(?:b|strong)[^>]*>\\s*${n}\\)`, "i").test(html);
+    new RegExp(`<(?:b|strong)[^>]*>\\s*${n}(?:\\\\)?\\)`, "i").test(html);
   if (boldChoice(1) && boldChoice(2)) return true;
   return (
-    /<t[dh]\b[^>]*>[\s\S]*?\b1\)/i.test(html) &&
-    /<t[dh]\b[^>]*>[\s\S]*?\b2\)/i.test(html)
+    /<t[dh]\b[^>]*>[\s\S]*?\b1(?:\\)?\)/i.test(html) &&
+    /<t[dh]\b[^>]*>[\s\S]*?\b2(?:\\)?\)/i.test(html)
   );
 }
 
@@ -110,16 +119,46 @@ function tableDirectRows(table) {
 }
 
 function rowChoiceNumber(tr) {
-  const first = tr.querySelector(":scope > td, :scope > th");
-  if (!first) return null;
-  const raw = normalizeCellText(first);
-  let m = raw.match(CHOICE_NUM_RE);
-  if (m) return m[1];
-  m = raw.match(/^(\d+)\)\s+/);
-  if (m) return m[1];
-  const inner = first.innerHTML || "";
-  const bm = inner.match(/<(?:b|strong)[^>]*>\s*(\d+)\)\s*<\/(?:b|strong)>/i);
-  return bm ? bm[1] : null;
+  const cells = [...tr.querySelectorAll(":scope > td, :scope > th")];
+  for (const cell of cells) {
+    const num = choiceNumFromElement(cell);
+    if (num != null) return num;
+  }
+  return null;
+}
+
+/** FIPI: пустая ячейка | <b>1)</b> | тело варианта; CKEditor: одна ячейка «1) …». */
+function findChoiceRowParts(tr) {
+  const cells = [...tr.querySelectorAll(":scope > td, :scope > th")];
+  let num = null;
+  let labelIdx = -1;
+  for (let i = 0; i < cells.length; i++) {
+    const n = choiceNumFromElement(cells[i]);
+    if (n != null) {
+      num = n;
+      labelIdx = i;
+      break;
+    }
+  }
+  if (num == null) return null;
+
+  let bodyHtml = "";
+  for (let i = labelIdx + 1; i < cells.length; i++) {
+    const html = (cells[i]?.innerHTML || "").trim();
+    if (html) {
+      bodyHtml = html;
+      break;
+    }
+  }
+
+  if (!bodyHtml && cells.length === 1) {
+    bodyHtml = (cells[0].innerHTML || "")
+      .replace(/<(?:b|strong)[^>]*>\s*\d+(?:\\)?\)\s*<\/(?:b|strong)>/gi, "")
+      .trim();
+  }
+
+  if (!bodyHtml) return null;
+  return { num, bodyHtml };
 }
 
 function isChoiceOptionsTable(table) {
@@ -154,21 +193,9 @@ function findChoiceOptionsTable(root) {
 function extractAndRemoveChoiceRows(table) {
   const items = [];
   for (const tr of [...tableDirectRows(table)]) {
-    const num = rowChoiceNumber(tr);
-    if (num == null) continue;
-
-    const cells = [...tr.querySelectorAll(":scope > td, :scope > th")];
-    let bodyCell = cells[1] || cells[0];
-    let bodyHtml = (bodyCell?.innerHTML || "").trim();
-
-    if (cells.length === 1 && bodyHtml) {
-      bodyHtml = bodyHtml
-        .replace(/<(?:b|strong)[^>]*>\s*\d+\)\s*<\/(?:b|strong)>/gi, "")
-        .trim();
-    }
-
-    if (!bodyHtml) continue;
-    items.push({ num, bodyHtml });
+    const parts = findChoiceRowParts(tr);
+    if (!parts) continue;
+    items.push(parts);
     tr.remove();
   }
   return items;
@@ -237,10 +264,10 @@ function choiceNumFromElement(el) {
   const raw = normalizeCellText(el);
   let m = raw.match(CHOICE_NUM_RE);
   if (m) return m[1];
-  m = raw.match(/^(\d+)\)\s+/);
+  m = raw.match(/^(\d+)(?:\\)?\)\s+/);
   if (m) return m[1];
   const inner = el.innerHTML || "";
-  const bm = inner.match(/<(?:b|strong)[^>]*>\s*(\d+)\)\s*<\/(?:b|strong)>/i);
+  const bm = inner.match(/<(?:b|strong)[^>]*>\s*(\d+)(?:\\)?\)\s*<\/(?:b|strong)>/i);
   return bm ? bm[1] : null;
 }
 
@@ -301,10 +328,11 @@ function formatFromTaskHtmlBlocks(root) {
     if (num != null) {
       const clone = block.cloneNode(true);
       clone.querySelectorAll("b, strong").forEach((tag) => {
-        if (normalizeCellText(tag) === `${num})`) tag.remove();
+        const label = normalizeCellText(tag);
+        if (label === `${num})` || label === `${num}\\)`) tag.remove();
       });
       let bodyHtml = clone.innerHTML.trim();
-      bodyHtml = bodyHtml.replace(new RegExp(`^\\s*${num}\\)\\s*`), "").trim();
+      bodyHtml = bodyHtml.replace(new RegExp(`^\\s*${num}(?:\\\\)?\\)\\s*`), "").trim();
       if (bodyHtml) choices.push({ num, bodyHtml });
     } else if (hasVisibleContent(block)) {
       questionParts.push(block.innerHTML.trim());
@@ -354,7 +382,7 @@ function collectChoiceImageSrcSet(choices) {
 }
 
 function isImageOnlyNodeForChoice(node, choiceSrcSet) {
-  if (!node || !choiceSrcSet || choiceSrcSet.size < 2) return false;
+  if (!node || !choiceSrcSet || choiceSrcSet.size === 0) return false;
   const imgs = [...node.querySelectorAll("img")];
   if (!imgs.length) return false;
   const srcs = imgs.map((img) => normalizeImageSrc(img.getAttribute("src"))).filter(Boolean);
@@ -365,30 +393,107 @@ function isImageOnlyNodeForChoice(node, choiceSrcSet) {
   return text.length === 0;
 }
 
+function repairBareFipiInnerimgSrc(html, folderId) {
+  if (!html || !folderId) return html;
+  const fid = String(folderId).toUpperCase();
+  return String(html).replace(
+    /((?:src|href)\s*=\s*["'])([^"']*task_files\/)innerimg([0-4])\.gif(["'])/gi,
+    (match, prefix, path, num, quote) => {
+      const target = `${path}${fid}_innerimg${num}.gif`;
+      if (match.includes(`${fid}_innerimg`)) return match;
+      return `${prefix}${target}${quote}`;
+    }
+  );
+}
+
+function extractFipiFolderFromHtml(html) {
+  const folders = new Set();
+  const re = /([A-F0-9]{32})_innerimg[0-4]\.gif/gi;
+  let m;
+  const s = String(html || "");
+  while ((m = re.exec(s)) !== null) folders.add(m[1].toUpperCase());
+  const qm = s.match(/questions\/([A-F0-9]{32})\/innerimg/gi) || [];
+  for (const hit of qm) {
+    const id = hit.match(/([A-F0-9]{32})/i)?.[1];
+    if (id) folders.add(id.toUpperCase());
+  }
+  return folders.size === 1 ? [...folders][0] : null;
+}
+
+const CHOICE_INSTRUCTION_RE = /^выберите\s+правильн/i;
+
+function scrubChoiceQuestionDebris(root) {
+  if (!root) return;
+  root.querySelectorAll("p, div").forEach((el) => {
+    const t = normalizeCellText(el);
+    if (t === "." || t === "·" || t === ",") {
+      el.remove();
+      return;
+    }
+    if (CHOICE_INSTRUCTION_RE.test(t) && !el.querySelector("img, table, mjx-container")) {
+      el.remove();
+    }
+  });
+  stripTrailingEmptyTableRows(root);
+  unwrapRedundantSingleCellTables(root);
+  pruneEmptyNodes(root);
+}
+
+function stripChoiceImagesFromQuestionRoot(root, choiceSrcSet) {
+  if (!root || !choiceSrcSet || choiceSrcSet.size === 0) return;
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+
+    for (const img of [...root.querySelectorAll("img")]) {
+      const src = normalizeImageSrc(img.getAttribute("src"));
+      if (!src || !choiceSrcSet.has(src)) continue;
+      const host = img.closest("p, td, th, figure, div, span") || img;
+      if (host === root) {
+        img.remove();
+      } else if (host.querySelectorAll("img").length <= 1 && normalizeCellText(host).length === 0) {
+        host.remove();
+      } else {
+        img.remove();
+      }
+      changed = true;
+    }
+
+    for (const table of [...root.querySelectorAll("table")]) {
+      const rows = tableDirectRows(table);
+      const mediaRows = rows.filter((tr) => isImageOnlyNodeForChoice(tr, choiceSrcSet));
+      if (rows.length >= 2 && mediaRows.length >= 2 && mediaRows.length === rows.length) {
+        table.remove();
+        changed = true;
+        continue;
+      }
+      if (rows.length === 1 && isImageOnlyNodeForChoice(rows[0], choiceSrcSet)) {
+        table.remove();
+        changed = true;
+      }
+    }
+
+    for (const child of [...root.children]) {
+      if (isImageOnlyNodeForChoice(child, choiceSrcSet)) {
+        child.remove();
+        changed = true;
+      }
+    }
+  }
+}
+
 function stripDuplicateChoiceMediaFromQuestion(questionHtml, choices) {
   const qHtml = String(questionHtml || "").trim();
   if (!qHtml) return qHtml;
   const choiceSrcSet = collectChoiceImageSrcSet(choices);
-  if (choiceSrcSet.size < 2) return qHtml;
+  if (choiceSrcSet.size === 0) return qHtml;
 
   const root = parseHtmlFragment(qHtml);
   if (!root) return qHtml;
 
-  // Удаляем "галереи" вариантов, если они полностью состоят из тех же картинок, что и в 1) 2) 3) 4).
-  [...root.children].forEach((child) => {
-    if (isImageOnlyNodeForChoice(child, choiceSrcSet)) {
-      child.remove();
-      return;
-    }
-
-    if (child.tagName === "TABLE") {
-      const rows = tableDirectRows(child);
-      const mediaRows = rows.filter((tr) => isImageOnlyNodeForChoice(tr, choiceSrcSet));
-      if (rows.length >= 2 && mediaRows.length >= 2 && mediaRows.length === rows.length) {
-        child.remove();
-      }
-    }
-  });
+  // Удаляем «галереи» вариантов и любые картинки из 1) 2) 3) 4) в условии.
+  stripChoiceImagesFromQuestionRoot(root, choiceSrcSet);
 
   stripTrailingEmptyTableRows(root);
   stripTrailingEmptyTaskBlocks(root);
@@ -396,11 +501,98 @@ function stripDuplicateChoiceMediaFromQuestion(questionHtml, choices) {
   return root.innerHTML.trim();
 }
 
+const CHOICE_FOOTER_TEXT_RE = /^В\s+ответ/i;
+
+function isChoiceFooterElement(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag !== "P" && tag !== "DIV") return false;
+  if (el.querySelector("img, table, ol, ul, mjx-container")) return false;
+  const t = normalizeCellText(el);
+  return CHOICE_FOOTER_TEXT_RE.test(t);
+}
+
+function extractChoiceFooter(root) {
+  let footerHtml = "";
+
+  function walk(el) {
+    for (const node of [...el.childNodes]) {
+      if (node.nodeType === 3) {
+        const t = normalizeCellText(node);
+        if (t && CHOICE_FOOTER_TEXT_RE.test(t)) {
+          if (!footerHtml) footerHtml = t;
+          node.remove();
+        }
+        continue;
+      }
+      if (node.nodeType !== 1) continue;
+      if (isChoiceFooterElement(node)) {
+        if (!footerHtml) footerHtml = normalizeCellText(node);
+        node.remove();
+        continue;
+      }
+      walk(node);
+    }
+  }
+
+  walk(root);
+  return footerHtml;
+}
+
+function unwrapLayoutTablesInQuestion(root) {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    stripTrailingEmptyTableRows(root);
+    for (const table of [...root.querySelectorAll("table")]) {
+      const rows = tableDirectRows(table).filter((tr) => hasVisibleContent(tr));
+      if (rows.length !== 1) continue;
+      const cells = rows[0].querySelectorAll(":scope > td, :scope > th");
+      if (cells.length !== 1) continue;
+      const cell = cells[0];
+      const frag = document.createDocumentFragment();
+      while (cell.firstChild) frag.appendChild(cell.firstChild);
+      table.replaceWith(frag);
+      changed = true;
+    }
+  }
+}
+
+function prepareChoiceQuestionHtml(questionHtml) {
+  const root = parseHtmlFragment(questionHtml);
+  if (!root) return { questionHtml: questionHtml || "", footerHtml: "" };
+
+  const footerHtml = extractChoiceFooter(root);
+  scrubChoiceQuestionDebris(root);
+  stripTrailingEmptyTableRows(root);
+  unwrapRedundantSingleCellTables(root);
+  unwrapLayoutTablesInQuestion(root);
+  pruneEmptyNodes(root);
+  stripTrailingEmptyTableRows(root);
+  pruneEmptyNodes(root);
+
+  return { questionHtml: root.innerHTML.trim(), footerHtml };
+}
+
 function buildChoiceMarkup(questionHtml, choices) {
   const wrap = document.createElement("div");
   wrap.className = "oge-math-choice-task";
 
-  const qHtml = stripDuplicateChoiceMediaFromQuestion(questionHtml, choices);
+  const folderId = extractFipiFolderFromHtml(
+    `${questionHtml || ""}${choices.map((c) => c.bodyHtml || "").join("")}`
+  );
+  let qHtml = stripDuplicateChoiceMediaFromQuestion(questionHtml, choices);
+  if (folderId) {
+    qHtml = repairBareFipiInnerimgSrc(qHtml, folderId);
+    choices = choices.map(({ num, bodyHtml }) => ({
+      num,
+      bodyHtml: repairBareFipiInnerimgSrc(bodyHtml, folderId),
+    }));
+  }
+  const prepared = prepareChoiceQuestionHtml(qHtml);
+  qHtml = prepared.questionHtml;
+  const footerHtml = prepared.footerHtml;
+
   if (qHtml && htmlHasVisibleText(qHtml)) {
     const q = document.createElement("div");
     q.className = "oge-math-choice-question";
@@ -433,6 +625,14 @@ function buildChoiceMarkup(questionHtml, choices) {
   }
 
   wrap.appendChild(list);
+
+  if (footerHtml && htmlHasVisibleText(footerHtml)) {
+    const foot = document.createElement("p");
+    foot.className = "oge-math-choice-footer";
+    foot.innerHTML = footerHtml;
+    wrap.appendChild(foot);
+  }
+
   return wrap.outerHTML;
 }
 
@@ -442,7 +642,7 @@ function buildChoiceMarkup(questionHtml, choices) {
  */
 export function formatOgeMathChoiceTaskHtml(html) {
   if (html == null || typeof html !== "string") return html;
-  const trimmed = html.trim();
+  const trimmed = repairLatexEscapedChoiceLabels(html.trim());
   if (!trimmed) return html;
 
   if (formatCache.has(trimmed)) return formatCache.get(trimmed);

@@ -146,12 +146,64 @@ _RE_MATH_TEX_BODY = re.compile(
 # Naked LaTeX in text (no $, no span): e.g. "уравнения 5^{x-4}=\frac{1}{125}."
 # Negative lookbehind: skip if inside our output (&#92;( = \( in entities)
 _RE_NAKED_INLINE = re.compile(
-    r'(?<!&#92;\()([^\s<>]*(?:\\frac\{[^}]*\}\{[^}]*\}|\^\{[^}]*\}|_\{[^}]*\}|\\sqrt(?:\[[^\]]*\])?\{[^}]*\})[^\s<>]*?)(?=[.,;:\s<>]|$|&#41;)',
+    r'(?<!&#92;\()([^\s<>]*(?:\\frac\{[^}]*\}\{[^}]*\}|\^\{[^}]*\}|_\{[^}]*\}|\\sqrt(?:\[[^\]]*\])?\{[^}]*\})[^\s<>]*?)(?=[.,;:\s<>)]|$|&#41;)',
 )
 # LaTeX с \infty, \cup, \cap и др. (интервалы, множества): (−∞;4)∪(4;5]
 _RE_NAKED_LATEX_SYMBOLS = re.compile(
-    r'(?<!&#92;\()([^\s<>]*(?:\\infty|\\cup|\\cap|\\leq|\\geq|\\wedge|\\vee|\\neg|\\exists|\\forall|\\in|\\notin)[^\s<>]*)(?=[.,;:\s<>]|$|&#41;)',
+    r'(?<!&#92;\()([^\s<>]*(?:\\infty|\\cup|\\cap|\\leq|\\geq|\\wedge|\\vee|\\neg|\\exists|\\forall|\\in|\\notin)[^\s<>]*)(?=[.,;:\s<>)]|$|&#41;)',
 )
+
+
+def _repair_malformed_inline_math_paren(html_text: str) -> str:
+    """\\(N), \\(3 \\le N \\le 10\\,000) — пропущенный \\ перед закрывающей скобкой.
+
+    Учитывает вложенные «(…)» внутри формулы: \\(10(𝑥-9)=7\\) не трогаем.
+    """
+    if not html_text:
+        return html_text
+
+    out: list[str] = []
+    i = 0
+    n = len(html_text)
+    while i < n:
+        if html_text.startswith("\\(", i):
+            fixed = _try_fix_malformed_inline_math_paren(html_text, i)
+            if fixed is not None:
+                out.append(fixed[0])
+                i = fixed[1]
+                continue
+        out.append(html_text[i])
+        i += 1
+    return "".join(out)
+
+
+def _try_fix_malformed_inline_math_paren(s: str, start: int) -> tuple[str, int] | None:
+    """Если \\(...\\) закрыт как «)» без «\\», вернуть (исправленный фрагмент, индекс после него)."""
+    i = start + 2
+    depth = 0
+    inner_start = i
+    while i < len(s):
+        if s.startswith("\\(", i):
+            i += 2
+            continue
+        if s.startswith("\\)", i):
+            if depth == 0:
+                return None
+            i += 2
+            continue
+        ch = s[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            if depth > 0:
+                depth -= 1
+            else:
+                inner = s[inner_start:i]
+                if not inner or len(inner) > 120 or "\\(" in inner:
+                    return None
+                return f"\\({inner}\\)", i + 1
+        i += 1
+    return None
 
 _fd = getattr(django_settings, 'FRONTEND_DIR', None)
 _basedir = getattr(django_settings, 'BASE_DIR', Path(__file__).resolve().parent.parent)
@@ -670,8 +722,12 @@ def _normalize_latex(s: str) -> str:
     s = html_lib.unescape(s)
     s = _logic_connectives_span_markup_to_tex(s)
     s = _add_thin_space_around_logic_connective_text(s)
+    # CKEditor иногда сохраняет конец строки array как \<br> вместо \\<br>
+    s = re.sub(r'(?<!\\)\\(?:\s*<br\s*/?>\s*)', r'\\\\', s, flags=re.IGNORECASE)
     s = s.replace('<br>', ' ').replace('<br/>', ' ').replace('<br />', ' ')
     s = _RE_NEWLINES.sub(' ', s)
+    # После схлопывания <br>: одиночный \ перед \hline (тот же дефект редактора)
+    s = re.sub(r'(?<!\\)\\ \s*\\hline', r'\\\\ \\hline', s)
     return s.strip()
 
 
@@ -718,6 +774,7 @@ def process_latex(
         )
 
     html_text = _decode_html_entity_layers_if_stored_escaped(html_text)
+    html_text = _repair_malformed_inline_math_paren(html_text)
 
     # 0. Verbatim — до обработки math (MathJax не поддерживает verbatim)
     html_text = _RE_VERBATIM.sub(_replace_verbatim, html_text)
@@ -803,5 +860,5 @@ def process_latex(
     # 8. Исправление &аmp; (кириллическая 'а') → & — corruption в некоторых данных
     html_text = html_text.replace("&\u0430mp;", "&")
     # 8b. LaTeX \& в условиях (таблицы запросов) → видимый &
-    html_text = re.sub(r"\\&", "&", html_text)
+    html_text = re.sub(r"\\+&", "&", html_text)
     return html_text

@@ -14,11 +14,15 @@ export function formatOgeInf6TaskHtml(html) {
       .replace(/\\quad\s*/g, '    ') // replace \quad with 4 spaces
       .replace(/&lt;/g, '<').replace(/&gt;/g, '>') // unescape html if any
       .replace(/&amp;/g, '&')
-      .replace(/\\;/g, ' ') // thin spaces
-      .trim();
-      
-    // Убираем лишние пробелы в конце строк, но сохраняем отступы слева
-    code = code.split('\n').map(line => line.trimEnd()).join('\n');
+      .replace(/\\;/g, " ") // thin spaces
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n");
+
+    // Убираем только хвостовые пробелы; отступы слева сохраняем
+    code = code
+      .split("\n")
+      .map((line) => line.replace(/[ \t]+$/g, ""))
+      .join("\n");
 
     return `<pre class="task-code-block"><code class="language-python">${code}</code></pre>`;
   });

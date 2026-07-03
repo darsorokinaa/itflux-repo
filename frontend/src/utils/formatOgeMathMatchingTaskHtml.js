@@ -175,6 +175,47 @@ function appendMatchingRow(wrap, rowClass, titleText, rowItems, itemClass) {
   wrap.appendChild(row);
 }
 
+/** Таблица ответа ОГЭ №11: строка А Б В и пустая строка для номеров графиков. */
+function appendAnswerGrid(wrap, formulaItems) {
+  const letters = sortMatchingItems(
+    formulaItems.filter((it) => it.kind === "letter")
+  ).map((it) => it.id);
+  if (letters.length < 2) return;
+
+  const grid = document.createElement("div");
+  grid.className = "oge-math-matching-answer-grid";
+
+  const table = document.createElement("table");
+  table.className = "oge-math-matching-answer-table";
+
+  const thead = document.createElement("thead");
+  const headerRow = document.createElement("tr");
+  for (const letter of letters) {
+    const th = document.createElement("th");
+    th.scope = "col";
+    th.textContent = letter;
+    headerRow.appendChild(th);
+  }
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  const bodyRow = document.createElement("tr");
+  for (const _letter of letters) {
+    const td = document.createElement("td");
+    const cell = document.createElement("span");
+    cell.className = "oge-math-matching-answer-cell";
+    cell.setAttribute("aria-hidden", "true");
+    td.appendChild(cell);
+    bodyRow.appendChild(td);
+  }
+  tbody.appendChild(bodyRow);
+  table.appendChild(tbody);
+
+  grid.appendChild(table);
+  wrap.appendChild(grid);
+}
+
 function mightBeMatchingTaskHtml(html) {
   if (!html || typeof html !== "string") return false;
   const s = html;
@@ -221,6 +262,8 @@ function buildMatchingMarkup(introHtml, items, footerHtml) {
     foot.innerHTML = footerHtml.trim();
     wrap.appendChild(foot);
   }
+
+  appendAnswerGrid(wrap, formulaItems);
 
   return wrap.outerHTML;
 }

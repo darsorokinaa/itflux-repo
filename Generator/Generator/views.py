@@ -2193,6 +2193,21 @@ def api_task_bank(request, level, subject):
 
         keep_tables = bool(tl and tl.part_id == 2)
         task_text_raw = str(task.task_template or '')
+        try:
+            from fipi_bare_innerimg_repair import repair_bare_fipi_innerimg_html
+            from import_tasks_universal import download as fipi_media_download
+
+            task_text_raw = repair_bare_fipi_innerimg_html(
+                task_text_raw,
+                task_db_id=task.id,
+                task_list_id=task.task_id,
+                subtopic_id=task.subtopic_id,
+                download=fipi_media_download,
+            )
+        except Exception:
+            logging.getLogger(__name__).debug(
+                "bare innerimg repair skipped for task %s", task.id, exc_info=True
+            )
 
         result.append({
             'id': task.id,

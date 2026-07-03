@@ -5,57 +5,6 @@ export type StdinOptions = {
   lines?: string[];
 };
 
-/** Захват stdout через единственный write-обработчик Pyodide */
-export function createPyodideStdoutCapture(
-  onChunk: (text: string) => void,
-  maxChars = RUN_LIMITS.maxOutputChars
-) {
-  let total = 0;
-  let stopped = false;
-  const decoder = new TextDecoder();
-
-  const write = (buffer: Uint8Array) => {
-    if (stopped) return buffer.byteLength;
-    const text = decoder.decode(buffer);
-    const room = maxChars - total;
-    if (room <= 0) {
-      stopped = true;
-      return buffer.byteLength;
-    }
-    const slice = text.length > room ? text.slice(0, room) : text;
-    total += slice.length;
-    onChunk(slice);
-    if (text.length > room) stopped = true;
-    return buffer.byteLength;
-  };
-
-  return {
-    write,
-    isTruncated: () => stopped,
-  };
-}
-
-export function createPyodideStdinHandler(options: StdinOptions = {}) {
-  const queue = [...(options.lines ?? [])];
-  let index = 0;
-  let pendingPrompt = "";
-
-  return {
-    noteStdout(chunk: string) {
-      pendingPrompt += chunk;
-    },
-    handler: () => {
-      if (index < queue.length) {
-        pendingPrompt = "";
-        return queue[index++];
-      }
-      const msg = pendingPrompt.trimEnd() || "Ввод";
-      pendingPrompt = "";
-      return window.prompt(msg) ?? "";
-    },
-  };
-}
-
 export function createSkulptInputfun(options: StdinOptions = {}) {
   const queue = [...(options.lines ?? [])];
   let index = 0;
@@ -64,11 +13,40 @@ export function createSkulptInputfun(options: StdinOptions = {}) {
     if (index < queue.length) {
       return queue[index++];
     }
-    const msg = String(promptText || "").trim() || "Ввод";
-    return window.prompt(msg) ?? "";
+    throw new Error(
+      "Недостаточно входных данных: программа запросила ввод, но строки во «Входных данных» закончились."
+    );
   };
 }
 
-export function countInputCalls(code: string) {
-  return (code.match(/\binput\s*\(/g) ?? []).length;
+/** Подсчёт input() во всех файлах проекта */
+export function countInputCalls(code: string, extraFiles: Record<string, string> = {}) {
+  let total = (code.match(/\binput\s*\(/g) ?? []).length;
+  for (const c of Object.values(extraFiles)) {
+    total += (c.match(/\binput\s*\(/g) ?? []).length;
+  }
+  return total;
 }
+
+export function validateStdinLines(
+  inputCallCount: number,
+  lines: string[]
+): { ok: boolean; error?: string } {
+  if (inputCallCount === 0) return { ok: true };
+  const nonEmpty = lines.filter((l) => l !== "");
+  if (nonEmpty.length === 0) {
+    return {
+      ok: false,
+      error: `В коде ${inputCallCount} вызов(ов) input() — заполните «Входные данные» (одна строка на каждый вызов).`,
+    };
+  }
+  if (lines.length < inputCallCount) {
+    return {
+      ok: false,
+      error: `Недостаточно входных данных: нужно ${inputCallCount} строк(и), указано ${lines.length}.`,
+    };
+  }
+  return { ok: true };
+}
+
+export { RUN_LIMITS };

@@ -1,10 +1,10 @@
 /// <reference lib="webworker" />
 
 /**
- * Web Worker, исполняющий Python (Pyodide) вне главного потока.
- * Вывод программы стримится в главный поток сообщениями по мере появления,
- * поэтому интерфейс не зависает, а результат печатается «вживую».
+ * Web Worker: безопасное выполнение Python (Pyodide) вне главного потока.
  */
+
+import { PYODIDE_SECURITY_PREAMBLE } from "../pythonSecurity";
 
 const PYODIDE_BASE = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
 const MAX_OUTPUT_CHARS = 32_000;
@@ -14,6 +14,7 @@ type RunMessage = {
   code: string;
   files: Record<string, string>;
   stdinLines: string[];
+  stdinRequired: number;
 };
 
 type PyodideInstance = {
@@ -46,12 +47,12 @@ async function getPyodide(): Promise<PyodideInstance> {
       try {
         pyodide.FS.mkdir("/home");
       } catch {
-        /* already exists */
+        /* exists */
       }
       try {
         pyodide.FS.mkdir("/home/user");
       } catch {
-        /* already exists */
+        /* exists */
       }
       return pyodide;
     })();
@@ -67,7 +68,7 @@ ctx.onmessage = async (event: MessageEvent<RunMessage>) => {
   const data = event.data;
   if (!data || data.type !== "run") return;
 
-  const { code, files, stdinLines } = data;
+  const { code, files, stdinLines, stdinRequired } = data;
 
   let pyodide: PyodideInstance;
   try {
@@ -86,7 +87,7 @@ ctx.onmessage = async (event: MessageEvent<RunMessage>) => {
     try {
       pyodide.FS.writeFile(`/home/user/${name}`, content);
     } catch {
-      /* skip files that fail to mount */
+      /* skip */
     }
   }
 
@@ -124,17 +125,25 @@ ctx.onmessage = async (event: MessageEvent<RunMessage>) => {
       if (stdinIndex < stdinLines.length) {
         return `${stdinLines[stdinIndex++]}\n`;
       }
-      return null; // EOF — input() выбросит EOFError, программа завершится
+      if (stdinRequired > stdinIndex) {
+        throw new Error(
+          "EOFError: Недостаточно входных данных — добавьте строки во «Входные данные»."
+        );
+      }
+      return null;
     },
     autoEOF: false,
   });
 
   const wrapped = `
-import os, sys
-os.chdir("/home/user")
+import os as _os, sys as _sys
+${PYODIDE_SECURITY_PREAMBLE}
+_os.chdir("/home/user")
+if "/home/user" not in _sys.path:
+    _sys.path.insert(0, "/home/user")
 try:
-    sys.stdout.reconfigure(line_buffering=True)
-    sys.stderr.reconfigure(line_buffering=True)
+    _sys.stdout.reconfigure(line_buffering=True)
+    _sys.stderr.reconfigure(line_buffering=True)
 except Exception:
     pass
 ${code}

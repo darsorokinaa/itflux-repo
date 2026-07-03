@@ -11,6 +11,7 @@ type Props = {
   taskSources?: TaskFileSource[];
   getTaskSources?: () => TaskFileSource[];
   initialOpen?: boolean;
+  storageId?: string;
 };
 
 function readOpenState(fallback: boolean) {
@@ -36,6 +37,7 @@ function InformaticsCodeEditorSidebarInner({
   taskSources = [],
   getTaskSources,
   initialOpen = false,
+  storageId,
 }: Props) {
   const [open, setOpen] = useState(() => readOpenState(initialOpen));
   const [panelMounted, setPanelMounted] = useState(false);
@@ -107,6 +109,7 @@ function InformaticsCodeEditorSidebarInner({
             <InformaticsCodeEditorPanel
               active
               hostRef={asideRef}
+              storageId={storageId}
               taskSources={taskSources}
               getTaskSources={getTaskSources}
               activeTaskId={activeTaskId}

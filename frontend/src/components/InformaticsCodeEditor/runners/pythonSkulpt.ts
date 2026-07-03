@@ -1,8 +1,8 @@
+import { formatEducationalError } from "../errorFormatter";
 import { loadScript } from "../loadScript";
 import { RUN_LIMITS, truncateOutput, withExecutionTimeout } from "../limits";
 import { createSkulptInputfun, type StdinOptions } from "../stdinProvider";
 import type { RunResult } from "../types";
-import type { VirtualFs } from "../virtualFs";
 
 const SKULPT_BASE = "https://cdn.jsdelivr.net/npm/skulpt@1.2.0/dist/";
 
@@ -83,18 +83,17 @@ async function ensureSkulpt(signal?: AbortSignal): Promise<SkulptGlobal> {
 }
 
 export function preloadSkulpt() {
-  /* Skulpt грузится только по кнопке «Запустить» */
+  /* Skulpt грузится по кнопке «Запустить» */
 }
 
 export async function runPythonSkulpt(
   code: string,
-  vfs: VirtualFs,
+  allFiles: Record<string, string>,
   turtleTargetId: string,
   signal?: AbortSignal,
   stdinOptions: StdinOptions = {}
 ): Promise<RunResult> {
   const Sk = await ensureSkulpt(signal);
-  const files = vfs.toRecord();
   let stdout = "";
   let stdoutTruncated = false;
 
@@ -119,7 +118,7 @@ export async function runPythonSkulpt(
       stdout += text.length > room ? text.slice(0, room) : text;
       if (text.length > room) stdoutTruncated = true;
     },
-    read: (file: string) => skulptRead(Sk, files, file),
+    read: (file: string) => skulptRead(Sk, allFiles, file),
     inputfun: createSkulptInputfun(stdinOptions),
     inputfunTakesPrompt: true,
     execLimit: RUN_LIMITS.turtleExecLimit,
@@ -140,25 +139,38 @@ export async function runPythonSkulpt(
     return {
       stdout: out.text,
       stderr: "",
+      usedTurtle: true,
       ...(stdoutTruncated || out.truncated
         ? {
             error:
               "Вывод программы обрезан — уменьшите количество print() или шагов черепахи.",
+            truncated: true,
           }
         : {}),
     };
   } catch (e) {
-    const msg =
+    const raw =
       e instanceof Error ? formatSkulptError(e) || e.message : formatSkulptError(e);
     const timedOut =
-      /время выполнения/i.test(msg) || /TimeLimitError|execLimit/i.test(msg);
+      /время выполнения/i.test(raw) || /TimeLimitError|execLimit/i.test(raw);
+    const edu = formatEducationalError(raw);
     const out = truncateOutput(stdout);
     return {
       stdout: out.text,
       stderr: "",
+      usedTurtle: true,
       error: timedOut
         ? `Программа остановлена: слишком долгое выполнение (лимит ${RUN_LIMITS.turtleTimeoutSec} с или ${RUN_LIMITS.turtleExecLimit.toLocaleString("ru-RU")} шагов).`
-        : msg,
+        : `${edu.type}: ${edu.message}${edu.line != null ? `\nСтрока ${edu.line}` : ""}${edu.hint ? `\n${edu.hint}` : ""}`,
+      educationalError: timedOut
+        ? undefined
+        : {
+            type: edu.type,
+            message: edu.message,
+            line: edu.line,
+            hint: edu.hint,
+          },
+      errorLine: edu.line,
       timedOut,
     };
   }

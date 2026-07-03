@@ -8,10 +8,14 @@ const InformaticsCodeEditorSidebar = lazy(
 
 type Props = {
   getTaskSources?: () => TaskFileSource[];
+  storageId?: string;
 };
 
 /** Лёгкая оболочка: тяжёлый редактор грузится только после нажатия «Код». */
-export default function InformaticsCodeEditorEntry({ getTaskSources }: Props) {
+export default function InformaticsCodeEditorEntry({
+  getTaskSources,
+  storageId,
+}: Props) {
   const [engaged, setEngaged] = useState(false);
 
   const handleOpen = useCallback(() => {
@@ -52,6 +56,7 @@ export default function InformaticsCodeEditorEntry({ getTaskSources }: Props) {
     >
       <InformaticsCodeEditorSidebar
         getTaskSources={getTaskSources}
+        storageId={storageId}
         initialOpen
       />
     </Suspense>

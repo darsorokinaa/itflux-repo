@@ -7,25 +7,36 @@ import {
   useState,
   type RefObject,
 } from "react";
-import CodeTab from "./CodeTab";
-import FilesTab from "./FilesTab";
-import {
-  CODE_LANGUAGES,
-  SIDEBAR_CODE_STORAGE_ID,
-  codeStorageKey,
-  type CodeLanguage,
-  type RunResult,
-  type TaskFileSource,
-} from "./types";
-import { VirtualFs } from "./virtualFs";
+import EditorToolbar from "./EditorToolbar";
+import FilePanel from "./FilePanel";
+import OutputPanel from "./OutputPanel";
+import { pickRunner } from "./detectRunner";
 import {
   limitsSummary,
   RUN_LIMITS,
   validateProgram,
 } from "./limits";
-import { countInputCalls } from "./stdinProvider";
-
-type TabId = "editor" | "files" | "output";
+import {
+  applyProjectToVfs,
+  loadProject,
+  MAIN_FILE,
+  migrateLegacyCode,
+  saveProject,
+  vfsToProjectFiles,
+  type SaveStatus,
+} from "./projectStorage";
+import {
+  countInputCalls,
+  validateStdinLines,
+} from "./stdinProvider";
+import {
+  SIDEBAR_CODE_STORAGE_ID,
+  type OutputTabId,
+  type RunResult,
+  type RunStatus,
+  type TaskFileSource,
+} from "./types";
+import { VirtualFs } from "./virtualFs";
 
 type Props = {
   storageId?: string;
@@ -37,14 +48,6 @@ type Props = {
   hostRef?: RefObject<HTMLElement | null>;
 };
 
-function saveStoredCode(storageId: string, lang: CodeLanguage, code: string) {
-  try {
-    localStorage.setItem(codeStorageKey(storageId, lang), code);
-  } catch {
-    /* ignore quota */
-  }
-}
-
 function InformaticsCodeEditorPanelInner({
   storageId = SIDEBAR_CODE_STORAGE_ID,
   taskSources = [],
@@ -54,21 +57,176 @@ function InformaticsCodeEditorPanelInner({
   active = true,
   hostRef,
 }: Props) {
-  const [language, setLanguage] = useState<CodeLanguage>("python");
-  const [tab, setTab] = useState<TabId>("editor");
+  const [vfs] = useState(() => new VirtualFs());
+  const [mainFile, setMainFile] = useState(MAIN_FILE);
+  const [mainContent, setMainContent] = useState("");
+  const [activeFile, setActiveFile] = useState(MAIN_FILE);
+  const [stdinPrefill, setStdinPrefill] = useState("");
   const [running, setRunning] = useState(false);
   const [runtimeLoading, setRuntimeLoading] = useState(false);
+  const [runStatus, setRunStatus] = useState<RunStatus>("idle");
   const [result, setResult] = useState<RunResult | null>(null);
-  const [vfs] = useState(() => new VirtualFs());
   const [runWarnings, setRunWarnings] = useState<string[]>([]);
-  const [stdinPrefill, setStdinPrefill] = useState("");
+  const [outputTab, setOutputTab] = useState<OutputTabId>("stdout");
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [lastUsedTurtle, setLastUsedTurtle] = useState(false);
+  const [projectReady, setProjectReady] = useState(false);
+  const [vfsVersion, setVfsVersion] = useState(0);
 
-  const getCodeRef = useRef(() => "");
+  const bumpVfs = useCallback(() => setVfsVersion((v) => v + 1), []);
+
   const runningRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const handleRunRef = useRef<() => void>(() => {});
+  const saveTimerRef = useRef<number | undefined>(undefined);
   const liveOutputRef = useRef({ stdout: "", stderr: "" });
   const flushFrameRef = useRef<number | null>(null);
+  const storageIdRef = useRef(storageId);
+
+  const turtleHostId = useMemo(
+    () => `inf-turtle-host-${storageId}`,
+    [storageId]
+  );
+
+  const auxFiles = useMemo(() => vfs.toRecord(), [vfs, vfsVersion]);
+
+  const allProjectFiles = useMemo(
+    () => vfsToProjectFiles(vfs, mainFile, mainContent),
+    [vfs, mainFile, mainContent]
+  );
+
+  const inputCallCount = useMemo(
+    () => countInputCalls(mainContent, auxFiles),
+    [mainContent, auxFiles]
+  );
+
+  const stdinLines = useMemo(
+    () => stdinPrefill.split(/\r?\n/).map((line) => line.replace(/\r$/, "")),
+    [stdinPrefill]
+  );
+
+  const activeFileUrl = useMemo(() => {
+    const sources = taskSources.length > 0 ? taskSources : getTaskSources?.() ?? [];
+    const task = sources.find((t) => String(t.id) === String(activeTaskId ?? ""));
+    return task?.fileUrl ?? null;
+  }, [taskSources, getTaskSources, activeTaskId]);
+
+  const persistProject = useCallback(
+    (main: string, stdin: string, status: SaveStatus = "saving") => {
+      setSaveStatus(status);
+      const project = {
+        files: vfsToProjectFiles(vfs, mainFile, main),
+        mainFile,
+        stdinPrefill: stdin,
+        version: 1 as const,
+      };
+      const ok = saveProject(storageIdRef.current, project);
+      setSaveStatus(ok ? "saved" : "error");
+    },
+    [vfs, mainFile]
+  );
+
+  const scheduleAutosave = useCallback(
+    (main: string, stdin: string) => {
+      if (saveTimerRef.current !== undefined) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+      setSaveStatus("saving");
+      saveTimerRef.current = window.setTimeout(() => {
+        persistProject(main, stdin, "saving");
+      }, RUN_LIMITS.autosaveDebounceMs);
+    },
+    [persistProject]
+  );
+
+  useEffect(() => {
+    storageIdRef.current = storageId;
+    const legacy = migrateLegacyCode(storageId);
+    const project = loadProject(storageId);
+    if (legacy) {
+      project.files[project.mainFile] = legacy;
+    }
+    setMainFile(project.mainFile);
+    setMainContent(project.files[project.mainFile] ?? "");
+    setStdinPrefill(project.stdinPrefill);
+    setActiveFile(project.mainFile);
+    applyProjectToVfs(vfs, project);
+    bumpVfs();
+    setProjectReady(true);
+    setSaveStatus("saved");
+    setResult(null);
+    setRunStatus("idle");
+  }, [storageId, vfs, bumpVfs]);
+
+  useEffect(
+    () => () => {
+      if (saveTimerRef.current !== undefined) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+    },
+    []
+  );
+
+  const handleMainContentChange = useCallback(
+    (code: string) => {
+      setMainContent(code);
+      scheduleAutosave(code, stdinPrefill);
+    },
+    [scheduleAutosave, stdinPrefill]
+  );
+
+  const handleAuxContentChange = useCallback(
+    (name: string, code: string) => {
+      try {
+        vfs.set(name, code);
+        bumpVfs();
+        scheduleAutosave(mainContent, stdinPrefill);
+      } catch (e) {
+        setRunWarnings([
+          e instanceof Error ? e.message : String(e),
+        ]);
+        setOutputTab("errors");
+      }
+    },
+    [vfs, mainContent, stdinPrefill, scheduleAutosave, bumpVfs]
+  );
+
+  const handleCreateFile = useCallback(
+    (name: string) => {
+      vfs.set(name, "");
+      bumpVfs();
+    },
+    [vfs, bumpVfs]
+  );
+
+  const handleRenameFile = useCallback(
+    (oldName: string, newName: string) => {
+      const content = vfs.get(oldName);
+      if (content === undefined) return;
+      vfs.delete(oldName);
+      vfs.set(newName, content);
+      bumpVfs();
+      scheduleAutosave(mainContent, stdinPrefill);
+    },
+    [vfs, mainContent, stdinPrefill, scheduleAutosave, bumpVfs]
+  );
+
+  const handleDeleteFile = useCallback(
+    (name: string) => {
+      vfs.delete(name);
+      bumpVfs();
+      scheduleAutosave(mainContent, stdinPrefill);
+    },
+    [vfs, mainContent, stdinPrefill, scheduleAutosave, bumpVfs]
+  );
+
+  const handleStdinChange = useCallback(
+    (value: string) => {
+      setStdinPrefill(value);
+      scheduleAutosave(mainContent, value);
+    },
+    [mainContent, scheduleAutosave]
+  );
 
   const flushLiveOutput = useCallback(() => {
     flushFrameRef.current = null;
@@ -76,6 +234,9 @@ function InformaticsCodeEditorPanelInner({
       stdout: liveOutputRef.current.stdout,
       stderr: liveOutputRef.current.stderr,
       timedOut: prev?.timedOut,
+      educationalError: prev?.educationalError,
+      errorLine: prev?.errorLine,
+      usedTurtle: prev?.usedTurtle,
     }));
   }, []);
 
@@ -93,80 +254,76 @@ function InformaticsCodeEditorPanelInner({
 
   useEffect(() => () => cancelFlush(), [cancelFlush]);
 
-  const turtleHostId = useMemo(
-    () => `inf-turtle-host-${storageId}`,
-    [storageId]
-  );
+  const handleStop = useCallback(() => {
+    abortRef.current?.abort();
+    runningRef.current = false;
+    setRunning(false);
+    setRuntimeLoading(false);
+    setRunStatus("stopped");
+    setResult((prev) => ({
+      stdout: prev?.stdout ?? "",
+      stderr: prev?.stderr ?? "",
+      error: "Выполнение остановлено.",
+      educationalError: {
+        type: "Остановлено",
+        message: "Выполнение программы прервано пользователем.",
+      },
+      usedTurtle: prev?.usedTurtle,
+    }));
+    setOutputTab("errors");
+  }, []);
 
-  const inputCallCount = useMemo(
-    () => countInputCalls(getCodeRef.current()),
-    [tab, language, result, runtimeLoading]
-  );
-  const stdinLines = useMemo(
-    () => stdinPrefill.split(/\r?\n/).map((line) => line.replace(/\r$/, "")),
-    [stdinPrefill]
-  );
+  const handleClearOutput = useCallback(() => {
+    setResult(null);
+    setRunWarnings([]);
+    setRunStatus("idle");
+    setOutputTab("stdout");
+    const host = document.getElementById(turtleHostId);
+    if (host) host.innerHTML = "";
+  }, [turtleHostId]);
 
-  const activeFileUrl = useMemo(() => {
-    const sources =
-      taskSources.length > 0
-        ? taskSources
-        : tab === "files" && getTaskSources
-          ? getTaskSources()
-          : [];
-    const task = sources.find(
-      (t) => String(t.id) === String(activeTaskId ?? "")
-    );
-    return task?.fileUrl ?? null;
-  }, [taskSources, getTaskSources, activeTaskId, tab]);
+  const handleSave = useCallback(() => {
+    if (saveTimerRef.current !== undefined) {
+      window.clearTimeout(saveTimerRef.current);
+    }
+    persistProject(mainContent, stdinPrefill, "saving");
+  }, [persistProject, mainContent, stdinPrefill]);
 
   const handleRun = useCallback(async () => {
     if (runningRef.current) return;
 
-    const code = getCodeRef.current();
-    const validation = validateProgram(code, language);
+    const code = mainContent;
+    const validation = validateProgram(code, "python", auxFiles);
     if (!validation.ok) {
       setResult({
         stdout: "",
         stderr: "",
         error: validation.error,
+        educationalError: validation.error
+          ? { type: "Ошибка", message: validation.error }
+          : undefined,
       });
       setRunWarnings([]);
-      setTab("output");
+      setRunStatus("error");
+      setOutputTab("errors");
       return;
     }
 
-    if (
-      inputCallCount > 0 &&
-      stdinLines.every((line) => line === "") &&
-      language !== "python-turtle"
-    ) {
-      setTab("output");
-      setRunWarnings([
-        ...validation.warnings,
-        `В коде ${inputCallCount} вызов(ов) input() — заполните «Входные данные» во вкладке «Вывод» (одна строка на каждый input()).`,
-      ]);
+    const stdinCheck = validateStdinLines(inputCallCount, stdinLines);
+    if (!stdinCheck.ok) {
+      setRunWarnings([...(stdinCheck.error ? [stdinCheck.error] : [])]);
+      setOutputTab("stdin");
       return;
     }
 
     if (validation.warnings.length) {
-      const proceed = window.confirm(
-        [
-          "Перед запуском:",
-          ...validation.warnings.map((w) => `• ${w}`),
-          "",
-          `Лимит: ${limitsSummary(language)}.`,
-          "",
-          "Запустить программу?",
-        ].join("\n")
-      );
-      if (!proceed) return;
+      setRunWarnings(validation.warnings);
+    } else {
+      setRunWarnings([]);
     }
 
     const stdinOptions =
-      inputCallCount > 0 && stdinLines.some((line) => line !== "")
-        ? { lines: stdinLines }
-        : {};
+      inputCallCount > 0 ? { lines: stdinLines } : {};
 
     runningRef.current = true;
     abortRef.current?.abort();
@@ -175,19 +332,34 @@ function InformaticsCodeEditorPanelInner({
 
     setRunning(true);
     setRuntimeLoading(true);
+    setRunStatus("loading");
     setResult(null);
-    setRunWarnings(validation.warnings);
-    setTab("output");
+    setOutputTab("stdout");
     liveOutputRef.current = { stdout: "", stderr: "" };
     cancelFlush();
 
+    const runner = pickRunner(code, allProjectFiles);
+    const useTurtle = runner === "skulpt";
+    setLastUsedTurtle(useTurtle);
+    if (useTurtle) {
+      setOutputTab("turtle");
+      await new Promise((r) =>
+        requestAnimationFrame(() => requestAnimationFrame(r))
+      );
+    }
+
     let runRes: RunResult;
     try {
-      if (language === "python") {
+      if (runner === "pyodide") {
         const { runPythonPyodide } = await import("./runners/pythonPyodide");
-        runRes = await runPythonPyodide(code, vfs, ac.signal, {
+        runRes = await runPythonPyodide(code, auxFiles, ac.signal, {
           ...stdinOptions,
-          onReady: () => setRuntimeLoading(false),
+          stdinRequired: inputCallCount,
+          allFiles: allProjectFiles,
+          onReady: () => {
+            setRuntimeLoading(false);
+            setRunStatus("running");
+          },
           onOutput: (chunk, stream) => {
             if (stream === "stdout") {
               liveOutputRef.current.stdout += chunk;
@@ -198,16 +370,15 @@ function InformaticsCodeEditorPanelInner({
           },
         });
       } else {
-        await new Promise((r) =>
-          requestAnimationFrame(() => requestAnimationFrame(r))
-        );
         if (!document.getElementById(turtleHostId)) {
           throw new Error("Холст Turtle не найден");
         }
+        setRuntimeLoading(false);
+        setRunStatus("running");
         const { runPythonSkulpt } = await import("./runners/pythonSkulpt");
         runRes = await runPythonSkulpt(
           code,
-          vfs,
+          allProjectFiles,
           turtleHostId,
           ac.signal,
           stdinOptions
@@ -218,6 +389,10 @@ function InformaticsCodeEditorPanelInner({
         stdout: "",
         stderr: "",
         error: e instanceof Error ? e.message : String(e),
+        educationalError: {
+          type: "Ошибка",
+          message: e instanceof Error ? e.message : String(e),
+        },
       };
     } finally {
       runningRef.current = false;
@@ -226,13 +401,26 @@ function InformaticsCodeEditorPanelInner({
       cancelFlush();
     }
 
-    if (!ac.signal.aborted) setResult(runRes);
+    if (!ac.signal.aborted) {
+      setResult(runRes);
+      if (runRes.timedOut) {
+        setRunStatus("timeout");
+        setOutputTab("errors");
+      } else if (runRes.error || runRes.educationalError) {
+        setRunStatus("error");
+        setOutputTab(useTurtle && runRes.stdout ? "turtle" : "errors");
+      } else {
+        setRunStatus("done");
+        if (useTurtle) setOutputTab("turtle");
+      }
+    }
   }, [
-    language,
-    vfs,
-    turtleHostId,
+    mainContent,
+    auxFiles,
+    allProjectFiles,
     inputCallCount,
     stdinLines,
+    turtleHostId,
     cancelFlush,
     scheduleFlush,
   ]);
@@ -254,202 +442,81 @@ function InformaticsCodeEditorPanelInner({
     return () => document.removeEventListener("keydown", handleKey);
   }, [active, hostRef]);
 
-  const code = getCodeRef.current();
-  const codeLines = code ? code.split(/\r?\n/).length : 0;
   const codeNearLimit =
-    code.length > RUN_LIMITS.maxCodeChars * 0.85 ||
-    codeLines > RUN_LIMITS.maxCodeLines * 0.85;
+    mainContent.length > RUN_LIMITS.maxCodeChars * 0.85 ||
+    mainContent.split(/\r?\n/).length > RUN_LIMITS.maxCodeLines * 0.85;
 
-  const langMeta = CODE_LANGUAGES.find((l) => l.id === language);
+  if (!projectReady) {
+    return (
+      <div className="inf-code-editor-panel inf-code-editor-panel--loading">
+        Загрузка проекта…
+      </div>
+    );
+  }
 
   return (
     <div className="inf-code-editor-panel">
       <header className="inf-code-editor-header">
-        <div className="inf-code-editor-header__main">
-          <span className="inf-code-editor-eyebrow">Редактор кода</span>
-          <h2 className="inf-code-editor-title">Python · Turtle</h2>
-          {langMeta ? (
-            <p className="inf-code-editor-subtitle">{langMeta.hint}</p>
-          ) : null}
-          <p className="inf-code-editor-limits" title="Ограничения среды выполнения">
-            {limitsSummary(language)} · файлы до {(RUN_LIMITS.maxFileBytes / 1024).toFixed(0)} КБ
+        <div className="inf-code-editor-header__brand">
+          <h2 className="inf-code-editor-header__title">Python</h2>
+          <p className="inf-code-editor-header__hint" title="Ограничения среды">
+            {limitsSummary()} · Ctrl+Enter
           </p>
         </div>
-        <div className="inf-code-editor-header__controls">
-          <div
-            className="inf-code-editor-lang-pills"
-            role="group"
-            aria-label="Режим"
-          >
-            {CODE_LANGUAGES.map((l) => (
-              <button
-                key={l.id}
-                type="button"
-                className={`inf-code-editor-lang-pill${language === l.id ? " is-active" : ""}`}
-                aria-pressed={language === l.id}
-                disabled={running}
-                onClick={() => {
-                  if (l.id === language) return;
-                  saveStoredCode(storageId, language, getCodeRef.current());
-                  setLanguage(l.id);
-                  setResult(null);
-                }}
-              >
-                {l.label}
-              </button>
-            ))}
-          </div>
-          {running ? (
-            <button
-              type="button"
-              className="inf-code-editor-stop"
-              onClick={() => {
-                abortRef.current?.abort();
-                runningRef.current = false;
-                setRunning(false);
-                setRuntimeLoading(false);
-                setResult((prev) => ({
-                  stdout: prev?.stdout ?? "",
-                  stderr: prev?.stderr ?? "",
-                  error: "Выполнение остановлено.",
-                }));
-              }}
-              title="Остановить выполнение"
-            >
-              ■
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="inf-code-editor-run"
-            onClick={() => void handleRun()}
-            disabled={running}
-            title="Запустить (Ctrl+Enter)"
-          >
-            {running ? "…" : "▶"}
-          </button>
-        </div>
+        <EditorToolbar
+          running={running}
+          runtimeLoading={runtimeLoading}
+          saveStatus={saveStatus}
+          onRun={() => void handleRun()}
+          onStop={handleStop}
+          onSave={handleSave}
+          onClearOutput={handleClearOutput}
+        />
       </header>
 
-      {codeNearLimit && tab === "editor" ? (
+      {codeNearLimit ? (
         <p className="inf-code-editor-warn" role="status">
-          Код близок к лимиту: {codeLines} / {RUN_LIMITS.maxCodeLines} строк,{" "}
-          {code.length.toLocaleString("ru-RU")} /{" "}
-          {RUN_LIMITS.maxCodeChars.toLocaleString("ru-RU")} символов.
+          Код близок к лимиту ({mainContent.length.toLocaleString("ru-RU")}{" "}
+          символов).
         </p>
       ) : null}
 
-      <div className="inf-code-editor-tabs" role="tablist">
-        {(
-          [
-            ["editor", "Код"],
-            ["files", "Файлы"],
-            ["output", "Вывод"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={tab === id}
-            className={`inf-code-editor-tab${tab === id ? " is-active" : ""}`}
-            onClick={() => setTab(id)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <div className="inf-code-editor-body">
+        <FilePanel
+          vfs={vfs}
+          mainFile={mainFile}
+          mainContent={mainContent}
+          activeFile={activeFile}
+          onSelectFile={setActiveFile}
+          onMainContentChange={handleMainContentChange}
+          onAuxContentChange={handleAuxContentChange}
+          onCreateFile={handleCreateFile}
+          onRenameFile={handleRenameFile}
+          onDeleteFile={handleDeleteFile}
+          running={running}
+          errorLine={result?.errorLine}
+          activeFileUrl={activeFileUrl}
+          taskSources={taskSources}
+          getTaskSources={getTaskSources}
+          activeTaskId={activeTaskId}
+          onActiveTaskChange={onActiveTaskChange}
+          vfsVersion={vfsVersion}
+        />
 
-      <div
-        className={`inf-code-editor-body${language === "python-turtle" ? " inf-code-editor-body--turtle" : ""}`}
-      >
-        {language === "python-turtle" ? (
-          <div
-            id={turtleHostId}
-            className="inf-code-turtle-host"
-            aria-label="Холст Turtle"
-          />
-        ) : null}
-
-        <div className="inf-code-editor-panes">
-          <div
-            className={`inf-code-editor-pane inf-code-editor-pane--editor${tab !== "editor" ? " is-hidden" : ""}`}
-          >
-            <CodeTab
-              storageId={storageId}
-              language={language}
-              running={running}
-              visible={tab === "editor"}
-              getCodeRef={getCodeRef}
-            />
-          </div>
-
-          <div
-            className={`inf-code-editor-pane inf-code-editor-pane--files${tab !== "files" ? " is-hidden" : ""}`}
-          >
-            <FilesTab
-              vfs={vfs}
-              activeFileUrl={activeFileUrl}
-              visible={tab === "files"}
-              taskSources={taskSources}
-              getTaskSources={getTaskSources}
-              activeTaskId={activeTaskId}
-              onActiveTaskChange={onActiveTaskChange}
-            />
-          </div>
-
-          <div
-            className={`inf-code-editor-pane inf-code-editor-pane--output${tab !== "output" ? " is-hidden" : ""}`}
-          >
-            {runtimeLoading ? (
-              <p className="inf-code-output-loading">
-                Загрузка среды выполнения… Первый запуск может занять до минуты.
-                Не закрывайте вкладку. Лимит выполнения —{" "}
-                {language === "python"
-                  ? RUN_LIMITS.pythonTimeoutSec
-                  : RUN_LIMITS.turtleTimeoutSec}{" "}
-                с.
-              </p>
-            ) : null}
-            {runWarnings.length > 0 && !runtimeLoading ? (
-              <ul className="inf-code-output-warnings">
-                {runWarnings.map((w) => (
-                  <li key={w}>{w}</li>
-                ))}
-              </ul>
-            ) : null}
-            {inputCallCount > 0 ? (
-              <label className="inf-code-stdin">
-                <span className="inf-code-stdin__label">
-                  Входные данные для input() ({inputCallCount}{" "}
-                  {inputCallCount === 1 ? "строка" : "строки"}, по одной на
-                  вызов)
-                </span>
-                <textarea
-                  className="inf-code-stdin__field"
-                  value={stdinPrefill}
-                  onChange={(e) => setStdinPrefill(e.target.value)}
-                  placeholder={"42\nhello\n"}
-                  rows={Math.min(6, Math.max(2, inputCallCount))}
-                  spellCheck={false}
-                  disabled={running}
-                />
-              </label>
-            ) : null}
-            <pre className="inf-code-output">
-              {result?.stdout || ""}
-              {result?.stderr ? `\n${result.stderr}` : ""}
-              {result?.timedOut ? "\n\n⏱ Программа остановлена по лимиту времени." : ""}
-              {result?.error ? `\n\n${result.error.startsWith("Ошибка") ? "" : "Ошибка:\n"}${result.error}` : ""}
-              {running && !runtimeLoading && !result?.stdout && !result?.stderr
-                ? "Выполнение…"
-                : ""}
-              {!result && !runtimeLoading && !running
-                ? `Ctrl+Enter — запуск\n\n${limitsSummary(language)}`
-                : ""}
-            </pre>
-          </div>
-        </div>
+        <OutputPanel
+          activeTab={outputTab}
+          onTabChange={setOutputTab}
+          result={result}
+          runStatus={runStatus}
+          runtimeLoading={runtimeLoading}
+          running={running}
+          stdinPrefill={stdinPrefill}
+          onStdinChange={handleStdinChange}
+          inputCallCount={inputCallCount}
+          runWarnings={runWarnings}
+          turtleHostId={turtleHostId}
+          showTurtleTab={lastUsedTurtle || pickRunner(mainContent, allProjectFiles) === "skulpt"}
+        />
       </div>
     </div>
   );

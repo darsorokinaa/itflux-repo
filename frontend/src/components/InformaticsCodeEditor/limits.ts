@@ -1,3 +1,4 @@
+import { findBlockedImports } from "./pythonSecurity";
 import type { CodeLanguage } from "./types";
 
 /** Ограничения среды выполнения (показываются пользователю) */
@@ -12,6 +13,7 @@ export const RUN_LIMITS = {
   maxFileBytes: 256 * 1024,
   maxTotalVfsBytes: 1024 * 1024,
   maxUploadBytes: 512 * 1024,
+  autosaveDebounceMs: 1500,
 } as const;
 
 export type ProgramValidation = {
@@ -40,7 +42,8 @@ export function truncateOutput(text: string, max = RUN_LIMITS.maxOutputChars) {
 
 export function validateProgram(
   code: string,
-  language: CodeLanguage
+  _language: CodeLanguage = "python",
+  allFiles: Record<string, string> = {}
 ): ProgramValidation {
   const warnings: string[] = [];
 
@@ -67,9 +70,19 @@ export function validateProgram(
     };
   }
 
+  const allCode = [code, ...Object.values(allFiles)].join("\n");
+  const blocked = findBlockedImports(allCode);
+  if (blocked.length) {
+    return {
+      ok: false,
+      error: `Модуль «${blocked[0]}» недоступен в учебном редакторе из соображений безопасности.`,
+      warnings,
+    };
+  }
+
   if (/while\s+(True|1)\s*:/i.test(code)) {
     warnings.push(
-      "Обнаружен бесконечный цикл while True — программа может быть остановлена по таймауту."
+      "Обнаружен бесконечный цикл while True — программа будет остановлена по таймауту."
     );
   }
 
@@ -87,21 +100,15 @@ export function validateProgram(
     );
   }
 
-  if (language === "python-turtle") {
-    if (!/\bturtle\b/i.test(code) && !/\bTurtle\b/.test(code)) {
-      warnings.push("В режиме Turtle обычно нужен import turtle.");
-    }
-  }
-
   if (/\bopen\s*\(/.test(code)) {
     warnings.push(
-      "open() читает файлы из вкладки «Файлы»; не загружайте слишком большие файлы."
+      "open() читает файлы из панели «Файлы»; не загружайте слишком большие файлы."
     );
   }
 
   if (/\binput\s*\(/.test(code)) {
     warnings.push(
-      "Для input() заполните «Входные данные» во вкладке «Вывод» — по одной строке на каждый вызов."
+      "Для input() заполните «Входные данные» — по одной строке на каждый вызов."
     );
   }
 
@@ -176,12 +183,8 @@ export function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
-export function limitsSummary(language: CodeLanguage) {
-  const timeout =
-    language === "python"
-      ? RUN_LIMITS.pythonTimeoutSec
-      : RUN_LIMITS.turtleTimeoutSec;
-  return `До ${RUN_LIMITS.maxCodeLines} строк · ${timeout} с на запуск · вывод до ${(RUN_LIMITS.maxOutputChars / 1000).toFixed(0)} тыс. символов`;
+export function limitsSummary() {
+  return `До ${RUN_LIMITS.maxCodeLines} строк · ${RUN_LIMITS.pythonTimeoutSec} с на запуск · вывод до ${(RUN_LIMITS.maxOutputChars / 1000).toFixed(0)} тыс. символов`;
 }
 
 export function withExecutionTimeout<T>(

@@ -22,12 +22,11 @@ import {
 } from "../data/subjects";
 import { formatTasksCount } from "../utils/formatTasksCount";
 import { openWorkbook } from "../utils/buildWorkbookHtml";
-import {
-  isInformaticsCodeEditorContext,
-} from "../utils/isOgeInformaticsTask";
+import { isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
 import type { TaskFileSource } from "../components/InformaticsCodeEditor/types";
 
 import MathContent from "../components/MathContent";
+import TaskFileAttachment from "../components/TaskFileAttachment";
 import TaskSearchPanel from "../components/TaskSearchPanel";
 
 const InformaticsCodeEditorEntry = lazy(
@@ -395,7 +394,7 @@ export default function AllTasksPage() {
     const qs = buildQuery(level, vprGrade, {
       page: String(page),
       per_page: String(PER_PAGE),
-      raw_html: "1",
+      raw_html: undefined,
       only_fipi: onlyFipi ? "1" : undefined,
       task_list_id: taskListId || undefined,
       subtopic_id:
@@ -783,108 +782,107 @@ export default function AllTasksPage() {
           <ul className="all-tasks-list">
             {visibleTasks.map((t, i) => {
               const ordinal = i + 1;
+              const taskNumber = t.task_number ?? ordinal;
               const taskBoardPersist = boardsByTask[String(t.id)];
               const hasTaskBoardDraft = boardPersistHasDraft(taskBoardPersist);
               const answerOpen = !!openAnswers[t.id];
               const answerHtml = (t.answer || "").trim();
               return (
-                <li
-                  key={t.id}
-                  className="all-tasks-card all-tasks-card--raw"
-                  data-task-number={t.task_number ?? undefined}
-                >
-                  <div className="all-tasks-card__aside">
-                    <span
-                      className="all-tasks-card__num"
-                      aria-label={`Задача №${ordinal} по порядку`}
-                    >
-                      {ordinal}
-                    </span>
-                    <span className="all-tasks-card__id">id {t.id}</span>
-                  </div>
-                  <div className="all-tasks-card__content">
-                    <div className="all-tasks-raw-item__meta">
-                      {t.task_number != null ? <span>№{t.task_number}</span> : null}
-                      {t.task_title ? <span>{t.task_title}</span> : null}
-                      {t.subtopic ? <span>{t.subtopic}</span> : null}
-                      {!answerHtml ? (
-                        <span className="task-no-answer-badge">Пока без ответа</span>
+                <li key={t.id} className="all-tasks-list__item">
+                  <article
+                    className="all-tasks-item"
+                    data-task-id={t.id}
+                    data-task-number={t.task_number ?? undefined}
+                  >
+                    <div className="all-tasks-item__card">
+                      <header className="all-tasks-item__head">
+                        <p className="all-tasks-item__meta">
+                          <span className="all-tasks-item__num">№{taskNumber}</span>
+                          <span className="all-tasks-item__meta-sep" aria-hidden>
+                            ·
+                          </span>
+                          <span>ID {t.id}</span>
+                          {t.task_title ? (
+                            <>
+                              <span className="all-tasks-item__meta-sep" aria-hidden>
+                                ·
+                              </span>
+                              <span>{t.task_title}</span>
+                            </>
+                          ) : null}
+                          {t.subtopic ? (
+                            <>
+                              <span className="all-tasks-item__meta-sep" aria-hidden>
+                                ·
+                              </span>
+                              <span>{t.subtopic}</span>
+                            </>
+                          ) : null}
+                          {!answerHtml ? (
+                            <span className="task-no-answer-badge">Пока без ответа</span>
+                          ) : null}
+                        </p>
+                        <div className="all-tasks-item__actions">
+                          {answerHtml ? (
+                            <button
+                              type="button"
+                              className="all-tasks-item__answer-btn"
+                              onClick={() => toggleAnswer(t.id)}
+                              aria-expanded={answerOpen ? "true" : "false"}
+                            >
+                              {answerOpen ? "Скрыть ответ" : "Посмотреть ответ"}
+                            </button>
+                          ) : null}
+                          <ExamTaskDrawingHeaderButton
+                            onClick={() => setOpenBoardForTaskId(t.id)}
+                            hasDraft={hasTaskBoardDraft}
+                          />
+                        </div>
+                      </header>
+                      <div className="all-tasks-item__content">
+                        <ExamTaskDrawingShell
+                          enabled
+                          taskId={t.id}
+                          level={level}
+                          subject={subject}
+                          variantId={ALL_TASKS_BOARD_VARIANT_ID}
+                          persistEntry={taskBoardPersist}
+                          onDrawingPersist={(payload: any) =>
+                            handleBoardPersist({ taskId: t.id, ...payload })
+                          }
+                          openBoardForTaskId={openBoardForTaskId}
+                          onConsumedBoardOpenRequest={() => setOpenBoardForTaskId(null)}
+                        >
+                          <LazyVisible minHeight={120}>
+                            <MathContent
+                              html={t.text || ""}
+                              className="all-tasks-item__html"
+                              plainHtml
+                            />
+                            {t.file_url ? <TaskFileAttachment href={t.file_url} /> : null}
+                          </LazyVisible>
+                        </ExamTaskDrawingShell>
+                      </div>
+                      {answerOpen ? (
+                        <div
+                          className="all-tasks-item__answer"
+                          role="region"
+                          aria-live="polite"
+                          aria-label="Правильный ответ"
+                        >
+                          {answerHtml ? (
+                            <MathContent
+                              html={answerHtml}
+                              className="all-tasks-item__html all-tasks-item__html--answer"
+                              plainHtml
+                            />
+                          ) : (
+                            <p>Ответ не указан.</p>
+                          )}
+                        </div>
                       ) : null}
                     </div>
-                    <ExamTaskDrawingShell
-                      enabled
-                      taskId={t.id}
-                      level={level}
-                      subject={subject}
-                      variantId={ALL_TASKS_BOARD_VARIANT_ID}
-                      persistEntry={taskBoardPersist}
-                      onDrawingPersist={(payload: any) =>
-                        handleBoardPersist({ taskId: t.id, ...payload })
-                      }
-                      openBoardForTaskId={openBoardForTaskId}
-                      onConsumedBoardOpenRequest={() => setOpenBoardForTaskId(null)}
-                    >
-                      <div className="all-tasks-raw-item__body">
-                        <LazyVisible minHeight={120}>
-                          <MathContent
-                            className="all-tasks-raw-html"
-                            html={t.text || ""}
-                            ogeInf13Enhance={level === "oge" && subject === "inf" && t.task_number === 13}
-                            ogeInf6Enhance={level === "oge" && subject === "inf" && t.task_number === 6}
-                            egeInfFileEnhance={level === "ege" && subject === "inf"}
-                            egeInf22Enhance={level === "ege" && subject === "inf" && t.task_number === 22}
-                            egeInf1Enhance={level === "ege" && subject === "inf" && t.task_number === 1}
-                            egeInf2Enhance={level === "ege" && subject === "inf" && t.task_number === 2}
-                          />
-                          {t.file_url ? (
-                            <p className="all-tasks-raw-file">
-                              <a href={t.file_url} target="_blank" rel="noreferrer">
-                                Файл задания
-                              </a>
-                            </p>
-                          ) : null}
-                        </LazyVisible>
-                      </div>
-                    </ExamTaskDrawingShell>
-                  </div>
-                  <div className="all-tasks-card__actions">
-                    {answerHtml ? (
-                      <button
-                        type="button"
-                        className="all-tasks-card__answer-btn"
-                        onClick={() => toggleAnswer(t.id)}
-                        aria-expanded={answerOpen ? "true" : "false"}
-                      >
-                        {answerOpen ? "Скрыть ответ" : "Посмотреть ответ"}
-                      </button>
-                    ) : (
-                      <span aria-hidden="true" />
-                    )}
-                    <div className="exam-task-card__status-cluster">
-                      <ExamTaskDrawingHeaderButton 
-                        onClick={() => setOpenBoardForTaskId(t.id)} 
-                        hasDraft={hasTaskBoardDraft}
-                      />
-                    </div>
-                  </div>
-                  {answerOpen ? (
-                    <div className="all-tasks-card__answer all-tasks-raw-answer" role="region" aria-live="polite">
-                      <div className="all-tasks-card__answer-label">
-                        <strong>Ответ</strong>
-                      </div>
-                      {answerHtml ? (
-                        <MathContent
-                          className="all-tasks-raw-html"
-                          html={answerHtml}
-                          ogeInf13Enhance={level === "oge" && subject === "inf" && t.task_number === 13}
-                          ogeInf6Enhance={level === "oge" && subject === "inf" && t.task_number === 6}
-                          egeInfFileEnhance={level === "ege" && subject === "inf"}
-                        />
-                      ) : (
-                        <p>Ответ не указан.</p>
-                      )}
-                    </div>
-                  ) : null}
+                  </article>
                 </li>
               );
             })}

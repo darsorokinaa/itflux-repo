@@ -3099,7 +3099,10 @@ function ExamPage() {
           </div>
           {showInfCodeSidebar ? (
             <Suspense fallback={null}>
-              <InformaticsCodeEditorEntry getTaskSources={getCodeEditorTaskSources} />
+              <InformaticsCodeEditorEntry
+                getTaskSources={getCodeEditorTaskSources}
+                storageId={examNavActiveId != null ? `task-${examNavActiveId}` : "sidebar"}
+              />
             </Suspense>
           ) : null}
         </div>

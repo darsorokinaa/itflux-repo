@@ -332,7 +332,7 @@ def build_pdf_context(request, variant, subject, author_filter=None):
         """Исправление &аmp; (кириллическая а), двойного escape и LaTeX \\& для PDF."""
         s = html.replace("&\u0430mp;", "&amp;").replace("&amp;amp;", "&amp;")
         # LaTeX tabular: \& → & в тексте запросов; в HTML иногда остаётся буквально
-        s = re.sub(r"\\&", "&", s)
+        s = re.sub(r"\\+&", "&", s)
         s = s.replace("&#92;&", "&")
         return s
 

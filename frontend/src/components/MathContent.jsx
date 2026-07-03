@@ -7,6 +7,8 @@ import { formatEgeInf2TruthTableHtml } from "../utils/formatEgeInf2TaskHtml";
 import { formatEgeInf1RoadGraphHtml } from "../utils/formatEgeInf1TaskHtml";
 import { stripFipiAttachedFileMarkup } from "../utils/formatEgeInfAttachedFileHtml";
 import { formatOgeInf6TaskHtml } from "../utils/formatOgeInf6TaskHtml";
+import { formatTaskCodeBlocksHtml } from "../utils/formatTaskCodeBlocksHtml";
+import { formatFipiUnicodeMathHtml } from "../utils/formatFipiUnicodeMathHtml";
 
 /** Снять слои &lt;…&gt; если HTML целиком попал в БД как экранированный текст. */
 function decodeHtmlEntityLayersIfStoredEscaped(raw) {
@@ -26,12 +28,187 @@ function decodeHtmlEntityLayersIfStoredEscaped(raw) {
 
 /**
  * В старых задачах встречаются лишние экранирующие "\" перед символами
- * вроде #, +, ^ (например "\#"). Убираем только этот частный случай.
+ * вроде #, +, ^, & (например "\#" или "\\&" из LaTeX). Убираем только этот частный случай.
  */
+/** Бэкенд (старая версия): формула рвётся — <span>\(10(𝑥-9\)</span>=7\). */
+function repairSplitBackendMathInline(html) {
+  if (typeof html !== "string" || !html.includes("math-inline")) return html;
+  return html.replace(
+    /<span class="math-inline">([\s\S]*?)<\/span>\s*([^<]+?)(?:&#92;&#41;|\\\))/gi,
+    (match, body, tail) => {
+      const tailTrim = tail.trim();
+      if (!tailTrim || !/^[=0-9+\-*/.\s]/.test(tailTrim)) return match;
+      let inner = body.trim();
+      inner = inner.replace(/^&#92;\(/i, "").replace(/^\\\(/, "");
+      inner = inner.replace(/&#92;&#41;$/i, "").replace(/\\\)$/, "");
+      if (!inner.includes("(")) return match;
+      return `<span class="math-inline">\\(${inner})${tailTrim}\\)</span>`;
+    }
+  );
+}
+
+function tryFixMalformedInlineMathParen(s, start) {
+  let i = start + 2;
+  let depth = 0;
+  const innerStart = i;
+  while (i < s.length) {
+    if (s.startsWith("\\(", i)) {
+      i += 2;
+      continue;
+    }
+    if (s.startsWith("\\)", i)) {
+      if (depth === 0) return null;
+      i += 2;
+      continue;
+    }
+    const ch = s[i];
+    if (ch === "(") depth += 1;
+    else if (ch === ")") {
+      if (depth > 0) depth -= 1;
+      else {
+        const inner = s.slice(innerStart, i);
+        if (!inner || inner.length > 120 || inner.includes("\\(")) return null;
+        return { fixed: `\\(${inner}\\)`, next: i + 1 };
+      }
+    }
+    i += 1;
+  }
+  return null;
+}
+
+function repairMalformedInlineMathParenSequence(s) {
+  if (!s) return s;
+  let out = "";
+  let i = 0;
+  while (i < s.length) {
+    if (s.startsWith("\\(", i)) {
+      const fix = tryFixMalformedInlineMathParen(s, i);
+      if (fix) {
+        out += fix.fixed;
+        i = fix.next;
+        continue;
+      }
+    }
+    out += s[i];
+    i += 1;
+  }
+  return out;
+}
+
+/** HTML-сущности &#92;( … &#41; — тот же разбор с учётом вложенных «(…)». */
+function repairMalformedInlineMathHtmlEntities(s) {
+  if (!s || !/&#92;\(/i.test(s)) return s;
+  let out = "";
+  let i = 0;
+  const open = "&#92;(";
+  const closeEscaped = "&#92;&#41;";
+  const closeBare = "&#41;";
+  while (i < s.length) {
+    if (s.startsWith(open, i)) {
+      let j = i + open.length;
+      let depth = 0;
+      const innerStart = j;
+      let fixed = false;
+      while (j < s.length) {
+        if (s.startsWith(open, j)) {
+          j += open.length;
+          continue;
+        }
+        if (s.startsWith(closeEscaped, j)) {
+          if (depth === 0) break;
+          j += closeEscaped.length;
+          continue;
+        }
+        if (s[j] === "(") {
+          depth += 1;
+          j += 1;
+          continue;
+        }
+        if (s.startsWith(closeBare, j)) {
+          if (depth > 0) {
+            depth -= 1;
+            j += closeBare.length;
+            continue;
+          }
+          const inner = s.slice(innerStart, j);
+          if (inner && inner.length <= 120 && !inner.includes(open)) {
+            out += `${open}${inner}${closeEscaped}`;
+            j += closeBare.length;
+            fixed = true;
+          }
+          break;
+        }
+        j += 1;
+      }
+      if (fixed) {
+        i = j;
+        continue;
+      }
+    }
+    out += s[i];
+    i += 1;
+  }
+  return out;
+}
+
+function repairMalformedInlineMathDelimiters(raw) {
+  if (typeof raw !== "string" || !raw) return raw;
+  let s = repairSplitBackendMathInline(raw);
+  s = repairMalformedInlineMathHtmlEntities(s);
+  s = repairMalformedInlineMathParenSequence(s);
+  return s;
+}
+
+/** cases/aligned и др. — блочная вёрстка, не inline (иначе рамка и вертикальный скролл). */
+const INLINE_TO_DISPLAY_TEX_RE =
+  /\\begin\{(cases|aligned|align\*?|gather\*?|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix)\}/;
+
+/** Бэкенд отдаёт <span class="math-inline">&#92;(...&#92;&#41;</span> — MathJax их не всегда подхватывает. */
+function unwrapBackendMathSpans(root) {
+  if (!root) return;
+  for (const span of [...root.querySelectorAll(".math-inline, .math-display")]) {
+    // array/tabular уже свёрнуты бэкендом в HTML-таблицу — не заменять на textContent
+    if (span.querySelector("table, pre, .frac, .cases-table")) continue;
+    let tex = repairMalformedInlineMathDelimiters((span.textContent || "").trim());
+    if (!tex) {
+      span.remove();
+      continue;
+    }
+    if (tex.startsWith("\\(") && tex.endsWith("\\)")) {
+      tex = tex.slice(2, -2);
+    } else if (tex.startsWith("\\[") && tex.endsWith("\\]")) {
+      tex = tex.slice(2, -2);
+    }
+    const isDisplay =
+      span.classList.contains("math-display") || INLINE_TO_DISPLAY_TEX_RE.test(tex);
+    const wrapped = isDisplay ? `$$${tex}$$` : `$${tex}$`;
+    span.replaceWith(root.ownerDocument.createTextNode(wrapped));
+  }
+}
+
+function typesetMathInElement(el, { plainHtml = false } = {}) {
+  const mj = window.MathJax;
+  if (!mj?.typesetPromise) return Promise.resolve();
+  const startup = mj.startup?.promise ?? Promise.resolve();
+  mathJaxPromise = mathJaxPromise
+    .then(() => startup)
+    .then(() => {
+      mj.typesetClear?.([el]);
+      return mj.typesetPromise([el]);
+    })
+    .then(() => {
+      if (plainHtml) polishBankTaskMathJaxTables(el);
+    });
+  return mathJaxPromise;
+}
+
 function normalizeEscapedTaskSymbols(raw) {
   if (typeof raw !== "string" || !raw) return raw;
-  return raw
+  return repairMalformedInlineMathDelimiters(raw)
     .replace(/\\([#+^])/g, "$1")
+    // Только LaTeX \& → &; не трогать &#92; &#92; (перенос строки в array, иначе таблица кодов слипается)
+    .replace(/&#92;\s*&(?:amp;|#38;)/gi, "&")
+    .replace(/\\+&/g, "&")
     // Исправление для ОГЭ 4: когда перенос строки сливается с \end{array} (получается \\end{array})
     .replace(/\\\\end\{/g, "\\\\ \\end{")
     // Удаляем одиночный "\" перед пробелом, HTML-тегом или концом строки.
@@ -115,6 +292,79 @@ function convertLogicSpansInsideMathDelimitersToTex(html) {
   return out.join("");
 }
 
+/** Внутри $...$ / $$...$$: убрать HTML-теги и заменить сравнения на TeX-команды. */
+function sanitizeTexInsideMathDelimiters(html) {
+  if (typeof html !== "string" || !html) return html;
+
+  const fixTex = (tex) => {
+    let t = tex.replace(/<[^>]+>/g, "");
+    t = t
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&#92;/g, "\\")
+      .replace(/&#123;/g, "{")
+      .replace(/&#125;/g, "}");
+    t = t
+      .replace(/\s*<=\s*/g, " \\le ")
+      .replace(/\s*>=\s*/g, " \\ge ")
+      .replace(/(?<!\\)<(?!=)/g, " \\lt ")
+      .replace(/(?<!\\)>(?!=)/g, " \\gt ");
+    return addThinSpaceAroundLogicText(t);
+  };
+
+  const out = [];
+  let i = 0;
+  while (i < html.length) {
+    if (html.startsWith("$$", i)) {
+      const end = html.indexOf("$$", i + 2);
+      if (end === -1) {
+        out.push(html.slice(i));
+        break;
+      }
+      out.push("$$");
+      out.push(fixTex(html.slice(i + 2, end)));
+      out.push("$$");
+      i = end + 2;
+      continue;
+    }
+    const j = html.indexOf("$", i);
+    if (j === -1) {
+      out.push(html.slice(i));
+      break;
+    }
+    out.push(html.slice(i, j));
+    const k = html.indexOf("$", j + 1);
+    if (k === -1) {
+      out.push(html.slice(j));
+      break;
+    }
+    out.push("$");
+    out.push(fixTex(html.slice(j + 1, k)));
+    out.push("$");
+    i = k + 1;
+  }
+  return out.join("");
+}
+
+function preparePlainBankTaskHtml(raw) {
+  const decoded = decodeHtmlEntityLayersIfStoredEscaped(raw);
+  let s = stripEmbeddedStyleBlocks(decoded);
+  s = normalizeEscapedTaskSymbols(s);
+  s = repairLogicConnectiveSpanMarkup(s);
+  s = formatFipiUnicodeMathHtml(s);
+  s = convertLogicSpansInsideMathDelimitersToTex(s);
+  s = sanitizeTexInsideMathDelimiters(s);
+  s = formatTaskCodeBlocksHtml(s);
+  // Соответствие А/Б/В ↔ 1/2/3 (ОГЭ мат. №11) — до choice, иначе 1) 2) путаются с вариантами.
+  const matched = formatOgeMathMatchingTaskHtml(s);
+  const afterMatch = matched && matched.trim() ? matched : s;
+  const choiceFormatted = formatOgeMathChoiceTaskHtml(afterMatch);
+  s = choiceFormatted && choiceFormatted.trim() ? choiceFormatted : afterMatch;
+  return s;
+}
+
 /**
  * Рендерит HTML с поддержкой LaTeX/MathJax. На любой странице MathJax
  * корректно отображает формулы.
@@ -173,6 +423,132 @@ function stripFipiInlineLayoutStyles(root) {
 function stripEmbeddedStyleBlocks(raw) {
   if (typeof raw !== "string" || !raw) return raw;
   return raw.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
+}
+
+const BANK_TASK_TABLE_BORDER = "1px solid #94a3b8";
+
+/** Банк задач (plainHtml): снять FIPI-прокрутку и выровнять рамки таблиц. */
+function polishBankTaskTables(root) {
+  if (!root) return;
+
+  root.querySelectorAll("style").forEach((node) => node.remove());
+
+  for (const table of root.querySelectorAll("table")) {
+    if (table.closest(".oge-math-choice-task")) continue;
+
+    if (table.classList.contains("cases-table")) {
+      table.style.setProperty("border", "none", "important");
+      table.style.setProperty("border-collapse", "collapse", "important");
+      for (const cell of table.querySelectorAll("th, td")) {
+        for (const prop of [
+          "border",
+          "border-left",
+          "border-right",
+          "border-top",
+          "border-bottom",
+        ]) {
+          cell.style.removeProperty(prop);
+        }
+        cell.style.setProperty("border", "none", "important");
+      }
+      continue;
+    }
+
+    table.classList.add("bank-task-table");
+    table.removeAttribute("border");
+    table.removeAttribute("cellspacing");
+    table.removeAttribute("cellpadding");
+
+    for (const prop of ["overflow", "overflow-x", "overflow-y", "max-height", "max-width", "height", "width"]) {
+      table.style.removeProperty(prop);
+    }
+
+    let parent = table.parentElement;
+    while (parent && parent !== root) {
+      const tag = parent.tagName;
+      if (tag === "FIGURE" || tag === "P" || tag === "DIV" || tag === "TD" || tag === "TH") {
+        for (const prop of ["overflow", "overflow-x", "overflow-y", "max-height"]) {
+          parent.style.removeProperty(prop);
+        }
+        parent.style.setProperty("overflow", "visible", "important");
+        parent.style.setProperty("max-height", "none", "important");
+      }
+      if (tag === "FIGURE") break;
+      parent = parent.parentElement;
+    }
+
+    table.style.setProperty("border-collapse", "collapse", "important");
+    table.style.setProperty("border", BANK_TASK_TABLE_BORDER, "important");
+    table.style.setProperty("overflow", "visible", "important");
+
+    for (const cell of table.querySelectorAll("th, td")) {
+      cell.removeAttribute("border");
+      for (const prop of [
+        "border",
+        "border-left",
+        "border-right",
+        "border-top",
+        "border-bottom",
+        "border-width",
+        "border-style",
+        "border-color",
+      ]) {
+        cell.style.removeProperty(prop);
+      }
+      cell.style.setProperty("border", BANK_TASK_TABLE_BORDER, "important");
+    }
+  }
+}
+
+/** MathJax array/tabular: полная сетка границ (после typesetPromise). */
+function polishBankTaskMathJaxTables(root) {
+  if (!root) return;
+
+  for (const mtable of root.querySelectorAll("mjx-mtable")) {
+    if (mtable.closest("mjx-cases")) continue;
+    mtable.style.setProperty("border-collapse", "collapse", "important");
+    mtable.style.setProperty("border-spacing", "0", "important");
+    mtable.style.setProperty("overflow", "visible", "important");
+    mtable.classList.add("bank-task-mjx-table");
+  }
+
+  for (const table of root.querySelectorAll("mjx-mtable > mjx-table")) {
+    if (table.closest("mjx-cases")) continue;
+    table.style.setProperty("border-collapse", "collapse", "important");
+    table.style.setProperty("border-spacing", "0", "important");
+    table.style.setProperty("overflow", "visible", "important");
+  }
+
+  for (const cell of root.querySelectorAll("mjx-mtd")) {
+    if (cell.closest("mjx-cases")) continue;
+    for (const prop of [
+      "border",
+      "border-left",
+      "border-right",
+      "border-top",
+      "border-bottom",
+      "border-width",
+      "border-style",
+      "border-color",
+    ]) {
+      cell.style.removeProperty(prop);
+    }
+    cell.style.setProperty("border", BANK_TASK_TABLE_BORDER, "important");
+    cell.style.setProperty("box-sizing", "content-box", "important");
+  }
+
+  for (const container of root.querySelectorAll("mjx-container")) {
+    container.style.setProperty("overflow", "visible", "important");
+    container.style.setProperty("overflow-x", "visible", "important");
+    container.style.setProperty("overflow-y", "visible", "important");
+    if (container.querySelector("mjx-cases")) {
+      container.style.setProperty("display", "block", "important");
+      container.style.setProperty("line-height", "normal", "important");
+      container.style.setProperty("margin", "0.65em auto", "important");
+      container.style.setProperty("text-align", "center", "important");
+      container.style.setProperty("max-height", "none", "important");
+    }
+  }
 }
 
 function parseHtmlFragmentForTables(html) {
@@ -481,7 +857,7 @@ function removeDuplicateRoadGraphImages(root, isEgeInf1) {
 
 let mathJaxPromise = Promise.resolve();
 
-function MathContentInner({ html, className, onImageClick, ogeInf13Enhance = false, ogeInf6Enhance = false, egeInfFileEnhance = false, egeInf22Enhance = false, egeInf1Enhance = false, egeInf2Enhance = false }) {
+function MathContentInner({ html, className, onImageClick, plainHtml = false, ogeInf13Enhance = false, ogeInf6Enhance = false, egeInfFileEnhance = false, egeInf22Enhance = false, egeInf1Enhance = false, egeInf2Enhance = false }) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -494,13 +870,17 @@ function MathContentInner({ html, className, onImageClick, ogeInf13Enhance = fal
     // не должна обрушивать рендер всей страницы варианта (React без error boundary
     // размонтирует всё дерево при выбросе из эффекта → пустой экран).
     try {
-      const cleaned = decoded; // stripEmbeddedStyleBlocks(decoded); - убрано по просьбе
-      const normalized = normalizeEscapedTaskSymbols(cleaned);
+      if (plainHtml) {
+        el.innerHTML = preparePlainBankTaskHtml(decoded);
+        polishBankTaskTables(el);
+      } else {
+      const normalized = normalizeEscapedTaskSymbols(decoded);
       const repaired = repairLogicConnectiveSpanMarkup(normalized);
+      const afterFipiMath = formatFipiUnicodeMathHtml(repaired);
       const afterFile = egeInfFileEnhance
-        ? stripFipiAttachedFileMarkup(repaired)
-        : repaired;
-      const pipedFile = afterFile && afterFile.trim() ? afterFile : repaired;
+        ? stripFipiAttachedFileMarkup(afterFipiMath)
+        : afterFipiMath;
+      const pipedFile = afterFile && afterFile.trim() ? afterFile : afterFipiMath;
       const inf2 = egeInf2Enhance ? formatEgeInf2TruthTableHtml(pipedFile) : pipedFile;
       const afterInf2 = inf2 && inf2.trim() ? inf2 : pipedFile;
       const inf22 = egeInf22Enhance ? formatEgeInf22ParallelProcessesHtml(afterInf2) : afterInf2;
@@ -562,12 +942,15 @@ function MathContentInner({ html, className, onImageClick, ogeInf13Enhance = fal
         }
       }
       // stripFipiInlineLayoutStyles(el); - убрано по просьбе
-    } catch (err) {
+      }
+      unwrapBackendMathSpans(el);
+      } catch (err) {
       // Любой сбой форматирования → показываем исходный (декодированный) HTML,
       // а не пустую страницу.
       console.error("MATH_CONTENT_RENDER_ERR:", err);
       try {
         el.innerHTML = decoded || s;
+        unwrapBackendMathSpans(el);
       } catch {
         el.textContent = s;
       }
@@ -577,12 +960,11 @@ function MathContentInner({ html, className, onImageClick, ogeInf13Enhance = fal
     const run = () => {
       if (cancelled) return;
       if (window.MathJax?.typesetPromise) {
-        mathJaxPromise = mathJaxPromise
-          .then(() => {
-            if (cancelled) return;
-            return window.MathJax.typesetPromise([el]);
-          })
-          .catch(() => {});
+        if (!cancelled) {
+          typesetMathInElement(el, { plainHtml }).catch((err) => {
+            console.error("MATHJAX_TYPESET_ERR:", err);
+          });
+        }
       } else {
         setTimeout(run, 100);
       }
@@ -591,7 +973,7 @@ function MathContentInner({ html, className, onImageClick, ogeInf13Enhance = fal
     return () => {
       cancelled = true;
     };
-  }, [html, ogeInf13Enhance, ogeInf6Enhance, egeInfFileEnhance, egeInf22Enhance, egeInf1Enhance, egeInf2Enhance]);
+  }, [html, plainHtml, ogeInf13Enhance, ogeInf6Enhance, egeInfFileEnhance, egeInf22Enhance, egeInf1Enhance, egeInf2Enhance]);
 
   useEffect(() => {
     if (!onImageClick || !ref.current) return;
