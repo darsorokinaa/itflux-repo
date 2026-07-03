@@ -344,6 +344,13 @@ function formatFromTaskHtmlBlocks(root) {
   return buildChoiceMarkup(questionHtml, choices);
 }
 
+function isOptionPointLetterImg(img) {
+  const host = img.closest(".oge-math-choice-option__body, p, td, li");
+  if (!host) return false;
+  const text = normalizeCellText(host).replace(/\s+/g, " ").trim();
+  return /^точка(\s+[a-d])?$/i.test(text);
+}
+
 /** Крошечные gif/PNG ФИПИ — дроби в строке условия vs числовая прямая. */
 function decorateFipiBitmapImages(root, mode) {
   if (!root) return;
@@ -355,12 +362,46 @@ function decorateFipiBitmapImages(root, mode) {
       mode === "question" &&
       src.includes("xs3qstsrc") &&
       parent?.tagName === "SPAN" &&
-      parent.childElementCount <= 1;
+      (parent.closest("p")?.querySelectorAll('img[src*="xs3qstsrc"]').length ?? 0) > 1;
     if (inlineFrac) {
       img.classList.add("oge-math-fipi-inline-frac");
       img.removeAttribute("width");
       img.removeAttribute("height");
       return;
+    }
+    const inlineLetter =
+      src.includes("innerimg") &&
+      parent?.tagName === "SPAN" &&
+      (parent.closest("p")?.querySelectorAll('img[src*="innerimg"]').length ?? 0) > 1;
+    if (inlineLetter) {
+      img.classList.add("oge-math-fipi-inline-letter");
+      img.removeAttribute("width");
+      img.removeAttribute("height");
+      return;
+    }
+    const soloInnerimgFrac =
+      mode === "question" &&
+      src.includes("innerimg") &&
+      parent?.tagName === "SPAN" &&
+      (parent.closest("p")?.querySelectorAll('img[src*="innerimg"]').length ?? 0) === 1;
+    if (soloInnerimgFrac) {
+      img.classList.add("oge-math-fipi-inline-frac");
+      img.removeAttribute("width");
+      img.removeAttribute("height");
+      return;
+    }
+    if (mode === "option" && src.includes("innerimg")) {
+      const cls = isOptionPointLetterImg(img)
+        ? "oge-math-fipi-inline-letter"
+        : "oge-math-fipi-inline-frac";
+      img.classList.add(cls);
+      img.removeAttribute("width");
+      img.removeAttribute("height");
+    }
+    if (mode === "option" && src.includes("xs3qstsrc")) {
+      img.classList.add("oge-math-fipi-inline-frac");
+      img.removeAttribute("width");
+      img.removeAttribute("height");
     }
     if (!src.endsWith(".gif")) return;
     img.classList.add("oge-math-fipi-bitmap");
@@ -514,7 +555,15 @@ function stripDuplicateChoiceMediaFromQuestion(questionHtml, choices) {
 }
 
 const CHOICE_FOOTER_TEXT_RE = /^В\s+ответ/i;
-const CHOICE_PROMPT_TEXT_RE = /^Какое это\s+число\??$/i;
+const CHOICE_PROMPT_TEXT_RE = /^Как(?:ое это\s+число|ая это\s+точка)\??$/i;
+const CHOICE_PROMPT_INLINE_RE = /(Какая это\s+точка\??|Какое это\s+число\??)\s*$/i;
+
+const MATH_POINT_LETTERS = [
+  ["\u{1D434}", "A"],
+  ["\u{1D435}", "B"],
+  ["\u{1D436}", "C"],
+  ["\u{1D437}", "D"],
+];
 
 function isChoiceFooterElement(el) {
   if (!el) return false;
@@ -563,35 +612,183 @@ function extractChoiceQuestionPrompt(root) {
   return prompt;
 }
 
+function extractInlineChoicePrompt(root) {
+  let prompt = "";
+  for (const p of [...root.querySelectorAll("p")]) {
+    if (p.querySelector("img")) continue;
+    const t = normalizeCellText(p);
+    const m = t.match(new RegExp(`^(.*?)[.\\s]+${CHOICE_PROMPT_INLINE_RE.source}$`, "i"));
+    if (!m || m[1].trim().length < 12) continue;
+    const promptText = m[2].endsWith("?") ? m[2] : `${m[2]}?`;
+    if (!prompt) prompt = promptText;
+    stripTrailingTextFromElement(p, m[2]);
+    pruneEmptyNodes(p);
+  }
+  return prompt;
+}
+
+function collectTextNodes(el, out = []) {
+  if (!el) return out;
+  for (const node of el.childNodes) {
+    if (node.nodeType === 3) out.push(node);
+    else if (node.nodeType === 1) collectTextNodes(node, out);
+  }
+  return out;
+}
+
+function stripTrailingTextFromElement(el, suffix) {
+  const target = String(suffix || "").replace(/\?+$/, "").trim();
+  if (!target || !el) return;
+  const re = new RegExp(`[\\s.]*${target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\??\\s*$`, "i");
+  const nodes = collectTextNodes(el);
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const node = nodes[i];
+    const text = node.textContent || "";
+    const match = text.match(re);
+    if (!match) continue;
+    node.textContent = text.slice(0, match.index).replace(/\s*\.\s*$/, "").trimEnd();
+    for (let j = i + 1; j < nodes.length; j++) nodes[j].remove();
+    break;
+  }
+}
+
+function mathDelimiterPointLetter(inner) {
+  const bare = String(inner || "")
+    .replace(/<\/?i>/gi, "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, "")
+    .trim();
+  if (!bare) return null;
+  for (const [ch, lat] of MATH_POINT_LETTERS) {
+    if (bare === ch || bare === lat) return lat;
+  }
+  if (/^[A-D]$/i.test(bare)) return bare.toUpperCase();
+  return null;
+}
+
+function normalizeMathPointLetters(root) {
+  if (!root) return;
+  let html = root.innerHTML;
+
+  // «-0, 205» в LaTeX → «-0,205»
+  html = html.replace(/(-?\d+),\s+(\d)/g, "$1,$2");
+
+  html = html.replace(/\\\(([\s\S]*?)\\\)/g, (match, inner) => {
+    const letter = mathDelimiterPointLetter(inner);
+    return letter ? `<i>${letter}</i>` : match;
+  });
+
+  html = html.replace(
+    /<span class="math-inline">\\\(([A-D])\\\)<\/span>/gi,
+    "<i>$1</i>"
+  );
+  html = html.replace(
+    /<mjx-container[^>]*>\s*<mjx-math[^>]*>\s*<mjx-mi[^>]*>([A-D])<\/mjx-mi>[\s\S]*?<\/mjx-container>/gi,
+    "<i>$1</i>"
+  );
+
+  html = html.replace(/\s+и\s+/gi, " и ");
+  html = html.replace(/\s+\./g, ".");
+  html = html.replace(/\.{2,}/g, ".");
+  root.innerHTML = html;
+}
+
+function cellTextValue(el) {
+  if (el == null) return "";
+  if (typeof el === "string") {
+    return el.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  }
+  return normalizeCellText(el);
+}
+
+function isSlashlessFracDigits(text) {
+  return /^\d{4,5}$/.test(cellTextValue(text));
+}
+
+function detectSlashlessFracDenominator(texts) {
+  const counts = new Map();
+  for (const raw of texts) {
+    const t = cellTextValue(raw);
+    if (t.length !== 4) continue;
+    const den = t.slice(-2);
+    if (Number(den) >= 2 && Number(den) <= 99) {
+      counts.set(den, (counts.get(den) || 0) + 1);
+    }
+  }
+  let best = null;
+  let bestCount = 0;
+  for (const [den, count] of counts) {
+    if (count > bestCount) {
+      bestCount = count;
+      best = den;
+    }
+  }
+  return best;
+}
+
+function parseSlashlessFracDigits(text, preferredDen) {
+  const t = cellTextValue(text);
+  if (!isSlashlessFracDigits(t)) return null;
+
+  if (preferredDen != null) {
+    const denStr = String(preferredDen);
+    if (t.endsWith(denStr)) {
+      const num = t.slice(0, t.length - denStr.length);
+      if (num.length >= 1 && Number(num) > 0) {
+        return { num, den: denStr };
+      }
+    }
+  }
+
+  if (t.length === 4) {
+    const den = t.slice(-2);
+    const num = t.slice(0, 2);
+    if (Number(den) >= 2 && Number(den) <= 99) {
+      return { num, den };
+    }
+  }
+
+  if (t.length === 5) {
+    const den = t.slice(-2);
+    const num = t.slice(0, 3);
+    if (Number(den) >= 2 && Number(den) <= 99) {
+      return { num, den };
+    }
+  }
+
+  return null;
+}
+
+function slashlessFracToLatex(parts) {
+  return `$\\frac{${parts.num}}{${parts.den}}$`;
+}
+
 function repairFipiSlashlessFracSpans(root) {
   const nodes = root.querySelectorAll(
     "p, span, div.task-html-block, li, .oge-math-choice-option__body"
   );
   for (const el of nodes) {
-    const text = normalizeCellText(el);
-    const solo = text.match(/^(\d{2})(\d{1,2})$/);
-    if (
-      solo &&
-      Number(solo[2]) >= 2 &&
-      Number(solo[2]) <= 99 &&
-      !el.querySelector("img, mjx-container, .math-inline, .math-display")
-    ) {
-      el.innerHTML = `$\\frac{${solo[1]}}{${solo[2]}}$`;
+    if (el.querySelector("img, mjx-container, .math-inline, .math-display")) continue;
+
+    const spans = [...el.querySelectorAll(":scope > span")];
+    const fracSpans = spans.filter((span) => isSlashlessFracDigits(span));
+    if (fracSpans.length >= 2) {
+      const preferredDen = detectSlashlessFracDenominator(
+        fracSpans.map((span) => cellTextValue(span))
+      );
+      for (const span of fracSpans) {
+        const parts = parseSlashlessFracDigits(span, preferredDen);
+        if (!parts) continue;
+        span.outerHTML = slashlessFracToLatex(parts);
+      }
       continue;
     }
 
-    const spans = [...el.querySelectorAll(":scope span")];
-    const fracSpans = spans.filter((span) => /^\d{2}\d{1,2}$/.test(normalizeCellText(span)));
-    if (fracSpans.length < 2) continue;
-    for (const span of fracSpans) {
-      const t = normalizeCellText(span);
-      const m = t.match(/^(\d{2})(\d{1,2})$/);
-      if (!m) continue;
-      const num = Number(m[1]);
-      const den = Number(m[2]);
-      if (den < 2 || den > 99) continue;
-      span.outerHTML = `$\\frac{${num}}{${den}}$`;
-    }
+    const text = cellTextValue(el);
+    if (!isSlashlessFracDigits(text)) continue;
+    const parts = parseSlashlessFracDigits(text, null);
+    if (!parts) continue;
+    el.innerHTML = slashlessFracToLatex(parts);
   }
 }
 
@@ -602,10 +799,53 @@ function repairFipiSlashlessFracHtml(html) {
   return root.innerHTML.trim();
 }
 
+function extractQuestionLatexFractions(questionHtml) {
+  const fracs = [];
+  const re = /\$\\frac\{(\d+)\}\{(\d+)\}\$/g;
+  let m;
+  const s = String(questionHtml || "");
+  while ((m = re.exec(s)) !== null) {
+    fracs.push(`$\\frac{${m[1]}}{${m[2]}}$`);
+  }
+  return fracs;
+}
+
+function isImageOnlyFracOptionBody(bodyHtml) {
+  const root = parseHtmlFragment(bodyHtml);
+  if (!root) return false;
+  const imgs = root.querySelectorAll("img");
+  if (imgs.length !== 1) return false;
+  const src = (imgs[0].getAttribute("src") || "").toLowerCase();
+  if (!src.includes("innerimg") && !src.includes("xs3qstsrc")) return false;
+  const text = normalizeCellText(root).replace(/\s+/g, " ").trim();
+  if (/^точка(\s+[a-d])?$/i.test(text)) return false;
+  return text.length === 0;
+}
+
+/** PNG-дроби в вариантах → LaTeX из условия (58/13, 69/13, …). */
+function repairChoiceOptionFracImagesFromQuestion(questionHtml, choices) {
+  const fracs = extractQuestionLatexFractions(questionHtml);
+  if (fracs.length < 2 || fracs.length !== choices.length) return choices;
+  if (!choices.every((c) => isImageOnlyFracOptionBody(c.bodyHtml))) return choices;
+  return choices.map((c, i) => ({ ...c, bodyHtml: fracs[i] }));
+}
+
+function isMathDelimiterHtml(html) {
+  const t = String(html || "").trim();
+  return /^\\\([\s\S]*\\\)$/.test(t) || /^\$[\s\S]*\$$/.test(t);
+}
+
 function flattenChoiceOptionBodyHtml(bodyHtml) {
   const root = parseHtmlFragment(bodyHtml);
   if (!root) return bodyHtml || "";
   root.querySelectorAll("p").forEach((p) => {
+    const inner = (p.innerHTML || "").trim();
+    if (isMathDelimiterHtml(inner)) {
+      const span = document.createElement("span");
+      span.innerHTML = inner;
+      p.replaceWith(span);
+      return;
+    }
     const imgs = [...p.querySelectorAll("img")];
     if (imgs.length !== 1) return;
     if (normalizeCellText(p)) return;
@@ -646,7 +886,8 @@ function prepareChoiceQuestionHtml(questionHtml) {
   if (!root) return { questionHtml: questionHtml || "", footerHtml: "", promptText: "" };
 
   const footerHtml = extractChoiceFooter(root);
-  const promptText = extractChoiceQuestionPrompt(root);
+  let promptText = extractChoiceQuestionPrompt(root);
+  if (!promptText) promptText = extractInlineChoicePrompt(root);
   scrubChoiceQuestionDebris(root);
   stripTrailingEmptyTableRows(root);
   unwrapRedundantSingleCellTables(root);
@@ -655,6 +896,7 @@ function prepareChoiceQuestionHtml(questionHtml) {
   stripTrailingEmptyTableRows(root);
   pruneEmptyNodes(root);
   repairFipiSlashlessFracSpans(root);
+  normalizeMathPointLetters(root);
 
   return {
     questionHtml: root.innerHTML.trim(),
@@ -682,6 +924,7 @@ function buildChoiceMarkup(questionHtml, choices) {
   qHtml = prepared.questionHtml;
   const footerHtml = prepared.footerHtml;
   const promptText = prepared.promptText;
+  choices = repairChoiceOptionFracImagesFromQuestion(qHtml, choices);
 
   if (qHtml && htmlHasVisibleText(qHtml)) {
     const q = document.createElement("div");
@@ -707,6 +950,7 @@ function buildChoiceMarkup(questionHtml, choices) {
     const body = document.createElement("span");
     body.className = "oge-math-choice-option__body";
     body.innerHTML = flattenChoiceOptionBodyHtml(repairFipiSlashlessFracHtml(bodyHtml));
+    normalizeMathPointLetters(body);
     decorateFipiBitmapImages(body, "option");
 
     li.appendChild(numEl);

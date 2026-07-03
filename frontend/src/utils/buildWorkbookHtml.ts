@@ -128,7 +128,7 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
         inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
         displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']]
       },
-      chtml: { scale: 1.32, mtextInheritFont: false, matchFontHeight: false },
+      chtml: { scale: 1.65, mtextInheritFont: false, matchFontHeight: false },
       startup: { typeset: false }
     };
   </script>
@@ -347,6 +347,11 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
     }
     .task-text .oge-math-choice-task img {
       max-width: 100%;
+      height: auto;
+    }
+    .task-text .oge-math-choice-task img.oge-math-fipi-inline-letter,
+    .task-text .oge-math-choice-task img.oge-math-fipi-inline-frac {
+      max-width: none !important;
     }
     .task-text .oge-math-choice-question .oge-math-fipi-inline-frac,
     .task-text .oge-math-choice-question p span > img[src*="xs3qstsrc"] {
@@ -355,8 +360,18 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
       width: auto !important;
       max-width: none !important;
       height: auto !important;
-      max-height: 1.55em !important;
-      margin: 0 0.06em !important;
+      max-height: 3.2em !important;
+      margin: 0 0.08em !important;
+    }
+    .task-text .oge-math-choice-question .oge-math-fipi-inline-letter,
+    .task-text .oge-math-choice-question p span > img[src*="innerimg"] {
+      display: inline-block !important;
+      vertical-align: middle;
+      width: auto !important;
+      max-width: none !important;
+      height: auto !important;
+      max-height: 1.4em !important;
+      margin: 0 0.04em !important;
     }
     .task-text .oge-math-choice-question > p:has(> img[src*="xs3qstsrc"]:only-child) > img[src*="xs3qstsrc"] {
       display: block !important;
@@ -368,6 +383,7 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
       display: inline-block !important;
       vertical-align: middle;
       margin: 0 0.04em !important;
+      font-size: 155% !important;
     }
     .task-text .oge-math-choice-question .task-html-block {
       display: inline;
@@ -388,6 +404,15 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
     .task-text .oge-math-choice-question p {
       margin: 0 0 0.3em;
       display: block;
+    }
+    .task-text .oge-math-choice-question i {
+      font-style: italic;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .task-text .oge-math-choice-option__body i {
+      font-style: italic;
+      font-weight: 600;
     }
     .task-text .oge-math-choice-question p:last-child {
       margin-bottom: 0;
@@ -458,13 +483,26 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
       vertical-align: middle;
       width: auto;
       height: auto;
-      max-height: 1.45em;
+      max-height: 2.75em;
       max-width: none;
       margin: 0;
+    }
+    .task-text .oge-math-choice-option__body .oge-math-fipi-inline-letter {
+      height: 1.4em !important;
+      max-height: none !important;
+    }
+    .task-text .oge-math-choice-option__body .oge-math-fipi-inline-frac {
+      height: 3.2em !important;
+      width: auto !important;
+      max-height: none !important;
+      max-width: none !important;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
     }
     .task-text .oge-math-choice-option__body mjx-container {
       display: inline-block !important;
       vertical-align: middle;
+      font-size: 150% !important;
     }
     .task-text .oge-math-choice-option__body table {
       display: inline-table;

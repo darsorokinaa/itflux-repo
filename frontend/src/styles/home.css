@@ -4006,6 +4006,15 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   min-width: 0;
 }
 
+.all-tasks-item__html .oge-math-choice-task img.oge-math-fipi-inline-letter,
+.all-tasks-item__html .oge-math-choice-task img.oge-math-fipi-inline-frac,
+.exam-task-card__text .oge-math-choice-task img.oge-math-fipi-inline-letter,
+.exam-task-card__text .oge-math-choice-task img.oge-math-fipi-inline-frac,
+.exam-page .task-text .oge-math-choice-task img.oge-math-fipi-inline-letter,
+.exam-page .task-text .oge-math-choice-task img.oge-math-fipi-inline-frac {
+  max-width: none !important;
+}
+
 /* ФИПИ innerimg*.gif — нативный размер, без «мыла» от width:100% */
 .exam-page .task-text .oge-math-choice-task img.oge-math-fipi-bitmap,
 .exam-page .task-text .oge-math-choice-task .oge-math-fipi-bitmap img,
@@ -4034,8 +4043,25 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   width: auto !important;
   max-width: none !important;
   height: auto !important;
-  max-height: 1.55em !important;
-  margin: 0 0.06em !important;
+  max-height: 3.1em !important;
+  margin: 0 0.08em !important;
+  border: none !important;
+}
+
+/* Буквы точек A–D (ФИПИ innerimg PNG) в строке условия */
+.exam-page .task-text .oge-math-choice-question .oge-math-fipi-inline-letter,
+.exam-task-card__text .oge-math-choice-question .oge-math-fipi-inline-letter,
+.all-tasks-item__html .oge-math-choice-question .oge-math-fipi-inline-letter,
+.exam-page .task-text .oge-math-choice-question p span > img[src*="innerimg"],
+.exam-task-card__text .oge-math-choice-question p span > img[src*="innerimg"],
+.all-tasks-item__html .oge-math-choice-question p span > img[src*="innerimg"] {
+  display: inline-block !important;
+  vertical-align: middle;
+  width: auto !important;
+  max-width: none !important;
+  height: auto !important;
+  max-height: 1.35em !important;
+  margin: 0 0.04em !important;
   border: none !important;
 }
 
@@ -4056,7 +4082,7 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   max-width: none !important;
   width: auto !important;
   height: auto !important;
-  max-height: 1.55em !important;
+  max-height: 3.1em !important;
   margin: 0 !important;
   display: inline-block !important;
   vertical-align: middle;
@@ -4096,6 +4122,15 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   display: inline-block !important;
   vertical-align: middle;
   margin: 0 0.04em !important;
+  font-size: 152% !important;
+}
+
+.all-tasks-item__html .oge-math-choice-option__body mjx-container[jax="CHTML"],
+.exam-task-card__text .oge-math-choice-option__body mjx-container[jax="CHTML"],
+.exam-page .task-text .oge-math-choice-option__body mjx-container[jax="CHTML"] {
+  display: inline-block !important;
+  vertical-align: middle;
+  font-size: 150% !important;
 }
 
 .exam-page .task-text .oge-math-choice-option__body .oge-math-fipi-bitmap,
@@ -4130,15 +4165,52 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   text-align: left;
 }
 
+.all-tasks-item__html .oge-math-choice-question i,
+.exam-task-card__text .oge-math-choice-question i,
+.exam-page .task-text .oge-math-choice-question i {
+  font-style: italic;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.all-tasks-item__html .oge-math-choice-option__body i,
+.exam-task-card__text .oge-math-choice-option__body i,
+.exam-page .task-text .oge-math-choice-option__body i {
+  font-style: italic;
+  font-weight: 600;
+}
+
 .all-tasks-item__html .oge-math-choice-option__body img,
-.all-tasks-item__html .oge-math-choice-option__body .oge-math-fipi-bitmap {
+.all-tasks-item__html .oge-math-choice-option__body .oge-math-fipi-bitmap,
+.exam-task-card__text .oge-math-choice-option__body img,
+.exam-task-card__text .oge-math-choice-option__body .oge-math-fipi-bitmap,
+.exam-page .task-text .oge-math-choice-option__body img,
+.exam-page .task-text .oge-math-choice-option__body .oge-math-fipi-bitmap {
   display: inline-block;
   vertical-align: middle;
   width: auto;
   height: auto;
-  max-height: 1.5em;
+  max-height: 2.6em;
   max-width: none;
   margin: 0;
+}
+
+.all-tasks-item__html .oge-math-choice-option__body .oge-math-fipi-inline-letter,
+.exam-task-card__text .oge-math-choice-option__body .oge-math-fipi-inline-letter,
+.exam-page .task-text .oge-math-choice-option__body .oge-math-fipi-inline-letter {
+  height: 1.35em !important;
+  max-height: none !important;
+}
+
+.all-tasks-item__html .oge-math-choice-option__body .oge-math-fipi-inline-frac,
+.exam-task-card__text .oge-math-choice-option__body .oge-math-fipi-inline-frac,
+.exam-page .task-text .oge-math-choice-option__body .oge-math-fipi-inline-frac {
+  height: 3.1em !important;
+  width: auto !important;
+  max-height: none !important;
+  max-width: none !important;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
 }
 
 .all-tasks-item__html .oge-math-choice-footer {
