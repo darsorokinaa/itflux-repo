@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useParams, useLocation, Link, useNavigate } from "react-router-dom";
 import MathContent from "../components/MathContent";
 import { devApiBase } from "../utils/devApiBase";
-import { isEgeInfTruthTableTask, isEgeInfParallelProcessesTask, isEgeInfRoadGraphTask, isEgeInformaticsContext, isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
+import { isEgeInfTruthTableTask, isEgeInfParallelProcessesTask, isEgeInfRoadGraphTask, isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
 
 const InformaticsCodeEditorEntry = lazy(
   () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
@@ -59,6 +59,17 @@ function isOgeInformaticsTask(level, subject, taskNumber, n) {
     String(level || "").toLowerCase() === "oge" &&
     String(subject || "").toLowerCase() === "inf" &&
     Number(taskNumber) === n
+  );
+}
+
+/** Условие задания — тот же рендер, что на вкладке «Все задачи». */
+function ExamTaskCondition({ html }) {
+  return (
+    <MathContent
+      html={html}
+      className="all-tasks-item__html exam-task-card__text task-text"
+      plainHtml
+    />
   );
 }
 
@@ -970,7 +981,7 @@ function ExamPage() {
   /* Подсказка «листайте», если блок условия реально переполнен по ширине */
   useEffect(() => {
     const updateScrollHints = () => {
-      const nodes = document.querySelectorAll(".exam-page .task-text");
+      const nodes = document.querySelectorAll(".exam-page .task-text, .exam-page .all-tasks-item__html");
       nodes.forEach((node) => {
         const hasOverflow = node.scrollWidth - node.clientWidth > 4;
         node.classList.toggle("task-text--has-overflow", hasOverflow);
@@ -992,7 +1003,7 @@ function ExamPage() {
     const handler = (e) => {
       const img = e.target.closest("img");
       if (!img) return;
-      const container = img.closest(".task-text, .correct-answer-content, .part2-answer-content, .task-content, .exam-page-container");
+      const container = img.closest(".task-text, .all-tasks-item__html, .correct-answer-content, .part2-answer-content, .task-content, .exam-page-container");
       if (!container) return;
       e.preventDefault();
       e.stopPropagation();
@@ -2343,16 +2354,7 @@ function ExamPage() {
                     openBoardForTaskId={eduOpenBoardForTaskId}
                     onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                   >
-                  <MathContent
-                    html={task.text}
-                    className="exam-task-card__text task-text"
-                    ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
-                    ogeInf6Enhance={isOgeInformaticsTask(level, subject, task.number, 6)}
-                    egeInfFileEnhance={isEgeInformaticsContext(level, subject)}
-                    egeInf22Enhance={isEgeInfParallelProcessesTask(level, subject, task.number)}
-                    egeInf1Enhance={isEgeInfRoadGraphTask(level, subject, task.number)}
-                    egeInf2Enhance={isEgeInfTruthTableTask(level, subject, task.number)}
-                  />
+                  <ExamTaskCondition html={task.text} />
                   {task.file && <TaskFileAttachment href={task.file} />}
                   {task.author && <div className="task-author">{task.author}</div>}
 
@@ -2737,16 +2739,7 @@ function ExamPage() {
                             openBoardForTaskId={eduOpenBoardForTaskId}
                             onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                           >
-                          <MathContent
-                            html={task.text}
-                            className="exam-task-card__text task-text"
-                            ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
-                            ogeInf6Enhance={isOgeInformaticsTask(level, subject, task.number, 6)}
-                            egeInfFileEnhance={isEgeInformaticsContext(level, subject)}
-                            egeInf22Enhance={isEgeInfParallelProcessesTask(level, subject, task.number)}
-                            egeInf1Enhance={isEgeInfRoadGraphTask(level, subject, task.number)}
-                            egeInf2Enhance={isEgeInfTruthTableTask(level, subject, task.number)}
-                          />
+                          <ExamTaskCondition html={task.text} />
                           {task.file && <TaskFileAttachment href={task.file} />}
                           {task.author && <div className="task-author">{task.author}</div>}
 
@@ -2860,16 +2853,7 @@ function ExamPage() {
                         openBoardForTaskId={eduOpenBoardForTaskId}
                         onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                       >
-                      <MathContent
-                        html={task.text}
-                        className="exam-task-card__text task-text"
-                        ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
-                        ogeInf6Enhance={isOgeInformaticsTask(level, subject, task.number, 6)}
-                        egeInfFileEnhance={isEgeInformaticsContext(level, subject)}
-                        egeInf22Enhance={isEgeInfParallelProcessesTask(level, subject, task.number)}
-                        egeInf1Enhance={isEgeInfRoadGraphTask(level, subject, task.number)}
-                        egeInf2Enhance={isEgeInfTruthTableTask(level, subject, task.number)}
-                      />
+                      <ExamTaskCondition html={task.text} />
                       {task.file && <TaskFileAttachment href={task.file} />}
                       {task.author && <div className="task-author">{task.author}</div>}
 

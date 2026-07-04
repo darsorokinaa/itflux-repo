@@ -52,8 +52,8 @@ COL_TASK_NUMBER = None   # None — не заполнять task_id
 COL_SUBTOPIC = None      # None — не заполнять subtopic_id
 
 # Предмет и уровень для поиска TaskList (subject_short и level.level в БД)
-SUBJECT = "inf"   # например math, inf
-LEVEL = "ege"      # например oge, ege, vpr
+SUBJECT = "math"   # например math, inf
+LEVEL = "oge"      # например oge, ege, vpr
 
 # Если подтемы нет в БД — создать автоматически (иначе только существующие)
 CREATE_SUBTOPIC_IF_MISSING = True

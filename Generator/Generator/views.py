@@ -2369,6 +2369,82 @@ class TaskListView(APIView):
 # ── end LK Variant Builder ────────────────────────────────────────────────────
 
 
+def _bank_task_file_url(request, task):
+    """Абсолютный URL вложения задачи (как в api_task_bank)."""
+    if not getattr(task, 'files', None):
+        return None
+    f = task.files
+    try:
+        url = f.url
+        if url:
+            return request.build_absolute_uri(url)
+    except Exception:
+        pass
+    if getattr(f, 'name', ''):
+        media_url = getattr(django_settings, 'MEDIA_URL', '/media/') or '/media/'
+        rel = (media_url.rstrip('/') + '/' + f.name.lstrip('/')).replace('//', '/')
+        return request.build_absolute_uri(rel)
+    return None
+
+
+def _task_matches_bank_filters(task, vpr_vf=None, only_fipi=False):
+    if not task or not getattr(task, 'is_active', True):
+        return False
+    if vpr_vf:
+        for key, val in vpr_vf.items():
+            if getattr(task, key, None) != val:
+                return False
+    if only_fipi and not Task.objects.filter(pk=task.pk).filter(_get_fipi_task_filter_q()).exists():
+        return False
+    return True
+
+
+def _serialize_bank_group_member(request, member, *, raw_html=False):
+    t = member.task
+    tl = t.task if t else None
+    part = tl.part if tl else None
+    keep_tables = bool(tl and tl.part_id == 2)
+    task_text_raw = str(t.task_template or '') if t else ''
+    if t:
+        try:
+            from fipi_bare_innerimg_repair import repair_bare_fipi_innerimg_html
+            from import_tasks_universal import download as fipi_media_download
+
+            task_text_raw = repair_bare_fipi_innerimg_html(
+                task_text_raw,
+                task_db_id=t.id,
+                task_list_id=t.task_id,
+                subtopic_id=t.subtopic_id,
+                download=fipi_media_download,
+            )
+        except Exception:
+            logging.getLogger(__name__).debug(
+                "bare innerimg repair skipped for task %s", t.id, exc_info=True
+            )
+    return {
+        'id': t.id if t else None,
+        'task_list_id': tl.id if tl else None,
+        'task_number': member.task_number,
+        'task_title': tl.task_title if tl else '',
+        'subtopic': t.subtopic.title if t and t.subtopic else None,
+        'max_score': tl.max_score if tl else 1,
+        'part_id': tl.part_id if tl else None,
+        'part_title': (part.part_title if part else None),
+        'text': (
+            task_text_raw
+            if raw_html
+            else process_latex(
+                task_text_raw,
+                for_browser=True,
+                keep_layout_tables=keep_tables,
+            )
+        ) if t else '',
+        'answer': str(t.answer or '') if t else '',
+        'file_url': _bank_task_file_url(request, t) if t else None,
+        'added_at': t.added_at.strftime('%d.%m.%Y') if t and t.added_at else None,
+    }
+
+
 @require_http_methods(["GET"])
 def api_group_instances(request, level, subject):
     """GET /api/<level>/<subject>/group-instances/
@@ -2377,30 +2453,38 @@ def api_group_instances(request, level, subject):
       group_id    — вернуть один конкретный TaskGroup по ID (type=group)
       linked_key  — вернуть все TaskGroup, соответствующие набору номеров заданий
                     (строка вида "19_20_21"; type=linked_group)
-      subtopic_id — опциональная фильтрация по подтеме TaskGroup.subtopic
+      subtopic_id — опциональная фильтрация по подтеме TaskGroup.subtopic (none — без подтемы)
+      only_fipi   — 1: только группы, где все задания из ФИПИ
       page        — страница (default 1)
-      per_page    — размер (default 20, max 50)
+      per_page    — размер (default 20, max 10000)
     """
     subject_instance = get_subject_for_api(subject)
     level_instance   = get_object_or_404(Level, level=level)
+    vpr_vf = _vpr_task_filters_from_request(request, level)
+    only_fipi = (request.GET.get("only_fipi") or "").strip() in ("1", "true", "yes")
+    raw_html = (request.GET.get("raw_html") or "").strip().lower() in ("1", "true", "yes")
+
+    member_qs = (
+        TaskGroupMember.objects
+        .select_related('task', 'task__task', 'task__task__part', 'task__subtopic')
+        .filter(task__is_active=True)
+        .order_by('task_number')
+    )
+    if vpr_vf:
+        for _vk, _vv in vpr_vf.items():
+            member_qs = member_qs.filter(**{f'task__{_vk}': _vv})
 
     qs = (
         TaskGroup.objects
         .filter(subject=subject_instance, level=level_instance)
         .exclude(taskgroupmember__task__is_active=False)
-        .prefetch_related(
-            Prefetch(
-                'taskgroupmember_set',
-                queryset=TaskGroupMember.objects.select_related('task', 'task__task')
-                .filter(task__is_active=True)
-                .order_by('task_number'),
-            )
-        )
+        .prefetch_related(Prefetch('taskgroupmember_set', queryset=member_qs))
     )
 
     group_id_param   = request.GET.get('group_id', '').strip()
     linked_key_param = request.GET.get('linked_key', '').strip()
     subtopic_id_param = request.GET.get('subtopic_id', '').strip()
+    expected_task_numbers = None
 
     if group_id_param:
         try:
@@ -2415,6 +2499,7 @@ def api_group_instances(request, level, subject):
             return JsonResponse({'total': 0, 'instances': []})
         if not task_numbers:
             return JsonResponse({'total': 0, 'instances': []})
+        expected_task_numbers = task_numbers
         # Группы, у которых есть ровно все нужные task_number
         qs = (
             qs
@@ -2425,47 +2510,59 @@ def api_group_instances(request, level, subject):
         )
 
     if subtopic_id_param:
-        try:
-            qs = qs.filter(subtopic_id=int(subtopic_id_param))
-        except (TypeError, ValueError):
-            pass
+        if subtopic_id_param.strip().lower() == "none":
+            qs = qs.filter(subtopic_id__isnull=True)
+        else:
+            try:
+                qs = qs.filter(subtopic_id=int(subtopic_id_param))
+            except (TypeError, ValueError):
+                pass
 
     try:
         page     = max(1, int(request.GET.get('page', 1)))
-        per_page = min(50, max(1, int(request.GET.get('per_page', 20))))
+        per_page = min(10000, max(1, int(request.GET.get('per_page', 20))))
     except (TypeError, ValueError):
         page, per_page = 1, 20
 
-    total  = qs.count()
-    offset = (page - 1) * per_page
-    groups = list(qs.order_by('id')[offset:offset + per_page])
-
     instances = []
-    for grp in groups:
+    for grp in qs.order_by('id'):
         members = list(grp.taskgroupmember_set.all())
-        task_items = []
-        for m in members:
-            t  = m.task
-            tl = t.task if t else None
-            part = tl.part if tl else None
-            task_items.append({
-                'id':          t.id if t else None,
-                'task_list_id': tl.id if tl else None,
-                'task_number': m.task_number,
-                'task_title':  tl.task_title if tl else '',
-                'text':        process_latex(str(t.task_template or ''), for_browser=True) if t else '',
-                'answer':      str(t.answer or '') if t else '',
-                'max_score':   t.max_score if t else None,
-                'part_id':     tl.part_id if tl else None,
-                'part_title':  (part.part_title if part else None),
-            })
+        if expected_task_numbers is not None:
+            member_nums = {m.task_number for m in members}
+            if not all(n in member_nums for n in expected_task_numbers):
+                continue
+        if only_fipi:
+            raw_members = TaskGroupMember.objects.filter(
+                task_group_id=grp.id,
+                task__is_active=True,
+            ).select_related('task')
+            if any(not _task_matches_bank_filters(m.task, vpr_vf=vpr_vf, only_fipi=True) for m in raw_members):
+                continue
+        task_items = [
+            _serialize_bank_group_member(request, m, raw_html=raw_html)
+            for m in members
+            if _task_matches_bank_filters(m.task, vpr_vf=vpr_vf, only_fipi=False)
+        ]
+        if expected_task_numbers is not None and len(task_items) != len(expected_task_numbers):
+            continue
+        if not task_items:
+            continue
         instances.append({
-            'group_id':   grp.id,
+            'group_id': grp.id,
             'subtopic_id': grp.subtopic_id,
-            'tasks':      task_items,
+            'tasks': task_items,
         })
 
-    return JsonResponse({'total': total, 'page': page, 'per_page': per_page, 'instances': instances})
+    total = len(instances)
+    offset = (page - 1) * per_page
+    page_instances = instances[offset:offset + per_page]
+
+    return JsonResponse({
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+        'instances': page_instances,
+    })
 
 def api_variant_lookup(request, variant_id):
     variant = get_object_or_404(Variant.objects.select_related('level', 'var_subject'), id=variant_id)

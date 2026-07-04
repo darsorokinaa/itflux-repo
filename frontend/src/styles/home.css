@@ -592,6 +592,40 @@
   box-shadow: inset 0 0 0 2px rgba(43, 82, 245, 0.35);
 }
 
+.all-tasks-item--group .all-tasks-item__card {
+  border-left: 4px solid var(--blue-hero, #2b52f5);
+}
+
+.all-tasks-item__head--group {
+  border-bottom: 1px solid var(--border-card, #e4e8ff);
+}
+
+.all-tasks-item__group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.all-tasks-item__group-part {
+  border-top: 1px solid #edf1ff;
+}
+
+.all-tasks-item__group-part:first-child {
+  border-top: none;
+}
+
+.all-tasks-item__group-part-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px 0;
+}
+
+.all-tasks-item__group-part .all-tasks-item__content {
+  padding-top: 10px;
+}
+
 .all-tasks-item__actions .exam-task-draw-fab {
   position: static;
   right: auto;

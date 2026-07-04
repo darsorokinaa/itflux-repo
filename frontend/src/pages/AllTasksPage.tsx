@@ -20,7 +20,7 @@ import {
   type SubjectDefinition,
   type SubjectId,
 } from "../data/subjects";
-import { formatTasksCount } from "../utils/formatTasksCount";
+import { formatGroupsCount, formatTasksCount } from "../utils/formatTasksCount";
 import WorkbookCreateBar from "../components/WorkbookCreateBar";
 import type { WorkbookTask } from "../utils/buildWorkbookHtml";
 import { isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
@@ -52,6 +52,72 @@ type BankResponse = {
   per_page: number;
   tasks: BankTask[];
 };
+
+type BankGroupInstance = {
+  group_id: number;
+  subtopic_id: number | null;
+  tasks: BankTask[];
+};
+
+type BankGroupResponse = {
+  total: number;
+  page: number;
+  per_page: number;
+  instances: BankGroupInstance[];
+};
+
+type GroupBankDescriptor = {
+  linkedKey: string;
+  taskNumbers: number[];
+  label: string;
+};
+
+type TasksStructureItem = {
+  type: "single" | "group" | "linked_group";
+  linked_key?: string;
+  task_numbers?: number[];
+  tasks?: Array<{
+    tasklist_id: number;
+    task_number: number;
+    task_title?: string;
+  }>;
+};
+
+type BankDisplayEntry =
+  | { kind: "single"; task: BankTask }
+  | { kind: "group"; groupId: number; tasks: BankTask[] };
+
+function buildGroupByTaskListId(
+  items: TasksStructureItem[]
+): Map<string, GroupBankDescriptor> {
+  const map = new Map<string, GroupBankDescriptor>();
+  for (const item of items) {
+    if (item.type !== "group" && item.type !== "linked_group") continue;
+    const numsRaw =
+      item.task_numbers && item.task_numbers.length
+        ? [...item.task_numbers]
+        : (item.tasks || [])
+            .map((x) => x.task_number)
+            .filter((n): n is number => n != null);
+    const numsSorted = [...new Set(numsRaw.map((n) => Number(n)))].sort((a, b) => a - b);
+    if (!numsSorted.length) continue;
+    const linkedKey =
+      item.type === "linked_group"
+        ? String(item.linked_key || numsSorted.join("_"))
+        : numsSorted.join("_");
+    const label =
+      numsSorted.length === 1
+        ? `Группа · задание ${numsSorted[0]}`
+        : `Группа ${numsSorted[0]}–${numsSorted[numsSorted.length - 1]}`;
+    const desc: GroupBankDescriptor = { linkedKey, taskNumbers: numsSorted, label };
+    for (const t of item.tasks || []) {
+      if (t.tasklist_id != null) {
+        map.set(String(t.tasklist_id), desc);
+      }
+    }
+  }
+  return map;
+}
 
 type TaskNumberOption = {
   task_list_id: number;
@@ -231,7 +297,14 @@ export default function AllTasksPage() {
 
   const [filterOptions, setFilterOptions] = useState<FiltersResponse | null>(null);
   const [filtersLoading, setFiltersLoading] = useState(false);
+  const [groupByTaskListId, setGroupByTaskListId] = useState<
+    Map<string, GroupBankDescriptor>
+  >(new Map());
   const [data, setData] = useState<BankResponse | null>(null);
+  const [groupData, setGroupData] = useState<BankGroupResponse | null>(null);
+  const [bankUsesGroups, setBankUsesGroups] = useState(false);
+  const [activeGroupDescriptor, setActiveGroupDescriptor] =
+    useState<GroupBankDescriptor | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -346,6 +419,26 @@ export default function AllTasksPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const url = `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/tasks/${buildQuery(level, vprGrade)}`;
+
+    fetch(url, { credentials: "same-origin" })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((json: { tasks?: TasksStructureItem[] }) => {
+        if (!cancelled) {
+          setGroupByTaskListId(buildGroupByTaskListId(json.tasks ?? []));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setGroupByTaskListId(new Map());
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [level, subject, vprGrade]);
+
+  useEffect(() => {
+    let cancelled = false;
     setFiltersLoading(true);
     const qs = buildQuery(level, vprGrade, {
       task_list_id: taskListId || undefined,
@@ -388,42 +481,90 @@ export default function AllTasksPage() {
       subtopicId !== SUBTOPIC_NO_ANSWER
     ) {
       setData(null);
+      setGroupData(null);
+      setBankUsesGroups(false);
+      setActiveGroupDescriptor(null);
       setError(null);
       setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
-    const qs = buildQuery(level, vprGrade, {
-      page: String(page),
-      per_page: String(PER_PAGE),
-      raw_html: undefined,
-      only_fipi: onlyFipi ? "1" : undefined,
-      task_list_id: taskListId || undefined,
-      subtopic_id:
-        subtopicId === SUBTOPIC_NONE
-          ? SUBTOPIC_NONE
-          : subtopicId && subtopicId !== SUBTOPIC_NO_ANSWER
-            ? subtopicId
-            : undefined,
-    });
+
+    const groupDescriptor = taskListId ? groupByTaskListId.get(taskListId) ?? null : null;
+
     try {
-      const res = await fetch(
-        `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/task-bank/${qs}`,
-        { credentials: "same-origin" }
-      );
-      if (!res.ok) {
-        throw new Error(`Ошибка загрузки (${res.status})`);
+      if (groupDescriptor) {
+        const qs = buildQuery(level, vprGrade, {
+          page: String(page),
+          per_page: String(PER_PAGE),
+          only_fipi: onlyFipi ? "1" : undefined,
+          linked_key: groupDescriptor.linkedKey,
+          subtopic_id:
+            subtopicId === SUBTOPIC_NONE
+              ? SUBTOPIC_NONE
+              : subtopicId && subtopicId !== SUBTOPIC_NO_ANSWER
+                ? subtopicId
+                : undefined,
+        });
+        const res = await fetch(
+          `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/group-instances/${qs}`,
+          { credentials: "same-origin" }
+        );
+        if (!res.ok) {
+          throw new Error(`Ошибка загрузки (${res.status})`);
+        }
+        const json: BankGroupResponse = await res.json();
+        setGroupData(json);
+        setData(null);
+        setBankUsesGroups(true);
+        setActiveGroupDescriptor(groupDescriptor);
+      } else {
+        const qs = buildQuery(level, vprGrade, {
+          page: String(page),
+          per_page: String(PER_PAGE),
+          raw_html: undefined,
+          only_fipi: onlyFipi ? "1" : undefined,
+          task_list_id: taskListId || undefined,
+          subtopic_id:
+            subtopicId === SUBTOPIC_NONE
+              ? SUBTOPIC_NONE
+              : subtopicId && subtopicId !== SUBTOPIC_NO_ANSWER
+                ? subtopicId
+                : undefined,
+        });
+        const res = await fetch(
+          `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/task-bank/${qs}`,
+          { credentials: "same-origin" }
+        );
+        if (!res.ok) {
+          throw new Error(`Ошибка загрузки (${res.status})`);
+        }
+        const json: BankResponse = await res.json();
+        setData(json);
+        setGroupData(null);
+        setBankUsesGroups(false);
+        setActiveGroupDescriptor(null);
       }
-      const json: BankResponse = await res.json();
-      setData(json);
     } catch (e) {
       setData(null);
+      setGroupData(null);
+      setBankUsesGroups(false);
+      setActiveGroupDescriptor(null);
       setError(e instanceof Error ? e.message : "Ошибка загрузки");
     } finally {
       setLoading(false);
     }
-  }, [level, subject, onlyFipi, page, vprGrade, taskListId, subtopicId]);
+  }, [
+    level,
+    subject,
+    onlyFipi,
+    page,
+    vprGrade,
+    taskListId,
+    subtopicId,
+    groupByTaskListId,
+  ]);
 
   useEffect(() => {
     fetchTasks();
@@ -450,19 +591,54 @@ export default function AllTasksPage() {
   const noAnswerOnly = subtopicId === SUBTOPIC_NO_ANSWER;
 
   const noAnswerCount = useMemo(() => {
+    if (bankUsesGroups) {
+      if (!groupData?.instances) return null;
+      return groupData.instances.filter((group) =>
+        group.tasks.some((t) => !(t.answer && String(t.answer).trim()))
+      ).length;
+    }
     if (!data?.tasks) return null;
     return data.tasks.filter((t) => !(t.answer && String(t.answer).trim())).length;
-  }, [data?.tasks]);
+  }, [bankUsesGroups, data?.tasks, groupData?.instances]);
 
-  const visibleTasks = useMemo(() => {
+  const displayEntries = useMemo((): BankDisplayEntry[] => {
+    if (bankUsesGroups) {
+      let instances = groupData?.instances ?? [];
+      if (noAnswerOnly) {
+        instances = instances.filter((group) =>
+          group.tasks.some((t) => !(t.answer && String(t.answer).trim()))
+        );
+      }
+      return instances.map((group) => ({
+        kind: "group" as const,
+        groupId: group.group_id,
+        tasks: group.tasks,
+      }));
+    }
     const list = data?.tasks ?? [];
-    if (!noAnswerOnly) return list;
-    return list.filter((t) => !(t.answer && String(t.answer).trim()));
-  }, [data?.tasks, noAnswerOnly]);
+    const singles = noAnswerOnly
+      ? list.filter((t) => !(t.answer && String(t.answer).trim()))
+      : list;
+    return singles.map((task) => ({ kind: "single" as const, task }));
+  }, [bankUsesGroups, data?.tasks, groupData?.instances, noAnswerOnly]);
 
-  const visibleTotal = noAnswerOnly ? visibleTasks.length : data?.total ?? 0;
+  const visibleTasks = useMemo(
+    () =>
+      displayEntries.flatMap((entry) =>
+        entry.kind === "group" ? entry.tasks : [entry.task]
+      ),
+    [displayEntries]
+  );
 
-  const canBuildWorkbook = Boolean(!loading && !error && visibleTasks.length);
+  const visibleTotal = noAnswerOnly
+    ? displayEntries.length
+    : bankUsesGroups
+      ? groupData?.total ?? 0
+      : data?.total ?? 0;
+
+  const canBuildWorkbook = Boolean(
+    !loading && !error && displayEntries.length > 0
+  );
 
   const workbookDraftIds = useMemo(
     () => new Set(workbookDraft.map((task) => task.id)),
@@ -510,6 +686,30 @@ export default function AllTasksPage() {
     vprGrade,
   ]);
 
+  const toggleWorkbookGroup = useCallback((tasks: BankTask[], checked: boolean) => {
+    if (checked) {
+      setWorkbookDraft((prev) => {
+        const existing = new Set(prev.map((item) => item.id));
+        const next = [...prev];
+        for (const task of tasks) {
+          if (existing.has(task.id)) continue;
+          existing.add(task.id);
+          next.push({
+            id: task.id,
+            task_number: task.task_number,
+            text: task.text,
+            subtopic: task.subtopic,
+            task_title: task.task_title,
+          });
+        }
+        return next;
+      });
+      return;
+    }
+    const removeIds = new Set(tasks.map((task) => task.id));
+    setWorkbookDraft((prev) => prev.filter((item) => !removeIds.has(item.id)));
+  }, []);
+
   const toggleWorkbookTask = useCallback((task: BankTask, checked: boolean) => {
     if (checked) {
       setWorkbookDraft((prev) => {
@@ -542,9 +742,14 @@ export default function AllTasksPage() {
 
   const allVisibleInWorkbook = useMemo(
     () =>
-      visibleTasks.length > 0 &&
-      visibleTasks.every((task) => workbookDraftIds.has(task.id)),
-    [visibleTasks, workbookDraftIds]
+      displayEntries.length > 0 &&
+      displayEntries.every((entry) => {
+        if (entry.kind === "group") {
+          return entry.tasks.every((task) => workbookDraftIds.has(task.id));
+        }
+        return workbookDraftIds.has(entry.task.id);
+      }),
+    [displayEntries, workbookDraftIds]
   );
 
   const addAllVisibleToWorkbook = useCallback(() => {
@@ -761,7 +966,7 @@ export default function AllTasksPage() {
               <span>Загрузка…</span>
             ) : error ? (
               <span className="all-tasks-meta__error">{error}</span>
-            ) : data ? (
+            ) : data || groupData ? (
               (() => {
                 const selectedTaskNum = taskListId
                   ? filterOptions?.task_numbers?.find(
@@ -780,10 +985,15 @@ export default function AllTasksPage() {
                 return (
                   <div className="all-tasks-meta__inner">
                     <span className="all-tasks-meta__count">
-                      {formatTasksCount(visibleTotal)}
+                      {bankUsesGroups ? formatGroupsCount(visibleTotal) : formatTasksCount(visibleTotal)}
                       {onlyFipi ? " · только ФИПИ" : ""}
                     </span>
-                    {selectedTaskNum ? (
+                    {bankUsesGroups && activeGroupDescriptor ? (
+                      <span className="all-tasks-meta__badge">
+                        {activeGroupDescriptor.label}
+                      </span>
+                    ) : null}
+                    {selectedTaskNum && !bankUsesGroups ? (
                       <span className="all-tasks-meta__badge">
                         №{selectedTaskNum.task_number}
                         {selectedTaskNum.task_title
@@ -837,7 +1047,7 @@ export default function AllTasksPage() {
           {(taskListId || subtopicId === SUBTOPIC_NONE || subtopicId === SUBTOPIC_NO_ANSWER) &&
           !loading &&
           !error &&
-          visibleTasks.length === 0 ? (
+          displayEntries.length === 0 ? (
             <p className="all-tasks-empty" role="status">
               {noAnswerOnly
                 ? "Среди выбранных задач все уже имеют ответ."
@@ -855,7 +1065,7 @@ export default function AllTasksPage() {
                 type="button"
                 className="all-tasks-workbook-hint__add-all"
                 onClick={addAllVisibleToWorkbook}
-                disabled={!visibleTasks.length || allVisibleInWorkbook}
+                disabled={!displayEntries.length || allVisibleInWorkbook}
               >
                 Добавить все
               </button>
@@ -863,9 +1073,180 @@ export default function AllTasksPage() {
           ) : null}
 
           <ul className="all-tasks-list">
-            {visibleTasks.map((t, i) => {
-              const ordinal = i + 1;
-              const taskNumber = t.task_number ?? ordinal;
+            {displayEntries.map((entry, entryIndex) => {
+              if (entry.kind === "group") {
+                const groupNums = entry.tasks
+                  .map((t) => t.task_number)
+                  .filter((n): n is number => n != null);
+                const groupInWorkbook = entry.tasks.every((task) =>
+                  workbookDraftIds.has(task.id)
+                );
+                const groupHasMissingAnswer = entry.tasks.some(
+                  (t) => !(t.answer && String(t.answer).trim())
+                );
+                return (
+                  <li key={`group-${entry.groupId}`} className="all-tasks-list__item">
+                    <article
+                      className={[
+                        "all-tasks-item",
+                        "all-tasks-item--group",
+                        workbookMode && groupInWorkbook ? "all-tasks-item--in-workbook" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      data-group-id={entry.groupId}
+                    >
+                      <div className="all-tasks-item__card">
+                        <header className="all-tasks-item__head all-tasks-item__head--group">
+                          <p className="all-tasks-item__meta">
+                            <span className="all-tasks-item__num">Группа заданий</span>
+                            <span className="all-tasks-item__meta-sep" aria-hidden>
+                              ·
+                            </span>
+                            <span>вариант #{entry.groupId}</span>
+                            {groupNums.length ? (
+                              <>
+                                <span className="all-tasks-item__meta-sep" aria-hidden>
+                                  ·
+                                </span>
+                                <span>№{groupNums.join(", ")}</span>
+                              </>
+                            ) : null}
+                            {groupHasMissingAnswer ? (
+                              <span className="task-no-answer-badge">Пока без ответа</span>
+                            ) : null}
+                          </p>
+                          <div className="all-tasks-item__actions">
+                            {workbookMode ? (
+                              <label className="all-tasks-item__workbook-check">
+                                <input
+                                  type="checkbox"
+                                  checked={groupInWorkbook}
+                                  onChange={(e) =>
+                                    toggleWorkbookGroup(entry.tasks, e.target.checked)
+                                  }
+                                />
+                                <span>Добавить группу</span>
+                              </label>
+                            ) : null}
+                          </div>
+                        </header>
+                        <div className="all-tasks-item__group-body">
+                          {entry.tasks.map((t) => {
+                            const taskNumber = t.task_number ?? 0;
+                            const taskBoardPersist = boardsByTask[String(t.id)];
+                            const hasTaskBoardDraft = boardPersistHasDraft(taskBoardPersist);
+                            const answerOpen = !!openAnswers[t.id];
+                            const answerHtml = (t.answer || "").trim();
+                            return (
+                              <section
+                                key={t.id}
+                                className="all-tasks-item__group-part"
+                                data-task-id={t.id}
+                                data-task-number={t.task_number ?? undefined}
+                              >
+                                <div className="all-tasks-item__group-part-head">
+                                  <p className="all-tasks-item__meta">
+                                    <span className="all-tasks-item__num">№{taskNumber}</span>
+                                    <span className="all-tasks-item__meta-sep" aria-hidden>
+                                      ·
+                                    </span>
+                                    <span>ID {t.id}</span>
+                                    {t.task_title ? (
+                                      <>
+                                        <span className="all-tasks-item__meta-sep" aria-hidden>
+                                          ·
+                                        </span>
+                                        <span>{t.task_title}</span>
+                                      </>
+                                    ) : null}
+                                    {t.part_title ? (
+                                      <>
+                                        <span className="all-tasks-item__meta-sep" aria-hidden>
+                                          ·
+                                        </span>
+                                        <span>{t.part_title}</span>
+                                      </>
+                                    ) : null}
+                                    {!answerHtml ? (
+                                      <span className="task-no-answer-badge">Пока без ответа</span>
+                                    ) : null}
+                                  </p>
+                                  <div className="all-tasks-item__actions">
+                                    {answerHtml ? (
+                                      <button
+                                        type="button"
+                                        className="all-tasks-item__answer-btn"
+                                        onClick={() => toggleAnswer(t.id)}
+                                        aria-expanded={answerOpen ? "true" : "false"}
+                                      >
+                                        {answerOpen ? "Скрыть ответ" : "Посмотреть ответ"}
+                                      </button>
+                                    ) : null}
+                                    <ExamTaskDrawingHeaderButton
+                                      onClick={() => setOpenBoardForTaskId(t.id)}
+                                      hasDraft={hasTaskBoardDraft}
+                                    />
+                                  </div>
+                                </div>
+                                <div className="all-tasks-item__content">
+                                  <ExamTaskDrawingShell
+                                    enabled
+                                    taskId={t.id}
+                                    level={level}
+                                    subject={subject}
+                                    variantId={ALL_TASKS_BOARD_VARIANT_ID}
+                                    persistEntry={taskBoardPersist}
+                                    onDrawingPersist={(payload: any) =>
+                                      handleBoardPersist({ taskId: t.id, ...payload })
+                                    }
+                                    openBoardForTaskId={openBoardForTaskId}
+                                    onConsumedBoardOpenRequest={() =>
+                                      setOpenBoardForTaskId(null)
+                                    }
+                                  >
+                                    <LazyVisible minHeight={120}>
+                                      <MathContent
+                                        html={t.text || ""}
+                                        className="all-tasks-item__html"
+                                        plainHtml
+                                      />
+                                      {t.file_url ? (
+                                        <TaskFileAttachment href={t.file_url} />
+                                      ) : null}
+                                    </LazyVisible>
+                                  </ExamTaskDrawingShell>
+                                </div>
+                                {answerOpen ? (
+                                  <div
+                                    className="all-tasks-item__answer"
+                                    role="region"
+                                    aria-live="polite"
+                                    aria-label="Правильный ответ"
+                                  >
+                                    {answerHtml ? (
+                                      <MathContent
+                                        html={answerHtml}
+                                        className="all-tasks-item__html all-tasks-item__html--answer"
+                                        plainHtml
+                                      />
+                                    ) : (
+                                      <p>Ответ не указан.</p>
+                                    )}
+                                  </div>
+                                ) : null}
+                              </section>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </article>
+                  </li>
+                );
+              }
+
+              const t = entry.task;
+              const taskNumber = t.task_number ?? entryIndex + 1;
               const taskBoardPersist = boardsByTask[String(t.id)];
               const hasTaskBoardDraft = boardPersistHasDraft(taskBoardPersist);
               const answerOpen = !!openAnswers[t.id];

@@ -871,8 +871,7 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
     // размонтирует всё дерево при выбросе из эффекта → пустой экран).
     try {
       if (plainHtml) {
-        el.innerHTML = preparePlainBankTaskHtml(decoded);
-        polishBankTaskTables(el);
+        el.innerHTML = prepareBankTaskDisplayHtml(decoded);
       } else {
       const normalized = normalizeEscapedTaskSymbols(decoded);
       const repaired = repairLogicConnectiveSpanMarkup(normalized);
@@ -1013,6 +1012,23 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
   return <div ref={ref} className={className} />;
 }
 
+/** Банк задач / тетрадь: тот же HTML, что в MathContent plainHtml (без typeset). */
+export function prepareBankTaskDisplayHtml(raw) {
+  if (raw == null || raw === "") return "";
+  try {
+    const decoded = decodeHtmlEntityLayersIfStoredEscaped(String(raw));
+    const html = preparePlainBankTaskHtml(decoded);
+    if (typeof document === "undefined") return html;
+    const el = document.createElement("div");
+    el.innerHTML = html;
+    polishBankTaskTables(el);
+    unwrapBackendMathSpans(el);
+    return el.innerHTML;
+  } catch {
+    return String(raw);
+  }
+}
+
 export const MathContent = memo(MathContentInner);
 export default MathContent;
-export { preparePlainBankTaskHtml };
+export { preparePlainBankTaskHtml, polishBankTaskMathJaxTables };

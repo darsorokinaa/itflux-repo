@@ -1,9 +1,14 @@
 /**
  * Сборка печатной «Рабочей тетради» из выбранных задач банка.
  * Открывается в новой вкладке: поле в клетку для решения + строка для ответа.
+ *
+ * Содержимое заданий рендерится тем же пайплайном и CSS, что на вкладке «Все задачи».
  */
 
-import { preparePlainBankTaskHtml } from "../components/MathContent.jsx";
+import {
+  prepareBankTaskDisplayHtml,
+  polishBankTaskMathJaxTables,
+} from "../components/MathContent.jsx";
 
 export type WorkbookTask = {
   id: number;
@@ -46,10 +51,25 @@ function logoUrl(): string {
   return `${origin}${base}favicon.png?v=1`;
 }
 
+/** Стили приложения (home, styles, digital-flow) — как на вкладке «Все задачи». */
+export function collectWorkbookAppStylesMarkup(): string {
+  if (typeof document === "undefined") return "";
+  const parts: string[] = [];
+  document.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
+    const href = (link as HTMLLinkElement).href;
+    if (href) parts.push(`<link rel="stylesheet" href="${escapeHtml(href)}" />`);
+  });
+  document.querySelectorAll("head style").forEach((style) => {
+    const css = style.textContent?.trim();
+    if (css) parts.push(`<style>${css}</style>`);
+  });
+  return parts.join("\n  ");
+}
+
 function prepareTaskHtml(raw: string): string {
   if (!raw) return "";
   try {
-    return preparePlainBankTaskHtml(raw);
+    return prepareBankTaskDisplayHtml(raw);
   } catch {
     return raw;
   }
@@ -71,7 +91,7 @@ function renderTask(
     : "";
 
   return `
-    <section class="task">
+    <section class="task workbook-task">
       <div class="task-header">
         <div class="task-left">
           <div class="task-badge">
@@ -79,7 +99,7 @@ function renderTask(
             <div class="task-id">${escapeHtml(String(task.id))}</div>
           </div>
           <div class="task-meta">
-            <div class="task-text">${prepareTaskHtml(task.text)}</div>
+            <div class="all-tasks-item__html workbook-task__body">${prepareTaskHtml(task.text)}</div>
           </div>
         </div>
       </div>
@@ -96,7 +116,31 @@ function normalizeOptions(options?: WorkbookOptions): Required<WorkbookOptions> 
   };
 }
 
-export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): string {
+export function typesetWorkbookMath(doc: Document): Promise<void> {
+  const mj = (doc.defaultView as Window | null)?.MathJax;
+  if (!mj?.typesetPromise) {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        typesetWorkbookMath(doc).then(resolve);
+      }, 120);
+    });
+  }
+  const startup = mj.startup?.promise ?? Promise.resolve();
+  return startup
+    .then(() => mj.typesetPromise?.())
+    .then(() => {
+      doc.querySelectorAll(".all-tasks-item__html").forEach((el) => {
+        polishBankTaskMathJaxTables(el);
+      });
+    })
+    .catch(() => undefined);
+}
+
+export function buildWorkbookHtml(
+  tasks: WorkbookTask[],
+  meta: WorkbookMeta,
+  appStylesMarkup = ""
+): string {
   const origin = siteOrigin();
   const title = escapeHtml(meta.title || "Рабочая тетрадь");
   const subtitle = meta.subtitle ? escapeHtml(meta.subtitle) : "";
@@ -108,6 +152,7 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
   const solutionChecked = options.showSolutionSpace ? "checked" : "";
   const answersChecked = options.showAnswers ? "checked" : "";
   const bodyClasses = [
+    "workbook-body",
     !options.showGrading ? "no-grading-fields" : "",
     !options.showSolutionSpace ? "no-solution-fields" : "",
     !options.showAnswers ? "no-answer-fields" : "",
@@ -122,13 +167,18 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${title} | Цифровой поток</title>
   ${origin ? `<base href="${escapeHtml(origin)}/">` : ""}
+  ${appStylesMarkup}
   <script>
     window.MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
         displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']]
       },
-      chtml: { scale: 1.65, mtextInheritFont: false, matchFontHeight: false },
+      chtml: {
+        scale: 1.525,
+        mtextInheritFont: false,
+        matchFontHeight: false
+      },
       startup: { typeset: false }
     };
   </script>
@@ -146,12 +196,10 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
       --workbook-rows: 5;
     }
     * { box-sizing: border-box; }
-    body {
+    body.workbook-body {
       margin: 0;
       background: #EEF3FA;
-      font-family: Arial, Helvetica, sans-serif;
       color: var(--text);
-      line-height: 1.28;
     }
     .toolbar {
       width: 210mm;
@@ -183,6 +231,10 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
       color: var(--muted);
       cursor: pointer;
       user-select: none;
+    }
+    #root.digital-flow-page.workbook-root {
+      min-height: 0;
+      background: transparent;
     }
     .page {
       width: 210mm;
@@ -284,7 +336,7 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
       font-size: 15px;
       color: var(--dark);
     }
-    .task {
+    .workbook-task {
       margin-bottom: 14px;
       page-break-inside: avoid;
       break-inside: avoid;
@@ -300,6 +352,7 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
       align-items: flex-start;
       gap: 10px;
       flex: 1;
+      min-width: 0;
     }
     .task-badge {
       width: 40px;
@@ -327,201 +380,13 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
       color: #98A1B2;
       font-weight: 600;
     }
-    .task-meta { flex: 1; padding-top: 0; }
-    .task-text {
-      margin: 0;
-      font-size: 13.5px;
-      color: var(--text);
-      line-height: 1.25;
-    }
-    .task-text :is(p, div, li) { margin: 0 0 0.2em; }
-    .task-text :is(p, div, ul, ol):last-child { margin-bottom: 0; }
-    .task-text table { margin: 0.15em 0; border-collapse: collapse; }
-    .task-text td, .task-text th { padding: 1px 4px; }
-    .task-text > :not(.oge-math-choice-task) img,
-    .task-text :not(.oge-math-choice-task) > img {
-      display: block;
-      max-width: 100%;
-      max-height: 110px;
-      margin: 0.15em 0;
-    }
-    .task-text .oge-math-choice-task img {
-      max-width: 100%;
-      height: auto;
-    }
-    .task-text .oge-math-choice-task img.oge-math-fipi-inline-letter,
-    .task-text .oge-math-choice-task img.oge-math-fipi-inline-frac {
-      max-width: none !important;
-    }
-    .task-text .oge-math-choice-question .oge-math-fipi-inline-frac,
-    .task-text .oge-math-choice-question p span > img[src*="xs3qstsrc"] {
-      display: inline-block !important;
-      vertical-align: middle;
-      width: auto !important;
-      max-width: none !important;
-      height: auto !important;
-      max-height: 3.2em !important;
-      margin: 0 0.08em !important;
-    }
-    .task-text .oge-math-choice-question .oge-math-fipi-inline-letter,
-    .task-text .oge-math-choice-question p span > img[src*="innerimg"] {
-      display: inline-block !important;
-      vertical-align: middle;
-      width: auto !important;
-      max-width: none !important;
-      height: auto !important;
-      max-height: 1.4em !important;
-      margin: 0 0.04em !important;
-    }
-    .task-text .oge-math-choice-question > p:has(> img[src*="xs3qstsrc"]:only-child) > img[src*="xs3qstsrc"] {
-      display: block !important;
-      max-width: 100% !important;
-      max-height: 100px;
-      margin: 0.2em 0 !important;
-    }
-    .task-text .oge-math-choice-question mjx-container[jax="CHTML"] {
-      display: inline-block !important;
-      vertical-align: middle;
-      margin: 0 0.04em !important;
-      font-size: 155% !important;
-    }
-    .task-text .oge-math-choice-question .task-html-block {
-      display: inline;
-      margin: 0;
-      padding: 0;
-    }
-    .task-text .oge-math-choice-question .task-html-block:has(> img:only-child) {
-      display: block;
-      margin: 0.2em 0;
-    }
-    .task-text .oge-math-choice-task { margin: 0; }
-    .task-text .oge-math-choice-question {
-      margin: 0 0 4px;
-      padding: 0;
-      font-size: inherit;
-      line-height: 1.25;
-    }
-    .task-text .oge-math-choice-question p {
-      margin: 0 0 0.3em;
-      display: block;
-    }
-    .task-text .oge-math-choice-question i {
-      font-style: italic;
-      font-weight: 600;
-      white-space: nowrap;
-    }
-    .task-text .oge-math-choice-option__body i {
-      font-style: italic;
-      font-weight: 600;
-    }
-    .task-text .oge-math-choice-question p:last-child {
-      margin-bottom: 0;
-    }
-    .task-text .oge-math-choice-question table {
-      margin: 0;
-      border: none;
-      border-collapse: collapse;
-    }
-    .task-text .oge-math-choice-question :is(td, th) {
-      border: none;
-      padding: 0 0.1em;
-      vertical-align: baseline;
-    }
-    .task-text .oge-math-choice-footer,
-    .task-text .oge-math-choice-prompt {
-      display: block;
-      margin: 2px 0 4px;
-      padding: 0;
-      font-size: inherit;
-      line-height: 1.25;
-      color: var(--text);
-    }
-    .task-text .oge-math-choice-options {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-    .task-text .oge-math-choice-option {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin: 0;
-      padding: 0;
-      min-height: 0;
-    }
-    .task-text .oge-math-choice-option__num {
-      flex-shrink: 0;
-      width: 22px;
-      height: 22px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 5px;
-      background: var(--blue);
-      color: #fff;
-      font-weight: 800;
-      font-size: 11px;
-      line-height: 1;
-    }
-    .task-text .oge-math-choice-option__body {
+    .task-meta {
       flex: 1;
       min-width: 0;
-      font-size: inherit;
-      line-height: 1.1;
+      padding-top: 0;
     }
-    .task-text .oge-math-choice-option__body :is(p, div, span) {
-      margin: 0;
-      padding: 0;
-      display: inline;
-    }
-    .task-text .oge-math-choice-option__body img,
-    .task-text .oge-math-choice-option__body .oge-math-fipi-bitmap {
-      display: inline-block;
-      vertical-align: middle;
-      width: auto;
-      height: auto;
-      max-height: 2.75em;
-      max-width: none;
-      margin: 0;
-    }
-    .task-text .oge-math-choice-option__body .oge-math-fipi-inline-letter {
-      height: 1.4em !important;
-      max-height: none !important;
-    }
-    .task-text .oge-math-choice-option__body .oge-math-fipi-inline-frac {
-      height: 3.2em !important;
-      width: auto !important;
-      max-height: none !important;
-      max-width: none !important;
-      image-rendering: -webkit-optimize-contrast;
-      image-rendering: crisp-edges;
-    }
-    .task-text .oge-math-choice-option__body mjx-container {
-      display: inline-block !important;
-      vertical-align: middle;
-      font-size: 150% !important;
-    }
-    .task-text .oge-math-choice-option__body table {
-      display: inline-table;
-      margin: 0;
-      border: none;
-      border-collapse: collapse;
-    }
-    .task-text .oge-math-choice-option__body :is(td, th) {
-      border: none;
-      padding: 0;
-      vertical-align: baseline;
-    }
-    .task-text table.bank-task-table {
-      border-collapse: collapse;
-      margin: 0.15em 0;
-    }
-    .task-text table.bank-task-table :is(td, th) {
-      border: 1px solid #94a3b8;
-      padding: 2px 5px;
+    .workbook-task__body {
+      overflow: visible !important;
     }
     .calculation-field {
       box-sizing: border-box;
@@ -577,7 +442,7 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
       margin-right: auto;
     }
     @media print {
-      body {
+      body.workbook-body {
         background: #fff;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
@@ -600,7 +465,7 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
         break-inside: avoid;
         page-break-inside: avoid;
       }
-      .task {
+      .workbook-task {
         break-inside: avoid;
         page-break-inside: avoid;
       }
@@ -624,44 +489,47 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
         Строки для ответа
       </label>
     </div>
-    <button type="button" onclick="window.print()">Печать / Сохранить в PDF</button>
+    <button type="button" id="workbook-print-btn" disabled>Подготовка формул…</button>
     <button type="button" class="secondary" onclick="window.close()">Закрыть</button>
   </div>
-  <main class="page">
-    <header class="header">
-      <a class="brand" href="https://t.me/itfluxacademy" target="_blank" rel="noreferrer">
-        <img class="brand-logo" src="${logoUrl()}" alt="Логотип" onerror="this.style.display='none'">
-        <span class="brand-title">Цифровой поток</span>
-      </a>
-      <a class="brand-handle" href="https://t.me/itfluxacademy" target="_blank" rel="noreferrer">@itfluxacademy</a>
-    </header>
+  <div id="root" class="digital-flow-page workbook-root">
+    <main class="page">
+      <header class="header">
+        <a class="brand" href="https://t.me/itfluxacademy" target="_blank" rel="noreferrer">
+          <img class="brand-logo" src="${logoUrl()}" alt="Логотип" onerror="this.style.display='none'">
+          <span class="brand-title">Цифровой поток</span>
+        </a>
+        <a class="brand-handle" href="https://t.me/itfluxacademy" target="_blank" rel="noreferrer">@itfluxacademy</a>
+      </header>
 
-    <section class="grading-block">
-      <section class="student-info">
-        <div class="info-field"><span>Фамилия, имя:</span><span class="info-line"></span></div>
-        <div class="info-field"><span>Класс:</span><span class="info-line"></span></div>
-        <div class="info-field"><span>Дата:</span><span class="info-line"></span></div>
-        <div class="info-field"><span>Оценка:</span><span class="info-box"></span></div>
+      <section class="grading-block">
+        <section class="student-info">
+          <div class="info-field"><span>Фамилия, имя:</span><span class="info-line"></span></div>
+          <div class="info-field"><span>Класс:</span><span class="info-line"></span></div>
+          <div class="info-field"><span>Дата:</span><span class="info-line"></span></div>
+          <div class="info-field"><span>Оценка:</span><span class="info-box"></span></div>
+        </section>
+        <div class="score-summary">
+          <span>Правильных: <span class="score-line"></span></span>
+          <span>Неправильных: <span class="score-line"></span></span>
+        </div>
       </section>
-      <div class="score-summary">
-        <span>Правильных: <span class="score-line"></span></span>
-        <span>Неправильных: <span class="score-line"></span></span>
-      </div>
-    </section>
 
-    <section class="title-block">
-      <h1 class="workbook-title">${title}</h1>
-      ${subtitle ? `<p class="workbook-subtitle">${subtitle}</p>` : ""}
-    </section>
+      <section class="title-block">
+        <h1 class="workbook-title">${title}</h1>
+        ${subtitle ? `<p class="workbook-subtitle">${subtitle}</p>` : ""}
+      </section>
 
-    <h2 class="section-title">Задания</h2>
-    ${tasksHtml}
-  </main>
+      <h2 class="section-title">Задания</h2>
+      ${tasksHtml}
+    </main>
+  </div>
   <script>
     (function () {
       var gradingCb = document.getElementById("toggle-grading");
       var solutionCb = document.getElementById("toggle-solution");
       var answersCb = document.getElementById("toggle-answers");
+      var printBtn = document.getElementById("workbook-print-btn");
       function sync() {
         document.body.classList.toggle("no-grading-fields", !gradingCb.checked);
         document.body.classList.toggle("no-solution-fields", !solutionCb.checked);
@@ -671,14 +539,21 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
       solutionCb.addEventListener("change", sync);
       answersCb.addEventListener("change", sync);
       sync();
-      function typeset() {
-        if (window.MathJax && window.MathJax.typesetPromise) {
-          window.MathJax.typesetPromise().catch(function () {});
-        } else {
-          setTimeout(typeset, 120);
-        }
+      if (window.opener && typeof window.opener.__typesetWorkbookTab === "function") {
+        window.opener.__typesetWorkbookTab(window).then(function () {
+          printBtn.disabled = false;
+          printBtn.textContent = "Печать / Сохранить в PDF";
+          printBtn.onclick = function () { window.print(); };
+        }).catch(function () {
+          printBtn.disabled = false;
+          printBtn.textContent = "Печать / Сохранить в PDF";
+          printBtn.onclick = function () { window.print(); };
+        });
+      } else {
+        printBtn.disabled = false;
+        printBtn.textContent = "Печать / Сохранить в PDF";
+        printBtn.onclick = function () { window.print(); };
       }
-      typeset();
     })();
   </script>
 </body>
@@ -686,12 +561,17 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
 }
 
 export function openWorkbook(tasks: WorkbookTask[], meta: WorkbookMeta): void {
-  const html = buildWorkbookHtml(tasks, meta);
+  const appStyles = collectWorkbookAppStylesMarkup();
+  const html = buildWorkbookHtml(tasks, meta, appStyles);
   const win = window.open("", "_blank");
   if (!win) {
     window.alert("Разрешите всплывающие окна, чтобы открыть рабочую тетрадь.");
     return;
   }
+
+  (window as Window & { __typesetWorkbookTab?: (w: Window) => Promise<void> }).__typesetWorkbookTab =
+    (tab) => typesetWorkbookMath(tab.document);
+
   win.document.open();
   win.document.write(html);
   win.document.close();
