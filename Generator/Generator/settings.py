@@ -394,6 +394,27 @@ TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '').strip()
 # Для личных чатов топиков нет — оставляем None, чтобы не отправлять message_thread_id.
 TELEGRAM_TOPIC_ID = os.environ.get('TELEGRAM_TOPIC_ID', '') or None
 
+# Сообщения об ошибках в заданиях — мгновенное уведомление на почту
+ERROR_REPORT_NOTIFY_EMAIL = os.environ.get(
+    'ERROR_REPORT_NOTIFY_EMAIL',
+    'itflux.academy@yandex.ru',
+).strip()
+
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.yandex.ru').strip()
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '465'))
+EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', 'true').lower() in (
+    '1', 'true', 'yes', 'on',
+)
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'false').lower() in (
+    '1', 'true', 'yes', 'on',
+)
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '').strip()
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '').strip()
+DEFAULT_FROM_EMAIL = os.environ.get(
+    'DEFAULT_FROM_EMAIL',
+    EMAIL_HOST_USER or ERROR_REPORT_NOTIFY_EMAIL,
+).strip()
+
 # —— HTTPS / cookies (прод, DEBUG=false): редирект HTTP→HTTPS обычно в nginx; Django может дублировать — осторожно с петлёй.
 if not DEBUG:
     SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "false").lower() in (

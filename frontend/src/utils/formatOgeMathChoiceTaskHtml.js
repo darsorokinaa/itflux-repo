@@ -351,6 +351,15 @@ function isOptionPointLetterImg(img) {
   return /^точка(\s+[a-d])?$/i.test(text);
 }
 
+/** Рисунок/схема — единственная картинка в абзаце без текста (дерево вероятностей и т.п.). */
+function isFipiDiagramImage(img) {
+  const p = img?.closest?.("p");
+  if (!p) return false;
+  const imgs = [...p.querySelectorAll("img")];
+  if (imgs.length !== 1 || imgs[0] !== img) return false;
+  return normalizeCellText(p).length === 0;
+}
+
 /** Крошечные gif/PNG ФИПИ — дроби в строке условия vs числовая прямая. */
 function decorateFipiBitmapImages(root, mode) {
   if (!root) return;
@@ -404,6 +413,12 @@ function decorateFipiBitmapImages(root, mode) {
       img.removeAttribute("height");
     }
     if (!src.endsWith(".gif")) return;
+    if (mode === "question" && isFipiDiagramImage(img)) {
+      img.classList.add("oge-math-fipi-bitmap", "oge-math-fipi-diagram");
+      img.removeAttribute("width");
+      img.removeAttribute("height");
+      return;
+    }
     img.classList.add("oge-math-fipi-bitmap");
     img.removeAttribute("width");
     img.removeAttribute("height");
@@ -413,6 +428,11 @@ function decorateFipiBitmapImages(root, mode) {
     img.parentNode?.insertBefore(box, img);
     box.appendChild(img);
   });
+}
+
+/** Разметка FIPI-картинок в обычных заданиях (не только с вариантами ответа). */
+export function decorateFipiTaskImages(root) {
+  decorateFipiBitmapImages(root, "question");
 }
 
 function normalizeImageSrc(rawSrc) {

@@ -2709,78 +2709,79 @@ body.exam-variant-view {
   color: #fff !important;
 }
 
-/* Кнопки «Критерии оценки» / «Показать решение» в части 2:
-   делаем их видимыми сразу, в фирменных синих токенах. */
+/* Кнопки «Критерии оценки» / «Показать решение» в части 2 */
 #main-wrapper.exam-page--edu .ev2-p2-actions--criteria {
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 10px;
 }
 
 #main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-outline,
-#main-wrapper.exam-page--edu .exam-variant-v2 .btn-outline {
+#main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-ghost {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  background: var(--bg-card) !important;
-  color: var(--blue-hero) !important;
-  border: 1.5px solid var(--blue-hero) !important;
-  border-radius: var(--r-pill) !important;
-  font-family: var(--font-display) !important;
-  font-weight: 800 !important;
-  font-size: 12px !important;
-  letter-spacing: 0.02em;
-  padding: 9px 18px !important;
-  min-height: 38px;
-  box-shadow: 0 2px 8px rgba(43, 82, 245, 0.08);
-  transition: background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  justify-content: center;
+  box-sizing: border-box;
+  border-radius: 999px !important;
+  font-family: var(--font-body) !important;
+  font-weight: 600 !important;
+  font-size: 11px !important;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  padding: 5px 12px !important;
+  min-height: 28px;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
-#main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-outline:hover:not(:disabled),
-#main-wrapper.exam-page--edu .exam-variant-v2 .btn-outline:hover:not(:disabled) {
-  background: var(--blue-soft) !important;
-  color: var(--blue-dark) !important;
-  border-color: var(--blue-dark) !important;
-  transform: translateY(-1px);
-}
-
-#main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-ghost,
-#main-wrapper.exam-page--edu .exam-variant-v2 .btn-ghost {
-  display: inline-flex;
-  align-items: center;
+#main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-outline {
   gap: 0;
-  background: var(--bg-card) !important;
+  background: var(--blue-soft) !important;
   color: var(--blue-hero) !important;
-  border: 1.5px solid var(--blue-hero) !important;
-  border-radius: var(--r-pill) !important;
-  font-family: var(--font-display) !important;
-  font-weight: 800 !important;
-  font-size: 12px !important;
-  letter-spacing: 0.02em;
-  padding: 9px 18px !important;
-  min-height: 38px;
+  border: 1px solid rgba(43, 82, 245, 0.22) !important;
+}
+
+#main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-outline:hover:not(:disabled) {
+  background: rgba(43, 82, 245, 0.14) !important;
+  color: var(--blue-dark) !important;
+  border-color: rgba(43, 82, 245, 0.35) !important;
+  transform: none;
+}
+
+#main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-ghost {
+  gap: 0;
+  background: #fff !important;
+  color: var(--blue-hero) !important;
+  border: 1px solid rgba(43, 82, 245, 0.28) !important;
   text-decoration: none !important;
-  box-shadow: 0 2px 8px rgba(43, 82, 245, 0.08);
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
 #main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-ghost::before,
-#main-wrapper.exam-page--edu .exam-variant-v2 .btn-ghost::before,
-#main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-ghost::after,
-#main-wrapper.exam-page--edu .exam-variant-v2 .btn-ghost::after {
+#main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-ghost::after {
   display: none !important;
   content: none !important;
 }
 
-#main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-ghost:hover:not(:disabled),
-#main-wrapper.exam-page--edu .exam-variant-v2 .btn-ghost:hover:not(:disabled) {
+#main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-ghost:hover:not(:disabled) {
   background: var(--blue-soft) !important;
   color: var(--blue-dark) !important;
-  border-color: var(--blue-dark) !important;
+  border-color: rgba(43, 82, 245, 0.38) !important;
   text-decoration: none !important;
-  transform: translateY(-1px);
+  transform: none;
 }
 
-#main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-ghost:disabled,
-#main-wrapper.exam-page--edu .exam-variant-v2 .btn-ghost:disabled {
+#main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-outline:focus-visible,
+#main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-ghost:focus-visible {
+  outline: 2px solid rgba(43, 82, 245, 0.35);
+  outline-offset: 2px;
+}
+
+#main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-outline:disabled,
+#main-wrapper.exam-page--edu .ev2-p2-actions--criteria .btn-ghost:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -4097,6 +4098,56 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   max-height: 1.35em !important;
   margin: 0 0.04em !important;
   border: none !important;
+}
+
+/* ФИПИ: inline-глифы и формулы в любом задании (дерево вероятностей №10 и т.п.) */
+.exam-page .task-text p span > img[src*="innerimg"],
+.exam-task-card__text p span > img[src*="innerimg"],
+.all-tasks-item__html p span > img[src*="innerimg"],
+.exam-page .task-text img.oge-math-fipi-inline-letter,
+.exam-task-card__text img.oge-math-fipi-inline-letter,
+.all-tasks-item__html img.oge-math-fipi-inline-letter,
+.exam-page .task-text img.oge-math-fipi-inline-frac,
+.exam-task-card__text img.oge-math-fipi-inline-frac,
+.all-tasks-item__html img.oge-math-fipi-inline-frac {
+  display: inline-block !important;
+  vertical-align: middle;
+  width: auto !important;
+  max-width: none !important;
+  height: auto !important;
+  max-height: 3.1em !important;
+  margin: 0 0.06em !important;
+  border: none !important;
+}
+
+.exam-page .task-text img.oge-math-fipi-inline-letter,
+.exam-task-card__text img.oge-math-fipi-inline-letter,
+.all-tasks-item__html img.oge-math-fipi-inline-letter {
+  max-height: 1.35em !important;
+  margin: 0 0.04em !important;
+}
+
+/* ФИПИ: схема/рисунок — отдельный абзац с одной картинкой */
+.exam-page .task:not(.task-geom) .task-text img.oge-math-fipi-diagram,
+.exam-page .task:not(.task-geom) .task-text p:has(> img[src*="innerimg"]:only-child) > img[src*="innerimg"],
+.exam-task-card__text img.oge-math-fipi-diagram,
+.all-tasks-item__html img.oge-math-fipi-diagram,
+.all-tasks-item__html p:has(> img[src*="innerimg"]:only-child) > img[src*="innerimg"] {
+  display: block !important;
+  width: auto !important;
+  max-width: 100% !important;
+  height: auto !important;
+  max-height: none !important;
+  margin: 0.5rem auto 0.35rem !important;
+  object-fit: contain !important;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+}
+
+.exam-page .task-alg .task-text img.oge-math-fipi-diagram,
+.exam-page .task-alg .task-text p:has(> img[src*="innerimg"]:only-child) > img[src*="innerimg"] {
+  width: auto !important;
+  max-width: 100% !important;
 }
 
 .exam-page .task-text .oge-math-choice-question .oge-math-fipi-formula,

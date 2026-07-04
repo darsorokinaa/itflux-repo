@@ -8357,7 +8357,7 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .exam-page .task-text figure.image {
     text-align: center;
 }
-/* Геометрия: до min(320px, 90vw) — в 1.5× к предыдущему уменьшенному виду */
+/* Геометрия: компактные иллюстрации (в 2 раза меньше прежнего лимита) */
 .exam-page .task-geom .task-text figure,
 .exam-page .task-geom .task-text figure.image {
     margin-top: 0.85rem !important;
@@ -8372,10 +8372,10 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .exam-page .task-geom .part2-answer-content img {
     display: block !important;
     margin: 0 auto !important;
-    width: min(320px, 90vw) !important;
+    width: min(160px, 45vw) !important;
     max-width: 100% !important;
-    height: min(320px, 90vw) !important;
-    max-height: min(320px, 90vw) !important;
+    height: min(160px, 45vw) !important;
+    max-height: min(160px, 45vw) !important;
     object-fit: contain !important;
     object-position: center !important;
     cursor: pointer;
@@ -14241,8 +14241,8 @@ body.exam-variant-view--edu main.container {
 .exam-variant-v2 .ev2-p2-actions--criteria {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
-    margin-bottom: 14px;
+    gap: 8px;
+    margin-bottom: 10px;
     align-items: center;
 }
 

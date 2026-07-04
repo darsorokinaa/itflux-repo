@@ -61,6 +61,8 @@ function looksLikeFipiUnicodeMath(text) {
   // Текстовые задачи (фрукты, рабочие, велосипедисты) — не трогаем.
   if (cyrillicWords >= 2) return false;
 
+  if (looksLikeFipiPiecewise(t)) return true;
+
   if (hasMathItalicX || hasInvisibleTimes) return true;
 
   if (t.startsWith("{") && hasInequality) return true;
@@ -91,11 +93,12 @@ function texifyComparisons(tex) {
     .replace(/\s*=\s*/g, " = ");
 }
 
-/** 𝑥2 → x^{2}; кириллическую «х» — только как переменную, не в словах вроде «сухих». */
+/** 𝑥2 → x^{2}; 𝑦 → y; кириллическую «х» — только как переменную. */
 function texifyVariablesAndPowers(tex) {
   let s = tex.replace(/([\u{1D465}x])(\d+)/giu, "x^{$2}");
   s = s.replace(/(?<![а-яёА-ЯЁa-zA-Z])([х])(\d+)/giu, "x^{$2}");
   s = s.replace(/\u{1D465}/gu, "x");
+  s = s.replace(/\u{1D466}/gu, "y");
   s = s.replace(/(?<![а-яёА-ЯЁ])([х])(?![а-яёА-ЯЁ])/gu, "x");
   return s;
 }
@@ -125,9 +128,104 @@ function splitFipiSystemInner(inner) {
   return parts;
 }
 
+/** Кусочно-заданная функция ФИПИ: 𝑦={𝑥2−6𝑥+10𝑥+2припри𝑥≥1,𝑥<1 */
+const FIPI_PIECEWISE_BRACE_RE = /(?:⎧\s*\{\s*\{\s*⎨\s*\{\s*\{\s*⎩|\{)\s*/iu;
+const FIPI_PIECEWISE_PRI_RE = /при\s*при(?:\s*при)?/iu;
+
+function looksLikeFipiPiecewise(text) {
+  const t = normalizeFipiUnicode(text);
+  return FIPI_PIECEWISE_PRI_RE.test(t) && /[{⎧]/.test(t) && /[𝑥xх\u{1D465}]/iu.test(t);
+}
+
+function parseFipiPiecewise(expr) {
+  const s = normalizeFipiUnicode(expr);
+  const priMatch = s.match(FIPI_PIECEWISE_PRI_RE);
+  if (!priMatch || priMatch.index == null) return null;
+
+  const beforePri = s.slice(0, priMatch.index).trim();
+  const condBlock = s
+    .slice(priMatch.index + priMatch[0].length)
+    .replace(/[.·…]\s*$/, "")
+    .trim();
+  const conds = splitFipiSystemInner(condBlock);
+  if (conds.length < 2) return null;
+
+  const braceMatch = beforePri.match(FIPI_PIECEWISE_BRACE_RE);
+  if (!braceMatch || braceMatch.index == null) return null;
+
+  const prefix = beforePri.slice(0, braceMatch.index).trim();
+  const exprBlock = beforePri.slice(braceMatch.index + braceMatch[0].length).trim();
+
+  let exprs = null;
+  if (conds.length === 2) {
+    exprs = splitPiecewiseExprPair(exprBlock);
+  } else if (conds.length === 3) {
+    exprs = splitPiecewiseExprTriple(exprBlock);
+  }
+  if (!exprs || exprs.length !== conds.length) return null;
+
+  const cases = buildPiecewiseCasesLatex(exprs, conds);
+  const prefixLatex = prefix ? `${texifyExprFragment(prefix.replace(/=\s*$/, ""))} = ` : "";
+  return `${prefixLatex}${cases}`;
+}
+
+function texifyExprFragment(expr) {
+  let s = normalizeFipiUnicode(expr).replace(/[.·…]\s*$/, "").trim();
+  if (!s) return "";
+  s = texifyVariablesAndPowers(s);
+  s = texifyComparisons(s);
+  s = texifyDecimalCommas(s);
+  s = s.replace(/\s*\+\s*/g, " + ");
+  s = s.replace(/\s*-\s*/g, " - ");
+  return s.replace(/\s{2,}/g, " ").trim();
+}
+
+/** Две ветви: квадратичная + линейная, слипшиеся без разделителя. */
+function splitPiecewiseExprPair(exprBlock) {
+  const t = texifyVariablesAndPowers(normalizeFipiUnicode(exprBlock));
+  if (!/x\^\{2\}/.test(t)) return null;
+  for (let i = t.length - 1; i >= 0; i--) {
+    if (!/\d/.test(t[i])) continue;
+    const rest = t.slice(i + 1);
+    if (/^\s*(?:[+\-]\s*)?x(?:\s*[+\-]|$)/.test(rest)) {
+      return [t.slice(0, i + 1).trim(), rest.trim()];
+    }
+  }
+  return null;
+}
+
+/** Три ветви: разбиваем справа (последняя — линейная/простая). */
+function splitPiecewiseExprTriple(exprBlock) {
+  const t = texifyVariablesAndPowers(normalizeFipiUnicode(exprBlock));
+  const tail = t.match(/(?:[+\-]\s*)?x(?:\s*[+\-]\s*\d+(?:\{,\}\d+)?)?$/);
+  if (!tail) return null;
+  const expr3 = tail[0].trim();
+  let rest = t.slice(0, t.length - tail[0].length).trim();
+  const mid = rest.match(/(?:[+\-]\s*)?\d+(?:\{,\}\d+)?\s*x(?:\s*[+\-][^+\-]+)?$/);
+  if (!mid) return null;
+  const expr2 = mid[0].trim();
+  const expr1 = rest.slice(0, rest.length - mid[0].length).trim();
+  if (!expr1 || !expr2 || !expr3) return null;
+  return [expr1, expr2, expr3];
+}
+
+function buildPiecewiseCasesLatex(exprs, conds) {
+  const rows = exprs.map((expr, i) => {
+    const exprLatex = texifyExprFragment(expr);
+    const condLatex = texifyExprFragment(conds[i] || "");
+    return `${exprLatex}, & \\text{при } ${condLatex}`;
+  });
+  return `\\begin{cases}${rows.join(" \\\\ ")}\\end{cases}`;
+}
+
 function fipiUnicodeExprToLatex(expr) {
   let s = normalizeFipiUnicode(expr);
   if (!s) return "";
+
+  if (looksLikeFipiPiecewise(s)) {
+    const piecewise = parseFipiPiecewise(s);
+    if (piecewise) return piecewise;
+  }
 
   if (s.startsWith("{")) {
     const inner = s.slice(1).replace(/[.·…]\s*$/, "").trim();
@@ -152,7 +250,8 @@ function fipiUnicodeExprToLatex(expr) {
 function wrapLatex(latex) {
   const t = String(latex || "").trim();
   if (!t) return "";
-  return `$${t}$`;
+  const display = /\\begin\{(cases|matrix|array|aligned)/.test(t);
+  return display ? `$$${t}$$` : `$${t}$`;
 }
 
 function convertTextNode(text) {

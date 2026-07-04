@@ -7,9 +7,12 @@ import {
 } from "../utils/buildWorkbookHtml";
 
 const DEFAULT_OPTIONS: Required<WorkbookOptions> = {
-  showGrading: true,
+  showGrading: false,
   showSolutionSpace: true,
   showAnswers: true,
+  showAnswerKey: false,
+  showTaskIds: false,
+  showStudentLine: true,
 };
 
 type WorkbookCreateBarProps = {
@@ -61,7 +64,7 @@ export default function WorkbookCreateBar({
                 setOptions((prev) => ({ ...prev, showGrading: e.target.checked }))
               }
             />
-            Поля для оценивания
+            Блок для учителя (внизу)
           </label>
           <label className="workbook-create-bar__option">
             <input
@@ -74,7 +77,7 @@ export default function WorkbookCreateBar({
                 }))
               }
             />
-            Место для решения
+            Поле для решения (клетка)
           </label>
           <label className="workbook-create-bar__option">
             <input
@@ -85,6 +88,36 @@ export default function WorkbookCreateBar({
               }
             />
             Строки для ответа
+          </label>
+          <label className="workbook-create-bar__option">
+            <input
+              type="checkbox"
+              checked={options.showAnswerKey}
+              onChange={(e) =>
+                setOptions((prev) => ({ ...prev, showAnswerKey: e.target.checked }))
+              }
+            />
+            Ответы
+          </label>
+          <label className="workbook-create-bar__option">
+            <input
+              type="checkbox"
+              checked={options.showTaskIds}
+              onChange={(e) =>
+                setOptions((prev) => ({ ...prev, showTaskIds: e.target.checked }))
+              }
+            />
+            ID задач
+          </label>
+          <label className="workbook-create-bar__option">
+            <input
+              type="checkbox"
+              checked={options.showStudentLine}
+              onChange={(e) =>
+                setOptions((prev) => ({ ...prev, showStudentLine: e.target.checked }))
+              }
+            />
+            Строка ученика
           </label>
         </div>
       ) : null}

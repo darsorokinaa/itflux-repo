@@ -46,6 +46,7 @@ except Exception:
     WeasyHTML = None  # type: ignore[assignment,misc]
     _WEASYPRINT_OK = False
 
+from .error_report_utils import notify_error_report_email
 from .models import (
     Announcement,
     Criteria,
@@ -3821,7 +3822,7 @@ def report_error(request, level, subject):
         return JsonResponse({"error": "Не указан тип ошибки"}, status=400)
 
     try:
-        ErrorReport.objects.create(
+        report = ErrorReport.objects.create(
             subject=str(subject),
             level=str(level),
             task_number=int(task_number) if task_number is not None else None,
@@ -3833,6 +3834,19 @@ def report_error(request, level, subject):
     except Exception:
         logger.exception("Не удалось сохранить ErrorReport")
         return JsonResponse({"error": "Не удалось сохранить сообщение"}, status=500)
+
+    try:
+        notify_error_report_email(
+            subject=report.subject,
+            level=report.level,
+            task_number=report.task_number,
+            task_id=report.task_id,
+            variant_id=report.variant_id,
+            error_type=report.error_type,
+            comment=report.comment,
+        )
+    except Exception:
+        logger.exception("Не удалось отправить письмо об ошибке")
 
     return JsonResponse({"ok": True})
 

@@ -46,6 +46,11 @@ import HomeworkReviewResults, {
   HomeworkTaskReviewNote,
   buildHomeworkReviewFromVariant,
 } from "../cabinet/HomeworkReviewResults";
+import {
+  openWorkbook,
+  variantTasksToWorkbookTasks,
+  VARIANT_PDF_OPTIONS,
+} from "../utils/buildWorkbookHtml";
 
 
 function isMathLikeSubject(subject) {
@@ -381,6 +386,43 @@ const LEVEL_NAMES = {
   vpr: "ВПР",
 };
 
+const EXAM_DURATION_MINUTES = {
+  oge: {
+    inf: 150,
+    math: 235,
+    phys: 180,
+    hist: 180,
+    bio: 180,
+    soc: 180,
+    rus: 235,
+    lit: 235,
+    geo: 150,
+    eng: 135,
+    chem: 180,
+  },
+  ege: {
+    inf: 235,
+    math: 235,
+    math_base: 180,
+    phys: 235,
+    hist: 210,
+    bio: 235,
+    soc: 210,
+    rus: 210,
+    lit: 235,
+    geo: 180,
+    eng: 180,
+    chem: 210,
+  },
+};
+
+function examDurationLabel(levelKey, subjectKey) {
+  const lk = String(levelKey || "").toLowerCase();
+  const sk = String(subjectKey || "").toLowerCase();
+  const minutes = EXAM_DURATION_MINUTES[lk]?.[sk];
+  return minutes ? `${minutes} минут` : undefined;
+}
+
 const SUBJECT_BADGE_NAMES = {
   inf: "Информатика",
   history: "История",
@@ -589,7 +631,6 @@ function ExamPage() {
   const [examFixedPanelOpen, setExamFixedPanelOpen] = useState(true);
 
   // Загрузка PDF
-  const [pdfLoading, setPdfLoading] = useState(null); // null | "default" | "cosmos" | "easter"
 
   // Копирование ссылки на вариант
   const [linkCopied, setLinkCopied] = useState(false);
@@ -1659,32 +1700,21 @@ function ExamPage() {
     handleFinish();
   };
 
-  const openPdf = async (variantId) => {
-    setPdfLoading("default");
-    const url = `/api/${level}/${subject}/variant/${variantId}/pdf/`;
-    try {
-      const res = await fetch(url, { credentials: "same-origin" });
-      if (!res.ok) throw new Error("Ошибка загрузки PDF");
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = `variant-${variantId}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
-    } catch {
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `variant-${variantId}.pdf`;
-      a.target = "_blank";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } finally {
-      setPdfLoading(null);
-    }
+  const openPdf = () => {
+    if (!variant?.tasks?.length) return;
+    const levelLabel =
+      LEVEL_NAMES[String(level || "").toLowerCase()] ||
+      (level ? String(level).toUpperCase() : "");
+    const subjectLabel = examHeroSubjectBadge(subject, location.state?.subjectName);
+    const subtitle = [levelLabel, subjectLabel].filter(Boolean).join(" · ");
+    openWorkbook(variantTasksToWorkbookTasks(variant.tasks), {
+      title: `Вариант ${variant.id} — ${subjectLabel} — ${levelLabel}`,
+      sheetTitle: `Вариант №${variant.id}`,
+      subtitle,
+      mode: "variant",
+      examDuration: examDurationLabel(level, subject),
+      options: VARIANT_PDF_OPTIONS,
+    });
   };
 
   const copyVariantLink = async () => {
@@ -2168,14 +2198,6 @@ function ExamPage() {
         )}
       </div>
       )}
-      {pdfLoading && (
-        <div className="pdf-loading-overlay" role="status" aria-live="polite">
-          <div className="pdf-loading-toast">
-            <span className="pdf-loading-spinner" aria-hidden="true" />
-            <span>Подождите немного, файл создаётся…</span>
-          </div>
-        </div>
-      )}
       <div className="content-area">
         <div className={`exam-inf-code-layout${showInfCodeSidebar ? " exam-inf-code-layout--with-sidebar" : ""}`}>
           <div className="exam-inf-code-main">
@@ -2238,8 +2260,7 @@ function ExamPage() {
                       <button
                         type="button"
                         className="exam-edu-btn exam-edu-btn--pdf"
-                        onClick={() => openPdf(variant.id)}
-                        disabled={!!pdfLoading}
+                        onClick={openPdf}
                       >
                         Скачать PDF
                       </button>

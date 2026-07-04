@@ -8,7 +8,10 @@
 
     {% if item.file_url %}
     <div class="materials">
-      <a href="{{ item.file_url }}" target="_blank">Скачать материалы к заданию</a>
+      <a class="materials-link" href="{{ item.file_url }}" target="_blank" rel="noopener">
+        <span class="materials-link__name">{{ item.file_name|default:"Материалы к заданию" }}</span>
+        <span class="materials-link__hint">Скачать материалы к заданию</span>
+      </a>
     </div>
     {% endif %}
 

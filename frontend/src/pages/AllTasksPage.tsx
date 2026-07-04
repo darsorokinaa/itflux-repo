@@ -667,10 +667,6 @@ export default function AllTasksPage() {
       }
     }
 
-    if (selectedSubtopicTitle) {
-      subtitleParts.push(selectedSubtopicTitle);
-    }
-
     return {
       title: "Рабочая тетрадь",
       subtitle: subtitleParts.join(" · "),
@@ -679,7 +675,6 @@ export default function AllTasksPage() {
     filterOptions?.task_numbers,
     level,
     levelDef?.label,
-    selectedSubtopicTitle,
     subject,
     subjects,
     taskListId,
@@ -698,8 +693,10 @@ export default function AllTasksPage() {
             id: task.id,
             task_number: task.task_number,
             text: task.text,
+            answer: task.answer,
             subtopic: task.subtopic,
             task_title: task.task_title,
+            file_url: task.file_url,
           });
         }
         return next;
@@ -720,8 +717,10 @@ export default function AllTasksPage() {
             id: task.id,
             task_number: task.task_number,
             text: task.text,
+            answer: task.answer,
             subtopic: task.subtopic,
             task_title: task.task_title,
+            file_url: task.file_url,
           },
         ];
       });
@@ -763,8 +762,10 @@ export default function AllTasksPage() {
           id: task.id,
           task_number: task.task_number,
           text: task.text,
+          answer: task.answer,
           subtopic: task.subtopic,
           task_title: task.task_title,
+          file_url: task.file_url,
         });
       }
       return next;

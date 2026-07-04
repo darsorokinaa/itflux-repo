@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef } from "react";
 import { formatOgeInformaticsTask13Html } from "../utils/formatOgeInf13TaskHtml";
-import { formatOgeMathChoiceTaskHtml } from "../utils/formatOgeMathChoiceTaskHtml";
+import { decorateFipiTaskImages, formatOgeMathChoiceTaskHtml } from "../utils/formatOgeMathChoiceTaskHtml";
 import { formatOgeMathMatchingTaskHtml } from "../utils/formatOgeMathMatchingTaskHtml";
 import { formatEgeInf22ParallelProcessesHtml } from "../utils/formatEgeInf22TaskHtml";
 import { formatEgeInf2TruthTableHtml } from "../utils/formatEgeInf2TaskHtml";
@@ -161,7 +161,42 @@ function repairMalformedInlineMathDelimiters(raw) {
 
 /** cases/aligned и др. — блочная вёрстка, не inline (иначе рамка и вертикальный скролл). */
 const INLINE_TO_DISPLAY_TEX_RE =
-  /\\begin\{(cases|aligned|align\*?|gather\*?|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix)\}/;
+  /\\begin\{(cases|aligned|align\*?|gather\*?|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|array)\}/;
+
+const MATH_ENV_BLOCK_RE =
+  /\\begin\{(cases|array|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|aligned|align\*?|gather\*?)\}(\{[^}]*\})?([\s\S]*?)\\end\{\1\}/g;
+
+function isBrokenBackendMathSpan(span) {
+  if (!span) return false;
+  if (span.querySelector(".cases-table")) return false;
+  if (span.querySelector("mjx-container")) return false;
+  const text = (span.textContent || "").trim();
+  if (span.querySelector("table.array-table, table")) return true;
+  if (/\bmatrix\b/i.test(text)) return true;
+  if (span.querySelector("td, th") && text.includes("&")) return true;
+  return false;
+}
+
+/** Бэкенд иногда сворачивает cases/array в HTML-таблицу с артефактами — восстанавливаем TeX из сырого текста. */
+function reinjectMathEnvTexFromRaw(root, raw) {
+  if (!root || !raw) return;
+  const blocks = [...String(raw).matchAll(MATH_ENV_BLOCK_RE)];
+  if (!blocks.length) return;
+
+  const brokenSpans = [...root.querySelectorAll(".math-display, .math-inline")].filter(
+    isBrokenBackendMathSpan
+  );
+
+  blocks.forEach((match, index) => {
+    const span = brokenSpans[index];
+    if (!span) return;
+    const fullTex = match[0];
+    const isDisplay =
+      span.classList.contains("math-display") || INLINE_TO_DISPLAY_TEX_RE.test(fullTex);
+    const wrapped = isDisplay ? `$$${fullTex}$$` : `$${fullTex}$`;
+    span.replaceWith(root.ownerDocument.createTextNode(wrapped));
+  });
+}
 
 /** Бэкенд отдаёт <span class="math-inline">&#92;(...&#92;&#41;</span> — MathJax их не всегда подхватывает. */
 function unwrapBackendMathSpans(root) {
@@ -435,6 +470,7 @@ function polishBankTaskTables(root) {
 
   for (const table of root.querySelectorAll("table")) {
     if (table.closest(".oge-math-choice-task")) continue;
+    if (table.closest(".math-inline, .math-display, .math-env")) continue;
 
     if (table.classList.contains("cases-table")) {
       table.style.setProperty("border", "none", "important");
@@ -453,6 +489,8 @@ function polishBankTaskTables(root) {
       }
       continue;
     }
+
+    if (table.classList.contains("array-table")) continue;
 
     table.classList.add("bank-task-table");
     table.removeAttribute("border");
@@ -912,6 +950,7 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
       const formatted = formatOgeMathChoiceTaskHtml(afterMatch);
       const piped = formatted && formatted.trim() ? formatted : afterMatch;
       el.innerHTML = convertLogicSpansInsideMathDelimitersToTex(piped);
+      reinjectMathEnvTexFromRaw(el, decoded);
       if (shouldNormalizeTables) {
         try {
           normalizeSparseTables(el);
@@ -943,6 +982,7 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
       // stripFipiInlineLayoutStyles(el); - убрано по просьбе
       }
       unwrapBackendMathSpans(el);
+      decorateFipiTaskImages(el);
       } catch (err) {
       // Любой сбой форматирования → показываем исходный (декодированный) HTML,
       // а не пустую страницу.
@@ -1021,8 +1061,10 @@ export function prepareBankTaskDisplayHtml(raw) {
     if (typeof document === "undefined") return html;
     const el = document.createElement("div");
     el.innerHTML = html;
-    polishBankTaskTables(el);
+    reinjectMathEnvTexFromRaw(el, decoded);
     unwrapBackendMathSpans(el);
+    polishBankTaskTables(el);
+    decorateFipiTaskImages(el);
     return el.innerHTML;
   } catch {
     return String(raw);

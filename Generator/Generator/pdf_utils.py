@@ -5,7 +5,7 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 from django.conf import settings as django_settings
 from django.contrib.staticfiles import finders
 from django.utils.safestring import mark_safe
@@ -76,6 +76,28 @@ def _format_ru_balls(n) -> str:
     if 2 <= last <= 4:
         return f"{num} балла"
     return f"{num} баллов"
+
+
+def _file_display_name(url: str) -> str:
+    """Имя файла из URL для подписи ссылки в PDF."""
+    s = str(url or "").strip()
+    if not s:
+        return "Материалы к заданию"
+    try:
+        name = unquote(urlparse(s).path.split("/")[-1] or "")
+        if name:
+            return name
+    except Exception:
+        pass
+    tail = s.split("/")[-1].split("?")[0]
+    try:
+        decoded = unquote(tail)
+        if decoded:
+            return decoded
+    except Exception:
+        if tail:
+            return tail
+    return "Материалы к заданию"
 
 
 def _answers_columns_for_pdf(rows: list) -> list[list]:
@@ -401,6 +423,7 @@ def build_pdf_context(request, variant, subject, author_filter=None):
             "part_id": part_id,
             "subject": subject,
             "file_url": file_url,
+            "file_name": _file_display_name(file_url) if file_url else None,
             "is_part_2": is_part_2,
             "is_oge_inf_part_2": is_oge_inf_part_2,
             "is_oge_inf_13": is_oge_inf_13_task,
