@@ -464,6 +464,45 @@ function stripEmbeddedStyleBlocks(raw) {
 
 const BANK_TASK_TABLE_BORDER = "1px solid #94a3b8";
 
+function cellTextForLayoutCheck(el) {
+  return (el?.textContent || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** FIPI-таблица только для раскладки рисунков (Рис. 1 | Рис. 2) — без сетки. */
+function isFipiImageLayoutTable(table) {
+  if (
+    table.closest(
+      ".oge-math-choice-task, .oge-math-matching-task, .oge-math-matching-answer-grid, .wb-answer-key-table"
+    )
+  ) {
+    return false;
+  }
+  if (table.closest("table") && table.closest("table") !== table) return false;
+
+  const cells = [
+    ...table.querySelectorAll(":scope > tbody > tr > th, :scope > tbody > tr > td"),
+    ...table.querySelectorAll(":scope > tr > th, :scope > tr > td"),
+    ...table.querySelectorAll(":scope > thead > tr > th, :scope > thead > tr > td"),
+  ];
+  if (cells.length < 2) return false;
+
+  const imgCells = cells.filter((cell) => cell.querySelector("img, figure.image, figure.table"));
+  if (imgCells.length < 2) return false;
+
+  return imgCells.every((cell) => {
+    const text = cellTextForLayoutCheck(cell);
+    return (
+      !text ||
+      text.length <= 32 ||
+      /^рис\.?\s*\d*/i.test(text) ||
+      /^fig\.?\s*\d*/i.test(text)
+    );
+  });
+}
+
 /** Банк задач (plainHtml): снять FIPI-прокрутку и выровнять рамки таблиц. */
 function polishBankTaskTables(root) {
   if (!root) return;
@@ -473,6 +512,7 @@ function polishBankTaskTables(root) {
 
   for (const table of root.querySelectorAll("table")) {
     if (table.closest(".oge-math-choice-task")) continue;
+    if (table.closest(".oge-math-matching-answer-table")) continue;
     if (table.closest(".math-inline, .math-display, .math-env")) continue;
 
     if (table.classList.contains("cases-table")) {
@@ -494,6 +534,29 @@ function polishBankTaskTables(root) {
     }
 
     if (table.classList.contains("array-table")) continue;
+
+    if (isFipiImageLayoutTable(table)) {
+      table.classList.add("wb-layout-table");
+      table.removeAttribute("border");
+      table.removeAttribute("cellspacing");
+      table.removeAttribute("cellpadding");
+      for (const prop of ["overflow", "overflow-x", "overflow-y", "max-height", "max-width", "height", "width", "border"]) {
+        table.style.removeProperty(prop);
+      }
+      table.style.setProperty("border", "none", "important");
+      table.style.setProperty("border-collapse", "collapse", "important");
+      table.style.setProperty("width", "100%", "important");
+      table.style.setProperty("max-width", "100%", "important");
+      for (const cell of table.querySelectorAll("th, td")) {
+        for (const prop of ["border", "border-left", "border-right", "border-top", "border-bottom", "padding", "width", "height"]) {
+          cell.style.removeProperty(prop);
+        }
+        cell.style.setProperty("border", "none", "important");
+        cell.style.setProperty("padding", "0 2mm", "important");
+        cell.style.setProperty("vertical-align", "top", "important");
+      }
+      continue;
+    }
 
     table.classList.add("bank-task-table");
     table.removeAttribute("border");

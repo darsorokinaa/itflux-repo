@@ -393,6 +393,7 @@ function workbookPrintCss(): string {
       --wb-cell: 4.5mm;
       --wb-grid-rows: 6;
       --wb-grid-line: rgba(74, 98, 128, 0.28);
+      --wb-table-border: #94a3b8;
     }
 
     * { box-sizing: border-box; }
@@ -666,6 +667,18 @@ function workbookPrintCss(): string {
     .workbook-task__body :is(figure.table, figure.image, .table) {
       max-width: 100%;
       margin: 0.3em 0;
+      overflow: visible !important;
+      max-height: none !important;
+      width: auto;
+    }
+    .workbook-task__body :is(div, p):has(> table) {
+      overflow: visible !important;
+      max-height: none !important;
+    }
+    .workbook-task__body figure.image:has(table) {
+      width: 100%;
+      max-width: 100%;
+      text-align: left;
     }
     .workbook-task__body img {
       max-width: 100%;
@@ -693,27 +706,120 @@ function workbookPrintCss(): string {
       height: auto;
       margin: 0.3em auto;
     }
-    .workbook-task__body table,
-    .workbook-task__body .bank-task-table {
-      border-collapse: collapse;
+    /* ── Таблицы в условиях ── */
+    .workbook-task__body table.bank-task-table,
+    .workbook-task__body table.array-table {
+      border-collapse: collapse !important;
+      border-spacing: 0;
+      display: table;
+      width: auto;
+      max-width: 100%;
       margin: 0.4em 0;
+      overflow: visible !important;
+      background: #fff;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .workbook-task__body table.bank-task-table {
+      border: 0.5pt solid var(--wb-table-border) !important;
       font-size: 11.5pt !important;
       line-height: 1.35;
-      max-width: 100%;
-      width: auto;
     }
-    .workbook-task__body :is(th, td) {
-      border: 0.5pt solid var(--wb-accent-border);
+    .workbook-task__body table.bank-task-table :is(th, td) {
+      border: 0.5pt solid var(--wb-table-border) !important;
       padding: 2mm 3.5mm !important;
       vertical-align: middle;
+      background: #fff !important;
       font-size: 11.5pt !important;
       line-height: 1.35;
     }
-    .workbook-task__body th {
+    .workbook-task__body table.bank-task-table th {
       font-weight: 600;
+      background: var(--wb-accent-light) !important;
     }
-    .workbook-task__body table mjx-container[jax="CHTML"],
-    .workbook-task__body .bank-task-table mjx-container[jax="CHTML"] {
+    .workbook-task__body table.array-table {
+      border: 0.5pt solid var(--wb-table-border);
+      margin: 0.4em auto;
+    }
+    .workbook-task__body table.array-table :is(th.array-cell, td.array-cell) {
+      border: 0.5pt solid var(--wb-table-border) !important;
+      padding: 1.5mm 3mm !important;
+      text-align: center;
+      vertical-align: middle;
+      background: #fff !important;
+    }
+    .workbook-task__body .math-display > table.array-table {
+      display: inline-table;
+    }
+    .workbook-task__body table.cases-table,
+    .workbook-task__body table.cases-table :is(thead, tbody, tfoot, tr, th, td) {
+      border: none !important;
+      padding: 0.15em 0.35em !important;
+      background: transparent !important;
+    }
+    .workbook-task__body table.wb-layout-table,
+    .workbook-task__body table.wb-layout-table :is(th, td) {
+      border: none !important;
+      padding: 0 2mm !important;
+      background: transparent !important;
+      vertical-align: top;
+    }
+    .workbook-task__body table.wb-layout-table {
+      width: 100% !important;
+      max-width: 100% !important;
+      margin: 0.3em 0;
+    }
+    .workbook-task__body table.wb-layout-table img {
+      max-width: 100%;
+      height: auto;
+    }
+    .workbook-task__body .oge-math-choice-question :is(table, th, td),
+    .workbook-task__body .oge-math-choice-option__body :is(table, th, td),
+    .workbook-task__body .oge-math-choice-task :is(table.bank-task-table, table.bank-task-table th, table.bank-task-table td) {
+      border: none !important;
+      padding: 0 !important;
+      background: transparent !important;
+    }
+    .workbook-task__body mjx-container[jax="CHTML"] {
+      overflow: visible !important;
+      max-width: 100%;
+    }
+    .workbook-task__body mjx-mtable,
+    .workbook-task__body mjx-mtable.bank-task-mjx-table {
+      border-collapse: collapse !important;
+      border-spacing: 0 !important;
+      overflow: visible !important;
+    }
+    .workbook-task__body mjx-mtable > mjx-table {
+      border-collapse: collapse !important;
+      border-spacing: 0 !important;
+      overflow: visible !important;
+    }
+    .workbook-task__body mjx-mtable.bank-task-mjx-table mjx-mtd {
+      border: 0.5pt solid var(--wb-table-border) !important;
+      box-sizing: content-box !important;
+      padding: 0.25em 0.55em !important;
+    }
+    .workbook-task__body mjx-cases mjx-mtd,
+    .workbook-task__body mjx-cases mjx-mtable,
+    .workbook-task__body mjx-cases mjx-mtable mjx-mtd,
+    .workbook-task__body mjx-cases mjx-table {
+      border: none !important;
+      padding: 0 !important;
+    }
+    .workbook-task__body mjx-mtable.bank-task-mjx-table mjx-mtr:first-child > mjx-mtd {
+      border-top: 0.5pt solid var(--wb-table-border) !important;
+    }
+    .workbook-task__body mjx-mtable.bank-task-mjx-table mjx-mtr:last-child > mjx-mtd {
+      border-bottom: 0.5pt solid var(--wb-table-border) !important;
+    }
+    .workbook-task__body mjx-mtable.bank-task-mjx-table mjx-mtr > mjx-mtd:first-child {
+      border-left: 0.5pt solid var(--wb-table-border) !important;
+    }
+    .workbook-task__body mjx-mtable.bank-task-mjx-table mjx-mtr > mjx-mtd:last-child {
+      border-right: 0.5pt solid var(--wb-table-border) !important;
+    }
+    .workbook-task__body table.bank-task-table mjx-container[jax="CHTML"] {
       font-size: 118% !important;
     }
     .workbook-task__body mjx-container[jax="CHTML"] {
@@ -723,6 +829,13 @@ function workbookPrintCss(): string {
     .workbook-task__body mjx-container[jax="CHTML"][display="true"] {
       font-size: 112% !important;
       margin: 0.4em 0;
+      display: block;
+      text-align: center;
+    }
+    .workbook-task__body mjx-container[jax="CHTML"]:has(mjx-cases) {
+      display: block !important;
+      margin: 0.4em auto !important;
+      text-align: center !important;
     }
     .workbook-task__body .task-code-block {
       font-family: "Liberation Mono", "Courier New", monospace;
@@ -1102,6 +1215,17 @@ function workbookPrintCss(): string {
         break-inside: avoid;
         page-break-inside: avoid;
       }
+      .workbook-task__body table.bank-task-table,
+      .workbook-task__body table.array-table,
+      .workbook-task__body table.wb-layout-table {
+        break-inside: auto;
+        page-break-inside: auto;
+      }
+      .workbook-task__body table.bank-task-table :is(th, td),
+      .workbook-task__body table.array-table :is(th, td) {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
       .wb-print-header {
         display: grid !important;
         visibility: visible !important;
@@ -1211,7 +1335,7 @@ export function typesetWorkbookMath(doc: Document): Promise<void> {
   return startup
     .then(() => mj.typesetPromise?.())
     .then(() => {
-      doc.querySelectorAll(".workbook-task__body").forEach((el) => {
+      doc.querySelectorAll(".workbook-task__body, .workbook-task__body--answer-key").forEach((el) => {
         normalizeWorkbookTableTypography(el);
         polishBankTaskMathJaxTables(el);
       });
