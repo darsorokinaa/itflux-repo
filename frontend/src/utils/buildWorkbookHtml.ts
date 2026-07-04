@@ -422,7 +422,7 @@ function workbookPrintCss(): string {
       border-collapse: collapse;
       border-spacing: 0;
     }
-    .wb-print-frame :is(td, th) {
+    .wb-print-frame > :is(thead, tfoot, tbody) > tr > :is(td, th) {
       padding: 0;
       border: none;
       vertical-align: top;
@@ -432,17 +432,19 @@ function workbookPrintCss(): string {
       display: none;
     }
 
-    /* Экранный превью: таблица для печати не должна ломать вёрстку */
+    /* Экранный превью: обёртка печати не должна ломать вложенные таблицы */
     @media screen {
-      .wb-print-frame,
-      .wb-print-frame tbody,
-      .wb-print-frame tr,
-      .wb-print-frame td {
-        display: contents;
+      .wb-print-frame {
+        display: block;
       }
-      .wb-print-frame thead,
-      .wb-print-frame tfoot {
+      .wb-print-frame > thead,
+      .wb-print-frame > tfoot {
         display: none !important;
+      }
+      .wb-print-frame > tbody,
+      .wb-print-frame > tbody > tr,
+      .wb-print-frame > tbody > tr > td {
+        display: block;
       }
       .wb-print-header,
       .wb-print-footer {
@@ -1187,11 +1189,23 @@ function workbookPrintCss(): string {
         padding: 0 var(--wb-margin-right) 0 var(--wb-margin-left);
         box-shadow: none;
       }
-      .wb-print-frame thead {
+      .wb-print-frame {
+        display: table;
+      }
+      .wb-print-frame > thead {
         display: table-header-group;
       }
-      .wb-print-frame tfoot {
+      .wb-print-frame > tfoot {
         display: table-footer-group;
+      }
+      .wb-print-frame > tbody {
+        display: table-row-group;
+      }
+      .wb-print-frame > tbody > tr {
+        display: table-row;
+      }
+      .wb-print-frame > tbody > tr > td {
+        display: table-cell;
       }
       .wb-print-header-gap {
         display: block;
