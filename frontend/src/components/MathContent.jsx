@@ -457,7 +457,9 @@ function stripFipiInlineLayoutStyles(root) {
  */
 function stripEmbeddedStyleBlocks(raw) {
   if (typeof raw !== "string" || !raw) return raw;
-  return raw.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
+  return raw
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<link\b[^>]*\brel=["']stylesheet["'][^>]*>/gi, "");
 }
 
 const BANK_TASK_TABLE_BORDER = "1px solid #94a3b8";
@@ -467,6 +469,7 @@ function polishBankTaskTables(root) {
   if (!root) return;
 
   root.querySelectorAll("style").forEach((node) => node.remove());
+  root.querySelectorAll('link[rel="stylesheet"]').forEach((node) => node.remove());
 
   for (const table of root.querySelectorAll("table")) {
     if (table.closest(".oge-math-choice-task")) continue;

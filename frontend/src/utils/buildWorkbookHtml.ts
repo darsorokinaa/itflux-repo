@@ -431,6 +431,30 @@ function workbookPrintCss(): string {
       display: none;
     }
 
+    /* Экранный превью: таблица для печати не должна ломать вёрстку */
+    @media screen {
+      .wb-print-frame,
+      .wb-print-frame tbody,
+      .wb-print-frame tr,
+      .wb-print-frame td {
+        display: contents;
+      }
+      .wb-print-frame thead,
+      .wb-print-frame tfoot {
+        display: none !important;
+      }
+      .wb-print-header,
+      .wb-print-footer {
+        display: none !important;
+        visibility: hidden !important;
+        position: absolute !important;
+        width: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
+        pointer-events: none !important;
+      }
+    }
+
     /* ── Панель перед печатью (не попадает в PDF) ── */
     .wb-toolbar {
       width: 210mm;
@@ -529,6 +553,9 @@ function workbookPrintCss(): string {
       text-align: left;
       color: var(--wb-text);
       letter-spacing: 0.01em;
+    }
+    .wb-header {
+      margin: 0 0 4mm;
     }
     .wb-sheet-info {
       margin: 0 0 8px;
@@ -1076,15 +1103,19 @@ function workbookPrintCss(): string {
         page-break-inside: avoid;
       }
       .wb-print-header {
-        display: grid;
-        grid-template-columns: 1fr auto 1fr;
-        align-items: center;
-        gap: 3mm;
-        position: fixed;
+        display: grid !important;
+        visibility: visible !important;
+        position: fixed !important;
         top: 0;
         left: 0;
         right: 0;
-        height: var(--wb-print-header-h);
+        width: auto !important;
+        height: var(--wb-print-header-h) !important;
+        overflow: visible !important;
+        pointer-events: none !important;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        gap: 3mm;
         box-sizing: border-box;
         padding: 1.5mm var(--wb-margin-right) 1.5mm var(--wb-margin-left);
         font-size: 7.5pt;
@@ -1095,7 +1126,7 @@ function workbookPrintCss(): string {
         z-index: 2;
       }
       .wb-print-header--simple {
-        display: flex;
+        display: flex !important;
         justify-content: space-between;
       }
       .wb-print-header__brand {
@@ -1115,12 +1146,16 @@ function workbookPrintCss(): string {
         display: none;
       }
       .wb-print-footer {
-        display: flex;
-        position: fixed;
+        display: flex !important;
+        visibility: visible !important;
+        position: fixed !important;
         bottom: 0;
         left: 0;
         right: 0;
-        height: var(--wb-print-footer-h);
+        width: auto !important;
+        height: var(--wb-print-footer-h) !important;
+        overflow: visible !important;
+        pointer-events: none !important;
         box-sizing: border-box;
         align-items: center;
         justify-content: space-between;
@@ -1258,7 +1293,7 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
   </header>`;
 
   const teacherBlock = `
-      <section class="wb-teacher-block grading-block" aria-label="Для учителя">
+      <section class="wb-teacher-block" aria-label="Для учителя">
         <div class="wb-teacher-block__title">Для учителя</div>
         <div class="wb-teacher-block__row">
           <span class="wb-teacher-field">Оценка: <span class="wb-teacher-field__line"></span></span>
