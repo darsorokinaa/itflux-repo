@@ -133,14 +133,7 @@ type SubtopicOption = {
   task_list_id: number | null;
   task_number: number | null;
   task_count: number;
-  no_subtopic?: boolean;
-  no_subtopic_scope?: "all" | "task";
 };
-
-/** Значение select и query-параметр subtopic=none */
-const SUBTOPIC_NONE = "none";
-/** Псевдо-подтема: показать только задачи без ответа (фильтруется на клиенте). */
-const SUBTOPIC_NO_ANSWER = "no-answer";
 
 type FiltersResponse = {
   task_numbers: TaskNumberOption[];
@@ -257,7 +250,8 @@ function readFiltersFromSearchParams(sp: URLSearchParams): AllTasksFilters {
 
   const taskListId = sp.get("task")?.trim() ?? "";
   const subtopicRaw = sp.get("subtopic")?.trim() ?? "";
-  const subtopicId = subtopicRaw === SUBTOPIC_NONE ? SUBTOPIC_NONE : subtopicRaw;
+  const subtopicId =
+    subtopicRaw === "none" || subtopicRaw === "no-answer" ? "" : subtopicRaw;
   const onlyFipi = sp.get("fipi") === "1";
   const page = Math.max(1, Number(sp.get("page")) || 1);
 
@@ -355,23 +349,11 @@ export default function AllTasksPage() {
   const levelDef = getLevelDef(level);
 
   const subtopicsForTask = useMemo(() => {
-    if (!filterOptions) return [];
-    const list = filterOptions.subtopics;
-    if (!taskListId) {
-      const global = list.find(
-        (s) => s.no_subtopic && s.no_subtopic_scope === "all"
-      );
-      return global ? [global] : [];
-    }
+    if (!filterOptions || !taskListId) return [];
     const tlId = Number(taskListId);
-    const forTask = list.filter(
-      (s) =>
-        s.task_list_id === tlId &&
-        (!s.no_subtopic || s.no_subtopic_scope !== "all")
+    return filterOptions.subtopics.filter(
+      (s) => s.task_list_id === tlId && s.id != null
     );
-    const noSt = forTask.find((s) => s.no_subtopic);
-    const rest = forTask.filter((s) => !s.no_subtopic);
-    return noSt ? [noSt, ...rest] : rest;
   }, [filterOptions, taskListId]);
 
   useEffect(() => {
@@ -465,22 +447,12 @@ export default function AllTasksPage() {
 
   useEffect(() => {
     if (!subtopicId) return;
-    if (subtopicId === SUBTOPIC_NO_ANSWER) return;
-    if (subtopicId === SUBTOPIC_NONE) {
-      const ok = subtopicsForTask.some((s) => s.no_subtopic);
-      if (!ok) setSubtopicId("");
-      return;
-    }
     const ok = subtopicsForTask.some((s) => String(s.id) === subtopicId);
     if (!ok) setSubtopicId("");
   }, [subtopicsForTask, subtopicId]);
 
   const fetchTasks = useCallback(async () => {
-    if (
-      !taskListId &&
-      subtopicId !== SUBTOPIC_NONE &&
-      subtopicId !== SUBTOPIC_NO_ANSWER
-    ) {
+    if (!taskListId) {
       setData(null);
       setGroupData(null);
       setBankUsesGroups(false);
@@ -501,12 +473,7 @@ export default function AllTasksPage() {
           per_page: String(PER_PAGE),
           only_fipi: onlyFipi ? "1" : undefined,
           linked_key: groupDescriptor.linkedKey,
-          subtopic_id:
-            subtopicId === SUBTOPIC_NONE
-              ? SUBTOPIC_NONE
-              : subtopicId && subtopicId !== SUBTOPIC_NO_ANSWER
-                ? subtopicId
-                : undefined,
+          subtopic_id: subtopicId || undefined,
         });
         const res = await fetch(
           `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/group-instances/${qs}`,
@@ -527,12 +494,7 @@ export default function AllTasksPage() {
           raw_html: undefined,
           only_fipi: onlyFipi ? "1" : undefined,
           task_list_id: taskListId || undefined,
-          subtopic_id:
-            subtopicId === SUBTOPIC_NONE
-              ? SUBTOPIC_NONE
-              : subtopicId && subtopicId !== SUBTOPIC_NO_ANSWER
-                ? subtopicId
-                : undefined,
+          subtopic_id: subtopicId || undefined,
         });
         const res = await fetch(
           `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/task-bank/${qs}`,
@@ -580,36 +542,9 @@ export default function AllTasksPage() {
     setWorkbookDraft([]);
   }, [level, subject]);
 
-  const selectedSubtopicTitle = useMemo(() => {
-    if (!subtopicId) return "";
-    if (subtopicId === SUBTOPIC_NO_ANSWER) return "Без ответов";
-    if (subtopicId === SUBTOPIC_NONE) {
-      return subtopicsForTask.find((s) => s.no_subtopic)?.title ?? "Без подтемы";
-    }
-    return subtopicsForTask.find((s) => String(s.id) === subtopicId)?.title ?? "";
-  }, [subtopicId, subtopicsForTask]);
-
-  const noAnswerOnly = subtopicId === SUBTOPIC_NO_ANSWER;
-
-  const noAnswerCount = useMemo(() => {
-    if (bankUsesGroups) {
-      if (!groupData?.instances) return null;
-      return groupData.instances.filter((group) =>
-        group.tasks.some((t) => !(t.answer && String(t.answer).trim()))
-      ).length;
-    }
-    if (!data?.tasks) return null;
-    return data.tasks.filter((t) => !(t.answer && String(t.answer).trim())).length;
-  }, [bankUsesGroups, data?.tasks, groupData?.instances]);
-
   const displayEntries = useMemo((): BankDisplayEntry[] => {
     if (bankUsesGroups) {
-      let instances = groupData?.instances ?? [];
-      if (noAnswerOnly) {
-        instances = instances.filter((group) =>
-          group.tasks.some((t) => !(t.answer && String(t.answer).trim()))
-        );
-      }
+      const instances = groupData?.instances ?? [];
       return instances.map((group) => ({
         kind: "group" as const,
         groupId: group.group_id,
@@ -617,11 +552,8 @@ export default function AllTasksPage() {
       }));
     }
     const list = data?.tasks ?? [];
-    const singles = noAnswerOnly
-      ? list.filter((t) => !(t.answer && String(t.answer).trim()))
-      : list;
-    return singles.map((task) => ({ kind: "single" as const, task }));
-  }, [bankUsesGroups, data?.tasks, groupData?.instances, noAnswerOnly]);
+    return list.map((task) => ({ kind: "single" as const, task }));
+  }, [bankUsesGroups, data?.tasks, groupData?.instances]);
 
   const visibleTasks = useMemo(
     () =>
@@ -631,11 +563,9 @@ export default function AllTasksPage() {
     [displayEntries]
   );
 
-  const visibleTotal = noAnswerOnly
-    ? displayEntries.length
-    : bankUsesGroups
-      ? groupData?.total ?? 0
-      : data?.total ?? 0;
+  const visibleTotal = bankUsesGroups
+    ? groupData?.total ?? 0
+    : data?.total ?? 0;
 
   const canBuildWorkbook = Boolean(
     !loading && !error && displayEntries.length > 0
@@ -914,30 +844,17 @@ export default function AllTasksPage() {
               <select
                 className="all-tasks-filter__control"
                 value={subtopicId}
-                disabled={filtersLoading}
+                disabled={filtersLoading || !taskListId}
                 onChange={(e) => {
                   setSubtopicId(e.target.value);
                   resetPage();
                 }}
               >
-                <option value="">
-                  {taskListId ? "Все подтемы" : "Все задания — без подтемы"}
-                </option>
-                <option value={SUBTOPIC_NO_ANSWER}>
-                  Без ответов{noAnswerCount != null ? ` (${noAnswerCount})` : ""}
-                </option>
+                <option value="">Все подтемы</option>
                 {subtopicsForTask.map((s) => (
-                  <option
-                    key={
-                      s.no_subtopic
-                        ? `none-${s.task_list_id ?? "all"}`
-                        : String(s.id)
-                    }
-                    value={s.no_subtopic ? SUBTOPIC_NONE : String(s.id)}
-                  >
+                  <option key={String(s.id)} value={String(s.id)}>
                     {s.title}
                     {` (${s.task_count})`}
-                    {!taskListId && s.task_number != null ? ` · №${s.task_number}` : ""}
                   </option>
                 ))}
               </select>
@@ -979,13 +896,7 @@ export default function AllTasksPage() {
                     )
                   : null;
                 const selectedSubtopic = subtopicId
-                  ? subtopicId === SUBTOPIC_NO_ANSWER
-                    ? { title: "Без ответов" }
-                    : subtopicId === SUBTOPIC_NONE
-                      ? subtopicsForTask.find((s) => s.no_subtopic) ?? {
-                          title: "Без подтемы",
-                        }
-                      : subtopicsForTask.find((s) => String(s.id) === subtopicId)
+                  ? subtopicsForTask.find((s) => String(s.id) === subtopicId)
                   : null;
                 return (
                   <div className="all-tasks-meta__inner">
@@ -1035,28 +946,18 @@ export default function AllTasksPage() {
             ) : null}
           </div>
 
-          {!taskListId &&
-          subtopicId !== SUBTOPIC_NONE &&
-          subtopicId !== SUBTOPIC_NO_ANSWER &&
-          !loading &&
-          !error ? (
+          {!taskListId && !loading && !error ? (
             <div className="all-tasks-empty all-tasks-empty--pick" role="status">
               <p className="all-tasks-empty__title">Выберите задание</p>
               <p className="all-tasks-empty__lead">
-                Укажите номер в фильтре «Задание» или выберите в «Подтема» пункт
-                «Без подтемы», чтобы показать все задачи без подтемы.
+                Укажите номер в фильтре «Задание», чтобы показать задачи из банка.
               </p>
             </div>
           ) : null}
 
-          {(taskListId || subtopicId === SUBTOPIC_NONE || subtopicId === SUBTOPIC_NO_ANSWER) &&
-          !loading &&
-          !error &&
-          displayEntries.length === 0 ? (
+          {taskListId && !loading && !error && displayEntries.length === 0 ? (
             <p className="all-tasks-empty" role="status">
-              {noAnswerOnly
-                ? "Среди выбранных задач все уже имеют ответ."
-                : "По выбранным фильтрам заданий нет. Смените задание, подтему или снимите «Только ФИПИ»."}
+              По выбранным фильтрам заданий нет. Смените задание, подтему или снимите «Только ФИПИ».
             </p>
           ) : null}
 

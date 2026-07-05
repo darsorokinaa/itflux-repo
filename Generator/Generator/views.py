@@ -2075,36 +2075,7 @@ def api_task_bank_filters(request, level, subject):
     subtopic_tl_qs = (
         task_list_qs.filter(id=tl_id_filter) if tl_id_filter is not None else task_list_qs
     )
-    if tl_id_filter is None:
-        all_no_qs = Task.active_objects.filter(
-            task__subject=subject_instance,
-            task__level=level_instance,
-            subtopic_id__isnull=True,
-        )
-        if vpr_vf:
-            all_no_qs = all_no_qs.filter(**vpr_vf)
-        subtopics.append({
-            "id": None,
-            "no_subtopic": True,
-            "no_subtopic_scope": "all",
-            "title": "Без подтемы",
-            "task_list_id": None,
-            "task_number": None,
-            "task_count": all_no_qs.count(),
-        })
     for tl in subtopic_tl_qs:
-        no_st_qs = Task.active_objects.filter(task_id=tl.id, subtopic_id__isnull=True)
-        if vpr_vf:
-            no_st_qs = no_st_qs.filter(**vpr_vf)
-        subtopics.append({
-            "id": None,
-            "no_subtopic": True,
-            "no_subtopic_scope": "task",
-            "title": "Без подтемы",
-            "task_list_id": tl.id,
-            "task_number": tl.task_number,
-            "task_count": no_st_qs.count(),
-        })
         for st in SubTopic.objects.filter(task_list=tl).order_by("order", "title"):
             st_qs = Task.active_objects.filter(task_id=tl.id, subtopic_id=st.id)
             if vpr_vf:
