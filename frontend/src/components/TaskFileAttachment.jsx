@@ -65,6 +65,25 @@ const DOWNLOAD_SVG = (
   </svg>
 );
 
+const AUDIO_EXTENSIONS = ["MP3", "WAV", "OGG", "AAC", "FLAC", "M4A"];
+
+function normalizeMediaUrl(url) {
+  if (!url) return "";
+  if (typeof window === "undefined") return url;
+  
+  // Если мы в dev-режиме и URL указывает на локальный бэкенд напрямую,
+  // заменяем его на относительный, чтобы запрос шёл через прокси Vite.
+  // Это решает проблему с CORS и недоступностью 127.0.0.1 при тестировании с телефона.
+  let normalized = url;
+  if (normalized.startsWith("http://127.0.0.1:8000")) {
+    normalized = normalized.replace("http://127.0.0.1:8000", "");
+  } else if (normalized.startsWith("http://localhost:8000")) {
+    normalized = normalized.replace("http://localhost:8000", "");
+  }
+  
+  return normalized;
+}
+
 /**
  * Карточка-ссылка на материалы к заданию (архив / файл).
  * Автор задания (в т.ч. «ФИПИ») выводится отдельно в разметке страницы — `.task-author`.
@@ -72,11 +91,30 @@ const DOWNLOAD_SVG = (
 export default function TaskFileAttachment({ href }) {
   if (!href) return null;
   const displayName = fileDisplayName(href);
+  const ext = fileExtensionUpper(displayName);
+  const isAudio = AUDIO_EXTENSIONS.includes(ext);
+  const normalizedHref = normalizeMediaUrl(href);
+
+  if (isAudio) {
+    return (
+      <div className="task-files task-files--audio">
+        <audio 
+          controls 
+          src={normalizedHref} 
+          className="task-audio-player" 
+          preload="metadata"
+        >
+          Ваш браузер не поддерживает элемент <code>audio</code>.
+        </audio>
+      </div>
+    );
+  }
+
   const meta = fileMetaLine(displayName);
 
   return (
     <div className="task-files">
-      <a className="file-attachment" href={href} target="_blank" rel="noreferrer" download>
+      <a className="file-attachment" href={normalizedHref} target="_blank" rel="noreferrer" download>
         <div className="file-icon">{FILE_DOC_SVG}</div>
         <div className="file-info">
           <span className="file-name">{displayName}</span>

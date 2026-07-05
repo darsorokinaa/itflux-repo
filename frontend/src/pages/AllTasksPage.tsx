@@ -230,13 +230,19 @@ type AllTasksFilters = {
   page: number;
 };
 
+function getActiveSubjectsForAllTasks(level: LevelId) {
+  return (SUBJECTS_BY_LEVEL[level] ?? []).map((s) =>
+    s.id === "rus" ? { ...s, comingSoon: false } : s
+  );
+}
+
 function readFiltersFromSearchParams(sp: URLSearchParams): AllTasksFilters {
   const levelRaw = sp.get("level");
   const level = LEVEL_OPTIONS.some((o) => o.id === levelRaw)
     ? (levelRaw as LevelId)
     : "oge";
 
-  const subjects = SUBJECTS_BY_LEVEL[level] ?? [];
+  const subjects = getActiveSubjectsForAllTasks(level);
   const subjectRaw = sp.get("subject");
   const subject =
     subjects.find((s) => s.id === subjectRaw && !s.comingSoon)?.id ??
@@ -345,7 +351,7 @@ export default function AllTasksPage() {
     }));
   }, []);
 
-  const subjects = SUBJECTS_BY_LEVEL[level] ?? [];
+  const subjects = getActiveSubjectsForAllTasks(level);
   const levelDef = getLevelDef(level);
 
   const subtopicsForTask = useMemo(() => {
@@ -372,7 +378,7 @@ export default function AllTasksPage() {
   }, [level, subject, vprGrade, taskListId, subtopicId, onlyFipi, page, setSearchParams]);
 
   useEffect(() => {
-    const list = SUBJECTS_BY_LEVEL[level] ?? [];
+    const list = getActiveSubjectsForAllTasks(level);
     if (!list.some((s) => s.id === subject)) {
       setSubject(list[0]?.id ?? "inf");
       return;

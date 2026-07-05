@@ -4862,6 +4862,19 @@ input.tasks-page-subtopic-num-input::-webkit-inner-spin-button {
     list-style: none;
 }
 
+.hw-review-files__item--audio {
+    margin: 6px 0;
+}
+
+.hw-review-audio-player {
+    width: 100%;
+    max-width: 320px;
+    height: 36px;
+    border-radius: 18px;
+    outline: none;
+    background: #f3f4f6;
+}
+
 .hw-review-files__list a {
     font-size: 0.84rem;
     color: #4f46e5;
@@ -5547,6 +5560,19 @@ mjx-container {
 .task-files {
     margin: 0.35rem 0 1rem;
     text-align: left;
+}
+
+.task-files--audio {
+    margin: 0.75rem 0 1rem;
+}
+
+.task-audio-player {
+    width: 100%;
+    max-width: 400px;
+    height: 44px;
+    border-radius: 22px;
+    outline: none;
+    background: #f3f4f6;
 }
 
 .task-files .file-attachment {
@@ -10470,6 +10496,26 @@ header.header--themed .theme-toggle > span {
     color: #1d4ed8;
     text-decoration: none;
     box-sizing: border-box;
+}
+
+.lesson-solution-audio-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 84px;
+    padding: 0.55rem;
+    border-radius: 10px;
+    border: 1px solid #dbeafe;
+    background: #eff6ff;
+    box-sizing: border-box;
+}
+
+.lesson-solution-audio-player {
+    width: 100%;
+    height: 36px;
+    border-radius: 18px;
+    outline: none;
 }
 
 .lesson-solution-file-item__name {

@@ -41,8 +41,8 @@ from fipi_html_normalize import (
 # ──────────────────────────── КОНФИГУРАЦИЯ ────────────────────────────────────
 
 # Файл, который импортируем.
-EXCEL_FILE = "/opt/itfluxacademy/itflux/27egeinf.xlsx"
-
+EXCEL_FILE = "/opt/itfluxacademy/itflux/oge_rus_1_6.xlsx"
+# EXCEL_FILE = "/Users/darsorokina/Desktop/oge_rus_1_6.xlsx"
 # Колонка с текстом задачи.
 COL_TASK = "task_template"
 
@@ -52,7 +52,7 @@ COL_TASK = "task_template"
 #   https://.../27-115a.txt https://.../27-115b.txt
 #   https://.../27-115a.txt
 #   https://.../27-115b.txt
-COL_FILES = "files_urls"
+COL_FILES = None
 
 # Колонка с URL аудио/файлов аудиозадания.
 # Если в этой колонке ФИПИ вместе с аудио отдаёт .gif-прелоадер,
@@ -71,7 +71,7 @@ COL_ANSWER = None
 COL_TASK_NUMBER = "tasklist_id"
 
 # Колонка с подтемой.
-COL_SUBTOPIC = "None
+COL_SUBTOPIC = None
 
 # Колонка с created_by, если есть. Если None или пусто — используется CREATED_BY_DEFAULT.
 COL_CREATED_BY = "created_by"

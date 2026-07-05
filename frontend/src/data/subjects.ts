@@ -84,7 +84,7 @@ const SUBJECT_HIST: SubjectDefinition = {
 export const SUBJECTS_BY_LEVEL: Record<LevelId, SubjectDefinition[]> = {
   vpr: [SUBJECT_INF, SUBJECT_MATH, SUBJECT_PHYS, SUBJECT_RUS, SUBJECT_HIST],
   oge: [SUBJECT_INF, SUBJECT_MATH_OGE, SUBJECT_PHYS, SUBJECT_RUS],
-  ege: [SUBJECT_INF, SUBJECT_MATH],
+  ege: [SUBJECT_INF, SUBJECT_MATH, SUBJECT_RUS],
 };
 
 export const GRADES_BY_LEVEL: Record<LevelId, number[]> = {

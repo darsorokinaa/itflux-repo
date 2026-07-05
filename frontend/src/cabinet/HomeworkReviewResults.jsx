@@ -11,6 +11,18 @@ import {
 } from "./cabinetReviewUtils";
 import { computePart1TaskCorrect } from "../utils/examAnswerCheck";
 
+function normalizeMediaUrl(url) {
+  if (!url) return "";
+  if (typeof window === "undefined") return url;
+  let normalized = url;
+  if (normalized.startsWith("http://127.0.0.1:8000")) {
+    normalized = normalized.replace("http://127.0.0.1:8000", "");
+  } else if (normalized.startsWith("http://localhost:8000")) {
+    normalized = normalized.replace("http://localhost:8000", "");
+  }
+  return normalized;
+}
+
 function FileLinks({ files, label, emptyLabel }) {
   if (!files?.length) {
     return emptyLabel ? <span className="hw-review-empty">{emptyLabel}</span> : null;
@@ -19,13 +31,26 @@ function FileLinks({ files, label, emptyLabel }) {
     <div className="hw-review-files">
       {label ? <span className="hw-review-files__label">{label}</span> : null}
       <ul className="hw-review-files__list">
-        {files.map((file) => (
-          <li key={file.url}>
-            <a href={file.url} target="_blank" rel="noreferrer">
-              {file.filename || "Файл"}
-            </a>
-          </li>
-        ))}
+        {files.map((file) => {
+          const isAudio = /\.(mp3|wav|ogg|aac|flac|m4a)$/i.test(file.filename || file.url || "");
+          const normalizedUrl = normalizeMediaUrl(file.url);
+          if (isAudio) {
+            return (
+              <li key={file.url} className="hw-review-files__item--audio">
+                <audio controls src={normalizedUrl} className="hw-review-audio-player" preload="metadata">
+                  Ваш браузер не поддерживает элемент <code>audio</code>.
+                </audio>
+              </li>
+            );
+          }
+          return (
+            <li key={file.url}>
+              <a href={normalizedUrl} target="_blank" rel="noreferrer">
+                {file.filename || "Файл"}
+              </a>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

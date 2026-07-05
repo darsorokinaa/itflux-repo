@@ -130,6 +130,18 @@ function TaskReportErrorButton({ taskId, taskNumber, onClick }) {
   );
 }
 
+function normalizeMediaUrl(url) {
+  if (!url) return "";
+  if (typeof window === "undefined") return url;
+  let normalized = url;
+  if (normalized.startsWith("http://127.0.0.1:8000")) {
+    normalized = normalized.replace("http://127.0.0.1:8000", "");
+  } else if (normalized.startsWith("http://localhost:8000")) {
+    normalized = normalized.replace("http://localhost:8000", "");
+  }
+  return normalized;
+}
+
 /** Урок/ДЗ: ученик прикрепляет файлы решения (часть 2). */
 function LessonSolutionUpload({
   taskNumber,
@@ -340,9 +352,11 @@ function LessonSolutionUpload({
           <span className="lesson-solution-previews__label">Прикреплено</span>
           <div className="lesson-solution-previews__grid">
             {sentPreviews.map((p, i) => {
-              const src = lessonToken && !cabinetMode
+              let src = lessonToken && !cabinetMode
                 ? `${p.url}${p.url.includes("?") ? "&" : "?"}t=${encodeURIComponent(lessonToken)}`
                 : p.url;
+              src = normalizeMediaUrl(src);
+              const isAudio = /\.(mp3|wav|ogg|aac|flac|m4a)$/i.test(p.filename || p.url || "");
               return (
                 <figure key={`${p.url}-${i}`} className="lesson-solution-preview-fig">
                   {canDeleteAttachment ? (
@@ -361,6 +375,12 @@ function LessonSolutionUpload({
                     <a href={src} target="_blank" rel="noreferrer" className="lesson-solution-preview-link">
                       <img src={src} alt="" className="lesson-solution-thumb" />
                     </a>
+                  ) : isAudio ? (
+                    <div className="lesson-solution-audio-wrap">
+                      <audio controls src={src} className="lesson-solution-audio-player" preload="metadata">
+                        Ваш браузер не поддерживает элемент <code>audio</code>.
+                      </audio>
+                    </div>
                   ) : (
                     <a href={src} target="_blank" rel="noreferrer" className="lesson-solution-file-item">
                       <span className="lesson-solution-file-item__icon" aria-hidden="true">📎</span>
