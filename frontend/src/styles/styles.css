@@ -5660,15 +5660,16 @@ mjx-container {
 
 .task-text table {
     border-collapse: collapse;
-    margin: 0;
+    margin: 0.5rem 0;
     width: 100%;
     max-width: 100%;
+    border: 1px solid #cbd5e1;
 }
 
 .task-text th,
 .task-text td {
-    border: none;
-    padding: 0;
+    border: 1px solid #cbd5e1;
+    padding: 6px 10px;
     text-align: left;
     font-size: inherit;
     min-width: 0;
@@ -5679,6 +5680,9 @@ mjx-container {
 }
 
 .task-text th {
+    background: #f8fafc;
+    font-weight: 600;
+}
     background-color: transparent;
     color: inherit;
 }
@@ -8680,7 +8684,7 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     margin-right: auto !important;
 }
 /* Таблицы в условии: минимум на всю ширину блока; если шире — прокрутка у .task-content */
-.exam-page .task-text table {
+.exam-page .task-text table:not(.wb-layout-table) {
     width: 100% !important;
     min-width: 100% !important;
     max-width: none !important;
@@ -8689,20 +8693,22 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     font-size: 0.95rem !important;
     line-height: 1.3 !important;
     border-collapse: collapse !important;
+    border: 1px solid #cbd5e1 !important;
 }
-.exam-page .task-text th,
-.exam-page .task-text td {
-    padding: 0 !important;
-    border: none !important;
+.exam-page .task-text table:not(.wb-layout-table) th,
+.exam-page .task-text table:not(.wb-layout-table) td {
+    padding: 6px 10px !important;
+    border: 1px solid #cbd5e1 !important;
     font-size: inherit !important;
     word-break: break-word !important;
     overflow-wrap: break-word !important;
     background: transparent !important;
+    color: inherit !important;
 }
 
 /* Двухколоночные нумерованные таблички в условии (например 1) / 18):
    показываем как аккуратную мини-таблицу, а не растянутую «сырость». */
-.exam-page .task-text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table):not(.wb-layout-table):not(.wb-layout-table) {
+.exam-page .task-text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table):not(.wb-layout-table) {
     width: auto !important;
     min-width: 0 !important;
     max-width: 100% !important;
@@ -8727,7 +8733,6 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     font-weight: 500 !important;
     background: #fff !important;
 }
-
 .exam-page .task-text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table):not(.wb-layout-table) td:first-child,
 .exam-page .task-text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table):not(.wb-layout-table) th:first-child {
     min-width: 64px !important;

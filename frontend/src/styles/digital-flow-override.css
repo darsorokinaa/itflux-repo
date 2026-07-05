@@ -1218,7 +1218,7 @@ button,
 }
 
 #root .all-tasks-item__html table:not(.wb-layout-table) :is(th, td) {
-  border: 1px solid #94a3b8 !important;
+  border: 1px solid #cbd5e1 !important;
   padding: 7px 11px !important;
   vertical-align: middle;
   background: #fff !important;

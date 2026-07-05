@@ -714,7 +714,7 @@ function polishBankTaskTables(root) {
     }
 
     table.style.setProperty("border-collapse", "collapse", "important");
-    table.style.setProperty("border", "none", "important");
+    table.style.setProperty("border", "1px solid #cbd5e1", "important");
     table.style.setProperty("overflow", "visible", "important");
 
     for (const cell of table.querySelectorAll("th, td")) {
@@ -732,6 +732,7 @@ function polishBankTaskTables(root) {
         cell.style.removeProperty(prop);
       }
       cell.style.setProperty("border", BANK_TASK_TABLE_BORDER, "important");
+      cell.style.setProperty("padding", "6px 10px", "important");
     }
   }
 }
