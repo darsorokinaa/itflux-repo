@@ -554,7 +554,7 @@ function stripEmbeddedStyleBlocks(raw) {
     .replace(/<link\b[^>]*\brel=["']stylesheet["'][^>]*>/gi, "");
 }
 
-const BANK_TASK_TABLE_BORDER = "1px solid #94a3b8";
+const BANK_TASK_TABLE_BORDER = "1px solid #cbd5e1";
 
 function cellTextForLayoutCheck(el) {
   return (el?.textContent || "")
@@ -714,7 +714,7 @@ function polishBankTaskTables(root) {
     }
 
     table.style.setProperty("border-collapse", "collapse", "important");
-    table.style.setProperty("border", BANK_TASK_TABLE_BORDER, "important");
+    table.style.setProperty("border", "none", "important");
     table.style.setProperty("overflow", "visible", "important");
 
     for (const cell of table.querySelectorAll("th, td")) {
