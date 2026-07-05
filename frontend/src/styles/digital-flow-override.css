@@ -1196,8 +1196,8 @@ button,
   max-height: none !important;
 }
 
-#root .all-tasks-item__html table,
-#root .all-tasks-item__html .bank-task-table {
+#root .all-tasks-item__html table:not(.wb-layout-table),
+#root .all-tasks-item__html .bank-task-table:not(.wb-layout-table) {
   border-collapse: collapse !important;
   border-spacing: 0;
   width: auto;
@@ -1209,14 +1209,22 @@ button,
   background: #fff;
 }
 
-#root .all-tasks-item__html table :is(th, td) {
+#root .all-tasks-item__html table.wb-layout-table,
+#root .all-tasks-item__html table.wb-layout-table :is(th, td) {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+#root .all-tasks-item__html table:not(.wb-layout-table) :is(th, td) {
   border: 1px solid #94a3b8 !important;
   padding: 7px 11px !important;
   vertical-align: middle;
   background: #fff !important;
 }
 
-#root .all-tasks-item__html table th {
+#root .all-tasks-item__html table:not(.wb-layout-table) th {
   font-weight: 600;
   background: #f8fafc !important;
 }
@@ -1826,7 +1834,8 @@ body,
   border-collapse: collapse !important;
   border: 1px solid var(--text-primary) !important;
   margin: 1rem 0;
-  table-layout: auto !important;
+  table-layout: fixed !important;
+  font-variant-numeric: tabular-nums;
 }
 
 .ege-inf-2-truth-table td,
@@ -1835,6 +1844,11 @@ body,
   padding: 0.5rem 0.75rem !important;
   text-align: center !important;
   vertical-align: middle !important;
+  width: 2.75rem !important;
+  min-width: 2.75rem !important;
+  max-width: 2.75rem !important;
+  box-sizing: border-box !important;
+  white-space: nowrap !important;
 }
 
 .ege-inf-2-truth-table td p,

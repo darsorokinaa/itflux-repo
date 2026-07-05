@@ -21,6 +21,7 @@ export type WorkbookTask = {
   file_url?: string | null;
   part?: number | null;
   max_score?: number | null;
+  author?: string | null;
 };
 
 export type WorkbookOptions = {
@@ -61,6 +62,7 @@ export type VariantPdfTask = {
   file?: string | null;
   part?: number | null;
   max_score?: number | null;
+  author?: string | null;
 };
 
 export const VARIANT_PDF_OPTIONS: Required<WorkbookOptions> = {
@@ -85,6 +87,7 @@ export function variantTasksToWorkbookTasks(tasks: VariantPdfTask[]): WorkbookTa
       file_url: task.file ?? null,
       part: task.part ?? null,
       max_score: task.max_score ?? null,
+      author: task.author ?? null,
     }));
 }
 
@@ -284,6 +287,9 @@ function renderTask(
     variantMode && task.max_score != null && task.max_score > 0
       ? `<div class="wb-task__score">${escapeHtml(formatRuBalls(task.max_score))}</div>`
       : "";
+  const authorHtml = task.author?.trim()
+    ? `<div class="wb-task__author">${escapeHtml(task.author.trim())}</div>`
+    : "";
 
   return `
     <section class="wb-task workbook-task${variantMode ? " wb-task--variant" : ""}">
@@ -300,6 +306,7 @@ function renderTask(
       ${fileHtml}
       ${solutionHtml}
       ${answerHtml}
+      ${authorHtml}
     </section>`;
 }
 
@@ -443,7 +450,7 @@ function workbookPrintCss(): string {
       }
       .wb-print-frame > tbody,
       .wb-print-frame > tbody > tr,
-      .wb-print-frame > tbody > tr > td {
+      .wb-print-frame > tbody > tr > .wb-print-frame__body {
         display: block;
       }
       .wb-print-header,
@@ -709,6 +716,22 @@ function workbookPrintCss(): string {
       margin: 0.3em auto;
     }
     /* ── Таблицы в условиях ── */
+    .workbook-sheet table:not(.wb-print-frame),
+    .wb-answer-key-table {
+      display: table !important;
+    }
+    .workbook-sheet table:not(.wb-print-frame) :is(thead, tbody, tfoot),
+    .wb-answer-key-table :is(thead, tbody, tfoot) {
+      display: table-row-group !important;
+    }
+    .workbook-sheet table:not(.wb-print-frame) tr,
+    .wb-answer-key-table tr {
+      display: table-row !important;
+    }
+    .workbook-sheet table:not(.wb-print-frame) :is(th, td),
+    .wb-answer-key-table :is(th, td) {
+      display: table-cell !important;
+    }
     .workbook-task__body table.bank-task-table,
     .workbook-task__body table.array-table {
       border-collapse: collapse !important;
@@ -774,6 +797,80 @@ function workbookPrintCss(): string {
     .workbook-task__body table.wb-layout-table img {
       max-width: 100%;
       height: auto;
+    }
+    .workbook-task__body .ege-inf-1-road-table {
+      display: table !important;
+      width: auto !important;
+      max-width: 100% !important;
+      margin: 0.4em 0 !important;
+      border-collapse: separate !important;
+      border-spacing: 0 !important;
+      border: none !important;
+      background: transparent !important;
+      table-layout: auto !important;
+      font-variant-numeric: tabular-nums;
+    }
+    .workbook-task__body .ege-inf-1-road-table :is(th, td) {
+      border: none !important;
+      padding: 1.5mm 3mm !important;
+      text-align: left !important;
+      vertical-align: middle !important;
+      background: transparent !important;
+      white-space: nowrap !important;
+    }
+    .workbook-task__body .ege-inf-1-road-table tr:first-child :is(th, td),
+    .workbook-task__body .ege-inf-1-road-table tr:nth-child(2) :is(th, td),
+    .workbook-task__body .ege-inf-1-road-table tr :is(th, td):first-child {
+      font-weight: 600;
+      color: var(--wb-accent);
+    }
+    .workbook-task__body .ege-inf-1-road-table tr:first-child :is(th, td):first-child {
+      font-weight: 400;
+      color: var(--wb-text);
+    }
+    .workbook-task__body .ege-inf-2-truth-table {
+      display: table !important;
+      width: auto !important;
+      max-width: 100% !important;
+      margin: 0.4em 0 !important;
+      border-collapse: collapse !important;
+      border: 0.5pt solid var(--wb-table-border) !important;
+      table-layout: fixed !important;
+      font-variant-numeric: tabular-nums;
+    }
+    .workbook-task__body .ege-inf-2-truth-table :is(th, td) {
+      border: 0.5pt solid var(--wb-table-border) !important;
+      padding: 2mm !important;
+      text-align: center !important;
+      vertical-align: middle !important;
+      background: #fff !important;
+      width: 9mm !important;
+      min-width: 9mm !important;
+      max-width: 9mm !important;
+      box-sizing: border-box !important;
+      white-space: nowrap !important;
+    }
+    .workbook-task__body .ege-inf-22-process-table {
+      display: table !important;
+      width: auto !important;
+      max-width: 100% !important;
+      margin: 0.4em 0 !important;
+      border-collapse: collapse !important;
+      border: 0.5pt solid var(--wb-table-border) !important;
+      background: #fff !important;
+    }
+    .workbook-task__body .ege-inf-22-process-table :is(th, td) {
+      border: 0.5pt solid var(--wb-table-border) !important;
+      padding: 2mm 3.5mm !important;
+      text-align: center !important;
+      vertical-align: middle !important;
+      background: #fff !important;
+      white-space: nowrap;
+    }
+    .workbook-task__body .ege-inf-22-process-table thead th {
+      background: var(--wb-accent-light) !important;
+      font-weight: 600;
+      white-space: normal;
     }
     .workbook-task__body .oge-math-choice-question :is(table, th, td),
     .workbook-task__body .oge-math-choice-option__body :is(table, th, td),
@@ -1030,6 +1127,14 @@ function workbookPrintCss(): string {
       border-bottom: 0.5pt solid var(--wb-line-light);
       min-height: 1.15em;
     }
+    .wb-task__author {
+      margin: 2mm 0 0 calc(var(--wb-num-w) + 4mm);
+      text-align: right;
+      font-size: 7.5pt;
+      font-style: italic;
+      line-height: 1.25;
+      color: var(--wb-text-secondary);
+    }
 
     /* ── Файлы к заданию ── */
     .wb-task__file {
@@ -1097,6 +1202,7 @@ function workbookPrintCss(): string {
       font-size: 9.5pt;
       line-height: 1.3;
       table-layout: fixed;
+      display: table !important;
     }
     .wb-answer-key-table :is(th, td) {
       border: 0.5pt solid var(--wb-accent-border);
@@ -1204,7 +1310,7 @@ function workbookPrintCss(): string {
       .wb-print-frame > tbody > tr {
         display: table-row;
       }
-      .wb-print-frame > tbody > tr > td {
+      .wb-print-frame > tbody > tr > .wb-print-frame__body {
         display: table-cell;
       }
       .wb-print-header-gap {
@@ -1513,7 +1619,7 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
       </tfoot>
       <tbody>
         <tr>
-          <td>
+          <td class="wb-print-frame__body">
             ${sheetHeaderHtml}
 
             <div class="wb-tasks">

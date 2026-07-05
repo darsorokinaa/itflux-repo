@@ -383,6 +383,16 @@ function sanitizeTexInsideMathDelimiters(html) {
   return out.join("");
 }
 
+function pipeTaskHtmlFormatter(html, formatter) {
+  try {
+    const next = formatter(html);
+    return next && String(next).trim() ? next : html;
+  } catch (err) {
+    console.error("TASK_HTML_FORMATTER_ERR:", err);
+    return html;
+  }
+}
+
 function preparePlainBankTaskHtml(raw) {
   const decoded = decodeHtmlEntityLayersIfStoredEscaped(raw);
   let s = stripEmbeddedStyleBlocks(decoded);
@@ -392,6 +402,11 @@ function preparePlainBankTaskHtml(raw) {
   s = convertLogicSpansInsideMathDelimitersToTex(s);
   s = sanitizeTexInsideMathDelimiters(s);
   s = formatTaskCodeBlocksHtml(s);
+  s = pipeTaskHtmlFormatter(s, formatEgeInf2TruthTableHtml);
+  s = pipeTaskHtmlFormatter(s, formatEgeInf22ParallelProcessesHtml);
+  s = pipeTaskHtmlFormatter(s, formatEgeInf1RoadGraphHtml);
+  s = pipeTaskHtmlFormatter(s, formatOgeInformaticsTask13Html);
+  s = pipeTaskHtmlFormatter(s, formatOgeInf6TaskHtml);
   // Соответствие А/Б/В ↔ 1/2/3 (ОГЭ мат. №11) — до choice, иначе 1) 2) путаются с вариантами.
   const matched = formatOgeMathMatchingTaskHtml(s);
   const afterMatch = matched && matched.trim() ? matched : s;
@@ -503,12 +518,57 @@ function isFipiImageLayoutTable(table) {
   });
 }
 
+/** FIPI-обёртка вокруг вложенной таблицы (ЕГЭ инф №4: коды Фано) — без внешней рамки. */
+function isFipiLayoutWrapperTable(table) {
+  if (
+    table.closest(
+      ".oge-math-choice-task, .oge-math-matching-task, .oge-math-matching-answer-grid, .wb-answer-key-table"
+    )
+  ) {
+    return false;
+  }
+  if (table.closest("table") && table.closest("table") !== table) return false;
+  if (!table.querySelector(":scope table")) return false;
+
+  const directCells = [
+    ...table.querySelectorAll(":scope > tbody > tr > th, :scope > tbody > tr > td"),
+    ...table.querySelectorAll(":scope > tr > th, :scope > tr > td"),
+  ];
+  return directCells.some((cell) => cell.querySelector(":scope table"));
+}
+
+function applyLayoutTableChrome(table) {
+  table.classList.add("wb-layout-table");
+  table.removeAttribute("border");
+  table.removeAttribute("cellspacing");
+  table.removeAttribute("cellpadding");
+  for (const prop of ["overflow", "overflow-x", "overflow-y", "max-height", "max-width", "height", "width", "border"]) {
+    table.style.removeProperty(prop);
+  }
+  table.style.setProperty("border", "none", "important");
+  table.style.setProperty("border-collapse", "collapse", "important");
+  table.style.setProperty("width", "100%", "important");
+  table.style.setProperty("max-width", "100%", "important");
+  for (const cell of table.querySelectorAll("th, td")) {
+    for (const prop of ["border", "border-left", "border-right", "border-top", "border-bottom", "padding", "width", "height"]) {
+      cell.style.removeProperty(prop);
+    }
+    cell.style.setProperty("border", "none", "important");
+    cell.style.setProperty("padding", "0", "important");
+    cell.style.setProperty("vertical-align", "top", "important");
+    cell.style.setProperty("background", "transparent", "important");
+  }
+}
+
 /** Банк задач (plainHtml): снять FIPI-прокрутку и выровнять рамки таблиц. */
 function polishBankTaskTables(root) {
   if (!root) return;
 
   root.querySelectorAll("style").forEach((node) => node.remove());
   root.querySelectorAll('link[rel="stylesheet"]').forEach((node) => node.remove());
+  root.querySelectorAll("table, thead, tbody, tfoot, tr, th, td").forEach((node) => {
+    node.style.removeProperty("display");
+  });
 
   for (const table of root.querySelectorAll("table")) {
     if (table.closest(".oge-math-choice-task")) continue;
@@ -534,27 +594,22 @@ function polishBankTaskTables(root) {
     }
 
     if (table.classList.contains("array-table")) continue;
+    if (
+      table.classList.contains("ege-inf-2-truth-table") ||
+      table.classList.contains("ege-inf-2-example-table") ||
+      table.classList.contains("ege-inf-1-road-table") ||
+      table.classList.contains("ege-inf-22-process-table")
+    ) {
+      continue;
+    }
 
     if (isFipiImageLayoutTable(table)) {
-      table.classList.add("wb-layout-table");
-      table.removeAttribute("border");
-      table.removeAttribute("cellspacing");
-      table.removeAttribute("cellpadding");
-      for (const prop of ["overflow", "overflow-x", "overflow-y", "max-height", "max-width", "height", "width", "border"]) {
-        table.style.removeProperty(prop);
-      }
-      table.style.setProperty("border", "none", "important");
-      table.style.setProperty("border-collapse", "collapse", "important");
-      table.style.setProperty("width", "100%", "important");
-      table.style.setProperty("max-width", "100%", "important");
-      for (const cell of table.querySelectorAll("th, td")) {
-        for (const prop of ["border", "border-left", "border-right", "border-top", "border-bottom", "padding", "width", "height"]) {
-          cell.style.removeProperty(prop);
-        }
-        cell.style.setProperty("border", "none", "important");
-        cell.style.setProperty("padding", "0 2mm", "important");
-        cell.style.setProperty("vertical-align", "top", "important");
-      }
+      applyLayoutTableChrome(table);
+      continue;
+    }
+
+    if (isFipiLayoutWrapperTable(table)) {
+      applyLayoutTableChrome(table);
       continue;
     }
 
@@ -1129,6 +1184,13 @@ export function prepareBankTaskDisplayHtml(raw) {
     el.innerHTML = html;
     reinjectMathEnvTexFromRaw(el, decoded);
     unwrapBackendMathSpans(el);
+    if (rawHasSparseGridTables(html)) {
+      try {
+        normalizeSparseTables(el);
+      } catch (err) {
+        console.error("TABLE_NORMALIZE_ERR:", err);
+      }
+    }
     polishBankTaskTables(el);
     decorateFipiTaskImages(el);
     return el.innerHTML;

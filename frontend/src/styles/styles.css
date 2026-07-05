@@ -8676,7 +8676,7 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 
 /* Двухколоночные нумерованные таблички в условии (например 1) / 18):
    показываем как аккуратную мини-таблицу, а не растянутую «сырость». */
-.exam-page .task-text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table) {
+.exam-page .task-text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table):not(.wb-layout-table):not(.wb-layout-table) {
     width: auto !important;
     min-width: 0 !important;
     max-width: 100% !important;
@@ -8689,8 +8689,8 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     background: #fff !important;
 }
 
-.exam-page .task-text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table) td,
-.exam-page .task-text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table) th {
+.exam-page .task-text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table):not(.wb-layout-table) td,
+.exam-page .task-text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table):not(.wb-layout-table) th {
     border: 1px solid #d9dee8 !important;
     padding: 9px 16px !important;
     text-align: center !important;
@@ -8702,8 +8702,8 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     background: #fff !important;
 }
 
-.exam-page .task-text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table) td:first-child,
-.exam-page .task-text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table) th:first-child {
+.exam-page .task-text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table):not(.wb-layout-table) td:first-child,
+.exam-page .task-text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table):not(.wb-layout-table) th:first-child {
     min-width: 64px !important;
     background: #f4f7ff !important;
     color: #1f2f4c !important;
@@ -14815,6 +14815,14 @@ body.exam-variant-view--edu main.container {
 
 #main-wrapper.exam-page--edu .exam-task-card__text table {
     min-width: min(100%, 520px);
+}
+
+#main-wrapper.exam-page--edu .exam-task-card__text table.wb-layout-table,
+#main-wrapper.exam-page--edu .exam-task-card__text table.wb-layout-table :is(th, td) {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
 }
 
 #main-wrapper.exam-page--edu .exam-task-answer {

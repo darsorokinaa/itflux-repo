@@ -44,6 +44,7 @@ type BankTask = {
   file_url?: string | null;
   part_id?: number | null;
   part_title?: string | null;
+  author?: string | null;
 };
 
 type BankResponse = {
@@ -697,6 +698,7 @@ export default function AllTasksPage() {
             subtopic: task.subtopic,
             task_title: task.task_title,
             file_url: task.file_url,
+            author: task.author,
           });
         }
         return next;
@@ -721,6 +723,7 @@ export default function AllTasksPage() {
             subtopic: task.subtopic,
             task_title: task.task_title,
             file_url: task.file_url,
+            author: task.author,
           },
         ];
       });
@@ -766,6 +769,7 @@ export default function AllTasksPage() {
           subtopic: task.subtopic,
           task_title: task.task_title,
           file_url: task.file_url,
+          author: task.author,
         });
       }
       return next;

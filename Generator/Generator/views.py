@@ -2230,6 +2230,7 @@ def api_task_bank(request, level, subject):
             ),
             'answer': str(task.answer or ''),
             'file_url': file_url,
+            'author': (task.author or '').strip() or None,
             'added_at': task.added_at.strftime('%d.%m.%Y') if task.added_at else None,
         })
 
@@ -2442,6 +2443,7 @@ def _serialize_bank_group_member(request, member, *, raw_html=False):
         ) if t else '',
         'answer': str(t.answer or '') if t else '',
         'file_url': _bank_task_file_url(request, t) if t else None,
+        'author': (t.author or '').strip() or None if t else None,
         'added_at': t.added_at.strftime('%d.%m.%Y') if t and t.added_at else None,
     }
 
