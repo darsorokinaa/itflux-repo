@@ -5,10 +5,11 @@
     python import_tasks_universal.py
 
 Поддерживает:
-  - несколько ссылок в files_urls / img_url в одной ячейке;
+  - несколько ссылок в files_urls / img_url / audio_url в одной ячейке;
   - разделители: ; , пробелы, переносы строк, %20;
   - скачивание нескольких файлов одной задачи с упаковкой в ZIP;
-  - скачивание нескольких картинок и добавление их в task_template.
+  - скачивание нескольких картинок и добавление их в task_template;
+  - импорт аудио из audio_url в поле files с игнорированием .gif и других картинок.
 """
 
 import json
@@ -53,26 +54,31 @@ COL_TASK = "task_template"
 #   https://.../27-115b.txt
 COL_FILES = "files_urls"
 
+# Колонка с URL аудио/файлов аудиозадания.
+# Если в этой колонке ФИПИ вместе с аудио отдаёт .gif-прелоадер,
+# .gif и другие картинки будут проигнорированы.
+COL_AUDIO = "audio_url"
+
 # Колонка с URL изображений.
 # Можно хранить несколько ссылок в одной ячейке.
-COL_IMAGES = "img_url"
+COL_IMAGES = None
 
 # Колонка с ответом.
-COL_ANSWER = "answer"
+COL_ANSWER = None
 
 # Колонка с номером задания ЕГЭ/ОГЭ.
 # В твоих файлах она обычно называется tasklist_id, но по смыслу там номер задания: 26, 27 и т.д.
 COL_TASK_NUMBER = "tasklist_id"
 
 # Колонка с подтемой.
-COL_SUBTOPIC = "subtopic"
+COL_SUBTOPIC = "None
 
 # Колонка с created_by, если есть. Если None или пусто — используется CREATED_BY_DEFAULT.
 COL_CREATED_BY = "created_by"
 
 # Предмет и уровень для поиска TaskList.
-SUBJECT = "inf"
-LEVEL = "ege"
+SUBJECT = "rus"
+LEVEL = "oge"
 
 # Если подтемы нет в БД — создать автоматически.
 CREATE_SUBTOPIC_IF_MISSING = True
@@ -281,6 +287,67 @@ def get_urls(cell) -> list[str]:
     return split_urls(cell)
 
 
+IMAGE_EXTENSIONS = {".gif", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".bmp", ".ico"}
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".oga", ".m4a", ".aac", ".flac", ".wma", ".opus"}
+
+
+def _url_extension(url: str) -> str:
+    """Возвращает расширение из пути URL без query-параметров."""
+    path = unquote(urlparse(url or "").path)
+    return os.path.splitext(path)[1].lower()
+
+
+def filter_audio_file_urls(urls: list[str]) -> list[str]:
+    """
+    Чистит ссылки из audio_url.
+
+    В аудиоколонке ФИПИ иногда вместе с настоящим файлом лежит .gif
+    или другая декоративная картинка. Их не скачиваем и не кладём в поле files.
+
+    Логика:
+      - картинки игнорируем всегда;
+      - аудиофайлы оставляем;
+      - ссылки без расширения или с нестандартным расширением тоже оставляем,
+        потому что ФИПИ может отдавать файл через getfile/download.
+    """
+    result = []
+    seen = set()
+
+    for url in urls:
+        clean = (url or "").strip()
+        if not clean:
+            continue
+
+        ext = _url_extension(clean)
+
+        if ext in IMAGE_EXTENSIONS:
+            print(f"    [audio skip image] {clean}")
+            continue
+
+        if clean not in seen:
+            result.append(clean)
+            seen.add(clean)
+
+    return result
+
+
+def resolve_optional_column(df: pd.DataFrame, preferred: str | None, aliases: list[str]) -> str | None:
+    """
+    Находит колонку без падения на старых Excel.
+    Например: audio_url / audio_urls / audio / audio_file.
+    """
+    if preferred and preferred in df.columns:
+        return preferred
+
+    lower_map = {str(c).strip().lower(): c for c in df.columns}
+    for alias in aliases:
+        col = lower_map.get(alias.lower())
+        if col:
+            return col
+
+    return None
+
+
 def _cell_str(row, col: str | None) -> str:
     if not col or col not in row.index:
         return ""
@@ -421,9 +488,18 @@ def main():
     TASK_FILES_DIR.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_excel(EXCEL_FILE)
+    audio_col = resolve_optional_column(
+        df,
+        COL_AUDIO,
+        aliases=["audio_url", "audio_urls", "audio", "audio_file", "audio_files", "аудио", "айдио"],
+    )
 
     print(f"Файл: {Path(EXCEL_FILE).name}  |  Строк: {len(df)}")
     print(f"Колонки: {list(df.columns)}")
+    if audio_col:
+        print(f"Аудио/файлы: колонка «{audio_col}»; .gif и картинки из неё игнорируются")
+    else:
+        print("Аудио/файлы: колонка не найдена, импорт аудио пропущен")
 
     if COL_TASK_NUMBER:
         print(
@@ -434,6 +510,7 @@ def main():
         print(f"Подтема: колонка «{COL_SUBTOPIC}»")
     print()
 
+    # COL_AUDIO намеренно не требуем: старые Excel без аудиоколонки должны импортироваться как раньше.
     required_columns = [
         col for col in [COL_TASK, COL_FILES, COL_IMAGES, COL_ANSWER, COL_TASK_NUMBER, COL_SUBTOPIC]
         if col
@@ -518,21 +595,38 @@ def main():
                         skip += 1
                         continue
 
-        # --- files: один или несколько файлов ---
+        # --- files + audio: один или несколько файлов ---
+        # В БД поле files одно. Поэтому обычные files_urls и audio_url объединяем,
+        # а если файлов несколько — make_zip_for_files упакует их в ZIP.
         local_file = None
+        combined_file_urls = []
+
         if COL_FILES:
-            file_urls = get_urls(row.get(COL_FILES))
+            combined_file_urls.extend(get_urls(row.get(COL_FILES)))
 
-            if file_urls:
-                print(f"[{row_number}/{len(df)}] files ({len(file_urls)} шт.):")
+        if audio_col:
+            audio_urls_raw = get_urls(row.get(audio_col))
+            audio_urls = filter_audio_file_urls(audio_urls_raw)
+            combined_file_urls.extend(audio_urls)
 
-            downloaded_files = []
-            for file_url in file_urls:
-                path = download(file_url)
-                if path:
-                    downloaded_files.append(path)
+        # Дедупликация после объединения files_urls + audio_url.
+        file_urls = []
+        seen_file_urls = set()
+        for file_url in combined_file_urls:
+            if file_url and file_url not in seen_file_urls:
+                file_urls.append(file_url)
+                seen_file_urls.add(file_url)
 
-            local_file = make_zip_for_files(downloaded_files, row_number)
+        if file_urls:
+            print(f"[{row_number}/{len(df)}] files/audio ({len(file_urls)} шт.):")
+
+        downloaded_files = []
+        for file_url in file_urls:
+            path = download(file_url)
+            if path:
+                downloaded_files.append(path)
+
+        local_file = make_zip_for_files(downloaded_files, row_number)
 
         # --- img: одна или несколько картинок ---
         if COL_IMAGES:
