@@ -14,7 +14,7 @@ export const GENERATOR_HASH = "home-levels";
 
 export const NAV_TABS: ReadonlyArray<NavTabDef> = [
   { key: "tasks", label: "Все задачи", to: "/tasks" },
-  { key: "generator", label: "Генератор вариантов", to: `/#${GENERATOR_HASH}`, badge: "бета-версия" },
+  { key: "generator", label: "Генератор вариантов", to: `/#${GENERATOR_HASH}` },
   { key: "lessons", label: "Готовые уроки", to: "/lessons" },
   { key: "teachers", label: "Для учителей", to: "/teachers" },
 ];

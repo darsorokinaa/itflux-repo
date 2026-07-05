@@ -265,6 +265,84 @@ function repairLogicConnectiveSpanMarkup(raw) {
   return s;
 }
 
+/** FIPI дробит условие на <span> без атрибутов — снимаем обёртки. */
+function unwrapPlainFipiSpans(raw) {
+  if (typeof raw !== "string" || !raw) return raw;
+  let s = raw;
+  for (let i = 0; i < 24; i++) {
+    const next = s.replace(/<span>([\s\S]*?)<\/span>/gi, "$1");
+    if (next === s) break;
+    s = next;
+  }
+  return s;
+}
+
+/** Висячие </span>/<span> после flatten ФИПИ — иначе видны как текст. */
+function repairOrphanSpanTags(raw) {
+  if (typeof raw !== "string" || !raw) return raw;
+  return raw
+    .replace(/(<(?:p|div|td|th|li|h[1-6])\b[^>]*>)\s*<\/span>/gi, "$1")
+    .replace(/<span>\s*(<\/(?:p|div|td|th|li|h[1-6])>)/gi, "$1")
+    .replace(/<\/span>\s*<span>/gi, " ")
+    .replace(/<span>\s*(?=<\/)/gi, "")
+    .replace(/<\/span>(?=\s*[^<])/gi, " ");
+}
+
+function looksLikeLogicFormula(text) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  if (!t || t.length > 220) return false;
+  if (/[а-яё]{5,}/i.test(t)) return false;
+  if (!/[a-zA-Z=(]/.test(t)) return false;
+  return /[¬→≡∧∨]|\/\\|\\\//.test(t);
+}
+
+function logicTextToLatex(text) {
+  return String(text || "")
+    .replace(/\u2192/g, " \\to ")
+    .replace(/\u2261/g, " \\equiv ")
+    .replace(/∧/g, " \\land ")
+    .replace(/∨/g, " \\lor ")
+    .replace(/¬/g, "\\neg ")
+    .replace(/\/\\/g, " \\land ")
+    .replace(/\\\//g, " \\lor ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Абзац с одной логической формулой → $…$ для MathJax. */
+function wrapLogicFormulasInMathDelimiters(html) {
+  if (html == null || typeof html !== "string" || !html) return html;
+  if (!/[¬→≡∧∨]|\/\\|\\\//.test(html)) return html;
+  if (typeof DOMParser === "undefined") return html;
+
+  const doc = new DOMParser().parseFromString(
+    `<div class="logic-formula-root">${html}</div>`,
+    "text/html"
+  );
+  const root = doc.querySelector(".logic-formula-root");
+  if (!root) return html;
+
+  for (const el of root.querySelectorAll("p, div.task-html-block, td, th")) {
+    if (el.closest(".oge-math-choice-task, .oge-math-choice-option")) continue;
+    if (el.querySelector("table, img, mjx-container, .math-inline, .math-display")) continue;
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+    if (!looksLikeLogicFormula(text)) continue;
+    if (/\$|math-inline|math-display|\\\(|\\\)/.test(el.innerHTML)) continue;
+    el.textContent = `$${logicTextToLatex(text)}$`;
+  }
+
+  return root.innerHTML;
+}
+
+function repairFipiSpanAndLogicMarkup(html) {
+  let s = repairLogicConnectiveSpanMarkup(html);
+  s = unwrapPlainFipiSpans(s);
+  s = repairOrphanSpanTags(s);
+  s = formatFipiUnicodeMathHtml(s);
+  s = wrapLogicFormulasInMathDelimiters(s);
+  return s;
+}
+
 /** В math mode пробелы не видны — разрядка вокруг \\text{…} и скобок (как на бэкенде). */
 function addThinSpaceAroundLogicText(texFragment) {
   if (typeof texFragment !== "string" || texFragment.indexOf("\\text{") === -1) {
@@ -397,8 +475,7 @@ function preparePlainBankTaskHtml(raw) {
   const decoded = decodeHtmlEntityLayersIfStoredEscaped(raw);
   let s = stripEmbeddedStyleBlocks(decoded);
   s = normalizeEscapedTaskSymbols(s);
-  s = repairLogicConnectiveSpanMarkup(s);
-  s = formatFipiUnicodeMathHtml(s);
+  s = repairFipiSpanAndLogicMarkup(s);
   s = convertLogicSpansInsideMathDelimitersToTex(s);
   s = sanitizeTexInsideMathDelimiters(s);
   s = formatTaskCodeBlocksHtml(s);
@@ -1033,8 +1110,7 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
         el.innerHTML = prepareBankTaskDisplayHtml(decoded);
       } else {
       const normalized = normalizeEscapedTaskSymbols(decoded);
-      const repaired = repairLogicConnectiveSpanMarkup(normalized);
-      const afterFipiMath = formatFipiUnicodeMathHtml(repaired);
+      const afterFipiMath = repairFipiSpanAndLogicMarkup(normalized);
       const afterFile = egeInfFileEnhance
         ? stripFipiAttachedFileMarkup(afterFipiMath)
         : afterFipiMath;

@@ -8920,11 +8920,11 @@ button.cb-sch-event {
   }
 
   .cb-block-hero     { order: 1; }
-  .cb-block-metrics  { order: 2; }
+  .cb-block-lessons  { order: 2; }
   .cb-block-pending-reviews { order: 3; }
-  .cb-block-lessons  { order: 4; }
-  .cb-block-recent   { order: 5; }
-  .cb-block-progress { order: 6; }
+  .cb-block-metrics  { order: 4; }
+  .cb-block-progress { order: 5; }
+  .cb-block-recent   { order: 6; }
   .cb-block-calendar { order: 7; }
   .cb-block-guide    { order: 8; }
 

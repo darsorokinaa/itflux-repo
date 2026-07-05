@@ -593,7 +593,7 @@
 }
 
 .all-tasks-item--group .all-tasks-item__card {
-  border-left: 4px solid var(--blue-hero, #2b52f5);
+  /* Removed side blue border per user request */
 }
 
 .all-tasks-item__head--group {
@@ -604,6 +604,29 @@
   display: flex;
   flex-direction: column;
   gap: 0;
+}
+
+.all-tasks-item__group-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+@media (min-width: 1024px) {
+  .all-tasks-item__group-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: stretch;
+  }
+  .all-tasks-item__group-col--main {
+    border-right: 1px solid var(--border-card, #e4e8ff);
+  }
+}
+
+@media (max-width: 1023px) {
+  .all-tasks-item__group-col--sub {
+    border-top: 1px solid #edf1ff;
+  }
 }
 
 .all-tasks-item__group-part {
@@ -649,6 +672,11 @@
 .all-tasks-item__content {
   padding: 18px 20px 20px;
   background: #fff;
+}
+
+.all-tasks-item__content .task-author {
+  margin-top: 0.35rem;
+  margin-bottom: 0;
 }
 
 .all-tasks-item__content .exam-task-card__body {

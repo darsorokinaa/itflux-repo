@@ -1038,112 +1038,133 @@ export default function AllTasksPage() {
                           </div>
                         </header>
                         <div className="all-tasks-item__group-body">
-                          {entry.tasks.map((t) => {
-                            const taskNumber = t.task_number ?? 0;
-                            const taskBoardPersist = boardsByTask[String(t.id)];
-                            const hasTaskBoardDraft = boardPersistHasDraft(taskBoardPersist);
-                            const answerOpen = !!openAnswers[t.id];
-                            const answerHtml = (t.answer || "").trim();
-                            return (
-                              <section
-                                key={t.id}
-                                className="all-tasks-item__group-part"
-                                data-task-id={t.id}
-                                data-task-number={t.task_number ?? undefined}
-                              >
-                                <div className="all-tasks-item__group-part-head">
-                                  <p className="all-tasks-item__meta">
-                                    <span className="all-tasks-item__num">№{taskNumber}</span>
-                                    <span className="all-tasks-item__meta-sep" aria-hidden>
-                                      ·
-                                    </span>
-                                    <span>ID {t.id}</span>
-                                    {t.task_title ? (
-                                      <>
-                                        <span className="all-tasks-item__meta-sep" aria-hidden>
-                                          ·
-                                        </span>
-                                        <span>{t.task_title}</span>
-                                      </>
-                                    ) : null}
-                                    {t.part_title ? (
-                                      <>
-                                        <span className="all-tasks-item__meta-sep" aria-hidden>
-                                          ·
-                                        </span>
-                                        <span>{t.part_title}</span>
-                                      </>
-                                    ) : null}
-                                    {!answerHtml ? (
-                                      <span className="task-no-answer-badge">Пока без ответа</span>
-                                    ) : null}
-                                  </p>
-                                  <div className="all-tasks-item__actions">
-                                    {answerHtml ? (
-                                      <button
-                                        type="button"
-                                        className="all-tasks-item__answer-btn"
-                                        onClick={() => toggleAnswer(t.id)}
-                                        aria-expanded={answerOpen ? "true" : "false"}
-                                      >
-                                        {answerOpen ? "Скрыть ответ" : "Посмотреть ответ"}
-                                      </button>
-                                    ) : null}
-                                    <ExamTaskDrawingHeaderButton
-                                      onClick={() => setOpenBoardForTaskId(t.id)}
-                                      hasDraft={hasTaskBoardDraft}
-                                    />
-                                  </div>
-                                </div>
-                                <div className="all-tasks-item__content">
-                                  <ExamTaskDrawingShell
-                                    enabled
-                                    taskId={t.id}
-                                    level={level}
-                                    subject={subject}
-                                    variantId={ALL_TASKS_BOARD_VARIANT_ID}
-                                    persistEntry={taskBoardPersist}
-                                    onDrawingPersist={(payload: any) =>
-                                      handleBoardPersist({ taskId: t.id, ...payload })
-                                    }
-                                    openBoardForTaskId={openBoardForTaskId}
-                                    onConsumedBoardOpenRequest={() =>
-                                      setOpenBoardForTaskId(null)
-                                    }
-                                  >
-                                    <LazyVisible minHeight={120}>
-                                      <MathContent
-                                        html={t.text || ""}
-                                        className="all-tasks-item__html"
-                                        plainHtml
-                                      />
-                                      {t.file_url ? (
-                                        <TaskFileAttachment href={t.file_url} />
+                          {(() => {
+                            const renderGroupTask = (t: BankTask) => {
+                              const taskNumber = t.task_number ?? 0;
+                              const taskBoardPersist = boardsByTask[String(t.id)];
+                              const hasTaskBoardDraft = boardPersistHasDraft(taskBoardPersist);
+                              const answerOpen = !!openAnswers[t.id];
+                              const answerHtml = (t.answer || "").trim();
+                              return (
+                                <section
+                                  key={t.id}
+                                  className="all-tasks-item__group-part"
+                                  data-task-id={t.id}
+                                  data-task-number={t.task_number ?? undefined}
+                                >
+                                  <div className="all-tasks-item__group-part-head">
+                                    <p className="all-tasks-item__meta">
+                                      <span className="all-tasks-item__num">№{taskNumber}</span>
+                                      <span className="all-tasks-item__meta-sep" aria-hidden>
+                                        ·
+                                      </span>
+                                      <span>ID {t.id}</span>
+                                      {t.task_title ? (
+                                        <>
+                                          <span className="all-tasks-item__meta-sep" aria-hidden>
+                                            ·
+                                          </span>
+                                          <span>{t.task_title}</span>
+                                        </>
                                       ) : null}
-                                    </LazyVisible>
-                                  </ExamTaskDrawingShell>
-                                </div>
-                                {answerOpen ? (
-                                  <div
-                                    className="all-tasks-item__answer"
-                                    role="region"
-                                    aria-live="polite"
-                                    aria-label="Правильный ответ"
-                                  >
-                                    {answerHtml ? (
-                                      <MathContent
-                                        html={answerHtml}
-                                        className="all-tasks-item__html all-tasks-item__html--answer"
-                                        plainHtml
+                                      {t.part_title ? (
+                                        <>
+                                          <span className="all-tasks-item__meta-sep" aria-hidden>
+                                            ·
+                                          </span>
+                                          <span>{t.part_title}</span>
+                                        </>
+                                      ) : null}
+                                      {!answerHtml ? (
+                                        <span className="task-no-answer-badge">Пока без ответа</span>
+                                      ) : null}
+                                    </p>
+                                    <div className="all-tasks-item__actions">
+                                      {answerHtml ? (
+                                        <button
+                                          type="button"
+                                          className="all-tasks-item__answer-btn"
+                                          onClick={() => toggleAnswer(t.id)}
+                                          aria-expanded={answerOpen ? "true" : "false"}
+                                        >
+                                          {answerOpen ? "Скрыть ответ" : "Посмотреть ответ"}
+                                        </button>
+                                      ) : null}
+                                      <ExamTaskDrawingHeaderButton
+                                        onClick={() => setOpenBoardForTaskId(t.id)}
+                                        hasDraft={hasTaskBoardDraft}
                                       />
-                                    ) : (
-                                      <p>Ответ не указан.</p>
-                                    )}
+                                    </div>
                                   </div>
-                                ) : null}
-                              </section>
+                                  <div className="all-tasks-item__content">
+                                    <ExamTaskDrawingShell
+                                      enabled
+                                      taskId={t.id}
+                                      level={level}
+                                      subject={subject}
+                                      variantId={ALL_TASKS_BOARD_VARIANT_ID}
+                                      persistEntry={taskBoardPersist}
+                                      onDrawingPersist={(payload: any) =>
+                                        handleBoardPersist({ taskId: t.id, ...payload })
+                                      }
+                                      openBoardForTaskId={openBoardForTaskId}
+                                      onConsumedBoardOpenRequest={() =>
+                                        setOpenBoardForTaskId(null)
+                                      }
+                                    >
+                                      <LazyVisible minHeight={120}>
+                                        <MathContent
+                                          html={t.text || ""}
+                                          className="all-tasks-item__html"
+                                          plainHtml
+                                        />
+                                        {t.file_url ? (
+                                          <TaskFileAttachment href={t.file_url} />
+                                        ) : null}
+                                        {t.author ? (
+                                          <div className="task-author">{t.author}</div>
+                                        ) : null}
+                                      </LazyVisible>
+                                    </ExamTaskDrawingShell>
+                                  </div>
+                                  {answerOpen ? (
+                                    <div
+                                      className="all-tasks-item__answer"
+                                      role="region"
+                                      aria-live="polite"
+                                      aria-label="Правильный ответ"
+                                    >
+                                      {answerHtml ? (
+                                        <MathContent
+                                          html={answerHtml}
+                                          className="all-tasks-item__html all-tasks-item__html--answer"
+                                          plainHtml
+                                        />
+                                      ) : (
+                                        <p>Ответ не указан.</p>
+                                      )}
+                                    </div>
+                                  ) : null}
+                                </section>
+                              );
+                            };
+
+                            const firstTask = entry.tasks[0];
+                            const otherTasks = entry.tasks.slice(1);
+
+                            return (
+                              <>
+                                <div className="all-tasks-item__group-col all-tasks-item__group-col--main">
+                                  {firstTask && renderGroupTask(firstTask)}
+                                </div>
+                                {otherTasks.length > 0 && (
+                                  <div className="all-tasks-item__group-col all-tasks-item__group-col--sub">
+                                    {otherTasks.map((t) => renderGroupTask(t))}
+                                  </div>
+                                )}
+                              </>
                             );
-                          })}
+                          })()}
                         </div>
                       </div>
                     </article>
@@ -1246,6 +1267,9 @@ export default function AllTasksPage() {
                               plainHtml
                             />
                             {t.file_url ? <TaskFileAttachment href={t.file_url} /> : null}
+                            {t.author ? (
+                              <div className="task-author">{t.author}</div>
+                            ) : null}
                           </LazyVisible>
                         </ExamTaskDrawingShell>
                       </div>
