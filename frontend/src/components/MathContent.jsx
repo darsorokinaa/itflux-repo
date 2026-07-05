@@ -716,6 +716,8 @@ function polishBankTaskTables(root) {
     table.style.setProperty("border-collapse", "collapse", "important");
     table.style.setProperty("border", "1px solid #cbd5e1", "important");
     table.style.setProperty("overflow", "visible", "important");
+    table.style.setProperty("margin", "0.5rem 0", "important");
+    table.style.setProperty("width", "100%", "important");
 
     for (const cell of table.querySelectorAll("th, td")) {
       cell.removeAttribute("border");
