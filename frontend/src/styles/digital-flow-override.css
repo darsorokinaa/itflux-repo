@@ -2033,76 +2033,240 @@ body,
   object-position: center !important;
 }
 
-/* DocViewer CSV paginator: isolate from global button typography/focus styles */
+/* DocViewer paginator: keep controls clean and readable */
 .lesson-viewer-page--doc #react-doc-viewer,
-.lesson-viewer-page--doc #csv-renderer {
+.lesson-viewer-page--doc #react-doc-viewer * {
   font-family: var(--font-body);
 }
 
-.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-root {
-  border-top: 1px solid #e5e7eb;
-  background: #fff;
+.lesson-viewer-page--doc #react-doc-viewer :is(#document-nav, .MuiTablePagination-root, [class*="MuiTablePagination-root"]) {
+  border-top: 1px solid #e5e7eb !important;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
 }
 
-.lesson-viewer-page--doc #csv-renderer button {
-  font-family: var(--font-body) !important;
+.lesson-viewer-page--doc #react-doc-viewer :is(#document-nav, .MuiTablePagination-toolbar, [class*="MuiTablePagination-toolbar"]) {
+  min-height: 48px !important;
+  padding: 8px 12px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 8px !important;
 }
 
-.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-toolbar {
-  min-height: 48px;
-  padding: 8px 12px;
-  gap: 6px;
+.lesson-viewer-page--doc #react-doc-viewer :is(.MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows, [class*="MuiTablePagination-selectLabel"], [class*="MuiTablePagination-displayedRows"], #document-nav span, #document-nav p, #document-nav div) {
+  margin: 0 !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: #0f172a !important;
+  letter-spacing: 0.01em;
 }
 
-.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-selectLabel,
-.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-displayedRows {
-  margin: 0;
-  font-family: var(--font-body);
-  font-size: 14px;
-  font-weight: 500;
-  color: #111827;
+.lesson-viewer-page--doc #react-doc-viewer :is(.MuiTablePagination-actions, [class*="MuiTablePagination-actions"], #document-nav) {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
 }
 
-.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 8px;
+.lesson-viewer-page--doc #react-doc-viewer :is(.MuiTablePagination-actions, [class*="MuiTablePagination-actions"], #document-nav) button {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  min-width: 32px !important;
+  width: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 9px !important;
+  background: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08) !important;
+  color: transparent !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  position: relative !important;
+  transition: border-color 0.16s ease, background-color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
 }
 
-.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-actions button {
-  min-width: 32px;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  background: #fff;
-  color: #1f2937;
-  font-family: var(--font-body) !important;
-  font-size: 16px;
-  font-weight: 600;
+.lesson-viewer-page--doc #react-doc-viewer :is(.MuiTablePagination-actions, [class*="MuiTablePagination-actions"], #document-nav) button > * {
+  display: none !important;
+}
+
+.lesson-viewer-page--doc #react-doc-viewer :is(.MuiTablePagination-actions, [class*="MuiTablePagination-actions"], #document-nav) button::before {
+  content: "›";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
   line-height: 1;
+  color: #334155;
 }
 
-.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-actions button:hover:not(:disabled) {
-  background: #f3f4f6;
-  border-color: #9ca3af;
+.lesson-viewer-page--doc #react-doc-viewer :is(.MuiTablePagination-actions, [class*="MuiTablePagination-actions"], #document-nav) button:first-child::before,
+.lesson-viewer-page--doc #react-doc-viewer :is(.MuiTablePagination-actions, [class*="MuiTablePagination-actions"], #document-nav) button[aria-label*="previous" i]::before,
+.lesson-viewer-page--doc #react-doc-viewer :is(.MuiTablePagination-actions, [class*="MuiTablePagination-actions"], #document-nav) button[aria-label*="назад" i]::before,
+.lesson-viewer-page--doc #react-doc-viewer :is(.MuiTablePagination-actions, [class*="MuiTablePagination-actions"], #document-nav) button[aria-label*="prev" i]::before {
+  content: "‹";
 }
 
-.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-actions button:disabled {
-  opacity: 0.45;
-  color: #9ca3af;
+.lesson-viewer-page--doc #react-doc-viewer :is(.MuiTablePagination-actions, [class*="MuiTablePagination-actions"], #document-nav) button:hover:not(:disabled) {
+  background: #eff6ff !important;
+  border-color: #93c5fd !important;
+  box-shadow: 0 3px 10px rgba(37, 99, 235, 0.16) !important;
+  transform: translateY(-1px);
 }
 
-.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-actions button:focus-visible {
-  outline: 2px solid rgba(43, 82, 245, 0.55);
-  outline-offset: 1px;
+.lesson-viewer-page--doc #react-doc-viewer :is(.MuiTablePagination-actions, [class*="MuiTablePagination-actions"], #document-nav) button:disabled {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-actions button svg {
-  width: 18px;
-  height: 18px;
+.lesson-viewer-page--doc #react-doc-viewer :is(.MuiTablePagination-actions, [class*="MuiTablePagination-actions"], #document-nav) button:disabled::before {
+  color: #94a3b8;
+}
+
+.lesson-viewer-page--doc #react-doc-viewer :is(.MuiTablePagination-actions, [class*="MuiTablePagination-actions"], #document-nav) button:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.55) !important;
+  outline-offset: 1px !important;
+}
+
+/* Fallback selectors when renderer uses different wrappers/classes */
+.lesson-viewer-page--doc :is(.MuiTablePagination-root, [class*="MuiTablePagination-root"], #document-nav) {
+  border-top: 1px solid #e5e7eb !important;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
+}
+
+.lesson-viewer-page--doc :is(.MuiTablePagination-toolbar, [class*="MuiTablePagination-toolbar"], #document-nav) {
+  min-height: 48px !important;
+  padding: 8px 12px !important;
+  gap: 8px !important;
+  align-items: center !important;
+}
+
+.lesson-viewer-page--doc :is(.MuiTablePagination-selectLabel, [class*="MuiTablePagination-selectLabel"], .MuiTablePagination-displayedRows, [class*="MuiTablePagination-displayedRows"]) {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: #0f172a !important;
+}
+
+.lesson-viewer-page--doc :is(.MuiTablePagination-actions, [class*="MuiTablePagination-actions"], #document-nav) button,
+.lesson-viewer-page--doc button[aria-label*="previous" i],
+.lesson-viewer-page--doc button[aria-label*="next" i],
+.lesson-viewer-page--doc button[title*="previous" i],
+.lesson-viewer-page--doc button[title*="next" i],
+.lesson-viewer-page--doc button[aria-label*="назад" i],
+.lesson-viewer-page--doc button[aria-label*="впер" i] {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  min-width: 32px !important;
+  width: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 9px !important;
+  background: #ffffff !important;
+  color: transparent !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  position: relative !important;
+}
+
+.lesson-viewer-page--doc :is(.MuiTablePagination-actions, [class*="MuiTablePagination-actions"], #document-nav) button > * {
+  display: none !important;
+}
+
+.lesson-viewer-page--doc :is(.MuiTablePagination-actions, [class*="MuiTablePagination-actions"], #document-nav) button::before,
+.lesson-viewer-page--doc button[aria-label*="previous" i]::before,
+.lesson-viewer-page--doc button[aria-label*="next" i]::before,
+.lesson-viewer-page--doc button[title*="previous" i]::before,
+.lesson-viewer-page--doc button[title*="next" i]::before,
+.lesson-viewer-page--doc button[aria-label*="назад" i]::before,
+.lesson-viewer-page--doc button[aria-label*="впер" i]::before {
+  content: "›";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  line-height: 1;
+  color: #334155;
+}
+
+.lesson-viewer-page--doc button[aria-label*="previous" i]::before,
+.lesson-viewer-page--doc button[title*="previous" i]::before,
+.lesson-viewer-page--doc button[aria-label*="назад" i]::before {
+  content: "‹";
+}
+
+/* MS Office online embed: hide built-in toolbar with broken controls */
+.lesson-viewer-page--doc #msdoc-renderer {
+  position: relative;
+  overflow: hidden !important;
+  background: #fff;
+}
+
+.lesson-viewer-page--doc #msdoc-renderer iframe {
+  width: 100% !important;
+  height: calc(100% + 44px) !important;
+  margin-top: -44px !important;
+  border: 0 !important;
+}
+
+/* Numbered two-column instruction blocks: make text and numeration more compact */
+#root :is(.exam-page .task-text, .exam-task-card__text, .all-tasks-item__html)
+table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table):not(.wb-layout-table) {
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  margin: 0.45rem auto !important;
+  border: 1px solid #d5dbe7 !important;
+  border-radius: 10px !important;
+  overflow: hidden !important;
+  box-shadow: 0 1px 6px rgba(28, 45, 92, 0.06) !important;
+  background: #fff !important;
+}
+
+#root :is(.exam-page .task-text, .exam-task-card__text, .all-tasks-item__html)
+table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table):not(.wb-layout-table)
+:is(td, th) {
+  border: 1px solid #dde3ee !important;
+  padding: 7px 12px !important;
+  font-size: 0.9rem !important;
+  line-height: 1.28 !important;
+  font-weight: 500 !important;
+  color: var(--text-main) !important;
+  background: #fff !important;
+  vertical-align: top !important;
+}
+
+#root :is(.exam-page .task-text, .exam-task-card__text, .all-tasks-item__html)
+table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table):not(.wb-layout-table)
+:is(td, th):first-child {
+  min-width: 46px !important;
+  width: 46px !important;
+  padding: 7px 8px !important;
+  text-align: center !important;
+  font-size: 0.82rem !important;
+  line-height: 1.15 !important;
+  font-weight: 600 !important;
+  color: #24324b !important;
+  background: #f7faff !important;
+  white-space: nowrap !important;
+}
+
+/* Same compact typography for lesson-viewer HTML/proxy renderers */
+.lesson-viewer-page--doc :is(#proxy-renderer, #html-renderer)
+table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead))
+:is(td, th) {
+  font-size: 0.9rem !important;
+  line-height: 1.28 !important;
+}
+
+.lesson-viewer-page--doc :is(#proxy-renderer, #html-renderer)
+table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead))
+:is(td, th):first-child {
+  font-size: 0.82rem !important;
+  line-height: 1.15 !important;
 }
 
 /* Inline images in lesson text (e.g., formulas from docs) should not blow up lines */
