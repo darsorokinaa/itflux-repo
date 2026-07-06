@@ -2033,6 +2033,110 @@ body,
   object-position: center !important;
 }
 
+/* DocViewer CSV paginator: isolate from global button typography/focus styles */
+.lesson-viewer-page--doc #react-doc-viewer,
+.lesson-viewer-page--doc #csv-renderer {
+  font-family: var(--font-body);
+}
+
+.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-root {
+  border-top: 1px solid #e5e7eb;
+  background: #fff;
+}
+
+.lesson-viewer-page--doc #csv-renderer button {
+  font-family: var(--font-body) !important;
+}
+
+.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-toolbar {
+  min-height: 48px;
+  padding: 8px 12px;
+  gap: 6px;
+}
+
+.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-selectLabel,
+.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-displayedRows {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  color: #111827;
+}
+
+.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-actions button {
+  min-width: 32px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2937;
+  font-family: var(--font-body) !important;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-actions button:hover:not(:disabled) {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-actions button:disabled {
+  opacity: 0.45;
+  color: #9ca3af;
+}
+
+.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-actions button:focus-visible {
+  outline: 2px solid rgba(43, 82, 245, 0.55);
+  outline-offset: 1px;
+}
+
+.lesson-viewer-page--doc #csv-renderer .MuiTablePagination-actions button svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Inline images in lesson text (e.g., formulas from docs) should not blow up lines */
+.lesson-viewer-page--doc #proxy-renderer p img,
+.lesson-viewer-page--doc #proxy-renderer span img,
+.lesson-viewer-page--doc #proxy-renderer li img,
+.lesson-viewer-page--doc #proxy-renderer td img,
+.lesson-viewer-page--doc #msdoc-renderer p img,
+.lesson-viewer-page--doc #msdoc-renderer span img,
+.lesson-viewer-page--doc #msdoc-renderer li img,
+.lesson-viewer-page--doc #msdoc-renderer td img,
+.lesson-viewer-page--doc #html-renderer p img,
+.lesson-viewer-page--doc #html-renderer span img,
+.lesson-viewer-page--doc #html-renderer li img,
+.lesson-viewer-page--doc #html-renderer td img {
+  display: inline-block !important;
+  vertical-align: middle !important;
+  max-height: 2.2em !important;
+  max-width: 14em !important;
+  width: auto !important;
+  height: auto !important;
+}
+
+/* Keep standalone illustrations readable but bounded by viewport */
+.lesson-viewer-page--doc #proxy-renderer > img,
+.lesson-viewer-page--doc #msdoc-renderer > img,
+.lesson-viewer-page--doc #html-renderer > img,
+.lesson-viewer-page--doc #proxy-renderer figure img,
+.lesson-viewer-page--doc #msdoc-renderer figure img,
+.lesson-viewer-page--doc #html-renderer figure img {
+  max-width: min(100%, 960px) !important;
+  max-height: 72vh !important;
+}
+
 /* ============================================================
    Мобильная нижняя навигация (Цифровой поток)
    Видна только ≤ планшета. На desktop полностью скрыта — макет не меняется.
