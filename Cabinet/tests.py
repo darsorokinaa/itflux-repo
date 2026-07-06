@@ -1775,6 +1775,8 @@ class SecurityHardeningTests(TestCase):
         from Cabinet.models import ReferralLink, Student, TariffPlan
 
         self.teacher = User.objects.create_user(username="sec_teacher", password="pass")
+        self.teacher.profile.role = Profile.Role.TEACHER
+        self.teacher.profile.save(update_fields=["role"])
         self.pro_plan, _ = TariffPlan.objects.get_or_create(
             slug="pro",
             defaults={"name": "Профи", "price_month": Decimal("1990"), "sort_order": 2},
@@ -1851,6 +1853,70 @@ class SecurityHardeningTests(TestCase):
             validate_uploaded_file(
                 SimpleUploadedFile("virus.exe", b"MZ", content_type="application/octet-stream")
             )
+
+    def test_teacher_can_upload_interactive_image_file(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        upload = SimpleUploadedFile("card.png", b"png-bytes", content_type="image/png")
+
+        response = client.post(
+            "/api/cabinet/interactives/upload-image/",
+            {"file": upload},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        payload = response.json()
+        self.assertTrue(payload.get("ok"))
+        self.assertTrue(str(payload.get("url") or "").startswith("/media/"))
+        self.assertEqual(payload.get("filename"), "card.png")
+
+    def test_interactive_image_upload_rejects_non_image_file(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        upload = SimpleUploadedFile("card.pdf", b"pdf-bytes", content_type="application/pdf")
+
+        response = client.post(
+            "/api/cabinet/interactives/upload-image/",
+            {"file": upload},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        payload = response.json()
+        self.assertEqual(payload.get("code"), "IMAGE_TYPE_NOT_ALLOWED")
+
+    def test_interactive_create_ignores_unknown_appearance_slugs(self):
+        from Cabinet.models import Interactive
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        response = client.post(
+            "/api/cabinet/interactives/",
+            data={
+                "title": "",
+                "interactive_type": "flashcards",
+                "direction": "other",
+                "exam_type": "none",
+                "status": "draft",
+                "background_slug": "light-gray",
+                "card_style_slug": "classic",
+                "sound_pack_slug": "soft",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        interactive = Interactive.objects.filter(teacher=self.teacher).order_by("-id").first()
+        self.assertIsNotNone(interactive)
+        self.assertEqual(interactive.title, "Без названия")
+        self.assertIsNone(interactive.background_id)
+        self.assertIsNone(interactive.card_style_id)
+        self.assertIsNone(interactive.sound_pack_id)
 
     def test_invitation_preview_masks_email(self):
         from Cabinet.invitations import create_student_invitation, invitation_preview_payload

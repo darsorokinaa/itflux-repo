@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import InteractiveEditorPreview from "../components/InteractiveEditorPreview";
 import InteractiveEditorSettings from "../components/InteractiveEditorSettings";
+import InteractiveImageField from "../components/InteractiveImageField";
 import QuizEditor from "../components/QuizEditor";
 import WheelEditor from "../components/WheelEditor";
 import { CabinetPageShell } from "../CabinetSectionUi";
@@ -19,6 +20,7 @@ import {
   createInteractive,
   fetchInteractive,
   publishInteractive,
+  uploadInteractiveImage,
   updateInteractive,
 } from "../../utils/cabinetAuth";
 import {
@@ -134,7 +136,15 @@ function EditorItemShell({
   );
 }
 
-function FlashcardsEditor({ data, onCardsChange, openIndex, setOpenIndex, isMobile }) {
+function FlashcardsEditor({
+  data,
+  onCardsChange,
+  onImageUpload,
+  imageUploading,
+  openIndex,
+  setOpenIndex,
+  isMobile,
+}) {
   const [dragIndex, setDragIndex] = useState(null);
   const [overIndex, setOverIndex] = useState(null);
 
@@ -236,26 +246,30 @@ function FlashcardsEditor({ data, onCardsChange, openIndex, setOpenIndex, isMobi
                   <span>Лицевая сторона</span>
                   <input value={card.front} placeholder="Термин" onChange={(e) => updateCard(index, "front", e.target.value)} />
                 </label>
-                <label className="ix-ed-field">
-                  <span>Картинка (лицевая)</span>
-                  <input
-                    value={card.front_image_url || ""}
-                    placeholder="https://..."
-                    onChange={(e) => updateCard(index, "front_image_url", e.target.value)}
-                  />
-                </label>
+                <InteractiveImageField
+                  label="Картинка (лицевая)"
+                  value={card.front_image_url || ""}
+                  uploading={imageUploading}
+                  onUpload={async (file) => {
+                    const url = await onImageUpload(file);
+                    updateCard(index, "front_image_url", url);
+                  }}
+                  onClear={() => updateCard(index, "front_image_url", "")}
+                />
                 <label className="ix-ed-field">
                   <span>Обратная сторона</span>
                   <input value={card.back} placeholder="Ответ" onChange={(e) => updateCard(index, "back", e.target.value)} />
                 </label>
-                <label className="ix-ed-field">
-                  <span>Картинка (обратная)</span>
-                  <input
-                    value={card.back_image_url || ""}
-                    placeholder="https://..."
-                    onChange={(e) => updateCard(index, "back_image_url", e.target.value)}
-                  />
-                </label>
+                <InteractiveImageField
+                  label="Картинка (обратная)"
+                  value={card.back_image_url || ""}
+                  uploading={imageUploading}
+                  onUpload={async (file) => {
+                    const url = await onImageUpload(file);
+                    updateCard(index, "back_image_url", url);
+                  }}
+                  onClear={() => updateCard(index, "back_image_url", "")}
+                />
                 <label className="ix-ed-field">
                   <span>Подсказка</span>
                   <input value={card.hint} placeholder="Необязательно" onChange={(e) => updateCard(index, "hint", e.target.value)} />
@@ -273,7 +287,15 @@ function FlashcardsEditor({ data, onCardsChange, openIndex, setOpenIndex, isMobi
   );
 }
 
-function MatchingEditor({ data, onPairsChange, openIndex, setOpenIndex, isMobile }) {
+function MatchingEditor({
+  data,
+  onPairsChange,
+  onImageUpload,
+  imageUploading,
+  openIndex,
+  setOpenIndex,
+  isMobile,
+}) {
   const [dragIndex, setDragIndex] = useState(null);
   const [overIndex, setOverIndex] = useState(null);
 
@@ -364,26 +386,30 @@ function MatchingEditor({ data, onPairsChange, openIndex, setOpenIndex, isMobile
                   <span>Слева</span>
                   <input value={pair.left} onChange={(e) => updatePair(index, "left", e.target.value)} />
                 </label>
-                <label className="ix-ed-field">
-                  <span>Картинка слева</span>
-                  <input
-                    value={pair.left_image_url || ""}
-                    placeholder="https://..."
-                    onChange={(e) => updatePair(index, "left_image_url", e.target.value)}
-                  />
-                </label>
+                <InteractiveImageField
+                  label="Картинка слева"
+                  value={pair.left_image_url || ""}
+                  uploading={imageUploading}
+                  onUpload={async (file) => {
+                    const url = await onImageUpload(file);
+                    updatePair(index, "left_image_url", url);
+                  }}
+                  onClear={() => updatePair(index, "left_image_url", "")}
+                />
                 <label className="ix-ed-field">
                   <span>Справа</span>
                   <input value={pair.right} onChange={(e) => updatePair(index, "right", e.target.value)} />
                 </label>
-                <label className="ix-ed-field">
-                  <span>Картинка справа</span>
-                  <input
-                    value={pair.right_image_url || ""}
-                    placeholder="https://..."
-                    onChange={(e) => updatePair(index, "right_image_url", e.target.value)}
-                  />
-                </label>
+                <InteractiveImageField
+                  label="Картинка справа"
+                  value={pair.right_image_url || ""}
+                  uploading={imageUploading}
+                  onUpload={async (file) => {
+                    const url = await onImageUpload(file);
+                    updatePair(index, "right_image_url", url);
+                  }}
+                  onClear={() => updatePair(index, "right_image_url", "")}
+                />
                 <label className="ix-ed-field ix-ed-field--wide">
                   <span>Пояснение</span>
                   <input value={pair.explanation} onChange={(e) => updatePair(index, "explanation", e.target.value)} />
@@ -397,7 +423,15 @@ function MatchingEditor({ data, onPairsChange, openIndex, setOpenIndex, isMobile
   );
 }
 
-function SequenceEditor({ data, onStepsChange, openIndex, setOpenIndex, isMobile }) {
+function SequenceEditor({
+  data,
+  onStepsChange,
+  onImageUpload,
+  imageUploading,
+  openIndex,
+  setOpenIndex,
+  isMobile,
+}) {
   const [dragIndex, setDragIndex] = useState(null);
   const [overIndex, setOverIndex] = useState(null);
 
@@ -485,14 +519,16 @@ function SequenceEditor({ data, onStepsChange, openIndex, setOpenIndex, isMobile
                 <span>Текст</span>
                 <input value={step.text} onChange={(e) => updateStep(index, "text", e.target.value)} />
               </label>
-              <label className="ix-ed-field ix-ed-field--wide">
-                <span>Картинка</span>
-                <input
-                  value={step.image_url || ""}
-                  placeholder="https://..."
-                  onChange={(e) => updateStep(index, "image_url", e.target.value)}
-                />
-              </label>
+              <InteractiveImageField
+                label="Картинка"
+                value={step.image_url || ""}
+                uploading={imageUploading}
+                onUpload={async (file) => {
+                  const url = await onImageUpload(file);
+                  updateStep(index, "image_url", url);
+                }}
+                onClear={() => updateStep(index, "image_url", "")}
+              />
               <label className="ix-ed-field">
                 <span>Позиция</span>
                 <input type="number" min={1} value={step.position} onChange={(e) => updateStep(index, "position", e.target.value)} />
@@ -527,7 +563,9 @@ export default function CabinetInteractiveEditorPage() {
   const [loadError, setLoadError] = useState("");
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
   const [publishError, setPublishError] = useState("");
+  const [imageError, setImageError] = useState("");
   const [openItemIndex, setOpenItemIndex] = useState(0);
   const { catalog } = useInteractiveAppearanceCatalog();
 
@@ -631,6 +669,27 @@ export default function CabinetInteractiveEditorPage() {
     setSaved(false);
   };
 
+  const onImageUpload = useCallback(async (file) => {
+    if (!file) throw new Error("Файл не выбран");
+    setImageUploading(true);
+    setImageError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const data = await uploadInteractiveImage(formData);
+      const url = String(data?.url || "").trim();
+      if (!url) throw new Error("Сервер не вернул ссылку на файл");
+      setSaved(false);
+      return url;
+    } catch (err) {
+      const message = err?.message || "Не удалось загрузить изображение";
+      setImageError(message);
+      throw err instanceof Error ? err : new Error(message);
+    } finally {
+      setImageUploading(false);
+    }
+  }, []);
+
   const handlePublish = async () => {
     if (data.type === "wheel" && !wheelCanPublish(data)) {
       setPublishError(wheelPublishError(data));
@@ -685,6 +744,7 @@ export default function CabinetInteractiveEditorPage() {
 
       {saved ? <p className="ix-ed-saved" role="status">Сохранено</p> : null}
       {publishError ? <p className="ix-ed-error" role="alert">{publishError}</p> : null}
+      {imageError ? <p className="ix-ed-error" role="alert">{imageError}</p> : null}
 
       <div className="ix-ed-layout">
         <div className="ix-ed-layout__main">
@@ -701,6 +761,8 @@ export default function CabinetInteractiveEditorPage() {
             <FlashcardsEditor
               data={data}
               onCardsChange={(cards) => onChange("cards", cards)}
+              onImageUpload={onImageUpload}
+              imageUploading={imageUploading}
               openIndex={openItemIndex}
               setOpenIndex={setOpenItemIndex}
               isMobile={isMobile}
@@ -710,6 +772,8 @@ export default function CabinetInteractiveEditorPage() {
             <MatchingEditor
               data={data}
               onPairsChange={(pairs) => onChange("pairs", pairs)}
+              onImageUpload={onImageUpload}
+              imageUploading={imageUploading}
               openIndex={openItemIndex}
               setOpenIndex={setOpenItemIndex}
               isMobile={isMobile}
@@ -719,6 +783,8 @@ export default function CabinetInteractiveEditorPage() {
             <SequenceEditor
               data={data}
               onStepsChange={(steps) => onChange("steps", steps)}
+              onImageUpload={onImageUpload}
+              imageUploading={imageUploading}
               openIndex={openItemIndex}
               setOpenIndex={setOpenItemIndex}
               isMobile={isMobile}
@@ -728,6 +794,8 @@ export default function CabinetInteractiveEditorPage() {
             <QuizEditor
               data={data}
               onQuestionsChange={(questions) => onChange("questions", questions)}
+              onImageUpload={onImageUpload}
+              imageUploading={imageUploading}
               openIndex={openItemIndex}
               setOpenIndex={setOpenItemIndex}
               isMobile={isMobile}

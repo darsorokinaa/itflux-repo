@@ -884,6 +884,34 @@ class InteractiveViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         assignment = serializer.save(teacher=self.get_teacher())
         return Response(InteractiveAssignmentSerializer(assignment).data, status=status.HTTP_201_CREATED)
 
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="upload-image",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def upload_image(self, request):
+        import uuid
+
+        from .homework_api import _safe_upload_filename
+        from .upload_validation import UploadValidationError, validate_uploaded_image
+
+        uploaded = request.FILES.get("file")
+        if not uploaded:
+            return Response({"error": "file required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            validate_uploaded_image(uploaded)
+        except UploadValidationError as exc:
+            return Response({"error": exc.message, "code": exc.code}, status=status.HTTP_400_BAD_REQUEST)
+
+        safe_name = _safe_upload_filename(uploaded.name)
+        uid = uuid.uuid4().hex[:12]
+        rel_path = f"cabinet/interactives/uploads/{self.get_teacher().pk}/{uid}_{safe_name}"
+        saved_path = default_storage.save(rel_path, uploaded)
+        file_url = default_storage.url(saved_path)
+        return Response({"ok": True, "url": file_url, "filename": safe_name}, status=status.HTTP_201_CREATED)
+
 
 class InteractiveAssignmentViewSet(TeacherScopedMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
     serializer_class = InteractiveAssignmentSerializer

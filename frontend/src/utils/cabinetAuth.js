@@ -2,6 +2,18 @@ function apiBase() {
   return "/api/cabinet";
 }
 
+function collectApiMessages(value) {
+  if (value == null) return [];
+  if (typeof value === "string") return value.trim() ? [value.trim()] : [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectApiMessages(item));
+  }
+  if (typeof value === "object") {
+    return Object.values(value).flatMap((item) => collectApiMessages(item));
+  }
+  return [];
+}
+
 function formatApiError(data, fallback = "Ошибка запроса") {
   if (!data || typeof data !== "object") return fallback;
   if (typeof data.error === "string" && data.error.trim()) return data.error;
@@ -9,11 +21,7 @@ function formatApiError(data, fallback = "Ошибка запроса") {
   if (typeof data.message === "string" && data.message.trim()) return data.message;
   const fieldMessages = Object.entries(data)
     .filter(([key]) => !["error", "detail", "message", "code", "conflicts"].includes(key))
-    .flatMap(([, value]) => {
-      if (Array.isArray(value)) return value.map(String);
-      if (typeof value === "string") return [value];
-      return [];
-    })
+    .flatMap(([, value]) => collectApiMessages(value))
     .filter(Boolean);
   if (fieldMessages.length) return fieldMessages.join(" ");
   if (data.detail && typeof data.detail === "object") {
@@ -541,6 +549,10 @@ export function assignInteractive(interactiveId, payload) {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function uploadInteractiveImage(formData) {
+  return cabinetFetchMultipart("/interactives/upload-image/", formData);
 }
 
 export function fetchInteractiveAppearance() {

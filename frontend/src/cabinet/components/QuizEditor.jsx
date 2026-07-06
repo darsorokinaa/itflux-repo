@@ -6,6 +6,7 @@ import {
   summarizeQuestion,
 } from "../quizUtils";
 import { reorderList } from "../interactivesEditorUtils";
+import InteractiveImageField from "./InteractiveImageField";
 
 function SegmentedControl({ options, value, onChange, ariaLabel }) {
   return (
@@ -25,7 +26,15 @@ function SegmentedControl({ options, value, onChange, ariaLabel }) {
   );
 }
 
-function QuizAnswerRow({ answer, answerType, onChange, onRemove, canRemove }) {
+function QuizAnswerRow({
+  answer,
+  answerType,
+  onChange,
+  onRemove,
+  canRemove,
+  onUploadImage,
+  imageUploading,
+}) {
   const toggleCorrect = () => {
     if (answerType === "single") {
       onChange({ ...answer, is_correct: true }, "single-select");
@@ -52,11 +61,16 @@ function QuizAnswerRow({ answer, answerType, onChange, onRemove, canRemove }) {
           placeholder="Текст ответа"
           onChange={(e) => onChange({ ...answer, text: e.target.value })}
         />
-        <input
-          className="ix-quiz-answer__image"
+        <InteractiveImageField
+          label="Картинка варианта"
           value={answer.image_url || ""}
-          placeholder="Картинка: https://..."
-          onChange={(e) => onChange({ ...answer, image_url: e.target.value })}
+          compact
+          uploading={imageUploading}
+          onUpload={async (file) => {
+            const url = await onUploadImage(file);
+            onChange({ ...answer, image_url: url });
+          }}
+          onClear={() => onChange({ ...answer, image_url: "" })}
         />
       </div>
       {canRemove ? (
@@ -71,6 +85,8 @@ function QuizAnswerRow({ answer, answerType, onChange, onRemove, canRemove }) {
 export default function QuizEditor({
   data,
   onQuestionsChange,
+  onImageUpload,
+  imageUploading = false,
   openIndex,
   setOpenIndex,
   isMobile,
@@ -196,14 +212,16 @@ export default function QuizEditor({
                     onChange={(e) => updateQuestion(index, { text: e.target.value })}
                   />
                 </label>
-                <label className="ix-ed-field ix-ed-field--wide">
-                  <span>Картинка вопроса</span>
-                  <input
-                    value={question.image_url || ""}
-                    placeholder="https://..."
-                    onChange={(e) => updateQuestion(index, { image_url: e.target.value })}
-                  />
-                </label>
+                <InteractiveImageField
+                  label="Картинка вопроса"
+                  value={question.image_url || ""}
+                  uploading={imageUploading}
+                  onUpload={async (file) => {
+                    const url = await onImageUpload(file);
+                    updateQuestion(index, { image_url: url });
+                  }}
+                  onClear={() => updateQuestion(index, { image_url: "" })}
+                />
 
                 <div className="ix-ed-field">
                   <span>Тип ответа</span>
@@ -231,6 +249,8 @@ export default function QuizEditor({
                       answer={answer}
                       answerType={question.answer_type || "single"}
                       canRemove={(question.answers || []).length > 2}
+                      onUploadImage={onImageUpload}
+                      imageUploading={imageUploading}
                       onChange={(next, mode) => updateAnswer(index, aIndex, next, mode)}
                       onRemove={() => removeAnswer(index, aIndex)}
                     />

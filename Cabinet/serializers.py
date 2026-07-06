@@ -1003,27 +1003,41 @@ class InteractiveDetailSerializer(InteractiveListSerializer):
         ]
 
 
+class LenientSlugRelatedField(serializers.SlugRelatedField):
+    """Unknown/empty slug values are treated as null for soft-fallbacks."""
+
+    def to_internal_value(self, data):
+        if data in (None, ""):
+            return None
+        if isinstance(data, str) and data.strip() == "":
+            return None
+        try:
+            return super().to_internal_value(data)
+        except serializers.ValidationError:
+            return None
+
+
 class InteractiveWriteSerializer(serializers.ModelSerializer):
     flashcards = FlashcardItemSerializer(many=True, required=False)
     matching_pairs = MatchingPairSerializer(many=True, required=False)
     ordering_items = OrderingItemSerializer(many=True, required=False)
     quiz_questions = QuizQuestionSerializer(many=True, required=False)
     wheel_segments = WheelSegmentSerializer(many=True, required=False)
-    background_slug = serializers.SlugRelatedField(
+    background_slug = LenientSlugRelatedField(
         slug_field="slug",
         queryset=InteractiveBackground.objects.filter(is_active=True),
         source="background",
         required=False,
         allow_null=True,
     )
-    card_style_slug = serializers.SlugRelatedField(
+    card_style_slug = LenientSlugRelatedField(
         slug_field="slug",
         queryset=InteractiveCardStyle.objects.filter(is_active=True),
         source="card_style",
         required=False,
         allow_null=True,
     )
-    sound_pack_slug = serializers.SlugRelatedField(
+    sound_pack_slug = LenientSlugRelatedField(
         slug_field="slug",
         queryset=InteractiveSoundPack.objects.filter(is_active=True),
         source="sound_pack",
@@ -1056,6 +1070,13 @@ class InteractiveWriteSerializer(serializers.ModelSerializer):
             "quiz_questions",
             "wheel_segments",
         ]
+        extra_kwargs = {
+            "title": {"required": False, "allow_blank": True},
+        }
+
+    def validate_title(self, value):
+        text = (value or "").strip()
+        return text or "Без названия"
 
     def _save_items(self, interactive, validated_data):
         flashcards = validated_data.pop("flashcards", None)

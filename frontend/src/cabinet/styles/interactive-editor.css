@@ -194,6 +194,73 @@
   padding-top: 4px;
 }
 
+.ix-ed-file-input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ix-ed-image-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ix-ed-image-field__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #64748B;
+}
+
+.ix-ed-image-field__preview {
+  width: 100%;
+  max-height: 150px;
+  object-fit: contain;
+  border: 1px solid #CBD5E1;
+  border-radius: 12px;
+  background: #FFFFFF;
+}
+
+.ix-ed-image-field__empty {
+  min-height: 88px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #CBD5E1;
+  border-radius: 12px;
+  background: #F8FAFC;
+  color: #64748B;
+  font-size: 0.78rem;
+}
+
+.ix-ed-image-field__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ix-ed-image-field__error {
+  margin: 0;
+  color: #DC2626;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.ix-ed-image-field--compact .ix-ed-image-field__label {
+  font-size: 0.68rem;
+}
+
+.ix-ed-image-field--compact .ix-ed-image-field__preview {
+  max-height: 110px;
+}
+
+.ix-ed-image-field--compact .ix-ed-image-field__empty {
+  min-height: 60px;
+}
+
 .ix-ed-field__note {
   margin: 6px 0 0;
   font-size: 0.72rem;
@@ -938,17 +1005,6 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-.ix-quiz-answer__image {
-  width: 100%;
-  border: none;
-  background: #F8FAFC;
-  border-radius: 10px;
-  padding: 7px 10px;
-  font: inherit;
-  color: #475569;
-  outline: none;
 }
 
 .ix-quiz-answer__remove {

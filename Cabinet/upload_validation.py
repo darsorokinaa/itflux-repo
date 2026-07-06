@@ -26,6 +26,14 @@ ALLOWED_UPLOAD_CONTENT_TYPES = frozenset({
     "application/x-zip-compressed",
 })
 
+ALLOWED_IMAGE_EXTENSIONS = frozenset({
+    ".png", ".jpg", ".jpeg", ".gif", ".webp",
+})
+
+ALLOWED_IMAGE_CONTENT_TYPES = frozenset({
+    "image/png", "image/jpeg", "image/gif", "image/webp",
+})
+
 
 class UploadValidationError(Exception):
     def __init__(self, message: str, code: str = "INVALID_UPLOAD"):
@@ -54,3 +62,19 @@ def validate_uploaded_file(uploaded) -> None:
     content_type = (getattr(uploaded, "content_type", "") or "").split(";", 1)[0].strip().lower()
     if content_type and content_type not in ALLOWED_UPLOAD_CONTENT_TYPES:
         raise UploadValidationError("Недопустимый тип содержимого файла", "FILE_TYPE_NOT_ALLOWED")
+
+
+def validate_uploaded_image(uploaded) -> None:
+    validate_uploaded_file(uploaded)
+
+    name = getattr(uploaded, "name", "") or "file"
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in ALLOWED_IMAGE_EXTENSIONS:
+        raise UploadValidationError(
+            f"Поддерживаются только изображения ({ext or 'без расширения'})",
+            "IMAGE_TYPE_NOT_ALLOWED",
+        )
+
+    content_type = (getattr(uploaded, "content_type", "") or "").split(";", 1)[0].strip().lower()
+    if content_type and content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
+        raise UploadValidationError("Можно загружать только изображения", "IMAGE_TYPE_NOT_ALLOWED")
