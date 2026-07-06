@@ -76,9 +76,7 @@ export const VARIANT_PDF_OPTIONS: Required<WorkbookOptions> = {
 };
 
 export function variantTasksToWorkbookTasks(tasks: VariantPdfTask[]): WorkbookTask[] {
-  return [...tasks]
-    .sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0))
-    .map((task) => ({
+  return tasks.map((task) => ({
       id: task.id,
       task_number: task.number != null ? Number(task.number) : null,
       text: task.text || "",
@@ -270,7 +268,8 @@ function renderTask(
   task: WorkbookTask,
   index: number,
   options: Required<WorkbookOptions>,
-  variantMode = false
+  variantMode = false,
+  subject?: string
 ): string {
   const num = displayTaskNumber(task, index);
   const idHtml = `<span class="wb-task__id"${options.showTaskIds ? "" : ' style="display:none"'}">${escapeHtml(String(task.id))}</span>`;
@@ -300,7 +299,7 @@ function renderTask(
           ${idHtml}
         </div>
         <div class="wb-task__content">
-          <div class="workbook-task__body">${prepareTaskHtml(task.text, meta.subject)}</div>
+          <div class="workbook-task__body">${prepareTaskHtml(task.text, subject)}</div>
         </div>
         ${scoreHtml}
       </div>
@@ -313,7 +312,8 @@ function renderTask(
 
 function renderVariantTasksHtml(
   tasks: WorkbookTask[],
-  options: Required<WorkbookOptions>
+  options: Required<WorkbookOptions>,
+  subject?: string
 ): string {
   const chunks: string[] = [];
   let lastPart: 1 | 2 | null = null;
@@ -324,7 +324,7 @@ function renderVariantTasksHtml(
       chunks.push(`<h2 class="wb-part-title">Часть ${part}</h2>`);
       lastPart = part;
     }
-    chunks.push(renderTask(task, index, options, true));
+    chunks.push(renderTask(task, index, options, true, subject));
   });
 
   return chunks.join("\n");
@@ -333,23 +333,26 @@ function renderVariantTasksHtml(
 function renderTasksHtml(
   tasks: WorkbookTask[],
   options: Required<WorkbookOptions>,
-  mode?: WorkbookMeta["mode"]
+  mode?: WorkbookMeta["mode"],
+  subject?: string
 ): string {
   if (mode === "variant") {
-    return renderVariantTasksHtml(tasks, options);
+    return renderVariantTasksHtml(tasks, options, subject);
   }
-  return tasks.map((task, index) => renderTask(task, index, options, false)).join("\n");
+  return tasks
+    .map((task, index) => renderTask(task, index, options, false, subject))
+    .join("\n");
 }
 
 function buildAnswerKeySectionHtml(
   tasks: WorkbookTask[],
-  mode?: WorkbookMeta["mode"]
+  subject?: string
 ): string {
   const rows = tasks
     .map((task, index) => {
       const num = displayTaskNumber(task, index);
       const body = task.answer?.trim()
-        ? prepareTaskHtml(task.answer, meta.subject)
+        ? prepareTaskHtml(task.answer, subject)
         : '<span class="wb-answer-key-empty">—</span>';
       return `<tr>
         <td class="wb-answer-key-table__num">${num}</td>
@@ -1472,9 +1475,9 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
   const subtitle = meta.subtitle?.trim() ?? "";
   const { center: headerCenter, right: headerRight } = parseWorkbookHeader(subtitle);
   const options = normalizeOptions(meta.options);
-  const tasksHtml = renderTasksHtml(tasks, options, meta.mode);
+  const tasksHtml = renderTasksHtml(tasks, options, meta.mode, meta.subject);
   const sheetInfoHtml = buildSheetInfoHtml(tasks, meta.mode);
-  const answerKeyHtml = buildAnswerKeySectionHtml(tasks, meta.mode);
+  const answerKeyHtml = buildAnswerKeySectionHtml(tasks, meta.subject);
 
   const pageHeaderCenter = [headerCenter, meta.examDuration].filter(Boolean).join(" · ");
 
@@ -1687,7 +1690,14 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
 }
 
 export function openWorkbook(tasks: WorkbookTask[], meta: WorkbookMeta): void {
-  const html = buildWorkbookHtml(tasks, meta);
+  let html = "";
+  try {
+    html = buildWorkbookHtml(tasks, meta);
+  } catch (err) {
+    console.error("WORKBOOK_BUILD_ERR:", err);
+    window.alert("Не удалось сформировать файл. Обновите страницу и попробуйте снова.");
+    return;
+  }
   const win = window.open("", "_blank");
   if (!win) {
     window.alert("Разрешите всплывающие окна, чтобы открыть рабочую тетрадь.");

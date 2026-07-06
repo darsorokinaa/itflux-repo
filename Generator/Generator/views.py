@@ -2149,7 +2149,8 @@ def api_task_bank(request, level, subject):
 
     total = qs.count()
     offset = (page - 1) * per_page
-    tasks_qs = qs.order_by('task__task_number', 'id')[offset:offset + per_page]
+    # Дефолтный порядок в банке задач: сначала недавно добавленные.
+    tasks_qs = qs.order_by('-added_at', '-id')[offset:offset + per_page]
 
     result = []
     for task in tasks_qs:
