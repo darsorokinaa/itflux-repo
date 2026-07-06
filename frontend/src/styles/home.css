@@ -4163,12 +4163,27 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   margin: 0 0.04em !important;
 }
 
+/* Фолбэк: innerimg/xs3qstsrc как прямой ребёнок <p> внутри текста (без обёртки span) */
+.exam-page .task-text p > img[src*="innerimg"]:not(.oge-math-fipi-diagram):not(.oge-math-fipi-inline-letter):not(.oge-math-fipi-inline-frac),
+.exam-page .task-text p > img[src*="xs3qstsrc"]:not(.oge-math-fipi-diagram):not(.oge-math-fipi-inline-letter):not(.oge-math-fipi-inline-frac),
+.exam-task-card__text p > img[src*="innerimg"]:not(.oge-math-fipi-diagram):not(.oge-math-fipi-inline-letter):not(.oge-math-fipi-inline-frac),
+.exam-task-card__text p > img[src*="xs3qstsrc"]:not(.oge-math-fipi-diagram):not(.oge-math-fipi-inline-letter):not(.oge-math-fipi-inline-frac),
+.all-tasks-item__html p > img[src*="innerimg"]:not(.oge-math-fipi-diagram):not(.oge-math-fipi-inline-letter):not(.oge-math-fipi-inline-frac),
+.all-tasks-item__html p > img[src*="xs3qstsrc"]:not(.oge-math-fipi-diagram):not(.oge-math-fipi-inline-letter):not(.oge-math-fipi-inline-frac) {
+  display: inline-block !important;
+  vertical-align: middle !important;
+  width: auto !important;
+  max-width: none !important;
+  height: auto !important;
+  max-height: 3.1em !important;
+  margin: 0 0.06em !important;
+  border: none !important;
+}
+
 /* ФИПИ: схема/рисунок — отдельный абзац с одной картинкой */
 .exam-page .task:not(.task-geom) .task-text img.oge-math-fipi-diagram,
-.exam-page .task:not(.task-geom) .task-text p:has(> img[src*="innerimg"]:only-child) > img[src*="innerimg"],
 .exam-task-card__text img.oge-math-fipi-diagram,
-.all-tasks-item__html img.oge-math-fipi-diagram,
-.all-tasks-item__html p:has(> img[src*="innerimg"]:only-child) > img[src*="innerimg"] {
+.all-tasks-item__html img.oge-math-fipi-diagram {
   display: block !important;
   width: auto !important;
   max-width: 100% !important;
@@ -4181,7 +4196,8 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
 }
 
 .exam-page .task-alg .task-text img.oge-math-fipi-diagram,
-.exam-page .task-alg .task-text p:has(> img[src*="innerimg"]:only-child) > img[src*="innerimg"] {
+.exam-task-card__text img.oge-math-fipi-diagram,
+.all-tasks-item__html img.oge-math-fipi-diagram {
   width: auto !important;
   max-width: 100% !important;
 }
