@@ -71,6 +71,7 @@ function TaskCondition({ task, level, subject }) {
         <MathContent
           html={task.text}
           className="cb-review-detail__task-text task-text"
+          ogeMathChoiceEnhance={subject === "math"}
           ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
           ogeInf6Enhance={isOgeInformaticsTask(level, subject, task.number, 6)}
           egeInfFileEnhance={isEgeInformaticsContext(level, subject)}

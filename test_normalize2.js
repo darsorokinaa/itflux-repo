@@ -1,19 +1,19 @@
 const { JSDOM } = require('jsdom');
 const dom = new JSDOM();
+const document = dom.window.document;
 
-function process(html) {
-  const doc = dom.window.document.createElement('div');
-  doc.innerHTML = html;
-  
-  // This is what my formatEgeInf2TruthTableHtml does to the text nodes!
-  function normalizeCellText(el) {
-    return (el?.textContent || "")
-      .replace(/\u00a0/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+const html = `<div><figure class="table"><div class="task-html-block"><figure class="table"><table><tbody><tr><td><strong>1)</strong>&nbsp;</td><td><p>Напишите сочинение-рассуждение</p></td></tr></tbody></table></figure></div></figure></div>`;
+
+const tempDiv = document.createElement("div");
+tempDiv.innerHTML = html;
+
+tempDiv.querySelectorAll("figure").forEach((fig) => {
+  const table = fig.querySelector("table");
+  if (table && table.parentElement === fig) {
+    fig.replaceWith(table);
+  } else if (table && fig.textContent.trim() === table.textContent.trim()) {
+    fig.replaceWith(table);
   }
-  
-  return doc.innerHTML;
-}
+});
 
-console.log(process('<p>(x /\\ y) \\/ z</p>'));
+console.log(tempDiv.innerHTML);

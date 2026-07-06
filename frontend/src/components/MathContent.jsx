@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef } from "react";
 import { formatOgeInformaticsTask13Html } from "../utils/formatOgeInf13TaskHtml";
-import { decorateFipiTaskImages, formatOgeMathChoiceTaskHtml } from "../utils/formatOgeMathChoiceTaskHtml";
+import { decorateFipiTaskImages, formatOgeMathChoiceTaskHtml, normalizeCkEditorMarkup } from "../utils/formatOgeMathChoiceTaskHtml";
 import { formatOgeMathMatchingTaskHtml } from "../utils/formatOgeMathMatchingTaskHtml";
 import { formatEgeInf22ParallelProcessesHtml } from "../utils/formatEgeInf22TaskHtml";
 import { formatEgeInf2TruthTableHtml } from "../utils/formatEgeInf2TaskHtml";
@@ -471,7 +471,8 @@ function pipeTaskHtmlFormatter(html, formatter) {
   }
 }
 
-function preparePlainBankTaskHtml(raw) {
+function preparePlainBankTaskHtml(raw, options = {}) {
+  const { ogeMathChoiceEnhance = true } = options;
   const decoded = decodeHtmlEntityLayersIfStoredEscaped(raw);
   let s = stripEmbeddedStyleBlocks(decoded);
   s = normalizeEscapedTaskSymbols(s);
@@ -484,12 +485,31 @@ function preparePlainBankTaskHtml(raw) {
   s = pipeTaskHtmlFormatter(s, formatEgeInf1RoadGraphHtml);
   s = pipeTaskHtmlFormatter(s, formatOgeInformaticsTask13Html);
   s = pipeTaskHtmlFormatter(s, formatOgeInf6TaskHtml);
+  
+  // Unconditionally remove CKEditor's <figure class="table"> wrappers
+  if (typeof document !== "undefined") {
+    const tempDiv = document.createElement("div");
+    tempDiv.innerHTML = s;
+    tempDiv.querySelectorAll("figure").forEach((fig) => {
+      const table = fig.querySelector("table");
+      if (table && table.parentElement === fig) {
+        fig.replaceWith(table);
+      } else if (table && fig.textContent.trim() === table.textContent.trim()) {
+        fig.replaceWith(table);
+      }
+    });
+    s = tempDiv.innerHTML;
+  }
+
   // Соответствие А/Б/В ↔ 1/2/3 (ОГЭ мат. №11) — до choice, иначе 1) 2) путаются с вариантами.
   const matched = formatOgeMathMatchingTaskHtml(s);
   const afterMatch = matched && matched.trim() ? matched : s;
-  const choiceFormatted = formatOgeMathChoiceTaskHtml(afterMatch);
-  s = choiceFormatted && choiceFormatted.trim() ? choiceFormatted : afterMatch;
-  return s;
+  let sFinal = afterMatch;
+  if (ogeMathChoiceEnhance) {
+    const choiceFormatted = formatOgeMathChoiceTaskHtml(afterMatch);
+    sFinal = choiceFormatted && choiceFormatted.trim() ? choiceFormatted : afterMatch;
+  }
+  return sFinal;
 }
 
 /**
@@ -605,13 +625,13 @@ function isFipiLayoutWrapperTable(table) {
     return false;
   }
   if (table.closest("table") && table.closest("table") !== table) return false;
-  if (!table.querySelector(":scope table")) return false;
+  if (!table.querySelector("table")) return false;
 
   const directCells = [
     ...table.querySelectorAll(":scope > tbody > tr > th, :scope > tbody > tr > td"),
     ...table.querySelectorAll(":scope > tr > th, :scope > tr > td"),
   ];
-  return directCells.some((cell) => cell.querySelector(":scope table"));
+  return directCells.some((cell) => cell.querySelector("table"));
 }
 
 function applyLayoutTableChrome(table) {
@@ -1096,7 +1116,7 @@ function removeDuplicateRoadGraphImages(root, isEgeInf1) {
 
 let mathJaxPromise = Promise.resolve();
 
-function MathContentInner({ html, className, onImageClick, plainHtml = false, ogeInf13Enhance = false, ogeInf6Enhance = false, egeInfFileEnhance = false, egeInf22Enhance = false, egeInf1Enhance = false, egeInf2Enhance = false }) {
+function MathContentInner({ html, className, onImageClick, plainHtml = false, ogeMathChoiceEnhance = true, ogeInf13Enhance = false, ogeInf6Enhance = false, egeInfFileEnhance = false, egeInf22Enhance = false, egeInf1Enhance = false, egeInf2Enhance = false }) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -1110,7 +1130,7 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
     // размонтирует всё дерево при выбросе из эффекта → пустой экран).
     try {
       if (plainHtml) {
-        el.innerHTML = prepareBankTaskDisplayHtml(decoded);
+        el.innerHTML = prepareBankTaskDisplayHtml(decoded, { ogeMathChoiceEnhance });
       } else {
       const normalized = normalizeEscapedTaskSymbols(decoded);
       const afterFipiMath = repairFipiSpanAndLogicMarkup(normalized);
@@ -1147,8 +1167,11 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
       const matched = formatOgeMathMatchingTaskHtml(afterInf6);
       const afterMatch = matched && matched.trim() ? matched : afterInf6;
       // Только отображение: в CKEditor в БД остаются исходные <table>, не oge-math-choice-*.
-      const formatted = formatOgeMathChoiceTaskHtml(afterMatch);
-      const piped = formatted && formatted.trim() ? formatted : afterMatch;
+      let piped = afterMatch;
+      if (ogeMathChoiceEnhance) {
+        const formatted = formatOgeMathChoiceTaskHtml(afterMatch);
+        piped = formatted && formatted.trim() ? formatted : afterMatch;
+      }
       el.innerHTML = convertLogicSpansInsideMathDelimitersToTex(piped);
       reinjectMathEnvTexFromRaw(el, decoded);
       if (shouldNormalizeTables) {
@@ -1212,7 +1235,7 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
     return () => {
       cancelled = true;
     };
-  }, [html, plainHtml, ogeInf13Enhance, ogeInf6Enhance, egeInfFileEnhance, egeInf22Enhance, egeInf1Enhance, egeInf2Enhance]);
+  }, [html, plainHtml, ogeMathChoiceEnhance, ogeInf13Enhance, ogeInf6Enhance, egeInfFileEnhance, egeInf22Enhance, egeInf1Enhance, egeInf2Enhance]);
 
   useEffect(() => {
     if (!onImageClick || !ref.current) return;
@@ -1253,11 +1276,11 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
 }
 
 /** Банк задач / тетрадь: тот же HTML, что в MathContent plainHtml (без typeset). */
-export function prepareBankTaskDisplayHtml(raw) {
+export function prepareBankTaskDisplayHtml(raw, options = {}) {
   if (raw == null || raw === "") return "";
   try {
     const decoded = decodeHtmlEntityLayersIfStoredEscaped(String(raw));
-    const html = preparePlainBankTaskHtml(decoded);
+    const html = preparePlainBankTaskHtml(decoded, options);
     if (typeof document === "undefined") return html;
     const el = document.createElement("div");
     el.innerHTML = html;

@@ -1,15 +1,15 @@
-function normalizeEscapedTaskSymbols(raw) {
-  if (typeof raw !== "string" || !raw) return raw;
-  return raw
-    .replace(/\\([#+^])/g, "$1")
-    .replace(/\\\\end\{/g, "\\\\ \\end{")
-    .replace(/(?<!\\)\\(?=\s|<|$)/g, "");
-}
+const { JSDOM } = require('jsdom');
+const dom = new JSDOM();
+const document = dom.window.document;
 
-const html1 = '<p>(x /\\<span> y) \\/ z</p>';
-const html2 = '<p>¬((x → w) → (w ≡ z)) \\/ y,</p>';
-const html3 = '<p>(x /\\ y) \\/ z</p>';
+const html = `<div><figure class="table"><div class="task-html-block"><figure class="table"><table><tbody><tr><td><strong>1)</strong>&nbsp;</td><td><p>Напишите сочинение-рассуждение</p></td></tr></tbody></table></figure></div></figure></div>`;
 
-console.log("1:", normalizeEscapedTaskSymbols(html1));
-console.log("2:", normalizeEscapedTaskSymbols(html2));
-console.log("3:", normalizeEscapedTaskSymbols(html3));
+const tempDiv = document.createElement("div");
+tempDiv.innerHTML = html;
+
+tempDiv.querySelectorAll("figure").forEach((fig) => {
+  const table = fig.querySelector(":scope > table");
+  if (table) fig.replaceWith(table);
+});
+
+console.log(tempDiv.innerHTML);

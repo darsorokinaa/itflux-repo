@@ -68,12 +68,13 @@ function isOgeInformaticsTask(level, subject, taskNumber, n) {
 }
 
 /** Условие задания — тот же рендер, что на вкладке «Все задачи». */
-function ExamTaskCondition({ html }) {
+function ExamTaskCondition({ html, subject }) {
   return (
     <MathContent
       html={html}
       className="all-tasks-item__html exam-task-card__text task-text"
       plainHtml
+      ogeMathChoiceEnhance={subject === "math"}
     />
   );
 }
@@ -2395,7 +2396,7 @@ function ExamPage() {
                     openBoardForTaskId={eduOpenBoardForTaskId}
                     onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                   >
-                  <ExamTaskCondition html={task.text} />
+                  <ExamTaskCondition html={task.text} subject={subject} />
                   {task.file && <TaskFileAttachment href={task.file} />}
                   {task.author && <div className="task-author">{task.author}</div>}
 
@@ -2780,7 +2781,7 @@ function ExamPage() {
                             openBoardForTaskId={eduOpenBoardForTaskId}
                             onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                           >
-                          <ExamTaskCondition html={task.text} />
+                          <ExamTaskCondition html={task.text} subject={subject} />
                           {task.file && <TaskFileAttachment href={task.file} />}
                           {task.author && <div className="task-author">{task.author}</div>}
 
@@ -2894,7 +2895,7 @@ function ExamPage() {
                         openBoardForTaskId={eduOpenBoardForTaskId}
                         onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                       >
-                      <ExamTaskCondition html={task.text} />
+                      <ExamTaskCondition html={task.text} subject={subject} />
                       {task.file && <TaskFileAttachment href={task.file} />}
                       {task.author && <div className="task-author">{task.author}</div>}
 

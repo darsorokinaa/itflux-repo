@@ -154,6 +154,7 @@ function SearchVariantPage() {
                           html={t.task_text}
                           className="all-tasks-item__html task-text"
                           plainHtml
+                          ogeMathChoiceEnhance={data.variant.subject === "math"}
                         />
                       ) : (
                         <span className="sv-task-text-fallback">Текст задания недоступен.</span>

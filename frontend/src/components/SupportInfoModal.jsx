@@ -125,7 +125,7 @@ export default function SupportInfoModal({ open, items = [], onClose }) {
           {items && items.length > 0 ? (
             items.map((item, i) => (
               <div key={i} className="support-info-item">
-                <MathContent html={item.html} className="support-info-content" />
+                <MathContent html={item.html} className="support-info-content" ogeMathChoiceEnhance={false} />
               </div>
             ))
           ) : (

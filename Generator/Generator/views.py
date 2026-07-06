@@ -3734,6 +3734,7 @@ def search_task(request):
     return JsonResponse({
         "tasks": [{
             "id": task.id,
+            "subject": task.task.subject.subject_short if task.task and task.task.subject else None,
             "task_number": task.task.task_number,
             "task_text": process_latex(str(task.task_template or ""), for_browser=True),
             "answer": task.answer,

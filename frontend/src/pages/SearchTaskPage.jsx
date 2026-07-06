@@ -105,6 +105,7 @@ function SearchTaskPage() {
                   <MathContent 
                     html={t.task_text || ""} 
                     className="search-task-condition" 
+                    ogeMathChoiceEnhance={t.subject === "math"}
                     ogeInf13Enhance={t.task_number === 13}
                     ogeInf6Enhance={t.task_number === 6}
                     egeInfFileEnhance={true}

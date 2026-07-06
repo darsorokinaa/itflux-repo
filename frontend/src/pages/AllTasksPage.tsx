@@ -607,6 +607,7 @@ export default function AllTasksPage() {
     return {
       title: "Рабочая тетрадь",
       subtitle: subtitleParts.join(" · "),
+      subject: subject,
     };
   }, [
     filterOptions?.task_numbers,
@@ -1123,6 +1124,7 @@ export default function AllTasksPage() {
                                           html={t.text || ""}
                                           className="all-tasks-item__html"
                                           plainHtml
+                                          ogeMathChoiceEnhance={subject === "math"}
                                         />
                                         {t.file_url ? (
                                           <TaskFileAttachment href={t.file_url} />
@@ -1271,6 +1273,7 @@ export default function AllTasksPage() {
                               html={t.text || ""}
                               className="all-tasks-item__html"
                               plainHtml
+                              ogeMathChoiceEnhance={subject === "math"}
                             />
                             {t.file_url ? <TaskFileAttachment href={t.file_url} /> : null}
                             {t.author ? (

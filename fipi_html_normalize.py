@@ -532,6 +532,8 @@ def unwrap_layout_tables(html: str) -> str:
     if not html or "<table" not in html.lower():
         return html
     out = html
+    preserved_tables = {}
+    
     for _ in range(64):
         replaced = False
         for m in _RE_INNER_TABLE.finditer(out):
@@ -541,8 +543,18 @@ def unwrap_layout_tables(html: str) -> str:
                 out = out[: m.start()] + new_html + out[m.end() :]
                 replaced = True
                 break
+            else:
+                placeholder = f"__PRESERVED_TABLE_{len(preserved_tables)}__"
+                preserved_tables[placeholder] = table_html
+                out = out[: m.start()] + placeholder + out[m.end() :]
+                replaced = True
+                break
         if not replaced:
             break
+            
+    for placeholder, table_html in reversed(list(preserved_tables.items())):
+        out = out.replace(placeholder, table_html)
+        
     return out
 
 

@@ -76,7 +76,7 @@ function htmlHasVisibleText(html) {
 }
 
 /** CKEditor 5: <figure class="table"> оборачивает таблицы; <b> → <strong> — textContent ок. */
-export function normalizeCkEditorMarkup(root) {
+function normalizeCkEditorMarkup(root) {
   root.querySelectorAll("figure").forEach((fig) => {
     const table = fig.querySelector(":scope > table");
     if (table) fig.replaceWith(table);
@@ -431,7 +431,7 @@ function decorateFipiBitmapImages(root, mode) {
 }
 
 /** Разметка FIPI-картинок в обычных заданиях (не только с вариантами ответа). */
-export function decorateFipiTaskImages(root) {
+function decorateFipiTaskImages(root) {
   decorateFipiBitmapImages(root, "question");
 }
 
@@ -1001,7 +1001,7 @@ function buildChoiceMarkup(questionHtml, choices) {
  * @param {string} html — как в task_template из БД (CKEditor / импорт ФИПИ)
  * @returns {string} — только для отображения, не для сохранения в CKEditor
  */
-export function formatOgeMathChoiceTaskHtml(html) {
+function formatOgeMathChoiceTaskHtml(html) {
   if (html == null || typeof html !== "string") return html;
   const trimmed = repairLatexEscapedChoiceLabels(html.trim());
   if (!trimmed) return html;
@@ -1045,3 +1045,4 @@ export function formatOgeMathChoiceTaskHtml(html) {
   if (!htmlHasVisibleText(built)) return cacheFormatResult(trimmed, html);
   return cacheFormatResult(trimmed, built);
 }
+module.exports = { formatOgeMathChoiceTaskHtml };

@@ -42,6 +42,7 @@ export type WorkbookOptions = {
 export type WorkbookMeta = {
   title: string;
   subtitle?: string;
+  subject?: string;
   /** Заголовок на листе; по умолчанию «Рабочий лист». */
   sheetTitle?: string;
   /** workbook — тетрадь из банка; variant — PDF экзаменационного варианта */
@@ -256,10 +257,10 @@ function renderTaskFileHtml(fileUrl: string | null | undefined): string {
       </div>`;
 }
 
-function prepareTaskHtml(raw: string): string {
+function prepareTaskHtml(raw: string, subject?: string): string {
   if (!raw) return "";
   try {
-    return prepareBankTaskDisplayHtml(raw);
+    return prepareBankTaskDisplayHtml(raw, { ogeMathChoiceEnhance: subject === "math" || !subject });
   } catch {
     return raw;
   }
@@ -299,7 +300,7 @@ function renderTask(
           ${idHtml}
         </div>
         <div class="wb-task__content">
-          <div class="workbook-task__body">${prepareTaskHtml(task.text)}</div>
+          <div class="workbook-task__body">${prepareTaskHtml(task.text, meta.subject)}</div>
         </div>
         ${scoreHtml}
       </div>
@@ -348,7 +349,7 @@ function buildAnswerKeySectionHtml(
     .map((task, index) => {
       const num = displayTaskNumber(task, index);
       const body = task.answer?.trim()
-        ? prepareTaskHtml(task.answer)
+        ? prepareTaskHtml(task.answer, meta.subject)
         : '<span class="wb-answer-key-empty">—</span>';
       return `<tr>
         <td class="wb-answer-key-table__num">${num}</td>
