@@ -9,6 +9,8 @@ import { stripFipiAttachedFileMarkup } from "../utils/formatEgeInfAttachedFileHt
 import { formatOgeInf6TaskHtml } from "../utils/formatOgeInf6TaskHtml";
 import { formatTaskCodeBlocksHtml } from "../utils/formatTaskCodeBlocksHtml";
 import { formatFipiUnicodeMathHtml } from "../utils/formatFipiUnicodeMathHtml";
+import { parseTaskHtmlFragment } from "../utils/parseTaskHtmlFragment";
+import { repairOrphanSpanTags } from "../utils/repairTaskHtmlSpans";
 
 /** Снять слои &lt;…&gt; если HTML целиком попал в БД как экранированный текст. */
 function decodeHtmlEntityLayersIfStoredEscaped(raw) {
@@ -199,25 +201,50 @@ function reinjectMathEnvTexFromRaw(root, raw) {
 }
 
 /** Бэкенд отдаёт <span class="math-inline">&#92;(...&#92;&#41;</span> — MathJax их не всегда подхватывает. */
+function unwrapOneBackendMathSpan(span, root) {
+  if (!span) return;
+  if (span.querySelector("table, pre, .frac, .cases-table")) return;
+  if (span.querySelector(".math-inline, .math-display")) return;
+
+  let tex = repairMalformedInlineMathDelimiters((span.textContent || "").trim());
+  if (!tex) {
+    span.remove();
+    return;
+  }
+  let trailing = "";
+  const delimMatch = tex.match(/^\\\(([\s\S]*?)\\\)\s*(.*)$/);
+  if (delimMatch) {
+    tex = delimMatch[1];
+    trailing = delimMatch[2] || "";
+  } else if (tex.startsWith("\\(") && tex.endsWith("\\)")) {
+    tex = tex.slice(2, -2);
+  } else if (tex.startsWith("\\[") && tex.endsWith("\\]")) {
+    tex = tex.slice(2, -2);
+  }
+  const isDisplay =
+    span.classList.contains("math-display") || INLINE_TO_DISPLAY_TEX_RE.test(tex);
+  const wrapped = isDisplay ? `$$${tex}$$` : `$${tex}$`;
+  const doc = root.ownerDocument;
+  if (trailing) {
+    const frag = doc.createDocumentFragment();
+    frag.appendChild(doc.createTextNode(wrapped));
+    frag.appendChild(doc.createTextNode(trailing));
+    span.replaceWith(frag);
+  } else {
+    span.replaceWith(doc.createTextNode(wrapped));
+  }
+}
+
 function unwrapBackendMathSpans(root) {
   if (!root) return;
-  for (const span of [...root.querySelectorAll(".math-inline, .math-display")]) {
-    // array/tabular уже свёрнуты бэкендом в HTML-таблицу — не заменять на textContent
-    if (span.querySelector("table, pre, .frac, .cases-table")) continue;
-    let tex = repairMalformedInlineMathDelimiters((span.textContent || "").trim());
-    if (!tex) {
-      span.remove();
-      continue;
+  for (let pass = 0; pass < 16; pass += 1) {
+    const leaves = [...root.querySelectorAll(".math-inline, .math-display")].filter(
+      (span) => !span.querySelector(".math-inline, .math-display")
+    );
+    if (!leaves.length) break;
+    for (const span of leaves) {
+      unwrapOneBackendMathSpan(span, root);
     }
-    if (tex.startsWith("\\(") && tex.endsWith("\\)")) {
-      tex = tex.slice(2, -2);
-    } else if (tex.startsWith("\\[") && tex.endsWith("\\]")) {
-      tex = tex.slice(2, -2);
-    }
-    const isDisplay =
-      span.classList.contains("math-display") || INLINE_TO_DISPLAY_TEX_RE.test(tex);
-    const wrapped = isDisplay ? `$$${tex}$$` : `$${tex}$`;
-    span.replaceWith(root.ownerDocument.createTextNode(wrapped));
   }
 }
 
@@ -265,28 +292,29 @@ function repairLogicConnectiveSpanMarkup(raw) {
   return s;
 }
 
-/** FIPI дробит условие на <span> без атрибутов — снимаем обёртки. */
+/** FIPI дробит условие на <span> без атрибутов — снимаем обёртки (не трогаем вложенные span). */
 function unwrapPlainFipiSpans(raw) {
   if (typeof raw !== "string" || !raw) return raw;
-  let s = raw;
-  for (let i = 0; i < 24; i++) {
-    const next = s.replace(/<span>([\s\S]*?)<\/span>/gi, "$1");
-    if (next === s) break;
-    s = next;
+  if (typeof document === "undefined" || !/<span(?![^>]*\bclass=)/i.test(raw)) return raw;
+  const root = parseTaskHtmlFragment(raw);
+  if (!root) return raw;
+  for (let pass = 0; pass < 24; pass += 1) {
+    let changed = false;
+    for (const span of [...root.querySelectorAll("span")]) {
+      if (span.attributes.length > 0) continue;
+      if (span.querySelector("span")) continue;
+      const parent = span.parentNode;
+      if (!parent) continue;
+      while (span.firstChild) parent.insertBefore(span.firstChild, span);
+      parent.removeChild(span);
+      changed = true;
+    }
+    if (!changed) break;
   }
-  return s;
+  return root.innerHTML;
 }
 
-/** Висячие </span>/<span> после flatten ФИПИ — иначе видны как текст. */
-function repairOrphanSpanTags(raw) {
-  if (typeof raw !== "string" || !raw) return raw;
-  return raw
-    .replace(/(<(?:p|div|td|th|li|h[1-6])\b[^>]*>)\s*<\/span>/gi, "$1")
-    .replace(/<span>\s*(<\/(?:p|div|td|th|li|h[1-6])>)/gi, "$1")
-    .replace(/<\/span>\s*<span>/gi, " ")
-    .replace(/<span>\s*(?=<\/)/gi, "")
-    .replace(/<\/span>(?=\s*[^<])/gi, " ");
-}
+/** Висячие </span>/<span> — см. repairTaskHtmlSpans.js */
 
 function looksLikeLogicFormula(text) {
   const t = String(text || "").replace(/\s+/g, " ").trim();
@@ -315,11 +343,7 @@ function wrapLogicFormulasInMathDelimiters(html) {
   if (!/[¬→≡∧∨]|\/\\|\\\//.test(html)) return html;
   if (typeof DOMParser === "undefined") return html;
 
-  const doc = new DOMParser().parseFromString(
-    `<div class="logic-formula-root">${html}</div>`,
-    "text/html"
-  );
-  const root = doc.querySelector(".logic-formula-root");
+  const root = parseTaskHtmlFragment(html, "logic-formula-root");
   if (!root) return html;
 
   for (const el of root.querySelectorAll("p, div.task-html-block, td, th")) {
@@ -509,7 +533,7 @@ function preparePlainBankTaskHtml(raw, options = {}) {
     const choiceFormatted = formatOgeMathChoiceTaskHtml(afterMatch);
     sFinal = choiceFormatted && choiceFormatted.trim() ? choiceFormatted : afterMatch;
   }
-  return sFinal;
+  return repairOrphanSpanTags(sFinal);
 }
 
 /**
@@ -811,19 +835,7 @@ function polishBankTaskMathJaxTables(root) {
 }
 
 function parseHtmlFragmentForTables(html) {
-  if (typeof DOMParser !== "undefined") {
-    const doc = new DOMParser().parseFromString(
-      `<!DOCTYPE html><html><body>${html}</body></html>`,
-      "text/html"
-    );
-    return doc.body;
-  }
-  if (typeof document !== "undefined") {
-    const host = document.createElement("div");
-    host.innerHTML = html;
-    return host;
-  }
-  return null;
+  return parseTaskHtmlFragment(html);
 }
 
 function rawHasSparseGridTables(html) {
@@ -1172,7 +1184,7 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
         const formatted = formatOgeMathChoiceTaskHtml(afterMatch);
         piped = formatted && formatted.trim() ? formatted : afterMatch;
       }
-      el.innerHTML = convertLogicSpansInsideMathDelimitersToTex(piped);
+      el.innerHTML = convertLogicSpansInsideMathDelimitersToTex(repairOrphanSpanTags(piped));
       reinjectMathEnvTexFromRaw(el, decoded);
       if (shouldNormalizeTables) {
         try {

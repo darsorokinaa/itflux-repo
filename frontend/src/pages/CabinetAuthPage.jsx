@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { fetchCabinetSession, loginCabinet, registerCabinet, getCabinetHomePath, fetchReferralPreview } from "../utils/cabinetAuth";
 
 const PAGE_TITLE = "Личный кабинет — вход — Цифровой поток";
+const GUIDE_OPEN_ON_REGISTER_KEY = "cabinet-guide-open-on-register";
 
 const ROLE_OPTIONS = [
   { value: "student", label: "Ученик" },
@@ -150,6 +151,7 @@ export default function CabinetAuthPage() {
       await registerCabinet(payload);
       try {
         sessionStorage.removeItem("cabinet_referral_code");
+        sessionStorage.setItem(GUIDE_OPEN_ON_REGISTER_KEY, "1");
       } catch {
         // ignore storage errors
       }

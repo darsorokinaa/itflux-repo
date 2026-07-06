@@ -401,6 +401,10 @@ export function fetchLessonPlan(id) {
   return cabinetFetch(`/lesson-plans/${id}/`, { method: "GET" });
 }
 
+export function fetchLessonPlanSubjects() {
+  return cabinetFetch("/lesson-plans/subjects/", { method: "GET" });
+}
+
 export function createLessonPlan(payload) {
   return cabinetFetch("/lesson-plans/", {
     method: "POST",

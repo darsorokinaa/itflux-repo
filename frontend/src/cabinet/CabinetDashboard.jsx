@@ -202,7 +202,7 @@ function HeroIllustration({ badges }) {
 }
 
 export default function CabinetDashboard() {
-  const { user } = useOutletContext();
+  const { user, openGuide } = useOutletContext();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -377,6 +377,13 @@ export default function CabinetDashboard() {
           <span className="cb-guide-compact__steps">
             ученики → урок → задание → проверка
           </span>
+          <button
+            type="button"
+            className="cb-btn cb-btn--outline cb-btn--sm cb-guide-compact__open"
+            onClick={openGuide}
+          >
+            Инструкция
+          </button>
         </div>
       </div>
 

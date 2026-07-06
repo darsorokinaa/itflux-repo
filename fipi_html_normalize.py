@@ -343,6 +343,7 @@ def prepare_task_html_for_display(html: str, *, keep_layout_tables: bool = False
         s = strip_border_markup(s)
     else:
         s = flatten_fipi_layout_markup(s)
+    s = repair_orphan_span_tags(s)
     return compact_whitespace_in_tags(s)
 
 
@@ -405,6 +406,45 @@ def compact_whitespace_in_tags(html: str) -> str:
     out = _RE_P_BR_ONLY.sub("", html)
     out = re.sub(r"(\d+\))\s*&nbsp;\s*", r"\1) ", out, flags=re.IGNORECASE)
     return out
+
+
+def repair_orphan_span_tags(html: str) -> str:
+    """Висячие <span> после flatten ФИПИ; не трогаем </span> у span с class= (math-inline и др.)."""
+    if not html:
+        return html
+    out = re.sub(
+        r"(<(?:p|div|td|th|li|h[1-6])\b[^>]*>)\s*</span>",
+        r"\1",
+        html,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(
+        r"<span>\s*(</(?:p|div|td|th|li|h[1-6])>)",
+        r"\1",
+        out,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(r"</span>\s*<span>", " ", out, flags=re.IGNORECASE)
+    out = re.sub(r"<span>\s*(?=</)", "", out, flags=re.IGNORECASE)
+
+    parts: list[str] = []
+    last = 0
+    for m in re.finditer(r"</span>(?=\s*[^<])", out, flags=re.IGNORECASE):
+        parts.append(out[last : m.start()])
+        before = out[: m.start()]
+        keep = False
+        last_open = before.rfind("<span")
+        last_close = before.rfind("</span>")
+        if last_open > last_close:
+            gt = before.find(">", last_open)
+            if gt != -1:
+                open_tag = before[last_open : gt + 1]
+                if re.search(r"\bclass\s*=", open_tag, re.IGNORECASE):
+                    keep = True
+        parts.append(m.group(0) if keep else " ")
+        last = m.end()
+    parts.append(out[last:])
+    return "".join(parts)
 
 
 def _cell_plain_text(cell_html: str) -> str:
@@ -701,6 +741,19 @@ _RE_OUTER_PLAIN_DIV = re.compile(
 )
 
 
+def _div_markup_balanced(fragment: str) -> bool:
+    """True, если <div> и </div> в фрагменте сбалансированы по вложенности."""
+    depth = 0
+    for m in re.finditer(r"</?div\b", fragment, re.IGNORECASE):
+        if m.group(0).startswith("</"):
+            depth -= 1
+            if depth < 0:
+                return False
+        else:
+            depth += 1
+    return depth == 0
+
+
 def unwrap_outer_plain_div(html: str) -> str:
     r"""Снимаем «голый» внешний `<div>` без атрибутов, в который ФИПИ обернул всё условие.
 
@@ -717,7 +770,10 @@ def unwrap_outer_plain_div(html: str) -> str:
         inner = m.group(1).strip("\n\r\t ")
         if not inner:
             break
-        # Проверяем, что внутри нет «оторванных» открытых div — глубокий unwrap безопасен.
+        # Снимаем обёртку только если внутри нет «оторванных» div — иначе
+        # `<div>текст</div><div>таблица</div>` превращается в висячий `</div>`.
+        if not _div_markup_balanced(inner):
+            break
         out = inner
     return out
 

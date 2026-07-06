@@ -39,6 +39,8 @@ function mapFlashcardsFromApi(items) {
   return (items || []).map((card) => ({
     front: card.front_text || "",
     back: card.back_text || "",
+    front_image_url: card.front_image_url || "",
+    back_image_url: card.back_image_url || "",
     hint: card.hint || "",
     explanation: card.explanation || "",
   }));
@@ -48,6 +50,8 @@ function mapMatchingFromApi(items) {
   return (items || []).map((pair) => ({
     left: pair.left_text || "",
     right: pair.right_text || "",
+    left_image_url: pair.left_image_url || "",
+    right_image_url: pair.right_image_url || "",
     explanation: pair.explanation || "",
   }));
 }
@@ -55,6 +59,7 @@ function mapMatchingFromApi(items) {
 function mapOrderingFromApi(items) {
   return (items || []).map((step) => ({
     text: step.text || "",
+    image_url: step.image_url || "",
     explanation: step.explanation || "",
     position: step.correct_order ?? 1,
   }));
@@ -64,8 +69,12 @@ function mapQuizFromApi(items) {
   return (items || []).map((question) => ({
     id: String(question.id),
     text: question.question_text || "",
+    image_url: question.image_url || "",
     answer_type: question.answer_type || "single",
-    answers: question.answers || [],
+    answers: (question.answers || []).map((answer) => ({
+      ...answer,
+      image_url: answer?.image_url || "",
+    })),
     explanation: question.explanation || "",
     points: question.points ?? 1,
   }));
@@ -143,7 +152,14 @@ export function mapApiInteractiveDetail(api) {
   if (type === "flashcards") {
     base.cards = mapFlashcardsFromApi(api.flashcards);
     if (!base.cards.length) {
-      base.cards = [{ front: "", back: "", hint: "", explanation: "" }];
+      base.cards = [{
+        front: "",
+        back: "",
+        front_image_url: "",
+        back_image_url: "",
+        hint: "",
+        explanation: "",
+      }];
     }
   }
   if (type === "matching") {
@@ -151,7 +167,13 @@ export function mapApiInteractiveDetail(api) {
     base.shufflePairs = true;
     base.showResultImmediately = false;
     if (!base.pairs.length) {
-      base.pairs = [{ left: "", right: "", explanation: "" }];
+      base.pairs = [{
+        left: "",
+        right: "",
+        left_image_url: "",
+        right_image_url: "",
+        explanation: "",
+      }];
     }
   }
   if (type === "sequence") {
@@ -159,7 +181,7 @@ export function mapApiInteractiveDetail(api) {
     base.allowMultipleAttempts = true;
     base.showAnswerOnError = true;
     if (!base.steps.length) {
-      base.steps = [{ text: "", explanation: "", position: 1 }];
+      base.steps = [{ text: "", image_url: "", explanation: "", position: 1 }];
     }
   }
   if (type === "quiz") {
@@ -168,6 +190,7 @@ export function mapApiInteractiveDetail(api) {
       base.questions = [{
         id: `q${Date.now()}`,
         text: "",
+        image_url: "",
         answer_type: "single",
         answers: [],
         explanation: "",
@@ -226,6 +249,8 @@ export function buildInteractiveWritePayload(interactive, statusOverride) {
     payload.flashcards = (interactive.cards || []).map((card, index) => ({
       front_text: card.front || "",
       back_text: card.back || "",
+      front_image_url: card.front_image_url || "",
+      back_image_url: card.back_image_url || "",
       hint: card.hint || "",
       explanation: card.explanation || "",
       order: index,
@@ -236,6 +261,8 @@ export function buildInteractiveWritePayload(interactive, statusOverride) {
     payload.matching_pairs = (interactive.pairs || []).map((pair, index) => ({
       left_text: pair.left || "",
       right_text: pair.right || "",
+      left_image_url: pair.left_image_url || "",
+      right_image_url: pair.right_image_url || "",
       explanation: pair.explanation || "",
       order: index,
     }));
@@ -244,6 +271,7 @@ export function buildInteractiveWritePayload(interactive, statusOverride) {
   if (interactive.type === "sequence") {
     payload.ordering_items = (interactive.steps || []).map((step, index) => ({
       text: step.text || "",
+      image_url: step.image_url || "",
       explanation: step.explanation || "",
       correct_order: step.position ?? (index + 1),
     }));
@@ -252,8 +280,12 @@ export function buildInteractiveWritePayload(interactive, statusOverride) {
   if (interactive.type === "quiz") {
     payload.quiz_questions = (interactive.questions || []).map((question, index) => ({
       question_text: question.text || "",
+      image_url: question.image_url || "",
       answer_type: question.answer_type || "single",
-      answers: question.answers || [],
+      answers: (question.answers || []).map((answer) => ({
+        ...answer,
+        image_url: answer?.image_url || "",
+      })),
       explanation: question.explanation || "",
       points: question.points ?? 1,
       order: index,

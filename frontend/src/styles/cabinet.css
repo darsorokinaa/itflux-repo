@@ -46,6 +46,12 @@
     width: 100%;
     justify-content: center;
   }
+
+  .cb-students-pending__actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 360px) {
@@ -265,11 +271,62 @@
   background: #fff;
 }
 
+.cb-students-pending__body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.cb-students-pending__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cb-students-pending__status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.cb-students-pending__status--pending {
+  color: #b45309;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+}
+
+.cb-students-pending__status--joined {
+  color: #166534;
+  background: #ecfdf3;
+  border: 1px solid #86efac;
+}
+
 .cb-students-pending__meta {
   display: block;
   margin-top: 4px;
   color: var(--text-muted, #64748b);
   font-size: 0.85rem;
+}
+
+.cb-students-pending__link {
+  display: inline-flex;
+  margin-top: 6px;
+  font-size: 0.82rem;
+  color: #1d4ed8;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+
+.cb-students-pending__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .cabinet-auth-footer {

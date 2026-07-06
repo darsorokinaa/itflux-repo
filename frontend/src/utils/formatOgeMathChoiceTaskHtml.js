@@ -8,6 +8,8 @@
  * - Классы oge-math-choice-* в редактор не сохраняйте — после сохранения разметка снова таблицами.
  */
 
+import { parseTaskHtmlFragment } from "./parseTaskHtmlFragment";
+
 const CHOICE_NUM_RE = /^(\d+)(?:\\)?\)\s*$/;
 
 const formatCache = new Map();
@@ -40,12 +42,7 @@ function cacheFormatResult(trimmed, result) {
 }
 
 function parseHtmlFragment(html) {
-  if (typeof DOMParser === "undefined") return null;
-  const doc = new DOMParser().parseFromString(
-    `<div class="oge-math-choice-parse-root">${html}</div>`,
-    "text/html"
-  );
-  return doc.querySelector(".oge-math-choice-parse-root");
+  return parseTaskHtmlFragment(html, "oge-math-choice-parse-root");
 }
 
 function normalizeCellText(el) {

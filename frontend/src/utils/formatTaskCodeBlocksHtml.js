@@ -116,16 +116,13 @@ export function formatTaskCodeBlocksHtml(html) {
   if (typeof html !== "string" || !html) return html;
 
   let out = formatOgeInf6TaskHtml(html);
-  if (typeof DOMParser === "undefined" || !/<table\b/i.test(out)) {
+  if (typeof document === "undefined" || !/<table\b/i.test(out)) {
     return out;
   }
 
-  const doc = new DOMParser().parseFromString(
-    `<!DOCTYPE html><html><body><div id="task-code-fmt-root">${out}</div></body></html>`,
-    "text/html"
-  );
-  const root = doc.getElementById("task-code-fmt-root");
-  if (!root) return out;
+  // createElement, не DOMParser: при висячих </div> полный HTML-документ обрезает хвост.
+  const root = document.createElement("div");
+  root.innerHTML = out;
 
   const tables = [...root.querySelectorAll("table")].sort(
     (a, b) => b.querySelectorAll("table").length - a.querySelectorAll("table").length
@@ -135,7 +132,7 @@ export function formatTaskCodeBlocksHtml(html) {
     if (!table.isConnected || !tableLooksLikePythonCode(table)) continue;
     const lines = extractLinesFromTable(table);
     if (lines.length < 2) continue;
-    table.replaceWith(makeCodeBlock(doc, lines));
+    table.replaceWith(makeCodeBlock(root.ownerDocument, lines));
   }
 
   upgradeExistingPreBlocks(root);

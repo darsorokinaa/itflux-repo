@@ -8,6 +8,12 @@ import {
 import { getInteractiveDisplayTitle } from "../interactivesData";
 import { playInteractiveSound, unlockInteractiveAudio, startInteractiveBackgroundSound, stopInteractiveBackgroundSound } from "../interactiveSounds";
 
+function InlineImage({ src, alt, className }) {
+  const value = String(src || "").trim();
+  if (!value) return null;
+  return <img src={value} alt={alt} className={className} loading="lazy" />;
+}
+
 function CompletionScreen({ scorePercent, onRestart }) {
   return (
     <div className="ix-play-complete">
@@ -198,6 +204,11 @@ function FlashcardPlayer({ cards, bare, playing, appearance, onComplete }) {
           <div className="cb-flash-card__face cb-flash-card__face--front">
             {!studyMode ? <span className="cb-flash-card__label">Лицевая сторона</span> : null}
             <p>{card.front || "—"}</p>
+            <InlineImage
+              src={card.front_image_url}
+              alt="Изображение на лицевой стороне"
+              className="ix-inline-media"
+            />
             {card.hint ? (
               <small>{studyMode ? card.hint : `Подсказка: ${card.hint}`}</small>
             ) : null}
@@ -205,6 +216,11 @@ function FlashcardPlayer({ cards, bare, playing, appearance, onComplete }) {
           <div className="cb-flash-card__face cb-flash-card__face--back">
             {!studyMode ? <span className="cb-flash-card__label">Обратная сторона</span> : null}
             <p>{card.back || "—"}</p>
+            <InlineImage
+              src={card.back_image_url}
+              alt="Изображение на обратной стороне"
+              className="ix-inline-media"
+            />
             {card.explanation ? <small>{card.explanation}</small> : null}
           </div>
         </div>
@@ -258,12 +274,21 @@ function MatchingPlayer({ pairs, shuffle, bare, playing, appearance, onComplete 
   const studyMode = bare || playing;
 
   const leftItems = useMemo(() => {
-    const items = pairs.map((p, i) => ({ id: `l${i}`, text: p.left || `— ${i + 1}` }));
+    const items = pairs.map((p, i) => ({
+      id: `l${i}`,
+      text: p.left || `— ${i + 1}`,
+      image_url: p.left_image_url || "",
+    }));
     return shuffle ? [...items].sort(() => Math.random() - 0.5) : items;
   }, [pairs, shuffle]);
 
   const rightItems = useMemo(() => {
-    const items = pairs.map((p, i) => ({ id: `r${i}`, text: p.right || `— ${i + 1}`, pairIndex: i }));
+    const items = pairs.map((p, i) => ({
+      id: `r${i}`,
+      text: p.right || `— ${i + 1}`,
+      image_url: p.right_image_url || "",
+      pairIndex: i,
+    }));
     return shuffle ? [...items].sort(() => Math.random() - 0.5) : items;
   }, [pairs, shuffle]);
 
@@ -390,7 +415,8 @@ function MatchingPlayer({ pairs, shuffle, bare, playing, appearance, onComplete 
                 ].filter(Boolean).join(" ")}
                 onClick={() => handleLeft(item.id)}
               >
-                {item.text}
+                <span className="cb-match-item__text">{item.text}</span>
+                <InlineImage src={item.image_url} alt="Изображение слева" className="ix-inline-media ix-inline-media--compact" />
               </button>
             ))}
           </div>
@@ -410,7 +436,8 @@ function MatchingPlayer({ pairs, shuffle, bare, playing, appearance, onComplete 
                 ].filter(Boolean).join(" ")}
                 onClick={() => handleRight(item)}
               >
-                {item.text}
+                <span className="cb-match-item__text">{item.text}</span>
+                <InlineImage src={item.image_url} alt="Изображение справа" className="ix-inline-media ix-inline-media--compact" />
               </button>
             ))}
           </div>
@@ -438,7 +465,11 @@ function SequencePlayer({ steps, shuffle, bare, playing, appearance, onComplete 
   const correctOrder = sortedSteps.map((s, i) => s.text || `Шаг ${i + 1}`);
 
   const shuffled = useMemo(() => {
-    const items = steps.map((s, i) => ({ id: `s${i}`, text: s.text || `Шаг ${i + 1}` }));
+    const items = steps.map((s, i) => ({
+      id: `s${i}`,
+      text: s.text || `Шаг ${i + 1}`,
+      image_url: s.image_url || "",
+    }));
     if (!shuffle) return items;
     return [...items].sort(() => Math.random() - 0.5);
   }, [steps, shuffle]);

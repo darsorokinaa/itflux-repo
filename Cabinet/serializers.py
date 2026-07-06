@@ -16,6 +16,11 @@ from .choices import (
     SubmissionStatus,
 )
 from .invitations import invitation_join_path
+from .plan_subjects import (
+    get_plan_subject_label,
+    get_plan_subject_options,
+    normalize_plan_subject_id,
+)
 from .models import (
     FlashcardItem,
     Homework,
@@ -662,7 +667,7 @@ class LessonPlanItemEditorSerializer(LessonPlanItemWriteSerializer):
 
 class LessonPlanListSerializer(serializers.ModelSerializer):
     direction_label = serializers.CharField(source="get_direction_display", read_only=True)
-    subject_label = serializers.CharField(source="get_subject_display", read_only=True)
+    subject_label = serializers.SerializerMethodField()
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     progress_percent = serializers.IntegerField(read_only=True)
     items_count = serializers.IntegerField(read_only=True)
@@ -694,6 +699,9 @@ class LessonPlanListSerializer(serializers.ModelSerializer):
     def get_is_public(self, obj):
         return obj.teacher is None
 
+    def get_subject_label(self, obj):
+        return get_plan_subject_label(obj.subject)
+
 
 class LessonPlanDetailSerializer(LessonPlanListSerializer):
     items = LessonPlanItemSerializer(many=True, read_only=True)
@@ -704,6 +712,7 @@ class LessonPlanDetailSerializer(LessonPlanListSerializer):
 
 class LessonPlanWriteSerializer(serializers.ModelSerializer):
     is_public = serializers.BooleanField(required=False, write_only=True)
+    subject = serializers.CharField(max_length=20)
 
     class Meta:
         model = LessonPlan
@@ -721,6 +730,16 @@ class LessonPlanWriteSerializer(serializers.ModelSerializer):
             "is_public",
         ]
         read_only_fields = ["id"]
+
+    def validate_subject(self, value):
+        subject_id = normalize_plan_subject_id(value)
+        if not subject_id:
+            raise serializers.ValidationError("Выберите предмет.")
+
+        allowed_ids = {item["id"] for item in get_plan_subject_options()}
+        if allowed_ids and subject_id not in allowed_ids:
+            raise serializers.ValidationError("Выберите предмет из списка базы.")
+        return subject_id
 
 
 class LessonPlanEnrollmentSerializer(serializers.ModelSerializer):
@@ -863,19 +882,36 @@ class InteractiveAppearanceCatalogSerializer(serializers.Serializer):
 class FlashcardItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = FlashcardItem
-        fields = ["id", "front_text", "back_text", "hint", "explanation", "order"]
+        fields = [
+            "id",
+            "front_text",
+            "back_text",
+            "front_image_url",
+            "back_image_url",
+            "hint",
+            "explanation",
+            "order",
+        ]
 
 
 class MatchingPairSerializer(serializers.ModelSerializer):
     class Meta:
         model = MatchingPair
-        fields = ["id", "left_text", "right_text", "explanation", "order"]
+        fields = [
+            "id",
+            "left_text",
+            "right_text",
+            "left_image_url",
+            "right_image_url",
+            "explanation",
+            "order",
+        ]
 
 
 class OrderingItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrderingItem
-        fields = ["id", "text", "correct_order", "explanation"]
+        fields = ["id", "text", "image_url", "correct_order", "explanation"]
 
 
 class QuizQuestionSerializer(serializers.ModelSerializer):
@@ -884,6 +920,7 @@ class QuizQuestionSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "question_text",
+            "image_url",
             "answers",
             "answer_type",
             "explanation",

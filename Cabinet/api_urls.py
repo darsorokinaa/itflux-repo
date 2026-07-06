@@ -48,6 +48,7 @@ urlpatterns = [
     path("reports/lesson/<int:lesson_id>/", api_views.ReportsLessonView.as_view(), name="cabinet_reports_lesson"),
     path("reports/topics/", api_views.ReportsTopicsView.as_view(), name="cabinet_reports_topics"),
     path("reports/parent-summary/", api_views.ReportsParentSummaryView.as_view(), name="cabinet_reports_parent_summary"),
+    path("lesson-plans/subjects/", api_views.LessonPlanSubjectOptionsView.as_view(), name="cabinet_lesson_plan_subjects"),
     path("invitations/join/<str:token>/", api_views.InvitationPreviewView.as_view(), name="cabinet_invitation_preview"),
     path("invitations/join/<str:token>/accept/", api_views.InvitationAcceptView.as_view(), name="cabinet_invitation_accept"),
     # Тарифная система

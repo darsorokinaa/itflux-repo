@@ -9,6 +9,12 @@ import WheelVisual from "./WheelVisual";
 import { computeInteractiveFillProgress } from "../interactivesEditorUtils";
 import "../styles/interactive-wheel.css";
 
+function PreviewImage({ src, alt, className }) {
+  const value = String(src || "").trim();
+  if (!value) return null;
+  return <img src={value} alt={alt} className={className} loading="lazy" />;
+}
+
 function FlashcardStudentPreview({ cards, appearance }) {
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -34,6 +40,11 @@ function FlashcardStudentPreview({ cards, appearance }) {
           <p className="ix-ed-preview-card__text">
             {flipped ? (card.back || "—") : (card.front || "—")}
           </p>
+          <PreviewImage
+            src={flipped ? card.back_image_url : card.front_image_url}
+            alt={flipped ? "Изображение ответа" : "Изображение термина"}
+            className="ix-ed-preview-media"
+          />
           {!flipped && card.hint ? (
             <p className="ix-ed-preview-card__hint">Подсказка: {card.hint}</p>
           ) : null}
@@ -59,9 +70,15 @@ function MatchingStudentPreview({ pairs }) {
   const pair = (pairs || []).find((p) => p.left || p.right) || { left: "—", right: "—" };
   return (
     <div className="ix-ed-preview-match">
-      <span className="ix-ed-preview-match__chip">{pair.left || "—"}</span>
+      <span className="ix-ed-preview-match__chip">
+        <span>{pair.left || "—"}</span>
+        <PreviewImage src={pair.left_image_url} alt="Изображение слева" className="ix-ed-preview-chip-media" />
+      </span>
       <span className="ix-ed-preview-match__dash">↔</span>
-      <span className="ix-ed-preview-match__chip">{pair.right || "—"}</span>
+      <span className="ix-ed-preview-match__chip">
+        <span>{pair.right || "—"}</span>
+        <PreviewImage src={pair.right_image_url} alt="Изображение справа" className="ix-ed-preview-chip-media" />
+      </span>
     </div>
   );
 }
@@ -73,7 +90,10 @@ function SequenceStudentPreview({ steps }) {
       {(list.length ? list : [{ text: "—", position: 1 }]).map((step, i) => (
         <li key={i}>
           <span className="ix-ed-preview-steps__num">{step.position ?? i + 1}</span>
-          <span>{step.text}</span>
+          <div className="ix-ed-preview-steps__content">
+            <span>{step.text}</span>
+            <PreviewImage src={step.image_url} alt="Изображение шага" className="ix-ed-preview-chip-media" />
+          </div>
         </li>
       ))}
     </ol>

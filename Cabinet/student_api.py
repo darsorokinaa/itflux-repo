@@ -394,6 +394,8 @@ def _interactive_to_player_payload(interactive):
             {
                 "front": c.front_text,
                 "back": c.back_text,
+                "front_image_url": c.front_image_url,
+                "back_image_url": c.back_image_url,
                 "hint": c.hint,
                 "explanation": c.explanation,
             }
@@ -401,7 +403,13 @@ def _interactive_to_player_payload(interactive):
         ]
     elif interactive.interactive_type == "matching":
         payload["pairs"] = [
-            {"left": p.left_text, "right": p.right_text, "explanation": p.explanation}
+            {
+                "left": p.left_text,
+                "right": p.right_text,
+                "left_image_url": p.left_image_url,
+                "right_image_url": p.right_image_url,
+                "explanation": p.explanation,
+            }
             for p in MatchingPair.objects.filter(interactive=interactive).order_by("order", "id")
         ]
         payload["shufflePairs"] = True
@@ -410,6 +418,7 @@ def _interactive_to_player_payload(interactive):
             {
                 "id": str(q.id),
                 "text": q.question_text,
+                "image_url": q.image_url,
                 "answer_type": q.answer_type,
                 "answers": q.answers,
                 "explanation": q.explanation,
@@ -432,7 +441,12 @@ def _interactive_to_player_payload(interactive):
         payload["wheelSettings"] = interactive.wheel_settings or {}
     else:
         payload["steps"] = [
-            {"text": s.text, "explanation": s.explanation, "position": s.correct_order}
+            {
+                "text": s.text,
+                "image_url": s.image_url,
+                "explanation": s.explanation,
+                "position": s.correct_order,
+            }
             for s in OrderingItem.objects.filter(interactive=interactive).order_by("correct_order", "id")
         ]
     return payload

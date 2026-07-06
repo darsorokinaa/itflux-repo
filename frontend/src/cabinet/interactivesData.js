@@ -333,7 +333,14 @@ export function createEmptyInteractive(type) {
   if (type === "flashcards") {
     return {
       ...base,
-      cards: [{ front: "", back: "", hint: "", explanation: "" }],
+      cards: [{
+        front: "",
+        back: "",
+        front_image_url: "",
+        back_image_url: "",
+        hint: "",
+        explanation: "",
+      }],
     };
   }
   if (type === "matching") {
@@ -341,7 +348,13 @@ export function createEmptyInteractive(type) {
       ...base,
       shufflePairs: true,
       showResultImmediately: false,
-      pairs: [{ left: "", right: "", explanation: "" }],
+      pairs: [{
+        left: "",
+        right: "",
+        left_image_url: "",
+        right_image_url: "",
+        explanation: "",
+      }],
     };
   }
   if (type === "quiz") {
@@ -362,7 +375,7 @@ export function createEmptyInteractive(type) {
     ...base,
     allowMultipleAttempts: true,
     showAnswerOnError: true,
-    steps: [{ text: "", explanation: "", position: 1 }],
+    steps: [{ text: "", image_url: "", explanation: "", position: 1 }],
   };
 }
 

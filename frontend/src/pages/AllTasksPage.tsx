@@ -21,6 +21,7 @@ import {
   type SubjectId,
 } from "../data/subjects";
 import { formatGroupsCount, formatTasksCount } from "../utils/formatTasksCount";
+import VariantCreateBar from "../components/VariantCreateBar";
 import WorkbookCreateBar from "../components/WorkbookCreateBar";
 import type { WorkbookTask } from "../utils/buildWorkbookHtml";
 import { isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
@@ -142,6 +143,7 @@ type FiltersResponse = {
 
 const PER_PAGE = 5000;
 const ALL_TASKS_BOARD_VARIANT_ID = "task-bank";
+const NO_ANSWER_SUBTOPIC_VALUE = "no-answer";
 
 const LazyVisible = memo(function LazyVisible({
   minHeight = 140,
@@ -256,8 +258,7 @@ function readFiltersFromSearchParams(sp: URLSearchParams): AllTasksFilters {
 
   const taskListId = sp.get("task")?.trim() ?? "";
   const subtopicRaw = sp.get("subtopic")?.trim() ?? "";
-  const subtopicId =
-    subtopicRaw === "none" || subtopicRaw === "no-answer" ? "" : subtopicRaw;
+  const subtopicId = subtopicRaw === "none" ? "" : subtopicRaw;
   const onlyFipi = sp.get("fipi") === "1";
   const page = Math.max(1, Number(sp.get("page")) || 1);
 
@@ -312,8 +313,8 @@ export default function AllTasksPage() {
   const [openBoardForTaskId, setOpenBoardForTaskId] = useState<number | null>(null);
   const [boardsByTask, setBoardsByTask] = useState<Record<string, any>>({});
   const [openAnswers, setOpenAnswers] = useState<Record<number, boolean>>({});
-  const [workbookDraft, setWorkbookDraft] = useState<WorkbookTask[]>([]);
-  const [workbookMode, setWorkbookMode] = useState(false);
+  const [pickDraft, setPickDraft] = useState<WorkbookTask[]>([]);
+  const [pickMode, setPickMode] = useState<"workbook" | "variant" | null>(null);
 
   const toggleAnswer = useCallback((taskId: number) => {
     setOpenAnswers((prev) => ({ ...prev, [taskId]: !prev[taskId] }));
@@ -452,7 +453,7 @@ export default function AllTasksPage() {
   }, [level, subject, vprGrade, taskListId]);
 
   useEffect(() => {
-    if (!subtopicId) return;
+    if (!subtopicId || subtopicId === NO_ANSWER_SUBTOPIC_VALUE) return;
     const ok = subtopicsForTask.some((s) => String(s.id) === subtopicId);
     if (!ok) setSubtopicId("");
   }, [subtopicsForTask, subtopicId]);
@@ -544,8 +545,8 @@ export default function AllTasksPage() {
   }, [level, subject, vprGrade, taskListId, subtopicId, onlyFipi, page]);
 
   useEffect(() => {
-    setWorkbookMode(false);
-    setWorkbookDraft([]);
+    setPickMode(null);
+    setPickDraft([]);
   }, [level, subject]);
 
   const displayEntries = useMemo((): BankDisplayEntry[] => {
@@ -577,14 +578,17 @@ export default function AllTasksPage() {
     !loading && !error && displayEntries.length > 0
   );
 
-  const workbookDraftIds = useMemo(
-    () => new Set(workbookDraft.map((task) => task.id)),
-    [workbookDraft]
+  const pickDraftIds = useMemo(
+    () => new Set(pickDraft.map((task) => task.id)),
+    [pickDraft]
+  );
+
+  const subjectTitle = useMemo(
+    () => subjects.find((s) => s.id === subject)?.title ?? subject,
+    [subject, subjects]
   );
 
   const workbookMeta = useMemo(() => {
-    const subjectTitle =
-      subjects.find((s) => s.id === subject)?.title ?? subject;
     const subtitleParts = [levelDef?.label ?? level.toUpperCase(), subjectTitle];
 
     if (level === "vpr") {
@@ -614,14 +618,14 @@ export default function AllTasksPage() {
     level,
     levelDef?.label,
     subject,
-    subjects,
+    subjectTitle,
     taskListId,
     vprGrade,
   ]);
 
-  const toggleWorkbookGroup = useCallback((tasks: BankTask[], checked: boolean) => {
+  const togglePickGroup = useCallback((tasks: BankTask[], checked: boolean) => {
     if (checked) {
-      setWorkbookDraft((prev) => {
+      setPickDraft((prev) => {
         const existing = new Set(prev.map((item) => item.id));
         const next = [...prev];
         for (const task of tasks) {
@@ -643,12 +647,12 @@ export default function AllTasksPage() {
       return;
     }
     const removeIds = new Set(tasks.map((task) => task.id));
-    setWorkbookDraft((prev) => prev.filter((item) => !removeIds.has(item.id)));
+    setPickDraft((prev) => prev.filter((item) => !removeIds.has(item.id)));
   }, []);
 
-  const toggleWorkbookTask = useCallback((task: BankTask, checked: boolean) => {
+  const togglePickTask = useCallback((task: BankTask, checked: boolean) => {
     if (checked) {
-      setWorkbookDraft((prev) => {
+      setPickDraft((prev) => {
         if (prev.some((item) => item.id === task.id)) return prev;
         return [
           ...prev,
@@ -666,33 +670,38 @@ export default function AllTasksPage() {
       });
       return;
     }
-    setWorkbookDraft((prev) => prev.filter((item) => item.id !== task.id));
+    setPickDraft((prev) => prev.filter((item) => item.id !== task.id));
   }, []);
 
   const startWorkbookMode = useCallback(() => {
-    setWorkbookDraft([]);
-    setWorkbookMode(true);
+    setPickDraft([]);
+    setPickMode("workbook");
   }, []);
 
-  const exitWorkbookMode = useCallback(() => {
-    setWorkbookMode(false);
-    setWorkbookDraft([]);
+  const startVariantMode = useCallback(() => {
+    setPickDraft([]);
+    setPickMode("variant");
   }, []);
 
-  const allVisibleInWorkbook = useMemo(
+  const exitPickMode = useCallback(() => {
+    setPickMode(null);
+    setPickDraft([]);
+  }, []);
+
+  const allVisibleInPick = useMemo(
     () =>
       displayEntries.length > 0 &&
       displayEntries.every((entry) => {
         if (entry.kind === "group") {
-          return entry.tasks.every((task) => workbookDraftIds.has(task.id));
+          return entry.tasks.every((task) => pickDraftIds.has(task.id));
         }
-        return workbookDraftIds.has(entry.task.id);
+        return pickDraftIds.has(entry.task.id);
       }),
-    [displayEntries, workbookDraftIds]
+    [displayEntries, pickDraftIds]
   );
 
-  const addAllVisibleToWorkbook = useCallback(() => {
-    setWorkbookDraft((prev) => {
+  const addAllVisibleToPick = useCallback(() => {
+    setPickDraft((prev) => {
       const existing = new Set(prev.map((task) => task.id));
       const next = [...prev];
       for (const task of visibleTasks) {
@@ -733,7 +742,7 @@ export default function AllTasksPage() {
       <div
         className={`digital-flow-page__wrap${showCodeSidebar ? " digital-flow-page__wrap--with-code-sidebar" : ""}`}
       >
-        <main className={`all-tasks-page${workbookMode ? " all-tasks-page--workbook-mode" : ""}`}>
+        <main className={`all-tasks-page${pickMode ? " all-tasks-page--workbook-mode" : ""}`}>
           <header className="section-head section-head--page">
             <h1 className="section-head__title">Все задачи</h1>
             <p className="section-head__lead">
@@ -858,6 +867,7 @@ export default function AllTasksPage() {
                 }}
               >
                 <option value="">Все подтемы</option>
+                <option value={NO_ANSWER_SUBTOPIC_VALUE}>Без ответа</option>
                 {subtopicsForTask.map((s) => (
                   <option key={String(s.id)} value={String(s.id)}>
                     {s.title}
@@ -902,8 +912,11 @@ export default function AllTasksPage() {
                       (t) => String(t.task_list_id) === taskListId
                     )
                   : null;
+                const noAnswerOnly = subtopicId === NO_ANSWER_SUBTOPIC_VALUE;
                 const selectedSubtopic = subtopicId
-                  ? subtopicsForTask.find((s) => String(s.id) === subtopicId)
+                  ? noAnswerOnly
+                    ? null
+                    : subtopicsForTask.find((s) => String(s.id) === subtopicId)
                   : null;
                 return (
                   <div className="all-tasks-meta__inner">
@@ -929,20 +942,32 @@ export default function AllTasksPage() {
                         {selectedSubtopic.title}
                       </span>
                     ) : null}
-                    {canBuildWorkbook && !workbookMode ? (
-                      <button
-                        type="button"
-                        className="all-tasks-workbook-btn"
-                        onClick={startWorkbookMode}
-                      >
-                        Создать рабочую тетрадь
-                      </button>
+                    {noAnswerOnly ? (
+                      <span className="all-tasks-meta__sub">Без ответа</span>
                     ) : null}
-                    {workbookMode ? (
+                    {canBuildWorkbook && !pickMode ? (
+                      <div className="all-tasks-meta__actions">
+                        <button
+                          type="button"
+                          className="all-tasks-workbook-btn"
+                          onClick={startWorkbookMode}
+                        >
+                          Создать рабочую тетрадь
+                        </button>
+                        <button
+                          type="button"
+                          className="all-tasks-workbook-btn all-tasks-workbook-btn--variant"
+                          onClick={startVariantMode}
+                        >
+                          Создать вариант
+                        </button>
+                      </div>
+                    ) : null}
+                    {pickMode ? (
                       <button
                         type="button"
                         className="all-tasks-workbook-btn all-tasks-workbook-btn--cancel"
-                        onClick={exitWorkbookMode}
+                        onClick={exitPickMode}
                       >
                         Отмена
                       </button>
@@ -968,17 +993,18 @@ export default function AllTasksPage() {
             </p>
           ) : null}
 
-          {workbookMode ? (
+          {pickMode ? (
             <div className="all-tasks-workbook-hint" role="status">
               <p className="all-tasks-workbook-hint__text">
-                Отметьте галочкой задания для тетради, затем нажмите «Создать тетрадь» внизу
-                справа.
+                {pickMode === "variant"
+                  ? "Отметьте галочкой задания для варианта, затем нажмите «Создать вариант» внизу справа."
+                  : "Отметьте галочкой задания для тетради, затем нажмите «Создать тетрадь» внизу справа."}
               </p>
               <button
                 type="button"
                 className="all-tasks-workbook-hint__add-all"
-                onClick={addAllVisibleToWorkbook}
-                disabled={!displayEntries.length || allVisibleInWorkbook}
+                onClick={addAllVisibleToPick}
+                disabled={!displayEntries.length || allVisibleInPick}
               >
                 Добавить все
               </button>
@@ -991,8 +1017,8 @@ export default function AllTasksPage() {
                 const groupNums = entry.tasks
                   .map((t) => t.task_number)
                   .filter((n): n is number => n != null);
-                const groupInWorkbook = entry.tasks.every((task) =>
-                  workbookDraftIds.has(task.id)
+                const groupInPick = entry.tasks.every((task) =>
+                  pickDraftIds.has(task.id)
                 );
                 const groupHasMissingAnswer = entry.tasks.some(
                   (t) => !(t.answer && String(t.answer).trim())
@@ -1003,7 +1029,7 @@ export default function AllTasksPage() {
                       className={[
                         "all-tasks-item",
                         "all-tasks-item--group",
-                        workbookMode && groupInWorkbook ? "all-tasks-item--in-workbook" : "",
+                        pickMode && groupInPick ? "all-tasks-item--in-workbook" : "",
                       ]
                         .filter(Boolean)
                         .join(" ")}
@@ -1030,13 +1056,13 @@ export default function AllTasksPage() {
                             ) : null}
                           </p>
                           <div className="all-tasks-item__actions">
-                            {workbookMode ? (
+                            {pickMode ? (
                               <label className="all-tasks-item__workbook-check">
                                 <input
                                   type="checkbox"
-                                  checked={groupInWorkbook}
+                                  checked={groupInPick}
                                   onChange={(e) =>
-                                    toggleWorkbookGroup(entry.tasks, e.target.checked)
+                                    togglePickGroup(entry.tasks, e.target.checked)
                                   }
                                 />
                                 <span>Добавить группу</span>
@@ -1186,13 +1212,13 @@ export default function AllTasksPage() {
               const hasTaskBoardDraft = boardPersistHasDraft(taskBoardPersist);
               const answerOpen = !!openAnswers[t.id];
               const answerHtml = (t.answer || "").trim();
-              const inWorkbook = workbookDraftIds.has(t.id);
+              const inPick = pickDraftIds.has(t.id);
               return (
                 <li key={t.id} className="all-tasks-list__item">
                   <article
                     className={[
                       "all-tasks-item",
-                      workbookMode && inWorkbook ? "all-tasks-item--in-workbook" : "",
+                      pickMode && inPick ? "all-tasks-item--in-workbook" : "",
                     ]
                       .filter(Boolean)
                       .join(" ")}
@@ -1228,12 +1254,12 @@ export default function AllTasksPage() {
                           ) : null}
                         </p>
                         <div className="all-tasks-item__actions">
-                          {workbookMode ? (
+                          {pickMode ? (
                             <label className="all-tasks-item__workbook-check">
                               <input
                                 type="checkbox"
-                                checked={inWorkbook}
-                                onChange={(e) => toggleWorkbookTask(t, e.target.checked)}
+                                checked={inPick}
+                                onChange={(e) => togglePickTask(t, e.target.checked)}
                               />
                               <span>Добавить</span>
                             </label>
@@ -1317,10 +1343,18 @@ export default function AllTasksPage() {
       </div>
 
       <WorkbookCreateBar
-        active={workbookMode}
-        tasks={workbookDraft}
+        active={pickMode === "workbook"}
+        tasks={pickDraft}
         meta={workbookMeta}
-        onCreated={exitWorkbookMode}
+        onCreated={exitPickMode}
+      />
+      <VariantCreateBar
+        active={pickMode === "variant"}
+        tasks={pickDraft}
+        level={level}
+        subject={subject}
+        subjectName={subjectTitle}
+        onCreated={exitPickMode}
       />
     </div>
   );

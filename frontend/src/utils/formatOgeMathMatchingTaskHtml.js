@@ -3,6 +3,8 @@
  * или «ФУНКЦИИ» / «ГРАФИКИ». Рисунки 1) 2) 3) и варианты А) Б) В) — в одну строку.
  */
 
+import { parseTaskHtmlFragment } from "./parseTaskHtmlFragment";
+
 const SECTION_HEADERS = /^(КОЭФФИЦИЕНТЫ|ГРАФИКИ|ФУНКЦИИ)$/i;
 const LETTER_LABEL_RE = /^([А-ЯA-Z])\)$/i;
 const NUM_LABEL_RE = /^(\d+)\)$/;
@@ -11,12 +13,7 @@ const formatCache = new Map();
 const FORMAT_CACHE_MAX = 48;
 
 function parseHtmlFragment(html) {
-  if (typeof DOMParser === "undefined") return null;
-  const doc = new DOMParser().parseFromString(
-    `<div class="oge-math-matching-parse-root">${html}</div>`,
-    "text/html"
-  );
-  return doc.querySelector(".oge-math-matching-parse-root");
+  return parseTaskHtmlFragment(html, "oge-math-matching-parse-root");
 }
 
 function normalizeCellText(el) {

@@ -13,10 +13,13 @@ import {
 import { CabinetCallProvider } from "./CabinetCallContext";
 import CabinetGlobalSearch from "./components/CabinetGlobalSearch";
 import CabinetNotificationsBell from "./components/CabinetNotificationsBell";
+import CabinetGuideModal from "./components/CabinetGuideModal";
 import "../styles/cabinet-dashboard.css";
 import "../styles/cabinet-mobile-system.css";
 
 const PAGE_TITLE = "Кабинет учителя — Цифровой поток";
+const GUIDE_SEEN_KEY = "cabinet-guide-seen-v1";
+const GUIDE_OPEN_ON_REGISTER_KEY = "cabinet-guide-open-on-register";
 
 function SoonBadge() {
   return <span className="cabinet-soon-badge">скоро</span>;
@@ -25,6 +28,7 @@ function SoonBadge() {
 function NavSidebarItem({ item, active }) {
   const className = [
     "cabinet-nav-item",
+    item.accent ? "cabinet-nav-item--accent" : "",
     active && !item.soon ? "active" : "",
     active && item.soon ? "cabinet-nav-item--soon-active" : "",
     item.soon ? "cabinet-nav-item--soon" : "",
@@ -55,7 +59,13 @@ function NavSidebarItem({ item, active }) {
   }
 
   return (
-    <Link to={item.path} className={className} aria-label={item.label}>
+    <Link
+      to={item.path}
+      className={className}
+      aria-label={item.label}
+      target={item.newTab ? "_blank" : undefined}
+      rel={item.newTab ? "noopener noreferrer" : undefined}
+    >
       {content}
     </Link>
   );
@@ -67,6 +77,7 @@ export default function CabinetLayout() {
   const [user, setUser] = useState(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const searchInputRef = useRef(null);
 
   useEffect(() => { document.title = PAGE_TITLE; }, []);
@@ -89,6 +100,40 @@ export default function CabinetLayout() {
       searchInputRef.current.focus();
     }
   }, [searchOpen]);
+
+  useEffect(() => {
+    if (loading || !user || user.role === "student") return;
+    try {
+      if (window.sessionStorage.getItem(GUIDE_OPEN_ON_REGISTER_KEY) === "1") {
+        window.sessionStorage.removeItem(GUIDE_OPEN_ON_REGISTER_KEY);
+        setGuideOpen(true);
+        return;
+      }
+      if (window.localStorage.getItem(GUIDE_SEEN_KEY) !== "1") {
+        setGuideOpen(true);
+      }
+    } catch {
+      setGuideOpen(true);
+    }
+  }, [loading, user]);
+
+  const openGuide = () => setGuideOpen(true);
+  const closeGuide = () => {
+    try {
+      window.localStorage.setItem(GUIDE_SEEN_KEY, "1");
+    } catch {
+      /* ignore localStorage errors */
+    }
+    setGuideOpen(false);
+  };
+  const completeGuide = () => {
+    try {
+      window.localStorage.setItem(GUIDE_SEEN_KEY, "1");
+    } catch {
+      /* ignore localStorage errors */
+    }
+    setGuideOpen(false);
+  };
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -124,7 +169,7 @@ export default function CabinetLayout() {
     ? "cabinet-content"
     : "cabinet-content cabinet-content--page";
   const sectionTitle = getCabinetSectionTitle(location.pathname);
-  const outletContext = { user, handleLogout, loggingOut };
+  const outletContext = { user, handleLogout, loggingOut, openGuide };
 
   return (
     <CabinetCallProvider>
@@ -158,6 +203,15 @@ export default function CabinetLayout() {
       <main className="cabinet-main">
         <header className={`cabinet-header${isDashboard ? " cabinet-header--dashboard" : ""}`}>
           <div className="cabinet-header-title">
+            <button
+              type="button"
+              className="cabinet-header-guide-btn"
+              aria-label="Открыть инструкцию"
+              title="Инструкция"
+              onClick={openGuide}
+            >
+              <CabinetIcon name="bulb" />
+            </button>
             <p className="cabinet-header-section">{sectionTitle}</p>
           </div>
           <div className="cabinet-header-right">
@@ -208,6 +262,7 @@ export default function CabinetLayout() {
           </Link>
         ))}
       </nav>
+      <CabinetGuideModal open={guideOpen} onClose={closeGuide} onComplete={completeGuide} />
     </div>
     </CabinetCallProvider>
   );

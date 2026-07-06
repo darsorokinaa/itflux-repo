@@ -3,25 +3,12 @@
  * Чистит хвост ФИПИ, превращает ShowPictureQ в <img>, выравнивает порядок блоков.
  */
 
+import { parseTaskHtmlFragment } from "./parseTaskHtmlFragment";
+
 const DOC_POS_FOLLOWING = 4;
 
 function parseHtmlFragment(html) {
-  if (typeof DOMParser !== "undefined") {
-    const doc = new DOMParser().parseFromString(
-      `<!DOCTYPE html><html><body>${html}</body></html>`,
-      "text/html"
-    );
-    const body = doc.body;
-    if (body?.innerHTML?.trim() || body?.querySelector("img, table, p")) {
-      return body;
-    }
-  }
-  if (typeof document !== "undefined") {
-    const host = document.createElement("div");
-    host.innerHTML = html;
-    return host;
-  }
-  return null;
+  return parseTaskHtmlFragment(html);
 }
 
 function htmlHasVisibleContent(html) {

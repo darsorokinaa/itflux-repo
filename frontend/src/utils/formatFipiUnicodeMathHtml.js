@@ -3,6 +3,8 @@
  * При показе превращаем в $…$ для typeset.
  */
 
+import { parseTaskHtmlFragment } from "./parseTaskHtmlFragment";
+
 const FIPI_MATH_MARK_RE = /[\u2062\u2212\u2264\u2265\u00d7\u00f7\u{1D465}]/u;
 
 const CYRILLIC_WORD_RE = /[а-яё]{3,}/gi;
@@ -290,13 +292,9 @@ function convertElementText(el) {
 export function formatFipiUnicodeMathHtml(html) {
   if (html == null || typeof html !== "string") return html;
   if (!FIPI_MATH_MARK_RE.test(html)) return html;
-  if (typeof DOMParser === "undefined") return html;
+  if (typeof document === "undefined") return html;
 
-  const doc = new DOMParser().parseFromString(
-    `<div class="fipi-unicode-math-root">${html}</div>`,
-    "text/html"
-  );
-  const root = doc.querySelector(".fipi-unicode-math-root");
+  const root = parseTaskHtmlFragment(html, "fipi-unicode-math-root");
   if (!root) return html;
 
   for (const el of root.querySelectorAll("p, .oge-math-choice-question, td, th, div")) {

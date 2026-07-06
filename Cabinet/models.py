@@ -942,6 +942,8 @@ class FlashcardItem(models.Model):
     )
     front_text = models.TextField("Лицевая сторона")
     back_text = models.TextField("Обратная сторона")
+    front_image_url = models.URLField("Картинка на лицевой стороне", max_length=1000, blank=True, default="")
+    back_image_url = models.URLField("Картинка на обратной стороне", max_length=1000, blank=True, default="")
     hint = models.CharField("Подсказка", max_length=255, blank=True)
     explanation = models.TextField("Пояснение", blank=True)
     order = models.PositiveIntegerField("Порядок", default=0)
@@ -964,6 +966,8 @@ class MatchingPair(models.Model):
     )
     left_text = models.TextField("Левая часть")
     right_text = models.TextField("Правая часть")
+    left_image_url = models.URLField("Картинка слева", max_length=1000, blank=True, default="")
+    right_image_url = models.URLField("Картинка справа", max_length=1000, blank=True, default="")
     explanation = models.TextField("Пояснение", blank=True)
     order = models.PositiveIntegerField("Порядок", default=0)
 
@@ -984,6 +988,7 @@ class OrderingItem(models.Model):
         verbose_name="Интерактив",
     )
     text = models.TextField("Текст")
+    image_url = models.URLField("Картинка", max_length=1000, blank=True, default="")
     correct_order = models.PositiveIntegerField("Правильный порядок")
     explanation = models.TextField("Пояснение", blank=True)
 
@@ -1011,6 +1016,7 @@ class QuizQuestion(models.Model):
         verbose_name="Интерактив",
     )
     question_text = models.TextField("Вопрос")
+    image_url = models.URLField("Картинка вопроса", max_length=1000, blank=True, default="")
     answers = models.JSONField(
         "Варианты ответов",
         default=list,

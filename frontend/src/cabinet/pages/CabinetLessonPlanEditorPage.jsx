@@ -10,6 +10,7 @@ import {
   addLessonPlanItem,
   createLessonPlan,
   createScheduleEvent,
+  fetchLessonPlanSubjects,
   deleteLessonPlanItem,
   fetchCabinetSession,
   fetchLessonPlan,
@@ -330,7 +331,9 @@ export default function CabinetLessonPlanEditorPage() {
 
   const [title, setTitle] = useState("");
   const [type, setType] = useState("oge");
-  const [subject, setSubject] = useState("informatics");
+  const [subject, setSubject] = useState(defaultSubjectForDirection("oge"));
+  const [subjectOptions, setSubjectOptions] = useState(PLAN_SUBJECTS);
+  const [subjectsLoading, setSubjectsLoading] = useState(true);
   const [goal, setGoal] = useState("");
   const [description, setDescription] = useState("");
   const [grade, setGrade] = useState("");
@@ -371,6 +374,71 @@ export default function CabinetLessonPlanEditorPage() {
     return () => { cancelled = true; };
   }, []);
 
+  const defaultSubjectFromOptions = useCallback((direction, options) => {
+    const list = Array.isArray(options) && options.length ? options : PLAN_SUBJECTS;
+    const ids = new Set(list.map((item) => String(item.id)));
+
+    if (direction === "school") {
+      if (ids.has("math")) return "math";
+      if (ids.has("math_base")) return "math_base";
+    }
+
+    if (ids.has("inf")) return "inf";
+    const fallback = defaultSubjectForDirection(direction);
+    if (ids.has(fallback)) return fallback;
+    return list[0]?.id || fallback;
+  }, []);
+
+  const normalizeSubjectSelection = useCallback((value, direction, options) => {
+    const list = Array.isArray(options) && options.length ? options : PLAN_SUBJECTS;
+    const ids = new Set(list.map((item) => String(item.id)));
+    const current = String(value || "").trim();
+    const normalized = current.toLowerCase();
+
+    if (!normalized) {
+      return defaultSubjectFromOptions(direction, list);
+    }
+    if (ids.has(current)) return current;
+    if (ids.has(normalized)) return normalized;
+    if (normalized === "informatics" && ids.has("inf")) return "inf";
+    if (normalized === "inf" && ids.has("informatics")) return "informatics";
+    if (normalized === "math" && ids.has("math_base") && !ids.has("math")) return "math_base";
+
+    return defaultSubjectFromOptions(direction, list);
+  }, [defaultSubjectFromOptions]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchLessonPlanSubjects()
+      .then((data) => {
+        if (cancelled) return;
+        const next = (data?.subjects || [])
+          .map((item) => ({
+            id: String(item?.id || "").trim(),
+            label: String(item?.label || item?.id || "").trim(),
+          }))
+          .filter((item) => item.id && item.label);
+        setSubjectOptions(next.length ? next : PLAN_SUBJECTS);
+      })
+      .catch(() => {
+        if (!cancelled) setSubjectOptions(PLAN_SUBJECTS);
+      })
+      .finally(() => {
+        if (!cancelled) setSubjectsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!subjectOptions.length) return;
+    setSubject((prev) => {
+      const next = normalizeSubjectSelection(prev, type, subjectOptions);
+      return next === prev ? prev : next;
+    });
+  }, [normalizeSubjectSelection, subjectOptions, type]);
+
   useEffect(() => {
     if (!sessionReady || isNew) {
       if (isNew && sessionReady) setLoadingExisting(false);
@@ -401,7 +469,7 @@ export default function CabinetLessonPlanEditorPage() {
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoadingExisting(false));
-  }, [canPublishCatalog, isNew, planId, navigate, sessionReady]);
+  }, [canPublishCatalog, isNew, navigate, planId, sessionReady]);
 
   const progress = useMemo(
     () => calculateProgress({ title, sessions }),
@@ -937,8 +1005,12 @@ export default function CabinetLessonPlanEditorPage() {
               <div className="cb-pe-params__row">
                 <label className="cb-pe-field">
                   <span>Предмет</span>
-                  <select value={subject} onChange={(e) => setSubject(e.target.value)}>
-                    {PLAN_SUBJECTS.map((item) => (
+                  <select
+                    value={subject}
+                    onChange={(e) => setSubject(e.target.value)}
+                    disabled={subjectsLoading && !subjectOptions.length}
+                  >
+                    {subjectOptions.map((item) => (
                       <option key={item.id} value={item.id}>{item.label}</option>
                     ))}
                   </select>
@@ -949,9 +1021,13 @@ export default function CabinetLessonPlanEditorPage() {
                     value={type}
                     onChange={(e) => {
                       const nextType = e.target.value;
+                      const prevDefault = defaultSubjectFromOptions(type, subjectOptions);
+                      const nextDefault = defaultSubjectFromOptions(nextType, subjectOptions);
                       setType(nextType);
                       setSubject((prev) => (
-                        prev === defaultSubjectForDirection(type) ? defaultSubjectForDirection(nextType) : prev
+                        prev === prevDefault
+                          ? nextDefault
+                          : normalizeSubjectSelection(prev, nextType, subjectOptions)
                       ));
                     }}
                   >

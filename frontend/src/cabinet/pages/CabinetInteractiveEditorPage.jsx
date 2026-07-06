@@ -145,7 +145,14 @@ function FlashcardsEditor({ data, onCardsChange, openIndex, setOpenIndex, isMobi
   };
 
   const addCard = () => {
-    onCardsChange([...data.cards, { front: "", back: "", hint: "", explanation: "" }]);
+    onCardsChange([...data.cards, {
+      front: "",
+      back: "",
+      front_image_url: "",
+      back_image_url: "",
+      hint: "",
+      explanation: "",
+    }]);
     setOpenIndex(data.cards.length);
   };
 
@@ -230,8 +237,24 @@ function FlashcardsEditor({ data, onCardsChange, openIndex, setOpenIndex, isMobi
                   <input value={card.front} placeholder="Термин" onChange={(e) => updateCard(index, "front", e.target.value)} />
                 </label>
                 <label className="ix-ed-field">
+                  <span>Картинка (лицевая)</span>
+                  <input
+                    value={card.front_image_url || ""}
+                    placeholder="https://..."
+                    onChange={(e) => updateCard(index, "front_image_url", e.target.value)}
+                  />
+                </label>
+                <label className="ix-ed-field">
                   <span>Обратная сторона</span>
                   <input value={card.back} placeholder="Ответ" onChange={(e) => updateCard(index, "back", e.target.value)} />
+                </label>
+                <label className="ix-ed-field">
+                  <span>Картинка (обратная)</span>
+                  <input
+                    value={card.back_image_url || ""}
+                    placeholder="https://..."
+                    onChange={(e) => updateCard(index, "back_image_url", e.target.value)}
+                  />
                 </label>
                 <label className="ix-ed-field">
                   <span>Подсказка</span>
@@ -261,7 +284,13 @@ function MatchingEditor({ data, onPairsChange, openIndex, setOpenIndex, isMobile
   };
 
   const addPair = () => {
-    onPairsChange([...data.pairs, { left: "", right: "", explanation: "" }]);
+    onPairsChange([...data.pairs, {
+      left: "",
+      right: "",
+      left_image_url: "",
+      right_image_url: "",
+      explanation: "",
+    }]);
     setOpenIndex(data.pairs.length);
   };
 
@@ -336,8 +365,24 @@ function MatchingEditor({ data, onPairsChange, openIndex, setOpenIndex, isMobile
                   <input value={pair.left} onChange={(e) => updatePair(index, "left", e.target.value)} />
                 </label>
                 <label className="ix-ed-field">
+                  <span>Картинка слева</span>
+                  <input
+                    value={pair.left_image_url || ""}
+                    placeholder="https://..."
+                    onChange={(e) => updatePair(index, "left_image_url", e.target.value)}
+                  />
+                </label>
+                <label className="ix-ed-field">
                   <span>Справа</span>
                   <input value={pair.right} onChange={(e) => updatePair(index, "right", e.target.value)} />
+                </label>
+                <label className="ix-ed-field">
+                  <span>Картинка справа</span>
+                  <input
+                    value={pair.right_image_url || ""}
+                    placeholder="https://..."
+                    onChange={(e) => updatePair(index, "right_image_url", e.target.value)}
+                  />
                 </label>
                 <label className="ix-ed-field ix-ed-field--wide">
                   <span>Пояснение</span>
@@ -364,7 +409,12 @@ function SequenceEditor({ data, onStepsChange, openIndex, setOpenIndex, isMobile
   };
 
   const addStep = () => {
-    onStepsChange([...data.steps, { text: "", explanation: "", position: data.steps.length + 1 }]);
+    onStepsChange([...data.steps, {
+      text: "",
+      image_url: "",
+      explanation: "",
+      position: data.steps.length + 1,
+    }]);
     setOpenIndex(data.steps.length);
   };
 
@@ -434,6 +484,14 @@ function SequenceEditor({ data, onStepsChange, openIndex, setOpenIndex, isMobile
               <label className="ix-ed-field ix-ed-field--wide">
                 <span>Текст</span>
                 <input value={step.text} onChange={(e) => updateStep(index, "text", e.target.value)} />
+              </label>
+              <label className="ix-ed-field ix-ed-field--wide">
+                <span>Картинка</span>
+                <input
+                  value={step.image_url || ""}
+                  placeholder="https://..."
+                  onChange={(e) => updateStep(index, "image_url", e.target.value)}
+                />
               </label>
               <label className="ix-ed-field">
                 <span>Позиция</span>

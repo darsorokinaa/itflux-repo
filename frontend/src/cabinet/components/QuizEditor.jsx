@@ -45,12 +45,20 @@ function QuizAnswerRow({ answer, answerType, onChange, onRemove, canRemove }) {
       >
         {answerType === "single" ? (answer.is_correct ? "●" : "○") : (answer.is_correct ? "✓" : "□")}
       </button>
-      <input
-        className="ix-quiz-answer__text"
-        value={answer.text}
-        placeholder="Текст ответа"
-        onChange={(e) => onChange({ ...answer, text: e.target.value })}
-      />
+      <div className="ix-quiz-answer__body">
+        <input
+          className="ix-quiz-answer__text"
+          value={answer.text}
+          placeholder="Текст ответа"
+          onChange={(e) => onChange({ ...answer, text: e.target.value })}
+        />
+        <input
+          className="ix-quiz-answer__image"
+          value={answer.image_url || ""}
+          placeholder="Картинка: https://..."
+          onChange={(e) => onChange({ ...answer, image_url: e.target.value })}
+        />
+      </div>
       {canRemove ? (
         <button type="button" className="ix-quiz-answer__remove" onClick={onRemove} aria-label="Удалить вариант">
           ×
@@ -186,6 +194,14 @@ export default function QuizEditor({
                     value={question.text}
                     placeholder="Текст вопроса"
                     onChange={(e) => updateQuestion(index, { text: e.target.value })}
+                  />
+                </label>
+                <label className="ix-ed-field ix-ed-field--wide">
+                  <span>Картинка вопроса</span>
+                  <input
+                    value={question.image_url || ""}
+                    placeholder="https://..."
+                    onChange={(e) => updateQuestion(index, { image_url: e.target.value })}
                   />
                 </label>
 

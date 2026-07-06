@@ -53,14 +53,18 @@ const PLAN_DIRECTION_LABELS = {
 };
 
 export const PLAN_SUBJECTS = [
-  { id: "informatics", label: "Информатика" },
+  { id: "inf", label: "Информатика" },
   { id: "math", label: "Математика" },
+  { id: "rus", label: "Русский язык" },
   { id: "other", label: "Другое" },
 ];
 
 const PLAN_SUBJECT_LABELS = {
+  inf: "Информатика",
   informatics: "Информатика",
   math: "Математика",
+  math_base: "Математика базовая",
+  rus: "Русский язык",
   other: "Другое",
 };
 
@@ -70,7 +74,7 @@ export function planSubjectLabelFromId(subjectId) {
 
 export function defaultSubjectForDirection(direction) {
   if (direction === "school") return "math";
-  return "informatics";
+  return "inf";
 }
 
 const PLAN_STATUS_TONES = {
@@ -191,7 +195,10 @@ const MATH_KEYWORDS = /математ|алгебр|геометр|уравнен
 
 function planSubjectKind(plan) {
   if (plan.subject && plan.subject !== "other") {
-    return plan.subject;
+    const subjectId = String(plan.subject).toLowerCase();
+    if (subjectId === "inf" || subjectId === "informatics") return "informatics";
+    if (subjectId === "math" || subjectId === "math_base") return "math";
+    return subjectId;
   }
   const hay = `${plan.title || ""} ${plan.description || ""} ${plan.goal || ""}`;
 

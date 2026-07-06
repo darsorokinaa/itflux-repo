@@ -2124,14 +2124,20 @@ def api_task_bank(request, level, subject):
             pass
 
     subtopic_id = request.GET.get('subtopic_id')
+    no_answer_only = False
     if subtopic_id:
         if subtopic_id.strip().lower() == "none":
             qs = qs.filter(subtopic_id__isnull=True)
+        elif subtopic_id.strip().lower() == "no-answer":
+            no_answer_only = True
         else:
             try:
                 qs = qs.filter(subtopic_id=int(subtopic_id))
             except (TypeError, ValueError):
                 pass
+
+    if no_answer_only:
+        qs = qs.filter(Q(answer__isnull=True) | Q(answer__exact=''))
 
     raw_html = (request.GET.get("raw_html") or "").strip().lower() in ("1", "true", "yes")
 
@@ -2458,6 +2464,7 @@ def api_group_instances(request, level, subject):
     group_id_param   = request.GET.get('group_id', '').strip()
     linked_key_param = request.GET.get('linked_key', '').strip()
     subtopic_id_param = request.GET.get('subtopic_id', '').strip()
+    no_answer_only = False
     expected_task_numbers = None
 
     if group_id_param:
@@ -2486,6 +2493,8 @@ def api_group_instances(request, level, subject):
     if subtopic_id_param:
         if subtopic_id_param.strip().lower() == "none":
             qs = qs.filter(subtopic_id__isnull=True)
+        elif subtopic_id_param.strip().lower() == "no-answer":
+            no_answer_only = True
         else:
             try:
                 qs = qs.filter(subtopic_id=int(subtopic_id_param))
@@ -2501,6 +2510,8 @@ def api_group_instances(request, level, subject):
     instances = []
     for grp in qs.order_by('id'):
         members = list(grp.taskgroupmember_set.all())
+        if no_answer_only and any(str(m.task.answer or '').strip() for m in members):
+            continue
         if expected_task_numbers is not None:
             member_nums = {m.task_number for m in members}
             if not all(n in member_nums for n in expected_task_numbers):

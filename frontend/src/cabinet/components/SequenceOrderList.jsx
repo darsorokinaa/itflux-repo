@@ -84,7 +84,17 @@ export default function SequenceOrderList({
             onDragEnd={handleDragEnd}
           >
             {showNumbers ? <span className="cb-sequence-item__num">{index + 1}</span> : null}
-            <span className="cb-sequence-item__text">{step?.text}</span>
+            <div className="cb-sequence-item__content">
+              <span className="cb-sequence-item__text">{step?.text}</span>
+              {step?.image_url ? (
+                <img
+                  src={step.image_url}
+                  alt="Изображение шага"
+                  className="ix-inline-media ix-inline-media--compact"
+                  loading="lazy"
+                />
+              ) : null}
+            </div>
           </li>
         );
       })}

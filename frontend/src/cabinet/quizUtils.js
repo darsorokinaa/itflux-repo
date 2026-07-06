@@ -3,13 +3,14 @@ export function genQuizId(prefix = "id") {
 }
 
 export function createEmptyAnswer() {
-  return { id: genQuizId("a"), text: "", is_correct: false };
+  return { id: genQuizId("a"), text: "", image_url: "", is_correct: false };
 }
 
 export function createEmptyQuestion() {
   return {
     id: genQuizId("q"),
     text: "",
+    image_url: "",
     answer_type: "single",
     answers: [createEmptyAnswer(), createEmptyAnswer()],
     explanation: "",

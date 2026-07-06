@@ -21,6 +21,7 @@ from .choices import (
 )
 from .subscription_service import LimitExceeded, SubscriptionLimitService
 from .plan_catalog import can_publish_catalog_lesson_plan
+from .plan_subjects import get_plan_subject_options
 from .invitations import (
     accept_student_invitation,
     create_student_invitation,
@@ -633,6 +634,11 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         plan.lessons_count = plan.items.count()
         plan.save(update_fields=["lessons_count", "updated_at"])
         return Response(LessonPlanItemSerializer(item).data, status=status.HTTP_201_CREATED)
+
+
+class LessonPlanSubjectOptionsView(TeacherScopedMixin, APIView):
+    def get(self, request):
+        return Response({"subjects": get_plan_subject_options()})
 
 
 class LessonPlanItemViewSet(

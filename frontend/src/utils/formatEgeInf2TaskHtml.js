@@ -1,3 +1,5 @@
+import { parseTaskHtmlFragment } from "./parseTaskHtmlFragment";
+
 export function mightBeEgeInf2TruthTableTask(html) {
   if (html == null || typeof html !== "string") return false;
   if (/\bege-inf-2-task\b/i.test(html)) return false;
@@ -151,18 +153,8 @@ export function formatEgeInf2TruthTableHtml(html) {
   if (!trimmed || !mightBeEgeInf2TruthTableTask(trimmed)) return html;
 
   try {
-    let doc;
-    if (typeof DOMParser !== "undefined") {
-      doc = new DOMParser().parseFromString(
-        `<!DOCTYPE html><html><body>${trimmed}</body></html>`,
-        "text/html"
-      ).body;
-    } else if (typeof document !== "undefined") {
-      doc = document.createElement("div");
-      doc.innerHTML = trimmed;
-    } else {
-      return html;
-    }
+    const doc = parseTaskHtmlFragment(trimmed);
+    if (!doc) return html;
 
     reconstructFlattenedExampleTable(doc);
     normalizeSparseTruthTables(doc);

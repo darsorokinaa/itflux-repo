@@ -7,6 +7,12 @@ import {
 } from "../quizUtils";
 import { playInteractiveSound } from "../interactiveSounds";
 
+function QuizImage({ src, alt, className }) {
+  const value = String(src || "").trim();
+  if (!value) return null;
+  return <img src={value} alt={alt} className={className} loading="lazy" />;
+}
+
 function formatAnswerTexts(question, answerIds = []) {
   const texts = (question?.answers || [])
     .filter((answer) => answerIds.includes(answer.id))
@@ -248,6 +254,7 @@ function QuizQuestionView({
     <div className="ix-quiz-question-card">
       <p className="ix-quiz-question-card__progress">Вопрос {index + 1} / {total}</p>
       <h3 className="ix-quiz-question-card__text">{question.text || "—"}</h3>
+      <QuizImage src={question.image_url} alt="Изображение вопроса" className="ix-inline-media" />
       <div className="ix-quiz-play-answers">
         {(question.answers || []).map((answer) => {
           const selected = selectedIds.includes(answer.id);
@@ -271,7 +278,10 @@ function QuizQuestionView({
                   ? (selected ? "●" : "○")
                   : (selected ? "✓" : "□")}
               </span>
-              <span>{answer.text || "—"}</span>
+              <span className="ix-quiz-play-answer__content">
+                <span>{answer.text || "—"}</span>
+                <QuizImage src={answer.image_url} alt="Изображение ответа" className="ix-inline-media ix-inline-media--compact" />
+              </span>
             </button>
           );
         })}

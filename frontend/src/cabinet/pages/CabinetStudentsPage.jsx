@@ -20,6 +20,7 @@ import { mapApiEnrollment } from "../lessonPlansData";
 import {
   addStudentToGroup,
   archiveStudent,
+  buildInvitationUrl,
   cancelInvitation,
   createGroup,
   createInvitation,
@@ -103,6 +104,7 @@ function formatGrade(grade) {
 
 function StudentChip({ student, enrollment, dragging, onDragStart, onDragEnd, onOpen, onAssignHomework }) {
   const tone = avatarTone(student);
+  const joined = Boolean(student.raw?.is_registered);
 
   return (
     <div
@@ -135,6 +137,12 @@ function StudentChip({ student, enrollment, dragging, onDragStart, onDragEnd, on
               {enrollment.planTitle}
             </span>
           ) : null}
+          <span
+            className={`cb-student-chip__join-status${joined ? " cb-student-chip__join-status--joined" : ""}`}
+            title={joined ? "Ученик вошёл в кабинет по приглашению" : "Ученик ещё не присоединился по ссылке"}
+          >
+            {joined ? "Присоединился" : "Не присоединился"}
+          </span>
         </span>
         <span className={`cb-student-chip__status cb-student-chip__status--${student.status}`} title={STATUS_LABELS[student.status]} />
       </button>
@@ -306,27 +314,74 @@ function AddStudentCard({ onClick }) {
 }
 
 function PendingInvitesPanel({ invitations, onCancel }) {
+  const [copiedInviteId, setCopiedInviteId] = useState(null);
+
   if (!invitations.length) return null;
+
+  const handleCopyInvite = async (invite) => {
+    const inviteUrl = buildInvitationUrl(invite.join_path);
+    if (!inviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopiedInviteId(invite.id);
+      window.setTimeout(() => {
+        setCopiedInviteId((prev) => (prev === invite.id ? null : prev));
+      }, 1500);
+    } catch {
+      setCopiedInviteId(null);
+    }
+  };
 
   return (
     <section className="cb-students-pending">
       <h2 className="cb-students-panel__title">
-        Ожидают регистрации
+        Приглашения ученикам
         <span className="cb-students-col__count">{invitations.length}</span>
       </h2>
       <ul className="cb-students-pending__list">
         {invitations.map((invite) => (
           <li key={invite.id} className="cb-students-pending__item">
-            <div>
-              <strong>{invite.email || "Ссылка без email"}</strong>
+            <div className="cb-students-pending__body">
+              <div className="cb-students-pending__title-row">
+                <strong>{invite.email || "Ссылка без email"}</strong>
+                <span
+                  className={`cb-students-pending__status cb-students-pending__status--${invite.status === "accepted" ? "joined" : "pending"}`}
+                >
+                  {invite.status === "accepted" ? "Присоединился" : "Не присоединился"}
+                </span>
+              </div>
               <span className="cb-students-pending__meta">
                 {invite.group_title ? `Группа: ${invite.group_title}` : "Индивидуально"}
                 {invite.direction_label ? ` · ${invite.direction_label}` : ""}
+                {invite.grade ? ` · ${invite.grade} класс` : ""}
               </span>
+              {invite.join_path ? (
+                <a
+                  href={buildInvitationUrl(invite.join_path)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="cb-students-pending__link"
+                >
+                  Ссылка приглашения
+                </a>
+              ) : null}
             </div>
-            <button type="button" className="cb-btn cb-btn--text cb-btn--sm" onClick={() => onCancel(invite.id)}>
-              Отменить
-            </button>
+            <div className="cb-students-pending__actions">
+              {invite.join_path ? (
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--outline cb-btn--sm"
+                  onClick={() => handleCopyInvite(invite)}
+                >
+                  {copiedInviteId === invite.id ? "Скопировано" : "Копировать"}
+                </button>
+              ) : null}
+              {invite.status === "pending" ? (
+                <button type="button" className="cb-btn cb-btn--text cb-btn--sm" onClick={() => onCancel(invite.id)}>
+                  Отменить
+                </button>
+              ) : null}
+            </div>
           </li>
         ))}
       </ul>
@@ -425,14 +480,22 @@ export default function CabinetStudentsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [studentsData, groupsData, invitesData] = await Promise.all([
+      const [studentsData, groupsData, pendingInvites, acceptedInvites] = await Promise.all([
         fetchStudents({ status: "active" }),
         fetchGroups({ status: "active" }),
         fetchInvitations({ status: "pending" }),
+        fetchInvitations({ status: "accepted" }),
       ]);
       setStudents((studentsData || []).map(mapApiStudent));
       setGroups((groupsData || []).map(mapApiGroup));
-      setInvitations(invitesData || []);
+      const mergedInvites = [...(pendingInvites || []), ...(acceptedInvites || [])]
+        .filter((inv) => inv && inv.id != null)
+        .sort((a, b) => {
+          const aTime = Date.parse(a.created_at || "") || 0;
+          const bTime = Date.parse(b.created_at || "") || 0;
+          return bTime - aTime;
+        });
+      setInvitations(mergedInvites);
       await loadEnrollments();
     } catch (err) {
       setError(err.message || "Не удалось загрузить данные");
@@ -811,8 +874,6 @@ export default function CabinetStudentsPage() {
         <SummaryMetrics students={students} groups={groups} attentionCount={attentionCount} />
       </div>
 
-      <PendingInvitesPanel invitations={invitations} onCancel={handleCancelInvite} />
-
       <div className="cb-students-toolbar">
         <CabinetFilterBar filters={FILTERS} active={filter} onChange={setFilter} />
       </div>
@@ -1020,6 +1081,8 @@ export default function CabinetStudentsPage() {
           </div>
         )}
       </div>
+
+      <PendingInvitesPanel invitations={invitations} onCancel={handleCancelInvite} />
     </CabinetPageShell>
   );
 }

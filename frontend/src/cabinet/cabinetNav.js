@@ -6,6 +6,7 @@ export const CABINET_NAV = [
   { id: "review",       label: "Проверка",       path: "/cabinet/review",      icon: "check"        },
   { id: "schedule",     label: "Календарь",      path: "/cabinet/schedule",    icon: "calendar"     },
   { id: "ai",           label: "ИИ-помощник",    path: "/cabinet/ai",          icon: "spark",  soon: true, disabled: true },
+  { id: "task-bank",    label: "Банк задач",    path: "/tasks",               icon: "tasks", accent: true, newTab: true },
 ];
 
 /** Основные пункты нижней навигации на mobile */

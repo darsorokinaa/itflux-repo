@@ -3,13 +3,10 @@
  * Разворачивает FIPI-обёртки, чистит пример таблицы, убирает дубли картинок.
  */
 
+import { parseTaskHtmlFragment } from "./parseTaskHtmlFragment";
+
 function parseHtmlFragment(html) {
-  if (typeof DOMParser === "undefined") return null;
-  const doc = new DOMParser().parseFromString(
-    `<!DOCTYPE html><body>${html}</body>`,
-    "text/html"
-  );
-  return doc.body;
+  return parseTaskHtmlFragment(html);
 }
 
 function normalizeCellText(el) {
