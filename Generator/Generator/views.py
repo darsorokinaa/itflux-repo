@@ -776,6 +776,14 @@ _YANDEX_WEBMASTER_HTML = {
         "    <body>Verification: 031b211eae53d997</body>\n"
         "</html>\n"
     ),
+    "yandex_8c3afeb4d0030408.html": (
+        "<html>\n"
+        "    <head>\n"
+        '        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">\n'
+        "    </head>\n"
+        "    <body>Verification: 8c3afeb4d0030408</body>\n"
+        "</html>\n"
+    ),
 }
 
 
