@@ -81,6 +81,55 @@ logger = logging.getLogger(__name__)
 _CKEDITOR_ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
 _CKEDITOR_MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 
+# URL-маски клиентских (React) страниц, которые должны возвращать index.html с кодом 200.
+# Для остальных путей отдаём index.html с кодом 404, чтобы роботы корректно видели "страница не найдена".
+_SPA_KNOWN_PATH_PATTERNS = (
+    re.compile(r"^/$"),
+    re.compile(r"^/about/?$"),
+    re.compile(r"^/privacy/?$"),
+    re.compile(r"^/tasks/?$"),
+    re.compile(r"^/generator/?$"),
+    re.compile(r"^/lessons/?$"),
+    re.compile(r"^/lessons/[^/]+/view/?$"),
+    re.compile(r"^/teachers/?$"),
+    re.compile(r"^/for-teachers/?$"),
+    re.compile(r"^/cabinet/login/?$"),
+    re.compile(r"^/cabinet/join/[^/]+/?$"),
+    re.compile(r"^/cabinet/interactives/[^/]+/play/?$"),
+    re.compile(r"^/cabinet(?:/.*)?$"),
+    re.compile(r"^/login/?$"),
+    re.compile(r"^/subject/(oge|ege|vpr)/?$"),
+    re.compile(r"^/search/tasks/?$"),
+    re.compile(r"^/search-variant/?$"),
+    re.compile(r"^/lesson/join/?$"),
+    re.compile(r"^/lesson/join/variant/\d+/?$"),
+    re.compile(r"^/vpr/?$"),
+    re.compile(r"^/(oge|ege|vpr)/?$"),
+    re.compile(r"^/(oge|ege|vpr)/[a-z0-9_-]+/?$"),
+    re.compile(r"^/(oge|ege|vpr)/[a-z0-9_-]+/variant/\d+/?$"),
+)
+
+_SITEMAP_STATIC_PATHS = (
+    "/",
+    "/tasks",
+    "/generator",
+    "/lessons",
+    "/teachers",
+    "/privacy",
+    "/subject/oge",
+    "/subject/ege",
+    "/subject/vpr",
+    "/cabinet/login",
+)
+
+
+def _is_known_spa_path(pathname: str) -> bool:
+    path = pathname or "/"
+    for pattern in _SPA_KNOWN_PATH_PATTERNS:
+        if pattern.fullmatch(path):
+            return True
+    return False
+
 
 _INNER_TABLE_RE = re.compile(r"<table\b[^>]*>(?:(?!<table\b).)*?</table>", re.IGNORECASE | re.DOTALL)
 _TR_RE = re.compile(r"(<tr\b[^>]*>)(.*?)(</tr>)", re.IGNORECASE | re.DOTALL)
@@ -759,6 +808,42 @@ def favicon(request):
     return HttpResponse(status=404)
 
 
+def robots_txt(request):
+    base = request.build_absolute_uri("/")
+    sitemap_url = request.build_absolute_uri("/sitemap.xml")
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "\n"
+        f"Host: {urlparse(base).netloc}\n"
+        f"Sitemap: {sitemap_url}\n"
+    )
+    return HttpResponse(body, content_type="text/plain; charset=UTF-8")
+
+
+def sitemap_xml(request):
+    now_iso = timezone.now().date().isoformat()
+    base = request.build_absolute_uri("/").rstrip("/")
+    urls = []
+    for path in _SITEMAP_STATIC_PATHS:
+        loc = f"{base}{path}"
+        urls.append(
+            "  <url>\n"
+            f"    <loc>{loc}</loc>\n"
+            f"    <lastmod>{now_iso}</lastmod>\n"
+            "    <changefreq>daily</changefreq>\n"
+            "    <priority>0.8</priority>\n"
+            "  </url>"
+        )
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "\n".join(urls)
+        + "\n</urlset>\n"
+    )
+    return HttpResponse(xml, content_type="application/xml; charset=UTF-8")
+
+
 _YANDEX_WEBMASTER_HTML = {
     "yandex_ef13ec5e267d285b.html": (
         "<html>\n"
@@ -815,7 +900,9 @@ def react_app(request):
     index_path = frontend_dir / 'index.html'
     if index_path.exists():
         with open(index_path, 'r', encoding='utf-8') as f:
-            resp = HttpResponse(f.read(), content_type='text/html; charset=utf-8')
+            index_html = f.read()
+        status = 200 if _is_known_spa_path(request.path) else 404
+        resp = HttpResponse(index_html, content_type='text/html; charset=utf-8', status=status)
         # Иначе браузер/CDN держит старый index.html и подгружает старый бандл без новых экранов/карточек.
         resp["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         resp["Pragma"] = "no-cache"

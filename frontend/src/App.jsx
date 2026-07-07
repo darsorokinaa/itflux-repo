@@ -53,6 +53,66 @@ import StudentMorePage from "./cabinet/student/pages/StudentMorePage";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ensureSiteFavicon } from "./utils/ensureSiteFavicon";
 
+const DEFAULT_META_DESCRIPTION =
+  "Цифровой поток: подготовка к ОГЭ и ЕГЭ, генератор вариантов, банк задач, интерактивные уроки и личный кабинет учителя.";
+
+function getMetaDescriptionForPath(pathname) {
+  const path = pathname || "/";
+
+  if (path === "/") {
+    return "Цифровой поток — онлайн-платформа для подготовки к ОГЭ и ЕГЭ: генератор вариантов, банк задач и инструменты для учителя.";
+  }
+  if (path.startsWith("/tasks")) {
+    return "Банк заданий ОГЭ, ЕГЭ и ВПР: фильтры по предмету, номеру и подтеме, создание варианта и рабочей тетради.";
+  }
+  if (path.startsWith("/generator")) {
+    return "Генератор экзаменационных вариантов с автоматической сборкой задач по предметам и уровням подготовки.";
+  }
+  if (path === "/lessons" || /^\/lessons\/[^/]+\/view\/?$/.test(path)) {
+    return "Готовые уроки и материалы: откройте занятие, просмотрите файл и используйте контент в учебном процессе.";
+  }
+  if (path === "/teachers" || path === "/for-teachers") {
+    return "Решения для учителей: управление классами, планами, домашними заданиями и интерактивными материалами.";
+  }
+  if (path === "/privacy") {
+    return "Политика конфиденциальности платформы «Цифровой поток».";
+  }
+  if (path.startsWith("/cabinet/student")) {
+    return "Личный кабинет ученика: уроки, домашние задания, интерактивы и результаты обучения.";
+  }
+  if (path.startsWith("/cabinet/login") || path.startsWith("/login")) {
+    return "Вход в личный кабинет «Цифровой поток».";
+  }
+  if (path.startsWith("/cabinet/join/")) {
+    return "Присоединение к кабинету по приглашению учителя.";
+  }
+  if (path.startsWith("/cabinet")) {
+    return "Личный кабинет учителя: ученики, группы, планы уроков, расписание, интерактивы и проверка работ.";
+  }
+  if (path.startsWith("/search/tasks")) {
+    return "Поиск заданий по ID в банке задач «Цифровой поток».";
+  }
+  if (path.startsWith("/search-variant")) {
+    return "Поиск варианта по номеру и быстрый переход к заданиям.";
+  }
+  if (path.startsWith("/lesson/join")) {
+    return "Подключение к онлайн-уроку по ссылке приглашения.";
+  }
+  if (/^\/subject\/(oge|ege|vpr)\/?$/.test(path)) {
+    return "Выберите предмет и разделы для подготовки к экзаменам на платформе «Цифровой поток».";
+  }
+  if (/^\/(oge|ege|vpr)\/[a-z0-9_-]+\/variant\/\d+\/?$/.test(path)) {
+    return "Экзаменационный вариант: решайте задания онлайн, проверяйте ответы и скачивайте PDF.";
+  }
+  if (/^\/(oge|ege|vpr)\/[a-z0-9_-]+\/?$/.test(path)) {
+    return "Подбор и решение задач по выбранному предмету и уровню подготовки.";
+  }
+  if (/^\/(oge|ege|vpr)\/?$/.test(path)) {
+    return "Подготовка к экзаменам по уровням: ОГЭ, ЕГЭ и школьная база.";
+  }
+  return "Страница не найдена. Перейдите в банк задач или на главную страницу «Цифровой поток».";
+}
+
 function scrollDocumentToTop() {
   window.scrollTo(0, 0);
   const se = document.scrollingElement;
@@ -104,6 +164,23 @@ function ScrollToTop() {
   return null;
 }
 
+function MetaDescriptionSync() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    let meta = document.querySelector('meta[name="description"]');
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta.setAttribute("name", "description");
+      document.head.appendChild(meta);
+    }
+    const content = getMetaDescriptionForPath(pathname) || DEFAULT_META_DESCRIPTION;
+    meta.setAttribute("content", content);
+  }, [pathname]);
+
+  return null;
+}
+
 function SearchTaskWithKey() {
   const location = useLocation();
   return <SearchTaskPage key={location.search} />;
@@ -135,6 +212,7 @@ function App() {
     <BrowserRouter>
       <CyrillicPathRedirect />
       <ScrollToTop />
+      <MetaDescriptionSync />
       <Routes>
 
         <Route element={<Layout />}>
