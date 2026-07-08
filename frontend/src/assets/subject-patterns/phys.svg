@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 120" fill="none">
+  <g stroke="rgba(255,255,255,0.34)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="54" cy="46" r="18"/>
+    <ellipse cx="54" cy="46" rx="30" ry="10"/>
+    <ellipse cx="54" cy="46" rx="10" ry="30"/>
+    <path d="M124 20l30 52h-60z"/>
+    <path d="M124 72v22"/>
+    <circle cx="124" cy="96" r="6"/>
+    <path d="M190 34c12 0 12 18 24 18s12-18 24-18 12 18 24 18"/>
+    <path d="M190 88c12 0 12-18 24-18s12 18 24 18 12-18 24-18"/>
+    <path d="M290 26h58"/>
+    <path d="M320 26v56"/>
+    <path d="M292 82h56"/>
+    <path d="M380 54h74"/>
+    <path d="M428 28v52"/>
+    <path d="M392 80h72"/>
+    <circle cx="492" cy="40" r="14"/>
+    <path d="M492 54v26"/>
+    <path d="M476 80h32"/>
+  </g>
+  <g fill="rgba(255,255,255,0.3)" font-size="16" font-family="JetBrains Mono, monospace" font-weight="700">
+    <text x="176" y="22">F = ma</text>
+    <text x="286" y="104">E = mc^2</text>
+    <text x="386" y="20">v/t</text>
+  </g>
+</svg>

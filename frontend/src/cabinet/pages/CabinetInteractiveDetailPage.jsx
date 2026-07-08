@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { displayName } from "../../pages/CabinetAuthPage";
 import {
   assignInteractive,
@@ -283,12 +283,6 @@ export default function CabinetInteractiveDetailPage() {
     <CabinetPageShell className="cb-section--interactive-detail ix-page ix-launch-page">
       {toast}
       {shareMsg ? <div className="cb-soon-toast" role="status">{shareMsg}</div> : null}
-
-      <p className="cb-editor-breadcrumb ix-launch-breadcrumb">
-        <Link to="/cabinet/interactives">Интерактивы</Link>
-        <span> / </span>
-        <span>{getInteractiveDisplayTitle(interactive)}</span>
-      </p>
 
       <div className="ix-launch-top ix-launch-top--v2">
         <InteractiveLaunchScreen

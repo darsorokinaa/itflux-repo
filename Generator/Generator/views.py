@@ -1658,25 +1658,29 @@ def _vpr_counts_filters_from_request(request):
     return flt
 
 
-def _subject_task_counts_by_level(request, level_str: str):
+_SUBJECT_SHORTS_BY_LEVEL = {
+    "vpr": ("math", "inf", "phys", "rus", "history"),
+    "oge": ("math", "inf", "phys", "rus"),
+    # На карточках выбора предмета для ЕГЭ теперь есть и русский язык.
+    "ege": ("math", "inf", "rus"),
+}
+
+_SUBJECT_CATALOG_CORE_SHORTS = ("inf", "math", "rus")
+
+
+def _subject_task_counts_payload(request, level_str: str):
     """
     Счётчики активных заданий по предметам для уровня (vpr / oge / ege).
     Для ВПР: с query grade / advanced — как у api_tasks.
     """
     level_str = (level_str or "").lower()
-    if level_str not in ("vpr", "oge", "ege"):
+    shorts = _SUBJECT_SHORTS_BY_LEVEL.get(level_str)
+    if not shorts:
         return None
 
     level_instance = _level_instance_for_canonical_slug(level_str)
     if not level_instance:
-        return JsonResponse({})
-
-    shorts_by_level = {
-        "vpr": ("math", "inf", "phys", "rus", "history"),
-        "oge": ("math", "inf", "phys", "rus"),
-        "ege": ("math", "inf"),
-    }
-    shorts = shorts_by_level[level_str]
+        return {}
 
     vf = {}
     if level_str == "vpr":
@@ -1693,8 +1697,14 @@ def _subject_task_counts_by_level(request, level_str: str):
         if vf:
             qs = qs.filter(**vf)
         out[short] = qs.count()
+    return out
 
-    return JsonResponse(out)
+
+def _subject_task_counts_by_level(request, level_str: str):
+    payload = _subject_task_counts_payload(request, level_str)
+    if payload is None:
+        return None
+    return JsonResponse(payload)
 
 
 @require_http_methods(["GET"])
@@ -1715,6 +1725,29 @@ def api_level_subject_task_counts(request, level):
     if resp is None:
         return JsonResponse({"error": "unknown level"}, status=400)
     return resp
+
+
+@require_http_methods(["GET"])
+def api_level_subject_catalog(request, level):
+    """
+    GET /api/<level>/subject-catalog/ — данные карточек предметов для нового продуктового экрана.
+    Возвращает счётчик задач и признак доступности (is_available) для inf/math/rus.
+    """
+    counts = _subject_task_counts_payload(request, level)
+    if counts is None:
+        return JsonResponse({"error": "unknown level"}, status=400)
+
+    subjects = []
+    for subject_id in _SUBJECT_CATALOG_CORE_SHORTS:
+        task_count = int(counts.get(subject_id, 0) or 0)
+        subjects.append(
+            {
+                "id": subject_id,
+                "tasks_count": task_count,
+                "is_available": task_count > 0,
+            }
+        )
+    return JsonResponse({"level": (level or "").lower(), "subjects": subjects})
 
 
 @csrf_exempt
@@ -2113,6 +2146,26 @@ def _level_instance_for_canonical_slug(canonical: str):
         if _normalize_level_slug(lev.level) == canonical:
             return lev
     return None
+
+
+@require_http_methods(["GET"])
+def api_generator_overview(request):
+    """
+    GET /api/generator/overview/ — компактные агрегаты для экрана «Генератор вариантов».
+    """
+    tasks_by_level = {}
+    levels = []
+    for level_id in ("oge", "ege", "vpr"):
+        level_instance = _level_instance_for_canonical_slug(level_id)
+        tasks_count = (
+            int(Task.active_objects.filter(task__level=level_instance).count())
+            if level_instance
+            else 0
+        )
+        tasks_by_level[level_id] = tasks_count
+        levels.append({"id": level_id, "tasks_count": tasks_count})
+
+    return JsonResponse({"tasks_by_level": tasks_by_level, "levels": levels})
 
 
 @require_http_methods(["GET"])

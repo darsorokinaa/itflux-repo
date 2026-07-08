@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 120" fill="none">
+  <g stroke="rgba(255,255,255,0.34)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M24 24h72v58H24z"/>
+    <path d="M60 24v58"/>
+    <path d="M24 82c10-6 22-8 36-8s26 2 36 8"/>
+    <path d="M126 22h74v58h-74z"/>
+    <path d="M138 34h50"/>
+    <path d="M138 46h50"/>
+    <path d="M138 58h42"/>
+    <path d="M232 84c10-28 26-42 50-46"/>
+    <path d="M282 38c4 12-4 26-18 38"/>
+    <path d="M316 24h90v48h-90z"/>
+    <path d="M330 40h24"/>
+    <path d="M368 40h24"/>
+    <path d="M436 24h100v58"/>
+    <path d="M436 82h100"/>
+    <path d="M478 24v58"/>
+  </g>
+  <g fill="rgba(255,255,255,0.3)" font-size="16" font-family="JetBrains Mono, monospace" font-weight="700">
+    <text x="30" y="16">"quote"</text>
+    <text x="128" y="102">novel</text>
+    <text x="244" y="104">author</text>
+    <text x="318" y="18">hero</text>
+    <text x="438" y="18">plot</text>
+  </g>
+</svg>

@@ -9,26 +9,22 @@ export type NavTabDef = {
   disabled?: boolean;
 };
 
-/** Якорь блока «Выберите формат подготовки» на главной (HomePage). */
-export const GENERATOR_HASH = "home-levels";
-
 export const NAV_TABS: ReadonlyArray<NavTabDef> = [
   { key: "tasks", label: "Все задачи", to: "/tasks" },
-  { key: "generator", label: "Генератор вариантов", to: `/#${GENERATOR_HASH}` },
+  { key: "generator", label: "Генератор вариантов", to: "/generator" },
   { key: "lessons", label: "Готовые уроки", to: "/lessons" },
   { key: "teachers", label: "Для учителей", to: "/teachers" },
 ];
 
 /** Какая вкладка подсвечена на текущем пути. */
 export function getActiveNavTab(
-  pathname: string,
-  hash: string = ""
+  pathname: string
 ): NavTabKey | null {
   const p = (pathname || "").replace(/\/+$/, "") || "/";
-  if (p === "/tasks" || p.startsWith("/subject/")) {
+  if (p === "/tasks") {
     return "tasks";
   }
-  if (p === "/" && hash === `#${GENERATOR_HASH}`) {
+  if (p === "/generator" || p === "/subject" || p.startsWith("/subject/")) {
     return "generator";
   }
   if (p === "/lessons" || p.startsWith("/lessons/")) {

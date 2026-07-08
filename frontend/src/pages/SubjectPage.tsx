@@ -1,47 +1,65 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import SubjectCard from "../components/SubjectCard";
-import ScientistQuoteBanner from "../components/ScientistQuoteBanner";
 import NotFoundPage from "./NotFoundPage";
 import { getLevelDef, isLevelId, type LevelId } from "../data/levels";
 import {
   GRADES_BY_LEVEL,
   SUBJECTS_BY_LEVEL,
   type SubjectDefinition,
-  type SubjectId,
 } from "../data/subjects";
-import { formatTasksCount } from "../utils/formatTasksCount";
+import "../styles/tool-workspace.css";
 
-type CountMap = Partial<Record<SubjectId, number>>;
+type AvailabilityMap = Partial<Record<string, boolean>>;
 
 export default function SubjectPage() {
   const { level: levelParam } = useParams();
   const navigate = useNavigate();
   const levelStr = (levelParam || "").toLowerCase();
 
-  const level: LevelId | null = isLevelId(levelStr) ? levelStr : null;
-  const def = level ? getLevelDef(level) : undefined;
+  const level: LevelId = isLevelId(levelStr) ? levelStr : "oge";
+  const levelParamIsInvalid = Boolean(levelParam) && !isLevelId(levelStr);
+  const def = getLevelDef(level);
 
-  const grades = level ? GRADES_BY_LEVEL[level] : [];
-  const subjects = level ? SUBJECTS_BY_LEVEL[level] : [];
+  const grades = GRADES_BY_LEVEL[level];
+  const subjects = SUBJECTS_BY_LEVEL[level];
   const singleGrade = grades.length === 1;
 
   const [selectedClass, setSelectedClass] = useState<number | null>(() =>
     level ? GRADES_BY_LEVEL[level][0] ?? null : null,
   );
-  const [selectedSubject, setSelectedSubject] = useState<SubjectId | null>(null);
   const [advancedLevel, setAdvancedLevel] = useState(false);
-  const [counts, setCounts] = useState<CountMap>({});
-  const [countsLoading, setCountsLoading] = useState(true);
+  const [availability, setAvailability] = useState<AvailabilityMap>({});
 
   useEffect(() => {
-    if (!level) return;
     const g = GRADES_BY_LEVEL[level];
     if (g.length === 0) return;
     setSelectedClass(g[0]);
-    setSelectedSubject(null);
     setAdvancedLevel(false);
   }, [level]);
+
+  const dashboardSubjects = useMemo(() => subjects, [subjects]);
+
+  const isSubjectLocked = (subject: SubjectDefinition) => {
+    const endpointValue = availability[subject.id];
+    if (typeof endpointValue === "boolean") {
+      return !endpointValue;
+    }
+    return Boolean(subject.comingSoon);
+  };
+
+  const orderedSubjects = useMemo(() => {
+    const list = [...dashboardSubjects];
+    const inf = list.find((s) => s.id === "inf");
+    const rest = list.filter((s) => s.id !== "inf");
+
+    const available = rest.filter((s) => !isSubjectLocked(s));
+    const lockedSorted = rest
+      .filter((s) => isSubjectLocked(s))
+      .sort((a, b) => a.title.localeCompare(b.title, "ru"));
+
+    return inf ? [inf, ...available, ...lockedSorted] : [...available, ...lockedSorted];
+  }, [dashboardSubjects, availability]);
 
   const countsQuery = useMemo(() => {
     if (!level) return "";
@@ -53,54 +71,55 @@ export default function SubjectPage() {
   }, [level, selectedClass, advancedLevel]);
 
   useEffect(() => {
-    if (!level) return;
     let cancelled = false;
-    setCounts({});
-    setCountsLoading(true);
-    const url = `/api/${level}/subject-task-counts/${countsQuery}`;
-    fetch(url, { credentials: "same-origin" })
-      .then((r) => (r.ok ? r.json() : {}))
-      .then((data: Record<string, number>) => {
-        if (cancelled || !data || typeof data !== "object") return;
-        const next: CountMap = {};
-        for (const k of Object.keys(data)) {
-          if (typeof data[k] === "number") {
-            next[k as SubjectId] = data[k];
+    setAvailability({});
+    const loadCatalog = async () => {
+      try {
+        const catalogRes = await fetch(`/api/${level}/subject-catalog/${countsQuery}`, {
+          credentials: "same-origin",
+        });
+        if (catalogRes.ok) {
+          const data = await catalogRes.json();
+          const subjects = Array.isArray(data?.subjects) ? data.subjects : [];
+          const nextAvailability: AvailabilityMap = {};
+          for (const item of subjects) {
+            const id = String(item?.id || "");
+            if (!id) continue;
+            if (typeof item.is_available === "boolean") {
+              nextAvailability[id] = item.is_available;
+            }
           }
+          if (!cancelled) {
+            setAvailability(nextAvailability);
+          }
+          return;
         }
-        setCounts(next);
-      })
-      .catch(() => {
-        if (!cancelled) setCounts({});
-      })
-      .finally(() => {
-        if (!cancelled) setCountsLoading(false);
-      });
+      } catch {
+        // fallback to legacy endpoint below
+      }
+
+      try {
+        await fetch(`/api/${level}/subject-task-counts/${countsQuery}`, {
+          credentials: "same-origin",
+        });
+      } catch {
+        if (!cancelled) {
+          setAvailability({});
+        }
+      }
+    };
+
+    loadCatalog();
     return () => {
       cancelled = true;
     };
   }, [level, countsQuery]);
 
-  const countLabelFor = (s: SubjectDefinition) => {
-    if (s.comingSoon) return "скоро";
-    if (countsLoading) return "…";
-    const n = counts[s.id];
-    if (typeof n === "number") return formatTasksCount(n);
-    return "–";
-  };
-
-  const selectedSubjectDef =
-    selectedSubject != null ? subjects.find((x) => x.id === selectedSubject) : undefined;
-
-  const canContinue =
-    selectedClass != null &&
-    selectedSubject != null &&
-    !!selectedSubjectDef &&
-    !selectedSubjectDef.comingSoon;
-
-  const handleContinue = () => {
-    if (!level || !canContinue || !selectedSubject) return;
-    const path = `/${level}/${selectedSubject}`;
+  const handleSubjectOpen = (subjectId: string) => {
+    if (selectedClass == null) return;
+    const subject = dashboardSubjects.find((item) => item.id === subjectId);
+    if (!subject || isSubjectLocked(subject)) return;
+    const path = `/${level}/${subjectId}`;
     if (level === "vpr" && selectedClass != null) {
       const q = new URLSearchParams();
       q.set("grade", String(selectedClass));
@@ -111,7 +130,12 @@ export default function SubjectPage() {
     navigate(path);
   };
 
-  if (!level || !def) {
+  const handleLevelChange = (nextLevel: LevelId) => {
+    if (nextLevel === level) return;
+    navigate(`/subject/${nextLevel}`);
+  };
+
+  if (levelParamIsInvalid) {
     return <NotFoundPage />;
   }
 
@@ -120,108 +144,116 @@ export default function SubjectPage() {
   } as CSSProperties;
 
   const leadText = singleGrade
-    ? `Выбери предмет — откроется банк заданий · ${grades[0]} класс`
-    : "Выбери класс и предмет — откроется банк заданий";
+    ? `Выберите предмет для ${grades[0]} класса и переходите к настройке варианта.`
+    : "Сначала выберите класс, затем предмет и переходите к заданиям.";
+  const promoSteps = [
+    "Выберите уровень в переключателе над карточками: ОГЭ, ЕГЭ или школьная программа.",
+    "Для школьной программы можно выбрать класс и включить «Углублённый уровень».",
+    "Нажмите на доступный предмет в сетке справа: карточки «Скоро» пока не открываются.",
+  ];
 
   return (
     <div className="digital-flow-page" style={pageStyle}>
       <div className="digital-flow-page__wrap">
-        <main className="subject-pick">
-          <div className="subject-pick__top">
-            <button
-              type="button"
-              className="subject-pick__back"
-              onClick={() => navigate("/")}
-            >
-              ← На главную
-            </button>
-            <span className="subject-pick__badge">{def.badgeLabel}</span>
-          </div>
-
-          <header className="section-head section-head--page">
-            <h1 className="section-head__title">{def.fullTitle}</h1>
-            <p className="section-head__lead">{leadText}</p>
+        <main className="subject-dashboard-page">
+          <header className="subject-dashboard-page__header">
+            <h1 className="subject-dashboard-page__title">Выбор предмета</h1>
+            <p className="subject-dashboard-page__lead">{leadText}</p>
           </header>
 
-          {!singleGrade ? (
-            <section className="subject-pick__grades" aria-label="Класс">
-              <p className="subject-pick__grades-label">Класс</p>
-              <div className="subject-pick__grade-list" role="list">
-                {grades.map((g) => {
-                  const sel = selectedClass === g;
-                  return (
-                    <button
-                      key={g}
-                      type="button"
-                      role="listitem"
-                      className={
-                        sel
-                          ? "subject-pick-grade subject-pick-grade--selected"
-                          : "subject-pick-grade"
-                      }
-                      onClick={() => setSelectedClass(g)}
-                    >
-                      {g}
-                      <span className="subject-pick-grade__suffix">класс</span>
-                    </button>
-                  );
-                })}
+          <div className="subject-dashboard-page__content">
+            <aside className="subject-dashboard-page__promo" aria-label="Подсказка по работе с генератором">
+              <span className="subject-dashboard-page__promo-tag">Подготовка к экзамену</span>
+              <h2 className="subject-dashboard-page__promo-title">Как выбрать уровень и предмет</h2>
+              <p className="subject-dashboard-page__promo-lead">
+                Сначала переключите уровень подготовки, затем выберите предмет.
+                После клика откроется экран с заданиями по выбранному направлению.
+              </p>
+              <ol className="subject-dashboard-page__promo-list">
+                {promoSteps.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ol>
+            </aside>
+
+            <section className="subject-dashboard-page__subjects-panel" aria-label="Предметы">
+              <div className="subject-dashboard-page__level-switch" aria-label="Уровень подготовки">
+                <p className="subject-dashboard-page__level-switch-label">Уровень подготовки</p>
+                <div className="subject-dashboard-page__level-switch-list" role="radiogroup">
+                  {([
+                    { id: "oge", label: "ОГЭ" },
+                    { id: "ege", label: "ЕГЭ" },
+                    { id: "vpr", label: "Школьная программа" },
+                  ] as Array<{ id: LevelId; label: string }>).map((item) => {
+                    const checked = level === item.id;
+                    return (
+                      <label
+                        key={item.id}
+                        className={
+                          checked
+                            ? `subject-dashboard-page__level-option subject-dashboard-page__level-option--${item.id} is-active`
+                            : `subject-dashboard-page__level-option subject-dashboard-page__level-option--${item.id}`
+                        }
+                      >
+                        <input
+                          type="radio"
+                          name="subject-level"
+                          checked={checked}
+                          onChange={() => handleLevelChange(item.id)}
+                        />
+                        <span>{item.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                {level === "vpr" && !singleGrade ? (
+                  <div className="subject-dashboard-page__vpr-inline" aria-label="Параметры школьной программы">
+                    <span className="subject-dashboard-page__vpr-inline-title">Класс</span>
+                    <div className="subject-dashboard-page__grade-list" role="list">
+                      {grades.map((g) => {
+                        const sel = selectedClass === g;
+                        return (
+                          <button
+                            key={g}
+                            type="button"
+                            role="listitem"
+                            className={
+                              sel
+                                ? "subject-dashboard-page__grade is-selected"
+                                : "subject-dashboard-page__grade"
+                            }
+                            onClick={() => setSelectedClass(g)}
+                          >
+                            {g}
+                            <span className="subject-dashboard-page__grade-suffix">класс</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <label className="subject-dashboard-page__advanced">
+                      <input
+                        type="checkbox"
+                        checked={advancedLevel}
+                        onChange={(e) => setAdvancedLevel(e.target.checked)}
+                      />
+                      Углублённый уровень
+                    </label>
+                  </div>
+                ) : null}
               </div>
 
-              {level === "vpr" ? (
-                <label className="subject-pick__advanced">
-                  <input
-                    type="checkbox"
-                    checked={advancedLevel}
-                    onChange={(e) => setAdvancedLevel(e.target.checked)}
+              <div className="subject-dashboard-page__subjects">
+                {orderedSubjects.map((s) => (
+                  <SubjectCard
+                    key={s.id}
+                    subject={s}
+                    locked={isSubjectLocked(s)}
+                    onClick={() => handleSubjectOpen(s.id)}
                   />
-                  Углублённый уровень
-                </label>
-              ) : null}
+                ))}
+              </div>
             </section>
-          ) : null}
-
-          <ScientistQuoteBanner />
-
-          <section
-            className="subject-pick__subjects home-levels-grid"
-            aria-label="Предметы"
-          >
-            {subjects.map((s) => (
-              <SubjectCard
-                key={s.id}
-                subject={s}
-                countLabel={countLabelFor(s)}
-                selectedSubjectId={selectedSubject}
-                onClick={() => setSelectedSubject(s.id)}
-              />
-            ))}
-          </section>
-
-          <div className="subject-pick__actions">
-            <button
-              type="button"
-              className="subject-pick__cta"
-              disabled={!canContinue}
-              onClick={handleContinue}
-            >
-              Перейти к заданиям
-              {canContinue ? (
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden
-                >
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              ) : null}
-            </button>
           </div>
         </main>
       </div>

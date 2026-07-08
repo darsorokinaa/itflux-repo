@@ -5,7 +5,6 @@ import {
   useSearchParams,
   Navigate,
   useLocation,
-  Link,
 } from "react-router-dom";
 import { FileText, Target, CircleHelp } from "lucide-react";
 
@@ -82,18 +81,6 @@ function vprApiQueryString(level, searchParams) {
   return `?${p.toString()}`;
 }
 
-/** Подпись уровня в крошках: «ВПР · 8 класс», «ОГЭ · 9 класс», … */
-function levelBreadcrumbLabel(level, vprGradeParam) {
-  const lv = String(level || "").toLowerCase();
-  if (lv === "vpr") {
-    if (vprGradeParam) return `ВПР · ${vprGradeParam} класс`;
-    return "ВПР · 7, 8, 10 класс";
-  }
-  if (lv === "oge") return "ОГЭ · 9 класс";
-  if (lv === "ege") return "ЕГЭ · 11 класс";
-  return formatExamLevelRu(level);
-}
-
 function TasksPage() {
   const { level, subject } = useParams();
   const location = useLocation();
@@ -107,11 +94,8 @@ function TasksPage() {
     pathNorm.toLowerCase() === "/lesson/join";
 
   const searchQuery = searchParams.get("search")?.trim() ?? "";
-  const vprGradeParam = String(level || "").toLowerCase() === "vpr" ? searchParams.get("grade")?.trim() : null;
   const vprAdvanced =
     String(level || "").toLowerCase() === "vpr" && searchParams.get("advanced") === "1";
-  const levelCrumbStr = levelBreadcrumbLabel(level, vprGradeParam);
-
   const [tasks, setTasks] = useState([]);
   const [subjectNameFromApi, setSubjectNameFromApi] = useState(() =>
     formatSubjectDisplayName(level, subject, SUBJECT_NAMES[subject] || subject)
@@ -146,7 +130,7 @@ function TasksPage() {
   /** Подсветка карточек режима (вариант / тренировка) */
   const [prepModeFocus, setPrepModeFocus] = useState("variant");
   /** Левая колонка «как это работает» скрыта по умолчанию */
-  const [showPrepIntro, setShowPrepIntro] = useState(false);
+  const [showPrepIntro, setShowPrepIntro] = useState(true);
   const [submitBlock1, setSubmitBlock1] = useState(false);
   const [submitBlock2, setSubmitBlock2] = useState(false);
 
@@ -857,8 +841,6 @@ function TasksPage() {
   const getTaskCountForIdentifier = (identifier) => getEffectiveTaskCount(identifier);
 
   const prepShell = (main) => {
-    const subjectPickerUrl = `/subject/${level}${location.search || ""}`;
-    const levelCrumb = levelBreadcrumbLabel(level, vprGradeParam);
     return (
     <div
       className={`tasks-prep-shell${showPrepIntro ? " tasks-prep-shell--intro-open" : ""}`}
@@ -890,33 +872,33 @@ function TasksPage() {
               <span>Сгенерируйте вариант или начните тестирование.</span>
             </div>
           </div>
+          <div className="tasks-prep-intro-actions">
+            <button
+              type="button"
+              className="tasks-prep-how-btn tasks-prep-how-btn--inside"
+              aria-expanded={showPrepIntro}
+              aria-controls="prep-intro-panel"
+              onClick={() => setShowPrepIntro(false)}
+            >
+              Скрыть инструкцию
+            </button>
+          </div>
         </div>
       </aside>
       <div className="tasks-prep-main">
-          <div className="tasks-prep-topbar">
-            <nav className="tasks-prep-breadcrumb" aria-label="Навигация по разделам">
-              <Link className="subject-pick__back" to={subjectPickerUrl}>
-                ← На главную
-              </Link>
-              <span className="tasks-prep-bc-sep" aria-hidden>
-                /
-              </span>
-              <span className="tasks-prep-bc-level">{levelCrumb}</span>
-              <span className="tasks-prep-bc-sep" aria-hidden>
-                /
-              </span>
-              <span className="tasks-prep-bc-current">{subjectNameFromApi}</span>
-            </nav>
-            <button
-              type="button"
-              className="tasks-prep-how-btn"
-              aria-expanded={showPrepIntro}
-              aria-controls="prep-intro-panel"
-              onClick={() => setShowPrepIntro((v) => !v)}
-            >
-              Как это работает?
-            </button>
-          </div>
+          {!showPrepIntro ? (
+            <div className="tasks-prep-intro-reveal">
+              <button
+                type="button"
+                className="tasks-prep-how-btn"
+                aria-expanded={showPrepIntro}
+                aria-controls="prep-intro-panel"
+                onClick={() => setShowPrepIntro(true)}
+              >
+                Показать инструкцию
+              </button>
+            </div>
+          ) : null}
           {main}
       </div>
     </div>
@@ -945,7 +927,11 @@ function TasksPage() {
   const part2Blocked = submitBlock1;
   const nPart1 = part1Tasks.length;
   const nPart2 = part2Tasks.length;
-  const variantTitlePrep = subjectPrepPhraseForVariantTitle(level, subject);
+  const selectedLevelLabel =
+    String(level || "").toLowerCase() === "vpr"
+      ? "Школьная программа"
+      : formatExamLevelRu(level);
+  const selectedVprGrade = searchParams.get("grade");
 
   return prepDigitalWrap(
     <>
@@ -956,31 +942,26 @@ function TasksPage() {
       ) : null}
       {prepShell(
         <>
-          <header className="section-head section-head--page">
-            <h1 id="prep-subject-heading" className="section-head__title">
-              {prepModeFocus === "variant"
-                ? variantTitlePrep
-                  ? `Вариант по ${variantTitlePrep}`
-                  : `Вариант — ${subjectNameFromApi}`
-                : `Тренировка по номерам — ${subjectNameFromApi}`}
-            </h1>
-            <p className="section-head__lead">
-              {prepModeFocus === "variant"
-                ? "Соберите работу для урока, домашнего задания или самостоятельной подготовки."
-                : "Отработайте конкретные номера, темы и слабые места в комфортном темпе."}
-              {vprAdvanced ? " · Углублённый уровень" : null}
-            </p>
-          </header>
+          <section className="tasks-prep-selection-meta" aria-label="Выбранные параметры">
+            <span className="tasks-prep-selection-pill">
+              <strong>Предмет:</strong> {subjectNameFromApi}
+            </span>
+            <span className="tasks-prep-selection-pill">
+              <strong>Уровень:</strong> {selectedLevelLabel}
+            </span>
+            {String(level || "").toLowerCase() === "vpr" ? (
+              <>
+                <span className="tasks-prep-selection-pill">
+                  <strong>Класс:</strong> {selectedVprGrade ? `${selectedVprGrade} класс` : "не выбран"}
+                </span>
+                <span className="tasks-prep-selection-pill">
+                  <strong>Режим:</strong> {vprAdvanced ? "углублённый" : "базовый"}
+                </span>
+              </>
+            ) : null}
+          </section>
 
-          <section className="tasks-prep-format-section" aria-labelledby="prep-format-work-title">
-            <header className="section-head">
-              <h2 id="prep-format-work-title" className="section-head__title">
-                Выберите формат работы
-              </h2>
-              <p className="section-head__lead">
-                Определите, как ученик будет проходить задания.
-              </p>
-            </header>
+          <section className="tasks-prep-format-section" aria-label="Выбор формата работы">
             <div className="tasks-prep-mode-row" role="radiogroup" aria-label="Сценарий подготовки">
             <label
               className={`tasks-prep-mode-card tasks-prep-mode-card--variant${

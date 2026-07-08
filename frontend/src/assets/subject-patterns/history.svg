@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 120" fill="none">
+  <g stroke="rgba(255,255,255,0.34)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M26 24h56v18H26z"/>
+    <path d="M34 42v34"/>
+    <path d="M48 42v34"/>
+    <path d="M62 42v34"/>
+    <path d="M26 76h56"/>
+    <path d="M108 22h86v56h-86z"/>
+    <path d="M116 32h70"/>
+    <path d="M116 44h58"/>
+    <path d="M116 56h64"/>
+    <path d="M116 68h48"/>
+    <circle cx="244" cy="50" r="26"/>
+    <path d="M244 24v52"/>
+    <path d="M218 50h52"/>
+    <path d="M226 32l36 36"/>
+    <path d="M262 32l-36 36"/>
+    <path d="M304 24h60v54h-60z"/>
+    <path d="M334 24v54"/>
+    <path d="M304 78h60"/>
+    <path d="M396 28h132v50"/>
+    <path d="M396 78h132"/>
+  </g>
+  <g fill="rgba(255,255,255,0.3)" font-size="16" font-family="JetBrains Mono, monospace" font-weight="700">
+    <text x="26" y="104">year</text>
+    <text x="100" y="102">chronicle</text>
+    <text x="286" y="102">empire</text>
+    <text x="398" y="20">history</text>
+  </g>
+</svg>

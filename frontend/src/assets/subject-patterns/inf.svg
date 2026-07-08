@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 120" fill="none">
+  <g stroke="rgba(255,255,255,0.34)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 40l-22 20 22 20"/>
+    <path d="M76 40l22 20-22 20"/>
+    <path d="M56 34l-16 52"/>
+    <rect x="122" y="24" width="86" height="62" rx="8"/>
+    <path d="M122 72h86"/>
+    <rect x="136" y="86" width="58" height="10" rx="4"/>
+    <path d="M248 28h66v18h-66z"/>
+    <path d="M248 58h66v18h-66z"/>
+    <path d="M248 88h66v18h-66z"/>
+    <path d="M346 22v86"/>
+    <path d="M334 60h24"/>
+    <rect x="388" y="26" width="132" height="66" rx="10"/>
+    <path d="M420 98h68"/>
+    <path d="M404 108h100"/>
+    <path d="M430 48h48"/>
+    <path d="M430 64h48"/>
+  </g>
+  <g fill="rgba(255,255,255,0.3)" font-size="16" font-family="JetBrains Mono, monospace" font-weight="700">
+    <text x="132" y="56">if x &gt; 0</text>
+    <text x="132" y="70">return y</text>
+    <text x="246" y="16">10100101</text>
+    <text x="398" y="22">array[]</text>
+    <text x="28" y="104">{ }</text>
+  </g>
+</svg>

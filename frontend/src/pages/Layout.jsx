@@ -32,6 +32,7 @@ function Layout() {
     pathname === "/cabinet" ||
     pathname === "/cabinet/login" ||
     isStudentCabinet ||
+    pathname === "/subject" ||
     pathname.startsWith("/subject/") ||
     pathname.startsWith("/search/tasks") ||
     pathname.startsWith("/search-variant") ||

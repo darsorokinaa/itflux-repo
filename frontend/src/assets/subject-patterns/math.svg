@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 120" fill="none">
+  <g stroke="rgba(255,255,255,0.34)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 82h68"/>
+    <path d="M28 74c6-18 16-26 30-28 12-2 21 5 30 20"/>
+    <path d="M126 36h52l-24 48h-52z"/>
+    <path d="M132 84l42-48"/>
+    <path d="M220 30h60"/>
+    <path d="M250 12v36"/>
+    <path d="M322 34h48"/>
+    <path d="M322 84h48"/>
+    <path d="M346 22v74"/>
+    <circle cx="420" cy="60" r="24"/>
+    <path d="M392 60h56"/>
+    <path d="M420 32v56"/>
+    <path d="M492 22l44 64"/>
+    <path d="M536 22l-44 64"/>
+  </g>
+  <g fill="rgba(255,255,255,0.3)" font-size="16" font-family="JetBrains Mono, monospace" font-weight="700">
+    <text x="24" y="26">x^2 + y^2</text>
+    <text x="204" y="98">a/b + c/d</text>
+    <text x="302" y="16">sqrt(x)</text>
+    <text x="464" y="100">ax + by = c</text>
+  </g>
+</svg>

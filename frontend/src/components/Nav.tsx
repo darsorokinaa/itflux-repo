@@ -1,6 +1,6 @@
-import { type MouseEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { getActiveNavTab, GENERATOR_HASH, NAV_TABS } from "../config/navTabs";
+import { getActiveNavTab, NAV_TABS } from "../config/navTabs";
 import { fetchCabinetSession } from "../utils/cabinetAuth";
 
 function LogoMark() {
@@ -54,23 +54,8 @@ function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
 
 export default function Nav() {
   const { pathname, search, hash } = useLocation();
-  const active = getActiveNavTab(pathname, hash);
+  const active = getActiveNavTab(pathname);
   const [menuOpen, setMenuOpen] = useState(false);
-
-  const scrollToGenerator = (smooth = true) => {
-    const el = document.getElementById(GENERATOR_HASH);
-    if (!el) return;
-    el.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
-  };
-
-  const onGeneratorClick = (e: MouseEvent<HTMLAnchorElement>) => {
-    if (pathname === "/") {
-      e.preventDefault();
-      scrollToGenerator(true);
-      window.history.replaceState(null, "", `/#${GENERATOR_HASH}`);
-    }
-    setMenuOpen(false);
-  };
 
   useEffect(() => {
     setMenuOpen(false);
@@ -139,11 +124,6 @@ export default function Nav() {
                   );
                 }
 
-                const linkProps =
-                  tab.key === "generator"
-                    ? { onClick: onGeneratorClick }
-                    : { onClick: () => setMenuOpen(false) };
-
                 return (
                   <Link
                     key={tab.key}
@@ -151,7 +131,7 @@ export default function Nav() {
                     className={className}
                     role="tab"
                     aria-selected={isActive}
-                    {...linkProps}
+                    onClick={() => setMenuOpen(false)}
                   >
                     <span className="site-nav__tab-label">{tab.label}</span>
                     {tab.badge ? (

@@ -4,7 +4,6 @@ import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate } from
 import Layout from "./pages/Layout";
 import HomePage from "./pages/HomePage";
 import AllTasksPage from "./pages/AllTasksPage";
-import GeneratorHubPage from "./pages/GeneratorHubPage";
 import ExamLevelHubPage from "./pages/ExamLevelHubPage";
 import SubjectPage from "./pages/SubjectPage";
 import TasksPage from "./pages/TasksPage";
@@ -68,6 +67,9 @@ function getMetaDescriptionForPath(pathname) {
   if (path.startsWith("/generator")) {
     return "Генератор экзаменационных вариантов с автоматической сборкой задач по предметам и уровням подготовки.";
   }
+  if (path === "/subject" || /^\/subject\/(oge|ege|vpr)\/?$/.test(path)) {
+    return "Выберите уровень и предмет для подготовки к экзаменам на платформе «Цифровой поток».";
+  }
   if (path === "/lessons" || /^\/lessons\/[^/]+\/view\/?$/.test(path)) {
     return "Готовые уроки и материалы: откройте занятие, просмотрите файл и используйте контент в учебном процессе.";
   }
@@ -97,9 +99,6 @@ function getMetaDescriptionForPath(pathname) {
   }
   if (path.startsWith("/lesson/join")) {
     return "Подключение к онлайн-уроку по ссылке приглашения.";
-  }
-  if (/^\/subject\/(oge|ege|vpr)\/?$/.test(path)) {
-    return "Выберите предмет и разделы для подготовки к экзаменам на платформе «Цифровой поток».";
   }
   if (/^\/(oge|ege|vpr)\/[a-z0-9_-]+\/variant\/\d+\/?$/.test(path)) {
     return "Экзаменационный вариант: решайте задания онлайн, проверяйте ответы и скачивайте PDF.";
@@ -221,7 +220,7 @@ function App() {
           <Route path="/about" element={<Navigate to="/" replace />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/tasks" element={<AllTasksPage />} />
-          <Route path="/generator" element={<GeneratorHubPage />} />
+          <Route path="/generator" element={<Navigate to="/subject" replace />} />
           <Route path="/lessons" element={<ReadyLessonsPage />} />
           <Route path="/lessons/:slug/view" element={<LessonViewerPage />} />
           <Route path="/teachers" element={<ForTeachersPage />} />
@@ -269,6 +268,7 @@ function App() {
             <Route path="upgrade" element={<CabinetUpgradePage />} />
           </Route>
           <Route path="/login" element={<Navigate to="/cabinet/login" replace />} />
+          <Route path="/subject" element={<SubjectPage />} />
           <Route path="/subject/:level" element={<SubjectPage />} />
 
           <Route path="/search/tasks" element={<SearchTaskWithKey />} />

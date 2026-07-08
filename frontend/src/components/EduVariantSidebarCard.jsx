@@ -55,7 +55,9 @@ function SidebarTimerControls({ store, formatTimer }) {
   );
 }
 
-const TASK_NAV_PAGE_SIZE = 25;
+const DEFAULT_TASK_NAV_PAGE_SIZE = 25;
+const FULL_VARIANT_PAGING_THRESHOLD = 30;
+const FULL_VARIANT_MAX_PAGE_SIZE = 30;
 
 export default function EduVariantSidebarCard({
   formatTimer,
@@ -83,31 +85,67 @@ export default function EduVariantSidebarCard({
   submittedMessage = "",
 }) {
   const taskTotal = navTasksOrdered.length;
-  const needTaskPaging = taskTotal > TASK_NAV_PAGE_SIZE;
-  const pageCount = needTaskPaging ? Math.ceil(taskTotal / TASK_NAV_PAGE_SIZE) : 1;
+  const isFullVariantMode = mode === "variant";
+  const pagingThreshold = isFullVariantMode
+    ? FULL_VARIANT_PAGING_THRESHOLD
+    : DEFAULT_TASK_NAV_PAGE_SIZE;
+  const needTaskPaging = taskTotal > pagingThreshold;
+  const pageRanges = useMemo(() => {
+    if (!needTaskPaging) {
+      return [{ start: 0, end: taskTotal }];
+    }
+    if (!isFullVariantMode) {
+      const pageCount = Math.ceil(taskTotal / DEFAULT_TASK_NAV_PAGE_SIZE);
+      return Array.from({ length: pageCount }, (_, idx) => {
+        const start = idx * DEFAULT_TASK_NAV_PAGE_SIZE;
+        return {
+          start,
+          end: Math.min(start + DEFAULT_TASK_NAV_PAGE_SIZE, taskTotal),
+        };
+      });
+    }
+    const pageCount = Math.ceil(taskTotal / FULL_VARIANT_MAX_PAGE_SIZE);
+    const baseSize = Math.floor(taskTotal / pageCount);
+    const remainder = taskTotal % pageCount;
+    let cursor = 0;
+    return Array.from({ length: pageCount }, (_, idx) => {
+      const size = baseSize + (idx < remainder ? 1 : 0);
+      const start = cursor;
+      const end = start + size;
+      cursor = end;
+      return { start, end };
+    });
+  }, [needTaskPaging, isFullVariantMode, taskTotal]);
+  const pageCount = pageRanges.length;
 
   const [taskNavPage, setTaskNavPage] = useState(0);
+
+  useEffect(() => {
+    if (taskNavPage <= pageCount - 1) return;
+    setTaskNavPage(Math.max(0, pageCount - 1));
+  }, [taskNavPage, pageCount]);
 
   useEffect(() => {
     if (!needTaskPaging || activeNavTaskId == null) return;
     const idx = navTasksOrdered.findIndex((t) => t.id === activeNavTaskId);
     if (idx < 0) return;
-    const page = Math.floor(idx / TASK_NAV_PAGE_SIZE);
-    setTaskNavPage(page);
-  }, [activeNavTaskId, needTaskPaging, navTasksOrdered]);
+    const page = pageRanges.findIndex(({ start, end }) => idx >= start && idx < end);
+    if (page >= 0) setTaskNavPage(page);
+  }, [activeNavTaskId, needTaskPaging, navTasksOrdered, pageRanges]);
 
   const pagedNavTasks = useMemo(() => {
     if (!needTaskPaging) return navTasksOrdered;
-    const start = taskNavPage * TASK_NAV_PAGE_SIZE;
-    return navTasksOrdered.slice(start, start + TASK_NAV_PAGE_SIZE);
-  }, [navTasksOrdered, needTaskPaging, taskNavPage]);
+    const currentRange = pageRanges[taskNavPage] || pageRanges[0];
+    return navTasksOrdered.slice(currentRange.start, currentRange.end);
+  }, [navTasksOrdered, needTaskPaging, pageRanges, taskNavPage]);
 
   const rangeLabel = useMemo(() => {
     if (!needTaskPaging) return null;
-    const from = taskNavPage * TASK_NAV_PAGE_SIZE + 1;
-    const to = Math.min((taskNavPage + 1) * TASK_NAV_PAGE_SIZE, taskTotal);
+    const currentRange = pageRanges[taskNavPage] || pageRanges[0];
+    const from = currentRange.start + 1;
+    const to = currentRange.end;
     return `${from}–${to} из ${taskTotal}`;
-  }, [needTaskPaging, taskNavPage, taskTotal]);
+  }, [needTaskPaging, pageRanges, taskNavPage, taskTotal]);
 
   return (
     <div className="exam-edu-side-card">

@@ -16,10 +16,12 @@ urlpatterns = [
 
     path("api/csrf/", views.api_csrf, name="api_csrf"),
     path("api/catalog/", views.api_catalog, name="api_catalog"),
+    path("api/generator/overview/", views.api_generator_overview, name="api_generator_overview"),
     path("api/platform-stats/", views.api_platform_stats, name="api_platform_stats"),
     path("api/site-config/", views.api_site_config, name="api_site_config"),
     path("api/vpr/subject-task-counts/", views.api_vpr_subject_task_counts, name="api_vpr_subject_task_counts"),
     path("api/<str:level>/subject-task-counts/", views.api_level_subject_task_counts, name="api_level_subject_task_counts"),
+    path("api/<str:level>/subject-catalog/", views.api_level_subject_catalog, name="api_level_subject_catalog"),
     path("ckeditor/upload/", views.ckeditor_upload, name="ckeditor_upload"),
     path("api/lk-nav-unlock/", views.api_lk_nav_unlock, name="api_lk_nav_unlock"),
     path("api/cabinet/", include("Cabinet.urls")),

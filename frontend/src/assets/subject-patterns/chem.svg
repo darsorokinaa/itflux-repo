@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 120" fill="none">
+  <g stroke="rgba(255,255,255,0.34)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M34 22h18"/>
+    <path d="M43 22v18l-18 34h36l-18-34"/>
+    <circle cx="118" cy="34" r="10"/>
+    <circle cx="154" cy="34" r="10"/>
+    <circle cx="136" cy="66" r="10"/>
+    <path d="M128 40l-14 18"/>
+    <path d="M146 40l14 18"/>
+    <path d="M128 66h16"/>
+    <rect x="196" y="24" width="76" height="54" rx="8"/>
+    <path d="M196 62h76"/>
+    <path d="M210 84h48"/>
+    <circle cx="320" cy="30" r="8"/>
+    <circle cx="356" cy="30" r="8"/>
+    <circle cx="338" cy="60" r="8"/>
+    <circle cx="374" cy="60" r="8"/>
+    <path d="M328 36l-6 16"/>
+    <path d="M348 36l16 16"/>
+    <path d="M344 58l22 0"/>
+    <path d="M416 24h108"/>
+    <path d="M416 52h108"/>
+    <path d="M416 80h108"/>
+    <path d="M470 24v56"/>
+  </g>
+  <g fill="rgba(255,255,255,0.3)" font-size="16" font-family="JetBrains Mono, monospace" font-weight="700">
+    <text x="30" y="104">2H2 + O2 = 2H2O</text>
+    <text x="202" y="16">NaCl</text>
+    <text x="310" y="104">CH3-CH2-OH</text>
+  </g>
+</svg>

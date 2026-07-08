@@ -1,6 +1,4 @@
-import { type MouseEvent } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { GENERATOR_HASH } from "../config/navTabs";
+import { Link, useLocation } from "react-router-dom";
 
 type TabKey = "home" | "lessons" | "tasks" | "generator";
 
@@ -58,14 +56,14 @@ const TABS: ReadonlyArray<TabDef> = [
   { key: "home", label: "Главная", to: "/", Icon: IconHome },
   { key: "lessons", label: "Уроки", to: "/lessons", Icon: IconLessons },
   { key: "tasks", label: "Задачи", to: "/tasks", Icon: IconTasks },
-  { key: "generator", label: "Генератор", to: `/#${GENERATOR_HASH}`, Icon: IconGenerator },
+  { key: "generator", label: "Генератор", to: "/generator", Icon: IconGenerator },
 ];
 
-function getActiveTab(pathname: string, hash: string): TabKey | null {
+function getActiveTab(pathname: string): TabKey | null {
   const p = (pathname || "").replace(/\/+$/, "") || "/";
   if (p === "/lessons" || p.startsWith("/lessons/")) return "lessons";
-  if (p === "/tasks" || p.startsWith("/subject/")) return "tasks";
-  if (p === "/" && hash === `#${GENERATOR_HASH}`) return "generator";
+  if (p === "/tasks") return "tasks";
+  if (p === "/generator" || p === "/subject" || p.startsWith("/subject/")) return "generator";
   if (p === "/") return "home";
   return null;
 }
@@ -75,18 +73,8 @@ function getActiveTab(pathname: string, hash: string): TabKey | null {
  * Пункты: Главная · Уроки · Задачи · Генератор. Учитывает safe-area iOS.
  */
 export default function MobileTabBar() {
-  const { pathname, hash } = useLocation();
-  const navigate = useNavigate();
-  const active = getActiveTab(pathname, hash);
-
-  const onGeneratorClick = (e: MouseEvent<HTMLAnchorElement>) => {
-    if (pathname === "/") {
-      e.preventDefault();
-      const el = document.getElementById(GENERATOR_HASH);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-      window.history.replaceState(null, "", `/#${GENERATOR_HASH}`);
-    }
-  };
+  const { pathname } = useLocation();
+  const active = getActiveTab(pathname);
 
   return (
     <nav className="mobile-tabbar" aria-label="Мобильная навигация">
@@ -100,7 +88,6 @@ export default function MobileTabBar() {
                 className={`mobile-tabbar__link${isActive ? " is-active" : ""}`}
                 aria-current={isActive ? "page" : undefined}
                 aria-label={label}
-                onClick={key === "generator" ? onGeneratorClick : undefined}
               >
                 <span className="mobile-tabbar__icon" aria-hidden="true">
                   <Icon className="mobile-tabbar__icon-svg" />

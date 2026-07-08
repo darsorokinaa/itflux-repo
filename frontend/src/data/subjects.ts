@@ -1,6 +1,6 @@
 import type { LevelId } from "./levels";
 
-export type SubjectId = "math" | "inf" | "phys" | "rus" | "history";
+export type SubjectId = "math" | "inf" | "phys" | "chem" | "rus" | "lit" | "history";
 
 export type SubjectIconKind = "sum" | "code" | "atom" | "aa" | "section";
 
@@ -21,7 +21,7 @@ export interface SubjectDefinition {
 const SUBJECT_MATH_BASE: Omit<SubjectDefinition, "comingSoon"> = {
   id: "math",
   title: "Математика",
-  description: "Алгебра, геометрия, ЕГЭ-форматы",
+  description: "Числа, формулы, фигуры и задачи",
   bg: "#1D4ED8",
   accent: "#60A5FA",
   icon: "sum",
@@ -40,7 +40,7 @@ const SUBJECT_MATH: SubjectDefinition = {
 const SUBJECT_INF: SubjectDefinition = {
   id: "inf",
   title: "Информатика",
-  description: "Алгоритмы, программирование, логика",
+  description: "Алгоритмы, код, логика и данные",
   bg: "#7C3AED",
   accent: "#A78BFA",
   icon: "code",
@@ -50,9 +50,20 @@ const SUBJECT_INF: SubjectDefinition = {
 const SUBJECT_PHYS: SubjectDefinition = {
   id: "phys",
   title: "Физика",
-  description: "Механика, электродинамика, расчёты",
-  bg: "#059669",
-  accent: "#34D399",
+  description: "Движение, энергия и законы природы",
+  bg: "#4239B0",
+  accent: "#7B74E8",
+  icon: "atom",
+  pattern: "waves",
+  comingSoon: true,
+};
+
+const SUBJECT_CHEM: SubjectDefinition = {
+  id: "chem",
+  title: "Химия",
+  description: "Вещества, реакции и свойства материалов",
+  bg: "#0A8A62",
+  accent: "#54C59F",
   icon: "atom",
   pattern: "waves",
   comingSoon: true,
@@ -61,18 +72,29 @@ const SUBJECT_PHYS: SubjectDefinition = {
 const SUBJECT_RUS: SubjectDefinition = {
   id: "rus",
   title: "Русский язык",
-  description: "Орфография, пунктуация, сочинение",
-  bg: "#B91C1C",
-  accent: "#FCA5A5",
+  description: "Правила, тексты и грамотная речь",
+  bg: "#D84A6A",
+  accent: "#F58FA7",
   icon: "aa",
   pattern: "lines",
+  comingSoon: true,
+};
+
+const SUBJECT_LIT: SubjectDefinition = {
+  id: "lit",
+  title: "Литература",
+  description: "Книги, герои, авторы и смыслы",
+  bg: "#7D46E3",
+  accent: "#B38CFB",
+  icon: "section",
+  pattern: "timeline",
   comingSoon: true,
 };
 
 const SUBJECT_HIST: SubjectDefinition = {
   id: "history",
   title: "История",
-  description: "Даты, события, персоналии",
+  description: "События, личности и прошлое мира",
   bg: "#B45309",
   accent: "#FCD34D",
   icon: "section",
@@ -83,7 +105,7 @@ const SUBJECT_HIST: SubjectDefinition = {
 /** Набор предметов по уровням (информатика — первой в списке). */
 export const SUBJECTS_BY_LEVEL: Record<LevelId, SubjectDefinition[]> = {
   vpr: [SUBJECT_INF, SUBJECT_MATH, SUBJECT_PHYS, SUBJECT_RUS, SUBJECT_HIST],
-  oge: [SUBJECT_INF, SUBJECT_MATH_OGE, SUBJECT_PHYS, SUBJECT_RUS],
+  oge: [SUBJECT_MATH_OGE, SUBJECT_INF, SUBJECT_PHYS, SUBJECT_CHEM, SUBJECT_RUS, SUBJECT_LIT],
   ege: [SUBJECT_INF, SUBJECT_MATH, SUBJECT_RUS],
 };
 

@@ -1,11 +1,10 @@
 /**
  * Задания — домашние работы и интерактивы ученика.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import CabinetHomeworkCard from "../../CabinetHomeworkCard";
 import { fetchStudentAssignments, fetchStudentInteractives } from "../../../utils/cabinetAuth";
-import { loadStudentData } from "../studentData";
 import {
   getStudentAssignmentPath,
   mapStudentAssignmentToHwCard,
@@ -60,19 +59,59 @@ export default function StudentAssignmentsPage() {
   const [interactives, setInteractives] = useState([]);
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const loadItems = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
+    setError("");
+
+    const [assignmentsRes, interactivesRes] = await Promise.allSettled([
+      fetchStudentAssignments(),
+      fetchStudentInteractives(),
+    ]);
+
+    const errors = [];
+
+    if (assignmentsRes.status === "fulfilled") {
+      setAssignments(assignmentsRes.value?.items || []);
+    } else {
+      setAssignments([]);
+      errors.push(assignmentsRes.reason?.message || "Не удалось загрузить домашние задания.");
+    }
+
+    if (interactivesRes.status === "fulfilled") {
+      setInteractives(interactivesRes.value?.items || []);
+    } else {
+      setInteractives([]);
+      errors.push(interactivesRes.reason?.message || "Не удалось загрузить интерактивы.");
+    }
+
+    if (errors.length > 0) {
+      setError(errors[0]);
+    }
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
-    let done = 0;
-    const finish = () => { done += 1; if (done === 2) setLoading(false); };
+    loadItems();
+  }, [loadItems]);
 
-    loadStudentData(fetchStudentAssignments, "assignments", false)
-      .then((d) => setAssignments(d?.items || []))
-      .finally(finish);
-
-    loadStudentData(fetchStudentInteractives, "interactives", false)
-      .then((d) => setInteractives(d?.items || []))
-      .finally(finish);
-  }, []);
+  useEffect(() => {
+    const reload = () => {
+      loadItems({ silent: true });
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        reload();
+      }
+    };
+    window.addEventListener("focus", reload);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", reload);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [loadItems]);
 
   const allItems = useMemo(
     () => mergeItems(assignments, interactives),
@@ -87,6 +126,16 @@ export default function StudentAssignmentsPage() {
   return (
     <StudentPageShell className="st-assignments-page">
       <StudentFilterPills filters={FILTERS} active={filter} onChange={setFilter} />
+
+      {!loading && error ? (
+        <StudentEmptyState
+          icon="alert"
+          title="Не удалось загрузить задания"
+          text={error}
+          actionLabel="Повторить"
+          onAction={() => loadItems()}
+        />
+      ) : null}
 
       {loading && <StudentLoadingState />}
 

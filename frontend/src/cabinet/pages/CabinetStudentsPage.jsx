@@ -686,8 +686,9 @@ export default function CabinetStudentsPage() {
     });
   };
   const closeHomeworkAssignModal = () => setHomeworkAssignModal(null);
-  const handleHomeworkAssigned = () => {
+  const handleHomeworkAssigned = async () => {
     showToast("Домашнее задание выдано");
+    await loadData();
   };
   const handlePlanAttached = async () => {
     await loadEnrollments();

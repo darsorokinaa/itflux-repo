@@ -2168,13 +2168,13 @@
 /* ── TasksPage (выбор варианта / тренажёр) ── */
 
 .tasks-prep-flow {
-  padding: 8px 0 48px;
+  padding: 18px 0 48px;
 }
 
 .digital-flow-page .tasks-page.tasks-page--prep-v2 {
   max-width: none;
   margin: 0;
-  padding: 0;
+  padding: 18px 0 0;
   background: transparent;
 }
 
@@ -2237,6 +2237,33 @@
 .digital-flow-page .tasks-prep-how-btn:hover {
   background: var(--blue-soft);
   border-color: var(--border-blue);
+}
+
+.digital-flow-page .tasks-prep-how-btn--inside {
+  height: 34px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.55);
+  color: var(--blue-dark);
+  box-shadow: none;
+}
+
+.digital-flow-page .tasks-prep-intro-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.digital-flow-page .tasks-prep-intro-reveal {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 12px;
+}
+
+.digital-flow-page .tasks-prep-selection-pill {
+  border-color: #d4defc;
+  background: #f7f9ff;
 }
 
 .digital-flow-page .tasks-prep-intro {
