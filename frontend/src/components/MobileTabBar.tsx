@@ -54,9 +54,9 @@ type TabDef = {
 
 const TABS: ReadonlyArray<TabDef> = [
   { key: "home", label: "Главная", to: "/", Icon: IconHome },
-  { key: "lessons", label: "Уроки", to: "/lessons", Icon: IconLessons },
   { key: "tasks", label: "Задачи", to: "/tasks", Icon: IconTasks },
   { key: "generator", label: "Генератор", to: "/generator", Icon: IconGenerator },
+  { key: "lessons", label: "Уроки", to: "/lessons", Icon: IconLessons },
 ];
 
 function getActiveTab(pathname: string): TabKey | null {
@@ -70,7 +70,7 @@ function getActiveTab(pathname: string): TabKey | null {
 
 /**
  * Нижняя навигация для мобильных. Видна только ≤ планшета (CSS), desktop не затрагивает.
- * Пункты: Главная · Уроки · Задачи · Генератор. Учитывает safe-area iOS.
+ * Пункты: Главная · Задачи · Генератор · Уроки. Учитывает safe-area iOS.
  */
 export default function MobileTabBar() {
   const { pathname } = useLocation();

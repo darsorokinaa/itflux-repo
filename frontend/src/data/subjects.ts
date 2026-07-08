@@ -5,6 +5,28 @@ export type SubjectId = "math" | "inf" | "phys" | "chem" | "rus" | "lit" | "hist
 export type SubjectIconKind = "sum" | "code" | "atom" | "aa" | "section";
 
 export type SubjectPatternKind = "axes" | "flow" | "waves" | "lines" | "timeline";
+export type SubjectMotifKind =
+  | "formula"
+  | "graph"
+  | "figure"
+  | "code"
+  | "algorithm"
+  | "data"
+  | "force"
+  | "link"
+  | "energy"
+  | "molecule"
+  | "flask"
+  | "atom"
+  | "text"
+  | "quote"
+  | "speech"
+  | "book"
+  | "hero"
+  | "quill"
+  | "timeline"
+  | "landmark"
+  | "scroll";
 
 export interface SubjectDefinition {
   id: SubjectId;
@@ -14,9 +36,19 @@ export interface SubjectDefinition {
   accent: string;
   icon: SubjectIconKind;
   pattern: SubjectPatternKind;
+  patternAsset: string;
+  motifs: readonly [SubjectMotifKind, SubjectMotifKind, SubjectMotifKind];
   /** Предмет ещё не открыт — показываем бейдж «Скоро», выбор недоступен */
   comingSoon?: boolean;
 }
+
+const PATTERN_MATH = new URL("../assets/subject-patterns/math.svg", import.meta.url).href;
+const PATTERN_INF = new URL("../assets/subject-patterns/inf.svg", import.meta.url).href;
+const PATTERN_PHYS = new URL("../assets/subject-patterns/phys.svg", import.meta.url).href;
+const PATTERN_CHEM = new URL("../assets/subject-patterns/chem.svg", import.meta.url).href;
+const PATTERN_RUS = new URL("../assets/subject-patterns/rus.svg", import.meta.url).href;
+const PATTERN_LIT = new URL("../assets/subject-patterns/lit.svg", import.meta.url).href;
+const PATTERN_HISTORY = new URL("../assets/subject-patterns/history.svg", import.meta.url).href;
 
 const SUBJECT_MATH_BASE: Omit<SubjectDefinition, "comingSoon"> = {
   id: "math",
@@ -26,6 +58,8 @@ const SUBJECT_MATH_BASE: Omit<SubjectDefinition, "comingSoon"> = {
   accent: "#60A5FA",
   icon: "sum",
   pattern: "axes",
+  patternAsset: PATTERN_MATH,
+  motifs: ["formula", "graph", "figure"],
 };
 
 // Математика ОГЭ — уже доступна (задачи добавлены), без бейджа «Скоро»
@@ -45,6 +79,8 @@ const SUBJECT_INF: SubjectDefinition = {
   accent: "#A78BFA",
   icon: "code",
   pattern: "flow",
+  patternAsset: PATTERN_INF,
+  motifs: ["code", "algorithm", "data"],
 };
 
 const SUBJECT_PHYS: SubjectDefinition = {
@@ -55,6 +91,8 @@ const SUBJECT_PHYS: SubjectDefinition = {
   accent: "#7B74E8",
   icon: "atom",
   pattern: "waves",
+  patternAsset: PATTERN_PHYS,
+  motifs: ["force", "link", "energy"],
   comingSoon: true,
 };
 
@@ -66,6 +104,8 @@ const SUBJECT_CHEM: SubjectDefinition = {
   accent: "#54C59F",
   icon: "atom",
   pattern: "waves",
+  patternAsset: PATTERN_CHEM,
+  motifs: ["molecule", "flask", "atom"],
   comingSoon: true,
 };
 
@@ -77,6 +117,8 @@ const SUBJECT_RUS: SubjectDefinition = {
   accent: "#F58FA7",
   icon: "aa",
   pattern: "lines",
+  patternAsset: PATTERN_RUS,
+  motifs: ["text", "quote", "speech"],
   comingSoon: true,
 };
 
@@ -88,6 +130,8 @@ const SUBJECT_LIT: SubjectDefinition = {
   accent: "#B38CFB",
   icon: "section",
   pattern: "timeline",
+  patternAsset: PATTERN_LIT,
+  motifs: ["book", "hero", "quill"],
   comingSoon: true,
 };
 
@@ -99,6 +143,8 @@ const SUBJECT_HIST: SubjectDefinition = {
   accent: "#FCD34D",
   icon: "section",
   pattern: "timeline",
+  patternAsset: PATTERN_HISTORY,
+  motifs: ["timeline", "landmark", "scroll"],
   comingSoon: true,
 };
 

@@ -614,10 +614,10 @@
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
-  background-size: 18px 18px;
-  opacity: 0.5;
+    linear-gradient(rgba(255, 255, 255, 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.18) 1px, transparent 1px);
+  background-size: 20px 20px;
+  opacity: 0.24;
   pointer-events: none;
 }
 
@@ -625,39 +625,57 @@
   content: "";
   position: absolute;
   inset: 0;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: cover;
-  opacity: 0.95;
+  background:
+    linear-gradient(122deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.02) 52%),
+    radial-gradient(78% 110% at 88% -18%, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0));
+  opacity: 1;
   pointer-events: none;
 }
 
-.subject-dashboard-card--math .subject-dashboard-card__top::after {
-  background-image: url("../assets/subject-patterns/math.svg");
+.subject-dashboard-card__pattern {
+  position: absolute;
+  inset: 0;
+  background-image: var(--subject-card-pattern-url);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  opacity: 0.56;
+  pointer-events: none;
 }
 
-.subject-dashboard-card--inf .subject-dashboard-card__top::after {
-  background-image: url("../assets/subject-patterns/inf.svg");
+.subject-dashboard-card__motifs {
+  position: absolute;
+  z-index: 2;
+  right: 12px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  pointer-events: none;
 }
 
-.subject-dashboard-card--rus .subject-dashboard-card__top::after {
-  background-image: url("../assets/subject-patterns/rus.svg");
+.subject-dashboard-card__motif {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: rgba(255, 255, 255, 0.94);
+  opacity: 0.86;
 }
 
-.subject-dashboard-card--lit .subject-dashboard-card__top::after {
-  background-image: url("../assets/subject-patterns/lit.svg");
+.subject-dashboard-card__motif--2 {
+  opacity: 0.75;
 }
 
-.subject-dashboard-card--phys .subject-dashboard-card__top::after {
-  background-image: url("../assets/subject-patterns/phys.svg");
+.subject-dashboard-card__motif--3 {
+  opacity: 0.66;
 }
 
-.subject-dashboard-card--chem .subject-dashboard-card__top::after {
-  background-image: url("../assets/subject-patterns/chem.svg");
-}
-
-.subject-dashboard-card--history .subject-dashboard-card__top::after {
-  background-image: url("../assets/subject-patterns/history.svg");
+.subject-dashboard-card__motif-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .subject-dashboard-card__body {

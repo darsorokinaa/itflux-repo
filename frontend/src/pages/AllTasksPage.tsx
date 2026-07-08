@@ -29,7 +29,6 @@ import type { TaskFileSource } from "../components/InformaticsCodeEditor/types";
 
 import MathContent from "../components/MathContent";
 import TaskFileAttachment from "../components/TaskFileAttachment";
-import TaskSearchPanel from "../components/TaskSearchPanel";
 
 const InformaticsCodeEditorEntry = lazy(
   () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
@@ -743,15 +742,6 @@ export default function AllTasksPage() {
         className={`digital-flow-page__wrap${showCodeSidebar ? " digital-flow-page__wrap--with-code-sidebar" : ""}`}
       >
         <main className={`all-tasks-page${pickMode ? " all-tasks-page--workbook-mode" : ""}`}>
-          <header className="section-head section-head--page">
-            <h1 className="section-head__title">Все задачи</h1>
-            <p className="section-head__lead">
-              Фильтры по уровню, предмету, номеру задания и подтеме.
-            </p>
-          </header>
-
-          <TaskSearchPanel />
-
           <button
             type="button"
             className="all-tasks-filters-toggle"

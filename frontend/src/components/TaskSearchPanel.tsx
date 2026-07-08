@@ -7,8 +7,7 @@ type Props = {
 
 /**
  * Быстрый поиск по ID задачи или варианта.
- * Раньше жил в глобальной шапке — вынесен отдельным блоком под шапку
- * на страницы «Все задачи» и «Генератор вариантов», чтобы не перегружать меню.
+ * Используется в верхнем меню сайта.
  */
 export default function TaskSearchPanel({ className = "" }: Props) {
   const navigate = useNavigate();
@@ -33,33 +32,35 @@ export default function TaskSearchPanel({ className = "" }: Props) {
     <section className={`task-search-panel ${className}`.trim()} aria-label="Быстрый поиск">
       <div className="task-search-panel__content">
         <h2 className="task-search-panel__title">Быстрый поиск</h2>
-        <p className="task-search-panel__subtitle">Введите ID задачи или варианта</p>
+        <p className="task-search-panel__subtitle">Введите ID задания или варианта</p>
       </div>
 
       <form className="task-search-panel__form" onSubmit={onSubmit}>
         <label className="task-search-panel__field">
-          <span className="task-search-panel__label">ID задачи</span>
+          <span className="task-search-panel__label">ID задания</span>
           <input
             type="search"
             className="task-search-panel__input"
-            placeholder="Например, 12345"
+            placeholder="ID задания"
             value={taskId}
             onChange={(e) => setTaskId(e.target.value)}
             inputMode="numeric"
             autoComplete="off"
+            title="Введите ID задания"
           />
         </label>
 
         <label className="task-search-panel__field">
-          <span className="task-search-panel__label">ID варианта</span>
+          <span className="task-search-panel__label">№ варианта</span>
           <input
             type="search"
             className="task-search-panel__input"
-            placeholder="Например, 17"
+            placeholder="№ варианта"
             value={variantId}
             onChange={(e) => setVariantId(e.target.value)}
             inputMode="numeric"
             autoComplete="off"
+            title="Введите номер варианта"
           />
         </label>
 

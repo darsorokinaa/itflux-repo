@@ -1,7 +1,64 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { getActiveNavTab, NAV_TABS } from "../config/navTabs";
+import TaskSearchPanel from "./TaskSearchPanel";
 import { fetchCabinetSession } from "../utils/cabinetAuth";
+
+function pickFirstNonEmptyString(values: unknown[]) {
+  for (const value of values) {
+    const str = typeof value === "string" ? value.trim() : "";
+    if (str) return str;
+  }
+  return "";
+}
+
+function readUrlField(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (!value || typeof value !== "object") return "";
+  const candidate = value as Record<string, unknown>;
+  return pickFirstNonEmptyString([candidate.url, candidate.src, candidate.href]);
+}
+
+function normalizeAvatarUrl(url: string): string {
+  if (!url) return "";
+  if (typeof window === "undefined") return url;
+  if (url.startsWith("http://127.0.0.1:8000")) return url.replace("http://127.0.0.1:8000", "");
+  if (url.startsWith("http://localhost:8000")) return url.replace("http://localhost:8000", "");
+  if (url.startsWith("//")) return `${window.location.protocol}${url}`;
+  return url;
+}
+
+function resolveUserAvatarUrl(user: unknown): string {
+  if (!user || typeof user !== "object") return "";
+  const record = user as Record<string, unknown>;
+  const profile = record.profile && typeof record.profile === "object"
+    ? (record.profile as Record<string, unknown>)
+    : null;
+
+  const fromTop = pickFirstNonEmptyString([
+    readUrlField(record.avatar),
+    record.avatar_url,
+    readUrlField(record.photo),
+    record.photo_url,
+    readUrlField(record.image),
+    record.image_url,
+    record.picture,
+  ]);
+
+  const fromProfile = profile
+    ? pickFirstNonEmptyString([
+      readUrlField(profile.avatar),
+      profile.avatar_url,
+      readUrlField(profile.photo),
+      profile.photo_url,
+      readUrlField(profile.image),
+      profile.image_url,
+      profile.picture,
+    ])
+    : "";
+
+  return normalizeAvatarUrl(fromTop || fromProfile);
+}
 
 function LogoMark() {
   const src = `${import.meta.env.BASE_URL}favicon.png?v=1`;
@@ -20,15 +77,21 @@ function LogoMark() {
 
 function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
   const [cabinetAuthed, setCabinetAuthed] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     fetchCabinetSession()
       .then((data) => {
-        if (!cancelled) setCabinetAuthed(!!data?.authenticated);
+        if (cancelled) return;
+        const authed = !!data?.authenticated;
+        setCabinetAuthed(authed);
+        setAvatarUrl(authed ? resolveUserAvatarUrl(data?.user) : "");
       })
       .catch(() => {
-        if (!cancelled) setCabinetAuthed(false);
+        if (cancelled) return;
+        setCabinetAuthed(false);
+        setAvatarUrl("");
       });
     return () => {
       cancelled = true;
@@ -42,10 +105,23 @@ function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
       onClick={onNavigate}
     >
       <span className="cabinet-nav-button__icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M20 21a8 8 0 0 0-16 0" />
-          <circle cx="12" cy="7" r="4" />
-        </svg>
+        {cabinetAuthed && avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt=""
+            className="cabinet-nav-button__avatar"
+            loading="lazy"
+            decoding="async"
+            onError={() => setAvatarUrl("")}
+          />
+        ) : (
+          <span className={`cabinet-nav-button__avatar-fallback${cabinetAuthed ? " is-auth" : ""}`}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 21a8 8 0 0 0-16 0" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+          </span>
+        )}
       </span>
       Личный кабинет
     </Link>
@@ -69,7 +145,7 @@ export default function Nav() {
             <LogoMark />
             <span className="site-nav__titles">
               <span className="brand-name">Цифровой поток</span>
-              <span className="brand-sub">ОГЭ · ЕГЭ · Информатика</span>
+              <span className="brand-sub">ОГЭ · ЕГЭ · Школьная программа</span>
             </span>
           </Link>
 
@@ -146,6 +222,8 @@ export default function Nav() {
 
             <CabinetNavButton onNavigate={() => setMenuOpen(false)} />
           </div>
+
+          <TaskSearchPanel className="site-nav__quick-search" />
         </div>
       </nav>
     </header>

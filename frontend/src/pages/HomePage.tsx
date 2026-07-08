@@ -6,14 +6,16 @@ import {
   ClipboardList,
   CompassIcon,
 } from "lucide-react";
-import NewsBlock from "../components/NewsBlock";
+import HeroSection from "../components/HeroSection";
 import { type LevelId } from "../data/levels";
+import { SUBJECTS_BY_LEVEL } from "../data/subjects";
 import { formatTasksCount } from "../utils/formatTasksCount";
 import { formatIntRu } from "../utils/formatIntRu";
 
 type PlatformStats = {
   total_tasks: number;
   subjects_count: number;
+  generated_variants_count: number;
   tasks_by_level: Record<string, number>;
 };
 
@@ -57,11 +59,25 @@ const HOME_LEVELS: ReadonlyArray<HomeLevel> = [
   },
 ];
 
+const DEFAULT_HERO_SUBJECTS_COUNT = new Set(
+  Object.values(SUBJECTS_BY_LEVEL)
+    .flat()
+    .filter((subject) => !subject.comingSoon)
+    .map((subject) => subject.id),
+).size;
+
 export default function HomePage() {
   const navigate = useNavigate();
   const { hash } = useLocation();
   const [selected, setSelected] = useState<LevelId | null>(null);
   const [stats, setStats] = useState<PlatformStats | null>(null);
+  const heroTasksCountLabel =
+    stats != null && stats.total_tasks > 0 ? formatIntRu(stats.total_tasks) : "11 667";
+  const heroSubjectsCountLabel = formatIntRu(DEFAULT_HERO_SUBJECTS_COUNT);
+  const heroGeneratedVariantsCountLabel =
+    stats != null && stats.generated_variants_count >= 0
+      ? formatIntRu(stats.generated_variants_count)
+      : "0";
 
   useEffect(() => {
     let cancelled = false;
@@ -104,9 +120,13 @@ export default function HomePage() {
 
       <div className="digital-flow-page__wrap">
         <main className="home-page__main">
-        <Hero stats={stats} />
+          <HeroSection
+            tasksCountLabel={heroTasksCountLabel}
+            subjectsCountLabel={heroSubjectsCountLabel}
+            generatedVariantsCountLabel={heroGeneratedVariantsCountLabel}
+          />
 
-        <section id="home-levels" className="home-levels">
+          <section id="home-levels" className="home-levels">
           <header className="section-head">
             <h2 className="section-head__title">Выберите формат подготовки</h2>
             <p className="section-head__lead">
@@ -133,84 +153,11 @@ export default function HomePage() {
               );
             })}
           </div>
-        </section>
+          </section>
 
-        <ValueBlock />
-
-        <div className="home-page__updates">
-          <NewsBlock />
-        </div>
-      </main>
+          <TeacherWorkspaceBlock />
+        </main>
       </div>
-    </div>
-  );
-}
-
-/* ────────────────────────────────────────────────────────────── */
-
-function Hero({ stats }: { stats: PlatformStats | null }) {
-  const totalLabel = stats != null ? formatIntRu(stats.total_tasks) : "…";
-  const subjectsLabel = stats != null ? String(stats.subjects_count) : "…";
-
-  return (
-    <section className="hero-section" aria-labelledby="home-hero-heading">
-      <div className="hero-section__inner">
-        <div className="hero-section__copy">
-          <span className="hero-eyebrow">Подготовка к экзаменам по информатике</span>
-
-          <h1 id="home-hero-heading" className="hero-h1">
-            Готовься не наугад: решай задания, проверяй ответы и закрывай{" "}
-            <span className="hero-accent">ошибки.</span>
-          </h1>
-
-          <p className="hero-desc">
-            Платформа помогает готовиться системно: по темам, типам заданий,
-            вариантам и результатам проверки. Подходит для самостоятельной
-            подготовки и занятий с преподавателем.
-          </p>
-
-          <div className="hero-btns">
-            <CtaPrimary href="#home-levels">Начать подготовку</CtaPrimary>
-          </div>
-        </div>
-
-        <aside className="hero-aside" aria-label="Статистика платформы">
-          <StatCard number={totalLabel} label="задания" />
-          <StatCard number={subjectsLabel} label="типов ОГЭ" />
-          <StatCard number="ФИПИ" label="темы экзамена" />
-        </aside>
-      </div>
-    </section>
-  );
-}
-
-function CtaPrimary({
-  href,
-  children,
-}: {
-  href: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <a
-      href={href}
-      className="cta-primary btn-hero-primary inline-flex items-center justify-center gap-1.5"
-    >
-      {children}
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" strokeWidth="2.5"
-        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M5 12h14M13 6l6 6-6 6"/>
-      </svg>
-    </a>
-  );
-}
-
-function StatCard({ number, label }: { number: string; label: string }) {
-  return (
-    <div className="hero-stat">
-      <span className="hero-stat-num">{number}</span>
-      <span className="hero-stat-label">{label}</span>
     </div>
   );
 }
@@ -279,58 +226,56 @@ function LevelCardHome({
   );
 }
 
-/* ────────────────────────────────────────────────────────────── */
-
-type ValueItem = {
+type TeacherWorkspaceItem = {
   title: string;
   text: string;
   Icon: React.ComponentType<{ size?: number; strokeWidth?: number; color?: string }>;
 };
 
-const VALUE_ITEMS: ReadonlyArray<ValueItem> = [
+const TEACHER_WORKSPACE_ITEMS: ReadonlyArray<TeacherWorkspaceItem> = [
   {
-    title: "Решать по темам",
-    text: "Тренировка конкретных заданий, которые нужно подтянуть.",
+    title: "Банк задач",
+    text: "Актуальные задания по темам, классам и форматам",
     Icon: Target,
   },
   {
-    title: "Видеть ошибки",
-    text: "После проверки понятно, где потеряны баллы.",
-    Icon: ClipboardList,
+    title: "Генератор вариантов",
+    text: "Сборка вариантов и тренировок под нужный уровень",
+    Icon: CompassIcon,
   },
   {
-    title: "Проходить варианты",
-    text: "Практика в формате экзамена и сбор устойчивого результата.",
+    title: "Готовые уроки",
+    text: "Презентации, задания, рабочие листы и интерактивы",
     Icon: BookOpenCheck,
   },
   {
-    title: "Готовиться системно",
-    text: "Не случайное нарешивание, а фокус на слабые места.",
-    Icon: CompassIcon,
+    title: "Домашние задания",
+    text: "Выдача заданий ученикам и автоматическая проверка",
+    Icon: ClipboardList,
   },
 ];
 
-function ValueBlock() {
+function TeacherWorkspaceBlock() {
   return (
-    <section className="features-block" aria-labelledby="value-block-heading">
+    <section className="teacher-workspace-block" aria-labelledby="teacher-workspace-heading">
       <header className="section-head">
-        <h2 id="value-block-heading" className="section-head__title">
-          Как платформа помогает готовиться
+        <h2 id="teacher-workspace-heading" className="section-head__title">
+          Всё для занятий в одном месте
         </h2>
         <p className="section-head__lead">
-          Готовим по проверенной схеме: тема → практика → проверка → разбор
-          ошибок. Системно, без хаоса, с результатом.
+          Не нужно собирать материалы по разным вкладкам: задачи, варианты, уроки,
+          домашние задания и проверка собраны в одном рабочем пространстве.
         </p>
       </header>
 
-      <div className="features-grid">
-        {VALUE_ITEMS.map((item) => (
-          <article key={item.title} className="feature-card">
-            <div className="feature-card__icon" aria-hidden>
-              <item.Icon size={20} strokeWidth={2} color="currentColor" />
+      <div className="teacher-workspace-grid">
+        {TEACHER_WORKSPACE_ITEMS.map((item) => (
+          <article key={item.title} className="teacher-workspace-card">
+            <div className="teacher-workspace-card__icon" aria-hidden>
+              <item.Icon size={18} strokeWidth={2.1} color="currentColor" />
             </div>
-            <h3 className="feature-card__title">{item.title}</h3>
-            <p className="feature-card__desc">{item.text}</p>
+            <h3 className="teacher-workspace-card__title">{item.title}</h3>
+            <p className="teacher-workspace-card__text">{item.text}</p>
           </article>
         ))}
       </div>

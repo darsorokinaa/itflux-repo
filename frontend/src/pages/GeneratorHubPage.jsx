@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import TaskSearchPanel from "../components/TaskSearchPanel";
 import GeneratorCategoryCard from "../components/GeneratorCategoryCard";
 import StepIndicator from "../components/StepIndicator";
 import { formatTasksCount } from "../utils/formatTasksCount";
@@ -129,8 +128,6 @@ export default function GeneratorHubPage() {
               ))}
             </div>
           </section>
-
-          <TaskSearchPanel className="generator-tool-page__search" />
         </main>
       </div>
     </div>

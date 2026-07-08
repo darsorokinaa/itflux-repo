@@ -2170,7 +2170,7 @@ def api_generator_overview(request):
 
 @require_http_methods(["GET"])
 def api_platform_stats(request):
-    """GET /api/platform-stats/ — агрегаты для главной: всего заданий, предметов с заданиями, суммы по уровням."""
+    """GET /api/platform-stats/ — агрегаты для главной: задачи, предметы, варианты, суммы по уровням."""
     total_tasks = Task.active_objects.count()
     subjects_count = (
         Task.active_objects.filter(task__subject_id__isnull=False)
@@ -2178,6 +2178,7 @@ def api_platform_stats(request):
         .distinct()
         .count()
     )
+    generated_variants_count = Variant.objects.count()
 
     tasks_by_level = {}
     for level_str in ("vpr", "oge", "ege"):
@@ -2189,6 +2190,7 @@ def api_platform_stats(request):
         {
             "total_tasks": int(total_tasks),
             "subjects_count": int(subjects_count),
+            "generated_variants_count": int(generated_variants_count),
             "tasks_by_level": tasks_by_level,
         }
     )

@@ -434,9 +434,34 @@
   height: 22px;
   border-radius: 999px;
   background: #e0e7ff;
+  overflow: hidden;
+  flex-shrink: 0;
 }
 
-.cabinet-nav-button__icon svg {
+.cabinet-nav-button__avatar {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cabinet-nav-button__avatar-fallback {
+  width: 100%;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+  background: #e0e7ff;
+  color: currentColor;
+}
+
+.cabinet-nav-button__avatar-fallback.is-auth {
+  background: #eef2ff;
+  color: #4f46e5;
+}
+
+.cabinet-nav-button__avatar-fallback svg {
   width: 14px;
   height: 14px;
 }
