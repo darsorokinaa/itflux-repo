@@ -2127,6 +2127,13 @@
   background: #FAFAFA;
 }
 
+.cb-hw-assign-resource > svg {
+  width: 20px;
+  height: 20px;
+  color: #64748B;
+  flex-shrink: 0;
+}
+
 .cb-hw-assign-resource__body {
   flex: 1;
   min-width: 0;

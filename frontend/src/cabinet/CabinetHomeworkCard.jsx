@@ -154,7 +154,9 @@ export default function CabinetHomeworkCard({
         <div className="cb-hw-card__bottom">
           {progressLabel ? (
             <div className={`cb-hw-card__progress${hideProgressBar ? " cb-hw-card__progress--text-only" : ""}`}>
-              <span className="cb-hw-card__progress-label">{progressLabel}</span>
+              <span className={`cb-hw-card__progress-label cb-hw-card__progress-label--${safeProgress}`}>
+                {progressLabel}
+              </span>
               {!hideProgressBar ? (
                 <div className="cb-hw-bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
                   <div

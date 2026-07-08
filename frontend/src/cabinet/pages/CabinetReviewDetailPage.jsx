@@ -480,6 +480,18 @@ export default function CabinetReviewDetailPage() {
                       </div>
                       <TaskCondition task={task} level={level} subject={subject} />
                       <div className="cb-review-detail__answer-block">
+                        <span className="cb-review-detail__section-label">Правильный ответ</span>
+                        <div
+                          className={`cb-review-detail__task-answer${tableAnswer ? " cb-review-detail__task-answer--pre" : ""}`}
+                        >
+                          {task.answer ? (
+                            <MathContent html={String(task.answer)} plainHtml />
+                          ) : (
+                            <span className="cb-review-detail__empty-answer">Нет ответа в базе</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="cb-review-detail__answer-block">
                         <span className="cb-review-detail__section-label">Ответ ученика</span>
                         <div
                           className={`cb-review-detail__task-answer${tableAnswer ? " cb-review-detail__task-answer--pre" : ""}`}
@@ -529,6 +541,16 @@ export default function CabinetReviewDetailPage() {
                         <strong>Задание {task.number}</strong>
                       </div>
                       <TaskCondition task={task} level={level} subject={subject} />
+                      <div className="cb-review-detail__answer-block">
+                        <span className="cb-review-detail__section-label">Правильный ответ</span>
+                        {task.answer ? (
+                          <div className="cb-review-detail__task-answer">
+                            <MathContent html={String(task.answer)} plainHtml />
+                          </div>
+                        ) : (
+                          <p className="cb-review-detail__empty-answer">Нет ответа в базе</p>
+                        )}
+                      </div>
                       <div className="cb-review-detail__answer-block">
                         <span className="cb-review-detail__section-label">Ответ ученика</span>
                         {answer ? (

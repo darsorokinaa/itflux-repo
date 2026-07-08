@@ -54,7 +54,7 @@ export function mapStudentAssignmentToHwCard(item) {
     deadlineLabel = "На проверке";
     deadlineTone = "review";
   } else if (item.status === "checked" || item.status === "completed") {
-    deadlineLabel = item.status_label || "Готово";
+    deadlineLabel = item.status_label || "Проверено";
     deadlineTone = "completed";
   }
 
@@ -75,8 +75,10 @@ export function mapStudentAssignmentToHwCard(item) {
     hideProgressBar = false;
   } else if (item.status === "in_progress") {
     progressLabel = "В работе";
+    progressTone = "review";
   } else if (item.status === "new") {
     progressLabel = "Новое задание";
+    progressTone = "default";
   }
 
   return {

@@ -256,9 +256,21 @@
 
 .cb-hw-card__progress-label {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   color: #475569;
   line-height: 1.2;
+}
+
+.cb-hw-card__progress-label--completed {
+  color: #059669;
+}
+
+.cb-hw-card__progress-label--review {
+  color: #D97706;
+}
+
+.cb-hw-card__progress-label--overdue {
+  color: #DC2626;
 }
 
 .cb-hw-card__progress--text-only {

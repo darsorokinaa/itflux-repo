@@ -10,6 +10,7 @@ import {
   taskMaxScore,
 } from "./cabinetReviewUtils";
 import { computePart1TaskCorrect } from "../utils/examAnswerCheck";
+import MathContent from "../components/MathContent";
 
 function normalizeMediaUrl(url) {
   if (!url) return "";
@@ -134,7 +135,8 @@ function Part1Table({ rows }) {
           <thead>
             <tr>
               <th>№</th>
-              <th>Ваш ответ</th>
+              <th>Ответ ученика</th>
+              <th>Правильный ответ</th>
               <th>Решения</th>
               <th>Результат</th>
               <th>Комментарий</th>
@@ -145,6 +147,13 @@ function Part1Table({ rows }) {
               <tr key={row.taskId}>
                 <td>{row.number}</td>
                 <td>{row.answer || "—"}</td>
+                <td>
+                  {row.correctAnswer ? (
+                    <MathContent html={String(row.correctAnswer)} plainHtml />
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td>
                   <FileLinks files={row.studentFiles} emptyLabel="—" />
                 </td>
@@ -179,7 +188,8 @@ function Part2Table({ rows }) {
           <thead>
             <tr>
               <th>№</th>
-              <th>Ваш ответ</th>
+              <th>Ответ ученика</th>
+              <th>Правильный ответ</th>
               <th>Решения</th>
               <th>Баллы</th>
               <th>Комментарий</th>
@@ -190,6 +200,13 @@ function Part2Table({ rows }) {
               <tr key={row.taskId}>
                 <td>{row.number}</td>
                 <td>{row.answer || "—"}</td>
+                <td>
+                  {row.correctAnswer ? (
+                    <MathContent html={String(row.correctAnswer)} plainHtml />
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td>
                   <FileLinks files={row.studentFiles} emptyLabel="—" />
                 </td>
