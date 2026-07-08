@@ -1,6 +1,31 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BookOpen } from "lucide-react";
+import { ClipboardList, PenLine, Presentation, Search, StickyNote } from "lucide-react";
 import StateView from "../components/StateView";
+
+const patternInf = new URL("../assets/subject-patterns/inf.svg", import.meta.url).href;
+const patternMath = new URL("../assets/subject-patterns/math.svg", import.meta.url).href;
+const patternPhys = new URL("../assets/subject-patterns/phys.svg", import.meta.url).href;
+const patternChem = new URL("../assets/subject-patterns/chem.svg", import.meta.url).href;
+const patternRus = new URL("../assets/subject-patterns/rus.svg", import.meta.url).href;
+const patternLit = new URL("../assets/subject-patterns/lit.svg", import.meta.url).href;
+const patternHistory = new URL("../assets/subject-patterns/history.svg", import.meta.url).href;
+
+/** Единый предметный паттерн вместо случайных обложек: цвет + тематический SVG-узор. */
+const SUBJECT_THEMES = [
+  { test: /информат/i, color: "#32B6C5", pattern: patternInf },
+  { test: /математ/i, color: "#2B52F5", pattern: patternMath },
+  { test: /физ/i, color: "#4A4FC4", pattern: patternPhys },
+  { test: /хими/i, color: "#0F9E76", pattern: patternChem },
+  { test: /русск/i, color: "#D8546E", pattern: patternRus },
+  { test: /литератур/i, color: "#7D46E3", pattern: patternLit },
+  { test: /истори/i, color: "#B45309", pattern: patternHistory },
+];
+const DEFAULT_SUBJECT_THEME = { color: "#2440B8", pattern: patternInf };
+
+function getSubjectTheme(subjectName) {
+  const name = String(subjectName || "");
+  return SUBJECT_THEMES.find((theme) => theme.test.test(name)) || DEFAULT_SUBJECT_THEME;
+}
 
 const DIFFICULTY_LABELS = {
   beginner: "Начальный",
@@ -9,25 +34,22 @@ const DIFFICULTY_LABELS = {
 };
 
 const STATUS_LABELS = {
-  published: "Опубликован",
   draft: "Черновик",
   archived: "Архив",
 };
 
-function pickTheme(lesson) {
-  const topic = `${lesson.topic || ""} ${lesson.subtopic || ""}`.toLowerCase();
-  if (topic.includes("таблиц")) return "tables";
-  if (topic.includes("алгоритм")) return "algorithms";
-  if (topic.includes("логик")) return "logic";
-  if (topic.includes("код") || topic.includes("программ")) return "code";
-  if (lesson.exam_type === "oge") return "oge";
-  return "coding";
-}
+const DURATION_BUCKETS = [
+  { id: "short", label: "До 30 мин", test: (m) => m > 0 && m <= 30 },
+  { id: "medium", label: "30–45 мин", test: (m) => m > 30 && m <= 45 },
+  { id: "long", label: "45–60 мин", test: (m) => m > 45 && m <= 60 },
+  { id: "xlong", label: "60+ мин", test: (m) => m > 60 },
+];
 
-function formatClassLabel(lesson) {
-  if (lesson.grade) return `${lesson.grade} класс`;
-  if (lesson.level) return lesson.level;
-  return "—";
+function durationBucketId(minutes) {
+  const value = Number(minutes);
+  if (!value) return null;
+  const bucket = DURATION_BUCKETS.find((b) => b.test(value));
+  return bucket ? bucket.id : null;
 }
 
 function formatDuration(minutes) {
@@ -42,109 +64,112 @@ function mediaUrl(url) {
   return url;
 }
 
+const INCLUDES = [
+  { id: "presentation", label: "Презентация", Icon: Presentation },
+  { id: "practice", label: "Практика", Icon: PenLine },
+  { id: "homework", label: "ДЗ", Icon: ClipboardList },
+  { id: "notes", label: "Заметки", Icon: StickyNote },
+];
+
 function LessonCard({ lesson }) {
-  const theme = pickTheme(lesson);
+  const subjectTheme = getSubjectTheme(lesson.subject);
   const status = lesson.status || "published";
-  const statusLabel = STATUS_LABELS[status] || status;
+  const statusLabel = STATUS_LABELS[status];
   const durationLabel = formatDuration(lesson.duration_minutes);
-  const difficultyLabel = DIFFICULTY_LABELS[lesson.difficulty] || lesson.difficulty;
-  const coverUrl = mediaUrl(lesson.cover_image_url);
-  const cardBgImageUrl = mediaUrl(lesson.card_background_image_url);
-  const cardBgColor = lesson.card_background_color;
+  const difficultyLabel = DIFFICULTY_LABELS[lesson.difficulty];
   const canOpenLesson = Boolean(lesson.slug && (lesson.archive_url || lesson.file_url));
   const fileExtLower = (lesson.file_url || "").toLowerCase().split("?")[0];
   const isReactViewer = Boolean(
-    !lesson.archive_url && 
-    lesson.file_url && 
-    !fileExtLower.endsWith(".html")
+    !lesson.archive_url &&
+      lesson.file_url &&
+      !fileExtLower.endsWith(".html")
   );
   const lessonUrl = isReactViewer
     ? `/lessons/${encodeURIComponent(lesson.slug)}/view`
     : `/api/lessons/${encodeURIComponent(lesson.slug)}/view/`;
 
-  const cardStyle = {};
-  if (cardBgImageUrl) {
-    cardStyle.backgroundImage = `url(${cardBgImageUrl})`;
-    cardStyle.backgroundSize = "contain";
-    cardStyle.backgroundRepeat = "no-repeat";
-    cardStyle.backgroundPosition = "center";
-  } else if (cardBgColor) {
-    cardStyle.backgroundColor = cardBgColor;
-  }
+  const coverUrl = mediaUrl(lesson.cover_image_url);
+
+  const tags = [
+    lesson.grade ? `${lesson.grade} класс` : null,
+    lesson.level || null,
+    lesson.task_number ? `Задание ${lesson.task_number}` : null,
+    durationLabel,
+    difficultyLabel,
+  ].filter(Boolean);
+
+  const bannerStyle = coverUrl
+    ? {
+        backgroundColor: subjectTheme.color,
+        backgroundImage: `url("${coverUrl}")`,
+        backgroundSize: "cover",
+      }
+    : {
+        backgroundColor: subjectTheme.color,
+        backgroundImage: `url("${subjectTheme.pattern}")`,
+      };
 
   return (
-    <article className={`lesson-card-v3 lesson-card-v3--${theme}`} style={cardStyle}>
-      <div className="lesson-card-v3__layout">
-        <div className="lesson-card-v3__content">
-          <div className="lesson-card-v3__top">
-            <span className="lesson-card-v3__class">{formatClassLabel(lesson)}</span>
-            {status !== "published" ? (
-              <span className={`lesson-card-v3__status lesson-card-v3__status--${status}`}>
-                {statusLabel}
+    <article className="lesson-card-v3">
+      <div
+        className={`lesson-card-v3__banner ${coverUrl ? "lesson-card-v3__banner--cover" : ""}`}
+        style={bannerStyle}
+      >
+        {lesson.subject ? (
+          <span className="lesson-card-v3__banner-subject">{lesson.subject}</span>
+        ) : (
+          <span />
+        )}
+        {statusLabel ? (
+          <span className={`lesson-card-v3__status lesson-card-v3__status--${status}`}>
+            {statusLabel}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="lesson-card-v3__body">
+        {tags.length > 0 ? (
+          <div className="lesson-card-v3__tags">
+            {tags.map((tag) => (
+              <span key={tag} className="lesson-card-v3__tag">
+                {tag}
               </span>
-            ) : null}
+            ))}
           </div>
+        ) : null}
 
-          <h2 className="lesson-card-v3__title">{lesson.title}</h2>
+        <h3 className="lesson-card-v3__title">{lesson.title}</h3>
 
-          {lesson.short_description ? (
-            <p className="lesson-card-v3__desc">{lesson.short_description}</p>
-          ) : null}
+        {lesson.short_description ? (
+          <p className="lesson-card-v3__desc">{lesson.short_description}</p>
+        ) : null}
 
-          {lesson.topic ? (
-            <span className="lesson-card-v3__format">{lesson.topic}</span>
-          ) : null}
-
-          <div className="lesson-card-v3__meta">
-            {lesson.subject ? <span>{lesson.subject}</span> : null}
-            {lesson.task_number ? <span>Задание {lesson.task_number}</span> : null}
-            {durationLabel ? <span>{durationLabel}</span> : null}
-            {difficultyLabel ? <span>{difficultyLabel}</span> : null}
-          </div>
-
-          <div className="lesson-card-v3__actions">
-            {canOpenLesson ? (
-              <a
-                href={lessonUrl}
-                className="lesson-card-v3__btn lesson-card-v3__btn--primary"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Открыть урок
-              </a>
-            ) : (
-              <button type="button" className="lesson-card-v3__btn lesson-card-v3__btn--primary" disabled>
-                Скоро
-              </button>
-            )}
-          </div>
+        <div className="lesson-card-v3__includes">
+          {INCLUDES.map((item) => {
+            const Icon = item.Icon;
+            return (
+              <span key={item.id} className="lesson-card-v3__include">
+                <Icon strokeWidth={2} aria-hidden="true" />
+                {item.label}
+              </span>
+            );
+          })}
         </div>
 
-        <div className="lesson-card-v3__preview" aria-hidden="true">
-          {coverUrl ? (
-            <div className="lesson-card-v3__preview-card lesson-card-v3__preview-card--cover">
-              <img
-                src={coverUrl}
-                alt=""
-                className="lesson-card-v3__cover-image"
-                loading="lazy"
-                decoding="async"
-              />
-            </div>
-          ) : (
-            <div className="lesson-card-v3__preview-card lesson-card-v3__preview-card--front">
-              <span className="lesson-card-v3__topic-icon">
-                <BookOpen strokeWidth={2.2} />
-              </span>
-              <div className="lesson-card-v3__preview-body">
-                <span className="lesson-card-v3__preview-title">{lesson.title}</span>
-                {lesson.subtopic ? (
-                  <span className="lesson-card-v3__preview-meta">{lesson.subtopic}</span>
-                ) : null}
-              </div>
-            </div>
-          )}
-        </div>
+        {canOpenLesson ? (
+          <a
+            href={lessonUrl}
+            className="lesson-card-v3__btn"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Открыть урок
+          </a>
+        ) : (
+          <button type="button" className="lesson-card-v3__btn lesson-card-v3__btn--disabled" disabled>
+            Скоро
+          </button>
+        )}
       </div>
     </article>
   );
@@ -158,6 +183,8 @@ export default function ReadyLessonsPage() {
   const [subject, setSubject] = useState("");
   const [level, setLevel] = useState("");
   const [grade, setGrade] = useState("");
+  const [taskNumber, setTaskNumber] = useState("");
+  const [durationFilter, setDurationFilter] = useState("");
   const [difficulty, setDifficulty] = useState("");
 
   const [reloadKey, setReloadKey] = useState(0);
@@ -215,12 +242,22 @@ export default function ReadyLessonsPage() {
     return Array.from(values).sort((a, b) => Number(a) - Number(b));
   }, [lessons]);
 
+  const taskNumberOptions = useMemo(() => {
+    const values = new Set();
+    for (const lesson of lessons) {
+      if (lesson.task_number) values.add(String(lesson.task_number));
+    }
+    return Array.from(values).sort((a, b) => Number(a) - Number(b));
+  }, [lessons]);
+
   const filteredLessons = useMemo(() => {
     const q = search.trim().toLowerCase();
     return lessons.filter((lesson) => {
       if (subject && lesson.subject !== subject) return false;
       if (level && lesson.level !== level) return false;
       if (grade && String(lesson.grade) !== grade) return false;
+      if (taskNumber && String(lesson.task_number) !== taskNumber) return false;
+      if (durationFilter && durationBucketId(lesson.duration_minutes) !== durationFilter) return false;
       if (difficulty && lesson.difficulty !== difficulty) return false;
       if (!q) return true;
       const haystack = [
@@ -235,17 +272,21 @@ export default function ReadyLessonsPage() {
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [lessons, search, subject, level, grade, difficulty]);
+  }, [lessons, search, subject, level, grade, taskNumber, durationFilter, difficulty]);
 
   const resetFilters = () => {
     setSearch("");
     setSubject("");
     setLevel("");
     setGrade("");
+    setTaskNumber("");
+    setDurationFilter("");
     setDifficulty("");
   };
 
-  const hasActiveFilters = Boolean(search || subject || level || grade || difficulty);
+  const hasActiveFilters = Boolean(
+    search || subject || level || grade || taskNumber || durationFilter || difficulty
+  );
 
   return (
     <div className="digital-flow-page">
@@ -254,84 +295,125 @@ export default function ReadyLessonsPage() {
           <section className="lessons-hero-v3">
             <h1 className="lessons-hero-v3__title">Готовые уроки</h1>
             <p className="lessons-hero-v3__lead">
-              Каталог готовых материалов для уроков информатики: теория, практика и домашние задания
-              для ОГЭ и ЕГЭ.
+              Готовые материалы для занятия: теория, практика, домашнее задание и заметки для учителя.
             </p>
           </section>
 
-          <section className="lessons-filters lessons-filters--catalog" aria-label="Фильтры каталога">
-            <label className="lessons-filter lessons-filter--search">
-              <span className="lessons-filter__label">Поиск</span>
+          <section className="lessons-toolbar" aria-label="Поиск и фильтры каталога">
+            <label className="lessons-search">
+              <Search className="lessons-search__icon" size={18} strokeWidth={2.2} aria-hidden="true" />
               <input
                 type="search"
-                className="lessons-filter__control"
+                className="lessons-search__input"
                 placeholder="Название, тема, подтема"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
             </label>
 
-            <label className="lessons-filter">
-              <span className="lessons-filter__label">Предмет</span>
-              <select
-                className="lessons-filter__control"
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-              >
-                <option value="">Все</option>
-                {subjectOptions.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="lessons-filters-grid">
+              <label className="lessons-filter">
+                <span className="lessons-filter__label">Предмет</span>
+                <select
+                  className="lessons-filter__control"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                >
+                  <option value="">Все</option>
+                  {subjectOptions.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-            <label className="lessons-filter">
-              <span className="lessons-filter__label">Уровень</span>
-              <select
-                className="lessons-filter__control"
-                value={level}
-                onChange={(e) => setLevel(e.target.value)}
-              >
-                <option value="">Все</option>
-                {levelOptions.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <label className="lessons-filter">
+                <span className="lessons-filter__label">Класс</span>
+                <select
+                  className="lessons-filter__control"
+                  value={grade}
+                  onChange={(e) => setGrade(e.target.value)}
+                >
+                  <option value="">Все</option>
+                  {gradeOptions.map((value) => (
+                    <option key={value} value={value}>
+                      {value} класс
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-            <label className="lessons-filter">
-              <span className="lessons-filter__label">Класс</span>
-              <select
-                className="lessons-filter__control"
-                value={grade}
-                onChange={(e) => setGrade(e.target.value)}
-              >
-                <option value="">Все</option>
-                {gradeOptions.map((value) => (
-                  <option key={value} value={value}>
-                    {value} класс
-                  </option>
-                ))}
-              </select>
-            </label>
+              <label className="lessons-filter">
+                <span className="lessons-filter__label">Экзамен</span>
+                <select
+                  className="lessons-filter__control"
+                  value={level}
+                  onChange={(e) => setLevel(e.target.value)}
+                >
+                  <option value="">Все</option>
+                  {levelOptions.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-            <label className="lessons-filter">
-              <span className="lessons-filter__label">Сложность</span>
-              <select
-                className="lessons-filter__control"
-                value={difficulty}
-                onChange={(e) => setDifficulty(e.target.value)}
-              >
-                <option value="">Все</option>
-                <option value="beginner">Начальный</option>
-                <option value="medium">Средний</option>
-                <option value="advanced">Продвинутый</option>
-              </select>
-            </label>
+              <label className="lessons-filter">
+                <span className="lessons-filter__label">Номер задания</span>
+                <select
+                  className="lessons-filter__control"
+                  value={taskNumber}
+                  onChange={(e) => setTaskNumber(e.target.value)}
+                >
+                  <option value="">Все</option>
+                  {taskNumberOptions.map((value) => (
+                    <option key={value} value={value}>
+                      №{value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="lessons-filter">
+                <span className="lessons-filter__label">Длительность</span>
+                <select
+                  className="lessons-filter__control"
+                  value={durationFilter}
+                  onChange={(e) => setDurationFilter(e.target.value)}
+                >
+                  <option value="">Любая</option>
+                  {DURATION_BUCKETS.map((bucket) => (
+                    <option key={bucket.id} value={bucket.id}>
+                      {bucket.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="lessons-filter">
+                <span className="lessons-filter__label">Уровень</span>
+                <select
+                  className="lessons-filter__control"
+                  value={difficulty}
+                  onChange={(e) => setDifficulty(e.target.value)}
+                >
+                  <option value="">Все</option>
+                  <option value="beginner">Начальный</option>
+                  <option value="medium">Средний</option>
+                  <option value="advanced">Продвинутый</option>
+                </select>
+              </label>
+            </div>
+
+            {hasActiveFilters ? (
+              <div className="lessons-toolbar__footer">
+                <button type="button" className="lessons-reset-btn" onClick={resetFilters}>
+                  Сбросить фильтры
+                </button>
+              </div>
+            ) : null}
           </section>
 
           <section className="lessons-library-v3">
@@ -339,19 +421,6 @@ export default function ReadyLessonsPage() {
               <h2 className="lessons-library-v3__title">Каталог уроков</h2>
               <p className="lessons-library-v3__meta">
                 Найдено: <strong>{filteredLessons.length}</strong>
-                {hasActiveFilters ? (
-                  <>
-                    {" "}
-                    ·{" "}
-                    <button
-                      type="button"
-                      className="lesson-card-v3__btn lesson-card-v3__btn--ghost"
-                      onClick={resetFilters}
-                    >
-                      Сбросить фильтры
-                    </button>
-                  </>
-                ) : null}
               </p>
             </header>
 
