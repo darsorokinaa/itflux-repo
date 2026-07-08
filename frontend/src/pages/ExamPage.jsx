@@ -23,6 +23,7 @@ import {
   sanitizeTruthTableAnswerString,
   truthTableAnswerMaxChars,
 } from "../utils/truthTable";
+import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
 import { getShareablePageUrl } from "../utils/shareablePageUrl";
 import {
   parseHomeworkFromSearchForExam,
@@ -2355,12 +2356,12 @@ function ExamPage() {
                         <strong>Задание {task.number}</strong>
                         {!hideHomeworkVariantChrome && (
                           <>
-                            <span>
-                              ID {task.id} · Краткий ответ
+                            <span className="exam-task-card__meta">
+                              ID {task.id}
+                              {!task.answer || String(task.answer).trim() === "" ? (
+                                <TaskNoAnswerBadge />
+                              ) : null}
                             </span>
-                            {!task.answer || String(task.answer).trim() === "" ? (
-                              <span className="task-no-answer-badge">Пока без ответа</span>
-                            ) : null}
                           </>
                         )}
                       </div>
@@ -2740,12 +2741,12 @@ function ExamPage() {
                                 <strong>Задание {task.number}</strong>
                                 {!hideHomeworkVariantChrome && (
                                   <>
-                                    <span>
-                                      ID {task.id} · Развёрнутый ответ
+                                    <span className="exam-task-card__meta">
+                                      ID {task.id}
+                                      {!task.answer || String(task.answer).trim() === "" ? (
+                                        <TaskNoAnswerBadge />
+                                      ) : null}
                                     </span>
-                                    {!task.answer || String(task.answer).trim() === "" ? (
-                                      <span className="task-no-answer-badge">Пока без ответа</span>
-                                    ) : null}
                                   </>
                                 )}
                               </div>
@@ -2854,12 +2855,12 @@ function ExamPage() {
                             <strong>Задание {task.number}</strong>
                             {!hideHomeworkVariantChrome && (
                               <>
-                                <span>
-                                  ID {task.id} · Развёрнутый ответ
+                                <span className="exam-task-card__meta">
+                                  ID {task.id}
+                                  {!task.answer || String(task.answer).trim() === "" ? (
+                                    <TaskNoAnswerBadge />
+                                  ) : null}
                                 </span>
-                                {!task.answer || String(task.answer).trim() === "" ? (
-                                  <span className="task-no-answer-badge">Пока без ответа</span>
-                                ) : null}
                               </>
                             )}
                           </div>

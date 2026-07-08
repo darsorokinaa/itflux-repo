@@ -71,6 +71,20 @@ function itemsIncludeTaskNumber(items, n) {
   return false;
 }
 
+const PART_VARIANT_HINTS = {
+  1: "Краткие ответы и базовая экзаменационная часть.",
+  2: "Задания с развёрнутым ответом и практической проверкой.",
+};
+
+function collectAvailableParts(items, getPart) {
+  const parts = new Set();
+  for (const item of items) {
+    const part = getPart(item);
+    if (part != null && part !== "") parts.add(Number(part));
+  }
+  return [...parts].sort((a, b) => a - b);
+}
+
 /** Query для API ВПР: класс и углублённость (advanced 0/1). */
 function vprApiQueryString(level, searchParams) {
   if (String(level || "").toLowerCase() !== "vpr") return "";
@@ -154,10 +168,32 @@ function TasksPage() {
   }, []);
 
   useEffect(() => {
+    if (!tasks.length) return;
+
+    const parts = collectAvailableParts(tasks, (item) =>
+      item.type === "group" || item.type === "linked_group"
+        ? item.tasks?.[0]?.part
+        : item.part
+    );
+    if (!parts.length) return;
+
     if (subject === "inf" && level === "ege") {
-      setPrepVariantChoice("full");
+      setPrepVariantChoice(parts.length > 1 ? "full" : parts.includes(2) ? "part2" : "full");
+      return;
     }
-  }, [subject, level]);
+
+    if (parts.length === 1) {
+      setPrepVariantChoice(`part${parts[0]}`);
+      return;
+    }
+
+    setPrepVariantChoice((prev) => {
+      const match = /^part(\d+)$/.exec(prev);
+      if (match && parts.includes(Number(match[1]))) return prev;
+      if (prev === "full") return "full";
+      return "full";
+    });
+  }, [tasks, subject, level]);
 
   useEffect(() => {
     if (isLessonJoinPath) return undefined;
@@ -288,13 +324,6 @@ function TasksPage() {
   // Для тренажёра: фильтр ФИПИ + поиск по номеру/названию
   const tasksForTrainer =
     (onlyFipiTrainer && subtopicsByTask.length > 0 ? tasks.filter(isFipiItem) : tasks).filter(matchesSearch);
-
-  const part1Tasks = tasksForVariant.filter(
-    (item) => getItemPart(item) === 1 && matchesSearch(item)
-  );
-  const part2Tasks = tasksForVariant.filter(
-    (item) => getItemPart(item) === 2 && matchesSearch(item)
-  );
 
   const ogeInf13Block =
     level === "oge" && subject === "inf"
@@ -446,35 +475,19 @@ function TasksPage() {
     return appendVprOptions(payload);
   };
 
-  const onPart1 = () => {
+  const onPart = (partNum) => {
     const items = onlyFipiVariant
-      ? tasks.filter((item) => getItemPart(item) === 1).filter(isFipiItem)
-      : part1Tasks;
+      ? tasks.filter((item) => getItemPart(item) === partNum).filter(isFipiItem)
+      : tasksForVariant.filter((item) => getItemPart(item) === partNum && matchesSearch(item));
     const err13 = ogeInf13SelectionError(items);
     if (err13) {
       setPrepActionError(err13);
       return;
     }
     const payload = buildVariantPayload(items);
-    if (warnEmptyVariantPayload(items, "Часть 1")) return;
+    if (warnEmptyVariantPayload(items, `Часть ${partNum}`)) return;
     setSubmitBlock1(true);
-    postVariant(payload, "part1")
-      .catch(handleVariantGenerationError)
-      .finally(() => setSubmitBlock1(false));
-  };
-  const onPart2 = () => {
-    const items = onlyFipiVariant
-      ? tasks.filter((item) => getItemPart(item) === 2).filter(isFipiItem)
-      : part2Tasks;
-    const err13 = ogeInf13SelectionError(items);
-    if (err13) {
-      setPrepActionError(err13);
-      return;
-    }
-    const payload = buildVariantPayload(items);
-    if (warnEmptyVariantPayload(items, "Часть 2")) return;
-    setSubmitBlock1(true);
-    postVariant(payload, "part2")
+    postVariant(payload, `part${partNum}`)
       .catch(handleVariantGenerationError)
       .finally(() => setSubmitBlock1(false));
   };
@@ -494,15 +507,14 @@ function TasksPage() {
   };
 
   const runPrepVariantGeneration = () => {
-    if (prepVariantChoice === "part1") {
-      onPart1();
+    if (prepVariantChoice === "full") {
+      onChooseAll();
       return;
     }
-    if (prepVariantChoice === "part2") {
-      onPart2();
-      return;
+    const match = /^part(\d+)$/.exec(prepVariantChoice);
+    if (match) {
+      onPart(Number(match[1]));
     }
-    onChooseAll();
   };
 
   const buildPayloadFromTestCounts = () => {
@@ -840,8 +852,7 @@ function TasksPage() {
 
   const getTaskCountForIdentifier = (identifier) => getEffectiveTaskCount(identifier);
 
-  const prepShell = (main) => {
-    return (
+  const prepShell = (main) => (
     <div
       className={`tasks-prep-shell${showPrepIntro ? " tasks-prep-shell--intro-open" : ""}`}
     >
@@ -902,8 +913,7 @@ function TasksPage() {
           {main}
       </div>
     </div>
-    );
-  };
+  );
 
   const prepDigitalWrap = (content) => (
     <div className="digital-flow-page">
@@ -923,10 +933,18 @@ function TasksPage() {
     return prepDigitalWrap(prepShell(<p className="error">{error}</p>));
   }
 
-  const part1Blocked = submitBlock1 || (subject === "inf" && level === "ege");
-  const part2Blocked = submitBlock1;
-  const nPart1 = part1Tasks.length;
-  const nPart2 = part2Tasks.length;
+  const variantPartsAvailable = collectAvailableParts(tasksForVariant, getItemPart);
+  const hasMultipleVariantParts = variantPartsAvailable.length > 1;
+  const countTasksInPart = (partNum) =>
+    tasksForVariant.filter((item) => getItemPart(item) === partNum && matchesSearch(item)).length;
+  const variantPartsLabel = variantPartsAvailable
+    .map((partNum) => `часть ${partNum}`)
+    .join(" + ");
+  const variantModeDescription = hasMultipleVariantParts
+    ? `Часть ${variantPartsAvailable.join(", часть ")} или полный вариант в формате ${formatExamLevelRu(level)}.`
+    : variantPartsAvailable.length === 1
+      ? `Вариант по части ${variantPartsAvailable[0]} в формате ${formatExamLevelRu(level)}.`
+      : `Экзаменационный вариант в формате ${formatExamLevelRu(level)}.`;
   const selectedLevelLabel =
     String(level || "").toLowerCase() === "vpr"
       ? "Школьная программа"
@@ -986,7 +1004,7 @@ function TasksPage() {
               </span>
               <span className="tasks-prep-mode-card-title">Экзаменационный вариант</span>
               <p className="tasks-prep-mode-card-text">
-                Часть 1, часть 2 или полный вариант в формате {formatExamLevelRu(level)}.
+                {variantModeDescription}
               </p>
             </label>
             <label
@@ -1041,7 +1059,9 @@ function TasksPage() {
                 </h2>
                 <p className="tasks-prep-workspace-lead">
                   {prepModeFocus === "variant"
-                    ? "Выберите часть работы и источник заданий."
+                    ? hasMultipleVariantParts
+                      ? "Выберите часть работы и источник заданий."
+                      : "Выберите источник заданий и сгенерируйте вариант."
                     : "Выберите номера заданий в сетке, затем настройте количество и подтемы справа."}
                 </p>
               </div>
@@ -1100,52 +1120,39 @@ function TasksPage() {
                   }`}
                 >
                 <div className="tasks-prep-format-stack">
-                  <button
-                    type="button"
-                    className={`tasks-prep-format-option${prepVariantChoice === "part1" ? " is-active" : ""}`}
-                    disabled={part1Blocked}
-                    onClick={() => {
-                      setPrepActionError(null);
-                      setPrepVariantChoice("part1");
-                    }}
-                    aria-pressed={prepVariantChoice === "part1"}
-                  >
-                    <div className="tasks-prep-format-mark tasks-prep-format-mark--p1">1</div>
-                    <div>
-                      <span className="tasks-prep-format-title">Часть 1</span>
-                      <p className="tasks-prep-format-text">
-                        Краткие ответы и базовая экзаменационная часть.
-                      </p>
-                    </div>
-                    <span className="tasks-prep-format-meta">
-                      {nPart1}
-                      {" "}
-                      в списке
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`tasks-prep-format-option${prepVariantChoice === "part2" ? " is-active" : ""}`}
-                    disabled={part2Blocked}
-                    onClick={() => {
-                      setPrepActionError(null);
-                      setPrepVariantChoice("part2");
-                    }}
-                    aria-pressed={prepVariantChoice === "part2"}
-                  >
-                    <div className="tasks-prep-format-mark tasks-prep-format-mark--p2">2</div>
-                    <div>
-                      <span className="tasks-prep-format-title">Часть 2</span>
-                      <p className="tasks-prep-format-text">
-                        Задания с развёрнутым ответом и практической проверкой.
-                      </p>
-                    </div>
-                    <span className="tasks-prep-format-meta">
-                      {nPart2}
-                      {" "}
-                      в списке
-                    </span>
-                  </button>
+                  {variantPartsAvailable.map((partNum) => {
+                    const choice = `part${partNum}`;
+                    const partBlocked = submitBlock1 || (partNum === 1 && subject === "inf" && level === "ege");
+                    return (
+                      <button
+                        key={choice}
+                        type="button"
+                        className={`tasks-prep-format-option${prepVariantChoice === choice ? " is-active" : ""}`}
+                        disabled={partBlocked}
+                        onClick={() => {
+                          setPrepActionError(null);
+                          setPrepVariantChoice(choice);
+                        }}
+                        aria-pressed={prepVariantChoice === choice}
+                      >
+                        <div className={`tasks-prep-format-mark tasks-prep-format-mark--p${partNum}`}>
+                          {partNum}
+                        </div>
+                        <div>
+                          <span className="tasks-prep-format-title">Часть {partNum}</span>
+                          <p className="tasks-prep-format-text">
+                            {PART_VARIANT_HINTS[partNum] || `Задания части ${partNum}.`}
+                          </p>
+                        </div>
+                        <span className="tasks-prep-format-meta">
+                          {countTasksInPart(partNum)}
+                          {" "}
+                          в списке
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {hasMultipleVariantParts ? (
                   <button
                     type="button"
                     className={`tasks-prep-format-option${prepVariantChoice === "full" ? " is-active" : ""}`}
@@ -1160,11 +1167,12 @@ function TasksPage() {
                     <div>
                       <span className="tasks-prep-format-title">Полный вариант</span>
                       <p className="tasks-prep-format-text">
-                        Полная структура варианта: часть 1 и часть 2 вместе.
+                        Полная структура варианта: {variantPartsLabel}.
                       </p>
                     </div>
-                    <span className="tasks-prep-format-meta">часть 1 + часть 2</span>
+                    <span className="tasks-prep-format-meta">{variantPartsLabel}</span>
                   </button>
+                  ) : null}
                 </div>
                 {showOgeInf13VariantAside ? (
                   <aside className="tasks-prep-side-box tasks-prep-side-box--white">

@@ -2247,6 +2247,16 @@ body.tasks-prep-v2-active main.container.mt-4 {
     isolation: isolate;
 }
 
+.tasks-prep-intro--subject-bg::before,
+.tasks-prep-intro--subject-bg::after {
+    opacity: 0.35;
+}
+
+.tasks-prep-intro--subject-bg-image::before,
+.tasks-prep-intro--subject-bg-image::after {
+    opacity: 0.18;
+}
+
 .tasks-prep-intro::before {
     content: "";
     position: absolute;
@@ -3780,24 +3790,24 @@ body.tasks-prep-v2-active main.container.mt-4 {
 .search-variant-page--v2 .sv-task-row {
     background: #ffffff;
     border: 1px solid #e8e6f5;
-    border-radius: 12px;
-    padding: 14px 20px;
+    border-radius: 16px;
+    padding: 22px 24px;
     display: flex;
     align-items: flex-start;
-    gap: 16px;
+    gap: 20px;
     box-shadow: var(--shadow-sm);
     box-sizing: border-box;
 }
 
 .search-variant-page--v2 .sv-task-num {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    background: var(--primary-pink);
-    color: var(--primary-purple);
+    width: 60px;
+    height: 60px;
+    border-radius: 18px;
+    background: #2440b8;
+    color: #ffffff;
     font-family: var(--font-display), sans-serif;
-    font-size: 13px;
-    font-weight: 700;
+    font-size: 22px;
+    font-weight: 800;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3822,12 +3832,30 @@ body.tasks-prep-v2-active main.container.mt-4 {
     font-style: italic;
 }
 
+.search-variant-page--v2 .sv-task-header {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 7px;
+    margin-bottom: 14px;
+    width: 100%;
+}
+
+.search-variant-page--v2 .sv-task-title {
+    margin: 0;
+    font-family: var(--font-display), sans-serif;
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.2;
+}
+
 .search-variant-page--v2 .sv-task-id-row {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 6px;
-    flex-wrap: wrap;
+    gap: 8px;
+    flex-wrap: nowrap;
+    min-width: 0;
 }
 
 .search-variant-page--v2 .sv-task-id-label {
@@ -3838,12 +3866,14 @@ body.tasks-prep-v2-active main.container.mt-4 {
     font-size: 11px;
     font-weight: 600;
     font-family: "Mulish", var(--font-body), sans-serif;
+    flex-shrink: 0;
 }
 
 .search-variant-page--v2 .sv-task-id-value {
     font-size: 12px;
     color: var(--text-secondary);
     font-family: "Mulish", var(--font-body), sans-serif;
+    flex-shrink: 0;
 }
 
 .search-variant-page--v2 .sv-task-answer {
@@ -3891,12 +3921,24 @@ body.tasks-prep-v2-active main.container.mt-4 {
 
 @media (max-width: 480px) {
     .search-variant-page--v2 .sv-task-row {
-        flex-direction: column;
-        align-items: stretch;
+        padding: 16px 14px;
+        gap: 14px;
     }
 
     .search-variant-page--v2 .sv-task-num {
-        align-self: flex-start;
+        width: 46px;
+        height: 46px;
+        border-radius: 14px;
+        font-size: 17px;
+    }
+
+    .search-variant-page--v2 .sv-task-title {
+        font-size: 15px;
+    }
+
+    .search-variant-page--v2 .sv-task-header {
+        gap: 5px;
+        margin-bottom: 12px;
     }
 }
 
@@ -8496,9 +8538,11 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .exam-page .task-text figure.image {
     text-align: center;
 }
-/* Геометрия: компактные иллюстрации (в 2 раза меньше прежнего лимита) */
+/* Геометрия: иллюстрации (в 2.5 раза крупнее прежнего лимита 160px) */
 .exam-page .task-geom .task-text figure,
-.exam-page .task-geom .task-text figure.image {
+.exam-page .task-geom .task-text figure.image,
+.exam-page .exam-task-card.task-geom .exam-task-card__text figure,
+.exam-page .exam-task-card.task-geom .exam-task-card__text figure.image {
     margin-top: 0.85rem !important;
     margin-bottom: 0.55rem !important;
     margin-left: auto !important;
@@ -8508,13 +8552,17 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .exam-page .task-geom .task-text figure img,
 .exam-page .task-geom .task-text figure.image img,
 .exam-page .task-geom .correct-answer-content img,
-.exam-page .task-geom .part2-answer-content img {
+.exam-page .task-geom .part2-answer-content img,
+.exam-page .exam-task-card.task-geom .exam-task-card__text img,
+.exam-page .exam-task-card.task-geom .task-text img,
+.exam-page .exam-task-card.task-geom .exam-task-card__text figure img,
+.exam-page .exam-task-card.task-geom .exam-task-card__text img.oge-math-fipi-diagram {
     display: block !important;
     margin: 0 auto !important;
-    width: min(160px, 45vw) !important;
+    width: min(400px, 90vw) !important;
     max-width: 100% !important;
-    height: min(160px, 45vw) !important;
-    max-height: min(160px, 45vw) !important;
+    height: min(400px, 90vw) !important;
+    max-height: min(400px, 90vw) !important;
     object-fit: contain !important;
     object-position: center !important;
     cursor: pointer;
@@ -14951,6 +14999,19 @@ body.exam-variant-view--edu main.container {
     font-weight: 700;
 }
 
+#main-wrapper.exam-page--edu .exam-task-card__meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--exam-edu-muted);
+    font-weight: 700;
+}
+
+#main-wrapper.exam-page--edu .exam-task-card__meta .task-no-answer-hint {
+    margin-left: 0;
+}
+
 #main-wrapper.exam-page--edu .exam-task-card__chip {
     padding: 6px 10px;
     border-radius: 999px;
@@ -15557,20 +15618,18 @@ body.exam-variant-view--edu main.container {
 
     #main-wrapper.exam-page--edu .mobile-variant-bar,
     .mobile-variant-bar {
-        position: sticky;
-        top: 72px;
-        z-index: 180;
+        position: static;
+        z-index: auto;
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
         max-width: 100%;
+        margin: 0 0 12px;
         padding: 10px;
         border: 1px solid var(--exam-edu-line, #e3e4fb);
         border-radius: 18px;
-        background: rgba(255, 255, 255, 0.96);
-        box-shadow: 0 12px 26px rgba(58, 53, 138, 0.1);
-        -webkit-backdrop-filter: blur(10px);
-        backdrop-filter: blur(10px);
+        background: var(--bg-card, #fff);
+        box-shadow: var(--shadow-hover, 0 8px 22px rgba(58, 53, 138, 0.08));
     }
 }
 
@@ -15590,14 +15649,22 @@ body.exam-variant-view--edu main.container {
 
     #main-wrapper.exam-page--edu .mobile-variant-bar,
     .mobile-variant-bar {
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-bottom: 12px;
+        padding: 8px;
+        max-width: 100%;
     }
 
     .mobile-stat {
         min-width: 0;
+        min-height: 48px;
         padding: 8px 10px;
         border-radius: 12px;
         background: #f7f8ff;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
 
     .mobile-stat-label {
@@ -15613,13 +15680,19 @@ body.exam-variant-view--edu main.container {
         display: block;
         margin-top: 2px;
         color: var(--exam-edu-text, #17164f);
-        font-size: 14px;
+        font-size: 15px;
         font-weight: 900;
         white-space: nowrap;
+        line-height: 1.1;
     }
 
     .mobile-bar-btn {
-        min-height: 42px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        min-height: 48px;
+        padding: 0 10px;
         border: 1px solid var(--exam-edu-line, #e3e4fb);
         border-radius: 12px;
         background: #fff;
@@ -15627,6 +15700,7 @@ body.exam-variant-view--edu main.container {
         font-size: 13px;
         font-weight: 900;
         cursor: pointer;
+        box-sizing: border-box;
     }
 
     .mobile-bar-btn--primary {
@@ -15838,15 +15912,15 @@ body.exam-variant-view--edu main.container {
 
     #main-wrapper.exam-page--edu .mobile-variant-bar,
     .mobile-variant-bar {
-        top: 66px;
-        grid-template-columns: 1fr 1fr;
         gap: 7px;
+        margin-bottom: 10px;
         padding: 8px;
         max-width: 100%;
     }
 
     .mobile-stat,
     .mobile-bar-btn {
+        min-height: 46px;
         padding-left: 8px;
         padding-right: 8px;
     }

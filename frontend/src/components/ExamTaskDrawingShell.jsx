@@ -165,15 +165,27 @@ export default function ExamTaskDrawingShell({
     setRedoStack([]);
   }, [taskId, variantId]);
 
+  const closeBoard = useCallback(() => {
+    setBoardVisible(false);
+    setExtraDrawingPad(false);
+    setTool(null);
+    setHoveredId(null);
+    setRedoStack([]);
+  }, []);
+
   useEffect(() => {
     if (!enabled || openBoardForTaskId == null || openBoardForTaskId !== taskId) return;
     const id = requestAnimationFrame(() => {
-      setBoardVisible(true);
-      setTool("cursor");
+      if (isBoardVisible) {
+        closeBoard();
+      } else {
+        setBoardVisible(true);
+        setTool("cursor");
+      }
       onConsumedBoardOpenRequest?.();
     });
     return () => cancelAnimationFrame(id);
-  }, [enabled, onConsumedBoardOpenRequest, openBoardForTaskId, taskId]);
+  }, [enabled, onConsumedBoardOpenRequest, openBoardForTaskId, taskId, isBoardVisible, closeBoard]);
 
   useEffect(() => {
     if (!showCanvasLayer) return undefined;
@@ -434,13 +446,7 @@ export default function ExamTaskDrawingShell({
             onRedo={handleRedo}
             redoDisabled={redoStack.length === 0}
             onClearAll={handleClearAll}
-            onClosePanel={() => {
-              setBoardVisible(false);
-              setExtraDrawingPad(false);
-              setTool(null);
-              setHoveredId(null);
-              setRedoStack([]);
-            }}
+            onClosePanel={closeBoard}
             extraDrawingPad={extraDrawingPad}
             onExtraDrawingPadChange={setExtraDrawingPad}
           />

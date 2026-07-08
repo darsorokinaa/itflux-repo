@@ -29,6 +29,7 @@ import type { TaskFileSource } from "../components/InformaticsCodeEditor/types";
 
 import MathContent from "../components/MathContent";
 import TaskFileAttachment from "../components/TaskFileAttachment";
+import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
 
 const InformaticsCodeEditorEntry = lazy(
   () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
@@ -1042,7 +1043,7 @@ export default function AllTasksPage() {
                               </>
                             ) : null}
                             {groupHasMissingAnswer ? (
-                              <span className="task-no-answer-badge">Пока без ответа</span>
+                              <TaskNoAnswerBadge />
                             ) : null}
                           </p>
                           <div className="all-tasks-item__actions">
@@ -1099,7 +1100,7 @@ export default function AllTasksPage() {
                                         </>
                                       ) : null}
                                       {!answerHtml ? (
-                                        <span className="task-no-answer-badge">Пока без ответа</span>
+                                        <TaskNoAnswerBadge />
                                       ) : null}
                                     </p>
                                     <div className="all-tasks-item__actions">
@@ -1240,7 +1241,7 @@ export default function AllTasksPage() {
                             </>
                           ) : null}
                           {!answerHtml ? (
-                            <span className="task-no-answer-badge">Пока без ответа</span>
+                            <TaskNoAnswerBadge />
                           ) : null}
                         </p>
                         <div className="all-tasks-item__actions">

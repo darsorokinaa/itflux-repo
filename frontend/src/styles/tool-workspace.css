@@ -643,6 +643,20 @@
   pointer-events: none;
 }
 
+.subject-dashboard-card--has-bg-image .subject-dashboard-card__pattern {
+  opacity: 1;
+}
+
+.subject-dashboard-card--has-bg-image .subject-dashboard-card__top::before {
+  opacity: 0.1;
+}
+
+.subject-dashboard-card--has-bg-image .subject-dashboard-card__top::after {
+  background:
+    linear-gradient(122deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.01) 52%),
+    radial-gradient(78% 110% at 88% -18%, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0));
+}
+
 .subject-dashboard-card__motifs {
   position: absolute;
   z-index: 2;

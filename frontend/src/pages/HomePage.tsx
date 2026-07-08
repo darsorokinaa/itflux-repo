@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import HeroSection from "../components/HeroSection";
 import { type LevelId } from "../data/levels";
-import { SUBJECTS_BY_LEVEL } from "../data/subjects";
+import { countAvailableSubjectIds } from "../data/subjects";
 import { formatTasksCount } from "../utils/formatTasksCount";
 import { formatIntRu } from "../utils/formatIntRu";
 
@@ -59,13 +59,6 @@ const HOME_LEVELS: ReadonlyArray<HomeLevel> = [
   },
 ];
 
-const DEFAULT_HERO_SUBJECTS_COUNT = new Set(
-  Object.values(SUBJECTS_BY_LEVEL)
-    .flat()
-    .filter((subject) => !subject.comingSoon)
-    .map((subject) => subject.id),
-).size;
-
 export default function HomePage() {
   const navigate = useNavigate();
   const { hash } = useLocation();
@@ -73,7 +66,7 @@ export default function HomePage() {
   const [stats, setStats] = useState<PlatformStats | null>(null);
   const heroTasksCountLabel =
     stats != null && stats.total_tasks > 0 ? formatIntRu(stats.total_tasks) : "11 667";
-  const heroSubjectsCountLabel = formatIntRu(DEFAULT_HERO_SUBJECTS_COUNT);
+  const heroSubjectsCountLabel = formatIntRu(countAvailableSubjectIds());
   const heroGeneratedVariantsCountLabel =
     stats != null && stats.generated_variants_count >= 0
       ? formatIntRu(stats.generated_variants_count)

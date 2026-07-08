@@ -174,16 +174,22 @@ export default function SubjectCard({
   onClick,
 }: SubjectCardProps) {
   const isLocked = typeof lockedOverride === "boolean" ? lockedOverride : Boolean(subject.comingSoon);
+  const bgImageUrl = subject.backgroundImageUrl?.trim();
+  const bgColor = subject.backgroundColor?.trim();
+  const usesCustomBackground = Boolean(bgImageUrl || bgColor);
 
   const cardStyle = {
-    "--subject-card-top": subject.bg,
+    "--subject-card-top": bgColor || subject.bg,
     "--subject-card-border": subject.accent,
-    "--subject-card-pattern-url": `url("${subject.patternAsset}")`,
+    "--subject-card-pattern-url": bgImageUrl
+      ? `url("${bgImageUrl}")`
+      : `url("${subject.patternAsset}")`,
   } as CSSProperties;
 
   const className = [
     "subject-dashboard-card",
     `subject-dashboard-card--${subject.id}`,
+    usesCustomBackground && bgImageUrl && "subject-dashboard-card--has-bg-image",
     isLocked && "is-locked",
   ]
     .filter(Boolean)

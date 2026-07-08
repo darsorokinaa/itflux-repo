@@ -38,6 +38,9 @@ export interface SubjectDefinition {
   pattern: SubjectPatternKind;
   patternAsset: string;
   motifs: readonly [SubjectMotifKind, SubjectMotifKind, SubjectMotifKind];
+  /** Переопределение из API / админки */
+  backgroundColor?: string;
+  backgroundImageUrl?: string;
   /** Предмет ещё не открыт — показываем бейдж «Скоро», выбор недоступен */
   comingSoon?: boolean;
 }
@@ -119,7 +122,6 @@ const SUBJECT_RUS: SubjectDefinition = {
   pattern: "lines",
   patternAsset: PATTERN_RUS,
   motifs: ["text", "quote", "speech"],
-  comingSoon: true,
 };
 
 const SUBJECT_LIT: SubjectDefinition = {
@@ -160,3 +162,13 @@ export const GRADES_BY_LEVEL: Record<LevelId, number[]> = {
   oge: [9],
   ege: [11],
 };
+
+/** Уникальные предметы без бейджа «Скоро» — для счётчика «доступно сейчас» на главной. */
+export function countAvailableSubjectIds(): number {
+  return new Set(
+    Object.values(SUBJECTS_BY_LEVEL)
+      .flat()
+      .filter((subject) => !subject.comingSoon)
+      .map((subject) => subject.id),
+  ).size;
+}

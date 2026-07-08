@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import SearchByIdForm from "../components/SearchByIdForm";
 import MathContent from "../components/MathContent";
 import StateView from "../components/StateView";
+import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
 import { devApiBase } from "../utils/devApiBase";
 
 function formatLevel(level) {
@@ -141,12 +142,15 @@ function SearchVariantPage() {
                     {t.number}
                   </div>
                   <div className="sv-task-main">
-                    <div className="sv-task-id-row">
-                      <span className="sv-task-id-label">ID</span>
-                      <span className="sv-task-id-value">{t.id}</span>
-                      {!String(t.answer || "").trim() ? (
-                        <span className="task-no-answer-badge">Пока без ответа</span>
-                      ) : null}
+                    <div className="sv-task-header">
+                      <p className="sv-task-title">Задание {t.number}</p>
+                      <div className="sv-task-id-row">
+                        <span className="sv-task-id-label">ID</span>
+                        <span className="sv-task-id-value">{t.id}</span>
+                        {!String(t.answer || "").trim() ? (
+                          <TaskNoAnswerBadge />
+                        ) : null}
+                      </div>
                     </div>
                     <div className="task-content">
                       {t.task_text ? (

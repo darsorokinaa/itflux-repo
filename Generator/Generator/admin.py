@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.db.models import Q
 from django import forms
-from django.utils.html import strip_tags
+from django.utils.html import format_html, strip_tags
 from django_ckeditor_5.widgets import CKEditor5Widget
 
 from .models import (
@@ -56,11 +56,32 @@ class SubTopicInline(admin.TabularInline):
 
 @admin.register(Subject)
 class SubjectAdmin(admin.ModelAdmin):
-    list_display = ("id", "subject_short", "subject_name")
+    list_display = ("id", "subject_short", "subject_name", "background_color", "has_background_image")
     list_filter = ("subject_short",)
     search_fields = ("subject_short", "subject_name")
     list_per_page = 50
     show_full_result_count = False
+    readonly_fields = ("background_image_preview",)
+    fields = (
+        "subject_short",
+        "subject_name",
+        "background_color",
+        "background_image",
+        "background_image_preview",
+    )
+
+    @admin.display(boolean=True, description="Фон (картинка)")
+    def has_background_image(self, obj):
+        return bool(obj.background_image)
+
+    @admin.display(description="Превью фона")
+    def background_image_preview(self, obj):
+        if not obj.background_image:
+            return "—"
+        return format_html(
+            '<img src="{}" style="max-width:320px;max-height:180px;border-radius:12px;" alt="">',
+            obj.background_image.url,
+        )
 
 
 @admin.register(TaskList)

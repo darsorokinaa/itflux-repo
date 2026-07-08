@@ -12,6 +12,10 @@ import "../styles/tool-workspace.css";
 
 type AvailabilityMap = Partial<Record<string, boolean>>;
 
+type SubjectCatalogOverlay = Partial<
+  Record<string, Pick<SubjectDefinition, "backgroundColor" | "backgroundImageUrl">>
+>;
+
 export default function SubjectPage() {
   const { level: levelParam } = useParams();
   const navigate = useNavigate();
@@ -30,6 +34,7 @@ export default function SubjectPage() {
   );
   const [advancedLevel, setAdvancedLevel] = useState(false);
   const [availability, setAvailability] = useState<AvailabilityMap>({});
+  const [catalogOverlay, setCatalogOverlay] = useState<SubjectCatalogOverlay>({});
 
   useEffect(() => {
     const g = GRADES_BY_LEVEL[level];
@@ -38,7 +43,19 @@ export default function SubjectPage() {
     setAdvancedLevel(false);
   }, [level]);
 
-  const dashboardSubjects = useMemo(() => subjects, [subjects]);
+  const dashboardSubjects = useMemo(
+    () =>
+      subjects.map((subject) => {
+        const overlay = catalogOverlay[subject.id];
+        if (!overlay) return subject;
+        return {
+          ...subject,
+          ...(overlay.backgroundColor ? { backgroundColor: overlay.backgroundColor } : {}),
+          ...(overlay.backgroundImageUrl ? { backgroundImageUrl: overlay.backgroundImageUrl } : {}),
+        };
+      }),
+    [subjects, catalogOverlay],
+  );
 
   const isSubjectLocked = (subject: SubjectDefinition) => {
     const endpointValue = availability[subject.id];
@@ -73,6 +90,7 @@ export default function SubjectPage() {
   useEffect(() => {
     let cancelled = false;
     setAvailability({});
+    setCatalogOverlay({});
     const loadCatalog = async () => {
       try {
         const catalogRes = await fetch(`/api/${level}/subject-catalog/${countsQuery}`, {
@@ -81,16 +99,38 @@ export default function SubjectPage() {
         if (catalogRes.ok) {
           const data = await catalogRes.json();
           const subjects = Array.isArray(data?.subjects) ? data.subjects : [];
+          const backgrounds =
+            data?.backgrounds && typeof data.backgrounds === "object" ? data.backgrounds : {};
           const nextAvailability: AvailabilityMap = {};
+          const nextOverlay: SubjectCatalogOverlay = {};
+
+          const applyBackground = (id: string, source: Record<string, unknown>) => {
+            const backgroundColor = String(source?.background_color || "").trim();
+            const backgroundImageUrl = String(source?.background_image_url || "").trim();
+            if (backgroundColor || backgroundImageUrl) {
+              nextOverlay[id] = {
+                ...(backgroundColor ? { backgroundColor } : {}),
+                ...(backgroundImageUrl ? { backgroundImageUrl } : {}),
+              };
+            }
+          };
+
           for (const item of subjects) {
             const id = String(item?.id || "");
             if (!id) continue;
             if (typeof item.is_available === "boolean") {
               nextAvailability[id] = item.is_available;
             }
+            applyBackground(id, item as Record<string, unknown>);
+          }
+
+          for (const [id, source] of Object.entries(backgrounds)) {
+            if (nextOverlay[id]) continue;
+            applyBackground(id, source as Record<string, unknown>);
           }
           if (!cancelled) {
             setAvailability(nextAvailability);
+            setCatalogOverlay(nextOverlay);
           }
           return;
         }
@@ -105,6 +145,7 @@ export default function SubjectPage() {
       } catch {
         if (!cancelled) {
           setAvailability({});
+          setCatalogOverlay({});
         }
       }
     };

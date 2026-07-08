@@ -98,9 +98,11 @@ _RE_NAKED_ENV_BLOCK = re.compile(
     r'\\begin\{(tabular|array|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|cases|aligned|align\*?|gather\*?|equation\*?)\}(?:\{[^}]*\})?(.*?)\\end\{\1\}',
     re.DOTALL,
 )
-# MathJax (браузер и Node) не поддерживает tabular/array — только наш HTML-конвертер
+# MathJax (браузер и Node) не поддерживает tabular/array — только наш HTML-конвертер.
+# matrix/pmatrix/… MathJax рендерит нормально; в HTML-таблицу сворачивать нельзя
+# (кусочно-заданные функции с «при» превращаются в клетки с сырым TeX).
 _RE_HAS_TABULAR_OR_ARRAY = re.compile(
-    r'\\begin\s*\{(?:tabular|array|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix)\}',
+    r'\\begin\s*\{(?:tabular|array)\}',
     re.IGNORECASE | re.DOTALL,
 )
 _RE_VERBATIM = re.compile(r'\\begin\{verbatim\}(.*?)\\end\{verbatim\}', re.DOTALL)
@@ -823,16 +825,25 @@ def process_latex(
     html_text = _RE_DISPLAY.sub(replace_display, html_text)
     # 4b. Display math $$...$$
     html_text = _RE_DISPLAY_DOUBLE.sub(replace_display, html_text)
+    def replace_inline_paren(m):
+        latex = _normalize_latex(m.group(1))
+        if not latex:
+            return m.group(0)
+        display = _is_display_math(latex, m.group(0))
+        return _render_math_block(latex, display, for_pdf=for_pdf, for_browser=for_browser)
+
     # 5. Inline \(...\)
-    html_text = _RE_INLINE_PAREN.sub(
-        lambda m: _render_math_block(_normalize_latex(m.group(1)), False, for_pdf=for_pdf, for_browser=for_browser),
-        html_text,
-    )
+    html_text = _RE_INLINE_PAREN.sub(replace_inline_paren, html_text)
+
+    def replace_inline_dollar(m):
+        latex = _normalize_latex(m.group(1))
+        if not latex:
+            return m.group(0)
+        display = _is_display_math(latex, m.group(0))
+        return _render_math_block(latex, display, for_pdf=for_pdf, for_browser=for_browser)
+
     # 6. Inline $...$
-    html_text = _RE_INLINE_DOLLAR.sub(
-        lambda m: _render_math_block(_normalize_latex(m.group(1)), False, for_pdf=for_pdf, for_browser=for_browser),
-        html_text,
-    )
+    html_text = _RE_INLINE_DOLLAR.sub(replace_inline_dollar, html_text)
     # 6a. Голые блочные LaTeX-окружения без $...$, \(...\), \[...\]
     # Например: \begin{array}...\end{array} в тексте задачи.
     html_text = _RE_NAKED_ENV_BLOCK.sub(

@@ -1668,6 +1668,27 @@ _SUBJECT_SHORTS_BY_LEVEL = {
 _SUBJECT_CATALOG_CORE_SHORTS = ("inf", "math", "rus")
 
 
+def _subject_background_payload(subject_instance, request):
+    """Фон предмета для карточек и hero-блоков на фронте."""
+    if subject_instance is None:
+        return {"background_color": "", "background_image_url": ""}
+    image_url = ""
+    if getattr(subject_instance, "background_image", None):
+        try:
+            image_url = request.build_absolute_uri(subject_instance.background_image.url)
+        except (ValueError, AttributeError):
+            image_url = ""
+    return {
+        "background_color": (getattr(subject_instance, "background_color", "") or "").strip(),
+        "background_image_url": image_url,
+    }
+
+
+def _subjects_by_short(shorts):
+    rows = Subject.objects.filter(subject_short__in=shorts)
+    return {row.subject_short.lower(): row for row in rows}
+
+
 def _subject_task_counts_payload(request, level_str: str):
     """
     Счётчики активных заданий по предметам для уровня (vpr / oge / ege).
@@ -1737,17 +1758,34 @@ def api_level_subject_catalog(request, level):
     if counts is None:
         return JsonResponse({"error": "unknown level"}, status=400)
 
+    level_shorts = _SUBJECT_SHORTS_BY_LEVEL.get((level or "").lower(), ())
+    subject_ids = list(dict.fromkeys(list(level_shorts) + list(_SUBJECT_CATALOG_CORE_SHORTS)))
+    subjects_by_short = _subjects_by_short(subject_ids)
+
     subjects = []
-    for subject_id in _SUBJECT_CATALOG_CORE_SHORTS:
+    for subject_id in subject_ids:
         task_count = int(counts.get(subject_id, 0) or 0)
-        subjects.append(
-            {
-                "id": subject_id,
-                "tasks_count": task_count,
-                "is_available": task_count > 0,
-            }
-        )
-    return JsonResponse({"level": (level or "").lower(), "subjects": subjects})
+        subject_row = subjects_by_short.get(subject_id)
+        entry = {
+            "id": subject_id,
+            "tasks_count": task_count,
+            "is_available": task_count > 0,
+        }
+        entry.update(_subject_background_payload(subject_row, request))
+        subjects.append(entry)
+
+    backgrounds = {}
+    for row in Subject.objects.all().only("subject_short", "background_color", "background_image"):
+        short = (row.subject_short or "").lower()
+        if not short:
+            continue
+        backgrounds[short] = _subject_background_payload(row, request)
+
+    return JsonResponse({
+        "level": (level or "").lower(),
+        "subjects": subjects,
+        "backgrounds": backgrounds,
+    })
 
 
 @csrf_exempt
@@ -2007,8 +2045,9 @@ def api_tasks(request, level, subject):
 
     resp = {
         "subject_name": subject_instance.subject_name,
-        "tasks": result
+        "tasks": result,
     }
+    resp.update(_subject_background_payload(subject_instance, request))
     # Диагностика: при ?debug=1 показывать, почему linked_group может не отображаться
     if request.GET.get("debug") == "1":
         debug_linked = []
@@ -2812,6 +2851,7 @@ def _variant_detail_payload(request, variant):
         "level": variant.level.level,
         "subject": variant.var_subject.subject_short,
         "tasks": tasks_data,
+        **_subject_background_payload(variant.var_subject, request),
     }
 
 

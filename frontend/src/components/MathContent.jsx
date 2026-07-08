@@ -179,6 +179,60 @@ function isBrokenBackendMathSpan(span) {
   return false;
 }
 
+/** Ячейка array-table (бэкенд) → фрагмент LaTeX для MathJax. */
+function arrayCellToTex(cell) {
+  if (!cell) return "";
+  const clone = cell.cloneNode(true);
+  clone.querySelectorAll("sup").forEach((sup) => {
+    const t = (sup.textContent || "").trim();
+    sup.replaceWith(cell.ownerDocument.createTextNode(t ? `^{${t}}` : ""));
+  });
+  clone.querySelectorAll("sub").forEach((sub) => {
+    const t = (sub.textContent || "").trim();
+    sub.replaceWith(cell.ownerDocument.createTextNode(t ? `_{${t}}` : ""));
+  });
+  return (clone.textContent || "")
+    .replace(/\u2212/g, "-")
+    .replace(/≥/g, "\\ge ")
+    .replace(/≤/g, "\\le ")
+    .replace(/≠/g, "\\ne ")
+    .replace(/×/g, "\\times ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Свёрнутая бэкендом matrix/array-table → cases (если «при») или matrix. */
+function arrayTableToTex(table) {
+  if (!table) return null;
+  const grid = [...table.querySelectorAll("tr")].map((row) =>
+    [...row.querySelectorAll("td, th")].map((cell) => arrayCellToTex(cell))
+  );
+  if (!grid.length || !grid.some((row) => row.some(Boolean))) return null;
+
+  const isPiecewise =
+    grid.length >= 2 &&
+    grid.every((row) => row.length === 3) &&
+    grid.every((row) => /^при$/i.test(row[1]));
+
+  if (isPiecewise) {
+    const body = grid
+      .map((row) => `${row[0]}, & \\text{при } ${row[2]}`)
+      .join(" \\\\ ");
+    return `\\begin{cases}${body}\\end{cases}`;
+  }
+
+  const body = grid.map((row) => row.join(" & ")).join(" \\\\ ");
+  return `\\begin{matrix}${body}\\end{matrix}`;
+}
+
+function replaceBrokenMathSpanWithTex(span, tex) {
+  if (!span || !tex) return;
+  const isDisplay =
+    span.classList.contains("math-display") || INLINE_TO_DISPLAY_TEX_RE.test(tex);
+  const wrapped = isDisplay ? `$$${tex}$$` : `$${tex}$`;
+  span.replaceWith(span.ownerDocument.createTextNode(wrapped));
+}
+
 /** Бэкенд иногда сворачивает cases/array в HTML-таблицу с артефактами — восстанавливаем TeX из сырого текста. */
 function reinjectMathEnvTexFromRaw(root, raw) {
   if (!root || !raw) return;
@@ -192,12 +246,23 @@ function reinjectMathEnvTexFromRaw(root, raw) {
   blocks.forEach((match, index) => {
     const span = brokenSpans[index];
     if (!span) return;
-    const fullTex = match[0];
-    const isDisplay =
-      span.classList.contains("math-display") || INLINE_TO_DISPLAY_TEX_RE.test(fullTex);
-    const wrapped = isDisplay ? `$$${fullTex}$$` : `$${fullTex}$`;
-    span.replaceWith(root.ownerDocument.createTextNode(wrapped));
+    replaceBrokenMathSpanWithTex(span, match[0]);
   });
+}
+
+/** Уже отрендеренный бэкендом array-table (без TeX в raw) → MathJax. */
+function repairBrokenBackendArrayTables(root) {
+  if (!root) return;
+  const brokenSpans = [...root.querySelectorAll(".math-display, .math-inline")].filter(
+    isBrokenBackendMathSpan
+  );
+  for (const span of brokenSpans) {
+    const table = span.querySelector("table.array-table, table");
+    if (!table) continue;
+    const tex = arrayTableToTex(table);
+    if (!tex) continue;
+    replaceBrokenMathSpanWithTex(span, tex);
+  }
 }
 
 /** Бэкенд отдаёт <span class="math-inline">&#92;(...&#92;&#41;</span> — MathJax их не всегда подхватывает. */
@@ -1186,6 +1251,7 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
       }
       el.innerHTML = convertLogicSpansInsideMathDelimitersToTex(repairOrphanSpanTags(piped));
       reinjectMathEnvTexFromRaw(el, decoded);
+      repairBrokenBackendArrayTables(el);
       if (shouldNormalizeTables) {
         try {
           normalizeSparseTables(el);
@@ -1297,6 +1363,7 @@ export function prepareBankTaskDisplayHtml(raw, options = {}) {
     const el = document.createElement("div");
     el.innerHTML = html;
     reinjectMathEnvTexFromRaw(el, decoded);
+    repairBrokenBackendArrayTables(el);
     unwrapBackendMathSpans(el);
     if (rawHasSparseGridTables(html)) {
       try {

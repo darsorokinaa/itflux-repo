@@ -1950,7 +1950,18 @@ body,
     gap: 10px !important;
     width: 100% !important;
     max-width: 100% !important;
+    min-height: 0 !important;
     box-sizing: border-box !important;
+  }
+
+/* На странице варианта поиск в шапке не нужен — освобождаем место под контент */
+body.exam-variant-view .site-nav__quick-search.task-search-panel {
+    display: none !important;
+  }
+
+body.exam-variant-view .site-nav__inner,
+body.exam-variant-view .digital-flow-page .site-nav__inner {
+    padding: 10px 14px !important;
   }
 
 .site-nav__brand {
@@ -2010,20 +2021,13 @@ body,
 
 .site-nav__quick-search .task-search-panel__form {
     width: 100%;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 8px;
   }
 
 .site-nav__quick-search .task-search-panel__input,
 .site-nav__quick-search .task-search-panel__submit {
-    min-height: 44px;
-  }
-}
-
-@media (max-width: 560px) {
-.site-nav__quick-search .task-search-panel__form {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 8px;
+    min-height: 42px;
   }
 
 .site-nav__quick-search .task-search-panel__submit {

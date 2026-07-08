@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import SearchByIdForm from "../components/SearchByIdForm";
 import MathContent from "../components/MathContent";
 import StateView from "../components/StateView";
+import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
 import { devApiBase } from "../utils/devApiBase";
 
 function SearchTaskPage() {
@@ -96,7 +97,7 @@ function SearchTaskPage() {
                 <span className="search-task-badge">Задача №{t.task_number}</span>
                 <span className="search-task-id">ID: {t.id}</span>
                 {!t.answer ? (
-                  <span className="task-no-answer-badge">Пока без ответа</span>
+                  <TaskNoAnswerBadge />
                 ) : null}
               </div>
               <div className="search-task-card-body">

@@ -36,6 +36,11 @@ def lesson_cover_upload_to(instance, filename):
     return os.path.join("lessons", "covers", f"{uuid4().hex}{_safe_ext(filename, '.jpg')}")
 
 
+def subject_background_upload_to(instance, filename):
+    short = slugify(instance.subject_short or "subject") or "subject"
+    return os.path.join("subjects", "backgrounds", short, f"{uuid4().hex}{_safe_ext(filename, '.jpg')}")
+
+
 def lesson_file_resource_upload_to(instance, filename):
     return os.path.join("lessons", "resources", f"{uuid4().hex}{_safe_ext(filename)}")
 
@@ -89,6 +94,20 @@ class Level(models.Model):
 class Subject(models.Model):
     subject_short = models.CharField(max_length=50, db_index=True)
     subject_name = models.CharField(max_length=200)
+    background_color = models.CharField(
+        max_length=7,
+        blank=True,
+        default="",
+        verbose_name="Фон предмета (HEX цвет)",
+        help_text="Например, #311B41. Используется, если не задано изображение.",
+    )
+    background_image = models.ImageField(
+        upload_to=subject_background_upload_to,
+        blank=True,
+        null=True,
+        verbose_name="Фон предмета (картинка)",
+        help_text="Декоративный фон для карточки предмета и hero-блока генератора вариантов.",
+    )
 
     def __str__(self):
         return self.subject_short
