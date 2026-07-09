@@ -1,6 +1,6 @@
 import type { LevelId } from "./levels";
 
-export type SubjectId = "math" | "inf" | "phys" | "chem" | "rus" | "lit" | "history";
+export type SubjectId = "math" | "math_base" | "inf" | "phys" | "chem" | "rus" | "lit" | "history";
 
 export type SubjectIconKind = "sum" | "code" | "atom" | "aa" | "section";
 
@@ -67,6 +67,19 @@ const SUBJECT_MATH_BASE: Omit<SubjectDefinition, "comingSoon"> = {
 
 // Математика ОГЭ — уже доступна (задачи добавлены), без бейджа «Скоро»
 const SUBJECT_MATH_OGE: SubjectDefinition = { ...SUBJECT_MATH_BASE };
+
+// Математика ЕГЭ (Профильная)
+const SUBJECT_MATH_EGE_PROF: SubjectDefinition = {
+  ...SUBJECT_MATH_BASE,
+  title: "Математика (профиль)",
+};
+
+// Математика ЕГЭ (Базовая)
+const SUBJECT_MATH_EGE_BASE: SubjectDefinition = {
+  ...SUBJECT_MATH_BASE,
+  id: "math_base",
+  title: "Математика (база)",
+};
 
 // Остальные уровни — пока «Скоро»
 const SUBJECT_MATH: SubjectDefinition = {
@@ -154,7 +167,7 @@ const SUBJECT_HIST: SubjectDefinition = {
 export const SUBJECTS_BY_LEVEL: Record<LevelId, SubjectDefinition[]> = {
   vpr: [SUBJECT_INF, SUBJECT_MATH, SUBJECT_PHYS, SUBJECT_RUS, SUBJECT_HIST],
   oge: [SUBJECT_MATH_OGE, SUBJECT_INF, SUBJECT_PHYS, SUBJECT_CHEM, SUBJECT_RUS, SUBJECT_LIT],
-  ege: [SUBJECT_INF, SUBJECT_MATH, SUBJECT_RUS],
+  ege: [SUBJECT_INF, SUBJECT_MATH_EGE_PROF, SUBJECT_MATH_EGE_BASE, SUBJECT_RUS],
 };
 
 export const GRADES_BY_LEVEL: Record<LevelId, number[]> = {
