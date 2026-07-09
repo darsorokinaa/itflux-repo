@@ -437,6 +437,10 @@ export function deleteLessonPlan(id) {
   return cabinetFetch(`/lesson-plans/${id}/`, { method: "DELETE" });
 }
 
+export function deleteHomework(homeworkId) {
+  return cabinetFetch(`/homework/${encodeURIComponent(String(homeworkId))}/`, { method: "DELETE" });
+}
+
 export function copyLessonPlan(id) {
   return cabinetFetch(`/lesson-plans/${id}/copy/`, { method: "POST" });
 }
@@ -741,8 +745,25 @@ export function fetchStudentProgress() {
   return cabinetFetch("/student/progress/", { method: "GET" });
 }
 
-export function fetchStudentMaterials() {
-  return cabinetFetch("/student/materials/", { method: "GET" });
+export function fetchStudentMaterials(query = "") {
+  const qs = query ? `?q=${encodeURIComponent(query)}` : "";
+  return cabinetFetch(`/student/materials/${qs}`, { method: "GET" });
+}
+
+/* Teacher: direct material assignments */
+export function fetchDirectMaterials() {
+  return cabinetFetch("/direct-materials/", { method: "GET" });
+}
+
+export function assignMaterialDirect(payload) {
+  return cabinetFetch("/direct-materials/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteDirectMaterial(id) {
+  return cabinetFetch(`/direct-materials/${id}/`, { method: "DELETE" });
 }
 
 export function fetchStudentProfile() {

@@ -1,5 +1,6 @@
 """Student cabinet API — scoped to the logged-in pupil."""
 
+from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
@@ -17,6 +18,7 @@ from .models import (
     Lesson,
     LessonAssignment,
     MatchingPair,
+    DirectMaterialAssignment,
     Material,
     OrderingItem,
     QuizQuestion,
@@ -556,10 +558,15 @@ def _serialize_student_schedule_event_detail(event, students):
         plan_item_json = _plan_item_to_json(plan_item_obj, lesson_number=lesson_number)
     topic = _schedule_event_topic(event, students)
     homework_id = None
+    homework_status = None
     if plan_item_obj:
         hw = _homework_qs(students).filter(lesson_plan_item_id=plan_item_obj.id).first()
         if hw:
             homework_id = hw.id
+            student_obj = _pick_student(students, hw.teacher)
+            if student_obj:
+                sid, _, _ = _homework_student_status(hw, student_obj)
+                homework_status = sid
 
     return {
         "id": event.id,
@@ -580,6 +587,7 @@ def _serialize_student_schedule_event_detail(event, students):
         "teacher_name": _teacher_name(event.owner),
         "assignment_id": _assignment_id_for_event(event, students),
         "homework_id": homework_id,
+        "homework_status": homework_status,
         "planItem": plan_item_json,
         "planItems": [plan_item_json] if plan_item_json else [],
     }
@@ -791,7 +799,15 @@ class StudentLessonDetailView(StudentScopedView):
             return Response({"error": "Урок не найден."}, status=status.HTTP_404_NOT_FOUND)
         lesson = la.lesson
         materials = [
-            {"id": m.id, "title": m.title, "type": m.material_type, "type_label": m.get_material_type_display()}
+            {
+                "id": m.id,
+                "title": m.title,
+                "type": m.material_type,
+                "type_label": m.get_material_type_display(),
+                "external_url": m.external_url or "",
+                "file_url": m.file.url if m.file else "",
+                "has_content": bool(m.content and m.content.strip()),
+            }
             for m in lesson.materials.all()[:20]
         ]
         homeworks = [
@@ -1070,13 +1086,70 @@ class StudentProgressView(StudentScopedView):
         })
 
 
+def _collect_direct_materials(students):
+    """Materials assigned directly by teachers to students or their groups."""
+    from .models import DirectMaterialAssignment
+    items = []
+    seen = set()
+    student_objs = list(students)
+    group_ids = set()
+    for s in student_objs:
+        for g in s.groups.all():
+            group_ids.add(g.id)
+
+    qs = DirectMaterialAssignment.objects.filter(
+        models.Q(student__in=student_objs) | models.Q(group_id__in=group_ids)
+    ).select_related("material", "teacher").order_by("-assigned_at")
+
+    for da in qs:
+        m = da.material
+        if m.id in seen:
+            continue
+        seen.add(m.id)
+        items.append({
+            "id": m.id,
+            "title": m.title,
+            "description": m.description or "",
+            "type": m.material_type,
+            "type_label": m.get_material_type_display(),
+            "topic": m.topic or "",
+            "lesson_topic": "",
+            "assignment_id": None,
+            "external_url": m.external_url or "",
+            "file_url": m.file.url if m.file else "",
+            "cover_theme": "material",
+            "message": da.message or "",
+            "direct": True,
+            "assigned_at": da.assigned_at.isoformat(),
+        })
+    return items
+
+
 class StudentMaterialsView(StudentScopedView):
     def get(self, request):
         students, err = self.student_response_or_error()
         if err:
             return err
         self.sync_student_releases(students)
-        return Response({"items": _collect_student_materials(students, limit=50)})
+        q = (request.GET.get("q") or "").strip().lower()
+        lesson_items = _collect_student_materials(students, limit=200)
+        direct_items = _collect_direct_materials(students)
+        # merge, deduplicate by id (direct takes priority)
+        seen = {it["id"] for it in direct_items}
+        for it in lesson_items:
+            if it["id"] not in seen:
+                direct_items.append(it)
+                seen.add(it["id"])
+        all_items = direct_items
+        if q:
+            all_items = [
+                it for it in all_items
+                if q in it["title"].lower()
+                or q in it.get("description", "").lower()
+                or q in it.get("topic", "").lower()
+                or q in it.get("type_label", "").lower()
+            ]
+        return Response({"items": all_items[:100]})
 
 
 class StudentProfileView(StudentScopedView):

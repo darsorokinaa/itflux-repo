@@ -240,7 +240,7 @@ export default function StudentDashboard() {
               </a>
             ) : (
               <Link to={heroCtaLink} className="st-dash-hero__cta cb-btn cb-btn--white">
-                К занятию
+                К материалам
               </Link>
             )
           ) : (
@@ -257,7 +257,7 @@ export default function StudentDashboard() {
             <strong>
               {nextLessonLive && next_lesson.ends_at
                 ? `до ${formatStudentTime(next_lesson.ends_at)}`
-                : formatStudentTime(next_lesson.starts_at)}
+                : formatLessonWhen(next_lesson.starts_at)}
             </strong>
           </div>
         ) : (

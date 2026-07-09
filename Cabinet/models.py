@@ -344,6 +344,50 @@ class TeacherSavedMaterial(models.Model):
         return f"{self.teacher.username} → {self.material.title}"
 
 
+class DirectMaterialAssignment(models.Model):
+    """Teacher sends a material directly to a student group or individual student."""
+
+    teacher = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="direct_material_assignments",
+        verbose_name="Учитель",
+    )
+    material = models.ForeignKey(
+        Material,
+        on_delete=models.CASCADE,
+        related_name="direct_assignments",
+        verbose_name="Материал",
+    )
+    group = models.ForeignKey(
+        "StudentGroup",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="direct_material_assignments",
+        verbose_name="Группа",
+    )
+    student = models.ForeignKey(
+        "Student",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="direct_material_assignments",
+        verbose_name="Ученик",
+    )
+    message = models.TextField("Сообщение для ученика", blank=True)
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Прямая выдача материала"
+        verbose_name_plural = "Прямые выдачи материалов"
+        ordering = ["-assigned_at"]
+
+    def __str__(self):
+        target = self.group or self.student
+        return f"{self.teacher.username} → {self.material.title} → {target}"
+
+
 class Lesson(models.Model):
     teacher = models.ForeignKey(
         User,

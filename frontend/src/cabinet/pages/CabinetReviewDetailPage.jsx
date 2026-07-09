@@ -29,6 +29,7 @@ import {
 import { isTableAnswerTask } from "../../utils/examAnswerCheck";
 import {
   checkReviewItem,
+  deleteHomework,
   deleteReviewFeedback,
   fetchReviewItem,
   returnReviewItem,
@@ -363,6 +364,22 @@ export default function CabinetReviewDetailPage() {
     }
   };
 
+  const handleDeleteHomework = async () => {
+    const homeworkId = submission?.homework;
+    if (!homeworkId) return;
+    const title = review?.title || "это домашнее задание";
+    if (!window.confirm(`Удалить «${title}»?\n\nЭто действие нельзя отменить. Работа ученика тоже будет удалена.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteHomework(homeworkId);
+      navigate("/cabinet/review");
+    } catch (err) {
+      setError(err.message || "Не удалось удалить домашнее задание");
+      setBusy(false);
+    }
+  };
+
   const getPart1Verdict = (task, answer) => {
     if (isReadOnly) {
       const saved = homeworkTaskChecked(result, task.id);
@@ -646,26 +663,39 @@ export default function CabinetReviewDetailPage() {
         )}
       </section>
 
-      {isPending ? (
-        <div className="cb-review-detail__footer">
+      <div className="cb-review-detail__footer">
+        {submission?.homework ? (
           <button
             type="button"
-            className="cb-review-detail__btn cb-review-detail__btn--ghost"
+            className="cb-review-detail__btn cb-review-detail__btn--danger"
             disabled={busy}
-            onClick={handleReturn}
+            onClick={handleDeleteHomework}
+            title="Удалить домашнее задание вместе с работой ученика"
           >
-            Вернуть на доработку
+            Удалить ДЗ
           </button>
-          <button
-            type="button"
-            className="cb-review-detail__btn cb-review-detail__btn--primary"
-            disabled={busy}
-            onClick={handleCheck}
-          >
-            {busy ? "Сохранение…" : "Проверено"}
-          </button>
-        </div>
-      ) : null}
+        ) : null}
+        {isPending ? (
+          <>
+            <button
+              type="button"
+              className="cb-review-detail__btn cb-review-detail__btn--ghost"
+              disabled={busy}
+              onClick={handleReturn}
+            >
+              Вернуть на доработку
+            </button>
+            <button
+              type="button"
+              className="cb-review-detail__btn cb-review-detail__btn--primary"
+              disabled={busy}
+              onClick={handleCheck}
+            >
+              {busy ? "Сохранение…" : "Проверено"}
+            </button>
+          </>
+        ) : null}
+      </div>
     </CabinetPageShell>
   );
 }

@@ -76,7 +76,7 @@ function getEventPlanMaterials(event) {
 }
 
 function getEventPlanHomework(event) {
-  return planItemHomeworkPopoverRows(getEventPlanItem(event));
+  return planItemHomeworkPopoverRows(getEventPlanItem(event), event.homework_status || null);
 }
 
 function hasText(value) {

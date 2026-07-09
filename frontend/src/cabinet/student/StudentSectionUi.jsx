@@ -7,8 +7,8 @@ export const ASSIGNMENT_STATUS_COLORS = {
   submitted: "#10B981",
   checked: "#10B981",
   reviewing: "#F59E0B",
-  needs_fix: "#EF4444",
-  overdue: "#DC2626",
+  needs_fix: "#E53935",
+  overdue: "#E53935",
 };
 
 const COVER_GRADIENTS = {

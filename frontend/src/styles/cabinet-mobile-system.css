@@ -135,7 +135,7 @@
 
   /* Page shells: consistent horizontal padding */
   .cabinet-content:not(.cabinet-content--page):not(.cabinet-content--reports) {
-    padding: 12px;
+    padding: 16px;
   }
 
   .cabinet-content--page .cb-section.cb-page,
@@ -320,7 +320,7 @@
   }
 
   .cabinet-content:not(.cabinet-content--page):not(.cabinet-content--reports) {
-    padding: 10px;
+    padding: 12px;
   }
 
   .cb-mobile-nav__item span,

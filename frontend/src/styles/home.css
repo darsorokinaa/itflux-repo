@@ -799,6 +799,25 @@
   overflow: visible !important;
 }
 
+/* Холст рисования — выходит на 120px за блок задачи с каждой стороны */
+.all-tasks-item__content .exam-task-draw-stack {
+  position: relative;
+}
+
+.all-tasks-item__content .exam-task-draw-canvas {
+  left: -120px !important;
+  right: -120px !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  width: calc(100% + 240px) !important;
+  height: 100% !important;
+}
+
+/* Картинки в задачах кликабельны */
+.all-tasks-item__html img {
+  cursor: zoom-in;
+}
+
 .all-tasks-item__html img,
 .all-tasks-item__html figure {
   max-width: 100%;

@@ -30,6 +30,8 @@ import type { TaskFileSource } from "../components/InformaticsCodeEditor/types";
 import MathContent from "../components/MathContent";
 import TaskFileAttachment from "../components/TaskFileAttachment";
 import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
+// @ts-ignore JSX module without d.ts
+import ImageLightbox from "../components/ImageLightbox";
 
 const InformaticsCodeEditorEntry = lazy(
   () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
@@ -317,6 +319,21 @@ export default function AllTasksPage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [openBoardForTaskId, setOpenBoardForTaskId] = useState<number | null>(null);
   const [boardsByTask, setBoardsByTask] = useState<Record<string, any>>({});
+  const [lightbox, setLightbox] = useState({ open: false, src: "" });
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const img = (e.target as HTMLElement).closest("img");
+      if (!img) return;
+      const container = img.closest(".all-tasks-item__html");
+      if (!container) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setLightbox({ open: true, src: (img as HTMLImageElement).src });
+    };
+    document.addEventListener("click", handler, true);
+    return () => document.removeEventListener("click", handler, true);
+  }, []);
   const [openAnswers, setOpenAnswers] = useState<Record<number, boolean>>({});
   const [pickDraft, setPickDraft] = useState<WorkbookTask[]>([]);
   const [pickMode, setPickMode] = useState<"workbook" | "variant" | null>(null);
@@ -1369,6 +1386,11 @@ export default function AllTasksPage() {
         subject={subject}
         subjectName={subjectTitle}
         onCreated={exitPickMode}
+      />
+      <ImageLightbox
+        src={lightbox.src}
+        open={lightbox.open}
+        onClose={() => setLightbox((s) => ({ ...s, open: false }))}
       />
     </div>
   );

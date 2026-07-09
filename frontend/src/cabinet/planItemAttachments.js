@@ -160,7 +160,7 @@ export function planItemForScheduleEvent(apiData, existing = {}) {
   };
 }
 
-function toPopoverRow(row, extra = {}) {
+function toPopoverRow(row, extra = {}, submitted = false) {
   return {
     key: row.key,
     kind: row.kind,
@@ -168,6 +168,7 @@ function toPopoverRow(row, extra = {}) {
     text: extra.text || "",
     url: row.url || "",
     typeLabel: row.typeLabel || "",
+    submitted,
   };
 }
 
@@ -224,9 +225,12 @@ export function scheduleEventPlanItemToModalItem(item, event) {
   };
 }
 
-export function planItemHomeworkPopoverRows(item) {
+const SUBMITTED_STATUSES = new Set(["submitted", "reviewing", "checked", "completed"]);
+
+export function planItemHomeworkPopoverRows(item, hwStatus = null) {
   if (!item) return [];
-  const rows = homeworkResourceRows(item).map((row) => toPopoverRow(row));
+  const isSubmitted = hwStatus ? SUBMITTED_STATUSES.has(hwStatus) : false;
+  const rows = homeworkResourceRows(item).map((row) => toPopoverRow(row, {}, isSubmitted));
   const description = item.homeworkDescription || "";
   if (description.trim()) {
     rows.unshift({

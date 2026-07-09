@@ -140,7 +140,12 @@ function ResourceCard({ row, variant = "material" }) {
           <p className="cb-lesson-card__resource-note">{row.text}</p>
         ) : null}
       </div>
-      {row.url ? (
+      {row.submitted ? (
+        <span className="cb-lesson-card__resource-submitted">
+          <CabinetIcon name="check" />
+          Сдано
+        </span>
+      ) : row.url ? (
         <a
           href={row.url}
           target={external ? "_blank" : undefined}
@@ -509,7 +514,7 @@ export default function EventDetailCard({
 
   const formatValue = isOnline ? "Онлайн" : "Офлайн";
   const formatMeta = isOnline
-    ? (hasLink ? "Телемост" : (studentMode && hasMeetingLinkPending ? "Скоро" : "Без ссылки"))
+    ? (isDone ? "Проведено" : hasLink ? "Телемост" : (studentMode && hasMeetingLinkPending ? "Скоро" : "Без ссылки"))
     : null;
 
   const showStatusBadge = !studentMode && statusMeta && ["moved", "cancelled", "done"].includes(statusMeta.mod);
@@ -623,7 +628,7 @@ export default function EventDetailCard({
                           </button>
                         </div>
                       </>
-                    ) : studentMode && hasMeetingLinkPending ? (
+                    ) : studentMode && hasMeetingLinkPending && !isDone ? (
                       <p className="cb-lesson-card__meeting-empty">
                         Подключение откроется за 5 минут до начала
                       </p>

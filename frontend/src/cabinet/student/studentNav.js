@@ -1,10 +1,11 @@
-/** MVP навигация ученика: 4 вкладки */
+/** MVP навигация ученика: 5 вкладок */
 
 export const STUDENT_NAV = [
-  { id: "home",        label: "Главная",  path: "/cabinet/student",             icon: "home"     },
-  { id: "lessons",     label: "Занятия",  path: "/cabinet/student/lessons",      icon: "lessons"  },
-  { id: "assignments", label: "Задания",  path: "/cabinet/student/assignments",  icon: "check"    },
-  { id: "profile",     label: "Профиль",  path: "/cabinet/student/profile",      icon: "settings" },
+  { id: "home",        label: "Главная",   path: "/cabinet/student",              icon: "home"     },
+  { id: "lessons",     label: "Занятия",   path: "/cabinet/student/lessons",       icon: "lessons"  },
+  { id: "assignments", label: "Задания",   path: "/cabinet/student/assignments",   icon: "check"    },
+  { id: "materials",   label: "Материалы", path: "/cabinet/student/materials",     icon: "folder"   },
+  { id: "profile",     label: "Профиль",   path: "/cabinet/student/profile",       icon: "settings" },
 ];
 
 export const STUDENT_MOBILE_NAV = STUDENT_NAV;

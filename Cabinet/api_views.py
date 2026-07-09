@@ -30,6 +30,7 @@ from .invitations import (
     mark_expired_invitations,
 )
 from .models import (
+    DirectMaterialAssignment,
     Homework,
     HomeworkSubmission,
     Interactive,
@@ -1409,3 +1410,97 @@ class ReportsParentSummaryView(TeacherScopedMixin, APIView):
             "direction": student.get_direction_display(),
             "summary": f"Ученик {student.full_name} занимается по направлению {student.get_direction_display()}.",
         })
+
+
+class HomeworkDeleteView(TeacherScopedMixin, APIView):
+    """Удалить домашнее задание учителя вместе со всеми работами ученика."""
+
+    def delete(self, request, homework_id):
+        homework = get_object_or_404(Homework, pk=homework_id, teacher=request.user)
+
+        # ReviewItem ссылается на HomeworkSubmission через целочисленное поле source_id (не FK),
+        # поэтому каскад БД не срабатывает — удаляем связанные ReviewItem вручную.
+        submission_ids = list(homework.submissions.values_list("id", flat=True))
+        if submission_ids:
+            ReviewItem.objects.filter(
+                source_type="homework", source_id__in=submission_ids
+            ).delete()
+
+        homework.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class DirectMaterialAssignView(TeacherScopedMixin, APIView):
+    """Teacher assigns a material directly to a group or student."""
+
+    def get(self, request):
+        teacher = self.get_teacher()
+        qs = DirectMaterialAssignment.objects.filter(
+            teacher=teacher
+        ).select_related("material", "group", "student").order_by("-assigned_at")
+        items = []
+        for da in qs:
+            items.append({
+                "id": da.id,
+                "material_id": da.material_id,
+                "material_title": da.material.title,
+                "material_type_label": da.material.get_material_type_display(),
+                "group_id": da.group_id,
+                "group_title": da.group.title if da.group else None,
+                "student_id": da.student_id,
+                "student_name": str(da.student) if da.student else None,
+                "message": da.message,
+                "assigned_at": da.assigned_at.isoformat(),
+            })
+        return Response({"items": items})
+
+    def post(self, request):
+        teacher = self.get_teacher()
+        material_id = request.data.get("material_id")
+        group_id = request.data.get("group_id")
+        student_id = request.data.get("student_id")
+        message = (request.data.get("message") or "").strip()
+
+        if not material_id:
+            return Response({"error": "material_id обязателен."}, status=status.HTTP_400_BAD_REQUEST)
+        if not group_id and not student_id:
+            return Response({"error": "Укажите group_id или student_id."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            material = Material.objects.get(
+                pk=material_id,
+                teacher=teacher,
+            )
+        except Material.DoesNotExist:
+            return Response({"error": "Материал не найден."}, status=status.HTTP_404_NOT_FOUND)
+
+        group = None
+        student = None
+        if group_id:
+            try:
+                group = StudentGroup.objects.get(pk=group_id, teacher=teacher)
+            except StudentGroup.DoesNotExist:
+                return Response({"error": "Группа не найдена."}, status=status.HTTP_404_NOT_FOUND)
+        if student_id:
+            try:
+                student = Student.objects.get(pk=student_id)
+            except Student.DoesNotExist:
+                return Response({"error": "Ученик не найден."}, status=status.HTTP_404_NOT_FOUND)
+
+        da = DirectMaterialAssignment.objects.create(
+            teacher=teacher,
+            material=material,
+            group=group,
+            student=student,
+            message=message,
+        )
+        return Response({"id": da.id, "ok": True}, status=status.HTTP_201_CREATED)
+
+    def delete(self, request, pk=None):
+        teacher = self.get_teacher()
+        try:
+            da = DirectMaterialAssignment.objects.get(pk=pk, teacher=teacher)
+        except DirectMaterialAssignment.DoesNotExist:
+            return Response({"error": "Не найдено."}, status=status.HTTP_404_NOT_FOUND)
+        da.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

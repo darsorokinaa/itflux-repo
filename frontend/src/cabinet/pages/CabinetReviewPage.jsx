@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import CabinetHomeworkCard from "../CabinetHomeworkCard";
 import {
@@ -8,7 +8,7 @@ import {
   CabinetMetricsRow,
   CabinetEmptyState,
 } from "../CabinetSectionUi";
-import { fetchReviewItems } from "../../utils/cabinetAuth";
+import { deleteHomework, fetchReviewItems } from "../../utils/cabinetAuth";
 
 const FILTERS = [
   { id: "all", label: "Все" },
@@ -30,6 +30,7 @@ function mapReviewItem(item) {
     .toUpperCase();
   return {
     id: String(item.id),
+    homeworkId: item.homework_submission?.homework ?? null,
     filter: ["all", item.status === "pending" ? "new" : "done"],
     coverType: item.source_type === "homework" ? "exam" : "general",
     deadlineLabel: item.status_label || item.status,
@@ -51,6 +52,7 @@ export default function CabinetReviewPage() {
   const [works, setWorks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +67,20 @@ export default function CabinetReviewPage() {
       }
     })();
     return () => { cancelled = true; };
+  }, []);
+
+  const handleDelete = useCallback(async (item) => {
+    if (!item.homeworkId) return;
+    if (!window.confirm(`Удалить домашнее задание «${item.title}»?\n\nЭто действие нельзя отменить. Работа ученика тоже будет удалена.`)) return;
+    setDeletingId(item.id);
+    try {
+      await deleteHomework(item.homeworkId);
+      setWorks((prev) => prev.filter((w) => w.id !== item.id));
+    } catch (err) {
+      setError(err.message || "Не удалось удалить домашнее задание");
+    } finally {
+      setDeletingId(null);
+    }
   }, []);
 
   const metrics = useMemo(() => [
@@ -115,8 +131,10 @@ export default function CabinetReviewPage() {
               progressTone={item.progressTone}
               students={item.students}
               overflowCount={item.overflowCount}
-              actionLabel={item.actionLabel}
+              actionLabel={deletingId === item.id ? "Удаление…" : item.actionLabel}
               onAction={() => navigate(`/cabinet/review/${item.id}`)}
+              dangerActionLabel={item.homeworkId ? "Удалить ДЗ" : undefined}
+              onDangerAction={item.homeworkId ? () => handleDelete(item) : undefined}
             />
           ))}
         </div>
