@@ -260,6 +260,12 @@ export function assignStudentHomework(studentId, payload) {
   });
 }
 
+export function checkVariantTasksOverlap(studentId, variantId) {
+  return cabinetFetch(`/students/${studentId}/check-variant-tasks/?variant_id=${encodeURIComponent(variantId)}`, {
+    method: "GET",
+  });
+}
+
 export function fetchGroups(params = {}) {
   const qs = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {

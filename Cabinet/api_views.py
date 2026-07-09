@@ -173,6 +173,22 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         student.save(update_fields=["status", "updated_at"])
         return Response(StudentDetailSerializer(student).data)
 
+    @action(detail=True, methods=["get"], url_path="check-variant-tasks")
+    def check_variant_tasks(self, request, pk=None):
+        """GET /api/cabinet/students/{id}/check-variant-tasks/?variant_id=X
+        Возвращает список Generator task ID, которые уже выдавались этому ученику
+        и присутствуют в указанном варианте.
+        """
+        student = self.get_object()
+        variant_id_raw = (request.query_params.get("variant_id") or "").strip()
+        if not variant_id_raw or not variant_id_raw.isdigit():
+            return Response({"error": "Передайте параметр variant_id"}, status=status.HTTP_400_BAD_REQUEST)
+
+        from .student_release import check_variant_tasks_overlap
+
+        duplicates = check_variant_tasks_overlap(student=student, variant_id=int(variant_id_raw))
+        return Response({"duplicate_task_ids": duplicates})
+
     @action(detail=True, methods=["get"], url_path="homework-options")
     def homework_options(self, request, pk=None):
         """Пункты плана с ДЗ, доступные для выдачи ученику."""

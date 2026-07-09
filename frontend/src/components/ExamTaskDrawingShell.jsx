@@ -180,7 +180,9 @@ export default function ExamTaskDrawingShell({
         closeBoard();
       } else {
         setBoardVisible(true);
-        setTool("cursor");
+        // Открываем сразу в режиме карандаша — пользователь может рисовать поверх картинок без
+        // дополнительных кликов. Переключиться на курсор можно в панели инструментов.
+        setTool("pencil");
       }
       onConsumedBoardOpenRequest?.();
     });

@@ -4,7 +4,7 @@ import CabinetIcon from "../CabinetIcons";
 import CabinetModal from "./CabinetModal";
 import PlanItemResourcesPicker from "./PlanItemResourcesPicker";
 import { getInteractiveDisplayTitle } from "../interactivesData";
-import { assignStudentHomework, fetchStudentHomeworkOptions } from "../../utils/cabinetAuth";
+import { assignStudentHomework, checkVariantTasksOverlap, fetchStudentHomeworkOptions } from "../../utils/cabinetAuth";
 
 function HomeworkPickItem({ item, selected, onSelect, disabled }) {
   return (
@@ -72,6 +72,7 @@ export default function HomeworkAssignModal({
   const [customMaterials, setCustomMaterials] = useState([]);
   const [customInteractives, setCustomInteractives] = useState([]);
   const [resourcePickerOpen, setResourcePickerOpen] = useState(false);
+  const [duplicateTaskIds, setDuplicateTaskIds] = useState([]);
 
   const loadOptions = useCallback(async () => {
     setLoading(true);
@@ -175,6 +176,22 @@ export default function HomeworkAssignModal({
       prev.some((item) => item.id === material.id) ? prev : [...prev, material]
     ));
     setResourcePickerOpen(false);
+
+    if (material.material_type === "task_set" && material.external_url) {
+      const m = String(material.external_url).match(/\/variant\/(\d+)/);
+      const variantId = m ? m[1] : null;
+      if (variantId) {
+        try {
+          const data = await checkVariantTasksOverlap(student.id, variantId);
+          const ids = data?.duplicate_task_ids ?? [];
+          if (ids.length > 0) {
+            setDuplicateTaskIds((prev) => [...new Set([...prev, ...ids])]);
+          }
+        } catch {
+          // Ошибка проверки не блокирует добавление варианта
+        }
+      }
+    }
   };
 
   const handleAttachInteractive = async (interactive) => {
@@ -366,7 +383,10 @@ export default function HomeworkAssignModal({
                         title={material.title}
                         meta={material.material_type === "task_set" ? "Вариант" : "Материал"}
                         disabled={submitting}
-                        onRemove={() => setCustomMaterials((prev) => prev.filter((item) => item.id !== material.id))}
+                        onRemove={() => {
+                          setCustomMaterials((prev) => prev.filter((item) => item.id !== material.id));
+                          setDuplicateTaskIds([]);
+                        }}
                       />
                     ))}
                     {customInteractives.map((interactive) => (
@@ -392,6 +412,20 @@ export default function HomeworkAssignModal({
                   disabled={submitting}
                 />
               </label>
+
+              {duplicateTaskIds.length > 0 ? (
+                <div className="cb-hw-assign-duplicate-warn" role="alert">
+                  <CabinetIcon name="alert" />
+                  <div className="cb-hw-assign-duplicate-warn__body">
+                    <p className="cb-hw-assign-duplicate-warn__title">
+                      Часть задач уже выдавалась этому ученику
+                    </p>
+                    <p className="cb-hw-assign-duplicate-warn__ids">
+                      ID задач: {duplicateTaskIds.join(", ")}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="cb-modal-form__actions">
                 <div className="cb-modal-form__actions-main">

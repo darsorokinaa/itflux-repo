@@ -148,8 +148,8 @@ function taskExamPart(task: WorkbookTask): 1 | 2 | null {
   return null;
 }
 
-function displayTaskNumber(task: WorkbookTask, index: number): number {
-  return task.task_number != null ? task.task_number : index + 1;
+function displayTaskNumber(_task: WorkbookTask, index: number): number {
+  return index + 1;
 }
 
 function buildSheetInfoHtml(tasks: WorkbookTask[], mode?: WorkbookMeta["mode"]): string {
@@ -1518,8 +1518,6 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
         <span class="wb-header__right">${escapeHtml(headerRight)}</span>
       </div>
       <hr class="wb-header__rule" />
-      <h1 class="wb-sheet-title">${sheetTitle}</h1>
-      ${sheetInfoHtml}
       <p class="wb-student-line">
         Фамилия, имя<span class="wb-fill"></span>
         Класс<span class="wb-fill wb-fill--short"></span>

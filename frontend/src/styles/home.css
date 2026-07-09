@@ -5222,6 +5222,8 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   inset: 0;
   width: 100%;
   height: 100%;
+  /* z-index: 1 гарантирует отрисовку поверх position:relative элементов контента (картинки, таблицы). */
+  z-index: 1;
   pointer-events: none;
   display: block;
   -ms-touch-action: none;
@@ -5233,6 +5235,7 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
 
 .exam-task-draw-canvas--drawing {
   pointer-events: auto;
+  cursor: crosshair;
 }
 
 .exam-task-draw-extra-slab {

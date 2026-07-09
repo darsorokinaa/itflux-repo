@@ -2214,3 +2214,41 @@ class ReferralLinkRegistration(models.Model):
 
     def __str__(self):
         return f"{self.referral_link.code} → {self.user.username}"
+
+
+class StudentTaskHistory(models.Model):
+    """Хранит, какие задачи из банка (по ID в Generator) уже выдавались ученику.
+    Позволяет предупреждать учителя о повторных заданиях при выдаче варианта.
+    """
+
+    student = models.ForeignKey(
+        "Student",
+        on_delete=models.CASCADE,
+        related_name="task_history",
+        verbose_name="Ученик",
+    )
+    teacher = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="+",
+        verbose_name="Учитель",
+    )
+    generator_task_id = models.IntegerField("ID задачи в банке", db_index=True)
+    homework = models.ForeignKey(
+        "Homework",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="task_history_entries",
+        verbose_name="ДЗ",
+    )
+    assigned_at = models.DateTimeField("Выдано", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "История выданных задач"
+        verbose_name_plural = "История выданных задач"
+        unique_together = [("student", "generator_task_id")]
+
+    def __str__(self):
+        return f"Ученик {self.student_id} · задача {self.generator_task_id}"

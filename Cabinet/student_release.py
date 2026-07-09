@@ -1,6 +1,7 @@
 """Publish lesson materials and homework to the student cabinet when a class ends."""
 
 import logging
+import re
 
 from django.db import transaction
 from django.db.models import Q
@@ -382,6 +383,7 @@ def assign_homework_manually(*, teacher, student, plan_item, due_at=None):
             plan_item=plan_item,
         )
 
+    _record_variant_tasks_for_homework(homework, student, teacher)
     return homework
 
 
@@ -462,7 +464,79 @@ def assign_custom_homework(
             plan_item=None,
         )
 
+    _record_variant_tasks_for_homework(homework, student, teacher)
     return homework
+
+
+def _extract_variant_id_from_url(url):
+    """Извлечь ID варианта из URL вида /ege/math/variant/12345."""
+    m = re.search(r'/variant/(\d+)', str(url or ''))
+    return int(m.group(1)) if m else None
+
+
+def _record_variant_tasks_for_homework(homework, student, teacher):
+    """Сохранить ID задач из всех вариантов, прикреплённых к ДЗ, в историю ученика."""
+    try:
+        from Generator.models import VariantContent  # noqa: PLC0415
+        from .models import StudentTaskHistory
+
+        variant_ids = []
+        for hw_task in homework.tasks.all():
+            vid = _extract_variant_id_from_url(hw_task.description)
+            if vid:
+                variant_ids.append(vid)
+            # Проверяем также ссылку у прикреплённого материала
+            if hw_task.material:
+                vid = _extract_variant_id_from_url(hw_task.material.external_url)
+                if vid:
+                    variant_ids.append(vid)
+
+        task_ids = list(
+            VariantContent.objects.filter(variant_id__in=variant_ids)
+            .values_list('task_id', flat=True)
+            .distinct()
+        )
+
+        for task_id in task_ids:
+            StudentTaskHistory.objects.get_or_create(
+                student=student,
+                generator_task_id=task_id,
+                defaults={'teacher': teacher, 'homework': homework},
+            )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Failed to record task history for homework %s", homework.pk
+        )
+
+
+def check_variant_tasks_overlap(*, student, variant_id):
+    """Вернуть список ID задач варианта, которые уже были выданы ученику ранее.
+
+    Returns:
+        list[int] — Generator task IDs, которые уже встречались в истории ученика.
+    """
+    try:
+        from Generator.models import VariantContent  # noqa: PLC0415
+        from .models import StudentTaskHistory
+
+        task_ids = list(
+            VariantContent.objects.filter(variant_id=variant_id)
+            .values_list('task_id', flat=True)
+        )
+        already_seen = list(
+            StudentTaskHistory.objects.filter(
+                student=student,
+                generator_task_id__in=task_ids,
+            ).values_list('generator_task_id', flat=True)
+        )
+        return already_seen
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "check_variant_tasks_overlap failed for student %s variant %s",
+            getattr(student, 'pk', student),
+            variant_id,
+        )
+        return []
 
 
 def homework_options_for_student(*, teacher, student):

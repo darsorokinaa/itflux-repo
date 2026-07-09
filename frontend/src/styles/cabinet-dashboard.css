@@ -2170,6 +2170,44 @@
   color: #EF4444;
 }
 
+.cb-hw-assign-duplicate-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1.5px solid #F59E0B;
+  border-radius: 12px;
+  background: #FFFBEB;
+  margin-bottom: 4px;
+}
+
+.cb-hw-assign-duplicate-warn svg {
+  width: 18px;
+  height: 18px;
+  color: #D97706;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.cb-hw-assign-duplicate-warn__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.cb-hw-assign-duplicate-warn__title {
+  margin: 0 0 2px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #92400E;
+}
+
+.cb-hw-assign-duplicate-warn__ids {
+  margin: 0;
+  font-size: 0.76rem;
+  color: #78350F;
+  word-break: break-all;
+}
+
 /* Add cards */
 .cb-add-card {
   display: flex;
