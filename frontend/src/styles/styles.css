@@ -8700,7 +8700,7 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     font-size: 1.325em !important;
 }
 
-/* ЕГЭ профильная математика: все иллюстрации в задачах одного размера. */
+/* ЕГЭ профильная математика: обычные иллюстрации не раздуваем на всю карточку. */
 .all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__html img,
 .all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__html figure img,
 .all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__html figure.image img,
@@ -8711,10 +8711,10 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .exam-page[data-level="ege"][data-subject="math"] .exam-task-card__text img,
 .exam-page[data-level="ege"][data-subject="math"] .task-img-zoomable img {
     display: block !important;
-    width: 100% !important;
+    width: auto !important;
     max-width: 100% !important;
     height: auto !important;
-    max-height: none !important;
+    max-height: 160px !important;
     margin: 0.65rem auto 0.45rem !important;
     object-fit: contain !important;
     object-position: center !important;
@@ -8723,10 +8723,34 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .all-tasks-page[data-level="ege"][data-subject="math"] .task-img-zoomable,
 .exam-page[data-level="ege"][data-subject="math"] .task-img-zoomable {
     display: block !important;
-    width: 100% !important;
+    width: auto !important;
     max-width: 100% !important;
     margin-left: auto !important;
     margin-right: auto !important;
+}
+
+/* «Графики функций» в профильной математике: делаем заметно крупнее обычных формул. */
+.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item--function-graphs .all-tasks-item__html img,
+.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item--function-graphs .all-tasks-item__html figure img,
+.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item--function-graphs .task-img-zoomable img,
+.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__group-part--function-graphs .all-tasks-item__html img,
+.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__group-part--function-graphs .all-tasks-item__html figure img,
+.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__group-part--function-graphs .task-img-zoomable img,
+.exam-page[data-level="ege"][data-subject="math"] .task-function-graphs .task-text img,
+.exam-page[data-level="ege"][data-subject="math"] .exam-task-card.task-function-graphs .exam-task-card__text img {
+    width: min(250px, 100%) !important;
+    max-width: 100% !important;
+    height: min(250px, 70vw) !important;
+    max-height: 250px !important;
+    object-fit: contain !important;
+}
+
+.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item--function-graphs .task-img-zoomable,
+.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__group-part--function-graphs .task-img-zoomable,
+.exam-page[data-level="ege"][data-subject="math"] .task-function-graphs .task-img-zoomable,
+.exam-page[data-level="ege"][data-subject="math"] .exam-task-card.task-function-graphs .task-img-zoomable {
+    width: min(250px, 100%) !important;
+    max-width: 100% !important;
 }
 
 .math-vector-inline {

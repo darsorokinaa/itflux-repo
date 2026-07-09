@@ -40,6 +40,7 @@ type BankTask = {
   task_number: number | null;
   task_title: string;
   subtopic: string | null;
+  subdivision?: string | null;
   text: string;
   answer?: string | null;
   file_url?: string | null;
@@ -143,6 +144,11 @@ type FiltersResponse = {
 
 const PER_PAGE = 5000;
 const ALL_TASKS_BOARD_VARIANT_ID = "task-bank";
+
+function isFunctionGraphTask(task: Pick<BankTask, "task_title" | "subtopic" | "task_number">) {
+  const hay = `${task.task_title || ""} ${task.subtopic || ""}`.toLowerCase();
+  return hay.includes("график") && hay.includes("функц");
+}
 
 const LazyVisible = memo(function LazyVisible({
   minHeight = 140,
@@ -1081,7 +1087,12 @@ export default function AllTasksPage() {
                               return (
                                 <section
                                   key={t.id}
-                                  className="all-tasks-item__group-part"
+                                  className={[
+                                    "all-tasks-item__group-part",
+                                    isFunctionGraphTask(t) ? "all-tasks-item__group-part--function-graphs" : "",
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" ")}
                                   data-task-id={t.id}
                                   data-task-number={t.task_number ?? undefined}
                                 >
@@ -1220,6 +1231,7 @@ export default function AllTasksPage() {
                       "all-tasks-item",
                       t.subdivision === "geom" ? "all-tasks-item--geom" : "",
                       t.subdivision === "alg" ? "all-tasks-item--alg" : "",
+                      isFunctionGraphTask(t) ? "all-tasks-item--function-graphs" : "",
                       pickMode && inPick ? "all-tasks-item--in-workbook" : "",
                     ]
                       .filter(Boolean)
