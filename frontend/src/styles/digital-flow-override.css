@@ -2720,6 +2720,24 @@ to {
   outline-offset: 2px;
 }
 
+/* Таблицы, обёртывающие MathJax-формулы (системы уравнений, aligned и т.п.) — без рамок */
+#root :is(.exam-page .task-text, .exam-task-card__text, .all-tasks-item__html)
+table:has(> tbody > tr > td > mjx-container):not(.bank-task-table):not(.wb-layout-table):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table) {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  width: auto !important;
+  margin: 0.35em auto !important;
+}
+
+#root :is(.exam-page .task-text, .exam-task-card__text, .all-tasks-item__html)
+table:has(> tbody > tr > td > mjx-container):not(.bank-task-table):not(.wb-layout-table):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table)
+:is(td, th) {
+  border: none !important;
+  background: transparent !important;
+  padding: 2px 4px !important;
+}
+
 @media (max-width: 480px) {
 .state-view {
     margin: 16px auto;
