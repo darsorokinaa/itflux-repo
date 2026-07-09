@@ -8711,10 +8711,10 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .exam-page[data-level="ege"][data-subject="math"] .exam-task-card__text img,
 .exam-page[data-level="ege"][data-subject="math"] .task-img-zoomable img {
     display: block !important;
-    width: 100px !important;
-    max-width: 100px !important;
-    height: 100px !important;
-    max-height: 100px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
     margin: 0.65rem auto 0.45rem !important;
     object-fit: contain !important;
     object-position: center !important;
@@ -8723,8 +8723,8 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .all-tasks-page[data-level="ege"][data-subject="math"] .task-img-zoomable,
 .exam-page[data-level="ege"][data-subject="math"] .task-img-zoomable {
     display: block !important;
-    width: 100px !important;
-    max-width: 100px !important;
+    width: 100% !important;
+    max-width: 100% !important;
     margin-left: auto !important;
     margin-right: auto !important;
 }
