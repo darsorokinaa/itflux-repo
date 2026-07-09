@@ -727,7 +727,49 @@ def _subtopics_for_groups(subject_instance, level_instance, task_numbers, vpr_vf
             display_count = cnt if cnt > 0 else max(0, task_cnt // n_per_group)
             by_sid[st.id] = {"id": st.id, "title": st.title, "group_count": cnt, "display_count": display_count}
 
-    return sorted(by_sid.values(), key=lambda x: (-x["group_count"], x["title"]))
+    # 5) Виртуальные подтемы для связанных групп
+    if group_ids:
+        # "Без темы"
+        no_subtopic_groups = TaskGroup.objects.filter(id__in=group_ids, subtopic__isnull=True).count()
+        if no_subtopic_groups > 0:
+            by_sid["none"] = {
+                "id": "none",
+                "title": "Без темы",
+                "group_count": no_subtopic_groups,
+                "display_count": no_subtopic_groups,
+            }
+            
+        # "Без ответа" - хотя бы в одной задаче группы нет ответа
+        no_answer_groups = TaskGroup.objects.filter(
+            id__in=group_ids,
+            taskgroupmember__task__answer__isnull=True
+        ).distinct().count()
+        
+        if no_answer_groups == 0:
+            no_answer_groups = TaskGroup.objects.filter(
+                id__in=group_ids,
+                taskgroupmember__task__answer__exact=''
+            ).distinct().count()
+            
+        if no_answer_groups > 0:
+            by_sid["no-answer"] = {
+                "id": "no-answer",
+                "title": "Без ответа",
+                "group_count": no_answer_groups,
+                "display_count": no_answer_groups,
+            }
+
+    # Сортировка: сначала обычные подтемы по order/title, затем виртуальные
+    def _sort_key(item):
+        sid = item["id"]
+        if sid == "none":
+            return (1, 9998, "")
+        if sid == "no-answer":
+            return (1, 9999, "")
+        st = SubTopic.objects.filter(id=sid).first()
+        return (0, st.order if st and st.order else 0, st.title if st else "")
+
+    return sorted(list(by_sid.values()), key=_sort_key)
 
 
 def _normalize_content(data):
@@ -2153,10 +2195,12 @@ def api_subtopics(request, level, subject):
         if no_subtopic_count > 0:
             subtopics.append({
                 "id": "none",
-                "title": "Без подтемы",
+                "title": "Без темы",
                 "order": 9998,
                 "task_count": no_subtopic_count,
-                "fipi_task_count": base_tl_qs.filter(subtopic_id__isnull=True).filter(fipi_q).count()
+                "fipi_task_count": base_tl_qs.filter(subtopic_id__isnull=True).filter(fipi_q).count(),
+                "group_count": no_subtopic_count,
+                "display_count": no_subtopic_count,
             })
             
         no_answer_count = base_tl_qs.filter(Q(answer__isnull=True) | Q(answer__exact='')).count()
@@ -2166,7 +2210,9 @@ def api_subtopics(request, level, subject):
                 "title": "Без ответа",
                 "order": 9999,
                 "task_count": no_answer_count,
-                "fipi_task_count": base_tl_qs.filter(Q(answer__isnull=True) | Q(answer__exact='')).filter(fipi_q).count()
+                "fipi_task_count": base_tl_qs.filter(Q(answer__isnull=True) | Q(answer__exact='')).filter(fipi_q).count(),
+                "group_count": no_answer_count,
+                "display_count": no_answer_count,
             })
 
         if not subtopics:
@@ -2180,6 +2226,8 @@ def api_subtopics(request, level, subject):
                 base_qs = base_qs.filter(**vpr_vf)
             st["task_count"] = base_qs.count()
             st["fipi_task_count"] = base_qs.filter(fipi_q).count()
+            st["group_count"] = st["task_count"]
+            st["display_count"] = st["task_count"]
         out.append({
             "task_list_id": tl.id,
             "task_number": tl.task_number,
@@ -2326,7 +2374,59 @@ def api_task_bank_filters(request, level, subject):
     subtopic_tl_qs = (
         task_list_qs.filter(id=tl_id_filter) if tl_id_filter is not None else task_list_qs
     )
+    if tl_id_filter is None:
+        base_all_qs = Task.active_objects.filter(
+            task__subject=subject_instance,
+            task__level=level_instance,
+        )
+        if vpr_vf:
+            base_all_qs = base_all_qs.filter(**vpr_vf)
+
+        no_subtopic_count = base_all_qs.filter(subtopic_id__isnull=True).count()
+        if no_subtopic_count > 0:
+            subtopics.append({
+                "id": "none",
+                "title": "Без темы",
+                "task_list_id": None,
+                "task_number": None,
+                "task_count": no_subtopic_count,
+            })
+
+        no_answer_count = base_all_qs.filter(Q(answer__isnull=True) | Q(answer__exact='')).count()
+        if no_answer_count > 0:
+            subtopics.append({
+                "id": "no-answer",
+                "title": "Без ответа",
+                "task_list_id": None,
+                "task_number": None,
+                "task_count": no_answer_count,
+            })
+
     for tl in subtopic_tl_qs:
+        base_tl_qs = Task.active_objects.filter(task_id=tl.id)
+        if vpr_vf:
+            base_tl_qs = base_tl_qs.filter(**vpr_vf)
+
+        no_subtopic_count = base_tl_qs.filter(subtopic_id__isnull=True).count()
+        if no_subtopic_count > 0:
+            subtopics.append({
+                "id": "none",
+                "title": "Без темы",
+                "task_list_id": tl.id,
+                "task_number": tl.task_number,
+                "task_count": no_subtopic_count,
+            })
+
+        no_answer_count = base_tl_qs.filter(Q(answer__isnull=True) | Q(answer__exact='')).count()
+        if no_answer_count > 0:
+            subtopics.append({
+                "id": "no-answer",
+                "title": "Без ответа",
+                "task_list_id": tl.id,
+                "task_number": tl.task_number,
+                "task_count": no_answer_count,
+            })
+
         for st in SubTopic.objects.filter(task_list=tl).order_by("order", "title"):
             st_qs = Task.active_objects.filter(task_id=tl.id, subtopic_id=st.id)
             if vpr_vf:

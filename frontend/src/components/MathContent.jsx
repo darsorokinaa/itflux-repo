@@ -329,6 +329,16 @@ function typesetMathInElement(el, { plainHtml = false } = {}) {
   return mathJaxPromise;
 }
 
+function normalizeVectorLetters(value) {
+  return Array.from(String(value || "")).map((ch) => {
+    const cp = ch.codePointAt(0);
+    if (cp >= 0x1d434 && cp <= 0x1d44d) return String.fromCharCode(65 + cp - 0x1d434);
+    if (cp >= 0x1d44e && cp <= 0x1d467) return String.fromCharCode(97 + cp - 0x1d44e);
+    if (cp === 0x210e) return "h";
+    return ch;
+  }).join("");
+}
+
 function normalizeEscapedTaskSymbols(raw) {
   if (typeof raw !== "string" || !raw) return raw;
   let s = repairMalformedInlineMathDelimiters(raw)
@@ -344,8 +354,12 @@ function normalizeEscapedTaskSymbols(raw) {
     .replace(/(?<!\\|\/)\\(?=\s|<|$)/g, "");
     
   if (s.toLowerCase().includes("вектор")) {
-    s = s.replace(/(?:\\rightarrow|\\to|→)\s*([a-zA-Z]{2,})/g, "\\overrightarrow{$1}");
-    s = s.replace(/(?:\\rightarrow|\\to|→)\s*([a-zA-Z])/g, "\\vec{$1}");
+    s = s.replace(/(?:\\rightarrow|\\to|→)\s*(\p{L}{2,3})/gu, (_m, letters) => {
+      return `\\overrightarrow{${normalizeVectorLetters(letters)}}`;
+    });
+    s = s.replace(/(?:\\rightarrow|\\to|→)\s*(\p{L})/gu, (_m, letter) => {
+      return `\\vec{${normalizeVectorLetters(letter)}}`;
+    });
   }
   return s;
 }
@@ -1191,6 +1205,119 @@ function removeDuplicateImages(el) {
   });
 }
 
+function decorateVectorText(root) {
+  if (!root || typeof document === "undefined") return;
+  const wholeText = root.textContent || "";
+  if (!/вектор|скалярное произведение/i.test(wholeText)) return;
+
+  const makeVectorSpan = (letters) => {
+    const span = document.createElement("span");
+    span.className = `math-vector-inline${String(letters).length > 1 ? " math-vector-inline--wide" : ""}`;
+    span.textContent = letters;
+    return span;
+  };
+
+  const consumeLeadingVectorLetters = (node) => {
+    if (!node) return "";
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.nodeValue || "";
+      const match = /^(\s*)(\p{L}{1,3})(?=$|[\\\s.,;:)\]·+\-])/u.exec(text);
+      if (!match) return "";
+      node.nodeValue = text.slice(match[0].length);
+      return match[2];
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node;
+      if (el.closest("script, style, svg, .math-vector-inline")) return "";
+      const text = (el.textContent || "").trim();
+      if (!/^\p{L}{1,3}$/u.test(text)) return "";
+      el.remove();
+      return text;
+    }
+    return "";
+  };
+
+  const nextMeaningfulSibling = (node) => {
+    let cur = node.nextSibling;
+    while (cur) {
+      if (cur.nodeType === Node.TEXT_NODE && !(cur.nodeValue || "").trim()) {
+        cur = cur.nextSibling;
+        continue;
+      }
+      return cur;
+    }
+    return null;
+  };
+
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (!parent) return NodeFilter.FILTER_REJECT;
+      if (parent.closest("mjx-container, svg, script, style, .math-vector-inline")) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return /(?:\\rightarrow|\\to|→)/.test(node.nodeValue || "")
+        ? NodeFilter.FILTER_ACCEPT
+        : NodeFilter.FILTER_REJECT;
+    },
+  });
+
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+
+  nodes.forEach((node) => {
+    const text = node.nodeValue || "";
+    const pattern = /(?:\\rightarrow|\\to|→)\s*(\p{L}{1,3})(?=$|[\\\s.,;:)\]·+\-])/gu;
+    let last = 0;
+    let changed = false;
+    const fragment = document.createDocumentFragment();
+
+    text.replace(pattern, (match, letters, offset) => {
+      if (offset > last) fragment.appendChild(document.createTextNode(text.slice(last, offset)));
+      const span = document.createElement("span");
+      span.className = `math-vector-inline${String(letters).length > 1 ? " math-vector-inline--wide" : ""}`;
+      span.textContent = letters;
+      fragment.appendChild(span);
+      last = offset + match.length;
+      changed = true;
+      return match;
+    });
+
+    if (!changed) return;
+    if (last < text.length) fragment.appendChild(document.createTextNode(text.slice(last)));
+    node.parentNode?.replaceChild(fragment, node);
+  });
+
+  // Второй проход: стрелка и буква часто лежат в соседних узлах, например "→ " + <i>a</i>.
+  const splitNodes = [];
+  const splitWalker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (!parent) return NodeFilter.FILTER_REJECT;
+      if (parent.closest("mjx-container, svg, script, style, .math-vector-inline")) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return /(?:\\rightarrow|\\to|→)\s*$/.test(node.nodeValue || "")
+        ? NodeFilter.FILTER_ACCEPT
+        : NodeFilter.FILTER_REJECT;
+    },
+  });
+  while (splitWalker.nextNode()) splitNodes.push(splitWalker.currentNode);
+
+  splitNodes.forEach((node) => {
+    const next = nextMeaningfulSibling(node);
+    const letters = consumeLeadingVectorLetters(next);
+    if (!letters) return;
+
+    const text = node.nodeValue || "";
+    const before = text.replace(/(?:\\rightarrow|\\to|→)\s*$/, "");
+    const fragment = document.createDocumentFragment();
+    if (before) fragment.appendChild(document.createTextNode(before));
+    fragment.appendChild(makeVectorSpan(letters));
+    node.parentNode?.replaceChild(fragment, node);
+  });
+}
+
 function removeDuplicateRoadGraphImages(root, isEgeInf1) {
   if (!root) return;
   
@@ -1290,6 +1417,7 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
       }
       removeDuplicateRoadGraphImages(el, egeInf1Enhance);
       removeDuplicateImages(el);
+      decorateVectorText(el);
 
       // ДОПОЛНИТЕЛЬНАЯ ЗАЧИСТКА: если это 1-е задание, принудительно удаляем
       // все картинки (кроме первой), даже если они не попали
@@ -1403,6 +1531,7 @@ export function prepareBankTaskDisplayHtml(raw, options = {}) {
       }
     }
     removeDuplicateImages(el);
+    decorateVectorText(el);
     polishBankTaskTables(el);
     decorateFipiTaskImages(el);
     return el.innerHTML;

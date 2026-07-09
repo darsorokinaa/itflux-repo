@@ -8557,9 +8557,33 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .exam-page .exam-task-card.task-geom .task-text img,
 .exam-page .exam-task-card.task-geom .exam-task-card__text figure img,
 .exam-page .exam-task-card.task-geom .exam-task-card__text img.oge-math-fipi-diagram,
+.exam-page .task-alg .task-text img,
+.exam-page .task-alg .task-text figure img,
+.exam-page .task-alg .task-text figure.image img,
+.exam-page .task-alg .correct-answer-content img,
+.exam-page .task-alg .part2-answer-content img,
+.exam-page .exam-task-card.task-alg .exam-task-card__text img,
+.exam-page .exam-task-card.task-alg .task-text img,
+.exam-page .exam-task-card.task-alg .exam-task-card__text figure img,
+.exam-page .exam-task-card.task-alg .exam-task-card__text img.oge-math-fipi-diagram,
 .all-tasks-item__html.task-geom img,
 .all-tasks-item__html.task-geom figure img,
-.all-tasks-item__html.task-geom figure.image img {
+.all-tasks-item__html.task-geom figure.image img,
+.all-tasks-item__html .task-geom img,
+.all-tasks-item__html .task-geom figure img,
+.all-tasks-item__html .task-geom figure.image img,
+.all-tasks-item--geom .all-tasks-item__html img,
+.all-tasks-item--geom .all-tasks-item__html figure img,
+.all-tasks-item--geom .all-tasks-item__html figure.image img,
+.all-tasks-item__html.task-alg img,
+.all-tasks-item__html.task-alg figure img,
+.all-tasks-item__html.task-alg figure.image img,
+.all-tasks-item__html .task-alg img,
+.all-tasks-item__html .task-alg figure img,
+.all-tasks-item__html .task-alg figure.image img,
+.all-tasks-item--alg .all-tasks-item__html img,
+.all-tasks-item--alg .all-tasks-item__html figure img,
+.all-tasks-item--alg .all-tasks-item__html figure.image img {
     display: block !important;
     margin: 0 auto !important;
     width: min(400px, 90vw) !important;
@@ -8612,22 +8636,30 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     cursor: pointer;
 }
 
-/* Всё кроме геометрии и информатики: картинки 100% ширины */
-.exam-page .task:not(.task-geom) .task-text figure,
-.exam-page .task:not(.task-geom) .task-text figure.image,
-.all-tasks-item__html:not(.task-geom) figure,
-.all-tasks-item__html:not(.task-geom) figure.image {
+/* Всё кроме геометрии, алгебры и информатики: картинки 100% ширины */
+.exam-page .task:not(.task-geom):not(.task-alg) .task-text figure,
+.exam-page .task:not(.task-geom):not(.task-alg) .task-text figure.image,
+.all-tasks-item__html:not(.task-geom):not(.task-alg) figure,
+.all-tasks-item__html:not(.task-geom):not(.task-alg) figure.image,
+.all-tasks-item__html :not(.task-geom):not(.task-alg) figure,
+.all-tasks-item__html :not(.task-geom):not(.task-alg) figure.image,
+.all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html figure,
+.all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html figure.image {
     width: 100% !important;
     max-width: 100% !important;
 }
-.exam-page .task:not(.task-geom) .task-img-zoomable,
-.all-tasks-item__html:not(.task-geom) .task-img-zoomable {
+.exam-page .task:not(.task-geom):not(.task-alg) .task-img-zoomable,
+.all-tasks-item__html:not(.task-geom):not(.task-alg) .task-img-zoomable,
+.all-tasks-item__html :not(.task-geom):not(.task-alg) .task-img-zoomable,
+.all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html .task-img-zoomable {
     width: 100% !important;
     max-width: 100% !important;
     display: block !important;
 }
-.exam-page .task:not(.task-geom) .task-text img,
-.all-tasks-item__html:not(.task-geom) img {
+.exam-page .task:not(.task-geom):not(.task-alg) .task-text img,
+.all-tasks-item__html:not(.task-geom):not(.task-alg) img,
+.all-tasks-item__html :not(.task-geom):not(.task-alg) img,
+.all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html img {
     display: block !important;
     width: calc(100% / 1.5) !important;
     max-width: calc(100% / 1.5) !important;
@@ -8636,14 +8668,18 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     margin: 0.85rem auto 0.55rem !important;
     object-fit: contain !important;
 }
-.exam-page .task:not(.task-geom) .task-text figure img,
-.exam-page .task:not(.task-geom) .task-text figure.image img,
-.all-tasks-item__html:not(.task-geom) figure img,
-.all-tasks-item__html:not(.task-geom) figure.image img {
+.exam-page .task:not(.task-geom):not(.task-alg) .task-text figure img,
+.exam-page .task:not(.task-geom):not(.task-alg) .task-text figure.image img,
+.all-tasks-item__html:not(.task-geom):not(.task-alg) figure img,
+.all-tasks-item__html:not(.task-geom):not(.task-alg) figure.image img,
+.all-tasks-item__html :not(.task-geom):not(.task-alg) figure img,
+.all-tasks-item__html :not(.task-geom):not(.task-alg) figure.image img,
+.all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html figure img,
+.all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html figure.image img {
     margin: 0 auto !important;
 }
-.exam-page .task:not(.task-geom) .correct-answer-content img,
-.exam-page .task:not(.task-geom) .part2-answer-content img {
+.exam-page .task:not(.task-geom):not(.task-alg) .correct-answer-content img,
+.exam-page .task:not(.task-geom):not(.task-alg) .part2-answer-content img {
     display: block !important;
     width: calc(100% / 1.5) !important;
     max-width: calc(100% / 1.5) !important;
@@ -8653,19 +8689,7 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     cursor: pointer;
 }
 
-/* Алгебра: ещё компактнее иллюстрации и MathJax (раньше казались слишком крупными) */
-.exam-page .task-alg .task-text img,
-.exam-page .task-alg .task-text figure img,
-.exam-page .task-alg .task-text figure.image img,
-.exam-page .task-alg .correct-answer-content img,
-.exam-page .task-alg .part2-answer-content img,
-.all-tasks-item__html.task-alg img,
-.all-tasks-item__html.task-alg figure img,
-.all-tasks-item__html.task-alg figure.image img {
-    width: calc(100% / 2.25) !important;
-    max-width: calc(100% / 2.25) !important;
-}
-
+/* Алгебра: ещё компактнее MathJax (раньше казались слишком крупными) */
 .exam-page .task-alg .task-text mjx-container,
 .exam-page .task-alg .task-text mjx-container[display="true"],
 .exam-page .task-alg .correct-answer-content mjx-container,
@@ -8674,6 +8698,31 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .exam-page .task-alg .part2-answer-content mjx-container[display="true"],
 .exam-page .task-alg .criteria-text mjx-container {
     font-size: 1.325em !important;
+}
+
+.math-vector-inline {
+    position: relative;
+    display: inline-block;
+    padding-top: 0.18em;
+    font-style: italic;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.math-vector-inline::before {
+    content: "→";
+    position: absolute;
+    left: 50%;
+    top: -0.28em;
+    transform: translateX(-50%);
+    font-size: 0.76em;
+    line-height: 1;
+    font-style: normal;
+}
+
+.math-vector-inline--wide::before {
+    top: -0.22em;
+    font-size: 0.82em;
 }
 
 /* Убираем встроенные белые подложки у текста в задачах */

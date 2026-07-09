@@ -129,7 +129,7 @@ type TaskNumberOption = {
 };
 
 type SubtopicOption = {
-  id: number | null;
+  id: number | string | null;
   title: string;
   task_list_id: number | null;
   task_number: number | null;
@@ -355,7 +355,12 @@ export default function AllTasksPage() {
   const levelDef = getLevelDef(level);
 
   const subtopicsForTask = useMemo(() => {
-    if (!filterOptions || !taskListId) return [];
+    if (!filterOptions) return [];
+    if (!taskListId) {
+      return filterOptions.subtopics.filter(
+        (s) => s.task_list_id == null && (String(s.id) === "none" || String(s.id) === "no-answer")
+      );
+    }
     const tlId = Number(taskListId);
     return filterOptions.subtopics.filter(
       (s) => s.task_list_id === tlId && s.id != null
@@ -458,7 +463,7 @@ export default function AllTasksPage() {
   }, [subtopicsForTask, subtopicId]);
 
   const fetchTasks = useCallback(async () => {
-    if (!taskListId) {
+    if (!taskListId && !subtopicId) {
       setData(null);
       setGroupData(null);
       setBankUsesGroups(false);
@@ -850,7 +855,7 @@ export default function AllTasksPage() {
               <select
                 className="all-tasks-filter__control"
                 value={subtopicId}
-                disabled={filtersLoading || !taskListId}
+                disabled={filtersLoading || (!taskListId && subtopicsForTask.length === 0)}
                 onChange={(e) => {
                   setSubtopicId(e.target.value);
                   resetPage();
@@ -967,7 +972,7 @@ export default function AllTasksPage() {
             ) : null}
           </div>
 
-          {!taskListId && !loading && !error ? (
+          {!taskListId && !subtopicId && !loading && !error ? (
             <div className="all-tasks-empty all-tasks-empty--pick" role="status">
               <p className="all-tasks-empty__title">Выберите задание</p>
               <p className="all-tasks-empty__lead">
@@ -1018,6 +1023,8 @@ export default function AllTasksPage() {
                       className={[
                         "all-tasks-item",
                         "all-tasks-item--group",
+                        entry.subdivision === "geom" ? "all-tasks-item--geom" : "",
+                        entry.subdivision === "alg" ? "all-tasks-item--alg" : "",
                         pickMode && groupInPick ? "all-tasks-item--in-workbook" : "",
                       ]
                         .filter(Boolean)
@@ -1207,6 +1214,8 @@ export default function AllTasksPage() {
                   <article
                     className={[
                       "all-tasks-item",
+                      t.subdivision === "geom" ? "all-tasks-item--geom" : "",
+                      t.subdivision === "alg" ? "all-tasks-item--alg" : "",
                       pickMode && inPick ? "all-tasks-item--in-workbook" : "",
                     ]
                       .filter(Boolean)
