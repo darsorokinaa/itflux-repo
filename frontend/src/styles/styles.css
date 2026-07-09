@@ -8700,6 +8700,35 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     font-size: 1.325em !important;
 }
 
+/* ЕГЭ профильная математика: все иллюстрации в задачах одного размера. */
+.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__html img,
+.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__html figure img,
+.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__html figure.image img,
+.all-tasks-page[data-level="ege"][data-subject="math"] .task-img-zoomable img,
+.exam-page[data-level="ege"][data-subject="math"] .task-text img,
+.exam-page[data-level="ege"][data-subject="math"] .task-text figure img,
+.exam-page[data-level="ege"][data-subject="math"] .task-text figure.image img,
+.exam-page[data-level="ege"][data-subject="math"] .exam-task-card__text img,
+.exam-page[data-level="ege"][data-subject="math"] .task-img-zoomable img {
+    display: block !important;
+    width: 100px !important;
+    max-width: 100px !important;
+    height: 100px !important;
+    max-height: 100px !important;
+    margin: 0.65rem auto 0.45rem !important;
+    object-fit: contain !important;
+    object-position: center !important;
+}
+
+.all-tasks-page[data-level="ege"][data-subject="math"] .task-img-zoomable,
+.exam-page[data-level="ege"][data-subject="math"] .task-img-zoomable {
+    display: block !important;
+    width: 100px !important;
+    max-width: 100px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}
+
 .math-vector-inline {
     position: relative;
     display: inline-block;

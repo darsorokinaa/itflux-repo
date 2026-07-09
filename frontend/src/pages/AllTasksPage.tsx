@@ -746,7 +746,11 @@ export default function AllTasksPage() {
       <div
         className={`digital-flow-page__wrap${showCodeSidebar ? " digital-flow-page__wrap--with-code-sidebar" : ""}`}
       >
-        <main className={`all-tasks-page${pickMode ? " all-tasks-page--workbook-mode" : ""}`}>
+        <main
+          className={`all-tasks-page${pickMode ? " all-tasks-page--workbook-mode" : ""}`}
+          data-level={level}
+          data-subject={subject}
+        >
           <button
             type="button"
             className="all-tasks-filters-toggle"
