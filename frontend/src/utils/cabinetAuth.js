@@ -216,6 +216,11 @@ export function cancelInvitation(id) {
   });
 }
 
+/** Hard-delete an invitation (any status). Removes unregistered pre-profile student too. */
+export function deleteInvitation(id) {
+  return cabinetFetch(`/invitations/${id}/`, { method: "DELETE" });
+}
+
 export function buildInvitationUrl(joinPath) {
   if (!joinPath) return "";
   if (joinPath.startsWith("http")) return joinPath;

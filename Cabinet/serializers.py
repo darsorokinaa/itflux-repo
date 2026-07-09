@@ -139,6 +139,8 @@ class StudentInvitationSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "token",
+            "first_name",
+            "last_name",
             "email",
             "direction",
             "direction_label",
@@ -170,6 +172,8 @@ class StudentInvitationSerializer(serializers.ModelSerializer):
 
 
 class StudentInvitationCreateSerializer(serializers.Serializer):
+    first_name = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    last_name  = serializers.CharField(required=False, allow_blank=True, max_length=100)
     email = serializers.EmailField(required=False, allow_blank=True)
     group_id = serializers.IntegerField(required=False, allow_null=True)
     direction = serializers.ChoiceField(

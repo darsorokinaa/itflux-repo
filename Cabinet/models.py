@@ -217,6 +217,16 @@ class StudentInvitation(models.Model):
         related_name="invitations",
         verbose_name="Группа",
     )
+    first_name  = models.CharField("Имя ученика", max_length=100, blank=True)
+    last_name   = models.CharField("Фамилия ученика", max_length=100, blank=True)
+    pre_student = models.OneToOneField(
+        "Student",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="invitation",
+        verbose_name="Предварительный профиль",
+    )
     email = models.EmailField("Email (подсказка)", blank=True)
     direction = models.CharField(
         "Направление",

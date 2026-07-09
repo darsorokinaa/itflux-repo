@@ -132,6 +132,8 @@ export function emptyGroupForm() {
 
 export function emptyInviteForm(group = null) {
   return {
+    first_name: "",
+    last_name: "",
     email: "",
     direction: group?.raw?.direction || "oge",
     grade: "",
@@ -142,6 +144,8 @@ export function emptyInviteForm(group = null) {
 
 export function inviteFormToApiPayload(form) {
   return {
+    first_name: (form.first_name || "").trim(),
+    last_name:  (form.last_name  || "").trim(),
     email: (form.email || "").trim(),
     direction: form.direction || "other",
     grade: form.grade ? Number(form.grade) : null,

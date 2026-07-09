@@ -22,6 +22,7 @@ import {
   archiveStudent,
   buildInvitationUrl,
   cancelInvitation,
+  deleteInvitation,
   createGroup,
   createInvitation,
   fetchGroups,
@@ -313,7 +314,7 @@ function AddStudentCard({ onClick }) {
   );
 }
 
-function PendingInvitesPanel({ invitations, onCancel }) {
+function PendingInvitesPanel({ invitations, onDelete }) {
   const [copiedInviteId, setCopiedInviteId] = useState(null);
 
   if (!invitations.length) return null;
@@ -332,58 +333,72 @@ function PendingInvitesPanel({ invitations, onCancel }) {
     }
   };
 
+  const statusLabel = (invite) => {
+    if (invite.status === "accepted")  return { text: "Вошёл",    mod: "joined"   };
+    if (invite.status === "cancelled") return { text: "Отменено", mod: "cancelled" };
+    if (invite.status === "expired")   return { text: "Истекло",  mod: "cancelled" };
+    return { text: "Ожидает", mod: "pending" };
+  };
+
   return (
     <section className="cb-students-pending">
       <h2 className="cb-students-panel__title">
-        Приглашения ученикам
+        Приглашения
         <span className="cb-students-col__count">{invitations.length}</span>
       </h2>
       <ul className="cb-students-pending__list">
-        {invitations.map((invite) => (
-          <li key={invite.id} className="cb-students-pending__item">
-            <div className="cb-students-pending__body">
-              <div className="cb-students-pending__title-row">
-                <strong>{invite.email || "Ссылка без email"}</strong>
-                <span
-                  className={`cb-students-pending__status cb-students-pending__status--${invite.status === "accepted" ? "joined" : "pending"}`}
-                >
-                  {invite.status === "accepted" ? "Присоединился" : "Не присоединился"}
+        {invitations.map((invite) => {
+          const { text, mod } = statusLabel(invite);
+          const displayName = [invite.first_name, invite.last_name].filter(Boolean).join(" ")
+            || invite.email
+            || "Без имени";
+          return (
+            <li key={invite.id} className="cb-students-pending__item">
+              <div className="cb-students-pending__body">
+                <div className="cb-students-pending__title-row">
+                  <strong>{displayName}</strong>
+                  <span className={`cb-students-pending__status cb-students-pending__status--${mod}`}>
+                    {text}
+                  </span>
+                </div>
+                <span className="cb-students-pending__meta">
+                  {invite.group_title ? `Группа: ${invite.group_title}` : "Индивидуально"}
+                  {invite.direction_label ? ` · ${invite.direction_label}` : ""}
+                  {invite.grade ? ` · ${invite.grade} кл.` : ""}
                 </span>
+                {invite.join_path && invite.status === "pending" ? (
+                  <a
+                    href={buildInvitationUrl(invite.join_path)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="cb-students-pending__link"
+                  >
+                    Ссылка приглашения
+                  </a>
+                ) : null}
               </div>
-              <span className="cb-students-pending__meta">
-                {invite.group_title ? `Группа: ${invite.group_title}` : "Индивидуально"}
-                {invite.direction_label ? ` · ${invite.direction_label}` : ""}
-                {invite.grade ? ` · ${invite.grade} класс` : ""}
-              </span>
-              {invite.join_path ? (
-                <a
-                  href={buildInvitationUrl(invite.join_path)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="cb-students-pending__link"
-                >
-                  Ссылка приглашения
-                </a>
-              ) : null}
-            </div>
-            <div className="cb-students-pending__actions">
-              {invite.join_path ? (
+              <div className="cb-students-pending__actions">
+                {invite.join_path && invite.status === "pending" ? (
+                  <button
+                    type="button"
+                    className="cb-btn cb-btn--outline cb-btn--sm"
+                    onClick={() => handleCopyInvite(invite)}
+                  >
+                    {copiedInviteId === invite.id ? "Скопировано" : "Копировать"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  className="cb-btn cb-btn--outline cb-btn--sm"
-                  onClick={() => handleCopyInvite(invite)}
+                  className="cb-btn cb-btn--ghost cb-btn--sm cb-btn--danger"
+                  title="Удалить приглашение"
+                  onClick={() => onDelete(invite.id)}
                 >
-                  {copiedInviteId === invite.id ? "Скопировано" : "Копировать"}
+                  Удалить
                 </button>
-              ) : null}
-              {invite.status === "pending" ? (
-                <button type="button" className="cb-btn cb-btn--text cb-btn--sm" onClick={() => onCancel(invite.id)}>
-                  Отменить
-                </button>
-              ) : null}
-            </div>
-          </li>
-        ))}
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </section>
   );
@@ -720,6 +735,17 @@ export default function CabinetStudentsPage() {
     await loadData();
   };
 
+  const handleDeleteInvite = async (inviteId) => {
+    if (!window.confirm("Удалить приглашение? Если ученик ещё не вошёл — его предварительный профиль тоже будет удалён.")) return;
+    try {
+      await deleteInvitation(inviteId);
+      showToast("Приглашение удалено");
+      await loadData();
+    } catch {
+      showToast("Не удалось удалить приглашение");
+    }
+  };
+
   const handleArchiveStudent = async (studentId) => {
     await archiveStudent(studentId);
     showToast("Ученик перенесён в архив");
@@ -819,7 +845,7 @@ export default function CabinetStudentsPage() {
             { label: "Создать группу", onClick: openCreateGroup },
           ]}
         />
-        <PendingInvitesPanel invitations={invitations} onCancel={handleCancelInvite} />
+        <PendingInvitesPanel invitations={invitations} onDelete={handleDeleteInvite} />
         {inviteModal ? (
           <InviteFormModal
             group={inviteModal.group}
@@ -1083,7 +1109,7 @@ export default function CabinetStudentsPage() {
         )}
       </div>
 
-      <PendingInvitesPanel invitations={invitations} onCancel={handleCancelInvite} />
+      <PendingInvitesPanel invitations={invitations} onDelete={handleDeleteInvite} />
     </CabinetPageShell>
   );
 }

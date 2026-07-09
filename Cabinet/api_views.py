@@ -261,7 +261,7 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         return Response(HomeworkListSerializer(homework).data, status=status.HTTP_201_CREATED)
 
 
-class StudentInvitationViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.GenericViewSet):
+class StudentInvitationViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.CreateModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):
     def get_queryset(self):
         mark_expired_invitations()
         qs = StudentInvitation.objects.filter(teacher=self.get_teacher()).select_related("group")
@@ -299,6 +299,8 @@ class StudentInvitationViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins
             invitation = create_student_invitation(
                 self.get_teacher(),
                 group=group,
+                first_name=data.get("first_name") or "",
+                last_name=data.get("last_name") or "",
                 email=data.get("email") or "",
                 direction=data.get("direction") or "other",
                 grade=data.get("grade"),
@@ -323,6 +325,24 @@ class StudentInvitationViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins
         invitation.status = InvitationStatus.CANCELLED
         invitation.save(update_fields=["status", "updated_at"])
         return Response(StudentInvitationSerializer(invitation).data)
+
+    def destroy(self, request, pk=None):
+        """Hard-delete an invitation (any status). Also removes unregistered pre-profile student."""
+        invitation = get_object_or_404(
+            StudentInvitation,
+            pk=pk,
+            teacher=self.get_teacher(),
+        )
+        # Remove unregistered pre-profile student if still unlinked
+        if invitation.pre_student_id:
+            try:
+                pre = invitation.pre_student
+                if pre and pre.user_id is None:
+                    pre.delete()
+            except Exception:
+                pass
+        invitation.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class InvitationPreviewView(APIView):

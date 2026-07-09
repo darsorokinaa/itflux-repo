@@ -252,14 +252,25 @@ export function InviteFormModal({ group, onClose, onCreate }) {
     }
   };
 
+  const studentName = createdInvite
+    ? [createdInvite.first_name, createdInvite.last_name].filter(Boolean).join(" ")
+    : "";
+
   if (createdInvite) {
     return (
-      <CabinetModal title="Приглашение создано" onClose={onClose}>
+      <CabinetModal title="Ссылка создана" onClose={onClose}>
         <div className="cb-modal-form">
-          <p className="cabinet-auth-muted">
-            Отправьте ссылку ученику. После регистрации или входа он автоматически появится в вашем списке
-            {group?.name ? ` в группе «${group.name}»` : ""}.
-          </p>
+          {studentName ? (
+            <p className="cabinet-auth-muted">
+              Профиль <strong>{studentName}</strong> создан. Отправьте ссылку ученику — после входа он автоматически появится в вашем списке
+              {group?.name ? ` в группе «${group.name}»` : ""}.
+            </p>
+          ) : (
+            <p className="cabinet-auth-muted">
+              Отправьте ссылку ученику. После регистрации или входа он автоматически появится в вашем списке
+              {group?.name ? ` в группе «${group.name}»` : ""}.
+            </p>
+          )}
           <label className="cb-field cb-field--wide">
             <span>Ссылка для ученика</span>
             <input readOnly value={inviteUrl} onFocus={(e) => e.target.select()} />
@@ -287,16 +298,36 @@ export function InviteFormModal({ group, onClose, onCreate }) {
       <form className="cb-modal-form" onSubmit={handleSubmit}>
         {error ? <p className="cb-modal-form__error" role="alert">{error}</p> : null}
         <p className="cabinet-auth-muted" style={{ marginBottom: "12px" }}>
-          Ученик сам регистрируется по ссылке и автоматически привязывается к вам.
+          Введите имя ученика — появится в списке сразу. После входа по ссылке профиль привяжется автоматически.
         </p>
         <div className="cb-plan-editor__grid">
+          <label className="cb-field">
+            <span>Имя <span style={{ color: "#E53935" }}>*</span></span>
+            <input
+              type="text"
+              value={form.first_name}
+              onChange={(e) => setField("first_name", e.target.value)}
+              placeholder="Анна"
+              required
+              autoFocus
+            />
+          </label>
+          <label className="cb-field">
+            <span>Фамилия</span>
+            <input
+              type="text"
+              value={form.last_name}
+              onChange={(e) => setField("last_name", e.target.value)}
+              placeholder="Иванова"
+            />
+          </label>
           <label className="cb-field cb-field--wide">
             <span>Email ученика (необязательно)</span>
             <input
               type="email"
               value={form.email}
               onChange={(e) => setField("email", e.target.value)}
-              placeholder="Подсказка, кого ждёте по ссылке"
+              placeholder="Для дополнительной привязки"
             />
           </label>
           <label className="cb-field">
@@ -324,7 +355,7 @@ export function InviteFormModal({ group, onClose, onCreate }) {
             />
           </label>
         </div>
-        <FormActions onCancel={onClose} submitLabel="Создать ссылку" saving={saving} />
+        <FormActions onCancel={onClose} submitLabel="Создать профиль и ссылку" saving={saving} />
       </form>
     </CabinetModal>
   );

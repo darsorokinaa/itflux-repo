@@ -40,6 +40,8 @@ def create_student_invitation(
     *,
     group=None,
     email="",
+    first_name="",
+    last_name="",
     direction="other",
     grade=None,
     message="",
@@ -52,11 +54,33 @@ def create_student_invitation(
     while StudentInvitation.objects.filter(token=token).exists():
         token = generate_invite_token()
 
+    # Create a pre-profile student record if name is provided
+    pre_student = None
+    clean_first = (first_name or "").strip()
+    clean_last  = (last_name  or "").strip()
+    clean_email = (email or "").strip().lower()
+    if clean_first:
+        pre_student = Student.objects.create(
+            teacher=teacher,
+            first_name=clean_first,
+            last_name=clean_last,
+            email=clean_email,
+            direction=direction or "other",
+            grade=grade,
+            status=StudentStatus.ACTIVE,
+            user=None,
+        )
+        if group is not None:
+            group.students.add(pre_student)
+
     return StudentInvitation.objects.create(
         token=token,
         teacher=teacher,
         group=group,
-        email=(email or "").strip().lower(),
+        first_name=clean_first,
+        last_name=clean_last,
+        pre_student=pre_student,
+        email=clean_email,
         direction=direction or "other",
         grade=grade,
         message=(message or "").strip(),
@@ -128,8 +152,19 @@ def accept_student_invitation(token: str, user: User):
     last_name = (profile.surname or user.last_name or "").strip()
     invite_email = (invitation.email or user.email or "").strip().lower()
 
+    # Prefer the pre-created student profile linked to this invitation
     existing = None
-    if invite_email:
+    if invitation.pre_student_id:
+        try:
+            existing = Student.objects.get(
+                pk=invitation.pre_student_id,
+                teacher=invitation.teacher,
+                user__isnull=True,
+            )
+        except Student.DoesNotExist:
+            existing = None
+
+    if existing is None and invite_email:
         existing = (
             Student.objects.filter(
                 teacher=invitation.teacher,
