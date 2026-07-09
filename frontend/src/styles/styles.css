@@ -8590,10 +8590,10 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__html figure img:not(.oge-math-fipi-inline-letter):not(.oge-math-fipi-inline-frac):not(.oge-math-fipi-bitmap) {
     display: block !important;
     margin: 0 auto !important;
-    width: min(400px, 90vw) !important;
+    width: min(300px, 70vw) !important;
     max-width: 100% !important;
-    height: min(400px, 90vw) !important;
-    max-height: min(400px, 90vw) !important;
+    height: min(300px, 70vw) !important;
+    max-height: min(300px, 70vw) !important;
     object-fit: contain !important;
     object-position: center !important;
     cursor: pointer;
