@@ -1105,7 +1105,17 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
     subtopic_counts = None
     if isinstance(data, dict) and data.get("subtopic_ids"):
         raw = data["subtopic_ids"]
-        subtopic_ids = [int(x) for x in raw if x is not None and str(x).strip() != ""]
+        subtopic_ids = []
+        for x in raw:
+            if x is None or str(x).strip() == "":
+                continue
+            if str(x) in ("none", "no-answer"):
+                subtopic_ids.append(str(x))
+            else:
+                try:
+                    subtopic_ids.append(int(x))
+                except (TypeError, ValueError):
+                    pass
         if not subtopic_ids:
             subtopic_ids = None
     if isinstance(data, dict) and data.get("subtopic_counts") and isinstance(data["subtopic_counts"], dict):
@@ -1118,10 +1128,13 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
             except (TypeError, ValueError):
                 continue
             if n > 0:
-                try:
-                    subtopic_counts[int(k)] = n
-                except (TypeError, ValueError):
-                    pass
+                if str(k) in ("none", "no-answer"):
+                    subtopic_counts[str(k)] = n
+                else:
+                    try:
+                        subtopic_counts[int(k)] = n
+                    except (TypeError, ValueError):
+                        pass
         if not subtopic_counts:
             subtopic_counts = None
     if not content:
@@ -1490,11 +1503,16 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
         # Только подтемы, принадлежащие этому слоту (TaskList)
         slot_subtopic_ids = None
         if subtopic_ids:
+            numeric_ids = [x for x in subtopic_ids if isinstance(x, int)]
             slot_subtopic_ids = list(
                 SubTopic.objects.filter(
-                    id__in=subtopic_ids, task_list_id=tasklist_id
+                    id__in=numeric_ids, task_list_id=tasklist_id
                 ).values_list("id", flat=True)
             )
+            if "none" in subtopic_ids:
+                slot_subtopic_ids.append("none")
+            if "no-answer" in subtopic_ids:
+                slot_subtopic_ids.append("no-answer")
 
         # Важно: при одновременной передаче subtopic_ids и subtopic_counts сначала
         # собираем задачи по счётчикам (точное кол-во на подтему). Иначе ветка
@@ -1523,15 +1541,24 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
                 .order_by("order", "title", "id")
                 .values_list("id", flat=True)
             )
+            if "none" in subtopic_counts:
+                slot_subtopic_ids_for_counts.append("none")
+            if "no-answer" in subtopic_counts:
+                slot_subtopic_ids_for_counts.append("no-answer")
             pooled = []
             for sid in slot_subtopic_ids_for_counts:
                 cnt = subtopic_counts.get(sid, subtopic_counts.get(str(sid), 0))
                 cnt = int(cnt) if cnt else 0
                 if cnt <= 0:
                     continue
-                subset = list(
-                    qs.filter(subtopic_id=sid).values_list("id", flat=True)
-                )
+                
+                if sid == "none":
+                    subset = list(qs.filter(subtopic_id__isnull=True).values_list("id", flat=True))
+                elif sid == "no-answer":
+                    subset = list(qs.filter(Q(answer__isnull=True) | Q(answer__exact='')).values_list("id", flat=True))
+                else:
+                    subset = list(qs.filter(subtopic_id=sid).values_list("id", flat=True))
+                
                 shuffle(subset)
                 pooled.extend(subset[:cnt])
             if pooled:
@@ -1546,7 +1573,15 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
 
         if tasks_for_slot is None:
             if slot_subtopic_ids:
-                qf = qs.filter(subtopic_id__in=slot_subtopic_ids)
+                q_obj = Q()
+                numeric_ids = [x for x in slot_subtopic_ids if isinstance(x, int)]
+                if numeric_ids:
+                    q_obj |= Q(subtopic_id__in=numeric_ids)
+                if "none" in slot_subtopic_ids:
+                    q_obj |= Q(subtopic_id__isnull=True)
+                if "no-answer" in slot_subtopic_ids:
+                    q_obj |= Q(answer__isnull=True) | Q(answer__exact='')
+                qf = qs.filter(q_obj)
                 tasks_for_slot = list(qf.order_by("?")[: int(count)])
             elif is_oge_inf_13 and not oge_inf_13_subtopics:
                 st_ids_with_tasks = list(
@@ -2097,7 +2132,6 @@ def api_subtopics(request, level, subject):
             subject=subject_instance,
             level=level_instance,
         )
-        .filter(subtopics__isnull=False)
         .distinct()
         .order_by("task_number")
     )
@@ -2109,9 +2143,37 @@ def api_subtopics(request, level, subject):
         subtopics = list(
             SubTopic.objects.filter(task_list=tl).order_by("order", "title").values("id", "title", "order")
         )
+        
+        # Виртуальные подтемы
+        base_tl_qs = Task.active_objects.filter(task_id=tl.id)
+        if vpr_vf:
+            base_tl_qs = base_tl_qs.filter(**vpr_vf)
+            
+        no_subtopic_count = base_tl_qs.filter(subtopic_id__isnull=True).count()
+        if no_subtopic_count > 0:
+            subtopics.append({
+                "id": "none",
+                "title": "Без подтемы",
+                "order": 9998,
+                "task_count": no_subtopic_count,
+                "fipi_task_count": base_tl_qs.filter(subtopic_id__isnull=True).filter(fipi_q).count()
+            })
+            
+        no_answer_count = base_tl_qs.filter(Q(answer__isnull=True) | Q(answer__exact='')).count()
+        if no_answer_count > 0:
+            subtopics.append({
+                "id": "no-answer",
+                "title": "Без ответа",
+                "order": 9999,
+                "task_count": no_answer_count,
+                "fipi_task_count": base_tl_qs.filter(Q(answer__isnull=True) | Q(answer__exact='')).filter(fipi_q).count()
+            })
+
         if not subtopics:
             continue
         for st in subtopics:
+            if str(st.get("id")) in ("none", "no-answer"):
+                continue
             title = st["title"]
             base_qs = Task.active_objects.filter(task_id=tl.id, subtopic__title=title)
             if vpr_vf:

@@ -331,7 +331,7 @@ function typesetMathInElement(el, { plainHtml = false } = {}) {
 
 function normalizeEscapedTaskSymbols(raw) {
   if (typeof raw !== "string" || !raw) return raw;
-  return repairMalformedInlineMathDelimiters(raw)
+  let s = repairMalformedInlineMathDelimiters(raw)
     .replace(/\\([#+^])/g, "$1")
     // Только LaTeX \& → &; не трогать &#92; &#92; (перенос строки в array, иначе таблица кодов слипается)
     .replace(/&#92;\s*&(?:amp;|#38;)/gi, "&")
@@ -342,6 +342,12 @@ function normalizeEscapedTaskSymbols(raw) {
     // Используем negative lookbehind, чтобы не ломать двойные слеши (\\) переноса строк в LaTeX
     // и логические И (/\), где слеш предшествует обратному слешу.
     .replace(/(?<!\\|\/)\\(?=\s|<|$)/g, "");
+    
+  if (s.toLowerCase().includes("вектор")) {
+    s = s.replace(/(?:\\rightarrow|\\to|→)\s*([a-zA-Z]{2,})/g, "\\overrightarrow{$1}");
+    s = s.replace(/(?:\\rightarrow|\\to|→)\s*([a-zA-Z])/g, "\\vec{$1}");
+  }
+  return s;
 }
 
 /** span.logic-connective-ru иногда портится при сохранении (пробелы в тегах). */
@@ -1162,6 +1168,29 @@ function normalizeSparseTables(root) {
   });
 }
 
+function removeDuplicateImages(el) {
+  if (!el) return;
+  const seenImgs = new Set();
+  const allImgs = [...el.querySelectorAll("img")].filter(img => {
+    const src = img.getAttribute("src") || "";
+    if (!src || src.includes("math") || src.includes("mjx")) return false;
+    return true;
+  });
+  allImgs.forEach(img => {
+    const src = img.getAttribute("src");
+    if (seenImgs.has(src)) {
+      const host = img.closest("p, figure, div.task-html-block");
+      if (host && host.querySelectorAll("img").length <= 1) {
+        host.remove();
+      } else {
+        img.remove();
+      }
+    } else {
+      seenImgs.add(src);
+    }
+  });
+}
+
 function removeDuplicateRoadGraphImages(root, isEgeInf1) {
   if (!root) return;
   
@@ -1260,17 +1289,18 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
         }
       }
       removeDuplicateRoadGraphImages(el, egeInf1Enhance);
+      removeDuplicateImages(el);
 
       // ДОПОЛНИТЕЛЬНАЯ ЗАЧИСТКА: если это 1-е задание, принудительно удаляем
-      // все картинки с одинаковым src (кроме первой), даже если они не попали
+      // все картинки (кроме первой), даже если они не попали
       // в .ege-inf-1-task (на всякий случай).
       if (egeInf1Enhance) {
-        const allImgs = [...el.querySelectorAll("img")].filter(img => {
+        const remainingImgs = [...el.querySelectorAll("img")].filter(img => {
           const src = img.getAttribute("src") || "";
           return !src.includes("math") && !src.includes("mjx");
         });
-        if (allImgs.length > 1) {
-          allImgs.slice(1).forEach(img => {
+        if (remainingImgs.length > 1) {
+          remainingImgs.slice(1).forEach(img => {
             const host = img.closest("p, figure, div.task-html-block");
             if (host && host.querySelectorAll("img").length <= 1) {
               host.remove();
@@ -1372,6 +1402,7 @@ export function prepareBankTaskDisplayHtml(raw, options = {}) {
         console.error("TABLE_NORMALIZE_ERR:", err);
       }
     }
+    removeDuplicateImages(el);
     polishBankTaskTables(el);
     decorateFipiTaskImages(el);
     return el.innerHTML;

@@ -143,7 +143,6 @@ type FiltersResponse = {
 
 const PER_PAGE = 5000;
 const ALL_TASKS_BOARD_VARIANT_ID = "task-bank";
-const NO_ANSWER_SUBTOPIC_VALUE = "no-answer";
 
 const LazyVisible = memo(function LazyVisible({
   minHeight = 140,
@@ -258,7 +257,7 @@ function readFiltersFromSearchParams(sp: URLSearchParams): AllTasksFilters {
 
   const taskListId = sp.get("task")?.trim() ?? "";
   const subtopicRaw = sp.get("subtopic")?.trim() ?? "";
-  const subtopicId = subtopicRaw === "none" ? "" : subtopicRaw;
+  const subtopicId = subtopicRaw;
   const onlyFipi = sp.get("fipi") === "1";
   const page = Math.max(1, Number(sp.get("page")) || 1);
 
@@ -453,7 +452,7 @@ export default function AllTasksPage() {
   }, [level, subject, vprGrade, taskListId]);
 
   useEffect(() => {
-    if (!subtopicId || subtopicId === NO_ANSWER_SUBTOPIC_VALUE) return;
+    if (!subtopicId) return;
     const ok = subtopicsForTask.some((s) => String(s.id) === subtopicId);
     if (!ok) setSubtopicId("");
   }, [subtopicsForTask, subtopicId]);
@@ -858,7 +857,6 @@ export default function AllTasksPage() {
                 }}
               >
                 <option value="">Все подтемы</option>
-                <option value={NO_ANSWER_SUBTOPIC_VALUE}>Без ответа</option>
                 {subtopicsForTask.map((s) => (
                   <option key={String(s.id)} value={String(s.id)}>
                     {s.title}
@@ -903,7 +901,7 @@ export default function AllTasksPage() {
                       (t) => String(t.task_list_id) === taskListId
                     )
                   : null;
-                const noAnswerOnly = subtopicId === NO_ANSWER_SUBTOPIC_VALUE;
+                const noAnswerOnly = subtopicId === "no-answer";
                 const selectedSubtopic = subtopicId
                   ? noAnswerOnly
                     ? null

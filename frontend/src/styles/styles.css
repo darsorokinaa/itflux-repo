@@ -8556,12 +8556,15 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .exam-page .exam-task-card.task-geom .exam-task-card__text img,
 .exam-page .exam-task-card.task-geom .task-text img,
 .exam-page .exam-task-card.task-geom .exam-task-card__text figure img,
-.exam-page .exam-task-card.task-geom .exam-task-card__text img.oge-math-fipi-diagram {
+.exam-page .exam-task-card.task-geom .exam-task-card__text img.oge-math-fipi-diagram,
+.all-tasks-item__html.task-geom img,
+.all-tasks-item__html.task-geom figure img,
+.all-tasks-item__html.task-geom figure.image img {
     display: block !important;
     margin: 0 auto !important;
-    width: auto !important;
+    width: min(400px, 90vw) !important;
     max-width: 100% !important;
-    height: auto !important;
+    height: min(400px, 90vw) !important;
     max-height: min(400px, 90vw) !important;
     object-fit: contain !important;
     object-position: center !important;
@@ -8611,33 +8614,39 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 
 /* Всё кроме геометрии и информатики: картинки 100% ширины */
 .exam-page .task:not(.task-geom) .task-text figure,
-.exam-page .task:not(.task-geom) .task-text figure.image {
-    width: auto !important;
+.exam-page .task:not(.task-geom) .task-text figure.image,
+.all-tasks-item__html:not(.task-geom) figure,
+.all-tasks-item__html:not(.task-geom) figure.image {
+    width: 100% !important;
     max-width: 100% !important;
 }
-.exam-page .task:not(.task-geom) .task-img-zoomable {
-    width: auto !important;
+.exam-page .task:not(.task-geom) .task-img-zoomable,
+.all-tasks-item__html:not(.task-geom) .task-img-zoomable {
+    width: 100% !important;
     max-width: 100% !important;
     display: block !important;
 }
-.exam-page .task:not(.task-geom) .task-text img {
+.exam-page .task:not(.task-geom) .task-text img,
+.all-tasks-item__html:not(.task-geom) img {
     display: block !important;
-    width: auto !important;
-    max-width: 100% !important;
+    width: calc(100% / 1.5) !important;
+    max-width: calc(100% / 1.5) !important;
     height: auto !important;
     max-height: none !important;
     margin: 0.85rem auto 0.55rem !important;
     object-fit: contain !important;
 }
 .exam-page .task:not(.task-geom) .task-text figure img,
-.exam-page .task:not(.task-geom) .task-text figure.image img {
+.exam-page .task:not(.task-geom) .task-text figure.image img,
+.all-tasks-item__html:not(.task-geom) figure img,
+.all-tasks-item__html:not(.task-geom) figure.image img {
     margin: 0 auto !important;
 }
 .exam-page .task:not(.task-geom) .correct-answer-content img,
 .exam-page .task:not(.task-geom) .part2-answer-content img {
     display: block !important;
-    width: auto !important;
-    max-width: 100% !important;
+    width: calc(100% / 1.5) !important;
+    max-width: calc(100% / 1.5) !important;
     height: auto !important;
     margin: 0.75rem auto 0.5rem !important;
     object-fit: contain !important;
@@ -8649,9 +8658,12 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .exam-page .task-alg .task-text figure img,
 .exam-page .task-alg .task-text figure.image img,
 .exam-page .task-alg .correct-answer-content img,
-.exam-page .task-alg .part2-answer-content img {
-    width: auto !important;
-    max-width: 100% !important;
+.exam-page .task-alg .part2-answer-content img,
+.all-tasks-item__html.task-alg img,
+.all-tasks-item__html.task-alg figure img,
+.all-tasks-item__html.task-alg figure.image img {
+    width: calc(100% / 2.25) !important;
+    max-width: calc(100% / 2.25) !important;
 }
 
 .exam-page .task-alg .task-text mjx-container,
