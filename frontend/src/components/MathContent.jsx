@@ -1205,6 +1205,38 @@ function removeDuplicateImages(el) {
   });
 }
 
+function markFunctionGraphContent(root) {
+  if (!root) return;
+  const text = String(root.textContent || "").replace(/\s+/g, " ").toLowerCase();
+  if (/график\w*\s+функц|функц\w*\s+.*график/.test(text)) {
+    root.classList?.add("math-content--function-graphs");
+  }
+}
+
+function markStandaloneTaskImages(root) {
+  if (!root || typeof document === "undefined") return;
+  root.querySelectorAll("img").forEach((img) => {
+    if (
+      img.classList.contains("oge-math-fipi-inline-letter") ||
+      img.classList.contains("oge-math-fipi-inline-frac") ||
+      img.closest(".oge-math-fipi-formula, mjx-container, .math-inline, .math-display")
+    ) {
+      return;
+    }
+
+    const host = img.closest("figure, p, div.task-html-block, div");
+    if (!host) return;
+    const onlyImageLike =
+      host.querySelectorAll("img").length === 1 &&
+      host.querySelectorAll("table, mjx-container, .math-inline, .math-display").length === 0 &&
+      String(host.textContent || "").trim().length === 0;
+
+    if (onlyImageLike || img.classList.contains("oge-math-fipi-diagram")) {
+      img.classList.add("task-standalone-illustration");
+    }
+  });
+}
+
 function decorateVectorText(root) {
   if (!root || typeof document === "undefined") return;
   const wholeText = root.textContent || "";
@@ -1417,6 +1449,8 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
       }
       removeDuplicateRoadGraphImages(el, egeInf1Enhance);
       removeDuplicateImages(el);
+      markFunctionGraphContent(el);
+      markStandaloneTaskImages(el);
       decorateVectorText(el);
 
       // ДОПОЛНИТЕЛЬНАЯ ЗАЧИСТКА: если это 1-е задание, принудительно удаляем
@@ -1531,6 +1565,8 @@ export function prepareBankTaskDisplayHtml(raw, options = {}) {
       }
     }
     removeDuplicateImages(el);
+    markFunctionGraphContent(el);
+    markStandaloneTaskImages(el);
     decorateVectorText(el);
     polishBankTaskTables(el);
     decorateFipiTaskImages(el);
