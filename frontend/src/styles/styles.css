@@ -8566,6 +8566,8 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .exam-page .exam-task-card.task-alg .task-text img,
 .exam-page .exam-task-card.task-alg .exam-task-card__text figure img,
 .exam-page .exam-task-card.task-alg .exam-task-card__text img.oge-math-fipi-diagram,
+.exam-page[data-level="ege"][data-subject="math"] .task-text img:not(.oge-math-fipi-inline-letter):not(.oge-math-fipi-inline-frac):not(.oge-math-fipi-bitmap),
+.exam-page[data-level="ege"][data-subject="math"] .exam-task-card__text img:not(.oge-math-fipi-inline-letter):not(.oge-math-fipi-inline-frac):not(.oge-math-fipi-bitmap),
 .all-tasks-item__html.task-geom img,
 .all-tasks-item__html.task-geom figure img,
 .all-tasks-item__html.task-geom figure.image img,
@@ -8583,7 +8585,9 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .all-tasks-item__html .task-alg figure.image img,
 .all-tasks-item--alg .all-tasks-item__html img,
 .all-tasks-item--alg .all-tasks-item__html figure img,
-.all-tasks-item--alg .all-tasks-item__html figure.image img {
+.all-tasks-item--alg .all-tasks-item__html figure.image img,
+.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__html img:not(.oge-math-fipi-inline-letter):not(.oge-math-fipi-inline-frac):not(.oge-math-fipi-bitmap),
+.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__html figure img:not(.oge-math-fipi-inline-letter):not(.oge-math-fipi-inline-frac):not(.oge-math-fipi-bitmap) {
     display: block !important;
     margin: 0 auto !important;
     width: min(400px, 90vw) !important;
@@ -8700,69 +8704,7 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     font-size: 1.325em !important;
 }
 
-/* ЕГЭ профильная математика: картинки как в геометрии ОГЭ/математики. */
-.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__html img,
-.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__html figure img,
-.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__html figure.image img,
-.all-tasks-page[data-level="ege"][data-subject="math"] .task-img-zoomable img,
-.exam-page[data-level="ege"][data-subject="math"] .task-text img,
-.exam-page[data-level="ege"][data-subject="math"] .task-text figure img,
-.exam-page[data-level="ege"][data-subject="math"] .task-text figure.image img,
-.exam-page[data-level="ege"][data-subject="math"] .exam-task-card__text img,
-.exam-page[data-level="ege"][data-subject="math"] .task-img-zoomable img {
-    display: block !important;
-    width: min(400px, 90vw) !important;
-    max-width: 100% !important;
-    height: min(400px, 90vw) !important;
-    max-height: min(400px, 90vw) !important;
-    margin: 0.65rem auto 0.45rem !important;
-    object-fit: contain !important;
-    object-position: center !important;
-}
-
-.all-tasks-page[data-level="ege"][data-subject="math"] .task-img-zoomable,
-.exam-page[data-level="ege"][data-subject="math"] .task-img-zoomable {
-    display: block !important;
-    width: min(400px, 90vw) !important;
-    max-width: 100% !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-}
-
-/* ЕГЭ профильная математика: отдельные рисунки под условием крупнее, inline-формулы не трогаем. */
-.all-tasks-page[data-level="ege"][data-subject="math"] img.task-standalone-illustration,
-.all-tasks-page[data-level="ege"][data-subject="math"] .task-img-zoomable img.task-standalone-illustration,
-.exam-page[data-level="ege"][data-subject="math"] img.task-standalone-illustration,
-.exam-page[data-level="ege"][data-subject="math"] .task-img-zoomable img.task-standalone-illustration {
-    display: block !important;
-    width: min(250px, 100%) !important;
-    max-width: 100% !important;
-    height: min(250px, 70vw) !important;
-    max-height: 250px !important;
-    margin: 0.65rem auto 0.45rem !important;
-    object-fit: contain !important;
-    object-position: center !important;
-}
-
-/* «Графики функций» в профильной математике: дополнительно покрываем случаи без отдельного img-класса. */
-.all-tasks-page[data-level="ege"][data-subject="math"] .math-content--function-graphs img,
-.all-tasks-page[data-level="ege"][data-subject="math"] .math-content--function-graphs figure img,
-.all-tasks-page[data-level="ege"][data-subject="math"] .math-content--function-graphs .task-img-zoomable img,
-.exam-page[data-level="ege"][data-subject="math"] .math-content--function-graphs img,
-.exam-page[data-level="ege"][data-subject="math"] .math-content--function-graphs figure img,
-.exam-page[data-level="ege"][data-subject="math"] .math-content--function-graphs .task-img-zoomable img {
-    width: min(250px, 100%) !important;
-    max-width: 100% !important;
-    height: min(250px, 70vw) !important;
-    max-height: 250px !important;
-    object-fit: contain !important;
-}
-
-.all-tasks-page[data-level="ege"][data-subject="math"] .math-content--function-graphs .task-img-zoomable,
-.exam-page[data-level="ege"][data-subject="math"] .math-content--function-graphs .task-img-zoomable {
-    width: min(250px, 100%) !important;
-    max-width: 100% !important;
-}
+/* ЕГЭ профильная математика: все картинки как в геометрии (кроме явно-inline). */
 
 .math-vector-inline {
     position: relative;
