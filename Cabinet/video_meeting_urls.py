@@ -1,0 +1,46 @@
+from django.urls import path
+
+from . import video_meeting_api
+
+urlpatterns = [
+    path(
+        "for-event/<int:event_id>/",
+        video_meeting_api.VideoMeetingForEventView.as_view(),
+        name="video_meeting_for_event",
+    ),
+    path(
+        "<uuid:meeting_uuid>/",
+        video_meeting_api.VideoMeetingDetailView.as_view(),
+        name="video_meeting_detail",
+    ),
+    path(
+        "<uuid:meeting_uuid>/join-config/",
+        video_meeting_api.VideoMeetingJoinConfigView.as_view(),
+        name="video_meeting_join_config",
+    ),
+    path(
+        "<uuid:meeting_uuid>/start/",
+        video_meeting_api.VideoMeetingStartView.as_view(),
+        name="video_meeting_start",
+    ),
+    path(
+        "<uuid:meeting_uuid>/finish/",
+        video_meeting_api.VideoMeetingFinishView.as_view(),
+        name="video_meeting_finish",
+    ),
+    path(
+        "<uuid:meeting_uuid>/attendance/join/",
+        video_meeting_api.VideoMeetingAttendanceJoinView.as_view(),
+        name="video_meeting_attendance_join",
+    ),
+    path(
+        "<uuid:meeting_uuid>/attendance/leave/",
+        video_meeting_api.VideoMeetingAttendanceLeaveView.as_view(),
+        name="video_meeting_attendance_leave",
+    ),
+    path(
+        "<uuid:meeting_uuid>/attendance/",
+        video_meeting_api.VideoMeetingAttendanceListView.as_view(),
+        name="video_meeting_attendance_list",
+    ),
+]

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import SearchByIdForm from "../components/SearchByIdForm";
 import MathContent from "../components/MathContent";
+import { isOgeInformaticsTask, isOgeRusTask13 } from "../utils/isOgeInformaticsTask";
 import StateView from "../components/StateView";
 import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
 import { devApiBase } from "../utils/devApiBase";
@@ -107,7 +108,8 @@ function SearchTaskPage() {
                     html={t.task_text || ""} 
                     className="search-task-condition" 
                     ogeMathChoiceEnhance={t.subject === "math"}
-                    ogeInf13Enhance={t.task_number === 13}
+                    ogeInf13Enhance={isOgeInformaticsTask(t.level, t.subject, t.task_number, 13)}
+                    ogeRus13Enhance={isOgeRusTask13(t.level, t.subject, t.task_number)}
                     ogeInf6Enhance={t.task_number === 6}
                     egeInfFileEnhance={true}
                     egeInf22Enhance={t.task_number === 22}

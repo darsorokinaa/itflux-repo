@@ -6,6 +6,7 @@ from .models import (
     AIUsage,
     EventReminderLog,
     LessonPlanEnrollment,
+    MeetingAttendance,
     PromoCode,
     PromoCodeUsage,
     ReferralLink,
@@ -38,6 +39,7 @@ from .models import (
     ScheduleEventChangeLog,
     ScheduleEventParticipant,
     ScheduleEventSeries,
+    VideoMeeting,
     Student,
     StudentGroup,
     StudentInvitation,
@@ -407,6 +409,98 @@ class ScheduleEventChangeLogAdmin(admin.ModelAdmin):
     list_filter = ("change_type",)
     readonly_fields = ("event", "series", "changed_by", "change_type", "old_data", "new_data", "message", "created_at")
     ordering = ("-created_at",)
+
+
+class MeetingAttendanceInline(admin.TabularInline):
+    model = MeetingAttendance
+    extra = 0
+    readonly_fields = (
+        "user",
+        "joined_at",
+        "left_at",
+        "duration_seconds",
+        "jitsi_participant_id",
+        "created_at",
+    )
+    can_delete = False
+
+
+@admin.register(VideoMeeting)
+class VideoMeetingAdmin(admin.ModelAdmin):
+    list_display = (
+        "uuid",
+        "schedule_event",
+        "teacher_name",
+        "status",
+        "room_name",
+        "planned_starts_at",
+        "actual_started_at",
+        "actual_finished_at",
+        "attendance_count",
+        "created_at",
+    )
+    list_filter = ("status", "created_at")
+    search_fields = (
+        "uuid",
+        "room_name",
+        "schedule_event__title",
+        "schedule_event__owner__username",
+        "created_by__username",
+    )
+    readonly_fields = (
+        "uuid",
+        "room_name",
+        "created_at",
+        "updated_at",
+        "actual_started_at",
+        "actual_finished_at",
+    )
+    inlines = [MeetingAttendanceInline]
+    ordering = ("-created_at",)
+
+    @admin.display(description="Учитель")
+    def teacher_name(self, obj):
+        owner = obj.schedule_event.owner
+        profile = getattr(owner, "profile", None)
+        if profile:
+            return profile.get_display_name()
+        return owner.get_full_name() or owner.username
+
+    @admin.display(description="Плановое время", ordering="schedule_event__starts_at")
+    def planned_starts_at(self, obj):
+        return obj.schedule_event.starts_at
+
+    @admin.display(description="Подключений")
+    def attendance_count(self, obj):
+        return obj.attendance_sessions.count()
+
+
+@admin.register(MeetingAttendance)
+class MeetingAttendanceAdmin(admin.ModelAdmin):
+    list_display = (
+        "user",
+        "meeting_lesson",
+        "joined_at",
+        "left_at",
+        "duration_seconds",
+        "jitsi_participant_id",
+    )
+    list_filter = ("joined_at", "meeting__status")
+    search_fields = (
+        "user__username",
+        "user__email",
+        "user__first_name",
+        "user__last_name",
+        "meeting__room_name",
+        "meeting__schedule_event__title",
+        "jitsi_participant_id",
+    )
+    readonly_fields = ("created_at", "duration_seconds")
+    ordering = ("-joined_at",)
+
+    @admin.display(description="Урок")
+    def meeting_lesson(self, obj):
+        return obj.meeting.schedule_event.title
 
 
 @admin.register(Notification)

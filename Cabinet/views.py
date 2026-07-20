@@ -448,6 +448,7 @@ def api_schedule_create(request):
     is_online = fmt in ("online", "онлайн")
     telemost_url = (data.get("telemost_url") or data.get("link") or "").strip()
     telemost_auto = data.get("telemost_auto_create") is True
+    jitsi_auto = data.get("jitsi_auto_create") is True
 
     if is_online and not telemost_url and telemost_auto and telemost_auto_create_enabled():
         telemost_url, telemost_error = _create_telemost_link_for_user(
@@ -463,9 +464,19 @@ def api_schedule_create(request):
                 "error": f"Не удалось создать ссылку на звонок: {telemost_error or 'нет ссылки'}",
             }, status=502)
 
+    # Manual Telemost URL wins; otherwise auto-Jitsi when requested.
+    if telemost_url:
+        meeting_provider = "yandex_telemost"
+        jitsi_auto = False
+    elif is_online and jitsi_auto:
+        meeting_provider = "jitsi"
+    else:
+        meeting_provider = "none"
+
     from datetime import datetime as dt
 
     from .schedule_service import check_conflicts, create_series, create_single_event
+    from .video_meeting_service import get_or_create_meeting_for_event
 
     recurrence_type = (data.get("recurrence_type") or data.get("repeat_type") or "none").strip()
     student_ids = data.get("student_ids") or ([data["student_id"]] if data.get("student_id") else None)
@@ -494,6 +505,12 @@ def api_schedule_create(request):
     if event_type in ("group", "individual"):
         event_type = "group_lesson" if event_type == "group" else "individual_lesson"
 
+    def _ensure_jitsi_meetings(created_events):
+        if not (is_online and jitsi_auto):
+            return
+        for ev in created_events:
+            get_or_create_meeting_for_event(event=ev, created_by=request.user)
+
     if recurrence_type and recurrence_type != "none":
         start_date = starts_at.date()
         series_data = {
@@ -514,7 +531,7 @@ def api_schedule_create(request):
             "recurrence_until": data.get("recurrence_until") or data.get("repeat_until"),
             "recurrence_count": data.get("recurrence_count") or data.get("repeat_count"),
             "meeting_url": telemost_url if is_online else "",
-            "meeting_provider": "yandex_telemost" if telemost_url else "none",
+            "meeting_provider": meeting_provider,
             "format": "online" if is_online else "offline",
             "teacher_comment": (data.get("teacher_comment") or data.get("comment") or "").strip(),
             "materials": (data.get("materials") or "").strip(),
@@ -534,6 +551,7 @@ def api_schedule_create(request):
         first = events[0] if events else None
         if not first:
             return JsonResponse({"ok": False, "error": "Не удалось создать занятия серии."}, status=400)
+        _ensure_jitsi_meetings(events)
         return JsonResponse({
             "ok": True,
             "event": schedule_event_to_json(first),
@@ -552,7 +570,7 @@ def api_schedule_create(request):
             "event_type": event_type,
             "format": ScheduleEvent.Format.ONLINE if is_online else ScheduleEvent.Format.OFFLINE,
             "telemost_url": telemost_url if is_online else "",
-            "meeting_provider": "yandex_telemost" if telemost_url else "none",
+            "meeting_provider": meeting_provider,
             "audience": (data.get("audience") or "").strip(),
             "materials": (data.get("materials") or "").strip(),
             "teacher_comment": (data.get("teacher_comment") or data.get("comment") or "").strip(),
@@ -571,6 +589,7 @@ def api_schedule_create(request):
     if data.get("audience"):
         event.audience = data.get("audience")
         event.save(update_fields=["audience"])
+    _ensure_jitsi_meetings([event])
     return JsonResponse({"ok": True, "event": schedule_event_to_json(event)}, status=201)
 
 

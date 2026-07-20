@@ -60,6 +60,15 @@ export default function CabinetNotificationsBell({ studentMode = false }) {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
+  useEffect(() => {
+    const openNotifications = () => {
+      setOpen(true);
+      load();
+    };
+    window.addEventListener("cabinet:open-notifications", openNotifications);
+    return () => window.removeEventListener("cabinet:open-notifications", openNotifications);
+  }, [load]);
+
   const handleRead = async (id) => {
     await markNotificationRead(id, { student: studentMode });
     setItems((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));

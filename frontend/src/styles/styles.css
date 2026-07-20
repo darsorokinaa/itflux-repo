@@ -8930,6 +8930,24 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     color: inherit !important;
 }
 
+.exam-page .task-text table.oge-rus-13-essay-table td:last-child,
+.exam-page .task-text table.oge-rus-13-essay-table th:last-child,
+.task-text table.oge-rus-13-essay-table td:last-child,
+.task-text table.oge-rus-13-essay-table th:last-child {
+    text-align: left !important;
+    font-weight: 400 !important;
+    vertical-align: top !important;
+}
+
+.exam-page .task-text table.oge-rus-13-essay-table td:first-child,
+.exam-page .task-text table.oge-rus-13-essay-table th:first-child,
+.task-text table.oge-rus-13-essay-table td:first-child,
+.task-text table.oge-rus-13-essay-table th:first-child {
+    width: 56px !important;
+    min-width: 56px !important;
+    white-space: nowrap !important;
+}
+
 /* Двухколоночные нумерованные таблички в условии (например 1) / 18):
    показываем как аккуратную мини-таблицу, а не растянутую «сырость». */
 .exam-page .task-text table:has(tr td:nth-child(2)):not(:has(tr td:nth-child(3))):not(:has(thead)):not(.ege-inf-1-road-table):not(.ege-inf-22-process-table):not(.wb-layout-table) {

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { displayName } from "../pages/CabinetAuthPage";
-import CabinetIcon from "./CabinetIcons";
 import { CabinetEmptyState } from "./CabinetSectionUi";
 import { fetchDashboard } from "../utils/cabinetAuth";
+import "./styles/teacher-dashboard.css";
 
 const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 const MONTHS = [
@@ -11,98 +11,19 @@ const MONTHS = [
   "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
 ];
 
-const METRIC_DEFS = [
-  { key: "active_students_count", label: "Ученики", color: "#2563EB", icon: "students", tone: "brand" },
-  { key: "pending_reviews_count", label: "На проверке", color: "#F59E0B", icon: "check", tone: "warn" },
-  { key: "drafts_count", label: "Черновики", color: "#64748B", icon: "pencil", tone: "draft" },
-  { key: "today_lessons_count", label: "Уроки", color: "#7C3AED", icon: "lessons", tone: "lav" },
-];
-
-const STATUS_COLORS = {
-  success: "#10B981",
-  info: "#2563EB",
-  warn: "#F59E0B",
-  sky: "#3B82F6",
-  danger: "#EF4444",
-};
-
-
-function formatTimeUntil(timeStr, now) {
-  const [hours, minutes] = timeStr.split(":").map(Number);
-  const lessonAt = new Date(now);
-  lessonAt.setHours(hours, minutes, 0, 0);
-
-  const diffMs = lessonAt.getTime() - now.getTime();
-  if (diffMs <= 0) return "сейчас";
-
-  const totalMins = Math.round(diffMs / 60000);
-  if (totalMins < 60) return `через ${totalMins} мин`;
-
-  const h = Math.floor(totalMins / 60);
-  const m = totalMins % 60;
-  if (m === 0) return `через ${h} ч`;
-  return `через ${h} ч ${m} мин`;
-}
-
-function buildCalendarDays(date, eventDays = new Set()) {
-  const year = date.getFullYear();
-  const month = date.getMonth();
-  const today = date.getDate();
-  const firstDay = new Date(year, month, 1);
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const startOffset = (firstDay.getDay() + 6) % 7;
-  const cells = [];
-
-  for (let i = 0; i < startOffset; i += 1) cells.push(null);
-  for (let day = 1; day <= daysInMonth; day += 1) {
-    cells.push({
-      day,
-      isToday: day === today,
-      hasEvent: eventDays.has(day),
-    });
-  }
-  return cells;
-}
-
-function MetricRing({ pct, color }) {
-  const size = 40;
-  const stroke = 4;
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  const offset = c - (pct / 100) * c;
-
-  return (
-    <div className="cb-metric-ring" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#EEF2F7" strokeWidth={stroke} />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          stroke={color}
-          strokeWidth={stroke}
-          strokeDasharray={c}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        />
-      </svg>
-      <span className="cb-metric-ring__pct" style={{ color }}>{pct}%</span>
-    </div>
-  );
+function greetingForHour(hour) {
+  if (hour < 5) return "Доброй ночи";
+  if (hour < 12) return "Доброе утро";
+  if (hour < 18) return "Добрый день";
+  return "Добрый вечер";
 }
 
 function formatEventTime(isoString) {
   if (!isoString) return "";
-  const d = new Date(isoString);
-  return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-}
-
-function initialsFromName(name) {
-  const parts = (name || "").trim().split(/\s+/);
-  if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-  return (name || "?").slice(0, 2).toUpperCase();
+  return new Date(isoString).toLocaleTimeString("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function formatSubmittedWhen(isoString) {
@@ -114,95 +35,92 @@ function formatSubmittedWhen(isoString) {
   return `${d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })} · ${time}`;
 }
 
+function formatTimeUntil(timeStr, now) {
+  if (!timeStr) return "";
+  const [hours, minutes] = timeStr.split(":").map(Number);
+  const lessonAt = new Date(now);
+  lessonAt.setHours(hours, minutes, 0, 0);
+  const diffMs = lessonAt.getTime() - now.getTime();
+  if (diffMs <= 0) return "сейчас";
+  const totalMins = Math.round(diffMs / 60000);
+  if (totalMins < 60) return `через ${totalMins} мин`;
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  return m === 0 ? `через ${h} ч` : `через ${h} ч ${m} мин`;
+}
+
+function pluralRu(n, one, few, many) {
+  const abs = Math.abs(n) % 100;
+  const n1 = abs % 10;
+  if (abs > 10 && abs < 20) return many;
+  if (n1 === 1) return one;
+  if (n1 >= 2 && n1 <= 4) return few;
+  return many;
+}
+
+function buildCalendarDays(date, eventDays = new Set()) {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const today = date.getDate();
+  const firstDay = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const startOffset = (firstDay.getDay() + 6) % 7;
+  const prevMonthDays = new Date(year, month, 0).getDate();
+  const cells = [];
+
+  for (let i = 0; i < startOffset; i += 1) {
+    cells.push({ day: prevMonthDays - startOffset + i + 1, muted: true });
+  }
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push({
+      day,
+      isToday: day === today,
+      hasEvent: eventDays.has(day),
+    });
+  }
+  while (cells.length % 7 !== 0) {
+    cells.push({ day: cells.length - (startOffset + daysInMonth) + 1, muted: true });
+  }
+  return cells;
+}
+
 function mapPendingReview(item) {
-  const studentName = item.student_name || "Ученик";
   return {
     id: item.id,
-    title: item.title,
-    studentName,
+    title: item.title || "Работа",
+    studentName: item.student_name || "Ученик",
     typeLabel: item.source_type_label || item.source_type || "Работа",
     submittedAt: item.created_at,
-    initials: initialsFromName(studentName),
-    href: "/cabinet/review",
+    href: item.id ? `/cabinet/review/${item.id}` : "/cabinet/review",
   };
 }
 
-function PendingReviewRow({ item }) {
-  return (
-    <Link to={item.href} className="cb-pending-review">
-      <span className="cb-pending-review__avatar">{item.initials}</span>
-      <div className="cb-pending-review__body">
-        <div className="cb-pending-review__head">
-          <strong className="cb-pending-review__title">{item.title}</strong>
-          <span className="cb-pending-review__badge">На проверке</span>
-        </div>
-        <p className="cb-pending-review__meta">
-          {item.studentName}
-          {item.submittedAt ? ` · ${formatSubmittedWhen(item.submittedAt)}` : ""}
-        </p>
-      </div>
-      <span className="cb-pending-review__action cb-btn cb-btn--outline cb-btn--sm">
-        Проверить
-      </span>
-    </Link>
+function mapTodayLesson(ev, now) {
+  const time = formatEventTime(ev.starts_at);
+  const startsAt = ev.starts_at ? new Date(ev.starts_at) : null;
+  const endsAt = ev.ends_at ? new Date(ev.ends_at) : null;
+  const isCurrent = Boolean(
+    startsAt && endsAt && startsAt <= now && endsAt >= now,
   );
-}
-
-function PendingReviewSidebarRow({ item }) {
-  return (
-    <div className="cb-recent-item">
-      <span className="cb-recent-item__avatar">{item.initials}</span>
-      <div className="cb-recent-item__body">
-        <span className="cb-recent-item__name">{item.studentName}</span>
-        <span className="cb-recent-item__role">{item.title}</span>
-      </div>
-      <div className="cb-recent-item__actions">
-        <Link to={item.href} className="cb-recent-action" aria-label="Проверить">
-          <CabinetIcon name="check" />
-        </Link>
-        <Link to={item.href} className="cb-recent-action" aria-label="Открыть">
-          <CabinetIcon name="arrow" />
-        </Link>
-      </div>
-    </div>
+  const isSoon = Boolean(
+    startsAt && !isCurrent && startsAt > now && (startsAt - now) / 60000 <= 60,
   );
-}
-
-function HeroIllustration({ badges }) {
-  return (
-    <div className="cb-hero__visual" aria-hidden="true">
-      {badges.map((badge) => (
-        <span
-          key={badge.label}
-          className="cb-hero__badge"
-          style={{ top: badge.top, left: badge.left, right: badge.right }}
-        >
-          <CabinetIcon name={badge.icon} />
-          {badge.label}
-        </span>
-      ))}
-      <div className="cb-hero__illus">
-        <svg viewBox="0 0 200 160" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <ellipse cx="100" cy="148" rx="56" ry="8" fill="rgba(0,0,0,0.12)" />
-          <path d="M118 42c0-14-10-24-24-24s-24 10-24 24 10 24 24 24 24-10 24-24z" fill="#FCD9BD" />
-          <path d="M94 30c2-8 12-12 20-8 6 3 8 10 6 16-4-2-10-2-14 0-4-2-8-4-12-8z" fill="#1E293B" />
-          <path d="M70 52c-2 4-2 10 0 16 6 2 14 2 20 0 2-6 2-12 0-16-6-2-14-2-20 0z" fill="#FCD9BD" />
-          <rect x="58" y="72" width="84" height="68" rx="12" fill="#FFFFFF" opacity="0.95" />
-          <rect x="66" y="80" width="68" height="44" rx="6" fill="#DBEAFE" />
-          <rect x="72" y="88" width="24" height="4" rx="2" fill="#93C5FD" />
-          <rect x="72" y="96" width="40" height="3" rx="1.5" fill="#BFDBFE" />
-          <rect x="72" y="103" width="32" height="3" rx="1.5" fill="#BFDBFE" />
-          <path d="M82 128h36v6H82z" fill="#E2E8F0" />
-          <path d="M58 88c-8 4-14 14-16 26 4 2 10 4 16 4v-30z" fill="#4F46E5" />
-          <path d="M142 88c8 4 14 14 16 26-4 2-10 4-16 4V88z" fill="#4F46E5" />
-        </svg>
-      </div>
-    </div>
-  );
+  const ready = Boolean(ev.topic || ev.link || ev.plan_item_id);
+  return {
+    id: ev.id,
+    time,
+    title: ev.title || "Урок",
+    topic: ev.topic || "",
+    audience: ev.student_name || ev.group_title || ev.audience || "",
+    startsAt: ev.starts_at,
+    ready,
+    isCurrent: isCurrent || isSoon,
+    countdown: formatTimeUntil(time, now),
+  };
 }
 
 export default function CabinetDashboard() {
-  const { user, openGuide } = useOutletContext();
+  const { user } = useOutletContext();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -230,37 +148,97 @@ export default function CabinetDashboard() {
   );
   const calendarDays = useMemo(() => buildCalendarDays(today, eventDays), [today, eventDays]);
 
-  const metrics = useMemo(() => {
-    if (!data) return [];
-    return METRIC_DEFS.map((def) => ({
-      ...def,
-      value: data[def.key] ?? 0,
-      pct: Math.min(100, Math.max(0, (data[def.key] ?? 0) * 10)),
-    }));
-  }, [data]);
+  const todayLessons = useMemo(
+    () => (data?.today_events || [])
+      .map((ev) => mapTodayLesson(ev, today))
+      .sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt))),
+    [data?.today_events, today],
+  );
+
+  const pendingReviews = useMemo(
+    () => (data?.pending_reviews || []).map(mapPendingReview),
+    [data?.pending_reviews],
+  );
 
   const progressItems = data?.progress_overview || [];
-  const todayLessons = (data?.today_events || []).map((ev) => ({
-    time: formatEventTime(ev.starts_at),
-    title: ev.title,
-    topic: ev.topic || "",
-    startsAt: ev.starts_at,
-  }));
-  const pendingReviews = (data?.pending_reviews || []).map(mapPendingReview);
+  const upcomingActions = data?.upcoming_actions || [];
+  const draftsCount = data?.drafts_count ?? 0;
+  const lessonsCount = data?.today_lessons_count ?? todayLessons.length;
+  const reviewsCount = data?.pending_reviews_count ?? pendingReviews.length;
+  const homeworkToday = upcomingActions.length;
+  const firstLessonNote = todayLessons[0]
+    ? `первый в ${todayLessons[0].time}`
+    : "занятий нет";
 
-  const heroBadges = useMemo(() => {
-    if (!data) return [];
-    return [
-      { icon: "calendar", label: `${data.today_lessons_count} урока`, top: "14%", left: "4%" },
-      { icon: "check", label: `${data.pending_reviews_count} работ`, top: "58%", left: "2%" },
-      { icon: "book", label: `${data.drafts_count} черновика`, top: "22%", right: "8%" },
-    ];
-  }, [data]);
+  const dateLine = today.toLocaleDateString("ru-RU", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+  const subtitle = `${dateLine.charAt(0).toUpperCase()}${dateLine.slice(1)} · сегодня ${lessonsCount} ${pluralRu(lessonsCount, "урок", "урока", "уроков")} и ${reviewsCount} ${pluralRu(reviewsCount, "работа", "работы", "работ")} на проверке`;
 
-  const lessonCountdowns = useMemo(
-    () => todayLessons.map((lesson) => formatTimeUntil(lesson.time, today)),
-    [todayLessons, today],
-  );
+  const attentionItems = useMemo(() => {
+    const items = [];
+    if (reviewsCount > 0) {
+      items.push({
+        important: true,
+        title: "Проверить сданные работы",
+        text: `${reviewsCount} ${pluralRu(reviewsCount, "работа ждёт", "работы ждут", "работ ждут")} ручной проверки.`,
+        href: "/cabinet/review",
+        action: "Начать проверку →",
+      });
+    }
+    if (draftsCount > 0) {
+      items.push({
+        important: false,
+        title: "Незавершённые черновики",
+        text: `${draftsCount} ${pluralRu(draftsCount, "черновик", "черновика", "черновиков")} уроков, планов или интерактивов.`,
+        href: "/cabinet/plans",
+        action: "Открыть черновики →",
+      });
+    }
+    const unfinished = todayLessons.find((lesson) => !lesson.ready);
+    if (unfinished) {
+      items.push({
+        important: true,
+        title: `Доделать урок в ${unfinished.time}`,
+        text: unfinished.topic
+          ? `${unfinished.title} · ${unfinished.topic}`
+          : `${unfinished.title} · тема или материалы ещё не указаны`,
+        href: "/cabinet/schedule",
+        action: "Доделать →",
+      });
+    }
+    if (progressItems.length === 0 && !items.length) {
+      items.push({
+        important: false,
+        title: "Добавьте учеников",
+        text: "Когда появятся ученики и занятия, здесь будут задачи на сегодня.",
+        href: "/cabinet/students",
+        action: "Открыть учеников →",
+      });
+    }
+    return items.slice(0, 3);
+  }, [reviewsCount, draftsCount, todayLessons, progressItems.length]);
+
+  const notes = useMemo(() => {
+    const list = [];
+    todayLessons.slice(0, 2).forEach((lesson) => {
+      list.push({
+        title: lesson.audience || lesson.title,
+        text: lesson.topic
+          ? `Тема: ${lesson.topic}`
+          : `Урок в ${lesson.time} · ${lesson.countdown}`,
+      });
+    });
+    pendingReviews.slice(0, 2 - list.length).forEach((review) => {
+      list.push({
+        title: review.studentName,
+        text: `${review.title} · ${formatSubmittedWhen(review.submittedAt) || "на проверке"}`,
+      });
+    });
+    return list;
+  }, [todayLessons, pendingReviews]);
 
   if (loading) {
     return <p className="cb-loading">Загрузка главной…</p>;
@@ -276,201 +254,289 @@ export default function CabinetDashboard() {
     );
   }
 
-  const subtitle = data
-    ? `${data.today_lessons_count} урока · ${data.pending_reviews_count} на проверке`
-    : "";
-
   return (
-    <div className="cb-dashboard-grid">
-      <div className="cb-main-col">
-        <section className="cb-hero cb-block-hero">
-          <div className="cb-hero__content">
-            <h2 className="cb-hero__title">Привет, {firstName}!</h2>
-            <p className="cb-hero__role">Учитель · Цифровой поток</p>
-            {subtitle ? <p className="cb-hero__subtitle">{subtitle}</p> : null}
-            <div className="cb-hero__actions">
-              <Link to="/cabinet/schedule" className="cb-hero__btn cb-hero__btn--primary">
-                Урок
-              </Link>
-              <Link to="/cabinet/review" className="cb-hero__btn cb-hero__btn--ghost">
-                Проверка
-              </Link>
-            </div>
-          </div>
-          <HeroIllustration badges={heroBadges} />
-        </section>
-
-        <section className="cb-dash-section cb-block-metrics">
-          <h3 className="cb-dash-section__title">Сводка дня</h3>
-          <div className="cb-metrics cb-metrics--grid">
-            {metrics.map((m) => (
-              <div key={m.label} className={`cb-metric cb-metric--widget cb-metric--${m.tone}`}>
-                <div className={`cb-metric__icon cb-metric__icon--${m.tone}`}>
-                  <CabinetIcon name={m.icon} />
-                </div>
-                <div className="cb-metric__text">
-                  <span className="cb-metric__value">{m.value}</span>
-                  <span className="cb-metric__label">{m.label}</span>
-                </div>
-                <MetricRing pct={m.pct} color={m.color} />
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="cb-widget cb-block-pending-reviews">
-          <div className="cb-widget__head">
-            <h3 className="cb-widget__title">Сданные работы</h3>
-            <Link to="/cabinet/review" className="cb-widget__link">
-              {pendingReviews.length > 0
-                ? `Все (${data?.pending_reviews_count ?? pendingReviews.length})`
-                : "Проверка"}
-            </Link>
-          </div>
-          <div className="cb-pending-reviews">
-            {pendingReviews.length === 0 ? (
-              <p className="cb-widget__empty">Нет работ на проверку</p>
-            ) : (
-              pendingReviews.map((item) => (
-                <PendingReviewRow key={item.id} item={item} />
-              ))
-            )}
-          </div>
-        </section>
-
-        <section className="cb-widget cb-widget--progress cb-block-progress">
-          <div className="cb-widget__head">
-            <h3 className="cb-widget__title">Прогресс обучения</h3>
-            <Link to="/cabinet/students" className="cb-widget__link">Смотреть всех</Link>
-          </div>
-          <div className="cb-progress-cards">
-            {progressItems.length === 0 ? (
-              <p className="cb-widget__empty">Нет данных</p>
-            ) : (
-              progressItems.map((item) => (
-              <Link key={item.id || item.name} to={item.href || "/cabinet/students"} className="cb-progress-card">
-                <div className="cb-progress-card__head">
-                  <div className="cb-progress-card__title-row">
-                    <span className="cb-status-dot cb-status-dot--info" />
-                    <span className="cb-progress-card__name">{item.name}</span>
-                  </div>
-                  <span className="cb-progress-card__pct">{item.progress || 0}%</span>
-                </div>
-                <p className="cb-progress-card__role">{item.role}</p>
-                <div className="cb-progress-card__bar">
-                  <div
-                    className="cb-progress-card__fill"
-                    style={{
-                      width: `${item.progress || 0}%`,
-                      background: STATUS_COLORS.info,
-                    }}
-                  />
-                </div>
-              </Link>
-              ))
-            )}
-          </div>
-        </section>
-
-        <div className="cb-guide-compact cb-block-guide">
-          <span className="cb-guide-compact__label">Как начать:</span>
-          <span className="cb-guide-compact__steps">
-            ученики → урок → задание → проверка
-          </span>
-          <button
-            type="button"
-            className="cb-btn cb-btn--outline cb-btn--sm cb-guide-compact__open"
-            onClick={openGuide}
-          >
-            Инструкция
-          </button>
+    <main className="td-page">
+      <div className="td-topbar">
+        <div className="td-topbar__copy">
+          <h1>{greetingForHour(today.getHours())}, {firstName}!</h1>
+          <p>{subtitle}</p>
+        </div>
+        <div className="td-topbar-actions">
+          <Link to="/cabinet/schedule" className="td-button td-button-primary">＋ Создать урок</Link>
+          <Link to="/cabinet/students" className="td-button td-button-glass">Выдать задание</Link>
+          <Link to="/cabinet/students" className="td-button td-button-glass">Добавить ученика</Link>
         </div>
       </div>
 
-      <aside className="cb-sidebar-col">
-        <div className="cb-widget cb-widget--sidebar cb-block-calendar">
-          <div className="cb-widget__head">
-            <h3 className="cb-widget__title">{MONTHS[today.getMonth()]} {today.getFullYear()}</h3>
-          </div>
-          <div className="cb-cal-body">
-            <div className="cb-cal-grid">
-              {WEEKDAYS.map((d) => (
-                <span key={d} className="cb-cal-weekday">{d}</span>
-              ))}
-              {calendarDays.map((cell, i) => (
-                cell ? (
-                  <span
-                    key={i}
-                    className={[
-                      "cb-cal-day",
-                      cell.isToday ? "cb-cal-day--today" : "",
-                      i % 7 >= 5 ? "cb-cal-day--weekend" : "",
-                      cell.hasEvent ? "cb-cal-day--event" : "",
-                    ].filter(Boolean).join(" ")}
-                  >
-                    {cell.day}
-                    {cell.hasEvent ? <i className="cb-cal-day__dot" /> : null}
-                  </span>
+      <div className="td-workspace">
+        <section className="td-main-column">
+          <article className="td-card td-today-board">
+            <div className="td-section-head">
+              <div>
+                <h2>Сегодня</h2>
+                <p>Вся основная информация собрана в одном рабочем блоке.</p>
+              </div>
+              <Link to="/cabinet/schedule" className="td-link">Открыть расписание →</Link>
+            </div>
+
+            <div className="td-today-status">
+              <div className="td-status">
+                <span className="td-status-label">Уроков сегодня</span>
+                <strong className="td-status-value">{lessonsCount}</strong>
+                <span className="td-status-note">{firstLessonNote}</span>
+              </div>
+              <div className={`td-status${reviewsCount > 0 ? " is-urgent" : ""}`}>
+                <span className="td-status-label">Работ на проверке</span>
+                <strong className="td-status-value">{reviewsCount}</strong>
+                <span className="td-status-note">
+                  {reviewsCount > 0 ? "есть очередь проверки" : "очередь пуста"}
+                </span>
+              </div>
+              <div className="td-status">
+                <span className="td-status-label">Домашних заданий сегодня</span>
+                <strong className="td-status-value">{homeworkToday}</strong>
+                <span className="td-status-note">
+                  {homeworkToday > 0 ? "ближайшие сроки" : "активных сроков нет"}
+                </span>
+              </div>
+              <div className={`td-status${draftsCount === 0 ? " is-good" : ""}`}>
+                <span className="td-status-label">Черновики</span>
+                <strong className="td-status-value">{draftsCount}</strong>
+                <span className="td-status-note">
+                  {draftsCount === 0 ? "всё в порядке" : "нужно доделать"}
+                </span>
+              </div>
+            </div>
+
+            <div className="td-primary-grid">
+              <section className="td-schedule-panel">
+                <div className="td-section-head">
+                  <div>
+                    <h3>Расписание на сегодня</h3>
+                    <p>Время, ученик, тема и готовность урока.</p>
+                  </div>
+                  <Link to="/cabinet/schedule" className="td-small-button">＋ Добавить урок</Link>
+                </div>
+
+                {todayLessons.length === 0 ? (
+                  <div className="td-empty">
+                    <h4>На сегодня уроков нет</h4>
+                    <p>Запланируйте занятие в расписании — оно появится здесь.</p>
+                    <Link to="/cabinet/schedule" className="td-small-button">Открыть расписание</Link>
+                  </div>
                 ) : (
-                  <span key={i} className="cb-cal-day cb-cal-day--empty" />
-                )
+                  <div className="td-schedule-list">
+                    {todayLessons.map((lesson) => (
+                      <article
+                        key={lesson.id || `${lesson.time}-${lesson.title}`}
+                        className={`td-lesson${lesson.isCurrent ? " is-current" : ""}`}
+                      >
+                        <div className="td-lesson-time">{lesson.time}</div>
+                        <div>
+                          <h4>
+                            {lesson.audience
+                              ? `${lesson.audience} · ${lesson.title}`
+                              : lesson.title}
+                          </h4>
+                          <p>
+                            {lesson.topic
+                              ? `${lesson.topic} · ${lesson.countdown}`
+                              : `Тема пока не указана · ${lesson.countdown}`}
+                          </p>
+                        </div>
+                        <div className="td-lesson-meta">
+                          <span className={`td-chip${lesson.ready ? "" : " is-yellow"}`}>
+                            {lesson.ready ? "Готово" : "Не всё готово"}
+                          </span>
+                          <Link to="/cabinet/schedule" className="td-lesson-action">
+                            {lesson.ready ? "Открыть урок →" : "Доделать →"}
+                          </Link>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <aside className="td-review-panel">
+                <div className="td-section-head">
+                  <div>
+                    <h3>Нужно проверить</h3>
+                    <p>Работы отсортированы по срочности.</p>
+                  </div>
+                  <Link to="/cabinet/review" className="td-link">Все работы →</Link>
+                </div>
+
+                {pendingReviews.length === 0 ? (
+                  <div className="td-empty td-empty--compact">
+                    <h4>Нет работ на проверку</h4>
+                    <p>Когда ученики сдадут задания, они появятся здесь.</p>
+                  </div>
+                ) : (
+                  <div className="td-review-list">
+                    {pendingReviews.slice(0, 5).map((item, index) => (
+                      <Link key={item.id} to={item.href} className="td-review-item">
+                        <div className="td-review-icon">{index + 1}</div>
+                        <div>
+                          <h4>{item.studentName} · {item.title}</h4>
+                          <p>
+                            {item.typeLabel}
+                            {item.submittedAt ? ` · ${formatSubmittedWhen(item.submittedAt)}` : ""}
+                          </p>
+                        </div>
+                        <div className="td-review-count">1</div>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+
+                <div className="td-review-footer">
+                  <Link to="/cabinet/review" className="td-button">Начать проверку</Link>
+                </div>
+              </aside>
+            </div>
+          </article>
+
+          <article className="td-card td-attention-card">
+            <div className="td-section-head">
+              <div>
+                <h3>Требует внимания</h3>
+                <p>Только действия, которые действительно нужно выполнить сегодня.</p>
+              </div>
+            </div>
+            <div className="td-attention-grid">
+              {attentionItems.map((item) => (
+                <div
+                  key={item.title}
+                  className={`td-attention-item${item.important ? " is-important" : ""}`}
+                >
+                  <h4>{item.title}</h4>
+                  <p>{item.text}</p>
+                  <Link to={item.href}>{item.action}</Link>
+                </div>
               ))}
             </div>
-          </div>
-        </div>
+          </article>
 
-        <div className="cb-widget cb-widget--sidebar cb-block-lessons">
-          <div className="cb-widget__head">
-            <h3 className="cb-widget__title">Уроки сегодня</h3>
-          </div>
-          <div className="cb-lessons-mini cb-lessons-mini--timeline">
-            {todayLessons.length === 0 ? (
-              <p className="cb-widget__empty">Уроков пока нет</p>
-            ) : (
-              todayLessons.map((lesson, index) => (
-              <Link
-                key={`${lesson.time}-${lesson.title}`}
-                to="/cabinet/schedule"
-                className={`cb-lessons-mini__row${index === todayLessons.length - 1 ? " cb-lessons-mini__row--last" : ""}`}
-              >
-                <span className="cb-lessons-mini__rail">
-                  <span className="cb-lessons-mini__time">{lesson.time}</span>
-                  <span className="cb-lessons-mini__dot" />
+          <article className="td-card td-analytics-card">
+            <div className="td-section-head">
+              <div>
+                <h3>Кратко</h3>
+                <p>Аналитика находится ниже рабочего блока и не мешает ежедневным задачам.</p>
+              </div>
+              <Link to="/cabinet/reports" className="td-link">Подробный отчёт →</Link>
+            </div>
+            <div className="td-analytics-grid">
+              <div className="td-metric">
+                <span>Активных учеников</span>
+                <strong>{data?.active_students_count ?? 0}</strong>
+                <small>В кабинете учителя</small>
+              </div>
+              <div className="td-metric">
+                <span>Уроков сегодня</span>
+                <strong>{lessonsCount}</strong>
+                <small>{firstLessonNote}</small>
+              </div>
+              <div className="td-metric">
+                <span>На проверке</span>
+                <strong>{reviewsCount}</strong>
+                <small>Очередь ручной проверки</small>
+              </div>
+              <div className="td-metric">
+                <span>Черновики</span>
+                <strong>{draftsCount}</strong>
+                <small>Уроки, планы и интерактивы</small>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <aside className="td-side-column">
+          <section className="td-card td-side-card">
+            <h3>Быстрые действия</h3>
+            <p>Частые действия доступны без перехода по разделам.</p>
+            <div className="td-quick-actions">
+              <Link to="/cabinet/schedule" className="td-quick-action">
+                <span className="td-quick-icon">＋</span>
+                <span>
+                  <strong>Создать урок</strong>
+                  <span>Тема, материалы, ссылка и домашнее задание</span>
                 </span>
-                <div className="cb-lessons-mini__body">
-                  <div className="cb-lessons-mini__head">
-                    <strong>{lesson.title}</strong>
-                    <span className="cb-lessons-mini__badge">{lessonCountdowns[index]}</span>
-                  </div>
-                  <span className="cb-lessons-mini__topic">{lesson.topic}</span>
-                </div>
+                <span className="td-quick-arrow">→</span>
               </Link>
-              ))
-            )}
-          </div>
-          <Link to="/cabinet/schedule" className="cb-lessons-mini__add">
-            <CabinetIcon name="plus" /> Добавить урок
-          </Link>
-        </div>
+              <Link to="/cabinet/review" className="td-quick-action">
+                <span className="td-quick-icon">✓</span>
+                <span>
+                  <strong>Проверить работы</strong>
+                  <span>Открыть очередь ручной проверки</span>
+                </span>
+                <span className="td-quick-arrow">→</span>
+              </Link>
+              <Link to="/cabinet/students" className="td-quick-action">
+                <span className="td-quick-icon">⌁</span>
+                <span>
+                  <strong>Выдать задание</strong>
+                  <span>Отдельному ученику или группе</span>
+                </span>
+                <span className="td-quick-arrow">→</span>
+              </Link>
+              <Link to="/cabinet/students" className="td-quick-action">
+                <span className="td-quick-icon">👥</span>
+                <span>
+                  <strong>Ученики и группы</strong>
+                  <span>Добавление, распределение и доступы</span>
+                </span>
+                <span className="td-quick-arrow">→</span>
+              </Link>
+            </div>
+          </section>
 
-        <div className="cb-widget cb-widget--sidebar cb-block-recent">
-          <div className="cb-widget__head">
-            <h3 className="cb-widget__title">На проверке</h3>
-            {pendingReviews.length > 0 ? (
-              <Link to="/cabinet/review" className="cb-widget__link">Все</Link>
-            ) : null}
-          </div>
-          <div className="cb-recent-list">
-            {pendingReviews.length === 0 ? (
-              <p className="cb-widget__empty">Нет работ на проверку</p>
-            ) : (
-              pendingReviews.slice(0, 5).map((item) => (
-                <PendingReviewSidebarRow key={item.id} item={item} />
-              ))
-            )}
-          </div>
-        </div>
-      </aside>
-    </div>
+          <section className="td-card td-side-card td-calendar-card">
+            <div className="td-calendar-header">
+              <span className="td-calendar-title">{MONTHS[today.getMonth()]} {today.getFullYear()}</span>
+              <Link to="/cabinet/schedule" className="td-link">Расписание</Link>
+            </div>
+            <div className="td-weekdays">
+              {WEEKDAYS.map((day) => <span key={day}>{day}</span>)}
+            </div>
+            <div className="td-days">
+              {calendarDays.map((cell, index) => (
+                <span
+                  key={`${cell.day}-${index}`}
+                  className={[
+                    "td-day",
+                    cell.muted ? "is-muted" : "",
+                    cell.isToday ? "is-today" : "",
+                    cell.hasEvent ? "has-event" : "",
+                  ].filter(Boolean).join(" ")}
+                >
+                  {cell.day}
+                </span>
+              ))}
+            </div>
+          </section>
+
+          <section className="td-card td-side-card">
+            <h3>Заметки на сегодня</h3>
+            <p>Короткие рабочие напоминания учителя.</p>
+            <div className="td-notes-list">
+              {notes.length === 0 ? (
+                <div className="td-note">
+                  <strong>Пока тихо</strong>
+                  <span>Когда появятся уроки или работы, здесь будут короткие напоминания.</span>
+                </div>
+              ) : (
+                notes.map((note) => (
+                  <div key={`${note.title}-${note.text}`} className="td-note">
+                    <strong>{note.title}</strong>
+                    <span>{note.text}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+        </aside>
+      </div>
+    </main>
   );
 }

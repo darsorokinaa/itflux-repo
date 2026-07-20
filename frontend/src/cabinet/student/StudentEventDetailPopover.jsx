@@ -150,7 +150,8 @@ export default function StudentEventDetailPopover({ eventId, onClose }) {
   const hasAbout = planItem && (
     hasText(planItem.goal) || hasText(planItem.description) || hasText(planItem.teacherComment)
   );
-  const hasMeetingLink = Boolean(event.link);
+  const meetingHref = event.videoMeeting?.pageUrl || event.link || "";
+  const hasMeetingLink = Boolean(meetingHref);
   const hasLink = hasMeetingLink && canConnect;
   const isDone = event.status === "done" || event.status === "completed";
   const assignmentId = event.assignment_id;
@@ -198,7 +199,16 @@ export default function StudentEventDetailPopover({ eventId, onClose }) {
       onClose={onClose}
       onEdit={() => {}}
       onOpenLesson={openLesson}
-      onStart={() => {}}
+      onStart={() => {
+        const href = event.videoMeeting?.pageUrl || event.link || "";
+        if (!href) return;
+        if (href.startsWith("/cabinet/meetings/")) {
+          navigate(href);
+          onClose();
+          return;
+        }
+        window.open(href, "_blank", "noopener,noreferrer");
+      }}
       onRequestDelete={() => {}}
       onRequestCancel={() => {}}
       onDuplicate={() => {}}

@@ -1141,16 +1141,6 @@ export default function AllTasksPage() {
                                       ) : null}
                                     </p>
                                     <div className="all-tasks-item__actions">
-                                      {answerHtml ? (
-                                        <button
-                                          type="button"
-                                          className="all-tasks-item__answer-btn"
-                                          onClick={() => toggleAnswer(t.id)}
-                                          aria-expanded={answerOpen ? "true" : "false"}
-                                        >
-                                          {answerOpen ? "Скрыть ответ" : "Посмотреть ответ"}
-                                        </button>
-                                      ) : null}
                                       <ExamTaskDrawingHeaderButton
                                         onClick={() => setOpenBoardForTaskId(t.id)}
                                         hasDraft={hasTaskBoardDraft}
@@ -1189,6 +1179,18 @@ export default function AllTasksPage() {
                                       </LazyVisible>
                                     </ExamTaskDrawingShell>
                                   </div>
+                                  {answerHtml ? (
+                                    <div className="all-tasks-item__answer-foot">
+                                      <button
+                                        type="button"
+                                        className="all-tasks-item__answer-btn"
+                                        onClick={() => toggleAnswer(t.id)}
+                                        aria-expanded={answerOpen ? "true" : "false"}
+                                      >
+                                        {answerOpen ? "Скрыть ответ" : "Посмотреть ответ"}
+                                      </button>
+                                    </div>
+                                  ) : null}
                                   {answerOpen ? (
                                     <div
                                       className="all-tasks-item__answer"
@@ -1295,16 +1297,6 @@ export default function AllTasksPage() {
                               <span>Добавить</span>
                             </label>
                           ) : null}
-                          {answerHtml ? (
-                            <button
-                              type="button"
-                              className="all-tasks-item__answer-btn"
-                              onClick={() => toggleAnswer(t.id)}
-                              aria-expanded={answerOpen ? "true" : "false"}
-                            >
-                              {answerOpen ? "Скрыть ответ" : "Посмотреть ответ"}
-                            </button>
-                          ) : null}
                           <ExamTaskDrawingHeaderButton
                             onClick={() => setOpenBoardForTaskId(t.id)}
                             hasDraft={hasTaskBoardDraft}
@@ -1339,6 +1331,18 @@ export default function AllTasksPage() {
                           </LazyVisible>
                         </ExamTaskDrawingShell>
                       </div>
+                      {answerHtml ? (
+                        <div className="all-tasks-item__answer-foot">
+                          <button
+                            type="button"
+                            className="all-tasks-item__answer-btn"
+                            onClick={() => toggleAnswer(t.id)}
+                            aria-expanded={answerOpen ? "true" : "false"}
+                          >
+                            {answerOpen ? "Скрыть ответ" : "Посмотреть ответ"}
+                          </button>
+                        </div>
+                      ) : null}
                       {answerOpen ? (
                         <div
                           className="all-tasks-item__answer"

@@ -1,3 +1,5 @@
+import uuid
+
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -2306,3 +2308,84 @@ class StudentTaskHistory(models.Model):
 
     def __str__(self):
         return f"Ученик {self.student_id} · задача {self.generator_task_id}"
+
+
+class VideoMeeting(models.Model):
+    """Видеоконференция Jitsi, привязанная к событию расписания (одному уроку)."""
+
+    class Status(models.TextChoices):
+        SCHEDULED = "scheduled", "Запланирована"
+        LIVE = "live", "Идёт сейчас"
+        FINISHED = "finished", "Завершена"
+        CANCELLED = "cancelled", "Отменена"
+
+    uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    schedule_event = models.OneToOneField(
+        ScheduleEvent,
+        on_delete=models.CASCADE,
+        related_name="video_meeting",
+        verbose_name="Урок в расписании",
+    )
+    room_name = models.CharField("Название комнаты", max_length=255, unique=True, editable=False)
+    status = models.CharField(
+        "Статус",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.SCHEDULED,
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="created_video_meetings",
+        verbose_name="Создал",
+    )
+    actual_started_at = models.DateTimeField("Фактическое начало", null=True, blank=True)
+    actual_finished_at = models.DateTimeField("Фактическое завершение", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Видеоконференция"
+        verbose_name_plural = "Видеоконференции"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.schedule_event_id}: {self.room_name} ({self.status})"
+
+
+class MeetingAttendance(models.Model):
+    """
+    Сессия участия в видеоконференции.
+
+    Повторное подключение после выхода создаёт новую сессию (left_at уже заполнен).
+    Повторный join при открытой сессии (left_at is null) идемпотентно возвращает её.
+    """
+
+    meeting = models.ForeignKey(
+        VideoMeeting,
+        on_delete=models.CASCADE,
+        related_name="attendance_sessions",
+        verbose_name="Конференция",
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="meeting_attendance_sessions",
+        verbose_name="Пользователь",
+    )
+    joined_at = models.DateTimeField("Вход")
+    left_at = models.DateTimeField("Выход", null=True, blank=True)
+    duration_seconds = models.PositiveIntegerField("Длительность (сек)", default=0)
+    jitsi_participant_id = models.CharField("Jitsi participant id", max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Посещаемость видеоконференции"
+        verbose_name_plural = "Посещаемость видеоконференций"
+        ordering = ["-joined_at"]
+        indexes = [
+            models.Index(fields=["meeting", "user", "left_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} @ {self.meeting_id} ({self.joined_at})"

@@ -232,6 +232,7 @@ export function InviteFormModal({ group, onClose, onCreate }) {
     setError("");
     try {
       const invite = await onCreate(inviteFormToApiPayload(form));
+      if (!invite) return;
       setCreatedInvite(invite);
     } catch (err) {
       setError(err.message || "Не удалось создать приглашение");

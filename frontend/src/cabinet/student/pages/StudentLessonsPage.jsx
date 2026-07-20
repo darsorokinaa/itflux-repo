@@ -18,6 +18,8 @@ import {
   isLessonInProgress,
   studentLessonMeta,
   studentLessonMetaParts,
+  isInternalMeetingHref,
+  lessonMeetingHref,
   useLessonConnectAvailable,
   useLessonInProgress,
   useScheduleNow,
@@ -103,12 +105,31 @@ function LiveBadge({ className = "" }) {
   );
 }
 
+function MeetingConnectLink({ href, className, children, onClick }) {
+  if (isInternalMeetingHref(href)) {
+    return (
+      <Link to={href} className={className} onClick={onClick}>
+        {children}
+      </Link>
+    );
+  }
+  return (
+    <a href={href} className={className} target="_blank" rel="noreferrer" onClick={onClick}>
+      {children}
+    </a>
+  );
+}
+
 function FeaturedLessonCard({ event, onOpen }) {
   const canConnect = useLessonConnectAvailable(event.starts_at, event.ends_at);
   const inProgress = useLessonInProgress(event.starts_at, event.ends_at);
   const topic = lessonTopic(event);
   const { formatLine, teacher } = studentLessonMetaParts(event);
   const timeRange = formatLessonTimeRange(event.starts_at, event.ends_at);
+  const meetingHref = lessonMeetingHref(event);
+  const joinState = event.video_meeting?.joinState || event.videoMeeting?.joinState;
+  const connectLabel =
+    joinState === "live" || inProgress ? "Подключиться к уроку" : "Подключиться к уроку";
 
   return (
     <section className={`st-lessons-hero${inProgress ? " st-lessons-hero--live" : ""}`}>
@@ -133,16 +154,14 @@ function FeaturedLessonCard({ event, onOpen }) {
           </p>
         ) : null}
         <div className="st-lessons-hero__actions">
-          {canConnect && event.meeting_url ? (
-            <a
-              href={event.meeting_url}
+          {canConnect && meetingHref ? (
+            <MeetingConnectLink
+              href={meetingHref}
               className="st-lessons-hero__cta cb-btn cb-btn--white"
-              target="_blank"
-              rel="noreferrer"
               onClick={(e) => e.stopPropagation()}
             >
-              Подключиться
-            </a>
+              {connectLabel}
+            </MeetingConnectLink>
           ) : (
             <button
               type="button"
@@ -152,7 +171,7 @@ function FeaturedLessonCard({ event, onOpen }) {
               Открыть урок
             </button>
           )}
-          {canConnect && event.meeting_url ? (
+          {canConnect && meetingHref ? (
             <button
               type="button"
               className="st-lessons-hero__cta-secondary"
@@ -193,7 +212,8 @@ function CompactLessonCard({ event, onOpen }) {
   const inProgress = useLessonInProgress(event.starts_at, event.ends_at);
   const topic = lessonTopic(event);
   const { formatLine, teacher } = studentLessonMetaParts(event);
-  const showConnect = canConnect && event.meeting_url && (inProgress || isToday(event.starts_at) || isSoon(event.starts_at));
+  const meetingHref = lessonMeetingHref(event);
+  const showConnect = canConnect && meetingHref && (inProgress || isToday(event.starts_at) || isSoon(event.starts_at));
   const todayClass = isToday(event.starts_at) || inProgress ? " st-lesson-compact__date--today" : "";
 
   return (
@@ -229,15 +249,13 @@ function CompactLessonCard({ event, onOpen }) {
       </div>
       <div className="st-lesson-compact__actions">
         {showConnect ? (
-          <a
-            href={event.meeting_url}
+          <MeetingConnectLink
+            href={meetingHref}
             className="cb-btn cb-btn--outline cb-btn--sm st-lesson-compact__btn"
-            target="_blank"
-            rel="noreferrer"
             onClick={(e) => e.stopPropagation()}
           >
             Подключиться
-          </a>
+          </MeetingConnectLink>
         ) : (
           <button
             type="button"

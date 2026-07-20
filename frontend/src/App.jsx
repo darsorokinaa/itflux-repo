@@ -34,8 +34,9 @@ import CabinetInteractiveCreatePage from "./cabinet/pages/CabinetInteractiveCrea
 import CabinetInteractiveEditorPage from "./cabinet/pages/CabinetInteractiveEditorPage";
 import CabinetInteractiveDetailPage from "./cabinet/pages/CabinetInteractiveDetailPage";
 import CabinetInteractivePlayPage from "./cabinet/pages/CabinetInteractivePlayPage";
+import VideoMeetingPage from "./cabinet/pages/VideoMeetingPage";
 import CabinetMorePage from "./cabinet/pages/CabinetMorePage";
-import CabinetMaterialsAssignPage from "./cabinet/pages/CabinetMaterialsAssignPage";
+import CabinetReportsPage from "./cabinet/CabinetReportsPage";
 import CabinetAiPage from "./cabinet/CabinetAiPage";
 import CabinetUpgradePage from "./cabinet/pages/CabinetUpgradePage";
 import StudentCabinetPage from "./pages/StudentCabinetPage";
@@ -229,6 +230,7 @@ function App() {
           <Route path="/cabinet/login" element={<CabinetAuthPage />} />
           <Route path="/cabinet/join/:token" element={<CabinetJoinPage />} />
           <Route path="/cabinet/interactives/:id/play" element={<CabinetInteractivePlayPage />} />
+          <Route path="/cabinet/meetings/:meetingUuid" element={<VideoMeetingPage />} />
           <Route path="/cabinet/student" element={<StudentCabinetPage />}>
             <Route index element={<StudentDashboard />} />
             {/* === Основные вкладки MVP === */}
@@ -261,11 +263,10 @@ function App() {
             <Route path="interactives/:id" element={<CabinetInteractiveDetailPage />} />
             <Route path="review/:reviewId" element={<CabinetReviewDetailPage />} />
             <Route path="review" element={<CabinetReviewPage />} />
-            <Route path="reports" element={<Navigate to="/cabinet" replace />} />
+            <Route path="reports" element={<CabinetReportsPage />} />
             <Route path="library" element={<CabinetLibraryPage />} />
             <Route path="schedule" element={<CabinetSchedulePage />} />
             <Route path="ai" element={<CabinetAiPage />} />
-            <Route path="materials-assign" element={<CabinetMaterialsAssignPage />} />
             <Route path="more" element={<CabinetMorePage />} />
             <Route path="upgrade" element={<CabinetUpgradePage />} />
           </Route>

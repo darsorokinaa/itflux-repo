@@ -1,18 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   createScheduleEvent,
   deleteScheduleEvent,
+  ensureVideoMeetingForEvent,
   fetchCalendarEvents,
   fetchCalendarStatus,
+  fetchGroup,
   fetchScheduleEvents,
+  fetchStudents,
+  normalizeCabinetList,
   startTelemostLesson,
   updateScheduleEvent,
 } from "../../utils/cabinetAuth";
 import { useCabinetCall } from "../CabinetCallContext";
+import { mapApiStudent } from "../cabinetMappers";
 import { isTelemostMeetingUrl } from "../telemostPopup";
 import CreateScheduleLessonModal from "../components/CreateScheduleLessonModal";
 import EditScheduleLessonModal from "../components/EditScheduleLessonModal";
 import EventDetailCard from "../components/EventDetailCard";
+import HomeworkAssignModal from "../components/HomeworkAssignModal";
+import MaterialsAssignModal from "../components/MaterialsAssignModal";
 import PlanItemDetailModal from "../components/PlanItemDetailModal";
 import CabinetIcon from "../CabinetIcons";
 import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
@@ -272,6 +280,24 @@ function buildEventDateTime(event) {
 
 function isLocalEvent(event) {
   return event?.source === "local" || String(event?.id || "").startsWith("local-");
+}
+
+function scheduleEventNumericId(eventId) {
+  const text = String(eventId || "").trim();
+  if (text.startsWith("local-")) {
+    const n = Number(text.slice(6));
+    return Number.isFinite(n) ? n : null;
+  }
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+}
+
+function hasJitsiMeeting(event) {
+  return Boolean(event?.videoMeeting?.uuid || event?.meetingProvider === "jitsi");
+}
+
+function isCabinetMeetingPath(url) {
+  return typeof url === "string" && url.startsWith("/cabinet/meetings/");
 }
 
 function matchesSeriesScope(ev, event, scope) {
@@ -1237,8 +1263,16 @@ function ListView({ events, onEventClick, onOpen, onStart, onAddLesson }) {
           <div className="cb-sch-list__items">
             {items.map((ev) => {
               const accent = eventAccentColor(ev);
-              const hasLink = Boolean(ev.link && isTelemostMeetingUrl(ev.link));
+              const hasLink = Boolean(
+                (ev.link && (isTelemostMeetingUrl(ev.link) || isCabinetMeetingPath(ev.link)))
+                || ev.videoMeeting?.uuid,
+              );
               const canStart = ev.status === "planned" && ev.format === "Онлайн";
+              const vmStatus = ev.videoMeeting?.status;
+              let startLabel = "";
+              if (vmStatus === "live") startLabel = "Войти в комнату";
+              else if (vmStatus === "finished") startLabel = "Посещаемость";
+              else if (hasLink || vmStatus === "scheduled") startLabel = "Начать урок";
               return (
                 <article key={ev.id} className="cb-sch-list-card">
                   <div className="cb-sch-list-card__accent" style={{ background: accent }} aria-hidden="true" />
@@ -1271,9 +1305,18 @@ function ListView({ events, onEventClick, onOpen, onStart, onAddLesson }) {
                     <button type="button" className="cb-sch-btn cb-sch-btn--outline cb-sch-btn--sm" onClick={() => onOpen(ev)}>
                       Открыть
                     </button>
-                    {canStart && onStart ? (
+                    {canStart && onStart && vmStatus !== "finished" && startLabel ? (
                       <button type="button" className="cb-sch-btn cb-sch-btn--primary cb-sch-btn--sm" onClick={() => onStart(ev)}>
-                        {hasLink ? "Начать" : "Создать ссылку"}
+                        {startLabel}
+                      </button>
+                    ) : null}
+                    {vmStatus === "finished" && ev.videoMeeting?.uuid ? (
+                      <button
+                        type="button"
+                        className="cb-sch-btn cb-sch-btn--outline cb-sch-btn--sm"
+                        onClick={() => onStart(ev)}
+                      >
+                        Посещаемость
                       </button>
                     ) : null}
                   </div>
@@ -1542,7 +1585,10 @@ function EventDetailPopover(props) {
       isCancelled={event.status === "cancelled"}
       isDone={event.status === "done" || event.status === "completed"}
       canStart={event.status === "planned" && event.format === "Онлайн"}
-      hasLink={Boolean(event.link && isTelemostMeetingUrl(event.link))}
+      hasLink={Boolean(
+        event.videoMeeting?.uuid
+        || (event.link && (isTelemostMeetingUrl(event.link) || isCabinetMeetingPath(event.link))),
+      )}
       canEditLink={!event.readOnly && event.format === "Онлайн"}
       materials={materials}
       homework={homework}
@@ -1572,6 +1618,7 @@ function useMobileDefaultView() {
 }
 
 export default function CabinetSchedulePage() {
+  const navigate = useNavigate();
   const isMobile = useMobileDefaultView();
   const justDraggedRef = useRef(false);
   const [events, setEvents] = useState([]);
@@ -1585,7 +1632,7 @@ export default function CabinetSchedulePage() {
   const [yandexLayerIds, setYandexLayerIds] = useState("");
   const [yandexTzId, setYandexTzId] = useState("Europe/Moscow");
   const [embedHelpUrl, setEmbedHelpUrl] = useState("https://yandex.ru/support/yandex-360/customers/calendar/web/ru/widget");
-  const [view, setView] = useState(() => (typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches ? "list" : "week"));
+  const [view, setView] = useState(() => (typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches ? "day" : "week"));
   const [focusDate, setFocusDate] = useState(() => startOfDay(new Date()));
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
   const [sidebarOpen, setSidebarOpen] = useState(() =>
@@ -1605,13 +1652,80 @@ export default function CabinetSchedulePage() {
   const [statusMessage, setStatusMessage] = useState("");
   const [dropPreview, setDropPreview] = useState(null);
   const [pendingAction, setPendingAction] = useState(null);
-  const { notifySoon, toast } = useSoonToast();
+  const [materialsAssignModal, setMaterialsAssignModal] = useState(null);
+  const [homeworkAssignModal, setHomeworkAssignModal] = useState(null);
+  const { notifySoon, showToast, toast } = useSoonToast();
   const { prepareCall, openCall, abortCall } = useCabinetCall();
+
+  const resolveEventAssignTarget = useCallback(async (event) => {
+    const studentNameFromParticipants = () => {
+      const list = Array.isArray(event.participants) ? event.participants : [];
+      const student = list.find((p) => p.role === "student");
+      return student?.name || event.audience || "Ученик";
+    };
+
+    if (event.groupId) {
+      const group = await fetchGroup(event.groupId);
+      const students = normalizeCabinetList(group?.students).map(mapApiStudent);
+      return {
+        group: { id: group.id, name: group.title || event.audience || "Группа" },
+        students,
+      };
+    }
+
+    const studentId = event.studentId
+      || (Array.isArray(event.participantStudentIds) ? event.participantStudentIds[0] : null);
+    if (!studentId) {
+      return null;
+    }
+
+    const students = normalizeCabinetList(await fetchStudents()).map(mapApiStudent);
+    const student = students.find((s) => Number(s.id) === Number(studentId));
+    if (student) {
+      return { student };
+    }
+    return {
+      student: { id: studentId, name: studentNameFromParticipants() },
+    };
+  }, []);
+
+  const handleAddMaterials = useCallback(async (event) => {
+    try {
+      const target = await resolveEventAssignTarget(event);
+      if (!target?.student && !target?.group) {
+        showToast("Сначала укажите ученика или группу в уроке");
+        return;
+      }
+      setSelectedEvent(null);
+      setMaterialsAssignModal(target);
+    } catch (err) {
+      showToast(err.message || "Не удалось открыть выдачу материалов");
+    }
+  }, [resolveEventAssignTarget, showToast]);
+
+  const handleAddHomework = useCallback(async (event) => {
+    try {
+      const target = await resolveEventAssignTarget(event);
+      if (!target?.student && !target?.group) {
+        showToast("Сначала укажите ученика или группу в уроке");
+        return;
+      }
+      if (target.group && !(target.students || []).length) {
+        showToast("В группе пока нет учеников");
+        return;
+      }
+      setSelectedEvent(null);
+      setHomeworkAssignModal(target);
+    } catch (err) {
+      showToast(err.message || "Не удалось открыть выдачу ДЗ");
+    }
+  }, [resolveEventAssignTarget, showToast]);
 
   const handleOpenLesson = useCallback((event, focusMaterials = false) => {
     const item = getEventPlanItem(event);
     if (!item?.id) {
-      notifySoon();
+      // Урок без пункта плана — открываем выдачу материалов ученику/группе.
+      void handleAddMaterials(event);
       return;
     }
     setLessonDetail({
@@ -1620,10 +1734,10 @@ export default function CabinetSchedulePage() {
       focusMaterials,
     });
     setSelectedEvent(null);
-  }, [notifySoon]);
+  }, [handleAddMaterials]);
 
   useEffect(() => {
-    if (isMobile && view === "week") setView("list");
+    if (isMobile && (view === "week" || view === "month")) setView("day");
   }, [isMobile, view]);
 
   useEffect(() => {
@@ -1698,6 +1812,65 @@ export default function CabinetSchedulePage() {
   const handleStartLesson = useCallback(async (event) => {
     setStartingId(event.id);
 
+    // Встроенный Jitsi — приоритетный путь для онлайн-уроков без ссылки Телемост.
+    const preferJitsi =
+      hasJitsiMeeting(event)
+      || isCabinetMeetingPath(event.link)
+      || (event.format === "Онлайн" && !isTelemostMeetingUrl(event.link || ""));
+
+    if (preferJitsi && isLocalEvent(event)) {
+      try {
+        let meetingUuid = event.videoMeeting?.uuid;
+        if (!meetingUuid && isCabinetMeetingPath(event.link)) {
+          meetingUuid = event.link.split("/cabinet/meetings/")[1]?.split(/[/?#]/)[0];
+        }
+        if (!meetingUuid) {
+          const eventPk = scheduleEventNumericId(event.id);
+          if (!eventPk) {
+            throw new Error("Не удалось определить урок для видеокомнаты");
+          }
+          const data = await ensureVideoMeetingForEvent(eventPk);
+          meetingUuid = data?.videoMeeting?.uuid;
+          if (data?.videoMeeting) {
+            setEvents((prev) => prev.map((ev) => (
+              ev.id === event.id
+                ? {
+                  ...ev,
+                  videoMeeting: data.videoMeeting,
+                  link: data.videoMeeting.pageUrl || ev.link,
+                  meetingProvider: "jitsi",
+                }
+                : ev
+            )));
+            setSelectedEvent((prev) => (
+              prev?.id === event.id
+                ? {
+                  ...prev,
+                  videoMeeting: data.videoMeeting,
+                  link: data.videoMeeting.pageUrl || prev.link,
+                  meetingProvider: "jitsi",
+                }
+                : prev
+            ));
+          }
+        }
+        if (!meetingUuid) {
+          throw new Error("Не удалось создать видеокомнату");
+        }
+        showStatus(
+          event.videoMeeting?.status === "live" || event.videoMeeting?.status === "LIVE"
+            ? "Вход в комнату…"
+            : "Открываем онлайн-урок…",
+        );
+        navigate(`/cabinet/meetings/${meetingUuid}`);
+      } catch (err) {
+        showStatus(err.message || "Не удалось открыть видеокомнату Jitsi");
+      } finally {
+        setStartingId(null);
+      }
+      return;
+    }
+
     const popup = prepareCall({
       title: event.title,
       subtitle: event.topic,
@@ -1763,7 +1936,7 @@ export default function CabinetSchedulePage() {
     } finally {
       setStartingId(null);
     }
-  }, [showStatus, prepareCall, openCall, abortCall]);
+  }, [showStatus, prepareCall, openCall, abortCall, navigate]);
 
   const handleSaveTelemostLink = useCallback(async (event, link) => {
     if (link && !isTelemostMeetingUrl(link)) {
@@ -1832,9 +2005,12 @@ export default function CabinetSchedulePage() {
     }
     setCreateOpen(false);
     setCreateDraft(null);
-    if (payload.format === "online" && data?.event?.link) {
+    const hasMeetingLink = Boolean(
+      data?.event?.link || data?.event?.videoMeeting?.uuid || payload.jitsi_auto_create,
+    );
+    if (payload.format === "online" && hasMeetingLink) {
       showStatus(data?.events_created > 1
-        ? `Создано занятий: ${data.events_created}`
+        ? `Создано занятий: ${data.events_created}. Видеокомнаты готовы.`
         : "Урок создан, ссылка на звонок готова.");
     } else {
       showStatus(data?.events_created > 1
@@ -2206,6 +2382,8 @@ export default function CabinetSchedulePage() {
             setSelectedEvent(null);
           }}
           onOpenLesson={(focusMaterials) => handleOpenLesson(selectedEvent, focusMaterials)}
+          onAddMaterials={() => void handleAddMaterials(selectedEvent)}
+          onAddHomework={() => void handleAddHomework(selectedEvent)}
           onStart={handleStartLesson}
           onRequestDelete={() => {
             setPendingAction({ type: "delete", event: selectedEvent });
@@ -2217,6 +2395,31 @@ export default function CabinetSchedulePage() {
           onSaveLink={handleSaveTelemostLink}
           savingLinkId={savingLinkId}
           startingId={startingId}
+        />
+      ) : null}
+
+      {materialsAssignModal ? (
+        <MaterialsAssignModal
+          student={materialsAssignModal.student || null}
+          group={materialsAssignModal.group || null}
+          onClose={() => setMaterialsAssignModal(null)}
+          onAssigned={() => {
+            setMaterialsAssignModal(null);
+            showToast("Материалы выданы");
+          }}
+        />
+      ) : null}
+
+      {homeworkAssignModal ? (
+        <HomeworkAssignModal
+          student={homeworkAssignModal.student || null}
+          group={homeworkAssignModal.group || null}
+          students={homeworkAssignModal.students || null}
+          onClose={() => setHomeworkAssignModal(null)}
+          onAssigned={() => {
+            setHomeworkAssignModal(null);
+            showToast("Домашнее задание выдано");
+          }}
         />
       ) : null}
 

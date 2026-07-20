@@ -54,12 +54,25 @@ function AttachedResourceRow({ icon, title, meta, onRemove, disabled }) {
 }
 
 export default function HomeworkAssignModal({
-  student,
+  student = null,
+  students = null,
+  group = null,
   enrollment,
   onClose,
   onAssigned,
   onAttachPlan,
 }) {
+  const targets = useMemo(() => {
+    if (Array.isArray(students) && students.length) return students;
+    if (student) return [student];
+    return [];
+  }, [student, students]);
+  const primaryStudent = targets[0] || null;
+  const isGroupAssign = Boolean(group) || targets.length > 1;
+  const modalTitle = group?.name
+    ? `Задать ДЗ — ${group.name}`
+    : `Задать ДЗ — ${primaryStudent?.name || "ученик"}`;
+
   const [options, setOptions] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -75,10 +88,16 @@ export default function HomeworkAssignModal({
   const [duplicateTaskIds, setDuplicateTaskIds] = useState([]);
 
   const loadOptions = useCallback(async () => {
+    if (!primaryStudent?.id) {
+      setLoading(false);
+      setOptions(null);
+      setError(isGroupAssign ? "В группе пока нет учеников" : "Не выбран ученик");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
-      const data = await fetchStudentHomeworkOptions(student.id);
+      const data = await fetchStudentHomeworkOptions(primaryStudent.id);
       setOptions(data || null);
       const first = (data?.items || []).find((item) => !item.assigned) || (data?.items || [])[0];
       setSelectedId(first ? String(first.id) : "");
@@ -88,7 +107,7 @@ export default function HomeworkAssignModal({
     } finally {
       setLoading(false);
     }
-  }, [student.id]);
+  }, [primaryStudent?.id, isGroupAssign]);
 
   useEffect(() => {
     loadOptions();
@@ -117,6 +136,26 @@ export default function HomeworkAssignModal({
     [customInteractives],
   );
 
+  const assignToTargets = async (payload) => {
+    if (!targets.length) {
+      throw new Error(isGroupAssign ? "В группе пока нет учеников" : "Не выбран ученик");
+    }
+    const errors = [];
+    for (const target of targets) {
+      try {
+        await assignStudentHomework(target.id, payload);
+      } catch (err) {
+        errors.push(`${target.name || target.id}: ${err.message || "ошибка"}`);
+      }
+    }
+    if (errors.length === targets.length) {
+      throw new Error(errors[0] || "Не удалось выдать ДЗ");
+    }
+    if (errors.length) {
+      throw new Error(`Выдано частично. Не удалось: ${errors.join("; ")}`);
+    }
+  };
+
   const handlePlanSubmit = async (e) => {
     e.preventDefault();
     if (!selectedId) {
@@ -126,7 +165,7 @@ export default function HomeworkAssignModal({
     setSubmitting(true);
     setError("");
     try {
-      await assignStudentHomework(student.id, {
+      await assignToTargets({
         plan_item_id: Number(selectedId),
         due_at: deadline || undefined,
       });
@@ -154,7 +193,7 @@ export default function HomeworkAssignModal({
     setSubmitting(true);
     setError("");
     try {
-      await assignStudentHomework(student.id, {
+      await assignToTargets({
         title,
         description,
         material_ids: customMaterialIds,
@@ -177,12 +216,12 @@ export default function HomeworkAssignModal({
     ));
     setResourcePickerOpen(false);
 
-    if (material.material_type === "task_set" && material.external_url) {
+    if (material.material_type === "task_set" && material.external_url && primaryStudent?.id) {
       const m = String(material.external_url).match(/\/variant\/(\d+)/);
       const variantId = m ? m[1] : null;
       if (variantId) {
         try {
-          const data = await checkVariantTasksOverlap(student.id, variantId);
+          const data = await checkVariantTasksOverlap(primaryStudent.id, variantId);
           const ids = data?.duplicate_task_ids ?? [];
           if (ids.length > 0) {
             setDuplicateTaskIds((prev) => [...new Set([...prev, ...ids])]);
@@ -206,12 +245,18 @@ export default function HomeworkAssignModal({
 
   return (
     <>
-      <CabinetModal title={`Задать ДЗ — ${student.name}`} onClose={onClose}>
+      <CabinetModal title={modalTitle} onClose={onClose}>
         <form
           className="cb-modal-form cb-hw-assign-form"
           onSubmit={mode === "plan" ? handlePlanSubmit : handleCustomSubmit}
         >
           {error ? <p className="cb-modal-form__error" role="alert">{error}</p> : null}
+
+          {isGroupAssign && targets.length > 0 ? (
+            <p className="cabinet-auth-muted">
+              Задание будет выдано всем ученикам группы ({targets.length}).
+            </p>
+          ) : null}
 
           {showModeTabs ? (
             <div className="cb-hw-assign-mode" role="tablist" aria-label="Способ выдачи ДЗ">
@@ -249,7 +294,7 @@ export default function HomeworkAssignModal({
                     <button
                       type="button"
                       className="cb-btn cb-btn--primary cb-btn--sm"
-                      onClick={() => onAttachPlan(student)}
+                      onClick={() => onAttachPlan(group || student || primaryStudent)}
                     >
                       Привязать план
                     </button>
@@ -367,12 +412,12 @@ export default function HomeworkAssignModal({
                     onClick={() => setResourcePickerOpen(true)}
                     disabled={submitting}
                   >
-                    Добавить
+                    Добавить материал
                   </button>
                 </div>
                 {customMaterials.length === 0 && customInteractives.length === 0 ? (
                   <p className="cabinet-auth-muted">
-                    Можно прикрепить интерактив, файлы или вариант по номеру.
+                    Можно выбрать урок из библиотеки платформы, файлы учителя, интерактив или вариант.
                   </p>
                 ) : (
                   <div className="cb-hw-assign-resource-list">
@@ -445,6 +490,7 @@ export default function HomeworkAssignModal({
       <PlanItemResourcesPicker
         scope="homework"
         open={resourcePickerOpen}
+        initialTab="library"
         attachedMaterialIds={customMaterialIds}
         attachedInteractiveIds={customInteractiveIds}
         onClose={() => setResourcePickerOpen(false)}

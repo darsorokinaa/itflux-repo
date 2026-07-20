@@ -58,10 +58,25 @@ JITSI_EMBED_EXTRA_HOSTS = tuple(
     for h in os.environ.get("JITSI_EMBED_EXTRA_HOSTS", "").split(",")
     if h.strip()
 )
-# Для генерации Jitsi JWT (moderator=true для учителя) на своём сервере:
-# значения берутся из prosody config — luaModules/lib-jitsi-meet/token/prosody.cfg.lua (app_id / app_secret).
+# Видеоуроки в кабинете + JWT для собственного Jitsi (см. docs/JITSI_INTEGRATION.md).
+JITSI_DOMAIN = os.environ.get("JITSI_DOMAIN", "meet.jit.si").strip() or "meet.jit.si"
+JITSI_AUTH_MODE = (os.environ.get("JITSI_AUTH_MODE", "none") or "none").strip().lower()
 JITSI_APP_ID = os.environ.get("JITSI_APP_ID", "").strip()
 JITSI_APP_SECRET = os.environ.get("JITSI_APP_SECRET", "").strip()
+JITSI_SUB = os.environ.get("JITSI_SUB", "").strip()
+JITSI_AUD = os.environ.get("JITSI_AUD", "jitsi").strip() or "jitsi"
+try:
+    JITSI_TOKEN_TTL_SECONDS = int(os.environ.get("JITSI_TOKEN_TTL_SECONDS", "7200") or "7200")
+except ValueError:
+    JITSI_TOKEN_TTL_SECONDS = 7200
+try:
+    JITSI_JOIN_BEFORE_MINUTES = int(os.environ.get("JITSI_JOIN_BEFORE_MINUTES", "15") or "15")
+except ValueError:
+    JITSI_JOIN_BEFORE_MINUTES = 15
+try:
+    JITSI_JOIN_AFTER_MINUTES = int(os.environ.get("JITSI_JOIN_AFTER_MINUTES", "30") or "30")
+except ValueError:
+    JITSI_JOIN_AFTER_MINUTES = 30
 
 LK_PUBLIC_URL = os.environ.get("LK_PUBLIC_URL", "https://lk.itflux.ru").rstrip("/")
 # Базовый API-URL личного кабинета для server-to-server запросов генератора.

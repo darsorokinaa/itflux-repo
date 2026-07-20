@@ -16,6 +16,7 @@ import CabinetNotificationsBell from "./components/CabinetNotificationsBell";
 import CabinetGuideModal from "./components/CabinetGuideModal";
 import "../styles/cabinet-dashboard.css";
 import "../styles/cabinet-mobile-system.css";
+import "./styles/teacher-cabinet.css";
 
 const PAGE_TITLE = "Кабинет учителя — Цифровой поток";
 const GUIDE_SEEN_KEY = "cabinet-guide-seen-v1";
@@ -143,11 +144,7 @@ export default function CabinetLayout() {
   };
 
   if (loading) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#f2f4ff", color: "#94A3B8", fontSize: "0.9rem" }}>
-        Загрузка…
-      </div>
-    );
+    return <div className="cb-loading-screen">Загрузка…</div>;
   }
 
   if (!user) {
@@ -201,7 +198,7 @@ export default function CabinetLayout() {
       </aside>
 
       <main className="cabinet-main">
-        <header className={`cabinet-header${isDashboard ? " cabinet-header--dashboard" : ""}`}>
+        <header className={`cabinet-header cabinet-header--teacher${isDashboard ? " cabinet-header--dashboard" : ""}`}>
           <div className="cabinet-header-title">
             <button
               type="button"
@@ -250,12 +247,12 @@ export default function CabinetLayout() {
         </div>
       </main>
 
-      <nav className="cb-mobile-nav" aria-label="Мобильная навигация">
+      <nav className="cb-mobile-nav cb-teacher-mobile-nav" aria-label="Мобильная навигация">
         {CABINET_MOBILE_NAV.map((item) => (
           <Link
             key={item.id}
             to={item.path}
-            className={`cb-mobile-nav__item${isCabinetMobileNavActive(location.pathname, item) ? " is-active" : ""}`}
+            className={`cb-mobile-nav__item cb-teacher-mobile-nav__item${isCabinetMobileNavActive(location.pathname, item) ? " is-active" : ""}`}
           >
             <CabinetIcon name={item.icon} />
             <span>{item.label}</span>

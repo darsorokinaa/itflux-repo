@@ -28,9 +28,12 @@ export const STUDENT_STATUS_OPTIONS = [
 export function mapApiStudent(apiStudent) {
   const direction = DIRECTION_LABELS[apiStudent.direction] || apiStudent.direction_label || apiStudent.direction;
   const groupIds = (apiStudent.group_ids || []).map(String);
+  const name = apiStudent.full_name
+    || [apiStudent.first_name, apiStudent.last_name].filter(Boolean).join(" ")
+    || "Без имени";
   return {
     id: String(apiStudent.id),
-    name: apiStudent.full_name,
+    name,
     subject: apiStudent.direction === "python" ? "Python" : "Информатика",
     grade: apiStudent.grade,
     direction,

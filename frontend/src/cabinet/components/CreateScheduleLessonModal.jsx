@@ -181,9 +181,13 @@ export default function CreateScheduleLessonModal({
     if (meetingMode === "manual" && manualLink.trim()) {
       payload.telemost_url = manualLink.trim();
       payload.link = manualLink.trim();
-    }
-    if (meetingMode === "later" || meetingMode === "auto") {
+      payload.jitsi_auto_create = false;
+    } else if (meetingMode === "auto") {
       payload.telemost_url = "";
+      payload.jitsi_auto_create = true;
+    } else {
+      payload.telemost_url = "";
+      payload.jitsi_auto_create = false;
     }
     return payload;
   };
@@ -390,7 +394,6 @@ export default function CreateScheduleLessonModal({
                   <select value={meetingMode} onChange={(e) => setMeetingMode(e.target.value)}>
                     <option value="later">Создать позже</option>
                     <option value="manual">Ввести вручную</option>
-                    <option value="auto" disabled>Телемост автоматически (скоро)</option>
                   </select>
                 </label>
                 {meetingMode === "manual" ? (

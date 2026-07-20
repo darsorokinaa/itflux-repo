@@ -81,6 +81,31 @@ YANDEX_TELEMOST_AUTO_CREATE = os.environ.get(
     "YANDEX_TELEMOST_AUTO_CREATE", "true"
 ).strip().lower() not in ("0", "false", "no", "off")
 
+# —— Jitsi Meet (видеоуроки в кабинете) ——
+JITSI_DOMAIN = os.environ.get("JITSI_DOMAIN", "meet.jit.si").strip() or "meet.jit.si"
+JITSI_AUTH_MODE = (os.environ.get("JITSI_AUTH_MODE", "none") or "none").strip().lower()
+JITSI_APP_ID = os.environ.get("JITSI_APP_ID", "").strip()
+JITSI_APP_SECRET = os.environ.get("JITSI_APP_SECRET", "").strip()
+JITSI_SUB = os.environ.get("JITSI_SUB", "").strip()
+JITSI_AUD = os.environ.get("JITSI_AUD", "jitsi").strip() or "jitsi"
+try:
+    JITSI_TOKEN_TTL_SECONDS = int(os.environ.get("JITSI_TOKEN_TTL_SECONDS", "7200") or "7200")
+except ValueError:
+    JITSI_TOKEN_TTL_SECONDS = 7200
+try:
+    JITSI_JOIN_BEFORE_MINUTES = int(os.environ.get("JITSI_JOIN_BEFORE_MINUTES", "15") or "15")
+except ValueError:
+    JITSI_JOIN_BEFORE_MINUTES = 15
+try:
+    JITSI_JOIN_AFTER_MINUTES = int(os.environ.get("JITSI_JOIN_AFTER_MINUTES", "30") or "30")
+except ValueError:
+    JITSI_JOIN_AFTER_MINUTES = 30
+JITSI_EMBED_EXTRA_HOSTS = tuple(
+    h.strip().lower()
+    for h in os.environ.get("JITSI_EMBED_EXTRA_HOSTS", "").split(",")
+    if h.strip()
+)
+
 # VK notifications (optional — mock when token not set)
 VK_ACCESS_TOKEN = os.environ.get("VK_ACCESS_TOKEN", "").strip()
 VK_GROUP_ID = os.environ.get("VK_GROUP_ID", "").strip()

@@ -1,3 +1,16 @@
+/** ОГЭ русский язык, сочинение-рассуждение (№13). */
+export function isOgeRusTask13(
+  level: string | undefined,
+  subject: string | undefined,
+  taskNumber: number | string | null | undefined
+): boolean {
+  return (
+    String(level || "").toLowerCase() === "oge" &&
+    String(subject || "").toLowerCase() === "rus" &&
+    Number(taskNumber) === 13
+  );
+}
+
 /** ОГЭ информатика, задание с номером n (API иногда отдаёт строку). */
 export function isOgeInformaticsTask(
   level: string | undefined,

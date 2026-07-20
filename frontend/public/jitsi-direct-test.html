@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jitsi direct test</title>
+  <style>
+    html,body,#meet{margin:0;height:100%;background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif}
+    header{padding:8px 12px;font-size:13px}
+    code{color:#93c5fd}
+  </style>
+</head>
+<body>
+<header>Прямой тест Jitsi (без кабинета). Room: <code id="room"></code> · joined: <code id="st">…</code></header>
+<div id="meet"></div>
+<script>
+const params = new URLSearchParams(location.search);
+const domain = params.get('domain') || 'lesson.itflux-academy.ru';
+const roomName = params.get('room') || '';
+const jwt = params.get('jwt') || '';
+document.getElementById('room').textContent = roomName || '(нет room)';
+if (!roomName || !jwt) {
+  document.getElementById('st').textContent = 'нужны ?room=&jwt=';
+} else {
+  const s = document.createElement('script');
+  s.src = 'https://' + domain + '/libs/external_api.min.js';
+  s.onload = () => {
+    const api = new JitsiMeetExternalAPI(domain, {
+      roomName,
+      jwt,
+      parentNode: document.getElementById('meet'),
+      width: '100%',
+      height: '100%',
+      configOverwrite: {
+        prejoinPageEnabled: false,
+        prejoinConfig: { enabled: false },
+        p2p: { enabled: false },
+        preferBosh: true,
+      },
+    });
+    api.addListener('videoConferenceJoined', (e) => {
+      document.getElementById('st').textContent = 'YES id=' + (e && e.id);
+      console.info('joined', e);
+    });
+    api.addListener('participantJoined', (e) => console.info('participantJoined', e));
+    api.addListener('errorOccurred', (e) => {
+      const msg = [e && e.type, e && e.name, e && e.message].filter(Boolean).join(' · ');
+      document.getElementById('st').textContent = 'ERROR ' + msg;
+      console.warn(e);
+    });
+    setTimeout(() => {
+      if (document.getElementById('st').textContent === '…') {
+        document.getElementById('st').textContent = 'TIMEOUT — нет videoConferenceJoined';
+      }
+    }, 15000);
+  };
+  s.onerror = () => { document.getElementById('st').textContent = 'script load fail'; };
+  document.head.appendChild(s);
+}
+</script>
+</body>
+</html>

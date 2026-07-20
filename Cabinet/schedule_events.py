@@ -134,6 +134,26 @@ def schedule_event_to_json(event):
     today = timezone.localdate()
     link = (event.telemost_url or "").strip() or None
     is_online = event.format == ScheduleEvent.Format.ONLINE
+    video_meeting_json = None
+    # Reverse OneToOne raises DoesNotExist — не используем getattr.
+    try:
+        from .models import VideoMeeting
+        meeting = VideoMeeting.objects.filter(schedule_event_id=event.pk).first()
+    except Exception:
+        meeting = None
+    if meeting is not None:
+        from .video_meeting_service import meeting_join_window_state, ui_state_message
+        join_state = meeting_join_window_state(event, meeting)
+        video_meeting_json = {
+            "uuid": str(meeting.uuid),
+            "status": meeting.status,
+            "statusLabel": meeting.get_status_display(),
+            "joinState": join_state,
+            "joinStateLabel": ui_state_message(join_state),
+            "pageUrl": f"/cabinet/meetings/{meeting.uuid}",
+        }
+        if not link and meeting.status in ("scheduled", "live"):
+            link = video_meeting_json["pageUrl"]
 
     recurrence = None
     series_id = None
@@ -177,6 +197,8 @@ def schedule_event_to_json(event):
         "audience": audience,
         "format": "Онлайн" if is_online else "Офлайн",
         "link": link,
+        "videoMeeting": video_meeting_json,
+        "meetingProvider": event.meeting_provider,
         "materials": event.materials or "",
         "status": event.status,
         "statusLabel": event.get_status_display(),

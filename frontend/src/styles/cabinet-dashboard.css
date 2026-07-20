@@ -863,6 +863,12 @@
   flex: 1 1 220px;
 }
 
+.cb-btn svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
 .cb-filter-bar {
   display: flex;
   flex-wrap: nowrap;
@@ -1991,6 +1997,15 @@
 .cb-student-chip__action-btn--hw:hover {
   border-color: #D97706;
   background: #FFFBEB;
+}
+
+.cb-student-chip__action-btn--materials {
+  color: #0F766E;
+}
+
+.cb-student-chip__action-btn--materials:hover {
+  border-color: #0D9488;
+  background: #F0FDFA;
 }
 
 .cb-student-chip__action-btn--edit {
@@ -13710,13 +13725,13 @@ button.cb-sch-event {
    Tablet (768–1024px) improvements
    ============================================================ */
 
-@media (min-width: 768px) and (max-width: 1024px) {
+@media (min-width: 901px) and (max-width: 1024px) {
   /* --- Dashboard 1 col --- */
   .cb-dashboard-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  /* --- Sidebar groups 2 col --- */
+  /* --- Sidebar groups 2 col (tablets only; phones use display:contents stack) --- */
   .cb-sidebar-col {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -14736,137 +14751,4 @@ button.cb-sch-event {
   .cb-review-detail__btn {
     width: 100%;
   }
-}
-
-/* ── Teacher: direct material assign page ─────────────────────────────── */
-
-.cb-mat-assign-page .cb-page-sub {
-  margin: 4px 0 0;
-  font-size: 0.875rem;
-  color: #64748B;
-}
-
-.cb-mat-assign-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 24px;
-  align-items: start;
-}
-
-@media (max-width: 768px) {
-  .cb-mat-assign-layout {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* Form */
-.cb-assign-mat-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 20px;
-  background: #FFFFFF;
-  border: 1px solid #E2E8F0;
-  border-radius: 20px;
-}
-
-.cb-assign-mat-form__title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-  color: #0F172A;
-}
-
-.cb-assign-mat-form__label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #334155;
-}
-
-.cb-assign-mat-form__opt {
-  font-weight: 400;
-  color: #94A3B8;
-}
-
-.cb-assign-mat-form__error {
-  margin: 0;
-  font-size: 0.82rem;
-  color: #E53935;
-  font-weight: 600;
-}
-
-/* Assigned list */
-.cb-mat-assign-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.cb-assign-mat-list__title {
-  margin: 0 0 8px;
-  font-size: 1rem;
-  font-weight: 700;
-  color: #0F172A;
-}
-
-.cb-assign-mat-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px 14px;
-  background: #FFFFFF;
-  border: 1px solid #E2E8F0;
-  border-radius: 14px;
-}
-
-.cb-assign-mat-row__icon {
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
-  border-radius: 10px;
-  background: #EEF2FF;
-  color: #2F5EF5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 2px;
-}
-
-.cb-assign-mat-row__icon svg { width: 16px; height: 16px; }
-
-.cb-assign-mat-row__body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.cb-assign-mat-row__body strong {
-  font-size: 0.875rem;
-  font-weight: 700;
-  color: #0F172A;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cb-assign-mat-row__body span {
-  font-size: 0.78rem;
-  color: #64748B;
-}
-
-.cb-assign-mat-row__body em {
-  font-size: 0.78rem;
-  color: #2563EB;
-  font-style: normal;
-}
-
-.cb-empty-note {
-  font-size: 0.875rem;
-  color: #94A3B8;
-  padding: 12px 0;
 }

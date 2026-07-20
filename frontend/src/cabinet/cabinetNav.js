@@ -5,7 +5,6 @@ export const CABINET_NAV = [
   { id: "interactives", label: "Интерактивы",    path: "/cabinet/interactives",icon: "interactives" },
   { id: "review",       label: "Проверка",       path: "/cabinet/review",      icon: "check"        },
   { id: "schedule",     label: "Календарь",      path: "/cabinet/schedule",    icon: "calendar"     },
-  { id: "materials-assign", label: "Материалы",  path: "/cabinet/materials-assign", icon: "folder" },
   { id: "ai",           label: "ИИ-помощник",    path: "/cabinet/ai",          icon: "spark",  soon: true, disabled: true },
   { id: "task-bank",    label: "Банк задач",    path: "/tasks",               icon: "tasks", accent: true, newTab: true },
 ];
@@ -15,16 +14,17 @@ export const CABINET_MOBILE_NAV = [
   { id: "home", label: "Главная", path: "/cabinet", icon: "home" },
   { id: "students", label: "Ученики", path: "/cabinet/students", icon: "students" },
   { id: "lessons", label: "Уроки", path: "/cabinet/lessons", icon: "lessons" },
-  { id: "review", label: "Проверка", path: "/cabinet/review", icon: "check" },
+  { id: "schedule", label: "Расписание", path: "/cabinet/schedule", icon: "calendar" },
   { id: "more", label: "Ещё", path: "/cabinet/more", icon: "expand" },
 ];
 
 /** Пункты внутри «Ещё» на mobile */
 export const CABINET_MORE_ITEMS = [
+  { id: "review", label: "Домашние задания", path: "/cabinet/review", icon: "check" },
+  { id: "reports", label: "Отчёты", path: "/cabinet/reports", icon: "chart" },
   { id: "plans", label: "Планы уроков", path: "/cabinet/plans", icon: "plan" },
   { id: "interactives", label: "Интерактивы", path: "/cabinet/interactives", icon: "interactives" },
-  { id: "materials-assign", label: "Материалы", path: "/cabinet/materials-assign", icon: "folder" },
-  { id: "schedule", label: "Расписание", path: "/cabinet/schedule", icon: "calendar" },
+  { id: "notifications", label: "Уведомления", path: null, icon: "bell", action: "notifications" },
   { id: "ai", label: "ИИ-помощник", path: "/cabinet/ai", icon: "spark" },
   { id: "settings", label: "Настройки", path: null, icon: "settings", action: "settings" },
 ];

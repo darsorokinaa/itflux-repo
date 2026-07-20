@@ -1,0 +1,135 @@
+"""Генерация JWT и отображаемых данных пользователя для Jitsi Meet."""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+from typing import Any
+
+import jwt
+from django.conf import settings
+from django.contrib.auth.models import User
+from django.utils import timezone
+
+
+class JitsiConfigError(Exception):
+    """Некорректная или неполная конфигурация Jitsi."""
+
+
+def get_jitsi_domain() -> str:
+    return (getattr(settings, "JITSI_DOMAIN", "") or "meet.jit.si").strip()
+
+
+def get_jitsi_auth_mode() -> str:
+    mode = (getattr(settings, "JITSI_AUTH_MODE", "none") or "none").strip().lower()
+    return mode if mode in ("none", "jwt") else "none"
+
+
+def get_display_name(user: User) -> str:
+    profile = getattr(user, "profile", None)
+    if profile is not None:
+        name = profile.get_display_name()
+        if name:
+            return name
+    full = (user.get_full_name() or "").strip()
+    return full or user.username
+
+
+def get_avatar_url(user: User, request=None) -> str:
+    profile = getattr(user, "profile", None)
+    avatar = getattr(profile, "avatar", None) if profile is not None else None
+    if not avatar:
+        return ""
+    try:
+        url = avatar.url
+    except ValueError:
+        return ""
+    if request is not None:
+        return request.build_absolute_uri(url)
+    return url
+
+
+def build_user_info(user: User, request=None) -> dict[str, str]:
+    return {
+        "displayName": get_display_name(user),
+        "email": (user.email or "").strip(),
+        "avatarUrl": get_avatar_url(user, request),
+    }
+
+
+def generate_jitsi_jwt(
+    *,
+    room_name: str,
+    user: User,
+    is_moderator: bool,
+    request=None,
+) -> str | None:
+    """
+    Короткоживущий JWT для собственного Jitsi (режим JITSI_AUTH_MODE=jwt).
+
+    Формат claims совместим с token_verification Prosody (не JaaS):
+    aud по умолчанию «jitsi», iss = JITSI_APP_ID, sub = JITSI_SUB или домен.
+    """
+    if get_jitsi_auth_mode() != "jwt":
+        return None
+
+    app_id = (getattr(settings, "JITSI_APP_ID", "") or "").strip()
+    app_secret = (getattr(settings, "JITSI_APP_SECRET", "") or "").strip()
+    if not app_id or not app_secret:
+        raise JitsiConfigError("JITSI_APP_ID и JITSI_APP_SECRET обязательны при JITSI_AUTH_MODE=jwt")
+
+    domain = get_jitsi_domain()
+    sub = (getattr(settings, "JITSI_SUB", "") or "").strip() or domain
+    aud = (getattr(settings, "JITSI_AUD", "") or "").strip() or "jitsi"
+    ttl = int(getattr(settings, "JITSI_TOKEN_TTL_SECONDS", 7200) or 7200)
+    ttl = max(60, min(ttl, 86400))
+
+    now = timezone.now()
+    iat = int(now.timestamp())
+    nbf = int((now - timedelta(seconds=30)).timestamp())
+    exp = int((now + timedelta(seconds=ttl)).timestamp())
+    user_info = build_user_info(user, request)
+
+    # Prosody token_moderation/token_affiliation часто ждут строки "true"/"false", не bool.
+    user_claims: dict[str, Any] = {
+        "id": str(user.pk),
+        "name": user_info["displayName"],
+        "email": user_info["email"],
+        "avatar": user_info["avatarUrl"],
+        "moderator": "true" if is_moderator else "false",
+        "affiliation": "owner" if is_moderator else "member",
+    }
+    payload: dict[str, Any] = {
+        "aud": aud,
+        "iss": app_id,
+        "sub": sub,
+        "room": room_name,
+        "iat": iat,
+        "nbf": nbf,
+        "exp": exp,
+        "context": {
+            "user": user_claims,
+            "features": {
+                "livestreaming": False,
+                "outbound-call": False,
+                "transcription": False,
+                "recording": bool(is_moderator),
+            },
+        },
+    }
+    return jwt.encode(payload, app_secret, algorithm="HS256")
+
+
+def decode_jitsi_jwt_unsafe_for_tests(token: str) -> dict[str, Any]:
+    """Декодирование без проверки подписи — только для unit-тестов claims."""
+    return jwt.decode(token, options={"verify_signature": False})
+
+
+def jwt_expires_at(token: str) -> datetime | None:
+    try:
+        data = decode_jitsi_jwt_unsafe_for_tests(token)
+    except jwt.PyJWTError:
+        return None
+    exp = data.get("exp")
+    if not exp:
+        return None
+    return datetime.fromtimestamp(int(exp), tz=timezone.utc)

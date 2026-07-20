@@ -25,6 +25,7 @@ import {
   isEgeInfTruthTableTask,
   isEgeInformaticsContext,
   isOgeInformaticsTask,
+  isOgeRusTask13,
 } from "../../utils/isOgeInformaticsTask";
 import { isTableAnswerTask } from "../../utils/examAnswerCheck";
 import {
@@ -74,6 +75,7 @@ function TaskCondition({ task, level, subject }) {
           className="cb-review-detail__task-text task-text"
           ogeMathChoiceEnhance={subject === "math"}
           ogeInf13Enhance={isOgeInformaticsTask(level, subject, task.number, 13)}
+          ogeRus13Enhance={isOgeRusTask13(level, subject, task.number)}
           ogeInf6Enhance={isOgeInformaticsTask(level, subject, task.number, 6)}
           egeInfFileEnhance={isEgeInformaticsContext(level, subject)}
           egeInf22Enhance={isEgeInfParallelProcessesTask(level, subject, task.number)}

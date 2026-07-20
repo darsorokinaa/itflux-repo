@@ -691,6 +691,16 @@
   margin-top: 0;
 }
 
+.all-tasks-item__answer-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 20px 14px;
+}
+
+.all-tasks-item__group-part .all-tasks-item__answer-foot {
+  padding: 0 16px 12px;
+}
+
 .all-tasks-item__answer {
   margin: 0;
   padding: 14px 20px 18px;

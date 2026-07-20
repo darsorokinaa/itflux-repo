@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useParams, useLocation, Link, useNavigate } from "react-router-dom";
 import MathContent from "../components/MathContent";
 import { devApiBase } from "../utils/devApiBase";
-import { isEgeInfTruthTableTask, isEgeInfParallelProcessesTask, isEgeInfRoadGraphTask, isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
+import { isEgeInfTruthTableTask, isEgeInfParallelProcessesTask, isEgeInfRoadGraphTask, isInformaticsCodeEditorContext, isOgeRusTask13 } from "../utils/isOgeInformaticsTask";
 
 const InformaticsCodeEditorEntry = lazy(
   () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
@@ -69,13 +69,14 @@ function isOgeInformaticsTask(level, subject, taskNumber, n) {
 }
 
 /** Условие задания — тот же рендер, что на вкладке «Все задачи». */
-function ExamTaskCondition({ html, subject }) {
+function ExamTaskCondition({ html, subject, level, taskNumber }) {
   return (
     <MathContent
       html={html}
       className="all-tasks-item__html exam-task-card__text task-text"
       plainHtml
       ogeMathChoiceEnhance={subject === "math"}
+      ogeRus13Enhance={isOgeRusTask13(level, subject, taskNumber)}
     />
   );
 }
@@ -2397,7 +2398,7 @@ function ExamPage() {
                     openBoardForTaskId={eduOpenBoardForTaskId}
                     onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                   >
-                  <ExamTaskCondition html={task.text} subject={subject} />
+                  <ExamTaskCondition html={task.text} subject={subject} level={level} taskNumber={task.number} />
                   {task.file && <TaskFileAttachment href={task.file} />}
                   {task.author && <div className="task-author">{task.author}</div>}
 
@@ -2782,7 +2783,7 @@ function ExamPage() {
                             openBoardForTaskId={eduOpenBoardForTaskId}
                             onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                           >
-                          <ExamTaskCondition html={task.text} subject={subject} />
+                          <ExamTaskCondition html={task.text} subject={subject} level={level} taskNumber={task.number} />
                           {task.file && <TaskFileAttachment href={task.file} />}
                           {task.author && <div className="task-author">{task.author}</div>}
 
@@ -2896,7 +2897,7 @@ function ExamPage() {
                         openBoardForTaskId={eduOpenBoardForTaskId}
                         onConsumedBoardOpenRequest={() => setEduOpenBoardForTaskId(null)}
                       >
-                      <ExamTaskCondition html={task.text} subject={subject} />
+                      <ExamTaskCondition html={task.text} subject={subject} level={level} taskNumber={task.number} />
                       {task.file && <TaskFileAttachment href={task.file} />}
                       {task.author && <div className="task-author">{task.author}</div>}
 

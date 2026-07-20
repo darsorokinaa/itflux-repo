@@ -11,6 +11,7 @@ import { mapApiGroup, mapApiStudent } from "../cabinetMappers";
 import { GroupFormModal, InviteFormModal, StudentFormModal } from "../components/StudentGroupModals";
 import PlanAttachModal from "../components/PlanAttachModal";
 import HomeworkAssignModal from "../components/HomeworkAssignModal";
+import MaterialsAssignModal from "../components/MaterialsAssignModal";
 import LimitBadge from "../components/LimitBadge";
 import UpgradeLimitModal from "../components/UpgradeLimitModal";
 import CompactUpgradeModal from "../components/CompactUpgradeModal";
@@ -29,6 +30,7 @@ import {
   fetchInvitations,
   fetchPlanEnrollments,
   fetchStudents,
+  normalizeCabinetList,
   removeStudentFromGroup,
   updateGroup,
   updateStudent,
@@ -47,16 +49,12 @@ const FILTERS = [
 
 const INDIVIDUAL_BLOCK_ID = "individual";
 
-const STATUS_LABELS = {
-  active: "Активен",
-  review: "Работа на проверке",
-  warning: "Требует внимания",
-};
-
 function studentInitials(name) {
-  const parts = name.replace(/\./g, "").trim().split(/\s+/);
+  const safe = String(name || "").replace(/\./g, "").trim();
+  if (!safe) return "??";
+  const parts = safe.split(/\s+/);
   if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-  return name.slice(0, 2).toUpperCase();
+  return safe.slice(0, 2).toUpperCase();
 }
 
 function avatarTone(student) {
@@ -103,7 +101,16 @@ function formatGrade(grade) {
   return `${grade} класс`;
 }
 
-function StudentChip({ student, enrollment, dragging, onDragStart, onDragEnd, onOpen, onAssignHomework }) {
+function StudentChip({
+  student,
+  enrollment,
+  dragging,
+  onDragStart,
+  onDragEnd,
+  onOpen,
+  onAssignHomework,
+  onAssignMaterials,
+}) {
   const tone = avatarTone(student);
   const joined = Boolean(student.raw?.is_registered);
 
@@ -145,7 +152,6 @@ function StudentChip({ student, enrollment, dragging, onDragStart, onDragEnd, on
             {joined ? "Присоединился" : "Не присоединился"}
           </span>
         </span>
-        <span className={`cb-student-chip__status cb-student-chip__status--${student.status}`} title={STATUS_LABELS[student.status]} />
       </button>
       <div className="cb-student-chip__actions">
         <button
@@ -158,6 +164,18 @@ function StudentChip({ student, enrollment, dragging, onDragStart, onDragEnd, on
         >
           <CabinetIcon name="tasks" />
           <span>Задать ДЗ</span>
+        </button>
+        <button
+          type="button"
+          className="cb-student-chip__action-btn cb-student-chip__action-btn--materials"
+          onClick={() => onAssignMaterials?.(student)}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDragStart={(e) => e.preventDefault()}
+          aria-label="Выдать материалы"
+          title="Выдать дополнительные материалы"
+        >
+          <CabinetIcon name="folder" />
+          <span>Материалы</span>
         </button>
         <button
           type="button"
@@ -194,6 +212,9 @@ function GroupCard({
   onAttachPlan,
   onAttachPlanStudent,
   onAssignHomeworkStudent,
+  onAssignHomeworkGroup,
+  onAssignMaterialsStudent,
+  onAssignMaterialsGroup,
   enrollmentsByStudent,
 }) {
   const dirClass = group.direction === "ОГЭ" ? "oge" : "ege";
@@ -224,6 +245,26 @@ function GroupCard({
             ⋯
           </button>
         </div>
+      </div>
+
+      <div className="cb-group-card__students">
+        {students.length === 0 ? (
+          <p className="cb-group-card__empty">Перетащите сюда</p>
+        ) : (
+          students.map((st) => (
+            <StudentChip
+              key={st.id}
+              student={st}
+              enrollment={enrollmentsByStudent[st.id]}
+              dragging={draggingId === st.id}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+              onOpen={() => onOpenStudent(st)}
+              onAssignHomework={onAssignHomeworkStudent}
+              onAssignMaterials={onAssignMaterialsStudent}
+            />
+          ))
+        )}
       </div>
 
       <div className="cb-group-card__plan-block">
@@ -259,25 +300,6 @@ function GroupCard({
         </p>
       </div>
 
-      <div className="cb-group-card__students">
-        {students.length === 0 ? (
-          <p className="cb-group-card__empty">Перетащите сюда</p>
-        ) : (
-          students.map((st) => (
-            <StudentChip
-              key={st.id}
-              student={st}
-              enrollment={enrollmentsByStudent[st.id]}
-              dragging={draggingId === st.id}
-              onDragStart={onDragStart}
-              onDragEnd={onDragEnd}
-              onOpen={() => onOpenStudent(st)}
-              onAssignHomework={onAssignHomeworkStudent}
-            />
-          ))
-        )}
-      </div>
-
       <div className="cb-group-card__actions">
         <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={onOpenGroup}>
           Открыть группу
@@ -288,8 +310,19 @@ function GroupCard({
         <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={onOpenGroup}>
           Запланировать урок
         </button>
-        <button type="button" className="cb-btn cb-btn--text cb-btn--sm" onClick={onOpenGroup}>
+        <button
+          type="button"
+          className="cb-btn cb-btn--text cb-btn--sm"
+          onClick={() => onAssignHomeworkGroup?.(group)}
+        >
           Выдать задание
+        </button>
+        <button
+          type="button"
+          className="cb-btn cb-btn--text cb-btn--sm"
+          onClick={() => onAssignMaterialsGroup?.(group)}
+        >
+          Выдать материалы
         </button>
       </div>
     </article>
@@ -464,6 +497,7 @@ export default function CabinetStudentsPage() {
   const [enrollmentsByGroup, setEnrollmentsByGroup] = useState({});
   const [planAttachModal, setPlanAttachModal] = useState(null);
   const [homeworkAssignModal, setHomeworkAssignModal] = useState(null);
+  const [materialsAssignModal, setMaterialsAssignModal] = useState(null);
 
   const { toast, showToast } = useSoonToast();
   const subscription = useSubscription();
@@ -495,22 +529,33 @@ export default function CabinetStudentsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [studentsData, groupsData, pendingInvites, acceptedInvites] = await Promise.all([
+      const [studentsData, groupsData] = await Promise.all([
         fetchStudents({ status: "active" }),
         fetchGroups({ status: "active" }),
-        fetchInvitations({ status: "pending" }),
-        fetchInvitations({ status: "accepted" }),
       ]);
-      setStudents((studentsData || []).map(mapApiStudent));
-      setGroups((groupsData || []).map(mapApiGroup));
-      const mergedInvites = [...(pendingInvites || []), ...(acceptedInvites || [])]
-        .filter((inv) => inv && inv.id != null)
-        .sort((a, b) => {
-          const aTime = Date.parse(a.created_at || "") || 0;
-          const bTime = Date.parse(b.created_at || "") || 0;
-          return bTime - aTime;
-        });
-      setInvitations(mergedInvites);
+      setStudents(normalizeCabinetList(studentsData).map(mapApiStudent));
+      setGroups(normalizeCabinetList(groupsData).map(mapApiGroup));
+
+      try {
+        const [pendingInvites, acceptedInvites] = await Promise.all([
+          fetchInvitations({ status: "pending" }),
+          fetchInvitations({ status: "accepted" }),
+        ]);
+        const mergedInvites = [
+          ...normalizeCabinetList(pendingInvites),
+          ...normalizeCabinetList(acceptedInvites),
+        ]
+          .filter((inv) => inv && inv.id != null)
+          .sort((a, b) => {
+            const aTime = Date.parse(a.created_at || "") || 0;
+            const bTime = Date.parse(b.created_at || "") || 0;
+            return bTime - aTime;
+          });
+        setInvitations(mergedInvites);
+      } catch {
+        setInvitations([]);
+      }
+
       await loadEnrollments();
     } catch (err) {
       setError(err.message || "Не удалось загрузить данные");
@@ -526,8 +571,8 @@ export default function CabinetStudentsPage() {
         fetchStudents({ status: "archived" }),
         fetchGroups({ status: "archived" }),
       ]);
-      setArchivedStudents((archivedSt || []).map(mapApiStudent));
-      setArchivedGroups((archivedGr || []).map(mapApiGroup));
+      setArchivedStudents(normalizeCabinetList(archivedSt).map(mapApiStudent));
+      setArchivedGroups(normalizeCabinetList(archivedGr).map(mapApiGroup));
     } catch {
       // ignore — не критично
     } finally {
@@ -700,10 +745,27 @@ export default function CabinetStudentsPage() {
       enrollment: enrollmentsByStudent[student.id] || null,
     });
   };
+  const openAssignHomeworkForGroup = (group) => {
+    setHomeworkAssignModal({
+      group,
+      students: group.students || [],
+      enrollment: enrollmentsByGroup[group.id] || null,
+    });
+  };
   const closeHomeworkAssignModal = () => setHomeworkAssignModal(null);
   const handleHomeworkAssigned = async () => {
     showToast("Домашнее задание выдано");
     await loadData();
+  };
+  const openAssignMaterialsForStudent = (student) => {
+    setMaterialsAssignModal({ student });
+  };
+  const openAssignMaterialsForGroup = (group) => {
+    setMaterialsAssignModal({ group });
+  };
+  const closeMaterialsAssignModal = () => setMaterialsAssignModal(null);
+  const handleMaterialsAssigned = async () => {
+    showToast("Материалы выданы");
   };
   const handlePlanAttached = async () => {
     await loadEnrollments();
@@ -939,6 +1001,9 @@ export default function CabinetStudentsPage() {
                     onAttachPlan={openAttachPlanForGroup}
                     onAttachPlanStudent={openAttachPlanForStudent}
                     onAssignHomeworkStudent={openAssignHomeworkForStudent}
+                    onAssignHomeworkGroup={openAssignHomeworkForGroup}
+                    onAssignMaterialsStudent={openAssignMaterialsForStudent}
+                    onAssignMaterialsGroup={openAssignMaterialsForGroup}
                     enrollmentsByStudent={enrollmentsByStudent}
                     {...drop}
                   />
@@ -974,6 +1039,7 @@ export default function CabinetStudentsPage() {
                     onDragEnd={handleDragEnd}
                     onOpen={() => openEditStudent(st)}
                     onAssignHomework={openAssignHomeworkForStudent}
+                    onAssignMaterials={openAssignMaterialsForStudent}
                   />
                 ))}
                 <AddStudentCard onClick={openCreateStudent} />
@@ -1014,14 +1080,28 @@ export default function CabinetStudentsPage() {
       ) : null}
       {homeworkAssignModal ? (
         <HomeworkAssignModal
-          student={homeworkAssignModal.student}
+          student={homeworkAssignModal.student || null}
+          students={homeworkAssignModal.students || null}
+          group={homeworkAssignModal.group || null}
           enrollment={homeworkAssignModal.enrollment}
           onClose={closeHomeworkAssignModal}
           onAssigned={handleHomeworkAssigned}
-          onAttachPlan={(student) => {
+          onAttachPlan={(target) => {
             closeHomeworkAssignModal();
-            openAttachPlanForStudent(student);
+            if (homeworkAssignModal.group) {
+              openAttachPlanForGroup(homeworkAssignModal.group);
+            } else if (target) {
+              openAttachPlanForStudent(target);
+            }
           }}
+        />
+      ) : null}
+      {materialsAssignModal ? (
+        <MaterialsAssignModal
+          student={materialsAssignModal.student || null}
+          group={materialsAssignModal.group || null}
+          onClose={closeMaterialsAssignModal}
+          onAssigned={handleMaterialsAssigned}
         />
       ) : null}
       {inviteModal ? (

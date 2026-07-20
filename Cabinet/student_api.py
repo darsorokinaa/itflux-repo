@@ -189,7 +189,12 @@ def _schedule_format_label(event):
         return "Офлайн"
     provider = event.get_meeting_provider_display()
     if event.meeting_provider and event.meeting_provider != MeetingProvider.NONE:
-        short = "Телемост" if event.meeting_provider == MeetingProvider.YANDEX_TELEMOST else provider
+        if event.meeting_provider == MeetingProvider.YANDEX_TELEMOST:
+            short = "Телемост"
+        elif event.meeting_provider == MeetingProvider.JITSI:
+            short = "Jitsi"
+        else:
+            short = provider
         return f"Онлайн · {short}"
     return "Онлайн"
 
@@ -198,6 +203,32 @@ def _lesson_assignment_for_event(students, event):
     if not event.lesson_id:
         return None
     return _lesson_assignments_qs(students).filter(lesson_id=event.lesson_id).first()
+
+
+def _video_meeting_payload(event):
+    """Краткие данные Jitsi-комнаты для карточек ученика."""
+    try:
+        from .models import VideoMeeting
+        from .video_meeting_service import meeting_join_window_state, ui_state_message
+
+        vm = VideoMeeting.objects.filter(schedule_event_id=event.pk).first()
+    except Exception:
+        return None, event.meeting_url or ""
+    if vm is None:
+        return None, event.meeting_url or ""
+    join_state = meeting_join_window_state(event, vm)
+    payload = {
+        "uuid": str(vm.uuid),
+        "status": vm.status,
+        "statusLabel": vm.get_status_display(),
+        "joinState": join_state,
+        "joinStateLabel": ui_state_message(join_state),
+        "pageUrl": f"/cabinet/meetings/{vm.uuid}",
+    }
+    meeting_url = event.meeting_url or ""
+    if not meeting_url and vm.status in ("scheduled", "live"):
+        meeting_url = payload["pageUrl"]
+    return payload, meeting_url
 
 
 def _serialize_schedule_lesson_card(event, students):
@@ -210,6 +241,8 @@ def _serialize_schedule_lesson_card(event, students):
         hw = _homework_qs(students).filter(lesson_id=lesson.id).first()
         if hw:
             homework_title = hw.title
+    video_meeting, meeting_url = _video_meeting_payload(event)
+
     return {
         "id": event.id,
         "kind": "schedule",
@@ -219,7 +252,8 @@ def _serialize_schedule_lesson_card(event, students):
         "teacher_name": _teacher_name(event.owner),
         "format": event.get_format_display(),
         "format_label": _schedule_format_label(event),
-        "meeting_url": event.meeting_url or "",
+        "meeting_url": meeting_url,
+        "video_meeting": video_meeting,
         "status": event.status,
         "status_label": event.get_status_display(),
         "lesson_id": event.lesson_id,
@@ -529,6 +563,7 @@ def _assignment_id_for_event(event, students):
 
 def _serialize_schedule_event(event, students):
     topic = _schedule_event_topic(event, students)
+    video_meeting, meeting_url = _video_meeting_payload(event)
     return {
         "id": event.id,
         "topic": topic,
@@ -541,7 +576,8 @@ def _serialize_schedule_event(event, students):
         "format_label": _schedule_format_label(event),
         "event_type": event.get_event_type_display(),
         "event_type_code": event.event_type,
-        "meeting_url": event.meeting_url or "",
+        "meeting_url": meeting_url,
+        "video_meeting": video_meeting,
         "status": event.status,
         "status_label": event.get_status_display(),
         "lesson_id": event.lesson_id,
@@ -568,6 +604,7 @@ def _serialize_student_schedule_event_detail(event, students):
                 sid, _, _ = _homework_student_status(hw, student_obj)
                 homework_status = sid
 
+    video_meeting, meeting_url = _video_meeting_payload(event)
     return {
         "id": event.id,
         "startsAt": local_start.isoformat(),
@@ -578,7 +615,8 @@ def _serialize_student_schedule_event_detail(event, students):
         "topic": topic,
         "type": event.event_type,
         "format": "Онлайн" if event.format == ScheduleEvent.Format.ONLINE else "Офлайн",
-        "link": event.meeting_url or "",
+        "link": meeting_url,
+        "videoMeeting": video_meeting,
         "status": event.status,
         "readOnly": True,
         "materials": event.materials or "",

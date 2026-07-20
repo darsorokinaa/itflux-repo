@@ -164,6 +164,7 @@ class MaterialStatus(models.TextChoices):
 
 class MeetingProvider(models.TextChoices):
     YANDEX_TELEMOST = "yandex_telemost", "Яндекс Телемост"
+    JITSI = "jitsi", "Jitsi Meet"
     MANUAL = "manual", "Вручную"
     NONE = "none", "Нет"
 

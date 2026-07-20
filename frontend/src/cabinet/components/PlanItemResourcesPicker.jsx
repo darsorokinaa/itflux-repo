@@ -4,13 +4,25 @@ import CabinetModal from "./CabinetModal";
 import PlanItemCustomMaterialForm from "./PlanItemCustomMaterialForm";
 import { getLessonOpenUrl, lessonSubjectLine } from "../lessonCardUtils";
 import { buildLibraryLessonMaterialPayload } from "../planItemAttachments";
-import { fetchInteractives, createTeacherMaterial } from "../../utils/cabinetAuth";
+import { fetchInteractives, fetchMaterials, createTeacherMaterial } from "../../utils/cabinetAuth";
 import { getInteractiveDisplayTitle } from "../interactivesData";
 
 function normalizeList(data) {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.results)) return data.results;
   return [];
+}
+
+function materialMeta(material) {
+  return material.material_type_label
+    || material.topic
+    || (material.material_type === "task_set" ? "Вариант" : "Материал");
+}
+
+function materialIcon(material) {
+  if (material.material_type === "lesson") return "lessons";
+  if (material.material_type === "task_set") return "tasks";
+  return "file";
 }
 
 function ResourcePickRow({ icon, title, meta, attached, disabled, onSelect }) {
@@ -41,8 +53,12 @@ const SCOPE_CONFIG = {
     hint: "Выберите готовый урок или введите номер варианта с платформы.",
   },
   homework: {
-    title: "Добавить к домашнему заданию",
-    hint: "К ДЗ можно добавить свой интерактив, файлы или вариант по номеру.",
+    title: "Добавить материал",
+    hint: "Выберите урок из библиотеки платформы, файл учителя, интерактив или вариант.",
+  },
+  materials: {
+    title: "Добавить материал",
+    hint: "Выберите урок из библиотеки платформы или файл учителя.",
   },
 };
 
@@ -61,11 +77,13 @@ export default function PlanItemResourcesPicker({
   const [search, setSearch] = useState("");
   const [interactives, setInteractives] = useState([]);
   const [libraryLessons, setLibraryLessons] = useState([]);
+  const [teacherMaterials, setTeacherMaterials] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
   const interactiveSet = useMemo(() => new Set(attachedInteractiveIds), [attachedInteractiveIds]);
+  const materialSet = useMemo(() => new Set(attachedMaterialIds), [attachedMaterialIds]);
 
   const loadInteractives = useCallback(async () => {
     setLoading(true);
@@ -106,14 +124,32 @@ export default function PlanItemResourcesPicker({
     }
   }, [search]);
 
+  const loadTeacherMaterials = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await fetchMaterials({
+        mine: "true",
+        search: search.trim() || undefined,
+      });
+      setTeacherMaterials(normalizeList(data));
+    } catch (err) {
+      setTeacherMaterials([]);
+      setError(err?.message || "Не удалось загрузить файлы учителя");
+    } finally {
+      setLoading(false);
+    }
+  }, [search]);
+
   useEffect(() => {
     if (!open) return undefined;
     const timer = window.setTimeout(() => {
       if (tab === "interactives") loadInteractives();
       else if (tab === "library") loadLibrary();
+      else if (tab === "mine") loadTeacherMaterials();
     }, search ? 250 : 0);
     return () => window.clearTimeout(timer);
-  }, [open, loadInteractives, loadLibrary, search, tab]);
+  }, [open, loadInteractives, loadLibrary, loadTeacherMaterials, search, tab]);
 
   useEffect(() => {
     if (!open) {
@@ -167,6 +203,19 @@ export default function PlanItemResourcesPicker({
     }
   };
 
+  const handleTeacherMaterial = async (material) => {
+    if (!material?.id || materialSet.has(material.id)) return;
+    setSaving(true);
+    setError("");
+    try {
+      await onAttachMaterial?.(material);
+    } catch (err) {
+      setError(err?.message || "Не удалось добавить материал");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!open) return null;
 
   const customMode = tab === "file" || tab === "variant" ? tab : null;
@@ -182,11 +231,106 @@ export default function PlanItemResourcesPicker({
         ["library", "База"],
         ["variant", "Вариант"],
       ]
-      : [
-        ["interactives", "Интерактивы"],
-        ["file", "Файлы"],
-        ["variant", "Вариант"],
-      ];
+      : scope === "materials"
+        ? [
+          ["library", "Библиотека"],
+          ["mine", "Файлы учителя"],
+          ["file", "Загрузить"],
+        ]
+        : [
+          ["library", "Библиотека"],
+          ["mine", "Файлы учителя"],
+          ["interactives", "Интерактивы"],
+          ["file", "Загрузить"],
+          ["variant", "Вариант"],
+        ];
+
+  const searchPlaceholder = tab === "library"
+    ? "Название или тема урока"
+    : tab === "mine"
+      ? "Название файла или материала"
+      : "Название интерактива";
+
+  let body = null;
+  if (customMode) {
+    body = (
+      <PlanItemCustomMaterialForm
+        mode={customMode}
+        saving={saving}
+        error={error}
+        onSubmit={attachMaterial}
+      />
+    );
+  } else if (loading) {
+    body = <p className="cabinet-auth-muted">Загрузка…</p>;
+  } else if (tab === "library") {
+    body = libraryLessons.length === 0 ? (
+      <div className="cb-lesson-empty">
+        <p>Готовые уроки не найдены</p>
+      </div>
+    ) : (
+      <div className="cb-attach-list cb-plan-material-picker__list">
+        {libraryLessons.map((lesson) => (
+          <ResourcePickRow
+            key={lesson.id || lesson.slug}
+            icon="lessons"
+            title={lesson.title}
+            meta={lessonSubjectLine(lesson)}
+            attached={false}
+            disabled={saving || !getLessonOpenUrl(lesson)}
+            onSelect={() => handleLibraryLesson(lesson)}
+          />
+        ))}
+      </div>
+    );
+  } else if (tab === "mine") {
+    body = teacherMaterials.length === 0 ? (
+      <div className="cb-lesson-empty">
+        <p>У вас пока нет файлов</p>
+        <p className="cabinet-auth-muted">Загрузите файл на вкладке «Загрузить» или в разделе материалов.</p>
+      </div>
+    ) : (
+      <div className="cb-attach-list cb-plan-material-picker__list">
+        {teacherMaterials.map((material) => (
+          <ResourcePickRow
+            key={material.id}
+            icon={materialIcon(material)}
+            title={material.title}
+            meta={materialMeta(material)}
+            attached={materialSet.has(material.id)}
+            disabled={saving}
+            onSelect={() => handleTeacherMaterial(material)}
+          />
+        ))}
+      </div>
+    );
+  } else if (interactives.length === 0) {
+    body = (
+      <div className="cb-lesson-empty">
+        <p>У вас пока нет интерактивов</p>
+        <p className="cabinet-auth-muted">Создайте интерактив в разделе «Интерактивы».</p>
+      </div>
+    );
+  } else {
+    body = (
+      <div className="cb-attach-list cb-plan-material-picker__list">
+        {interactives.map((interactive) => (
+          <ResourcePickRow
+            key={interactive.id}
+            icon="interactive"
+            title={getInteractiveDisplayTitle({
+              ...interactive,
+              type: interactive.interactive_type || interactive.type,
+            })}
+            meta={interactive.interactive_type_label || interactive.interactiveTypeLabel || "Интерактив"}
+            attached={interactiveSet.has(interactive.id)}
+            disabled={saving}
+            onSelect={() => handleInteractive(interactive)}
+          />
+        ))}
+      </div>
+    );
+  }
 
   return (
     <CabinetModal title={config.title} onClose={onClose} wide>
@@ -206,73 +350,21 @@ export default function PlanItemResourcesPicker({
             </button>
           ))}
         </div>
-        {(tab === "interactives" || tab === "library") ? (
+        {(tab === "interactives" || tab === "library" || tab === "mine") ? (
           <label className="cb-field cb-plan-material-picker__search">
             <span>Поиск</span>
             <input
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={tab === "library" ? "Название или тема урока" : "Название интерактива"}
+              placeholder={searchPlaceholder}
             />
           </label>
         ) : null}
       </div>
 
       {error && !customMode ? <p className="cb-modal-form__error" role="alert">{error}</p> : null}
-
-      {customMode ? (
-        <PlanItemCustomMaterialForm
-          mode={customMode}
-          saving={saving}
-          error={error}
-          onSubmit={attachMaterial}
-        />
-      ) : loading ? (
-        <p className="cabinet-auth-muted">Загрузка…</p>
-      ) : tab === "library" ? (
-        libraryLessons.length === 0 ? (
-          <div className="cb-lesson-empty">
-            <p>Готовые уроки не найдены</p>
-          </div>
-        ) : (
-          <div className="cb-attach-list cb-plan-material-picker__list">
-            {libraryLessons.map((lesson) => (
-              <ResourcePickRow
-                key={lesson.id || lesson.slug}
-                icon="lessons"
-                title={lesson.title}
-                meta={lessonSubjectLine(lesson)}
-                attached={false}
-                disabled={saving || !getLessonOpenUrl(lesson)}
-                onSelect={() => handleLibraryLesson(lesson)}
-              />
-            ))}
-          </div>
-        )
-      ) : interactives.length === 0 ? (
-        <div className="cb-lesson-empty">
-          <p>У вас пока нет интерактивов</p>
-          <p className="cabinet-auth-muted">Создайте интерактив в разделе «Интерактивы».</p>
-        </div>
-      ) : (
-        <div className="cb-attach-list cb-plan-material-picker__list">
-          {interactives.map((interactive) => (
-            <ResourcePickRow
-              key={interactive.id}
-              icon="interactive"
-              title={getInteractiveDisplayTitle({
-                ...interactive,
-                type: interactive.interactive_type || interactive.type,
-              })}
-              meta={interactive.interactive_type_label || interactive.interactiveTypeLabel || "Интерактив"}
-              attached={interactiveSet.has(interactive.id)}
-              disabled={saving}
-              onSelect={() => handleInteractive(interactive)}
-            />
-          ))}
-        </div>
-      )}
+      {body}
     </CabinetModal>
   );
 }

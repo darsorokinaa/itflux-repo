@@ -10,7 +10,7 @@ export function CabinetPageShell({ children, className = "" }) {
   );
 }
 
-export function CabinetPageHeader({ title, subtitle, badge, actions = [] }) {
+export function CabinetPageHeader({ title, subtitle, badge, actions = [], children }) {
   const btnClass = (a) =>
     `cb-btn${a.primary ? " cb-btn--primary" : " cb-btn--outline"}${a.pill ? " cb-btn--pill" : ""}`;
 
@@ -22,6 +22,7 @@ export function CabinetPageHeader({ title, subtitle, badge, actions = [] }) {
           {badge}
         </div>
         {subtitle ? <p className="cb-page-sub">{subtitle}</p> : null}
+        {children}
       </div>
       {actions.length > 0 ? (
         <div className="cb-page-actions">

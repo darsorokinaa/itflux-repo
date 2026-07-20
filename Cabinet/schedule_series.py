@@ -184,8 +184,15 @@ def _participant_vk_user_id(user):
 
 
 def _ensure_organizer(event, teacher):
-    name = teacher.get_full_name() or teacher.username
-    ScheduleEventParticipant.objects.get_or_create(
+    """Учитель урока всегда участник с ролью «Организатор»."""
+    profile = getattr(teacher, "profile", None)
+    name = ""
+    if profile is not None:
+        name = (profile.get_display_name() or "").strip()
+    if not name:
+        name = (teacher.get_full_name() or "").strip() or teacher.username
+
+    participant, created = ScheduleEventParticipant.objects.get_or_create(
         event=event,
         teacher=teacher,
         role=ParticipantRole.ORGANIZER,
@@ -197,6 +204,25 @@ def _ensure_organizer(event, teacher):
             "status": ParticipantStatus.ACCEPTED,
         },
     )
+    if created:
+        return participant
+
+    update_fields = []
+    if participant.user_id != teacher.pk:
+        participant.user = teacher
+        update_fields.append("user")
+    if (participant.display_name or "").strip() != name:
+        participant.display_name = name
+        update_fields.append("display_name")
+    if participant.status != ParticipantStatus.ACCEPTED:
+        participant.status = ParticipantStatus.ACCEPTED
+        update_fields.append("status")
+    if (participant.contact_email or "") != (teacher.email or ""):
+        participant.contact_email = teacher.email or ""
+        update_fields.append("contact_email")
+    if update_fields:
+        participant.save(update_fields=update_fields + ["updated_at"])
+    return participant
 
 
 def _sync_group_participants(event, group, exclude_teacher=None):

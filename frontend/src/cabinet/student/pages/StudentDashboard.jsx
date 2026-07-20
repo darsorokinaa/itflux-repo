@@ -13,6 +13,8 @@ import {
   formatStudentDate,
   formatStudentTime,
   studentLessonMeta,
+  isInternalMeetingHref,
+  lessonMeetingHref,
   useLessonConnectAvailable,
   useLessonInProgress,
 } from "../StudentSectionUi";
@@ -85,16 +87,26 @@ function NextLessonCard({ lesson, onOpenSchedule }) {
         </p>
       </div>
       <div className="st-next-lesson__actions">
-        {canConnect && lesson.meeting_url ? (
-          <a
-            href={lesson.meeting_url}
-            className="cb-btn cb-btn--primary"
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
-          >
-            Подключиться
-          </a>
+        {canConnect && lessonMeetingHref(lesson) ? (
+          isInternalMeetingHref(lessonMeetingHref(lesson)) ? (
+            <Link
+              to={lessonMeetingHref(lesson)}
+              className="cb-btn cb-btn--primary"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Подключиться
+            </Link>
+          ) : (
+            <a
+              href={lessonMeetingHref(lesson)}
+              className="cb-btn cb-btn--primary"
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Подключиться
+            </a>
+          )
         ) : null}
         <Link to={lessonLink} className="cb-btn cb-btn--outline" onClick={(e) => e.stopPropagation()}>
           Открыть урок
@@ -215,12 +227,13 @@ export default function StudentDashboard() {
     || (metrics?.progress_percent ?? 0) > 0;
 
   const lastResult = recent_results?.[0];
-  const heroCtaLink = canConnectToNext && next_lesson?.meeting_url
-    ? next_lesson.meeting_url
+  const nextMeetingHref = next_lesson ? lessonMeetingHref(next_lesson) : "";
+  const heroCtaLink = canConnectToNext && nextMeetingHref
+    ? nextMeetingHref
     : next_lesson?.assignment_id
       ? `/cabinet/student/lessons/${next_lesson.assignment_id}`
       : null;
-  const heroUsesMeeting = Boolean(canConnectToNext && next_lesson?.meeting_url);
+  const heroUsesMeeting = Boolean(canConnectToNext && nextMeetingHref);
 
   return (
     <StudentPageShell className="st-dashboard">
@@ -230,14 +243,20 @@ export default function StudentDashboard() {
           <p className="st-dash-hero__sub">{todayLine}</p>
           {heroCtaLink ? (
             heroUsesMeeting ? (
-              <a
-                href={heroCtaLink}
-                className="st-dash-hero__cta cb-btn cb-btn--white"
-                target="_blank"
-                rel="noreferrer"
-              >
-                К занятию
-              </a>
+              isInternalMeetingHref(heroCtaLink) ? (
+                <Link to={heroCtaLink} className="st-dash-hero__cta cb-btn cb-btn--white">
+                  К занятию
+                </Link>
+              ) : (
+                <a
+                  href={heroCtaLink}
+                  className="st-dash-hero__cta cb-btn cb-btn--white"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  К занятию
+                </a>
+              )
             ) : (
               <Link to={heroCtaLink} className="st-dash-hero__cta cb-btn cb-btn--white">
                 К материалам

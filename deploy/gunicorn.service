@@ -49,14 +49,18 @@ Environment="LESSON_SECRET=eKPoaKBpV0QeRzYi3YWUV3gBNfWamBmGwK5MgLWvSoKmenpLVQGf7
 # Прямой HTTP к ЛК (порт 8003) — минует nginx и самоподписанный SSL-сертификат.
 # Генератор и ЛК на одном сервере, поэтому http://127.0.0.1:8003 работает без TLS.
 Environment="LK_LESSON_NOTIFY_URL=http://127.0.0.1:8003/api/lesson/teacher-joined/"
-# Свой сервер Jitsi: lesson.itflux.ru — разрешаем встраивать iframe и добавлять config.*
-Environment="JITSI_EMBED_EXTRA_HOSTS=lesson.itflux.ru"
-# Jitsi JWT для роли модератора (учитель) и участника (ученик).
-# Значения берутся из prosody-конфига Jitsi-сервера (/etc/prosody/conf.d/lesson.itflux.ru.cfg.lua):
-#   VirtualHost "lesson.itflux.ru" → authentication = "token" → app_id, app_secret.
-# Без этих переменных учитель НЕ станет модератором и увидит "no moderators have arrived".
-Environment="JITSI_APP_ID=itflux"
+# —— Jitsi Meet (кабинет /cabinet/meetings/) ——
+# Системный Jitsi на lesson.itflux-academy.ru (Prosody token).
+Environment="JITSI_DOMAIN=lesson.itflux-academy.ru"
+Environment="JITSI_AUTH_MODE=jwt"
+Environment="JITSI_SUB=lesson.itflux-academy.ru"
+Environment="JITSI_EMBED_EXTRA_HOSTS=lesson.itflux-academy.ru"
+Environment="JITSI_APP_ID=generator_test"
 Environment="JITSI_APP_SECRET=y4vz0t7pmGM8uppejoQwhGxIZv1vtWF3"
+Environment="JITSI_AUD=jitsi"
+Environment="JITSI_TOKEN_TTL_SECONDS=7200"
+Environment="JITSI_JOIN_BEFORE_MINUTES=15"
+Environment="JITSI_JOIN_AFTER_MINUTES=30"
 
 Restart=always
 RestartSec=5

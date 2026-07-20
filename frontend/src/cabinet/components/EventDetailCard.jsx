@@ -311,7 +311,6 @@ function ActionBar({
   isCancelled,
   isDone,
   hasMaterials,
-  canStart,
   hasLink,
   starting,
   isMobile,
@@ -374,14 +373,14 @@ function ActionBar({
         >
           {isDone && hasMaterials ? "Открыть материалы" : "Открыть урок"}
         </button>
-        {(canStart || hasLink) ? (
+        {hasLink ? (
           <button
             type="button"
             className="cb-lesson-card__btn cb-lesson-card__btn--secondary"
             disabled={starting}
             onClick={onStartMeeting}
           >
-            {starting ? "Подключение…" : (hasLink ? "Начать встречу" : "Создать ссылку")}
+            {starting ? "Подключение…" : "Начать встречу"}
           </button>
         ) : null}
         {!isMobile ? (
@@ -458,6 +457,8 @@ export default function EventDetailCard({
   onClose,
   onEdit,
   onOpenLesson,
+  onAddMaterials,
+  onAddHomework,
   onStart,
   onRequestDelete,
   onRequestCancel,
@@ -487,8 +488,11 @@ export default function EventDetailCard({
   };
 
   const handleStartMeeting = () => {
-    if (hasLink) {
-      window.open(event.link, "_blank", "noopener,noreferrer");
+    const link = event.videoMeeting?.pageUrl || event.link || "";
+    const isInternalJitsi = typeof link === "string" && link.startsWith("/cabinet/meetings/");
+    // Внешний Телемост — новая вкладка; Jitsi и создание комнаты — через onStart.
+    if (hasLink && link && !isInternalJitsi && !event.videoMeeting?.uuid) {
+      window.open(link, "_blank", "noopener,noreferrer");
       return;
     }
     onStart(event);
@@ -514,7 +518,13 @@ export default function EventDetailCard({
 
   const formatValue = isOnline ? "Онлайн" : "Офлайн";
   const formatMeta = isOnline
-    ? (isDone ? "Проведено" : hasLink ? "Телемост" : (studentMode && hasMeetingLinkPending ? "Скоро" : "Без ссылки"))
+    ? (isDone
+      ? "Проведено"
+      : (event.videoMeeting || event.meetingProvider === "jitsi")
+        ? "Jitsi"
+        : hasLink
+          ? "Телемост"
+          : (studentMode && hasMeetingLinkPending ? "Скоро" : "Без ссылки"))
     : null;
 
   const showStatusBadge = !studentMode && statusMeta && ["moved", "cancelled", "done"].includes(statusMeta.mod);
@@ -540,9 +550,21 @@ export default function EventDetailCard({
     !studentMode && statusMeta ? `cb-lesson-card--${statusMeta.mod}` : "",
   ].filter(Boolean).join(" ");
 
-  const showStart = canStart || hasLink;
   const openLesson = () => onOpenLesson(Boolean(isDone && materials.length));
-  const openMaterials = () => onOpenLesson(true);
+  const handleAddMaterials = () => {
+    if (onAddMaterials) {
+      onAddMaterials(event);
+      return;
+    }
+    onOpenLesson?.(true);
+  };
+  const handleAddHomework = () => {
+    if (onAddHomework) {
+      onAddHomework(event);
+      return;
+    }
+    onOpenLesson?.(true);
+  };
 
   return (
     <div className={overlayClass} onClick={onClose} role="presentation">
@@ -740,7 +762,7 @@ export default function EventDetailCard({
                 rows={materials}
                 emptyLabel="Материалов нет"
                 emptyActionLabel="Добавить"
-                onEmptyAction={event.readOnly ? null : openMaterials}
+                onEmptyAction={event.readOnly || studentMode ? null : handleAddMaterials}
                 variant="material"
                 isMobile={isMobile}
               />
@@ -750,7 +772,7 @@ export default function EventDetailCard({
                 rows={homework}
                 emptyLabel="Домашнее задание не выдано"
                 emptyActionLabel="Добавить ДЗ"
-                onEmptyAction={event.readOnly ? null : openMaterials}
+                onEmptyAction={event.readOnly || studentMode ? null : handleAddHomework}
                 variant="homework"
                 isMobile={isMobile}
               />
@@ -765,7 +787,6 @@ export default function EventDetailCard({
           isCancelled={isCancelled}
           isDone={isDone}
           hasMaterials={materials.length > 0}
-          canStart={showStart}
           hasLink={hasLink}
           starting={startingId === event.id}
           isMobile={isMobile}

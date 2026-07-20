@@ -2,6 +2,22 @@ function apiBase() {
   return "/api/cabinet";
 }
 
+/** DRF list or plain array — always returns an array. */
+export function normalizeCabinetList(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.results)) return data.results;
+  return [];
+}
+
+function buildCabinetQueryPath(path, params = {}) {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value != null && value !== "") qs.set(key, value);
+  });
+  const query = qs.toString();
+  return query ? `${path}?${query}` : path;
+}
+
 function collectApiMessages(value) {
   if (value == null) return [];
   if (typeof value === "string") return value.trim() ? [value.trim()] : [];
@@ -110,6 +126,84 @@ export function startTelemostLesson(payload = {}) {
   });
 }
 
+async function videoMeetingFetch(path, options = {}) {
+  await ensureCsrfCookie();
+  const headers = {
+    Accept: "application/json",
+    ...(options.body && !(options.body instanceof FormData)
+      ? { "Content-Type": "application/json" }
+      : {}),
+    ...(options.headers || {}),
+  };
+  const csrf = getCsrfToken();
+  if (csrf) headers["X-CSRFToken"] = csrf;
+
+  const res = await fetch(`/api/video-meetings${path}`, {
+    credentials: "same-origin",
+    ...options,
+    headers,
+  });
+
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+
+  if (!res.ok) {
+    const message = formatApiError(data, "Ошибка видеоконференции");
+    const err = new Error(message);
+    err.code = data?.code;
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+export function fetchVideoMeetingForEvent(eventId) {
+  return videoMeetingFetch(`/for-event/${eventId}/`, { method: "GET" });
+}
+
+export function ensureVideoMeetingForEvent(eventId) {
+  return videoMeetingFetch(`/for-event/${eventId}/`, { method: "POST", body: "{}" });
+}
+
+export function fetchVideoMeetingDetail(meetingUuid) {
+  return videoMeetingFetch(`/${meetingUuid}/`, { method: "GET" });
+}
+
+export function fetchVideoMeetingJoinConfig(meetingUuid) {
+  return videoMeetingFetch(`/${meetingUuid}/join-config/`, { method: "POST", body: "{}" });
+}
+
+export function startVideoMeeting(meetingUuid) {
+  return videoMeetingFetch(`/${meetingUuid}/start/`, { method: "POST", body: "{}" });
+}
+
+export function finishVideoMeeting(meetingUuid) {
+  return videoMeetingFetch(`/${meetingUuid}/finish/`, { method: "POST", body: "{}" });
+}
+
+export function recordVideoMeetingJoin(meetingUuid, payload = {}) {
+  return videoMeetingFetch(`/${meetingUuid}/attendance/join/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function recordVideoMeetingLeave(meetingUuid, payload = {}) {
+  return videoMeetingFetch(`/${meetingUuid}/attendance/leave/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchVideoMeetingAttendance(meetingUuid) {
+  return videoMeetingFetch(`/${meetingUuid}/attendance/`, { method: "GET" });
+}
+
 export function fetchTelemostStatus() {
   return cabinetFetch("/telemost/status/", { method: "GET" });
 }
@@ -194,12 +288,7 @@ export function acceptInvitation(token) {
 }
 
 export function fetchInvitations(params = {}) {
-  const qs = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    if (value != null && value !== "") qs.set(key, value);
-  });
-  const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  return cabinetFetch(`/invitations/${suffix}`, { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/invitations/", params), { method: "GET" });
 }
 
 export function createInvitation(payload) {
@@ -228,12 +317,7 @@ export function buildInvitationUrl(joinPath) {
 }
 
 export function fetchStudents(params = {}) {
-  const qs = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    if (value != null && value !== "") qs.set(key, value);
-  });
-  const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  return cabinetFetch(`/students/${suffix}`, { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/students/", params), { method: "GET" });
 }
 
 export function createStudent(payload) {
@@ -272,12 +356,11 @@ export function checkVariantTasksOverlap(studentId, variantId) {
 }
 
 export function fetchGroups(params = {}) {
-  const qs = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    if (value != null && value !== "") qs.set(key, value);
-  });
-  const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  return cabinetFetch(`/groups/${suffix}`, { method: "GET" });
+  return cabinetFetch(buildCabinetQueryPath("/groups/", params), { method: "GET" });
+}
+
+export function fetchGroup(id) {
+  return cabinetFetch(`/groups/${id}/`, { method: "GET" });
 }
 
 export function createGroup(payload) {
@@ -755,7 +838,6 @@ export function fetchStudentMaterials(query = "") {
   return cabinetFetch(`/student/materials/${qs}`, { method: "GET" });
 }
 
-/* Teacher: direct material assignments */
 export function fetchDirectMaterials() {
   return cabinetFetch("/direct-materials/", { method: "GET" });
 }

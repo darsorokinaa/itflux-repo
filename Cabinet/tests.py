@@ -1925,3 +1925,53 @@ class SecurityHardeningTests(TestCase):
         payload = invitation_preview_payload(invitation)
         self.assertIn("*", payload["email_hint"])
         self.assertNotEqual(payload["email_hint"], "student@example.com")
+
+    def test_teacher_students_page_apis(self):
+        from rest_framework.test import APIClient
+        from Cabinet.invitations import create_student_invitation
+        from Cabinet.models import Student
+
+        create_student_invitation(
+            self.teacher,
+            first_name="Анна",
+            last_name="Иванова",
+            direction="oge",
+        )
+        client = APIClient()
+        client.force_authenticate(user=self.teacher)
+
+        for path in (
+            "/api/cabinet/students/?status=active",
+            "/api/cabinet/groups/?status=active",
+            "/api/cabinet/invitations/?status=pending",
+            "/api/cabinet/invitations/?status=accepted",
+        ):
+            response = client.get(path)
+            self.assertEqual(response.status_code, 200, (path, response.content))
+
+        students = client.get("/api/cabinet/students/?status=active").json()
+        self.assertTrue(any(s.get("first_name") == "Анна" for s in students))
+        self.assertEqual(
+            Student.objects.filter(teacher=self.teacher, first_name="Анна", user__isnull=True).count(),
+            1,
+        )
+
+    def test_teacher_can_delete_invitation_with_pre_profile(self):
+        from rest_framework.test import APIClient
+        from Cabinet.invitations import create_student_invitation
+        from Cabinet.models import Student, StudentInvitation
+
+        invitation = create_student_invitation(
+            self.teacher,
+            first_name="Петр",
+            last_name="Сидоров",
+        )
+        pre_id = invitation.pre_student_id
+        self.assertIsNotNone(pre_id)
+
+        client = APIClient()
+        client.force_authenticate(user=self.teacher)
+        response = client.delete(f"/api/cabinet/invitations/{invitation.pk}/")
+        self.assertEqual(response.status_code, 204, response.content)
+        self.assertFalse(StudentInvitation.objects.filter(pk=invitation.pk).exists())
+        self.assertFalse(Student.objects.filter(pk=pre_id).exists())

@@ -204,8 +204,10 @@ export function studentLessonMetaParts(event) {
   return { formatLine, teacher };
 }
 
-/** Показывать «Подключиться» за 5 минут до начала и до конца занятия. */
-export const LESSON_CONNECT_BEFORE_MS = 5 * 60 * 1000;
+/** Показывать «Подключиться» за 15 минут до начала (как JITSI_JOIN_BEFORE_MINUTES). */
+export const LESSON_CONNECT_BEFORE_MS = 15 * 60 * 1000;
+/** Дополнительное окно после окончания (как JITSI_JOIN_AFTER_MINUTES). */
+export const LESSON_CONNECT_AFTER_MS = 30 * 60 * 1000;
 
 function lessonEndMs(startsAt, endsAt) {
   if (endsAt) {
@@ -261,8 +263,18 @@ export function canShowLessonConnectButton(startsAt, endsAt, now = Date.now()) {
   if (!startsAt) return false;
   const start = new Date(startsAt).getTime();
   if (Number.isNaN(start)) return false;
-  const end = lessonEndMs(startsAt, endsAt);
+  const end = lessonEndMs(startsAt, endsAt) + LESSON_CONNECT_AFTER_MS;
   return now >= start - LESSON_CONNECT_BEFORE_MS && now <= end;
+}
+
+export function lessonMeetingHref(event) {
+  const vmUrl = event?.video_meeting?.pageUrl || event?.videoMeeting?.pageUrl;
+  if (vmUrl) return vmUrl;
+  return event?.meeting_url || event?.link || "";
+}
+
+export function isInternalMeetingHref(href) {
+  return typeof href === "string" && href.startsWith("/cabinet/meetings/");
 }
 
 export function useLessonConnectAvailable(startsAt, endsAt) {

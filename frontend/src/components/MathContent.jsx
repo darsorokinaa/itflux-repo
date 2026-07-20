@@ -7,6 +7,7 @@ import { formatEgeInf2TruthTableHtml } from "../utils/formatEgeInf2TaskHtml";
 import { formatEgeInf1RoadGraphHtml } from "../utils/formatEgeInf1TaskHtml";
 import { stripFipiAttachedFileMarkup } from "../utils/formatEgeInfAttachedFileHtml";
 import { formatOgeInf6TaskHtml } from "../utils/formatOgeInf6TaskHtml";
+import { formatOgeRus13TaskHtml } from "../utils/formatOgeRus13TaskHtml";
 import { formatTaskCodeBlocksHtml } from "../utils/formatTaskCodeBlocksHtml";
 import { formatFipiUnicodeMathHtml } from "../utils/formatFipiUnicodeMathHtml";
 import { parseTaskHtmlFragment } from "../utils/parseTaskHtmlFragment";
@@ -593,6 +594,7 @@ function preparePlainBankTaskHtml(raw, options = {}) {
   s = pipeTaskHtmlFormatter(s, formatEgeInf22ParallelProcessesHtml);
   s = pipeTaskHtmlFormatter(s, formatEgeInf1RoadGraphHtml);
   s = pipeTaskHtmlFormatter(s, formatOgeInformaticsTask13Html);
+  s = pipeTaskHtmlFormatter(s, formatOgeRus13TaskHtml);
   s = pipeTaskHtmlFormatter(s, formatOgeInf6TaskHtml);
   
   // Unconditionally remove CKEditor's <figure class="table"> wrappers
@@ -1381,7 +1383,7 @@ function removeDuplicateRoadGraphImages(root, isEgeInf1) {
 
 let mathJaxPromise = Promise.resolve();
 
-function MathContentInner({ html, className, onImageClick, plainHtml = false, ogeMathChoiceEnhance = true, ogeInf13Enhance = false, ogeInf6Enhance = false, egeInfFileEnhance = false, egeInf22Enhance = false, egeInf1Enhance = false, egeInf2Enhance = false }) {
+function MathContentInner({ html, className, onImageClick, plainHtml = false, ogeMathChoiceEnhance = true, ogeInf13Enhance = false, ogeRus13Enhance = false, ogeInf6Enhance = false, egeInfFileEnhance = false, egeInf22Enhance = false, egeInf1Enhance = false, egeInf2Enhance = false }) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -1426,7 +1428,9 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
       }
       const inf13 = ogeInf13Enhance ? formatOgeInformaticsTask13Html(afterInf1) : afterInf1;
       const afterInf13 = inf13 && inf13.trim() ? inf13 : afterInf1;
-      const inf6 = ogeInf6Enhance ? formatOgeInf6TaskHtml(afterInf13) : afterInf13;
+      const rus13 = ogeRus13Enhance ? formatOgeRus13TaskHtml(afterInf13) : afterInf13;
+      const afterRus13 = rus13 && rus13.trim() ? rus13 : afterInf13;
+      const inf6 = ogeInf6Enhance ? formatOgeInf6TaskHtml(afterRus13) : afterRus13;
       const afterInf6 = inf6 && inf6.trim() ? inf6 : afterInf13;
       // Соответствие А/Б/В ↔ 1/2/3 (ОГЭ мат. №11) — до choice, иначе 1) 2) путаются с вариантами.
       const matched = formatOgeMathMatchingTaskHtml(afterInf6);
@@ -1505,7 +1509,7 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
     return () => {
       cancelled = true;
     };
-  }, [html, plainHtml, ogeMathChoiceEnhance, ogeInf13Enhance, ogeInf6Enhance, egeInfFileEnhance, egeInf22Enhance, egeInf1Enhance, egeInf2Enhance]);
+  }, [html, plainHtml, ogeMathChoiceEnhance, ogeInf13Enhance, ogeRus13Enhance, ogeInf6Enhance, egeInfFileEnhance, egeInf22Enhance, egeInf1Enhance, egeInf2Enhance]);
 
   useEffect(() => {
     if (!onImageClick || !ref.current) return;
