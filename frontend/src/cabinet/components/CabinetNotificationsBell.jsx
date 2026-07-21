@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import {
+  clearNotifications,
   fetchNotifications,
   markAllNotificationsRead,
   markNotificationRead,
@@ -17,11 +18,20 @@ function formatWhen(iso) {
   }
 }
 
+function notificationHref(n, studentMode) {
+  const raw = n?.url || n?.payload?.url || n?.payload?.link || "";
+  if (typeof raw === "string" && raw.startsWith("/")) return raw;
+  if (studentMode) return "/cabinet/student/lessons";
+  return "/cabinet/schedule";
+}
+
 export default function CabinetNotificationsBell({ studentMode = false }) {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState("");
   const rootRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -69,16 +79,42 @@ export default function CabinetNotificationsBell({ studentMode = false }) {
     return () => window.removeEventListener("cabinet:open-notifications", openNotifications);
   }, [load]);
 
-  const handleRead = async (id) => {
-    await markNotificationRead(id, { student: studentMode });
-    setItems((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
-    setUnread((c) => Math.max(0, c - 1));
+  const handleOpenItem = async (n) => {
+    if (!n.is_read) {
+      try {
+        await markNotificationRead(n.id, { student: studentMode });
+        setItems((prev) => prev.map((row) => (row.id === n.id ? { ...row, is_read: true } : row)));
+        setUnread((c) => Math.max(0, c - 1));
+      } catch {
+        /* ignore */
+      }
+    }
+    setOpen(false);
+    navigate(notificationHref(n, studentMode));
   };
 
   const handleReadAll = async () => {
-    await markAllNotificationsRead({ student: studentMode });
-    setItems((prev) => prev.map((n) => ({ ...n, is_read: true })));
-    setUnread(0);
+    if (!unread || busy) return;
+    setBusy("read");
+    try {
+      await markAllNotificationsRead({ student: studentMode });
+      setItems((prev) => prev.map((n) => ({ ...n, is_read: true })));
+      setUnread(0);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const handleClear = async () => {
+    if (!items.length || busy) return;
+    setBusy("clear");
+    try {
+      await clearNotifications({ student: studentMode });
+      setItems([]);
+      setUnread(0);
+    } finally {
+      setBusy("");
+    }
   };
 
   return (
@@ -96,10 +132,27 @@ export default function CabinetNotificationsBell({ studentMode = false }) {
         <div className="cabinet-notifications__panel">
           <div className="cabinet-notifications__head">
             <strong>Уведомления</strong>
-            {unread > 0 ? (
-              <button type="button" className="cabinet-notifications__read-all" onClick={handleReadAll}>
-                Прочитать все
-              </button>
+            {items.length > 0 ? (
+              <div className="cabinet-notifications__actions">
+                {unread > 0 ? (
+                  <button
+                    type="button"
+                    className="cabinet-notifications__read-all"
+                    onClick={handleReadAll}
+                    disabled={Boolean(busy)}
+                  >
+                    {busy === "read" ? "…" : "Прочитать все"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="cabinet-notifications__clear"
+                  onClick={handleClear}
+                  disabled={Boolean(busy)}
+                >
+                  {busy === "clear" ? "…" : "Очистить"}
+                </button>
+              </div>
             ) : null}
           </div>
           {loading ? <p className="cabinet-notifications__empty">Загрузка…</p> : null}
@@ -109,20 +162,29 @@ export default function CabinetNotificationsBell({ studentMode = false }) {
           <ul className="cabinet-notifications__list">
             {items.map((n) => (
               <li key={n.id} className={n.is_read ? "" : "cabinet-notifications__item--unread"}>
-                <button type="button" className="cabinet-notifications__item" onClick={() => !n.is_read && handleRead(n.id)}>
+                <button
+                  type="button"
+                  className="cabinet-notifications__item"
+                  onClick={() => void handleOpenItem(n)}
+                >
                   <span className="cabinet-notifications__title">{n.title}</span>
                   <span className="cabinet-notifications__message">{n.message}</span>
-                  <span className="cabinet-notifications__time">{formatWhen(n.created_at)}</span>
+                  <span className="cabinet-notifications__meta">
+                    <span className="cabinet-notifications__time">{formatWhen(n.created_at)}</span>
+                    {n.url || n.payload?.url ? (
+                      <span className="cabinet-notifications__link-hint">Открыть →</span>
+                    ) : null}
+                  </span>
                 </button>
               </li>
             ))}
           </ul>
           <Link
-            to={studentMode ? "/cabinet/student/schedule" : "/cabinet/schedule"}
+            to={studentMode ? "/cabinet/student/lessons" : "/cabinet/schedule"}
             className="cabinet-notifications__footer"
             onClick={() => setOpen(false)}
           >
-            Расписание
+            {studentMode ? "К занятиям" : "Расписание"}
           </Link>
         </div>
       ) : null}

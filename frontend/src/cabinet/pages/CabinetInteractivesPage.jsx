@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import ConfirmActionModal from "../components/ConfirmActionModal";
 import InteractiveAssignModal from "../components/InteractiveAssignModal";
 import {
   InteractivesEmptyState,
@@ -45,6 +46,8 @@ export default function CabinetInteractivesPage() {
   const [loadError, setLoadError] = useState("");
   const [showTypeModal, setShowTypeModal] = useState(false);
   const [assignTarget, setAssignTarget] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const { toast, notifySoon } = useSoonToast();
   const subscription = useSubscription();
@@ -202,16 +205,7 @@ export default function CabinetInteractivesPage() {
                     window.setTimeout(() => setNotice(""), 3200);
                   }
                 }}
-                onDelete={async () => {
-                  if (!window.confirm(`Удалить «${item.title || "интерактив"}»?`)) return;
-                  try {
-                    await deleteInteractiveApi(item.id);
-                    await refresh();
-                  } catch (err) {
-                    setNotice(err?.message || "Не удалось удалить");
-                    window.setTimeout(() => setNotice(""), 3200);
-                  }
-                }}
+                onDelete={() => setDeleteTarget(item)}
               />
             ))}
           </div>
@@ -232,6 +226,32 @@ export default function CabinetInteractivesPage() {
           onAssign={handleAssign}
         />
       ) : null}
+
+      <ConfirmActionModal
+        open={Boolean(deleteTarget)}
+        title="Удалить интерактив?"
+        text={`Удалить «${deleteTarget?.title || "интерактив"}»?`}
+        confirmLabel="Удалить"
+        danger
+        loading={deleteLoading}
+        onClose={() => {
+          if (!deleteLoading) setDeleteTarget(null);
+        }}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setDeleteLoading(true);
+          try {
+            await deleteInteractiveApi(deleteTarget.id);
+            setDeleteTarget(null);
+            await refresh();
+          } catch (err) {
+            setNotice(err?.message || "Не удалось удалить");
+            window.setTimeout(() => setNotice(""), 3200);
+          } finally {
+            setDeleteLoading(false);
+          }
+        }}
+      />
     </CabinetPageShell>
   );
 }

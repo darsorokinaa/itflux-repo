@@ -32,6 +32,7 @@ import {
   pickHomeworkFields,
   homeworkResultToUiState,
   buildHomeworkResultPayload,
+  buildLiveCheckedHomeworkResult,
   saveHomeworkDraft,
   submitHomework,
   homeworkApiUserMessage,
@@ -43,6 +44,13 @@ import {
   uploadHomeworkAnswer,
   deleteHomeworkAnswer,
 } from "../utils/cabinetHomework";
+import {
+  fetchCabinetSession,
+  fetchVideoMeetingLiveAnswers,
+  isTeacherRole,
+} from "../utils/cabinetAuth";
+import LiveVariantAnswersTable from "../cabinet/components/LiveVariantAnswersTable";
+import "../cabinet/styles/live-variant-answers.css";
 import HomeworkReviewResults, {
   HomeworkTaskReviewNote,
   buildHomeworkReviewFromVariant,
@@ -579,13 +587,28 @@ function ExamPage() {
     return parseHomeworkFromSearchForExam(location.search, embed);
   }, [location.search]);
   const isHomework = homeworkQuery.isHomework;
+  const isLiveVariant = Boolean(isHomework && homeworkQuery.isLiveMeeting);
+  const meetingUuid = useMemo(() => {
+    try {
+      return new URLSearchParams(location.search || "").get("meeting") || "";
+    } catch {
+      return "";
+    }
+  }, [location.search]);
   const isEmbeddedHomework = isHomework && lessonEmbedParams.embed;
   const isCabinetHomework = isHomework && !lessonEmbedParams.embed;
   /** Полноэкранный EdTech-макет с сайдбаром: не урок (в т.ч. ДЗ из кабинета ученика) */
   const showExamEducationShell = !lessonEmbedParams.embed;
   const cabinetAssignmentId = homeworkQuery.cabinetAssignment;
+  const [cabinetUser, setCabinetUser] = useState(null);
+  const [liveAnswers, setLiveAnswers] = useState(null);
+  const [liveAnswersLoading, setLiveAnswersLoading] = useState(false);
+  /** Учитель на вкладке варианта во время урока — определяем по доступу к live-answers. */
+  const [isLiveTeacherView, setIsLiveTeacherView] = useState(false);
   const isTeacherHomeworkView =
-    isHomework && lessonEmbedParams.embed && !lessonEmbedParams.student;
+    (isHomework && lessonEmbedParams.embed && !lessonEmbedParams.student)
+    || isLiveTeacherView
+    || Boolean(isLiveVariant && meetingUuid && isTeacherRole(cabinetUser));
   const homeworkStudentMode = isHomework && !isTeacherHomeworkView;
   const [hwApiRaw, setHwApiRaw] = useState(null);
   const [hwLoading, setHwLoading] = useState(false);
@@ -598,9 +621,9 @@ function ExamPage() {
   const showLessonSolutionUpload =
     lessonEmbedParams.embed && lessonEmbedParams.student && !!lessonEmbedParams.token;
   const showCabinetPart2SolutionUpload =
-    isCabinetHomework && homeworkStudentMode && !!cabinetAssignmentId;
+    isCabinetHomework && homeworkStudentMode && !!cabinetAssignmentId && !isLiveVariant;
   /** ДЗ из кабинета: без ID заданий, статус-плашек, номера варианта, PDF и ссылки */
-  const hideHomeworkVariantChrome = isCabinetHomework && homeworkStudentMode;
+  const hideHomeworkVariantChrome = isCabinetHomework && homeworkStudentMode && !isLiveVariant;
 
   /**
    * Пока variant ещё null, рендер только «Загрузка…» без #main-wrapper — :has(#main-wrapper…) в CSS не срабатывает.
@@ -848,6 +871,54 @@ function ExamPage() {
       cancelled = true;
     };
   }, [isHomework, cabinetAssignmentId, lessonEmbedParams.token]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCabinetSession()
+      .then((data) => {
+        if (!cancelled) setCabinetUser(data?.authenticated ? data.user : null);
+      })
+      .catch(() => {
+        if (!cancelled) setCabinetUser(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Учитель на вкладке варианта (?meeting=): таблица ответов прямо на странице.
+  // Не завязаны на live_meeting в URL — достаточно доступа к live-answers.
+  useEffect(() => {
+    if (!meetingUuid) {
+      setIsLiveTeacherView(false);
+      setLiveAnswers(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      setLiveAnswersLoading(true);
+      try {
+        const data = await fetchVideoMeetingLiveAnswers(meetingUuid);
+        if (cancelled) return;
+        const show = Boolean(data?.presented);
+        setIsLiveTeacherView(show);
+        setLiveAnswers(show ? data : null);
+      } catch {
+        if (!cancelled) {
+          setIsLiveTeacherView(false);
+          setLiveAnswers(null);
+        }
+      } finally {
+        if (!cancelled) setLiveAnswersLoading(false);
+      }
+    };
+    void tick();
+    const id = window.setInterval(tick, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [meetingUuid]);
 
   useEffect(() => {
     if (!variant?.tasks || !hwApiRaw) return;
@@ -1315,14 +1386,48 @@ function ExamPage() {
       const r = buildHomeworkResultPayload(variant.tasks, userAnswers, scores, checkedTasks);
       await saveHomeworkDraft(cabinetAssignmentId, { result: r }, homeworkLkOpts);
       if (isEmbeddedHomework) setHomeworkFieldsLocked(true);
-      setHwNotice("Черновик сохранён");
+      setHwNotice(isLiveVariant ? "Ответы синхронизированы" : "Черновик сохранён");
       setTimeout(() => setHwNotice(""), 2400);
     } catch (e) {
       setHwNotice(homeworkApiUserMessage(e) || "Не удалось сохранить");
     } finally {
       setHwActionBusy(false);
     }
-  }, [isHomework, cabinetAssignmentId, variant, userAnswers, scores, checkedTasks, homeworkLkOpts, hwApiRaw, isTeacherHomeworkView]);
+  }, [isHomework, cabinetAssignmentId, variant, userAnswers, scores, checkedTasks, homeworkLkOpts, hwApiRaw, isTeacherHomeworkView, isEmbeddedHomework, isLiveVariant]);
+
+  // Живой урок: учителю видны только ответы после «Проверить».
+  useEffect(() => {
+    if (!isLiveVariant || isLiveTeacherView || !cabinetAssignmentId || !variant || homeworkFieldsLocked) {
+      return undefined;
+    }
+    const statusNorm = pickHomeworkFields(hwApiRaw, cabinetAssignmentId || "").status;
+    if (homeworkIsReviewed(statusNorm) || statusNorm === "reviewing") return undefined;
+    const checked = checkedTasks || {};
+    if (!Object.keys(checked).length) return undefined;
+    const timer = window.setTimeout(() => {
+      const r = buildLiveCheckedHomeworkResult(variant.tasks, userAnswers, scores, checked);
+      void saveHomeworkDraft(cabinetAssignmentId, { result: r }, homeworkLkOpts)
+        .then(() => {
+          setHwNotice("");
+        })
+        .catch((err) => {
+          const msg = homeworkApiUserMessage(err) || "Не удалось синхронизировать ответы";
+          setHwNotice(msg);
+        });
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [
+    isLiveVariant,
+    isLiveTeacherView,
+    cabinetAssignmentId,
+    variant,
+    checkedTasks,
+    userAnswers,
+    scores,
+    homeworkLkOpts,
+    hwApiRaw,
+    homeworkFieldsLocked,
+  ]);
 
   const runHomeworkSubmit = useCallback(async () => {
     if (!isHomework || !cabinetAssignmentId || !variant) return;
@@ -1478,6 +1583,8 @@ function ExamPage() {
   const hwScorePart1Only = homeworkStudentMode;
   const p1FieldDisabled = (task) => {
     if (hRead) return true;
+    // Live-вариант: после «Проверить» ответ зафиксирован.
+    if (isLiveVariant && checkedTasks[task.id] !== undefined) return true;
     if (homeworkStudentMode) {
       if (homeworkConfirmedTasks[task.id]) return true;
       if (homeworkFieldsLocked || numLocked(task.number)) return true;
@@ -1493,14 +1600,15 @@ function ExamPage() {
   };
   const p2FieldDisabled = () =>
     hRead || (isHomework && (homeworkFieldsLocked || hwSt === "reviewed"));
-  const showAnswerFeedback = !homeworkStudentMode || showHomeworkReviewedResults;
+  const showAnswerFeedback = isLiveVariant || !homeworkStudentMode || showHomeworkReviewedResults;
   const showP1HomeworkConfirm = (task) =>
     homeworkStudentMode &&
+    !isLiveVariant &&
     !isEmbeddedHomework &&
     !hRead &&
     !homeworkConfirmedTasks[task.id];
   const showP1CheckNormal = (task) =>
-    !homeworkStudentMode && checkedTasks[task.id] === undefined;
+    (!homeworkStudentMode || isLiveVariant) && checkedTasks[task.id] === undefined;
   /** В ДЗ в iframe урока: «Сохранить» вместо «Проверить». */
   const p1ShowHomeworkSave = (task) =>
     isEmbeddedHomework &&
@@ -1704,7 +1812,11 @@ function ExamPage() {
     setResultsOpen(true);
   };
 
-  const homeworkSidebarFinishLabel = homeworkStudentMode ? "Отправить на проверку" : undefined;
+  const homeworkSidebarFinishLabel = isLiveVariant
+    ? undefined
+    : homeworkStudentMode
+      ? "Отправить на проверку"
+      : undefined;
   const homeworkSidebarSubmittedMessage =
     homeworkStudentMode && hRead
       ? homeworkIsReviewed(hwSt)
@@ -1714,6 +1826,10 @@ function ExamPage() {
   const handleSidebarFinish = () => {
     if (lessonEmbedParams.embed && window.parent && window.parent !== window) {
       window.parent.postMessage({ source: "exam-embedded-lesson", type: "lesson_finish_click" }, "*");
+      return;
+    }
+    if (isLiveVariant) {
+      handleFinish();
       return;
     }
     if (homeworkStudentMode) {
@@ -1768,7 +1884,9 @@ function ExamPage() {
   };
 
   const heroTitle =
-    (isEmbeddedHomework && !isTeacherHomeworkView) || hideHomeworkVariantChrome
+    isLiveVariant
+      ? `Вариант № ${variant.id}`
+      : (isEmbeddedHomework && !isTeacherHomeworkView) || hideHomeworkVariantChrome
       ? "Домашнее задание"
       : mode === "test"
         ? (() => {
@@ -1825,7 +1943,7 @@ function ExamPage() {
       (task.number === 26 || task.number === 27);
 
     if (p === 1) {
-      if (homeworkStudentMode) {
+      if (homeworkStudentMode && !isLiveVariant) {
         if (homeworkConfirmedTasks[task.id]) c += " is-pending";
         else {
           const ua = userAnswers[task.id];
@@ -1978,18 +2096,22 @@ function ExamPage() {
             {checkedTasks[task.id] ? (
               <>
                 <strong>Верно</strong>
-                <span className="exam-result__pts">{examP1PointsBadge(task)}</span>
+                {!isLiveVariant ? (
+                  <span className="exam-result__pts">{examP1PointsBadge(task)}</span>
+                ) : null}
               </>
             ) : (
               <>
                 <strong>Неверно</strong>
-                <div className="exam-result__correct">
-                  {" "}
-                  <MathContent
-                    html={task.answer || ""}
-                    className="exam-result-answer-math"
-                  />
-                </div>
+                {!isLiveVariant ? (
+                  <div className="exam-result__correct">
+                    {" "}
+                    <MathContent
+                      html={task.answer || ""}
+                      className="exam-result-answer-math"
+                    />
+                  </div>
+                ) : null}
               </>
             )}
           </div>
@@ -2309,6 +2431,13 @@ function ExamPage() {
               </div>
             </header>
 
+            {isLiveTeacherView ? (
+              <LiveVariantAnswersTable
+                answers={liveAnswers}
+                loading={liveAnswersLoading}
+              />
+            ) : null}
+
             {/* ===== ЧАСТЬ 1 ===== */}
             {part1Tasks.length > 0 && (
               <>
@@ -2322,7 +2451,8 @@ function ExamPage() {
               const truthCfg = !useTable ? getTruthTableConfig(task, { level, subject }) : null;
               const rows = useTable ? INF_TABLE_ROWS : 0;
               const cols = useTable ? INF_TABLE_COLS : 0;
-              const p1Done = showHomeworkReviewedResults
+              // Live-урок: после «Проверить» смотрим checkedTasks (верно/неверно без эталона).
+              const p1Done = isLiveVariant || showHomeworkReviewedResults
                 ? checkedTasks[task.id] !== undefined
                 : homeworkStudentMode
                   ? !!homeworkConfirmedTasks[task.id]
@@ -2338,7 +2468,7 @@ function ExamPage() {
                 rows,
                 cols,
                 getTableAnswerForCheck,
-                homeworkStudentMode && !showHomeworkReviewedResults,
+                homeworkStudentMode && !isLiveVariant && !showHomeworkReviewedResults,
                 homeworkConfirmedTasks
               );
 
@@ -2453,18 +2583,22 @@ function ExamPage() {
                             {checkedTasks[task.id] ? (
                               <>
                                 <strong>Верно</strong>
-                                <span className="exam-result__pts">{examP1PointsBadge(task)}</span>
+                                {!isLiveVariant ? (
+                                  <span className="exam-result__pts">{examP1PointsBadge(task)}</span>
+                                ) : null}
                               </>
                             ) : (
                               <>
                                 <strong>Неверно</strong>
-                                <div className="exam-result__correct">
-                                  {" "}
-                                  <MathContent
-                                    html={task.answer || ""}
-                                    className="exam-result-answer-math"
-                                  />
-                                </div>
+                                {!isLiveVariant ? (
+                                  <div className="exam-result__correct">
+                                    {" "}
+                                    <MathContent
+                                      html={task.answer || ""}
+                                      className="exam-result-answer-math"
+                                    />
+                                  </div>
+                                ) : null}
                               </>
                             )}
                           </div>
@@ -2571,18 +2705,22 @@ function ExamPage() {
                             {checkedTasks[task.id] ? (
                               <>
                                 <strong>Верно</strong>
-                                <span className="exam-result__pts">{examP1PointsBadge(task)}</span>
+                                {!isLiveVariant ? (
+                                  <span className="exam-result__pts">{examP1PointsBadge(task)}</span>
+                                ) : null}
                               </>
                             ) : (
                               <>
                                 <strong>Неверно</strong>
-                                <div className="exam-result__correct">
-                                 {" "}
-                                  <MathContent
-                                    html={task.answer || ""}
-                                    className="exam-result-answer-math"
-                                  />
-                                </div>
+                                {!isLiveVariant ? (
+                                  <div className="exam-result__correct">
+                                    {" "}
+                                    <MathContent
+                                      html={task.answer || ""}
+                                      className="exam-result-answer-math"
+                                    />
+                                  </div>
+                                ) : null}
                               </>
                             )}
                           </div>
@@ -2652,18 +2790,22 @@ function ExamPage() {
                             {checkedTasks[task.id] ? (
                               <>
                                 <strong>Верно</strong>
-                                <span className="exam-result__pts">{examP1PointsBadge(task)}</span>
+                                {!isLiveVariant ? (
+                                  <span className="exam-result__pts">{examP1PointsBadge(task)}</span>
+                                ) : null}
                               </>
                             ) : (
                               <>
                                 <strong>Неверно</strong>
-                                <div className="exam-result__correct">
-                                  {" "}
-                                  <MathContent
-                                    html={task.answer || ""}
-                                    className="exam-result-answer-math"
-                                  />
-                                </div>
+                                {!isLiveVariant ? (
+                                  <div className="exam-result__correct">
+                                    {" "}
+                                    <MathContent
+                                      html={task.answer || ""}
+                                      className="exam-result-answer-math"
+                                    />
+                                  </div>
+                                ) : null}
                               </>
                             )}
                           </div>
@@ -3031,6 +3173,15 @@ function ExamPage() {
 
               {showExamEducationShell && (
                 <aside className="exam-edu-sidebar desktop-variant-panel">
+                  {isLiveTeacherView ? (
+                    <div className="live-variant-answers-sidebar">
+                      <LiveVariantAnswersTable
+                        answers={liveAnswers}
+                        loading={liveAnswersLoading}
+                        compact
+                      />
+                    </div>
+                  ) : null}
                   <EduVariantSidebarCard
                     formatTimer={formatTimer}
                     timerStore={timerStore}

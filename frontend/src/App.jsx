@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect } from "react";
-import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import Layout from "./pages/Layout";
 import HomePage from "./pages/HomePage";
@@ -18,6 +18,7 @@ import LessonViewerPage from "./pages/LessonViewerPage";
 import ForTeachersPage from "./pages/ForTeachersPage";
 import CabinetAuthPage from "./pages/CabinetAuthPage";
 import CabinetJoinPage from "./cabinet/pages/CabinetJoinPage";
+import CabinetNotificationsSettingsPage from "./cabinet/pages/CabinetNotificationsSettingsPage";
 import CabinetPage from "./pages/CabinetPage";
 import CabinetDashboard from "./cabinet/CabinetDashboard";
 import CabinetStudentsPage from "./cabinet/pages/CabinetStudentsPage";
@@ -34,28 +35,40 @@ import CabinetInteractiveCreatePage from "./cabinet/pages/CabinetInteractiveCrea
 import CabinetInteractiveEditorPage from "./cabinet/pages/CabinetInteractiveEditorPage";
 import CabinetInteractiveDetailPage from "./cabinet/pages/CabinetInteractiveDetailPage";
 import CabinetInteractivePlayPage from "./cabinet/pages/CabinetInteractivePlayPage";
+import CabinetBoardsPage from "./cabinet/pages/CabinetBoardsPage";
+import CabinetBoardEditorPage from "./cabinet/pages/CabinetBoardEditorPage";
 import VideoMeetingPage from "./cabinet/pages/VideoMeetingPage";
+import MeetingCallDock from "./cabinet/components/MeetingCallDock";
 import CabinetMorePage from "./cabinet/pages/CabinetMorePage";
 import CabinetReportsPage from "./cabinet/CabinetReportsPage";
-import CabinetAiPage from "./cabinet/CabinetAiPage";
+// TEMP: ИИ-помощник скрыт
+// import CabinetAiPage from "./cabinet/CabinetAiPage";
 import CabinetUpgradePage from "./cabinet/pages/CabinetUpgradePage";
+import CabinetPaymentsPage from "./cabinet/pages/CabinetPaymentsPage";
+import CabinetJournalPage from "./cabinet/pages/CabinetJournalPage";
+import CabinetJournalAnalyticsPage from "./cabinet/pages/CabinetJournalAnalyticsPage";
+import CabinetLessonSummaryPage from "./cabinet/pages/CabinetLessonSummaryPage";
 import StudentCabinetPage from "./pages/StudentCabinetPage";
 import StudentDashboard from "./cabinet/student/pages/StudentDashboard";
 import StudentLessonsPage from "./cabinet/student/pages/StudentLessonsPage";
 import StudentLessonDetailPage from "./cabinet/student/pages/StudentLessonDetailPage";
 import StudentAssignmentsPage from "./cabinet/student/pages/StudentAssignmentsPage";
 import StudentAssignmentDetailPage from "./cabinet/student/pages/StudentAssignmentDetailPage";
-import StudentInteractivesPage from "./cabinet/student/pages/StudentInteractivesPage";
 import StudentInteractivePlayPage from "./cabinet/student/pages/StudentInteractivePlayPage";
-import StudentSchedulePage from "./cabinet/student/pages/StudentSchedulePage";
 import StudentMaterialsPage from "./cabinet/student/pages/StudentMaterialsPage";
+import StudentBoardsPage from "./cabinet/student/pages/StudentBoardsPage";
 import StudentProfilePage from "./cabinet/student/pages/StudentProfilePage";
-import StudentMorePage from "./cabinet/student/pages/StudentMorePage";
+import StudentResultsPage from "./cabinet/student/pages/StudentResultsPage";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ensureSiteFavicon } from "./utils/ensureSiteFavicon";
 
 const DEFAULT_META_DESCRIPTION =
   "Цифровой поток: подготовка к ОГЭ и ЕГЭ, генератор вариантов, банк задач, интерактивные уроки и личный кабинет учителя.";
+
+function LegacyInviteRedirect() {
+  const { token } = useParams();
+  return <Navigate to={`/invite/${token}/`} replace />;
+}
 
 function getMetaDescriptionForPath(pathname) {
   const path = pathname || "/";
@@ -87,8 +100,11 @@ function getMetaDescriptionForPath(pathname) {
   if (path.startsWith("/cabinet/login") || path.startsWith("/login")) {
     return "Вход в личный кабинет «Цифровой поток».";
   }
-  if (path.startsWith("/cabinet/join/")) {
+  if (path.startsWith("/invite/") || path.startsWith("/cabinet/join/")) {
     return "Присоединение к кабинету по приглашению учителя.";
+  }
+  if (path.startsWith("/cabinet/settings/notifications")) {
+    return "Настройки уведомлений и подключение Telegram.";
   }
   if (path.startsWith("/cabinet")) {
     return "Личный кабинет учителя: ученики, группы, планы уроков, расписание, интерактивы и проверка работ.";
@@ -228,8 +244,15 @@ function App() {
           <Route path="/teachers" element={<ForTeachersPage />} />
           <Route path="/for-teachers" element={<Navigate to="/teachers" replace />} />
           <Route path="/cabinet/login" element={<CabinetAuthPage />} />
-          <Route path="/cabinet/join/:token" element={<CabinetJoinPage />} />
+          <Route path="/invite/:token" element={<CabinetJoinPage />} />
+          <Route path="/invite/:token/" element={<CabinetJoinPage />} />
+          <Route path="/cabinet/join/:token" element={<LegacyInviteRedirect />} />
+          <Route path="/cabinet/join/:token/" element={<LegacyInviteRedirect />} />
+          <Route path="/cabinet/settings/notifications" element={<CabinetNotificationsSettingsPage />} />
+          <Route path="/cabinet/settings/notifications/" element={<CabinetNotificationsSettingsPage />} />
           <Route path="/cabinet/interactives/:id/play" element={<CabinetInteractivePlayPage />} />
+          <Route path="/cabinet/boards/:boardId" element={<CabinetBoardEditorPage />} />
+          <Route path="/teacher/boards/:boardId" element={<CabinetBoardEditorPage />} />
           <Route path="/cabinet/meetings/:meetingUuid" element={<VideoMeetingPage />} />
           <Route path="/cabinet/student" element={<StudentCabinetPage />}>
             <Route index element={<StudentDashboard />} />
@@ -238,8 +261,11 @@ function App() {
             <Route path="lessons/:id"      element={<StudentLessonDetailPage />} />
             <Route path="assignments"      element={<StudentAssignmentsPage />} />
             <Route path="assignments/:id"  element={<StudentAssignmentDetailPage />} />
+            <Route path="results"          element={<StudentResultsPage />} />
+            <Route path="results/:recordId" element={<StudentResultsPage />} />
             <Route path="profile"          element={<StudentProfilePage />} />
             <Route path="materials"        element={<StudentMaterialsPage />} />
+            <Route path="boards"           element={<StudentBoardsPage />} />
             {/* === Интерактив плеер (полноэкранный, без шапки) === */}
             <Route path="interactives/:id/play" element={<StudentInteractivePlayPage />} />
             {/* === Редиректы удалённых разделов === */}
@@ -261,12 +287,18 @@ function App() {
             <Route path="interactives/new/:type" element={<CabinetInteractiveEditorPage />} />
             <Route path="interactives/:id/edit" element={<CabinetInteractiveEditorPage />} />
             <Route path="interactives/:id" element={<CabinetInteractiveDetailPage />} />
+            <Route path="boards" element={<CabinetBoardsPage />} />
             <Route path="review/:reviewId" element={<CabinetReviewDetailPage />} />
             <Route path="review" element={<CabinetReviewPage />} />
+            <Route path="journal" element={<CabinetJournalPage />} />
+            <Route path="journal/analytics" element={<CabinetJournalAnalyticsPage />} />
+            <Route path="journal/lesson/:eventId" element={<CabinetLessonSummaryPage />} />
             <Route path="reports" element={<CabinetReportsPage />} />
             <Route path="library" element={<CabinetLibraryPage />} />
             <Route path="schedule" element={<CabinetSchedulePage />} />
-            <Route path="ai" element={<CabinetAiPage />} />
+            <Route path="payments" element={<CabinetPaymentsPage />} />
+            {/* TEMP: ИИ-помощник скрыт */}
+            {/* <Route path="ai" element={<CabinetAiPage />} /> */}
             <Route path="more" element={<CabinetMorePage />} />
             <Route path="upgrade" element={<CabinetUpgradePage />} />
           </Route>
@@ -298,6 +330,7 @@ function App() {
         </Route>
 
       </Routes>
+      <MeetingCallDock />
     </BrowserRouter>
   );
 }

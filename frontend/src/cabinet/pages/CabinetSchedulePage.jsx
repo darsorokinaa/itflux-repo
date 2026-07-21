@@ -1,18 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   createScheduleEvent,
   deleteScheduleEvent,
+  ensureScheduleEventPlanItem,
   ensureVideoMeetingForEvent,
   fetchCalendarEvents,
   fetchCalendarStatus,
+  fetchEventBillingBadge,
   fetchGroup,
   fetchScheduleEvents,
   fetchStudents,
   normalizeCabinetList,
   startTelemostLesson,
+  updateLessonPlanItem,
   updateScheduleEvent,
 } from "../../utils/cabinetAuth";
+import FinalizeLessonBillingModal from "../components/FinalizeLessonBillingModal";
+import BillingPaymentModal from "../components/BillingPaymentModal";
+import "../styles/payments.css";
 import { useCabinetCall } from "../CabinetCallContext";
 import { mapApiStudent } from "../cabinetMappers";
 import { isTelemostMeetingUrl } from "../telemostPopup";
@@ -20,8 +26,9 @@ import CreateScheduleLessonModal from "../components/CreateScheduleLessonModal";
 import EditScheduleLessonModal from "../components/EditScheduleLessonModal";
 import EventDetailCard from "../components/EventDetailCard";
 import HomeworkAssignModal from "../components/HomeworkAssignModal";
-import MaterialsAssignModal from "../components/MaterialsAssignModal";
+import { openLessonSummaryTab } from "../journal/openLessonSummary";
 import PlanItemDetailModal from "../components/PlanItemDetailModal";
+import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import CabinetIcon from "../CabinetIcons";
 import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
 import {
@@ -30,6 +37,7 @@ import {
   parseScheduleScope,
 } from "../scheduleLessonUtils";
 import {
+  planItemForScheduleEvent,
   planItemHomeworkPopoverRows,
   planItemLessonPopoverRows,
   planItemTaskPopoverRows,
@@ -555,7 +563,7 @@ function ScheduleToolbar({
     <div className="cb-sch-toolbar">
       <div className="cb-sch-toolbar__left">
         <h1 className="cb-sch-toolbar__title">Календарь</h1>
-        <button type="button" className="cb-sch-btn cb-sch-btn--today" onClick={onToday}>
+        <button type="button" className="cb-btn cb-btn--outline cb-sch-btn--today" onClick={onToday}>
           Сегодня
         </button>
         <div className="cb-sch-toolbar__nav">
@@ -586,7 +594,7 @@ function ScheduleToolbar({
             </button>
           ))}
         </div>
-        <button type="button" className="cb-sch-btn cb-sch-btn--primary cb-sch-btn--add" onClick={onAddLesson}>
+        <button type="button" className="cb-btn cb-btn--primary cb-sch-btn--add" onClick={onAddLesson}>
           <CabinetIcon name="plus" />
           Добавить урок
         </button>
@@ -726,7 +734,7 @@ function ScheduleSidebar({
         <CabinetIcon name="calendar" />
       </button>
       <aside className={`cb-sch-sidebar${open ? "" : " cb-sch-sidebar--collapsed"}`}>
-        <button type="button" className="cb-sch-btn cb-sch-btn--outline cb-sch-btn--create" onClick={onCreate}>
+        <button type="button" className="cb-btn cb-btn--outline cb-sch-btn--create" onClick={onCreate}>
           <CabinetIcon name="plus" />
           Новый урок
         </button>
@@ -984,7 +992,7 @@ function WeekGridEmptyState({ onAddLesson }) {
     <div className="cb-sch-week-empty" role="status">
       <h3 className="cb-sch-week-empty__title">На этой неделе занятий нет</h3>
       <p className="cb-sch-week-empty__text">Добавьте урок или выберите другой период.</p>
-      <button type="button" className="cb-sch-btn cb-sch-btn--primary" onClick={onAddLesson}>
+      <button type="button" className="cb-btn cb-btn--primary" onClick={onAddLesson}>
         Добавить урок
       </button>
     </div>
@@ -1131,7 +1139,7 @@ function DayGrid({
           <div className="cb-sch-week-empty cb-sch-week-empty--day" role="status">
             <h3 className="cb-sch-week-empty__title">На этот день занятий нет</h3>
             <p className="cb-sch-week-empty__text">Добавьте урок или выберите другую дату.</p>
-            <button type="button" className="cb-sch-btn cb-sch-btn--primary" onClick={onAddLesson}>
+            <button type="button" className="cb-btn cb-btn--primary" onClick={onAddLesson}>
               Добавить урок
             </button>
           </div>
@@ -1228,7 +1236,7 @@ function MonthGrid({
   );
 }
 
-function ListView({ events, onEventClick, onOpen, onStart, onAddLesson }) {
+function ListView({ events, onEventClick, onOpen, onStart, onCreateLink, onAddLesson }) {
   const grouped = useMemo(() => {
     const map = new Map();
     events.forEach((ev) => {
@@ -1247,7 +1255,7 @@ function ListView({ events, onEventClick, onOpen, onStart, onAddLesson }) {
         <h3 className="cb-sch-empty__title">Занятий пока нет</h3>
         <p className="cb-sch-empty__text">Добавьте первый урок в расписание.</p>
         {onAddLesson ? (
-          <button type="button" className="cb-sch-btn cb-sch-btn--primary" onClick={onAddLesson}>
+          <button type="button" className="cb-btn cb-btn--primary" onClick={onAddLesson}>
             Добавить урок
           </button>
         ) : null}
@@ -1270,9 +1278,11 @@ function ListView({ events, onEventClick, onOpen, onStart, onAddLesson }) {
               const canStart = ev.status === "planned" && ev.format === "Онлайн";
               const vmStatus = ev.videoMeeting?.status;
               let startLabel = "";
-              if (vmStatus === "live") startLabel = "Войти в комнату";
-              else if (vmStatus === "finished") startLabel = "Посещаемость";
-              else if (hasLink || vmStatus === "scheduled") startLabel = "Начать урок";
+              if (vmStatus === "live") startLabel = "Войти в урок";
+              else if (vmStatus === "finished") startLabel = "Аналитика";
+              else if (vmStatus === "scheduled") startLabel = "Начать урок";
+              else if (canStart && !hasLink) startLabel = "Создать ссылку";
+              else if (hasLink) startLabel = "Начать урок";
               return (
                 <article key={ev.id} className="cb-sch-list-card">
                   <div className="cb-sch-list-card__accent" style={{ background: accent }} aria-hidden="true" />
@@ -1302,21 +1312,17 @@ function ListView({ events, onEventClick, onOpen, onStart, onAddLesson }) {
                     {ev.topic ? <p className="cb-sch-list-card__topic">{ev.topic}</p> : null}
                   </div>
                   <div className="cb-sch-list-card__actions">
-                    <button type="button" className="cb-sch-btn cb-sch-btn--outline cb-sch-btn--sm" onClick={() => onOpen(ev)}>
+                    <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={() => onOpen(ev)}>
                       Открыть
                     </button>
-                    {canStart && onStart && vmStatus !== "finished" && startLabel ? (
-                      <button type="button" className="cb-sch-btn cb-sch-btn--primary cb-sch-btn--sm" onClick={() => onStart(ev)}>
-                        {startLabel}
+                    {canStart && startLabel === "Создать ссылку" && onCreateLink ? (
+                      <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={() => onCreateLink(ev)}>
+                        Создать ссылку
                       </button>
                     ) : null}
-                    {vmStatus === "finished" && ev.videoMeeting?.uuid ? (
-                      <button
-                        type="button"
-                        className="cb-sch-btn cb-sch-btn--outline cb-sch-btn--sm"
-                        onClick={() => onStart(ev)}
-                      >
-                        Посещаемость
+                    {canStart && onStart && startLabel && startLabel !== "Создать ссылку" ? (
+                      <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={() => onStart(ev)}>
+                        {startLabel}
                       </button>
                     ) : null}
                   </div>
@@ -1330,14 +1336,14 @@ function ListView({ events, onEventClick, onOpen, onStart, onAddLesson }) {
   );
 }
 
-function ConfirmActionModal({ action, onClose, onConfirm }) {
+function ConfirmActionModal({ action, onClose, onConfirm, saving = false }) {
+  const [planAction, setPlanAction] = useState("shift");
   if (!action) return null;
 
   const { type, event, targetDate, targetStartTime } = action;
   const recurring = isRecurring(event);
   const hasPlan = Boolean(event.hasPlan || event.planItem || event.studentId || event.groupId);
   const planTopic = event.planItem?.topic || event.planItem?.title || event.topic || "";
-  const [planAction, setPlanAction] = useState("shift");
 
   const copy = {
     move: {
@@ -1369,6 +1375,7 @@ function ConfirmActionModal({ action, onClose, onConfirm }) {
   }[type];
 
   const confirm = (scope) => {
+    if (saving) return;
     if (type === "cancel" && hasPlan) {
       onConfirm(scope, { planCancelAction: planAction });
       return;
@@ -1377,18 +1384,28 @@ function ConfirmActionModal({ action, onClose, onConfirm }) {
   };
 
   return (
-    <div className="cb-sch-overlay" onClick={onClose} role="presentation">
+    <div className="cb-sch-overlay" onClick={saving ? undefined : onClose} role="presentation">
       <div
         className="cb-sch-confirm"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-labelledby="sch-confirm-title"
+        aria-busy={saving || undefined}
       >
-        <button type="button" className="cb-sch-popover__close" onClick={onClose} aria-label="Закрыть">
+        <button
+          type="button"
+          className="cb-sch-popover__close"
+          onClick={onClose}
+          aria-label="Закрыть"
+          disabled={saving}
+        >
           <CabinetIcon name="close" />
         </button>
         <h2 id="sch-confirm-title" className="cb-sch-confirm__title">{copy.title}</h2>
         <p className="cb-sch-confirm__text">{copy.text}</p>
+        {saving ? (
+          <p className="cb-sch-confirm__hint" role="status">Сохранение… Не закрывайте окно.</p>
+        ) : null}
         {recurring ? (
           <p className="cb-sch-confirm__hint">Занятие входит в повторяющуюся серию ({event.recurrence === "weekly" ? "еженедельно" : "по расписанию"}).</p>
         ) : null}
@@ -1405,6 +1422,7 @@ function ConfirmActionModal({ action, onClose, onConfirm }) {
                 type="button"
                 className={`cb-sch-confirm__plan-btn${planAction === "shift" ? " cb-sch-confirm__plan-btn--active" : ""}`}
                 onClick={() => setPlanAction("shift")}
+                disabled={saving}
               >
                 Перенести на следующее занятие
               </button>
@@ -1412,6 +1430,7 @@ function ConfirmActionModal({ action, onClose, onConfirm }) {
                 type="button"
                 className={`cb-sch-confirm__plan-btn${planAction === "skip" ? " cb-sch-confirm__plan-btn--active" : ""}`}
                 onClick={() => setPlanAction("skip")}
+                disabled={saving}
               >
                 Пропустить для ученика
               </button>
@@ -1421,30 +1440,38 @@ function ConfirmActionModal({ action, onClose, onConfirm }) {
         <div className="cb-sch-confirm__actions">
           <button
             type="button"
-            className={`cb-sch-btn cb-sch-btn--sm${copy.danger ? " cb-sch-btn--danger" : " cb-sch-btn--primary"}`}
+            className={`cb-btn cb-btn--sm${copy.danger ? " cb-btn--danger" : " cb-btn--primary"}`}
             onClick={() => confirm("single")}
+            disabled={saving}
           >
-            {copy.single}
+            {saving ? "Сохранение…" : copy.single}
           </button>
           {recurring ? (
             <>
               <button
                 type="button"
-                className={`cb-sch-btn cb-sch-btn--sm${copy.danger ? " cb-sch-btn--danger-outline" : " cb-sch-btn--outline"}`}
+                className={`cb-btn cb-btn--sm${copy.danger ? " cb-btn--outline cb-btn--danger" : " cb-btn--outline"}`}
                 onClick={() => confirm("following")}
+                disabled={saving}
               >
-                {copy.following}
+                {saving ? "Сохранение…" : copy.following}
               </button>
               <button
                 type="button"
-                className={`cb-sch-btn cb-sch-btn--sm${copy.danger ? " cb-sch-btn--danger-outline" : " cb-sch-btn--outline"}`}
+                className={`cb-btn cb-btn--sm${copy.danger ? " cb-btn--outline cb-btn--danger" : " cb-btn--outline"}`}
                 onClick={() => confirm("entire")}
+                disabled={saving}
               >
-                {copy.entire}
+                {saving ? "Сохранение…" : copy.entire}
               </button>
             </>
           ) : null}
-          <button type="button" className="cb-sch-btn cb-sch-btn--ghost cb-sch-btn--sm" onClick={onClose}>
+          <button
+            type="button"
+            className="cb-btn cb-btn--ghost cb-btn--sm"
+            onClick={onClose}
+            disabled={saving}
+          >
             Не менять
           </button>
         </div>
@@ -1619,6 +1646,7 @@ function useMobileDefaultView() {
 
 export default function CabinetSchedulePage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const isMobile = useMobileDefaultView();
   const justDraggedRef = useRef(false);
   const [events, setEvents] = useState([]);
@@ -1631,7 +1659,6 @@ export default function CabinetSchedulePage() {
   const [yandexEmbedEnabled, setYandexEmbedEnabled] = useState(false);
   const [yandexLayerIds, setYandexLayerIds] = useState("");
   const [yandexTzId, setYandexTzId] = useState("Europe/Moscow");
-  const [embedHelpUrl, setEmbedHelpUrl] = useState("https://yandex.ru/support/yandex-360/customers/calendar/web/ru/widget");
   const [view, setView] = useState(() => (typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches ? "day" : "week"));
   const [focusDate, setFocusDate] = useState(() => startOfDay(new Date()));
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
@@ -1648,13 +1675,75 @@ export default function CabinetSchedulePage() {
   const [editEvent, setEditEvent] = useState(null);
   const [lessonDetail, setLessonDetail] = useState(null);
   const [startingId, setStartingId] = useState(null);
+  const [creatingLinkId, setCreatingLinkId] = useState(null);
   const [savingLinkId, setSavingLinkId] = useState(null);
   const [statusMessage, setStatusMessage] = useState("");
   const [dropPreview, setDropPreview] = useState(null);
   const [pendingAction, setPendingAction] = useState(null);
-  const [materialsAssignModal, setMaterialsAssignModal] = useState(null);
+  const [actionSaving, setActionSaving] = useState(false);
+  const actionSavingRef = useRef(false);
   const [homeworkAssignModal, setHomeworkAssignModal] = useState(null);
-  const { notifySoon, showToast, toast } = useSoonToast();
+  const [lessonResourcePicker, setLessonResourcePicker] = useState(null);
+  // { eventId, planItemId, initialTab, attachedMaterialIds, attachedInteractiveIds }
+  const [lessonResourceBusy, setLessonResourceBusy] = useState(false);
+  const [finalizeBillingEvent, setFinalizeBillingEvent] = useState(null);
+  const [finalizeBillingMode, setFinalizeBillingMode] = useState("conducted");
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [paymentForStudentId, setPaymentForStudentId] = useState(null);
+  const [paymentEventBillingIds, setPaymentEventBillingIds] = useState(null);
+  const [paymentDefaultAmount, setPaymentDefaultAmount] = useState(null);
+  const [paymentEventId, setPaymentEventId] = useState(null);
+  const [billingBadges, setBillingBadges] = useState([]);
+  const [paymentStudents, setPaymentStudents] = useState([]);
+
+  const refreshBillingBadges = useCallback((eventLike) => {
+    const eventPk = scheduleEventNumericId(eventLike?.id ?? eventLike);
+    if (!eventPk) return;
+    fetchEventBillingBadge(eventPk)
+      .then((data) => setBillingBadges(data?.badges || []))
+      .catch(() => {});
+  }, []);
+
+  const openBillingPrompt = useCallback((event, mode = "conducted") => {
+    const pk = scheduleEventNumericId(event?.id ?? event);
+    if (!pk) return;
+    setFinalizeBillingMode(mode);
+    setFinalizeBillingEvent(typeof event === "object" ? { ...event, id: pk } : { id: pk });
+  }, []);
+
+  const openLessonPayment = useCallback((studentId, eventBillingIds, amount, eventId = null) => {
+    setPaymentForStudentId(studentId || null);
+    setPaymentEventBillingIds(eventBillingIds || null);
+    setPaymentDefaultAmount(amount != null ? amount : null);
+    setPaymentEventId(eventId ? scheduleEventNumericId(eventId) : null);
+    setPaymentModalOpen(true);
+    fetchStudents({ status: "active" })
+      .then((raw) => setPaymentStudents(
+        normalizeCabinetList(raw).map((s) => ({
+          id: s.id,
+          name: s.full_name || `${s.first_name || ""} ${s.last_name || ""}`.trim(),
+        })),
+      ))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const eventPk = scheduleEventNumericId(selectedEvent?.id);
+    if (!eventPk) {
+      setBillingBadges([]);
+      return undefined;
+    }
+    let cancelled = false;
+    fetchEventBillingBadge(eventPk)
+      .then((data) => {
+        if (!cancelled) setBillingBadges(data?.badges || []);
+      })
+      .catch(() => {
+        if (!cancelled) setBillingBadges([]);
+      });
+    return () => { cancelled = true; };
+  }, [selectedEvent?.id]);
+  const { showToast, toast } = useSoonToast();
   const { prepareCall, openCall, abortCall } = useCabinetCall();
 
   const resolveEventAssignTarget = useCallback(async (event) => {
@@ -1689,19 +1778,92 @@ export default function CabinetSchedulePage() {
     };
   }, []);
 
+  const patchEventPlanItem = useCallback((eventId, planItem) => {
+    if (!eventId || !planItem) return;
+    setEvents((prev) => prev.map((ev) => (
+      ev.id === eventId ? { ...ev, planItem } : ev
+    )));
+    setSelectedEvent((prev) => (
+      prev && prev.id === eventId ? { ...prev, planItem } : prev
+    ));
+  }, []);
+
   const handleAddMaterials = useCallback(async (event) => {
+    const eventPk = scheduleEventNumericId(event?.id);
+    if (!eventPk) {
+      showToast("Не удалось определить занятие");
+      return;
+    }
     try {
-      const target = await resolveEventAssignTarget(event);
-      if (!target?.student && !target?.group) {
-        showToast("Сначала укажите ученика или группу в уроке");
+      let planItem = getEventPlanItem(event);
+      if (!planItem?.id) {
+        const data = await ensureScheduleEventPlanItem(eventPk);
+        planItem = data?.planItem || null;
+        if (planItem) patchEventPlanItem(event.id, planItem);
+      }
+      if (!planItem?.id) {
+        showToast("Не удалось подготовить урок для материалов");
         return;
       }
-      setSelectedEvent(null);
-      setMaterialsAssignModal(target);
+      setLessonResourcePicker({
+        eventId: event.id,
+        planItemId: planItem.id,
+        initialTab: "library",
+        attachedMaterialIds: (planItem.materials || []).map((m) => m.id).filter(Boolean),
+        attachedInteractiveIds: (planItem.attachedInteractives || []).map((i) => i.id).filter(Boolean),
+      });
     } catch (err) {
-      showToast(err.message || "Не удалось открыть выдачу материалов");
+      showToast(err.message || "Не удалось открыть добавление материалов");
     }
-  }, [resolveEventAssignTarget, showToast]);
+  }, [patchEventPlanItem, showToast]);
+
+  const handleAttachLessonMaterial = useCallback(async (material) => {
+    if (!lessonResourcePicker?.planItemId || !material?.id) return;
+    setLessonResourceBusy(true);
+    try {
+      const current = [...(lessonResourcePicker.attachedMaterialIds || [])];
+      if (!current.includes(material.id)) current.push(material.id);
+      const data = await updateLessonPlanItem(lessonResourcePicker.planItemId, {
+        material_ids: current,
+      });
+      const mapped = planItemForScheduleEvent(data, {
+        lessonNumber: getEventPlanItem(selectedEvent)?.lessonNumber,
+        planTitle: getEventPlanItem(selectedEvent)?.planTitle,
+      });
+      patchEventPlanItem(lessonResourcePicker.eventId, mapped);
+      setLessonResourcePicker(null);
+      showToast("Материал добавлен к уроку");
+    } catch (err) {
+      showToast(err.message || "Не удалось добавить материал");
+      throw err;
+    } finally {
+      setLessonResourceBusy(false);
+    }
+  }, [lessonResourcePicker, patchEventPlanItem, selectedEvent, showToast]);
+
+  const handleAttachLessonInteractive = useCallback(async (interactive) => {
+    if (!lessonResourcePicker?.planItemId || !interactive?.id) return;
+    setLessonResourceBusy(true);
+    try {
+      const current = [...(lessonResourcePicker.attachedInteractiveIds || [])];
+      if (!current.includes(interactive.id)) current.push(interactive.id);
+      const data = await updateLessonPlanItem(lessonResourcePicker.planItemId, {
+        interactive_ids: current,
+      });
+      const mapped = planItemForScheduleEvent(data, {
+        lessonNumber: getEventPlanItem(selectedEvent)?.lessonNumber,
+        planTitle: getEventPlanItem(selectedEvent)?.planTitle,
+      });
+      patchEventPlanItem(lessonResourcePicker.eventId, mapped);
+      setLessonResourcePicker(null);
+      showToast("Интерактив добавлен к уроку");
+    } catch (err) {
+      showToast(err.message || "Не удалось добавить интерактив");
+      throw err;
+    } finally {
+      setLessonResourceBusy(false);
+    }
+  }, [lessonResourcePicker, patchEventPlanItem, selectedEvent, showToast]);
 
   const handleAddHomework = useCallback(async (event) => {
     try {
@@ -1714,8 +1876,12 @@ export default function CabinetSchedulePage() {
         showToast("В группе пока нет учеников");
         return;
       }
+      const eventPk = scheduleEventNumericId(event?.id);
       setSelectedEvent(null);
-      setHomeworkAssignModal(target);
+      setHomeworkAssignModal({
+        ...target,
+        scheduleEventId: eventPk || null,
+      });
     } catch (err) {
       showToast(err.message || "Не удалось открыть выдачу ДЗ");
     }
@@ -1757,7 +1923,6 @@ export default function CabinetSchedulePage() {
           setYandexEmbedEnabled(Boolean(data?.enabled));
           setYandexLayerIds(data?.layer_ids || "");
           setYandexTzId(data?.tz_id || "Europe/Moscow");
-          if (data?.help_url) setEmbedHelpUrl(data.help_url);
         }
       })
       .catch(() => {});
@@ -1804,10 +1969,115 @@ export default function CabinetSchedulePage() {
     };
   }, [view, focusDate, yandexEmbedEnabled, calendarSource]);
 
+  // Deep-link /cabinet/schedule?finalize=<eventId>
+  useEffect(() => {
+    const params = new URLSearchParams(location.search || "");
+    const finalizeId = params.get("finalize");
+    if (!finalizeId) return;
+    const pk = scheduleEventNumericId(finalizeId);
+    if (!pk) return;
+    openBillingPrompt({ id: pk }, "conducted");
+    params.delete("finalize");
+    const next = params.toString();
+    navigate(`${location.pathname}${next ? `?${next}` : ""}`, { replace: true, state: location.state || {} });
+  }, [location.search, location.pathname, location.state, navigate, openBillingPrompt]);
+
+  // Deep-link /cabinet/schedule?event=<eventId> — из уведомлений
+  useEffect(() => {
+    if (calendarLoading) return;
+    const params = new URLSearchParams(location.search || "");
+    const eventParam = params.get("event");
+    if (!eventParam) return;
+    const found = events.find((ev) => {
+      const numeric = scheduleEventNumericId(ev.id);
+      return String(ev.id) === String(eventParam) || String(numeric) === String(eventParam);
+    });
+    if (!found) return;
+    setSelectedEvent(found);
+    params.delete("event");
+    const next = params.toString();
+    navigate(`${location.pathname}${next ? `?${next}` : ""}`, { replace: true, state: location.state || {} });
+  }, [events, calendarLoading, location.search, location.pathname, location.state, navigate]);
+
+  useEffect(() => {
+    const openEventId = location.state?.openEventId;
+    if (openEventId == null || calendarLoading) return;
+    const found = events.find((ev) => String(ev.id) === String(openEventId));
+    if (!found) return;
+    setSelectedEvent(found);
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
+  }, [events, calendarLoading, location.state, location.pathname, location.search, navigate]);
+
+  useEffect(() => {
+    const groupId = location.state?.createWithGroupId;
+    if (groupId == null) return;
+    setCreateDraft({
+      groupId,
+      type: "group_lesson",
+      dialogTitle: "Запланировать урок",
+    });
+    setCreateOpen(true);
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
+  }, [location.state, location.pathname, location.search, navigate]);
+
   const showStatus = useCallback((message) => {
     setStatusMessage(message);
     window.setTimeout(() => setStatusMessage(""), 4000);
   }, []);
+
+  const applyMeetingToEventState = useCallback((eventId, videoMeeting) => {
+    if (!videoMeeting) return;
+    setEvents((prev) => prev.map((ev) => (
+      ev.id === eventId
+        ? {
+          ...ev,
+          videoMeeting,
+          link: videoMeeting.pageUrl || videoMeeting.joinUrl || ev.link,
+          meetingProvider: "jitsi",
+        }
+        : ev
+    )));
+    setSelectedEvent((prev) => (
+      prev?.id === eventId
+        ? {
+          ...prev,
+          videoMeeting,
+          link: videoMeeting.pageUrl || videoMeeting.joinUrl || prev.link,
+          meetingProvider: "jitsi",
+        }
+        : prev
+    ));
+  }, []);
+
+  const handleCreateMeetingLink = useCallback(async (event) => {
+    if (!isLocalEvent(event)) return;
+    setCreatingLinkId(event.id);
+    try {
+      if (event.videoMeeting?.uuid) {
+        showStatus("Ссылка уже создана");
+        return;
+      }
+      const eventPk = scheduleEventNumericId(event.id);
+      if (!eventPk) {
+        throw new Error("Не удалось определить урок для видеокомнаты");
+      }
+      const data = await ensureVideoMeetingForEvent(eventPk);
+      const videoMeeting = data?.videoMeeting || data?.meeting;
+      if (!videoMeeting?.uuid) {
+        throw new Error("Не удалось создать видеокомнату");
+      }
+      applyMeetingToEventState(event.id, {
+        ...videoMeeting,
+        pageUrl: videoMeeting.pageUrl || videoMeeting.joinUrl,
+        status: videoMeeting.status || "scheduled",
+      });
+      showStatus(data?.created === false ? "Ссылка уже создана" : "Ссылка создана");
+    } catch (err) {
+      showStatus(err.message || "Не удалось создать ссылку");
+    } finally {
+      setCreatingLinkId(null);
+    }
+  }, [applyMeetingToEventState, showStatus]);
 
   const handleStartLesson = useCallback(async (event) => {
     setStartingId(event.id);
@@ -1824,43 +2094,17 @@ export default function CabinetSchedulePage() {
         if (!meetingUuid && isCabinetMeetingPath(event.link)) {
           meetingUuid = event.link.split("/cabinet/meetings/")[1]?.split(/[/?#]/)[0];
         }
+        // Создание комнаты — только через «Создать ссылку»; здесь открываем существующую.
         if (!meetingUuid) {
-          const eventPk = scheduleEventNumericId(event.id);
-          if (!eventPk) {
-            throw new Error("Не удалось определить урок для видеокомнаты");
-          }
-          const data = await ensureVideoMeetingForEvent(eventPk);
-          meetingUuid = data?.videoMeeting?.uuid;
-          if (data?.videoMeeting) {
-            setEvents((prev) => prev.map((ev) => (
-              ev.id === event.id
-                ? {
-                  ...ev,
-                  videoMeeting: data.videoMeeting,
-                  link: data.videoMeeting.pageUrl || ev.link,
-                  meetingProvider: "jitsi",
-                }
-                : ev
-            )));
-            setSelectedEvent((prev) => (
-              prev?.id === event.id
-                ? {
-                  ...prev,
-                  videoMeeting: data.videoMeeting,
-                  link: data.videoMeeting.pageUrl || prev.link,
-                  meetingProvider: "jitsi",
-                }
-                : prev
-            ));
-          }
+          throw new Error("Сначала создайте ссылку на онлайн-урок");
         }
-        if (!meetingUuid) {
-          throw new Error("Не удалось создать видеокомнату");
-        }
+        const vmStatus = event.videoMeeting?.status;
         showStatus(
-          event.videoMeeting?.status === "live" || event.videoMeeting?.status === "LIVE"
+          vmStatus === "live"
             ? "Вход в комнату…"
-            : "Открываем онлайн-урок…",
+            : vmStatus === "finished"
+              ? "Открываем аналитику…"
+              : "Открываем страницу урока…",
         );
         navigate(`/cabinet/meetings/${meetingUuid}`);
       } catch (err) {
@@ -2029,6 +2273,30 @@ export default function CabinetSchedulePage() {
     setCreateOpen(true);
   }, []);
 
+  const handleDuplicateLesson = useCallback((event) => {
+    if (!event || event.readOnly) return;
+    const lessonType = (
+      event.type === "individual"
+      || event.type === "individual_lesson"
+    ) ? "individual_lesson" : "group_lesson";
+    const studentId = event.studentId
+      || (Array.isArray(event.participantStudentIds) ? event.participantStudentIds[0] : null);
+    setSelectedEvent(null);
+    openCreateLesson({
+      date: formatApiDate(eventDate(event)),
+      startTime: event.startTime,
+      endTime: event.endTime,
+      lessonTitle: event.title || "",
+      topic: event.topic || "",
+      type: lessonType,
+      format: event.format === "Офлайн" || event.format === "offline" ? "offline" : "online",
+      groupId: event.groupId || "",
+      studentId: studentId || "",
+      studentIds: Array.isArray(event.participantStudentIds) ? event.participantStudentIds : [],
+      dialogTitle: "Дублировать урок",
+    });
+  }, [openCreateLesson]);
+
   const handleSlotClick = useCallback((day, startTime) => {
     openCreateLesson({
       date: formatApiDate(day),
@@ -2149,15 +2417,20 @@ export default function CabinetSchedulePage() {
   const mapApiScope = (scope) => parseScheduleScope(scope === "single" ? "single" : scope);
 
   const handleConfirmAction = useCallback(async (scope, options = {}) => {
-    if (!pendingAction) return;
-    const { type, event, targetDate, targetStartTime } = pendingAction;
+    if (!pendingAction || actionSavingRef.current) return;
+    actionSavingRef.current = true;
+    setActionSaving(true);
+
+    const action = pendingAction;
+    const { type, event, targetDate, targetStartTime } = action;
+    const snapshotEvents = events;
     const local = isLocalEvent(event);
     const apiScope = mapApiScope(scope);
     const planCancelAction = options.planCancelAction;
 
     try {
       if (type === "move") {
-        const nextEvents = applyMoveEvents(events, event, targetDate, targetStartTime, scope);
+        const nextEvents = applyMoveEvents(snapshotEvents, event, targetDate, targetStartTime, scope);
         const updated = nextEvents.find((ev) => ev.id === event.id);
         setEvents(nextEvents);
         if (local && updated) {
@@ -2173,6 +2446,7 @@ export default function CabinetSchedulePage() {
           }
         }
         showStatus(scope === "entire" ? "Вся серия перенесена" : scope === "following" ? "Серия перенесена" : "Занятие перенесено");
+        // Перенос времени — не финансовое событие: урок ещё состоится.
       } else if (type === "delete") {
         if (local) {
           await deleteScheduleEvent(event.id, { scope: apiScope, notifyParticipants: true });
@@ -2200,13 +2474,19 @@ export default function CabinetSchedulePage() {
           : "Занятие отменено, тема перенесена на следующее занятие";
         showStatus(scope === "entire" ? "Вся серия отменена" : scope === "following" ? "Серия отменена" : planMsg);
         setSelectedEvent(null);
+        openBillingPrompt(event, "cancelled");
       }
+      setPendingAction(null);
     } catch (err) {
+      if (type === "move") {
+        setEvents(snapshotEvents);
+      }
       showStatus(err.message || "Не удалось выполнить действие.");
+    } finally {
+      actionSavingRef.current = false;
+      setActionSaving(false);
     }
-
-    setPendingAction(null);
-  }, [pendingAction, events, showStatus, view, focusDate]);
+  }, [pendingAction, events, showStatus, view, focusDate, openBillingPrompt]);
 
   return (
     <CabinetPageShell className="cb-section--schedule cb-section--schedule-cal">
@@ -2257,35 +2537,8 @@ export default function CabinetSchedulePage() {
           {!yandexEmbedEnabled && calendarSource === "yandex" && yandexCalendarEnabled && !yandexLayerIds ? (
             <div className="cb-sch-calendar-hint">
               <p>
-                Чтобы показать <strong>оригинальный интерфейс Яндекс Календаря</strong>, скопируйте
-                {" "}
-                <code>layer_ids</code>
-                {" "}
-                из настроек календаря (Доступ → Код для вставки) и добавьте в
-                {" "}
-                <code>YANDEX_CALENDAR_LAYER_IDS</code>
-                {" "}
-                в
-                {" "}
-                <code>Generator/.env</code>
-                .
+                Интеграция с Яндекс Календарём пока не настроена. Обратитесь к администратору платформы.
               </p>
-              <a
-                href="https://calendar.yandex.ru/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="cb-sch-btn cb-sch-btn--outline cb-sch-btn--sm"
-              >
-                Открыть calendar.yandex.ru
-              </a>
-              <a
-                href={embedHelpUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="cb-sch-btn cb-sch-btn--ghost cb-sch-btn--sm"
-              >
-                Как получить код вставки
-              </a>
             </div>
           ) : null}
           {!yandexEmbedEnabled && calendarError ? (
@@ -2296,7 +2549,7 @@ export default function CabinetSchedulePage() {
                   href={calendarAuthorizeUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="cb-sch-btn cb-sch-btn--outline cb-sch-btn--sm"
+                  className="cb-btn cb-btn--outline cb-btn--sm"
                 >
                   Получить OAuth-токен
                 </a>
@@ -2355,6 +2608,7 @@ export default function CabinetSchedulePage() {
               onEventClick={handleEventClick}
               onOpen={handleEventClick}
               onStart={handleStartLesson}
+              onCreateLink={handleCreateMeetingLink}
               onAddLesson={() => openCreateLesson()}
             />
           )}
@@ -2385,36 +2639,83 @@ export default function CabinetSchedulePage() {
           onAddMaterials={() => void handleAddMaterials(selectedEvent)}
           onAddHomework={() => void handleAddHomework(selectedEvent)}
           onStart={handleStartLesson}
+          onCreateLink={handleCreateMeetingLink}
+          onOpenMeetingPage={handleStartLesson}
           onRequestDelete={() => {
             setPendingAction({ type: "delete", event: selectedEvent });
           }}
           onRequestCancel={() => {
             setPendingAction({ type: "cancel", event: selectedEvent });
           }}
-          onDuplicate={notifySoon}
+          onDuplicate={() => handleDuplicateLesson(selectedEvent)}
           onSaveLink={handleSaveTelemostLink}
           savingLinkId={savingLinkId}
           startingId={startingId}
-        />
-      ) : null}
-
-      {materialsAssignModal ? (
-        <MaterialsAssignModal
-          student={materialsAssignModal.student || null}
-          group={materialsAssignModal.group || null}
-          onClose={() => setMaterialsAssignModal(null)}
-          onAssigned={() => {
-            setMaterialsAssignModal(null);
-            showToast("Материалы выданы");
+          creatingLinkId={creatingLinkId}
+          billingBadges={billingBadges}
+          onRegisterPayment={(ev, payableBadges = []) => {
+            const rows = payableBadges.length
+              ? payableBadges
+              : (billingBadges || []).filter((b) =>
+                ["awaiting_payment", "partially_paid"].includes(b.financial_status),
+              );
+            const studentId = rows[0]?.student_id || ev.studentId || ev.student_id || null;
+            const ids = rows.map((b) => b.record_id).filter(Boolean);
+            const amount = rows.reduce((sum, b) => sum + Number(b.amount || 0), 0);
+            const eventPk = scheduleEventNumericId(ev?.id);
+            setSelectedEvent(null);
+            openLessonPayment(studentId, ids, amount || null, eventPk);
+          }}
+          onOpenJournal={(ev) => {
+            const id = ev?.id || selectedEvent?.id;
+            if (openLessonSummaryTab(id)) {
+              setSelectedEvent(null);
+            } else {
+              showToast("Не удалось открыть итоги урока");
+            }
           }}
         />
       ) : null}
+
+      <FinalizeLessonBillingModal
+        open={Boolean(finalizeBillingEvent)}
+        eventId={finalizeBillingEvent?.id}
+        mode={finalizeBillingMode}
+        onClose={() => setFinalizeBillingEvent(null)}
+        onDone={(result) => {
+          const eventPk = finalizeBillingEvent?.id;
+          setFinalizeBillingEvent(null);
+          if (!result?.silent) showToast("Финансы урока оформлены");
+          if (eventPk) refreshBillingBadges(eventPk);
+        }}
+        onRequestPayment={({ studentId, eventBillingIds, amount, eventId }) => {
+          openLessonPayment(studentId, eventBillingIds, amount, eventId);
+        }}
+      />
+      <BillingPaymentModal
+        open={paymentModalOpen}
+        onClose={() => {
+          setPaymentModalOpen(false);
+          setPaymentEventBillingIds(null);
+          setPaymentDefaultAmount(null);
+          setPaymentEventId(null);
+        }}
+        students={paymentStudents}
+        defaultStudentId={paymentForStudentId}
+        defaultAmount={paymentDefaultAmount}
+        eventBillingIds={paymentEventBillingIds}
+        onDone={() => {
+          showToast("Оплата сохранена");
+          if (paymentEventId) refreshBillingBadges(paymentEventId);
+        }}
+      />
 
       {homeworkAssignModal ? (
         <HomeworkAssignModal
           student={homeworkAssignModal.student || null}
           group={homeworkAssignModal.group || null}
           students={homeworkAssignModal.students || null}
+          scheduleEventId={homeworkAssignModal.scheduleEventId || null}
           onClose={() => setHomeworkAssignModal(null)}
           onAssigned={() => {
             setHomeworkAssignModal(null);
@@ -2423,10 +2724,26 @@ export default function CabinetSchedulePage() {
         />
       ) : null}
 
+      <PlanItemResourcesPicker
+        scope="lesson"
+        open={Boolean(lessonResourcePicker)}
+        initialTab={lessonResourcePicker?.initialTab || "library"}
+        attachedMaterialIds={lessonResourcePicker?.attachedMaterialIds || []}
+        attachedInteractiveIds={lessonResourcePicker?.attachedInteractiveIds || []}
+        onClose={() => {
+          if (!lessonResourceBusy) setLessonResourcePicker(null);
+        }}
+        onAttachMaterial={handleAttachLessonMaterial}
+        onAttachInteractive={handleAttachLessonInteractive}
+      />
+
       {pendingAction ? (
         <ConfirmActionModal
           action={pendingAction}
-          onClose={() => setPendingAction(null)}
+          saving={actionSaving}
+          onClose={() => {
+            if (!actionSavingRef.current) setPendingAction(null);
+          }}
           onConfirm={handleConfirmAction}
         />
       ) : null}
@@ -2456,9 +2773,17 @@ export default function CabinetSchedulePage() {
             setCreateDraft(null);
           }}
           onCreate={handleCreateLesson}
+          dialogTitle={createDraft?.dialogTitle}
           defaultDate={createDraft?.date || formatApiDate(selectedDate)}
           defaultStartTime={createDraft?.startTime}
           defaultEndTime={createDraft?.endTime}
+          defaultLessonTitle={createDraft?.lessonTitle}
+          defaultTopic={createDraft?.topic}
+          defaultType={createDraft?.type}
+          defaultFormat={createDraft?.format}
+          defaultGroupId={createDraft?.groupId}
+          defaultStudentId={createDraft?.studentId}
+          defaultStudentIds={createDraft?.studentIds}
         />
       ) : null}
     </CabinetPageShell>

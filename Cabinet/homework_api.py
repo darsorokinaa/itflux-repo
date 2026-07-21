@@ -62,7 +62,12 @@ def homework_has_variant_task(homework: Homework) -> bool:
 
 
 def _lesson_secret() -> str:
-    return (getattr(settings, "LESSON_SECRET", None) or "").strip()
+    # Без LESSON_SECRET live-ссылки на вариант не получают lesson_token —
+    # ученик не может сохранить ответы. Fallback на SECRET_KEY для локалки.
+    explicit = (getattr(settings, "LESSON_SECRET", None) or "").strip()
+    if explicit:
+        return explicit
+    return (getattr(settings, "SECRET_KEY", None) or "").strip()
 
 
 def _webhook_secret() -> str:
@@ -130,7 +135,13 @@ def normalize_variant_spa_url(url: str) -> str:
     return raw
 
 
-def build_variant_open_url(*, base_url: str, homework_id: int, token: str | None = None) -> str:
+def build_variant_open_url(
+    *,
+    base_url: str,
+    homework_id: int,
+    token: str | None = None,
+    live_meeting: bool = False,
+) -> str:
     raw = normalize_variant_spa_url(base_url)
     if not raw:
         return ""
@@ -138,6 +149,8 @@ def build_variant_open_url(*, base_url: str, homework_id: int, token: str | None
         "cabinet_assignment": str(homework_id),
         "homework_mode": "1",
     }
+    if live_meeting:
+        query["live_meeting"] = "1"
     if token:
         query["lesson_token"] = token
     qs = urlencode(query)
@@ -152,6 +165,9 @@ def submission_api_status(submission: HomeworkSubmission | None) -> str:
         return "reviewed"
     if submission.status in (SubmissionStatus.RETURNED, SubmissionStatus.NEEDS_REVISION):
         return "revision"
+    # Есть ответы, но ещё не сдано — черновик (live-урок и обычное ДЗ).
+    if not submission.submitted_at:
+        return "sent"
     if submission.status == SubmissionStatus.SUBMITTED:
         if submission.result_payload:
             return "submitted"
@@ -520,8 +536,8 @@ def _ensure_review_item(submission: HomeworkSubmission):
     from .models import ReviewItem
 
     if submission.status != SubmissionStatus.SUBMITTED:
-        return
-    ReviewItem.objects.get_or_create(
+        return None
+    item, _ = ReviewItem.objects.get_or_create(
         teacher=submission.homework.teacher,
         source_type="homework",
         source_id=submission.pk,
@@ -531,6 +547,40 @@ def _ensure_review_item(submission: HomeworkSubmission):
             "status": "pending",
             "priority": "normal",
         },
+    )
+    return item
+
+
+def _notify_homework_submitted(submission: HomeworkSubmission, review_item=None):
+    from django.utils import timezone as dj_tz
+
+    from .choices import NotificationChannel, NotificationStatus
+    from .models import Notification
+    from .notifications import get_or_create_preferences
+
+    teacher = submission.homework.teacher
+    if teacher is None:
+        return
+    prefs = get_or_create_preferences(teacher)
+    if not getattr(prefs, "notify_homework", True):
+        return
+    review_id = getattr(review_item, "pk", None)
+    url = f"/cabinet/review/{review_id}" if review_id else "/cabinet/review"
+    Notification.objects.create(
+        recipient_user=teacher,
+        recipient_teacher=teacher,
+        channel=NotificationChannel.IN_APP,
+        title="Сдано домашнее задание",
+        message=f"{submission.student.full_name} сдал(а) «{submission.homework.title}».",
+        payload={
+            "type": "homework_submitted",
+            "homework_id": submission.homework_id,
+            "submission_id": submission.pk,
+            "review_id": review_id,
+            "url": url,
+        },
+        status=NotificationStatus.SENT,
+        sent_at=dj_tz.now(),
     )
 
 
@@ -713,7 +763,8 @@ class HomeworkAssignmentSubmitView(HomeworkAssignmentBaseView):
         submission.status = SubmissionStatus.SUBMITTED
         submission.submitted_at = timezone.now()
         submission.save()
-        _ensure_review_item(submission)
+        review_item = _ensure_review_item(submission)
+        _notify_homework_submitted(submission, review_item)
         return Response({"ok": True, "status": "submitted"})
 
 
@@ -892,6 +943,7 @@ def build_homework_review_context(homework: Homework) -> dict:
     return {
         "homework_id": homework.id,
         "homework_title": homework.title,
+        "due_at": homework.due_at.isoformat() if homework.due_at else None,
         "has_variant": homework_has_variant_task(homework),
         "variant_id": variant_id,
         "variant_path": variant_path,

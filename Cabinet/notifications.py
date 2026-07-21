@@ -1,5 +1,6 @@
 """Unified notification dispatch for schedule events."""
 
+import html
 import logging
 from datetime import datetime
 
@@ -19,6 +20,7 @@ def get_or_create_preferences(user):
 
 def _event_payload(event):
     return {
+        "type": "schedule_event",
         "event_id": event.pk,
         "series_id": event.series_id,
         "title": event.title,
@@ -87,6 +89,37 @@ def _dispatch_to_user(user, participant, title, message, payload, vk_formatter=N
         elif err:
             n.error_message = err
             n.save(update_fields=["error_message"])
+        notifications.append(n)
+
+    if prefs.telegram_connected and participant.notification_enabled:
+        from .models import Profile
+        from .telegram_connect import platform_path_url, send_telegram_to_user
+        from Generator.telegram_utils import escape_telegram_html
+
+        # Постоянные маршруты платформы — без одноразовых/секретных токенов.
+        role = getattr(getattr(user, "profile", None), "role", None)
+        if role == Profile.Role.STUDENT:
+            cabinet_path = "/cabinet/student/lessons"
+        else:
+            cabinet_path = "/cabinet/schedule/"
+        cabinet_url = platform_path_url(cabinet_path)
+        tg_text = (
+            f"{escape_telegram_html(title)}\n\n{escape_telegram_html(message)}\n\n"
+            f'<a href="{html.escape(cabinet_url, quote=True)}">Открыть в кабинете</a>'
+        )
+        ok = send_telegram_to_user(user, tg_text)
+        status = NotificationStatus.SENT if ok else NotificationStatus.FAILED
+        n = _create_notification(
+            user=user,
+            title=title,
+            message=message,
+            channel=NotificationChannel.TELEGRAM,
+            payload={**payload, "cabinet_url": cabinet_url},
+            status=status,
+        )
+        if ok:
+            n.sent_at = timezone.now()
+            n.save(update_fields=["sent_at"])
         notifications.append(n)
 
     return notifications

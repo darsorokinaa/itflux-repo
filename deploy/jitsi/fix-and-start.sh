@@ -48,11 +48,11 @@ keys = {
     "JVB_COLIBRI_PORT": "$JVB_COLIBRI_PORT",
     "JICOFO_REST_PORT": "$JICOFO_REST_PORT",
     "ENABLE_AUTH": "1",
-    "ENABLE_GUESTS": "1",
+    "ENABLE_GUESTS": "0",
     "AUTH_TYPE": "jwt",
-    "JWT_APP_ID": "itflux",
+    "JWT_APP_ID": "generator_test",
     "JWT_APP_SECRET": """$SECRET""",
-    "JWT_ACCEPTED_ISSUERS": "itflux",
+    "JWT_ACCEPTED_ISSUERS": "generator_test",
     "JWT_ACCEPTED_AUDIENCES": "jitsi",
 }
 lines = text.splitlines()
@@ -168,4 +168,4 @@ curl -sI "https://${DOMAIN}/" | head -15 || true
 
 echo
 echo "JWT secret saved in $SECRET_FILE"
-echo "Django: JITSI_DOMAIN=$DOMAIN JITSI_AUTH_MODE=jwt JITSI_APP_ID=itflux JITSI_APP_SECRET=\$(cat $SECRET_FILE)"
+echo "Django: JITSI_DOMAIN=$DOMAIN JITSI_AUTH_MODE=jwt JITSI_APP_ID=generator_test JITSI_APP_SECRET=\$(cat $SECRET_FILE)"

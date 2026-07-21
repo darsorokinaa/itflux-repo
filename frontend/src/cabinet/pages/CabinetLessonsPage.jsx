@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { fetchScheduleEvents } from "../../utils/cabinetAuth";
 import {
   CabinetPageShell,
@@ -73,6 +74,7 @@ function SessionCard({ event, onOpen, onJoin }) {
 }
 
 export default function CabinetLessonsPage() {
+  const navigate = useNavigate();
   const [filter, setFilter] = useState("all");
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -106,8 +108,8 @@ export default function CabinetLessonsPage() {
   }, [sessions, filter]);
 
   const handleOpen = useCallback((event) => {
-    notifySoon();
-  }, [notifySoon]);
+    navigate("/cabinet/schedule", { state: { openEventId: event.id } });
+  }, [navigate]);
 
   const handleJoin = useCallback((event) => {
     if (event.link) {

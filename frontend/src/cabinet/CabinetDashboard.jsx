@@ -1,9 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useOutletContext } from "react-router-dom";
+import { Link, useNavigate, useOutletContext } from "react-router-dom";
 import { displayName } from "../pages/CabinetAuthPage";
+import { mapApiStudent } from "./cabinetMappers";
 import { CabinetEmptyState } from "./CabinetSectionUi";
-import { fetchDashboard } from "../utils/cabinetAuth";
+import CabinetModal from "./components/CabinetModal";
+import HomeworkAssignModal from "./components/HomeworkAssignModal";
+import {
+  fetchBillingDashboard,
+  fetchDashboard,
+  fetchJournalOverview,
+  fetchStudents,
+  normalizeCabinetList,
+} from "../utils/cabinetAuth";
+import { formatMoney } from "./billing/billingFormat";
+import { PAYMENTS_ENABLED } from "./featureFlags";
 import "./styles/teacher-dashboard.css";
+import "./styles/payments.css";
 
 const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 const MONTHS = [
@@ -120,11 +132,50 @@ function mapTodayLesson(ev, now) {
 }
 
 export default function CabinetDashboard() {
-  const { user } = useOutletContext();
+  const { user, currentPlan, subscriptionLoading } = useOutletContext();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [homeworkTarget, setHomeworkTarget] = useState(null);
+  const [studentPickerOpen, setStudentPickerOpen] = useState(false);
+  const [pickerStudents, setPickerStudents] = useState([]);
+  const [pickerValue, setPickerValue] = useState("");
+  const [assignLoading, setAssignLoading] = useState(false);
+  const [billingDash, setBillingDash] = useState(null);
+  const [journalDash, setJournalDash] = useState(null);
   const firstName = displayName(user).split(" ")[0];
+  const planName = currentPlan?.name || "";
+
+  const openHomeworkAssign = async () => {
+    setAssignLoading(true);
+    try {
+      const raw = await fetchStudents({ status: "active" });
+      const list = normalizeCabinetList(raw).map(mapApiStudent);
+      if (!list.length) {
+        navigate("/cabinet/students?invite=1");
+        return;
+      }
+      if (list.length === 1) {
+        setHomeworkTarget({ student: list[0] });
+        return;
+      }
+      setPickerStudents(list);
+      setPickerValue(list[0].id);
+      setStudentPickerOpen(true);
+    } catch {
+      navigate("/cabinet/students");
+    } finally {
+      setAssignLoading(false);
+    }
+  };
+
+  const confirmStudentPick = () => {
+    const student = pickerStudents.find((s) => s.id === pickerValue);
+    if (!student) return;
+    setStudentPickerOpen(false);
+    setHomeworkTarget({ student });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -138,6 +189,16 @@ export default function CabinetDashboard() {
         if (!cancelled) setLoading(false);
       }
     })();
+    if (PAYMENTS_ENABLED) {
+      fetchBillingDashboard()
+        .then((payload) => { if (!cancelled) setBillingDash(payload); })
+        .catch(() => {});
+    }
+    fetchJournalOverview()
+      .then((payload) => {
+        if (!cancelled) setJournalDash(payload);
+      })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
@@ -209,6 +270,25 @@ export default function CabinetDashboard() {
         action: "Доделать →",
       });
     }
+    if (journalDash && (journalDash.unfilled_journals > 0 || journalDash.unmarked_attendance_lessons > 0)) {
+      items.push({
+        important: true,
+        title: "Журнал",
+        text: [
+          journalDash.unfilled_journals > 0
+            ? `Не заполнены итоги: ${journalDash.unfilled_journals}`
+            : null,
+          journalDash.unmarked_attendance_lessons > 0
+            ? `Без посещаемости: ${journalDash.unmarked_attendance_lessons}`
+            : null,
+          journalDash.attention_students > 0
+            ? `Требуют внимания: ${journalDash.attention_students}`
+            : null,
+        ].filter(Boolean).join(" · "),
+        href: "/cabinet/journal",
+        action: "Открыть журнал →",
+      });
+    }
     if (progressItems.length === 0 && !items.length) {
       items.push({
         important: false,
@@ -218,8 +298,8 @@ export default function CabinetDashboard() {
         action: "Открыть учеников →",
       });
     }
-    return items.slice(0, 3);
-  }, [reviewsCount, draftsCount, todayLessons, progressItems.length]);
+    return items.slice(0, 4);
+  }, [reviewsCount, draftsCount, todayLessons, progressItems.length, journalDash]);
 
   const notes = useMemo(() => {
     const list = [];
@@ -260,11 +340,28 @@ export default function CabinetDashboard() {
         <div className="td-topbar__copy">
           <h1>{greetingForHour(today.getHours())}, {firstName}!</h1>
           <p>{subtitle}</p>
+          <Link
+            to="/cabinet/upgrade"
+            className="td-plan-chip"
+            title={planName ? `Тариф «${planName}»` : "Тарифы"}
+          >
+            <span className="td-plan-chip__label">Тариф</span>
+            <span className="td-plan-chip__name">
+              {subscriptionLoading ? "…" : (planName || "Не выбран")}
+            </span>
+          </Link>
         </div>
         <div className="td-topbar-actions">
           <Link to="/cabinet/schedule" className="td-button td-button-primary">＋ Создать урок</Link>
-          <Link to="/cabinet/students" className="td-button td-button-glass">Выдать задание</Link>
-          <Link to="/cabinet/students" className="td-button td-button-glass">Добавить ученика</Link>
+          <button
+            type="button"
+            className="td-button td-button-glass"
+            onClick={openHomeworkAssign}
+            disabled={assignLoading}
+          >
+            {assignLoading ? "Загрузка…" : "Выдать задание"}
+          </button>
+          <Link to="/cabinet/students?invite=1" className="td-button td-button-glass">Добавить ученика</Link>
         </div>
       </div>
 
@@ -452,6 +549,38 @@ export default function CabinetDashboard() {
         </section>
 
         <aside className="td-side-column">
+          {PAYMENTS_ENABLED && billingDash && (
+            Number(billingDash.awaiting_payment_count) > 0
+            || Number(billingDash.needs_decision) > 0
+            || Number(billingDash.low_packages) > 0
+            || Number(billingDash.debt_total) > 0
+            || Number(billingDash.today_received) > 0
+          ) ? (
+            <section className="td-card td-side-card pay-dash-widget">
+              <h3>Оплаты</h3>
+              <ul>
+                {Number(billingDash.today_received) > 0 ? (
+                  <li><span>Поступило сегодня</span><strong>{formatMoney(billingDash.today_received, billingDash.currency)}</strong></li>
+                ) : null}
+                {Number(billingDash.awaiting_payment_count) > 0 ? (
+                  <li><span>Ожидают оплаты</span><strong>{billingDash.awaiting_payment_count}</strong></li>
+                ) : null}
+                {Number(billingDash.needs_decision) > 0 ? (
+                  <li><span>Без оформления</span><strong>{billingDash.needs_decision}</strong></li>
+                ) : null}
+                {Number(billingDash.low_packages) > 0 ? (
+                  <li><span>Абонементы заканчиваются</span><strong>{billingDash.low_packages}</strong></li>
+                ) : null}
+                {Number(billingDash.debt_total) > 0 ? (
+                  <li><span>Задолженность</span><strong>{formatMoney(billingDash.debt_total, billingDash.currency)}</strong></li>
+                ) : null}
+              </ul>
+              <Link to="/cabinet/payments" className="td-link" style={{ display: "inline-block", marginTop: 10 }}>
+                Открыть оплаты →
+              </Link>
+            </section>
+          ) : null}
+
           <section className="td-card td-side-card">
             <h3>Быстрые действия</h3>
             <p>Частые действия доступны без перехода по разделам.</p>
@@ -472,19 +601,24 @@ export default function CabinetDashboard() {
                 </span>
                 <span className="td-quick-arrow">→</span>
               </Link>
-              <Link to="/cabinet/students" className="td-quick-action">
+              <button
+                type="button"
+                className="td-quick-action"
+                onClick={openHomeworkAssign}
+                disabled={assignLoading}
+              >
                 <span className="td-quick-icon">⌁</span>
                 <span>
                   <strong>Выдать задание</strong>
                   <span>Отдельному ученику или группе</span>
                 </span>
                 <span className="td-quick-arrow">→</span>
-              </Link>
-              <Link to="/cabinet/students" className="td-quick-action">
-                <span className="td-quick-icon">👥</span>
+              </button>
+              <Link to="/cabinet/students?invite=1" className="td-quick-action">
+                <span className="td-quick-icon">＋</span>
                 <span>
-                  <strong>Ученики и группы</strong>
-                  <span>Добавление, распределение и доступы</span>
+                  <strong>Добавить ученика</strong>
+                  <span>Приглашение и предварительный профиль</span>
                 </span>
                 <span className="td-quick-arrow">→</span>
               </Link>
@@ -537,6 +671,54 @@ export default function CabinetDashboard() {
           </section>
         </aside>
       </div>
+
+      {studentPickerOpen ? (
+        <CabinetModal
+          title="Кому выдать задание?"
+          onClose={() => setStudentPickerOpen(false)}
+          footer={(
+            <>
+              <button
+                type="button"
+                className="cb-btn cb-btn--secondary"
+                onClick={() => setStudentPickerOpen(false)}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="cb-btn cb-btn--primary"
+                onClick={confirmStudentPick}
+              >
+                Далее
+              </button>
+            </>
+          )}
+        >
+          <label className="cb-field">
+            <span>Ученик</span>
+            <select
+              value={pickerValue}
+              onChange={(e) => setPickerValue(e.target.value)}
+              autoFocus
+            >
+              {pickerStudents.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </label>
+        </CabinetModal>
+      ) : null}
+
+      {homeworkTarget ? (
+        <HomeworkAssignModal
+          student={homeworkTarget.student || null}
+          students={homeworkTarget.students || null}
+          group={homeworkTarget.group || null}
+          onClose={() => setHomeworkTarget(null)}
+          onAssigned={() => setHomeworkTarget(null)}
+        />
+      ) : null}
     </main>
   );
 }

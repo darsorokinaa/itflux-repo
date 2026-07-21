@@ -3,60 +3,118 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Jitsi direct test</title>
+  <title>Jitsi join diagnostic</title>
   <style>
-    html,body,#meet{margin:0;height:100%;background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif}
-    header{padding:8px 12px;font-size:13px}
-    code{color:#93c5fd}
+    html, body { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0; font-family: system-ui, sans-serif; }
+    header { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid #334155; }
+    code { color: #93c5fd; }
+    #meet { height: calc(100% - 72px); min-height: 500px; }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; }
+    .warn { color: #fbbf24; }
   </style>
 </head>
 <body>
-<header>Прямой тест Jitsi (без кабинета). Room: <code id="room"></code> · joined: <code id="st">…</code></header>
+<header>
+  <div><strong>Диагностика входа Jitsi</strong> — prejoin выкл., ждём videoConferenceJoined.</div>
+  <div class="row">
+    domain: <code id="domain"></code>
+    room: <code id="room"></code>
+    joined: <code id="st">…</code>
+    participants: <code id="pc">?</code>
+  </div>
+  <div class="warn">Два браузера / инкогнито на один room. JWT только свой тестовый (?jwt=).</div>
+</header>
 <div id="meet"></div>
 <script>
 const params = new URLSearchParams(location.search);
-const domain = params.get('domain') || 'lesson.itflux-academy.ru';
-const roomName = params.get('room') || '';
-const jwt = params.get('jwt') || '';
-document.getElementById('room').textContent = roomName || '(нет room)';
-if (!roomName || !jwt) {
-  document.getElementById('st').textContent = 'нужны ?room=&jwt=';
-} else {
-  const s = document.createElement('script');
-  s.src = 'https://' + domain + '/libs/external_api.min.js';
-  s.onload = () => {
-    const api = new JitsiMeetExternalAPI(domain, {
-      roomName,
-      jwt,
-      parentNode: document.getElementById('meet'),
-      width: '100%',
-      height: '100%',
-      configOverwrite: {
-        prejoinPageEnabled: false,
-        prejoinConfig: { enabled: false },
-        p2p: { enabled: false },
-        preferBosh: true,
-      },
-    });
-    api.addListener('videoConferenceJoined', (e) => {
-      document.getElementById('st').textContent = 'YES id=' + (e && e.id);
-      console.info('joined', e);
-    });
-    api.addListener('participantJoined', (e) => console.info('participantJoined', e));
-    api.addListener('errorOccurred', (e) => {
-      const msg = [e && e.type, e && e.name, e && e.message].filter(Boolean).join(' · ');
-      document.getElementById('st').textContent = 'ERROR ' + msg;
-      console.warn(e);
-    });
-    setTimeout(() => {
-      if (document.getElementById('st').textContent === '…') {
-        document.getElementById('st').textContent = 'TIMEOUT — нет videoConferenceJoined';
-      }
-    }, 15000);
-  };
-  s.onerror = () => { document.getElementById('st').textContent = 'script load fail'; };
-  document.head.appendChild(s);
+const domain = (params.get("domain") || "lesson.itflux-academy.ru").replace(/^https?:\/\//, "");
+const roomName = (params.get("room") || "directjoindiagnostic20260720").replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+const jwt = params.get("jwt") || "";
+const displayName = (params.get("name") || "Диагностика").trim() || "Участник";
+document.getElementById("domain").textContent = domain;
+document.getElementById("room").textContent = roomName;
+
+function bump(api) {
+  try {
+    document.getElementById("pc").textContent = String(api.getNumberOfParticipants());
+  } catch (_) {
+    document.getElementById("pc").textContent = "?";
+  }
 }
+
+function sanitize(event) {
+  if (!event || typeof event !== "object") return event;
+  const safe = { ...event };
+  delete safe.jwt; delete safe.token; delete safe.password; delete safe.email;
+  return safe;
+}
+
+const s = document.createElement("script");
+s.src = "https://" + domain + "/libs/external_api.min.js";
+s.onload = () => {
+  const options = {
+    roomName,
+    parentNode: document.getElementById("meet"),
+    width: "100%",
+    height: "100%",
+    lang: "ru",
+    userInfo: { displayName },
+    configOverwrite: {
+      prejoinPageEnabled: false,
+      prejoinConfig: { enabled: false },
+      requireDisplayName: false,
+      startWithAudioMuted: true,
+      startWithVideoMuted: false,
+      disableDeepLinking: true,
+      disableLobbyMode: true,
+      lobby: { enabled: false },
+      enableWelcomePage: false,
+    },
+    interfaceConfigOverwrite: { MOBILE_APP_PROMO: false },
+  };
+  if (jwt) options.jwt = jwt;
+
+  console.info("[Jitsi] Display name check", {
+    hasDisplayName: Boolean(displayName),
+    length: displayName.length,
+  });
+
+  const api = new JitsiMeetExternalAPI(domain, options);
+  let conferenceJoined = false;
+
+  [
+    "videoConferenceJoined", "videoConferenceLeft", "readyToClose",
+    "participantRoleChanged", "passwordRequired", "cameraError", "micError",
+    "errorOccurred", "peerConnectionFailure", "connectionFailed",
+  ].forEach((name) => {
+    try {
+      api.addListener(name, (e) => console.info("[Jitsi event] " + name, sanitize(e)));
+    } catch (err) {
+      console.warn("[Jitsi] Event unavailable: " + name, err);
+    }
+  });
+
+  api.addListener("videoConferenceJoined", (e) => {
+    conferenceJoined = true;
+    document.getElementById("st").textContent = "YES";
+    console.info("[Jitsi] Conference joined", {
+      roomName: e && e.roomName,
+      participantId: e && e.id,
+    });
+    bump(api);
+  });
+  api.addListener("participantJoined", () => bump(api));
+  api.addListener("participantLeft", () => bump(api));
+
+  setTimeout(() => {
+    if (!conferenceJoined) {
+      document.getElementById("st").textContent = "TIMEOUT — нет videoConferenceJoined";
+      console.error("[Jitsi] videoConferenceJoined was not received");
+    }
+  }, 15000);
+};
+s.onerror = () => { document.getElementById("st").textContent = "script load fail"; };
+document.head.appendChild(s);
 </script>
 </body>
 </html>

@@ -26,8 +26,10 @@ from .invitations import (
     accept_student_invitation,
     create_student_invitation,
     get_invitation_by_token,
+    invite_accept_api_payload,
     invitation_preview_payload,
     mark_expired_invitations,
+    resolve_invitation_for_user,
 )
 from .models import (
     DirectMaterialAssignment,
@@ -194,18 +196,48 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
     def homework_options(self, request, pk=None):
         """Пункты плана с ДЗ, доступные для выдачи ученику."""
         student = self.get_object()
-        from .student_release import homework_options_for_student
+        from .models import ScheduleEvent
+        from .student_release import (
+            _subject_for_event,
+            homework_options_for_student,
+            suggest_homework_due_at,
+        )
 
-        return Response(homework_options_for_student(teacher=self.get_teacher(), student=student))
+        payload = homework_options_for_student(teacher=self.get_teacher(), student=student)
+        schedule_event_id = request.query_params.get("schedule_event_id")
+        if schedule_event_id:
+            event = ScheduleEvent.objects.filter(
+                pk=schedule_event_id,
+                owner=self.get_teacher(),
+            ).select_related("lesson_plan_item", "lesson_plan_item__plan").first()
+            if event is not None:
+                subject = _subject_for_event(event) or payload.get("plan_subject") or None
+                suggested = suggest_homework_due_at(
+                    teacher=self.get_teacher(),
+                    student=student,
+                    subject=subject or None,
+                    after=event.ends_at or event.starts_at or timezone.now(),
+                    exclude_event_id=event.pk,
+                    group=event.group if event.group_id else None,
+                )
+                payload["suggested_due_at"] = suggested.isoformat() if suggested else None
+                payload["suggested_due_source"] = "next_lesson" if suggested else None
+                if subject:
+                    payload["plan_subject"] = subject
+        return Response(payload)
 
     @action(detail=True, methods=["post"], url_path="assign-homework")
     def assign_homework(self, request, pk=None):
         """Выдать ДЗ ученику из плана или дополнительное задание."""
         student = self.get_object()
+        from .models import ScheduleEvent
         from .student_release import (
+            _normalize_subject,
+            _subject_for_event,
             assign_custom_homework,
             assign_homework_manually,
             homework_options_for_student,
+            suggest_homework_due_at,
         )
 
         due_at_raw = request.data.get("due_at")
@@ -222,6 +254,20 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             elif timezone.is_naive(due_at):
                 due_at = timezone.make_aware(due_at, timezone.get_current_timezone())
 
+        schedule_event_id = request.data.get("schedule_event_id")
+        after = timezone.now()
+        exclude_event_id = None
+        subject = None
+        if schedule_event_id:
+            event = ScheduleEvent.objects.filter(
+                pk=schedule_event_id,
+                owner=self.get_teacher(),
+            ).select_related("lesson_plan_item", "lesson_plan_item__plan").first()
+            if event is not None:
+                after = event.ends_at or event.starts_at or after
+                exclude_event_id = event.pk
+                subject = _subject_for_event(event) or None
+
         plan_item_id = request.data.get("plan_item_id")
         try:
             if plan_item_id:
@@ -235,6 +281,15 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                         {"detail": "Пункт не принадлежит плану, назначенному ученику."},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
+                if due_at is None:
+                    subject = subject or _normalize_subject(getattr(plan_item.plan, "subject", "") or "") or None
+                    due_at = suggest_homework_due_at(
+                        teacher=self.get_teacher(),
+                        student=student,
+                        subject=subject,
+                        after=after,
+                        exclude_event_id=exclude_event_id,
+                    )
                 homework = assign_homework_manually(
                     teacher=self.get_teacher(),
                     student=student,
@@ -242,6 +297,14 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                     due_at=due_at,
                 )
             else:
+                if due_at is None:
+                    due_at = suggest_homework_due_at(
+                        teacher=self.get_teacher(),
+                        student=student,
+                        subject=subject,
+                        after=after,
+                        exclude_event_id=exclude_event_id,
+                    )
                 homework = assign_custom_homework(
                     teacher=self.get_teacher(),
                     student=student,
@@ -349,10 +412,11 @@ class InvitationPreviewView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, token):
-        invitation = get_invitation_by_token(token)
-        if invitation is None:
+        user = request.user if request.user.is_authenticated else None
+        payload = resolve_invitation_for_user(token, user)
+        if payload is None:
             return Response({"error": "Приглашение недействительно или истекло."}, status=404)
-        return Response(invitation_preview_payload(invitation))
+        return Response(payload)
 
 
 class InvitationAcceptView(APIView):
@@ -363,12 +427,7 @@ class InvitationAcceptView(APIView):
             student, invitation = accept_student_invitation(token, request.user)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
-        return Response({
-            "ok": True,
-            "student_id": student.id,
-            "teacher_id": invitation.teacher_id,
-            "group_id": invitation.group_id,
-        })
+        return Response(invite_accept_api_payload(student, invitation, request.user))
 
 
 class StudentGroupViewSet(TeacherScopedMixin, viewsets.ModelViewSet):

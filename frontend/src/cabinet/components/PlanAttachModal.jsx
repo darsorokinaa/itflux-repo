@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import CabinetModal from "./CabinetModal";
+import ConfirmActionModal from "./ConfirmActionModal";
 import { mapApiPlan, planCanBeAttached, planSubjectLine, targetDirectionSlug } from "../lessonPlansData";
 import {
   enrollLessonPlan,
@@ -41,6 +42,7 @@ export default function PlanAttachModal({
   const [error, setError] = useState("");
   const [selectingId, setSelectingId] = useState(null);
   const [detaching, setDetaching] = useState(false);
+  const [detachConfirmOpen, setDetachConfirmOpen] = useState(false);
 
   const targetName = targetType === "group" ? target?.name : target?.name;
   const directionSlug = targetDirectionSlug(target);
@@ -119,13 +121,18 @@ export default function PlanAttachModal({
     }
   };
 
-  const handleDetach = async () => {
+  const handleDetach = () => {
     if (!enrollment?.id) return;
-    if (!window.confirm("Отвязать план от этой карточки?")) return;
+    setDetachConfirmOpen(true);
+  };
+
+  const confirmDetach = async () => {
+    if (!enrollment?.id) return;
     setDetaching(true);
     setError("");
     try {
       await updatePlanEnrollment(enrollment.id, { status: "cancelled" });
+      setDetachConfirmOpen(false);
       onAttached?.();
       onClose?.();
     } catch (err) {
@@ -140,91 +147,106 @@ export default function PlanAttachModal({
     : `План для ${targetName}`;
 
   return (
-    <CabinetModal title={title} onClose={onClose}>
-      <div className="cb-modal-form">
-        {error ? <p className="cb-modal-form__error" role="alert">{error}</p> : null}
+    <>
+      <CabinetModal title={title} onClose={onClose}>
+        <div className="cb-modal-form">
+          {error ? <p className="cb-modal-form__error" role="alert">{error}</p> : null}
 
-        {enrollment?.planTitle ? (
-          <div className="cb-entity-plan-current">
-            <div className="cb-entity-plan-current__body">
-              <span className="cb-entity-plan-current__label">Текущий план</span>
-              <Link to={`/cabinet/plans/${enrollment.planId}`} className="cb-entity-plan-current__title">
-                {enrollment.planTitle}
-              </Link>
+          {enrollment?.planTitle ? (
+            <div className="cb-entity-plan-current">
+              <div className="cb-entity-plan-current__body">
+                <span className="cb-entity-plan-current__label">Текущий план</span>
+                <Link to={`/cabinet/plans/${enrollment.planId}`} className="cb-entity-plan-current__title">
+                  {enrollment.planTitle}
+                </Link>
+              </div>
+              <button
+                type="button"
+                className="cb-btn cb-btn--outline cb-btn--sm"
+                onClick={handleDetach}
+                disabled={detaching || Boolean(selectingId)}
+              >
+                {detaching ? "…" : "Отвязать"}
+              </button>
             </div>
-            <button
-              type="button"
-              className="cb-btn cb-btn--outline cb-btn--sm"
-              onClick={handleDetach}
-              disabled={detaching || Boolean(selectingId)}
-            >
-              {detaching ? "…" : "Отвязать"}
-            </button>
-          </div>
-        ) : null}
+          ) : null}
 
-        <div className="cb-attach-section">
-          <h3 className="cb-attach-section__title">
-            {enrollment ? "Сменить план" : "Выберите план"}
-          </h3>
-          {loading ? (
-            <p className="cabinet-auth-muted">Загрузка планов…</p>
-          ) : sortedPlans.length === 0 ? (
-            <p className="cabinet-auth-muted">
-              {currentPlanId ? "Других планов пока нет." : "Планов пока нет."}
-            </p>
-          ) : (
-            <>
-              {attachablePlans.length === 0 ? (
-                <p className="cabinet-auth-muted">
-                  {currentPlanId
-                    ? "Нет других опубликованных планов для назначения."
-                    : "Нет опубликованных планов для назначения. Опубликуйте план в редакторе."}
-                </p>
-              ) : (
-                <div className="cb-attach-list">
-                  {attachablePlans.map((plan) => (
-                    <PlanPickItem
-                      key={plan.id}
-                      plan={plan}
-                      onSelect={handleSelect}
-                      selecting={Boolean(selectingId)}
-                    />
-                  ))}
-                </div>
-              )}
-              {unavailablePlans.length > 0 ? (
-                <div className="cb-attach-section cb-attach-section--muted">
-                  <h4 className="cb-attach-section__subtitle">Недоступны для назначения</h4>
+          <div className="cb-attach-section">
+            <h3 className="cb-attach-section__title">
+              {enrollment ? "Сменить план" : "Выберите план"}
+            </h3>
+            {loading ? (
+              <p className="cabinet-auth-muted">Загрузка планов…</p>
+            ) : sortedPlans.length === 0 ? (
+              <p className="cabinet-auth-muted">
+                {currentPlanId ? "Других планов пока нет." : "Планов пока нет."}
+              </p>
+            ) : (
+              <>
+                {attachablePlans.length === 0 ? (
+                  <p className="cabinet-auth-muted">
+                    {currentPlanId
+                      ? "Нет других опубликованных планов для назначения."
+                      : "Нет опубликованных планов для назначения. Опубликуйте план в редакторе."}
+                  </p>
+                ) : (
                   <div className="cb-attach-list">
-                    {unavailablePlans.map((plan) => (
+                    {attachablePlans.map((plan) => (
                       <PlanPickItem
                         key={plan.id}
                         plan={plan}
                         onSelect={handleSelect}
                         selecting={Boolean(selectingId)}
-                        disabled
-                        hint={plan.status === "draft" ? "Черновик — опубликуйте план" : "План недоступен"}
                       />
                     ))}
                   </div>
-                </div>
-              ) : null}
-            </>
-          )}
-        </div>
+                )}
+                {unavailablePlans.length > 0 ? (
+                  <div className="cb-attach-section cb-attach-section--muted">
+                    <h4 className="cb-attach-section__subtitle">Недоступны для назначения</h4>
+                    <div className="cb-attach-list">
+                      {unavailablePlans.map((plan) => (
+                        <PlanPickItem
+                          key={plan.id}
+                          plan={plan}
+                          onSelect={handleSelect}
+                          selecting={Boolean(selectingId)}
+                          disabled
+                          hint={plan.status === "draft" ? "Черновик — опубликуйте план" : "План недоступен"}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
 
-        <div className="cb-modal-form__actions">
-          <div className="cb-modal-form__actions-main">
-            <Link to="/cabinet/plans/new" className="cb-btn cb-btn--primary" onClick={onClose}>
-              Создать свой план
-            </Link>
-            <button type="button" className="cb-btn cb-btn--outline" onClick={onClose}>
-              Закрыть
-            </button>
+          <div className="cb-modal-form__actions">
+            <div className="cb-modal-form__actions-main">
+              <Link to="/cabinet/plans/new" className="cb-btn cb-btn--primary" onClick={onClose}>
+                Создать свой план
+              </Link>
+              <button type="button" className="cb-btn cb-btn--outline" onClick={onClose}>
+                Закрыть
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-    </CabinetModal>
+      </CabinetModal>
+
+      <ConfirmActionModal
+        open={detachConfirmOpen}
+        title="Отвязать план?"
+        text="Отвязать план от этой карточки?"
+        confirmLabel="Отвязать"
+        danger
+        loading={detaching}
+        onClose={() => {
+          if (!detaching) setDetachConfirmOpen(false);
+        }}
+        onConfirm={confirmDetach}
+      />
+    </>
   );
 }

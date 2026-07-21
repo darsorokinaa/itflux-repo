@@ -144,11 +144,22 @@ async function videoMeetingFetch(path, options = {}) {
     headers,
   });
 
+  const contentType = res.headers.get("content-type") || "";
   let data = null;
-  try {
-    data = await res.json();
-  } catch {
-    data = null;
+  if (contentType.includes("application/json")) {
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+  } else {
+    const text = await res.text().catch(() => "");
+    if (!res.ok) {
+      const err = new Error(`Сервер вернул неожиданный ответ: ${res.status}`);
+      err.status = res.status;
+      err.data = { raw: text?.slice?.(0, 200) };
+      throw err;
+    }
   }
 
   if (!res.ok) {
@@ -172,6 +183,10 @@ export function ensureVideoMeetingForEvent(eventId) {
 
 export function fetchVideoMeetingDetail(meetingUuid) {
   return videoMeetingFetch(`/${meetingUuid}/`, { method: "GET" });
+}
+
+export function fetchVideoMeetingStatus(meetingUuid) {
+  return videoMeetingFetch(`/${meetingUuid}/status/`, { method: "GET" });
 }
 
 export function fetchVideoMeetingJoinConfig(meetingUuid) {
@@ -202,6 +217,22 @@ export function recordVideoMeetingLeave(meetingUuid, payload = {}) {
 
 export function fetchVideoMeetingAttendance(meetingUuid) {
   return videoMeetingFetch(`/${meetingUuid}/attendance/`, { method: "GET" });
+}
+
+/** Показать ученику доску или вариант во время урока. */
+export function presentVideoMeetingResource(meetingUuid, payload) {
+  return videoMeetingFetch(`/${meetingUuid}/present/`, {
+    method: "POST",
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export function clearVideoMeetingPresented(meetingUuid) {
+  return videoMeetingFetch(`/${meetingUuid}/present/`, { method: "DELETE" });
+}
+
+export function fetchVideoMeetingLiveAnswers(meetingUuid) {
+  return videoMeetingFetch(`/${meetingUuid}/live-answers/`, { method: "GET" });
 }
 
 export function fetchTelemostStatus() {
@@ -236,6 +267,14 @@ export function updateScheduleEvent(eventId, payload) {
   });
 }
 
+/** Создаёт/линкует пункт плана у занятия, чтобы прикреплять материалы и ДЗ. */
+export function ensureScheduleEventPlanItem(eventId) {
+  return cabinetFetch(`/schedule/${encodeURIComponent(eventId)}/ensure-plan-item/`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
 export function deleteScheduleEvent(eventId, { scope, notifyParticipants = true } = {}) {
   if (scope) {
     return updateScheduleEvent(eventId, {
@@ -264,6 +303,11 @@ export function markNotificationRead(id, { student = false } = {}) {
 
 export function markAllNotificationsRead({ student = false } = {}) {
   const path = student ? "/student/notifications/read-all/" : "/notifications/read-all/";
+  return cabinetFetch(path, { method: "POST", body: "{}" });
+}
+
+export function clearNotifications({ student = false } = {}) {
+  const path = student ? "/student/notifications/clear/" : "/notifications/clear/";
   return cabinetFetch(path, { method: "POST", body: "{}" });
 }
 
@@ -316,6 +360,53 @@ export function buildInvitationUrl(joinPath) {
   return `${window.location.origin}${joinPath}`;
 }
 
+export function fetchTelegramStatus() {
+  return cabinetFetch("/telegram/status/", { method: "GET" });
+}
+
+/** Создаёт одноразовую deep-link; фронт сразу открывает её, не показывая токен. */
+export function createTelegramConnectLink() {
+  return cabinetFetch("/telegram/connect-link/", {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function disconnectTelegram() {
+  return cabinetFetch("/telegram/disconnect/", {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function sendTelegramTestNotification() {
+  return cabinetFetch("/telegram/test/", {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function fetchNotificationPreferences() {
+  return cabinetFetch("/settings/notifications/", { method: "GET" });
+}
+
+export function updateNotificationPreferences(payload) {
+  return cabinetFetch("/settings/notifications/", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function openTelegramConnect() {
+  const data = await createTelegramConnectLink();
+  const deepLink = data?.deep_link;
+  if (!deepLink) {
+    throw new Error("Не удалось создать ссылку для Telegram");
+  }
+  window.open(deepLink, "_blank", "noopener,noreferrer");
+  return data;
+}
+
 export function fetchStudents(params = {}) {
   return cabinetFetch(buildCabinetQueryPath("/students/", params), { method: "GET" });
 }
@@ -338,8 +429,14 @@ export function archiveStudent(id) {
   return cabinetFetch(`/students/${id}/archive/`, { method: "PATCH" });
 }
 
-export function fetchStudentHomeworkOptions(studentId) {
-  return cabinetFetch(`/students/${studentId}/homework-options/`, { method: "GET" });
+export function fetchStudentHomeworkOptions(studentId, { scheduleEventId } = {}) {
+  const params = new URLSearchParams();
+  if (scheduleEventId) params.set("schedule_event_id", String(scheduleEventId));
+  const qs = params.toString();
+  return cabinetFetch(
+    `/students/${studentId}/homework-options/${qs ? `?${qs}` : ""}`,
+    { method: "GET" },
+  );
 }
 
 export function assignStudentHomework(studentId, payload) {
@@ -657,6 +754,67 @@ export function fetchInteractiveAppearance() {
   return cabinetFetch("/interactive-appearance/", { method: "GET" });
 }
 
+// --- Interactive boards (Excalidraw) ---
+
+export function fetchInteractiveBoards(params = {}) {
+  return cabinetFetch(buildCabinetQueryPath("/interactive-boards/", params), { method: "GET" });
+}
+
+export function fetchInteractiveBoard(id) {
+  return cabinetFetch(`/interactive-boards/${id}/`, { method: "GET" });
+}
+
+export function createInteractiveBoard(payload) {
+  return cabinetFetch("/interactive-boards/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateInteractiveBoard(id, payload) {
+  return cabinetFetch(`/interactive-boards/${id}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteInteractiveBoard(id) {
+  return cabinetFetch(`/interactive-boards/${id}/`, { method: "DELETE" });
+}
+
+export function duplicateInteractiveBoard(id, payload = {}) {
+  return cabinetFetch(`/interactive-boards/${id}/duplicate/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function clearInteractiveBoard(id, payload = {}) {
+  return cabinetFetch(`/interactive-boards/${id}/clear/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateInteractiveBoardAccess(id, payload) {
+  return cabinetFetch(`/interactive-boards/${id}/access/`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchInteractiveBoardAccess(id) {
+  return cabinetFetch(`/interactive-boards/${id}/access/`, { method: "GET" });
+}
+
+export function uploadInteractiveBoardImage(id, formData) {
+  return cabinetFetchMultipart(`/interactive-boards/${id}/upload-image/`, formData);
+}
+
+export function fetchStudentInteractiveBoards() {
+  return cabinetFetch("/student/interactive-boards/", { method: "GET" });
+}
+
 // --- Materials ---
 
 export function fetchMaterials(params = {}) {
@@ -862,4 +1020,296 @@ export function updateStudentProfile(payload) {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+}
+
+/* ── Учёт оплат репетитора ─────────────────────────────────────────── */
+
+export function fetchBillingDashboard(params = {}) {
+  return cabinetFetch(buildCabinetQueryPath("/billing/dashboard/", params), { method: "GET" });
+}
+
+export function fetchBillingDashboardDetail(detail, params = {}) {
+  return fetchBillingDashboard({ ...params, detail });
+}
+
+export function fetchBillingSettings() {
+  return cabinetFetch("/billing/settings/", { method: "GET" });
+}
+
+export function updateBillingSettings(payload) {
+  return cabinetFetch("/billing/settings/", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchBillingAccounts(params = {}) {
+  return cabinetFetch(buildCabinetQueryPath("/billing/accounts/", params), { method: "GET" });
+}
+
+export function fetchBillingAccount(accountId) {
+  return cabinetFetch(`/billing/accounts/${accountId}/`, { method: "GET" });
+}
+
+export function fetchStudentBillingAccount(studentId) {
+  return cabinetFetch(`/billing/students/${studentId}/account/`, { method: "GET" });
+}
+
+export function updateBillingAccountSettings(accountId, payload) {
+  return cabinetFetch(`/billing/accounts/${accountId}/settings/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchBillingTransactions(params = {}) {
+  return cabinetFetch(buildCabinetQueryPath("/billing/transactions/", params), { method: "GET" });
+}
+
+export function createBillingPayment(payload) {
+  return cabinetFetch("/billing/payments/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createBillingRefund(payload) {
+  return cabinetFetch("/billing/refunds/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createBillingAdjustment(payload) {
+  return cabinetFetch("/billing/adjustments/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function reverseBillingTransaction(txId, payload = {}) {
+  return cabinetFetch(`/billing/transactions/${txId}/reverse/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchBillingPackages(params = {}) {
+  return cabinetFetch(buildCabinetQueryPath("/billing/packages/", params), { method: "GET" });
+}
+
+export function createBillingPackage(payload) {
+  return cabinetFetch("/billing/packages/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function patchBillingPackage(packageId, payload) {
+  return cabinetFetch(`/billing/packages/${packageId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteBillingPackage(packageId) {
+  return cabinetFetch(`/billing/packages/${packageId}/`, {
+    method: "DELETE",
+  });
+}
+
+export function freezeBillingPackage(packageId) {
+  return cabinetFetch(`/billing/packages/${packageId}/freeze/`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function unfreezeBillingPackage(packageId) {
+  return cabinetFetch(`/billing/packages/${packageId}/unfreeze/`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function extendBillingPackage(packageId, payload) {
+  return cabinetFetch(`/billing/packages/${packageId}/extend/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function adjustBillingPackage(packageId, payload) {
+  return cabinetFetch(`/billing/packages/${packageId}/adjust/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchUnresolvedBillingLessons() {
+  return cabinetFetch("/billing/unresolved-lessons/", { method: "GET" });
+}
+
+export function previewEventBilling(eventId, payload = {}) {
+  return cabinetFetch(`/billing/events/${eventId}/preview/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function finalizeEventBilling(eventId, payload) {
+  return cabinetFetch(`/billing/events/${eventId}/finalize/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    headers: payload?.idempotency_key
+      ? { "X-Idempotency-Key": payload.idempotency_key }
+      : undefined,
+  });
+}
+
+export function cancelEventFinance(eventId, payload) {
+  return cabinetFetch(`/billing/events/${eventId}/cancel-finance/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function noShowEventFinance(eventId, payload) {
+  return cabinetFetch(`/billing/events/${eventId}/no-show/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchEventBillingBadge(eventId) {
+  return cabinetFetch(`/billing/events/${eventId}/badge/`, { method: "GET" });
+}
+
+export function bulkFinalizeBilling(payload) {
+  return cabinetFetch("/billing/lessons/bulk-finalize/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function billingPlanCheck(payload) {
+  return cabinetFetch("/billing/plan-check/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchBillingReports(params = {}) {
+  return cabinetFetch(buildCabinetQueryPath("/billing/reports/", params), { method: "GET" });
+}
+
+export function billingExportUrl(params = {}) {
+  const path = buildCabinetQueryPath("/billing/export/", params);
+  return `${apiBase()}${path}`;
+}
+
+export function previewPaymentReminder(payload) {
+  return cabinetFetch("/billing/reminders/preview/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function sendPaymentReminder(payload) {
+  return cabinetFetch("/billing/reminders/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchStudentBilling() {
+  return cabinetFetch("/billing/student/", { method: "GET" });
+}
+
+/* ── Журнал успеваемости ─────────────────────────────────────────── */
+
+export function fetchJournalOverview() {
+  return cabinetFetch("/journal/", { method: "GET" });
+}
+
+export function fetchJournalGradebook(params = {}) {
+  return cabinetFetch(buildCabinetQueryPath("/journal/gradebook/", params), { method: "GET" });
+}
+
+export function fetchJournalLessons(params = {}) {
+  return cabinetFetch(buildCabinetQueryPath("/journal/lessons/", params), { method: "GET" });
+}
+
+export function fetchJournalLesson(lessonId) {
+  return cabinetFetch(`/journal/lessons/${lessonId}/`, { method: "GET" });
+}
+
+export function saveJournalLesson(lessonId, payload) {
+  return cabinetFetch(`/journal/lessons/${lessonId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function completeJournalLesson(lessonId, payload = {}) {
+  return cabinetFetch(`/journal/lessons/${lessonId}/complete/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function publishJournalLesson(lessonId, payload = {}) {
+  return cabinetFetch(`/journal/lessons/${lessonId}/publish/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function bulkJournalLesson(lessonId, payload) {
+  return cabinetFetch(`/journal/lessons/${lessonId}/bulk/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchJournalStudent(studentId) {
+  return cabinetFetch(`/journal/students/${studentId}/`, { method: "GET" });
+}
+
+export function fetchJournalStudentsSummary() {
+  return cabinetFetch("/journal/students/", { method: "GET" });
+}
+
+export function fetchJournalGroup(groupId) {
+  return cabinetFetch(`/journal/groups/${groupId}/`, { method: "GET" });
+}
+
+export function fetchJournalAttendance(params = {}) {
+  return cabinetFetch(buildCabinetQueryPath("/journal/attendance/", params), { method: "GET" });
+}
+
+export function fetchJournalAnalytics(studentId) {
+  return cabinetFetch(
+    buildCabinetQueryPath("/journal/analytics/", { student_id: studentId }),
+    { method: "GET" },
+  );
+}
+
+export function fetchJournalSettings() {
+  return cabinetFetch("/journal/settings/", { method: "GET" });
+}
+
+export function updateJournalSettings(payload) {
+  return cabinetFetch("/journal/settings/", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchStudentResults() {
+  return cabinetFetch("/student/results/", { method: "GET" });
+}
+
+export function fetchStudentResultDetail(recordId) {
+  return cabinetFetch(`/student/results/${recordId}/`, { method: "GET" });
 }

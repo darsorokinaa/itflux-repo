@@ -1,0 +1,580 @@
+"""Тесты электронного журнала успеваемости."""
+
+from datetime import timedelta
+from decimal import Decimal
+from unittest.mock import patch
+
+from django.contrib.auth.models import User
+from django.db import IntegrityError
+from django.test import TestCase
+from django.utils import timezone
+from rest_framework.test import APIClient
+
+from Cabinet.billing_models import DeliveryStatus
+from Cabinet.journal_models import (
+    AttendanceStatus,
+    JournalAuditLog,
+    JournalStatus,
+    LessonJournal,
+    RecordPublishStatus,
+    StudentCriterionScore,
+    StudentLessonRecord,
+)
+from Cabinet.journal_service import (
+    JournalError,
+    attendance_report,
+    attendance_to_delivery_status,
+    complete_journal,
+    compute_overall_score,
+    get_or_create_journal,
+    publish_record,
+    update_journal,
+)
+from Cabinet.models import Homework, Profile, ScheduleEvent, Student, StudentGroup
+
+
+class JournalTestBase(TestCase):
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username="j_teacher", email="jt@test.ru", password="StrongPass123!"
+        )
+        self.teacher.profile.role = Profile.Role.TEACHER
+        self.teacher.profile.save()
+
+        self.other_teacher = User.objects.create_user(
+            username="j_other", email="jo@test.ru", password="StrongPass123!"
+        )
+        self.other_teacher.profile.role = Profile.Role.TEACHER
+        self.other_teacher.profile.save()
+
+        self.student_user = User.objects.create_user(
+            username="j_student", email="js@test.ru", password="StrongPass123!"
+        )
+        self.student_user.profile.role = Profile.Role.STUDENT
+        self.student_user.profile.save()
+
+        self.student = Student.objects.create(
+            teacher=self.teacher,
+            user=self.student_user,
+            first_name="Анна",
+            last_name="Иванова",
+            direction="oge",
+        )
+        self.student2 = Student.objects.create(
+            teacher=self.teacher,
+            first_name="Борис",
+            last_name="Петров",
+            direction="oge",
+        )
+        self.group = StudentGroup.objects.create(teacher=self.teacher, title="ОГЭ-1")
+        self.group.students.add(self.student, self.student2)
+
+        self.client = APIClient()
+        self.client.force_login(self.teacher)
+
+    def _individual_event(self, **kwargs):
+        starts = timezone.now() - timedelta(hours=1)
+        ends = starts + timedelta(minutes=60)
+        return ScheduleEvent.objects.create(
+            owner=self.teacher,
+            title="Индивидуальный урок",
+            topic="Системы счисления",
+            starts_at=starts,
+            ends_at=ends,
+            student=self.student,
+            event_type=ScheduleEvent.EventType.INDIVIDUAL_LESSON,
+            status=ScheduleEvent.Status.PLANNED,
+            **kwargs,
+        )
+
+    def _group_event(self, **kwargs):
+        starts = timezone.now() - timedelta(hours=1)
+        ends = starts + timedelta(minutes=90)
+        return ScheduleEvent.objects.create(
+            owner=self.teacher,
+            title="Групповой урок",
+            topic="Алгоритмы",
+            starts_at=starts,
+            ends_at=ends,
+            group=self.group,
+            event_type=ScheduleEvent.EventType.GROUP_LESSON,
+            status=ScheduleEvent.Status.PLANNED,
+            **kwargs,
+        )
+
+
+class JournalModelTests(JournalTestBase):
+    def test_create_individual_journal(self):
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        self.assertEqual(journal.planned_topic, "Системы счисления")
+        self.assertEqual(journal.student_records.count(), 1)
+        self.assertEqual(journal.status, JournalStatus.DRAFT)
+
+    def test_create_group_journal(self):
+        event = self._group_event()
+        journal = get_or_create_journal(event, self.teacher)
+        self.assertEqual(journal.student_records.count(), 2)
+        self.assertTrue(journal.group_id)
+
+    def test_unique_student_per_journal(self):
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        with self.assertRaises(IntegrityError):
+            StudentLessonRecord.objects.create(
+                journal=journal,
+                student=self.student,
+                attendance_status=AttendanceStatus.PRESENT,
+            )
+
+    def test_mark_present_late_partial_absent(self):
+        event = self._group_event()
+        journal = get_or_create_journal(event, self.teacher)
+        r1 = journal.student_records.get(student=self.student)
+        r2 = journal.student_records.get(student=self.student2)
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "student_records": [
+                    {
+                        "id": r1.id,
+                        "attendance_status": AttendanceStatus.LATE,
+                        "late_minutes": 10,
+                    },
+                    {
+                        "id": r2.id,
+                        "attendance_status": AttendanceStatus.ABSENT_UNEXCUSED,
+                    },
+                ]
+            },
+        )
+        r1.refresh_from_db()
+        r2.refresh_from_db()
+        self.assertEqual(r1.attendance_status, AttendanceStatus.LATE)
+        self.assertEqual(r1.late_minutes, 10)
+        self.assertEqual(r2.attendance_status, AttendanceStatus.ABSENT_UNEXCUSED)
+        for sc in r2.criterion_scores.all():
+            self.assertTrue(sc.is_not_applicable)
+
+    def test_criterion_score_and_out_of_range(self):
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        record = journal.student_records.get()
+        crit = record.criterion_scores.first().criterion
+        with self.assertRaises(JournalError):
+            update_journal(
+                journal,
+                self.teacher,
+                {
+                    "student_records": [
+                        {
+                            "id": record.id,
+                            "attendance_status": AttendanceStatus.PRESENT,
+                            "criterion_scores": [
+                                {"criterion_id": crit.id, "value": "99"}
+                            ],
+                        }
+                    ]
+                },
+            )
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "student_records": [
+                    {
+                        "id": record.id,
+                        "attendance_status": AttendanceStatus.PRESENT,
+                        "criterion_scores": [
+                            {"criterion_id": crit.id, "value": "4"}
+                        ],
+                    }
+                ]
+            },
+        )
+        score = StudentCriterionScore.objects.get(student_record=record, criterion=crit)
+        self.assertEqual(score.value, Decimal("4"))
+
+    def test_not_applicable_criterion(self):
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        record = journal.student_records.get()
+        crit = record.criterion_scores.first().criterion
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "student_records": [
+                    {
+                        "id": record.id,
+                        "criterion_scores": [
+                            {
+                                "criterion_id": crit.id,
+                                "is_not_applicable": True,
+                                "value": "5",
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+        score = StudentCriterionScore.objects.get(student_record=record, criterion=crit)
+        self.assertTrue(score.is_not_applicable)
+        self.assertIsNone(score.value)
+
+    def test_public_and_private_comments(self):
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        record = journal.student_records.get()
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "student_records": [
+                    {
+                        "id": record.id,
+                        "teacher_comment": "Публичный",
+                        "private_note": "Секрет",
+                    }
+                ]
+            },
+        )
+        record.refresh_from_db()
+        self.assertEqual(record.teacher_comment, "Публичный")
+        self.assertEqual(record.private_note, "Секрет")
+
+    def test_student_cannot_see_private_note(self):
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        record = journal.student_records.get()
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "student_records": [
+                    {
+                        "id": record.id,
+                        "attendance_status": AttendanceStatus.PRESENT,
+                        "teacher_comment": "Ок",
+                        "private_note": "Секрет",
+                    }
+                ]
+            },
+        )
+        complete_journal(journal, self.teacher, force=True)
+        publish_record(record, self.teacher, notify=False)
+        student_client = APIClient()
+        student_client.force_login(self.student_user)
+        resp = student_client.get(f"/api/cabinet/student/results/{record.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("private_note", resp.data)
+        self.assertEqual(resp.data["teacher_comment"], "Ок")
+
+    def test_draft_complete_publish_edit(self):
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        self.assertEqual(journal.status, JournalStatus.DRAFT)
+        record = journal.student_records.get()
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "actual_topic": "Перевод чисел",
+                "student_records": [
+                    {"id": record.id, "attendance_status": AttendanceStatus.PRESENT}
+                ],
+            },
+        )
+        journal = complete_journal(journal, self.teacher)
+        self.assertEqual(journal.status, JournalStatus.COMPLETED)
+        publish_record(record, self.teacher, notify=False)
+        record.refresh_from_db()
+        self.assertEqual(record.publish_status, RecordPublishStatus.PUBLISHED)
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "version": journal.version,
+                "student_records": [
+                    {"id": record.id, "teacher_comment": "Обновлено"}
+                ],
+            },
+        )
+        record.refresh_from_db()
+        self.assertEqual(record.publish_status, RecordPublishStatus.EDITED_AFTER_PUBLISH)
+
+    def test_homework_link(self):
+        hw = Homework.objects.create(teacher=self.teacher, title="ДЗ1", student=self.student)
+        event = self._individual_event(homework=hw)
+        journal = get_or_create_journal(event, self.teacher)
+        self.assertEqual(journal.homework_id, hw.id)
+
+    def test_attendance_maps_to_billing_delivery(self):
+        self.assertEqual(
+            attendance_to_delivery_status(AttendanceStatus.PRESENT),
+            DeliveryStatus.CONDUCTED,
+        )
+        self.assertEqual(
+            attendance_to_delivery_status(AttendanceStatus.ABSENT_UNEXCUSED),
+            DeliveryStatus.NO_SHOW,
+        )
+
+    def test_group_with_absent_student(self):
+        event = self._group_event()
+        journal = get_or_create_journal(event, self.teacher)
+        r1 = journal.student_records.get(student=self.student)
+        r2 = journal.student_records.get(student=self.student2)
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "student_records": [
+                    {"id": r1.id, "attendance_status": AttendanceStatus.PRESENT},
+                    {"id": r2.id, "attendance_status": AttendanceStatus.ABSENT_EXCUSED},
+                ]
+            },
+        )
+        self.assertEqual(journal.student_records.count(), 2)
+
+    def test_other_teacher_forbidden(self):
+        event = self._individual_event()
+        other_client = APIClient()
+        other_client.force_login(self.other_teacher)
+        resp = other_client.get(f"/api/cabinet/journal/lessons/{event.id}/")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_student_cannot_edit(self):
+        event = self._individual_event()
+        student_client = APIClient()
+        student_client.force_login(self.student_user)
+        resp = student_client.patch(
+            f"/api/cabinet/journal/lessons/{event.id}/",
+            {"actual_topic": "Хак"},
+            format="json",
+        )
+        self.assertIn(resp.status_code, {403, 404})
+
+    def test_attendance_report(self):
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        record = journal.student_records.get()
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "student_records": [
+                    {
+                        "id": record.id,
+                        "attendance_status": AttendanceStatus.LATE,
+                        "late_minutes": 5,
+                    }
+                ]
+            },
+        )
+        report = attendance_report(self.teacher, student_id=self.student.id)
+        self.assertEqual(report["late"], 1)
+        self.assertEqual(report["total_late_minutes"], 5)
+
+    def test_auto_overall_score(self):
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        record = journal.student_records.get()
+        scores_payload = []
+        for sc in record.criterion_scores.all()[:3]:
+            scores_payload.append({"criterion_id": sc.criterion_id, "value": "4"})
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "student_records": [
+                    {
+                        "id": record.id,
+                        "attendance_status": AttendanceStatus.PRESENT,
+                        "criterion_scores": scores_payload,
+                        "overall_score_manual": False,
+                    }
+                ]
+            },
+        )
+        record.refresh_from_db()
+        self.assertIsNotNone(record.overall_score)
+        # Критерии 1–5 со значением 4 → 75%
+        self.assertEqual(float(record.overall_score), 75.0)
+        self.assertIn("Среднее", record.overall_score_explanation)
+        self.assertIn("%", record.overall_score_explanation)
+
+    def test_double_create_idempotent(self):
+        event = self._individual_event()
+        j1 = get_or_create_journal(event, self.teacher)
+        j2 = get_or_create_journal(event, self.teacher)
+        self.assertEqual(j1.id, j2.id)
+        self.assertEqual(LessonJournal.objects.filter(schedule_event=event).count(), 1)
+
+    def test_audit_log(self):
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        record = journal.student_records.get()
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "actual_topic": "Новая тема",
+                "student_records": [
+                    {"id": record.id, "attendance_status": AttendanceStatus.PRESENT}
+                ],
+            },
+        )
+        self.assertTrue(
+            JournalAuditLog.objects.filter(journal=journal, action="update").exists()
+        )
+
+    @patch("Cabinet.journal_notifications.send_telegram_to_user", return_value=True)
+    def test_telegram_on_publish_not_on_autosave(self, mock_tg):
+        from Cabinet.notifications import get_or_create_preferences
+
+        prefs = get_or_create_preferences(self.student_user)
+        prefs.telegram_enabled = True
+        prefs.telegram_chat_id = "123456"
+        prefs.notify_journal_results = True
+        prefs.save()
+
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        record = journal.student_records.get()
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "student_records": [
+                    {
+                        "id": record.id,
+                        "attendance_status": AttendanceStatus.PRESENT,
+                        "teacher_comment": "Хорошо",
+                    }
+                ]
+            },
+        )
+        mock_tg.assert_not_called()
+        complete_journal(journal, self.teacher, force=True)
+        publish_record(record, self.teacher, notify=True)
+        mock_tg.assert_called()
+        # повторное автосохранение не шлёт
+        mock_tg.reset_mock()
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "version": LessonJournal.objects.get(pk=journal.pk).version,
+                "student_records": [
+                    {"id": record.id, "teacher_comment": "Правка без notify"}
+                ],
+            },
+        )
+        mock_tg.assert_not_called()
+
+    def test_api_create_and_complete(self):
+        event = self._individual_event()
+        resp = self.client.get(f"/api/cabinet/journal/lessons/{event.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["planned_topic"], "Системы счисления")
+        record_id = resp.data["student_records"][0]["id"]
+        resp = self.client.patch(
+            f"/api/cabinet/journal/lessons/{event.id}/",
+            {
+                "actual_topic": "Перевод чисел",
+                "version": resp.data["version"],
+                "student_records": [
+                    {
+                        "id": record_id,
+                        "attendance_status": AttendanceStatus.PRESENT,
+                        "teacher_comment": "Отлично",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        resp = self.client.post(
+            f"/api/cabinet/journal/lessons/{event.id}/complete/",
+            {},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["status"], JournalStatus.COMPLETED)
+
+    def test_analytics_insufficient_data(self):
+        resp = self.client.get(
+            f"/api/cabinet/journal/analytics/?student_id={self.student.id}"
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.data["enough_data"])
+
+    def test_student_journal_includes_performance_summary(self):
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        record = journal.student_records.get(student=self.student)
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "previous_homework_status": "full",
+                "student_records": [
+                    {
+                        "id": record.id,
+                        "attendance_status": AttendanceStatus.PRESENT,
+                        "overall_score": "90",
+                        "overall_score_manual": True,
+                        "variant_result": {
+                            "score_percent": 80,
+                            "tasks": [{"ok": True}, {"ok": False}],
+                        },
+                    }
+                ],
+            },
+        )
+        resp = self.client.get(f"/api/cabinet/journal/students/{self.student.id}/")
+        self.assertEqual(resp.status_code, 200)
+        summary = resp.data.get("summary") or {}
+        self.assertEqual(summary.get("scope"), "student")
+        self.assertIsNotNone(summary.get("lesson_work", {}).get("avg_score"))
+        self.assertIn("homework", summary)
+        self.assertIn("attendance", summary)
+        self.assertIn("score_series", summary)
+        criteria = summary.get("criteria") or []
+        self.assertTrue(criteria)
+        self.assertTrue(any((c.get("description") or "").strip() for c in criteria))
+
+    def test_gradebook_matrix_group(self):
+        event = self._group_event()
+        journal = get_or_create_journal(event, self.teacher)
+        r1 = journal.student_records.get(student=self.student)
+        r2 = journal.student_records.get(student=self.student2)
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "student_records": [
+                    {
+                        "id": r1.id,
+                        "attendance_status": AttendanceStatus.PRESENT,
+                        "overall_score": "85",
+                        "overall_score_manual": True,
+                    },
+                    {
+                        "id": r2.id,
+                        "attendance_status": AttendanceStatus.ABSENT_UNEXCUSED,
+                    },
+                ]
+            },
+        )
+        resp = self.client.get(
+            f"/api/cabinet/journal/gradebook/?group_id={self.group.id}"
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["scope"]["type"], "group")
+        self.assertGreaterEqual(len(resp.data["students"]), 2)
+        self.assertEqual(len(resp.data["columns"]), 1)
+        col = resp.data["columns"][0]
+        self.assertEqual(col["cells"][str(self.student.id)]["display"], "85%")
+        self.assertEqual(col["cells"][str(self.student2.id)]["display"], "н")

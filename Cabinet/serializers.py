@@ -1490,6 +1490,9 @@ class ScheduleEventChangeLogSerializer(serializers.ModelSerializer):
 
 
 class NotificationSerializer(serializers.ModelSerializer):
+    url = serializers.SerializerMethodField()
+    message = serializers.SerializerMethodField()
+
     class Meta:
         model = Notification
         fields = [
@@ -1497,6 +1500,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             "channel",
             "title",
             "message",
+            "url",
             "payload",
             "status",
             "is_read",
@@ -1504,6 +1508,16 @@ class NotificationSerializer(serializers.ModelSerializer):
             "sent_at",
         ]
         read_only_fields = fields
+
+    def get_message(self, obj):
+        from .notification_links import strip_open_path_from_message
+
+        return strip_open_path_from_message(obj.message)
+
+    def get_url(self, obj):
+        from .notification_links import resolve_notification_url
+
+        return resolve_notification_url(obj, self.context.get("request"))
 
 
 class DashboardReviewItemSerializer(serializers.ModelSerializer):

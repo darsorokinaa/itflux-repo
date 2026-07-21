@@ -58,6 +58,7 @@ export default function HomeworkAssignModal({
   students = null,
   group = null,
   enrollment,
+  scheduleEventId = null,
   onClose,
   onAssigned,
   onAttachPlan,
@@ -79,6 +80,8 @@ export default function HomeworkAssignModal({
   const [mode, setMode] = useState("plan");
   const [selectedId, setSelectedId] = useState("");
   const [deadline, setDeadline] = useState("");
+  const [suggestedDueAt, setSuggestedDueAt] = useState("");
+  const [deadlineTouched, setDeadlineTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [customTitle, setCustomTitle] = useState("");
   const [customDescription, setCustomDescription] = useState("");
@@ -86,6 +89,43 @@ export default function HomeworkAssignModal({
   const [customInteractives, setCustomInteractives] = useState([]);
   const [resourcePickerOpen, setResourcePickerOpen] = useState(false);
   const [duplicateTaskIds, setDuplicateTaskIds] = useState([]);
+
+  const toDateInputValue = (iso) => {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return "";
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    } catch {
+      return "";
+    }
+  };
+
+  const formatSuggestedHint = (iso) => {
+    if (!iso) return "";
+    try {
+      return new Date(iso).toLocaleString("ru-RU", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  };
+
+  const resolveDueAtPayload = () => {
+    if (!deadline) return undefined;
+    const suggestedDate = toDateInputValue(suggestedDueAt);
+    if (suggestedDueAt && (!deadlineTouched || deadline === suggestedDate)) {
+      return suggestedDueAt;
+    }
+    return deadline;
+  };
 
   const loadOptions = useCallback(async () => {
     if (!primaryStudent?.id) {
@@ -97,17 +137,23 @@ export default function HomeworkAssignModal({
     setLoading(true);
     setError("");
     try {
-      const data = await fetchStudentHomeworkOptions(primaryStudent.id);
+      const data = await fetchStudentHomeworkOptions(primaryStudent.id, {
+        scheduleEventId: scheduleEventId || undefined,
+      });
       setOptions(data || null);
       const first = (data?.items || []).find((item) => !item.assigned) || (data?.items || [])[0];
       setSelectedId(first ? String(first.id) : "");
+      const suggested = data?.suggested_due_at || "";
+      setSuggestedDueAt(suggested);
+      setDeadlineTouched(false);
+      setDeadline(toDateInputValue(suggested));
     } catch (err) {
       setError(err.message || "Не удалось загрузить занятия");
       setOptions(null);
     } finally {
       setLoading(false);
     }
-  }, [primaryStudent?.id, isGroupAssign]);
+  }, [primaryStudent?.id, isGroupAssign, scheduleEventId]);
 
   useEffect(() => {
     loadOptions();
@@ -167,7 +213,8 @@ export default function HomeworkAssignModal({
     try {
       await assignToTargets({
         plan_item_id: Number(selectedId),
-        due_at: deadline || undefined,
+        due_at: resolveDueAtPayload(),
+        ...(scheduleEventId ? { schedule_event_id: Number(scheduleEventId) } : {}),
       });
       onAssigned?.();
       onClose?.();
@@ -198,7 +245,8 @@ export default function HomeworkAssignModal({
         description,
         material_ids: customMaterialIds,
         interactive_ids: customInteractiveIds,
-        due_at: deadline || undefined,
+        due_at: resolveDueAtPayload(),
+        ...(scheduleEventId ? { schedule_event_id: Number(scheduleEventId) } : {}),
       });
       onAssigned?.();
       onClose?.();
@@ -349,9 +397,21 @@ export default function HomeworkAssignModal({
                         <input
                           type="date"
                           value={deadline}
-                          onChange={(e) => setDeadline(e.target.value)}
+                          onChange={(e) => {
+                            setDeadlineTouched(true);
+                            setDeadline(e.target.value);
+                          }}
                           disabled={submitting}
                         />
+                        {suggestedDueAt ? (
+                          <span className="cabinet-auth-muted">
+                            До следующего урока{options?.plan_subject ? " по предмету" : ""}: {formatSuggestedHint(suggestedDueAt)}
+                          </span>
+                        ) : (
+                          <span className="cabinet-auth-muted">
+                            Если следующего урока нет, срок можно указать вручную
+                          </span>
+                        )}
                       </label>
                       <div className="cb-modal-form__actions">
                         <div className="cb-modal-form__actions-main">
@@ -453,9 +513,17 @@ export default function HomeworkAssignModal({
                 <input
                   type="date"
                   value={deadline}
-                  onChange={(e) => setDeadline(e.target.value)}
+                  onChange={(e) => {
+                    setDeadlineTouched(true);
+                    setDeadline(e.target.value);
+                  }}
                   disabled={submitting}
                 />
+                {suggestedDueAt ? (
+                  <span className="cabinet-auth-muted">
+                    До следующего урока{options?.plan_subject ? " по предмету" : ""}: {formatSuggestedHint(suggestedDueAt)}
+                  </span>
+                ) : null}
               </label>
 
               {duplicateTaskIds.length > 0 ? (

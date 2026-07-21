@@ -7,6 +7,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .meeting_present import (
+    clear_presented,
+    live_variant_answers,
+    present_board,
+    present_variant,
+    redact_plan_item_for_student,
+    serialize_presented,
+)
 from .video_meeting_service import (
     VideoMeetingError,
     build_join_config,
@@ -14,22 +22,28 @@ from .video_meeting_service import (
     get_event_for_teacher,
     get_meeting_by_uuid,
     get_or_create_meeting_for_event,
+    lesson_meeting_audience,
+    lesson_meeting_subject,
     list_attendance_for_teacher,
     meeting_join_window_state,
     record_attendance_join,
     record_attendance_leave,
     resolve_access,
+    serialize_meeting_compact,
     serialize_meeting_summary,
     start_meeting,
     ui_state_message,
 )
 
 
-def _error_response(exc: VideoMeetingError) -> Response:
-    return Response(
-        {"error": exc.message, "code": exc.code},
-        status=exc.status,
-    )
+def _error_response(exc: VideoMeetingError, *, meeting=None) -> Response:
+    payload = {"error": exc.message, "detail": exc.message, "code": exc.code}
+    if meeting is not None:
+        payload["status"] = meeting.status
+    elif exc.code in ("not_live", "finished", "cancelled", "invalid_status"):
+        # Клиенту удобно читать статус рядом с detail.
+        payload.setdefault("status", exc.code if exc.code != "not_live" else "scheduled")
+    return Response(payload, status=exc.status)
 
 
 class VideoMeetingForEventView(APIView):
@@ -63,12 +77,18 @@ class VideoMeetingForEventView(APIView):
     def post(self, request, event_id: int):
         try:
             event = get_event_for_teacher(event_id, request.user)
-            meeting = get_or_create_meeting_for_event(event=event, created_by=request.user)
+            meeting, created = get_or_create_meeting_for_event(event=event, created_by=request.user)
         except VideoMeetingError as exc:
             return _error_response(exc)
+
+        summary = serialize_meeting_summary(meeting, event=event, user=request.user)
+        compact = serialize_meeting_compact(meeting)
         return Response(
             {
-                "videoMeeting": serialize_meeting_summary(meeting, event=event, user=request.user),
+                "success": True,
+                "created": created,
+                "meeting": compact,
+                "videoMeeting": summary,
             },
             status=status.HTTP_200_OK,
         )
@@ -96,19 +116,29 @@ class VideoMeetingDetailView(APIView):
         plan_item_json = (
             _plan_item_to_json(plan_item, lesson_number=lesson_number) if plan_item else None
         )
+        can_manage = access.role in ("teacher", "staff")
+        if not can_manage:
+            plan_item_json = redact_plan_item_for_student(plan_item_json)
 
+        subject = lesson_meeting_subject(event)
+        audience = lesson_meeting_audience(event)
         return Response({
             "videoMeeting": serialize_meeting_summary(meeting, event=event, user=request.user),
             "event": {
                 "id": event.pk,
-                "title": event.title,
+                "title": subject,
+                "eventTitle": event.title,
+                "audience": audience,
                 "topic": (plan_item_json or {}).get("topic") or event.topic or "",
                 "startsAt": event.starts_at.isoformat(),
                 "endsAt": event.ends_at.isoformat(),
                 "status": event.status,
-                "materials": event.materials or "",
-                "teacherComment": event.teacher_comment or "",
+                "materials": (event.materials or "") if can_manage else "",
+                "teacherComment": (event.teacher_comment or "") if can_manage else "",
                 "planItem": plan_item_json,
+                "studentId": event.student_id,
+                "groupId": event.group_id,
+                "lessonId": event.lesson_id,
                 "teacherName": (
                     getattr(event.owner, "profile", None).get_display_name()
                     if getattr(event.owner, "profile", None)
@@ -117,7 +147,42 @@ class VideoMeetingDetailView(APIView):
             },
             "joinState": state,
             "joinStateLabel": ui_state_message(state),
+            "canManage": can_manage,
+            "presented": serialize_presented(meeting, user=request.user),
+        })
+
+
+class VideoMeetingStatusView(APIView):
+    """Лёгкий polling статуса без выдачи JWT."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, meeting_uuid):
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+            access = resolve_access(request.user, meeting.schedule_event)
+            if not access.allowed:
+                raise VideoMeetingError(access.reason or "Доступ запрещён", code="forbidden", status=403)
+        except VideoMeetingError as exc:
+            return _error_response(exc)
+
+        event = meeting.schedule_event
+        state = meeting_join_window_state(event, meeting)
+        return Response({
+            "uuid": str(meeting.uuid),
+            "status": meeting.status,
+            "statusLabel": meeting.get_status_display(),
+            "joinState": state,
+            "joinStateLabel": ui_state_message(state),
+            "joinUrl": f"/cabinet/meetings/{meeting.uuid}",
             "canManage": access.role in ("teacher", "staff"),
+            "actualStartedAt": (
+                meeting.actual_started_at.isoformat() if meeting.actual_started_at else None
+            ),
+            "actualFinishedAt": (
+                meeting.actual_finished_at.isoformat() if meeting.actual_finished_at else None
+            ),
+            "presented": serialize_presented(meeting, user=request.user),
         })
 
 
@@ -131,11 +196,12 @@ class VideoMeetingJoinConfigView(APIView):
         return self._join(request, meeting_uuid)
 
     def _join(self, request, meeting_uuid):
+        meeting = None
         try:
             meeting = get_meeting_by_uuid(meeting_uuid)
             config = build_join_config(meeting=meeting, user=request.user, request=request)
         except VideoMeetingError as exc:
-            return _error_response(exc)
+            return _error_response(exc, meeting=meeting)
         return Response(config)
 
 
@@ -149,9 +215,12 @@ class VideoMeetingStartView(APIView):
         except VideoMeetingError as exc:
             return _error_response(exc)
         return Response({
+            "success": True,
             "videoMeeting": serialize_meeting_summary(
                 meeting, event=meeting.schedule_event, user=request.user
             ),
+            "meeting": serialize_meeting_compact(meeting),
+            "joinUrl": f"/cabinet/meetings/{meeting.uuid}",
         })
 
 
@@ -165,9 +234,11 @@ class VideoMeetingFinishView(APIView):
         except VideoMeetingError as exc:
             return _error_response(exc)
         return Response({
+            "success": True,
             "videoMeeting": serialize_meeting_summary(
                 meeting, event=meeting.schedule_event, user=request.user
             ),
+            "meeting": serialize_meeting_compact(meeting),
         })
 
 
@@ -175,6 +246,7 @@ class VideoMeetingAttendanceJoinView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, meeting_uuid):
+        meeting = None
         try:
             meeting = get_meeting_by_uuid(meeting_uuid)
             participant_id = ""
@@ -188,7 +260,7 @@ class VideoMeetingAttendanceJoinView(APIView):
                 jitsi_participant_id=str(participant_id or ""),
             )
         except VideoMeetingError as exc:
-            return _error_response(exc)
+            return _error_response(exc, meeting=meeting)
         return Response({
             "id": session.pk,
             "joinedAt": session.joined_at.isoformat(),
@@ -237,3 +309,59 @@ class VideoMeetingAttendanceListView(APIView):
         except VideoMeetingError as exc:
             return _error_response(exc)
         return Response({"results": rows})
+
+
+class VideoMeetingPresentView(APIView):
+    """POST — показать доску/вариант ученику; DELETE — убрать показ."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, meeting_uuid):
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+            data = request.data if isinstance(request.data, dict) else {}
+            kind = (data.get("kind") or "").strip().lower()
+            if kind == "board":
+                board_id = data.get("boardId") or data.get("board_id")
+                if not board_id:
+                    raise VideoMeetingError("Укажите boardId", code="invalid", status=400)
+                presented = present_board(meeting=meeting, user=request.user, board_id=str(board_id))
+            elif kind == "variant":
+                presented = present_variant(
+                    meeting=meeting,
+                    user=request.user,
+                    title=str(data.get("title") or ""),
+                    url=str(data.get("url") or data.get("openUrl") or data.get("open_url") or ""),
+                    material_id=data.get("materialId") or data.get("material_id"),
+                )
+            else:
+                raise VideoMeetingError(
+                    "kind должен быть board или variant",
+                    code="invalid",
+                    status=400,
+                )
+        except VideoMeetingError as exc:
+            return _error_response(exc)
+        return Response({"success": True, "presented": presented})
+
+    def delete(self, request, meeting_uuid):
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+            clear_presented(meeting=meeting, user=request.user)
+        except VideoMeetingError as exc:
+            return _error_response(exc)
+        return Response({"success": True, "presented": None})
+
+
+class VideoMeetingLiveAnswersView(APIView):
+    """Ответы ученика по показанному варианту (для учителя, polling)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, meeting_uuid):
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+            payload = live_variant_answers(meeting=meeting, user=request.user)
+        except VideoMeetingError as exc:
+            return _error_response(exc)
+        return Response(payload)

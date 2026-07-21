@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 import {
   acceptInvitation,
-  buildInvitationUrl,
   fetchCabinetSession,
   fetchInvitationPreview,
   getCabinetHomePath,
+  openTelegramConnect,
 } from "../../utils/cabinetAuth";
 
 function formatExpiry(iso) {
@@ -22,11 +22,82 @@ function formatExpiry(iso) {
   }
 }
 
+function JoinedSuccess({ result, homePath }) {
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState("");
+  const showTelegram = result?.show_telegram_connect !== false && !result?.telegram_connected;
+
+  const handleConnectTelegram = async () => {
+    setConnecting(true);
+    setConnectError("");
+    try {
+      await openTelegramConnect();
+    } catch (err) {
+      setConnectError(err.message || "Не удалось открыть Telegram");
+      setConnecting(false);
+      return;
+    }
+    setConnecting(false);
+  };
+
+  return (
+    <div className="cabinet-auth-page">
+      <div className="cabinet-auth-card">
+        <div className="cabinet-auth-head">
+          <span className="cabinet-auth-badge">Готово</span>
+          <h1 className="cabinet-auth-title">Вы присоединились к платформе</h1>
+        </div>
+
+        <div className="cb-invite-preview">
+          {result?.teacher_name ? (
+            <p><strong>Учитель:</strong> {result.teacher_name}</p>
+          ) : null}
+          {result?.group_title ? (
+            <p><strong>Группа:</strong> {result.group_title}</p>
+          ) : (
+            <p><strong>Формат:</strong> индивидуальные занятия</p>
+          )}
+        </div>
+
+        {connectError ? <p className="cabinet-auth-error" role="alert">{connectError}</p> : null}
+
+        <div className="cb-invite-preview__actions">
+          <Link
+            to={homePath}
+            className="cabinet-auth-submit"
+            style={{ textDecoration: "none", textAlign: "center" }}
+          >
+            Перейти в кабинет
+          </Link>
+          {showTelegram ? (
+            <button
+              type="button"
+              className="cabinet-auth-link"
+              style={{
+                display: "block",
+                width: "100%",
+                marginTop: "12px",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+              }}
+              disabled={connecting}
+              onClick={handleConnectTelegram}
+            >
+              {connecting ? "Открываем Telegram…" : "Подключить Telegram"}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CabinetJoinPage() {
   const { token } = useParams();
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [preview, setPreview] = useState(null);
+  const [joined, setJoined] = useState(null);
   const [error, setError] = useState("");
   const [session, setSession] = useState(null);
   const [accepting, setAccepting] = useState(false);
@@ -45,9 +116,15 @@ export default function CabinetJoinPage() {
           fetchInvitationPreview(token),
           fetchCabinetSession().catch(() => ({ authenticated: false })),
         ]);
-        if (!cancelled) {
+        if (cancelled) return;
+        const user = sess?.authenticated ? sess.user : null;
+        setSession(user);
+        if (invite?.status === "accepted") {
+          setJoined(invite);
+          setPreview(null);
+        } else {
           setPreview(invite);
-          setSession(sess?.authenticated ? sess.user : null);
+          setJoined(null);
         }
       } catch (err) {
         if (!cancelled) {
@@ -65,18 +142,25 @@ export default function CabinetJoinPage() {
 
   const loginHref = `/cabinet/login?invite=${encodeURIComponent(token)}`;
   const registerHref = `/cabinet/login?invite=${encodeURIComponent(token)}&mode=register`;
+  const homePath = getCabinetHomePath(session);
 
   const handleAccept = async () => {
     setAccepting(true);
     setError("");
     try {
-      await acceptInvitation(token);
-      navigate(getCabinetHomePath(session), { replace: true });
+      const result = await acceptInvitation(token);
+      setJoined(result);
+      setPreview(null);
     } catch (err) {
       setError(err.message || "Не удалось принять приглашение");
+    } finally {
       setAccepting(false);
     }
   };
+
+  if (!token) {
+    return <Navigate to="/cabinet/login" replace />;
+  }
 
   if (loading) {
     return (
@@ -88,21 +172,27 @@ export default function CabinetJoinPage() {
     );
   }
 
+  if (joined) {
+    return <JoinedSuccess result={joined} homePath={homePath} />;
+  }
+
   if (error && !preview) {
     return (
       <div className="cabinet-auth-page">
         <div className="cabinet-auth-card">
           <h1 className="cabinet-auth-title">Приглашение недоступно</h1>
           <p className="cabinet-auth-error" role="alert">{error}</p>
-          <Link to="/cabinet/login" className="cabinet-auth-submit" style={{ display: "inline-block", textAlign: "center", textDecoration: "none" }}>
+          <Link
+            to="/cabinet/login"
+            className="cabinet-auth-submit"
+            style={{ display: "inline-block", textAlign: "center", textDecoration: "none" }}
+          >
             Войти в кабинет
           </Link>
         </div>
       </div>
     );
   }
-
-  const inviteUrl = buildInvitationUrl(preview?.join_path);
 
   return (
     <div className="cabinet-auth-page">
@@ -156,20 +246,22 @@ export default function CabinetJoinPage() {
           )
         ) : (
           <div className="cb-invite-preview__actions">
-            <Link to={registerHref} className="cabinet-auth-submit" style={{ textDecoration: "none", textAlign: "center" }}>
+            <Link
+              to={registerHref}
+              className="cabinet-auth-submit"
+              style={{ textDecoration: "none", textAlign: "center" }}
+            >
               Зарегистрироваться и принять
             </Link>
-            <Link to={loginHref} className="cabinet-auth-link" style={{ display: "block", textAlign: "center", marginTop: "12px" }}>
+            <Link
+              to={loginHref}
+              className="cabinet-auth-link"
+              style={{ display: "block", textAlign: "center", marginTop: "12px" }}
+            >
               Уже есть аккаунт — войти
             </Link>
           </div>
         )}
-
-        {inviteUrl ? (
-          <p className="cabinet-auth-muted" style={{ marginTop: "16px", fontSize: "0.85rem", wordBreak: "break-all" }}>
-            Ссылка: {inviteUrl}
-          </p>
-        ) : null}
       </div>
     </div>
   );

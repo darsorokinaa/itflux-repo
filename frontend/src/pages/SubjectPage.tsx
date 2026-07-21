@@ -218,8 +218,8 @@ export default function SubjectPage() {
             </aside>
 
             <section className="subject-dashboard-page__subjects-panel" aria-label="Предметы">
-              <div className="subject-dashboard-page__level-switch" aria-label="Уровень подготовки">
-                <p className="subject-dashboard-page__level-switch-label">Уровень подготовки</p>
+              <div className="subject-dashboard-page__level-switch" aria-label="Выберите уровень подготовки">
+                <p className="subject-dashboard-page__level-switch-label">Выберите уровень</p>
                 <div className="subject-dashboard-page__level-switch-list" role="radiogroup">
                   {([
                     { id: "oge", label: "ОГЭ" },

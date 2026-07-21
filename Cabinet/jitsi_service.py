@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+import logging
+from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Any
 
 import jwt
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 class JitsiConfigError(Exception):
@@ -24,14 +27,28 @@ def get_jitsi_auth_mode() -> str:
     return mode if mode in ("none", "jwt") else "none"
 
 
-def get_display_name(user: User) -> str:
+def get_jitsi_display_name(user: User) -> str:
+    """Непустое отображаемое имя для Jitsi (join-config / JWT / prejoin)."""
     profile = getattr(user, "profile", None)
     if profile is not None:
-        name = profile.get_display_name()
+        name = (profile.get_display_name() or "").strip()
         if name:
             return name
-    full = (user.get_full_name() or "").strip()
-    return full or user.username
+
+    full_name = (user.get_full_name() or "").strip()
+    if full_name:
+        return full_name
+
+    username = str(getattr(user, "username", "") or "").strip()
+    if username:
+        return username
+
+    return f"Пользователь {user.pk}"
+
+
+def get_display_name(user: User) -> str:
+    """Alias для совместимости; всегда непустая строка."""
+    return get_jitsi_display_name(user)
 
 
 def get_avatar_url(user: User, request=None) -> str:
@@ -49,8 +66,11 @@ def get_avatar_url(user: User, request=None) -> str:
 
 
 def build_user_info(user: User, request=None) -> dict[str, str]:
+    display_name = get_jitsi_display_name(user)
+    if not display_name.strip():
+        display_name = f"Пользователь {user.pk}"
     return {
-        "displayName": get_display_name(user),
+        "displayName": display_name,
         "email": (user.email or "").strip(),
         "avatarUrl": get_avatar_url(user, request),
     }
@@ -85,19 +105,18 @@ def generate_jitsi_jwt(
 
     now = timezone.now()
     iat = int(now.timestamp())
+    # Небольшой запас на рассинхрон часов Django/Jitsi.
     nbf = int((now - timedelta(seconds=30)).timestamp())
     exp = int((now + timedelta(seconds=ttl)).timestamp())
     user_info = build_user_info(user, request)
+    display_name = user_info["displayName"]
 
-    # Prosody token_moderation/token_affiliation часто ждут строки "true"/"false", не bool.
     user_claims: dict[str, Any] = {
         "id": str(user.pk),
-        "name": user_info["displayName"],
-        "email": user_info["email"],
-        "avatar": user_info["avatarUrl"],
-        "moderator": "true" if is_moderator else "false",
-        "affiliation": "owner" if is_moderator else "member",
+        "name": display_name,
+        "moderator": bool(is_moderator),
     }
+
     payload: dict[str, Any] = {
         "aud": aud,
         "iss": app_id,
@@ -108,14 +127,19 @@ def generate_jitsi_jwt(
         "exp": exp,
         "context": {
             "user": user_claims,
-            "features": {
-                "livestreaming": False,
-                "outbound-call": False,
-                "transcription": False,
-                "recording": bool(is_moderator),
-            },
         },
     }
+
+    logger.info(
+        "Creating Jitsi token",
+        extra={
+            "room_name": room_name,
+            "user_id": user.pk,
+            "is_moderator": bool(is_moderator),
+            "token_expiration": datetime.fromtimestamp(exp, tz=dt_timezone.utc).isoformat(),
+            "has_display_name": bool(display_name),
+        },
+    )
     return jwt.encode(payload, app_secret, algorithm="HS256")
 
 
@@ -132,4 +156,4 @@ def jwt_expires_at(token: str) -> datetime | None:
     exp = data.get("exp")
     if not exp:
         return None
-    return datetime.fromtimestamp(int(exp), tz=timezone.utc)
+    return datetime.fromtimestamp(int(exp), tz=dt_timezone.utc)

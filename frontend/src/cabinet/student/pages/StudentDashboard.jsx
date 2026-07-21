@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import CabinetIcon from "../../CabinetIcons";
+import TelegramConnectPrompt from "../../components/TelegramConnectPrompt";
 import { fetchStudentDashboard } from "../../../utils/cabinetAuth";
 import { loadStudentData } from "../studentData";
 import StudentEventDetailPopover from "../StudentEventDetailPopover";
@@ -18,6 +19,7 @@ import {
   useLessonConnectAvailable,
   useLessonInProgress,
 } from "../StudentSectionUi";
+import "../../styles/notifications-settings.css";
 
 function DashBlock({ title, linkLabel, linkTo, children, className = "" }) {
   return (
@@ -45,7 +47,8 @@ function DashEmptyCard({ title, text }) {
 }
 
 function NextLessonCard({ lesson, onOpenSchedule }) {
-  const canConnect = useLessonConnectAvailable(lesson.starts_at, lesson.ends_at);
+  const vmStatus = lesson.video_meeting?.status || lesson.videoMeeting?.status;
+  const canConnect = useLessonConnectAvailable(lesson.starts_at, lesson.ends_at, vmStatus);
   const inProgress = useLessonInProgress(lesson.starts_at, lesson.ends_at);
   const topic = lesson.topic || lesson.title || "Индивидуальное занятие";
   const lessonLink = lesson.assignment_id
@@ -187,6 +190,7 @@ export default function StudentDashboard() {
   const canConnectToNext = useLessonConnectAvailable(
     data?.next_lesson?.starts_at,
     data?.next_lesson?.ends_at,
+    data?.next_lesson?.video_meeting?.status || data?.next_lesson?.videoMeeting?.status,
   );
   const nextLessonLive = useLessonInProgress(
     data?.next_lesson?.starts_at,
@@ -237,6 +241,7 @@ export default function StudentDashboard() {
 
   return (
     <StudentPageShell className="st-dashboard">
+      <TelegramConnectPrompt />
       <section className="st-dash-hero">
         <div className="st-dash-hero__content">
           <h1 className="st-dash-hero__title">Привет, {data.greeting_name}!</h1>
@@ -379,17 +384,9 @@ export default function StudentDashboard() {
         <section className="st-home-block st-dash-grid__quick">
           <h2 className="st-home-block__title">Быстрые действия</h2>
           <div className="st-dash-quick">
-            <Link to="/cabinet/student/lessons" className="st-dash-quick__item">
-              <CabinetIcon name="lessons" />
-              <span>Занятия</span>
-            </Link>
-            <Link to="/cabinet/student/assignments" className="st-dash-quick__item">
-              <CabinetIcon name="check" />
-              <span>Задания</span>
-            </Link>
-            <Link to="/cabinet/student/profile" className="st-dash-quick__item">
-              <CabinetIcon name="settings" />
-              <span>Профиль</span>
+            <Link to="/cabinet/student/boards" className="st-dash-quick__item">
+              <CabinetIcon name="board" />
+              <span>Доски</span>
             </Link>
           </div>
         </section>

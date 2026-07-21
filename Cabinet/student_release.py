@@ -44,6 +44,44 @@ LESSON_EVENT_TYPES = (
     ScheduleEvent.EventType.GROUP_LESSON,
 )
 
+_SUBJECT_ALIAS_GROUPS = (
+    frozenset({"inf", "informatics"}),
+    frozenset({"math", "math_base"}),
+)
+
+
+def _normalize_subject(value):
+    return (str(value or "")).strip().lower()
+
+
+def _subjects_equivalent(left, right):
+    a = _normalize_subject(left)
+    b = _normalize_subject(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    for group in _SUBJECT_ALIAS_GROUPS:
+        if a in group and b in group:
+            return True
+    return False
+
+
+def _subject_for_event(event, *, resolve=True):
+    """Предмет занятия: из пункта плана / связанного плана / enrollment."""
+    plan_item = None
+    if getattr(event, "lesson_plan_item_id", None) and getattr(event, "lesson_plan_item", None):
+        plan_item = event.lesson_plan_item
+    if plan_item is None and resolve:
+        try:
+            plan_item, _ = resolve_plan_item_for_event(event)
+        except Exception:
+            plan_item = None
+    plan = getattr(plan_item, "plan", None) if plan_item is not None else None
+    if plan is not None:
+        return _normalize_subject(getattr(plan, "subject", "") or "")
+    return ""
+
 
 def _student_upcoming_lesson_filter(student, group=None):
     filters = Q(student=student)
@@ -60,23 +98,68 @@ def _student_upcoming_lesson_filter(student, group=None):
     return filters
 
 
-def resolve_homework_due_at(*, event, student):
-    """Срок ДЗ — до начала следующего урока ученика у этого учителя."""
+def resolve_homework_due_at(*, event, student, subject=None):
+    """Срок ДЗ — до начала следующего урока ученика у этого учителя (по предмету)."""
     after = event.ends_at or event.starts_at or timezone.now()
-    group = event.group if event.group_id else None
-    next_event = (
+    subject = _normalize_subject(subject) or _subject_for_event(event, resolve=True)
+    return suggest_homework_due_at(
+        teacher=event.owner,
+        student=student,
+        subject=subject or None,
+        after=after,
+        exclude_event_id=event.pk,
+        group=event.group if event.group_id else None,
+    )
+
+
+def suggest_homework_due_at(
+    *,
+    teacher,
+    student,
+    subject=None,
+    after=None,
+    exclude_event_id=None,
+    group=None,
+):
+    """
+    Следующий урок ученика у учителя.
+    Если известен предмет — сначала ищем урок по этому предмету, иначе любой следующий.
+    """
+    after = after or timezone.now()
+    subject = _normalize_subject(subject)
+    qs = (
         ScheduleEvent.objects.filter(
-            owner=event.owner,
+            owner=teacher,
             starts_at__gt=after,
             event_type__in=LESSON_EVENT_TYPES,
         )
         .exclude(status=ScheduleEvent.Status.CANCELLED)
-        .exclude(pk=event.pk)
         .filter(_student_upcoming_lesson_filter(student, group))
+        .select_related("lesson_plan_item", "lesson_plan_item__plan", "group", "student")
         .order_by("starts_at", "pk")
-        .first()
+        .distinct()
     )
-    return next_event.starts_at if next_event else None
+    if exclude_event_id:
+        qs = qs.exclude(pk=exclude_event_id)
+
+    candidates = list(qs[:40])
+    if not candidates:
+        return None
+
+    if subject:
+        unmarked = []
+        for candidate in candidates:
+            # Для кандидатов только явный FK — без тяжёлого resolve по слоту.
+            cand_subject = _subject_for_event(candidate, resolve=False)
+            if cand_subject and _subjects_equivalent(subject, cand_subject):
+                return candidate.starts_at
+            if not cand_subject:
+                unmarked.append(candidate)
+        if unmarked:
+            return unmarked[0].starts_at
+        return None
+
+    return candidates[0].starts_at
 
 
 def event_is_finished(event, now=None):
@@ -571,12 +654,20 @@ def homework_options_for_student(*, teacher, student):
             )
 
     if not enrollment:
+        suggested = suggest_homework_due_at(
+            teacher=teacher,
+            student=student,
+            subject=None,
+            after=timezone.now(),
+        )
         return {
             "enrollment_id": None,
             "plan_id": None,
             "plan_title": "",
             "items": [],
             "allow_custom": True,
+            "suggested_due_at": suggested.isoformat() if suggested else None,
+            "suggested_due_source": "next_lesson" if suggested else None,
         }
 
     assigned = {
@@ -618,12 +709,23 @@ def homework_options_for_student(*, teacher, student):
             "homework_status": hw.status if hw else None,
         })
 
+    subject = _normalize_subject(getattr(enrollment.plan, "subject", "") or "")
+    suggested = suggest_homework_due_at(
+        teacher=teacher,
+        student=student,
+        subject=subject or None,
+        after=timezone.now(),
+    )
+
     return {
         "enrollment_id": enrollment.pk,
         "plan_id": enrollment.plan_id,
         "plan_title": enrollment.plan.title,
+        "plan_subject": subject or "",
         "items": items,
         "allow_custom": True,
+        "suggested_due_at": suggested.isoformat() if suggested else None,
+        "suggested_due_source": "next_lesson" if suggested else None,
     }
 
 

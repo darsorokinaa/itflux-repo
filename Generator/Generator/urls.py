@@ -1,10 +1,20 @@
 from django.contrib import admin
+from django.http import HttpResponseForbidden
 from django.urls import path, include, re_path
 from django.conf import settings
 from django.views.static import serve
 
 from . import views
 from Cabinet import homework_api
+from Cabinet.views import api_teacher_application
+
+
+def media_serve(request, path):
+    """Публичный media. Файлы досок — только через авторизованный API."""
+    normalized = (path or "").lstrip("/").replace("\\", "/")
+    if normalized.startswith("cabinet/boards/") or normalized.startswith("cabinet/boards_private/"):
+        return HttpResponseForbidden("Доступ к файлам доски только через API.")
+    return serve(request, path, document_root=settings.MEDIA_ROOT)
 
 
 urlpatterns = [
@@ -15,6 +25,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
 
     path("api/csrf/", views.api_csrf, name="api_csrf"),
+    path("api/teacher-applications/", api_teacher_application, name="api_teacher_applications"),
     path("api/catalog/", views.api_catalog, name="api_catalog"),
     path("api/generator/overview/", views.api_generator_overview, name="api_generator_overview"),
     path("api/platform-stats/", views.api_platform_stats, name="api_platform_stats"),
@@ -122,7 +133,7 @@ urlpatterns = [
 ]
 
 urlpatterns += [
-    re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
+    re_path(r'^media/(?P<path>.*)$', media_serve),
 ]
 
 # PDF без префикса /api/ (старые закладки)

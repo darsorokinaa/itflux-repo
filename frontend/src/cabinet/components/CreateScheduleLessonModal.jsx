@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import CabinetIcon from "../CabinetIcons";
-import { fetchGroups, fetchStudents } from "../../utils/cabinetAuth";
+import { billingPlanCheck, fetchGroups, fetchStudents } from "../../utils/cabinetAuth";
+import { formatMoney, formatUnits } from "../billing/billingFormat";
+import "../styles/payments.css";
 
 const WEEKDAYS = [
   { value: 0, label: "Пн" },
@@ -42,6 +44,27 @@ function buildLessonTitle({ audienceLabel, type }) {
   return type === "individual_lesson" ? "Индивидуальное занятие" : "Групповое занятие";
 }
 
+function formatConflictTime(iso) {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleString("ru-RU", {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return String(iso);
+  }
+}
+
+function conflictTypeLabel(type) {
+  if (type === "teacher") return "У вас";
+  if (type === "student") return "У ученика";
+  if (type === "group") return "У группы";
+  return "Конфликт";
+}
+
 export default function CreateScheduleLessonModal({
   onClose,
   onCreate,
@@ -50,15 +73,45 @@ export default function CreateScheduleLessonModal({
   defaultEndTime,
   defaultLessonTitle,
   defaultTopic,
+  defaultType,
+  defaultFormat,
+  defaultGroupId,
+  defaultStudentId,
+  defaultStudentIds,
   lessonPlanItemId,
   dialogTitle,
 }) {
-  const [type, setType] = useState("group_lesson");
+  const [type, setType] = useState(defaultType || "group_lesson");
   const [date, setDate] = useState(defaultDate || formatApiDate(new Date()));
   const [startTime, setStartTime] = useState(defaultStartTime || "15:00");
   const [endTime, setEndTime] = useState(defaultEndTime || "15:45");
   const [lessonTitle, setLessonTitle] = useState(defaultLessonTitle || "");
   const [topic, setTopic] = useState(defaultTopic || "");
+  const [timezone, setTimezone] = useState("Europe/Moscow");
+  const [format, setFormat] = useState(
+    defaultFormat === "offline" || defaultFormat === "Офлайн" ? "offline" : "online",
+  );
+  const isIndividual = type === "individual_lesson";
+  const [groupId, setGroupId] = useState(defaultGroupId ? String(defaultGroupId) : "");
+  const [studentId, setStudentId] = useState(defaultStudentId ? String(defaultStudentId) : "");
+  const [selectedStudentIds, setSelectedStudentIds] = useState(
+    Array.isArray(defaultStudentIds) ? defaultStudentIds.map(Number) : [],
+  );
+  const [recurrenceType, setRecurrenceType] = useState("none");
+  const [weekdays, setWeekdays] = useState([]);
+  const [repeatUntil, setRepeatUntil] = useState("");
+  const [repeatCount, setRepeatCount] = useState("");
+  const [repeatEndMode, setRepeatEndMode] = useState("none");
+  const [reminderMinutes, setReminderMinutes] = useState(15);
+  const [notifyParticipants, setNotifyParticipants] = useState(true);
+  const [meetingMode, setMeetingMode] = useState("auto");
+  const [manualLink, setManualLink] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [conflict, setConflict] = useState(null);
+  const [students, setStudents] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [billingPreview, setBillingPreview] = useState(null);
 
   useEffect(() => {
     if (defaultDate) setDate(defaultDate);
@@ -68,29 +121,35 @@ export default function CreateScheduleLessonModal({
 
   useEffect(() => {
     if (defaultLessonTitle) setLessonTitle(defaultLessonTitle);
-    if (defaultTopic) setTopic(defaultTopic);
+    if (defaultTopic != null) setTopic(defaultTopic);
   }, [defaultLessonTitle, defaultTopic]);
-  const [timezone, setTimezone] = useState("Europe/Moscow");
-  const [format, setFormat] = useState("online");
-  const isIndividual = type === "individual_lesson";
-  const [groupId, setGroupId] = useState("");
-  const [studentId, setStudentId] = useState("");
-  const [selectedStudentIds, setSelectedStudentIds] = useState([]);
-  const [recurrenceType, setRecurrenceType] = useState("none");
-  const [weekdays, setWeekdays] = useState([]);
-  const [repeatUntil, setRepeatUntil] = useState("");
-  const [repeatCount, setRepeatCount] = useState("");
-  const [repeatEndMode, setRepeatEndMode] = useState("none");
-  const [reminderMinutes, setReminderMinutes] = useState(15);
-  const [notifyParticipants, setNotifyParticipants] = useState(true);
-  const [meetingMode, setMeetingMode] = useState("later");
-  const [manualLink, setManualLink] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [conflict, setConflict] = useState(null);
 
-  const [students, setStudents] = useState([]);
-  const [groups,   setGroups]   = useState([]);
+  useEffect(() => {
+    if (defaultType) setType(defaultType);
+  }, [defaultType]);
+
+  useEffect(() => {
+    if (!defaultFormat) return;
+    setFormat(defaultFormat === "offline" || defaultFormat === "Офлайн" ? "offline" : "online");
+  }, [defaultFormat]);
+
+  useEffect(() => {
+    if (defaultGroupId != null && defaultGroupId !== "") {
+      setGroupId(String(defaultGroupId));
+    }
+  }, [defaultGroupId]);
+
+  useEffect(() => {
+    if (defaultStudentId != null && defaultStudentId !== "") {
+      setStudentId(String(defaultStudentId));
+    }
+  }, [defaultStudentId]);
+
+  useEffect(() => {
+    if (Array.isArray(defaultStudentIds) && defaultStudentIds.length) {
+      setSelectedStudentIds(defaultStudentIds.map(Number));
+    }
+  }, [defaultStudentIds]);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +165,26 @@ export default function CreateScheduleLessonModal({
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!studentId) {
+      setBillingPreview(null);
+      return undefined;
+    }
+    const [sh, sm] = String(startTime || "0:0").split(":").map(Number);
+    const [eh, em] = String(endTime || "0:0").split(":").map(Number);
+    let minutes = (eh * 60 + em) - (sh * 60 + sm);
+    if (!Number.isFinite(minutes) || minutes <= 0) minutes = 60;
+    let cancelled = false;
+    billingPlanCheck({ student_id: Number(studentId), duration_minutes: minutes })
+      .then((data) => {
+        if (!cancelled) setBillingPreview(data);
+      })
+      .catch(() => {
+        if (!cancelled) setBillingPreview(null);
+      });
+    return () => { cancelled = true; };
+  }, [studentId, startTime, endTime]);
 
   const audienceLabel = useMemo(() => {
     if (groupId) {
@@ -200,6 +279,10 @@ export default function CreateScheduleLessonModal({
       setError(isIndividual ? "Выберите ученика." : "Выберите группу или ученика.");
       return;
     }
+    if (billingPreview?.block && !force) {
+      setError(billingPreview.warning || "Недостаточно абонемента для этого занятия.");
+      return;
+    }
     setSaving(true);
     try {
       await onCreate(buildPayload(force));
@@ -254,10 +337,36 @@ export default function CreateScheduleLessonModal({
           ) : null}
           {conflict ? (
             <div className="cb-sch-form__conflict">
-              <p>В это время уже есть занятие. Выберите другое время или создайте всё равно.</p>
+              <p><strong>Обнаружено пересечение:</strong></p>
+              {Array.isArray(conflict) && conflict.length > 0 ? (
+                <ul className="cb-sch-form__conflict-list">
+                  {conflict.flatMap((block) => {
+                    const events = Array.isArray(block?.events) ? block.events : [];
+                    const prefix = conflictTypeLabel(block?.type);
+                    return events.map((ev) => {
+                      const audience = ev.audience || ev.group_title || ev.student_name || "";
+                      const when = ev.starts_at
+                        ? (ev.ends_at
+                          ? `${formatConflictTime(ev.starts_at)}–${formatConflictTime(ev.ends_at)}`
+                          : formatConflictTime(ev.starts_at))
+                        : "";
+                      return (
+                        <li key={`${block.type}-${ev.id}`}>
+                          {when ? `${when} — ` : ""}
+                          {ev.title || "Занятие"}
+                          {audience ? `, ${audience}` : ""}
+                          {prefix ? ` (${prefix})` : ""}
+                        </li>
+                      );
+                    });
+                  })}
+                </ul>
+              ) : (
+                <p>В это время уже есть занятие. Выберите другое время или создайте всё равно.</p>
+              )}
               <button
                 type="button"
-                className="cb-sch-btn cb-sch-btn--outline cb-sch-btn--sm"
+                className="cb-btn cb-btn--outline cb-btn--sm"
                 onClick={(e) => handleSubmit(e, true)}
               >
                 Всё равно создать
@@ -392,10 +501,16 @@ export default function CreateScheduleLessonModal({
                 <label className="cb-sch-field">
                   <span>Ссылка на встречу</span>
                   <select value={meetingMode} onChange={(e) => setMeetingMode(e.target.value)}>
+                    <option value="auto">Создать автоматически (Jitsi)</option>
                     <option value="later">Создать позже</option>
                     <option value="manual">Ввести вручную</option>
                   </select>
                 </label>
+                {meetingMode === "auto" ? (
+                  <p className="cb-sch-form__hint">
+                    При сохранении урока сразу создастся видеокомната — ссылка появится в карточке занятия.
+                  </p>
+                ) : null}
                 {meetingMode === "manual" ? (
                   <label className="cb-sch-field">
                     <span>URL встречи</span>
@@ -457,11 +572,29 @@ export default function CreateScheduleLessonModal({
             ) : null}
           </section>
 
+          {billingPreview ? (
+            <section className="cb-sch-form__section">
+              <h3>Стоимость занятия</h3>
+              <p className="pay-hint">
+                {billingPreview.price_preview?.price_source_label
+                  || formatMoney(billingPreview.price_preview?.amount, billingPreview.price_preview?.currency)}
+              </p>
+              {billingPreview.package ? (
+                <p className="pay-hint">
+                  Абонемент: осталось {formatUnits(billingPreview.package.remaining_units, billingPreview.package.unit_type)}
+                </p>
+              ) : null}
+              {billingPreview.warning ? (
+                <p className="pay-hint pay-hint--warn">{billingPreview.warning}</p>
+              ) : null}
+            </section>
+          ) : null}
+
           <div className="cb-sch-modal__actions">
-            <button type="submit" className="cb-sch-btn cb-sch-btn--primary" disabled={saving}>
+            <button type="submit" className="cb-btn cb-btn--primary" disabled={saving}>
               {saving ? "Сохранение…" : recurrenceType !== "none" ? "Создать серию" : "Создать урок"}
             </button>
-            <button type="button" className="cb-sch-btn cb-sch-btn--outline" onClick={onClose}>Отмена</button>
+            <button type="button" className="cb-btn cb-btn--outline" onClick={onClose}>Отмена</button>
           </div>
         </form>
       </div>

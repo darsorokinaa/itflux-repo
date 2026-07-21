@@ -78,7 +78,7 @@ try:
 except ValueError:
     JITSI_JOIN_AFTER_MINUTES = 30
 
-LK_PUBLIC_URL = os.environ.get("LK_PUBLIC_URL", "https://lk.itflux.ru").rstrip("/")
+LK_PUBLIC_URL = os.environ.get("LK_PUBLIC_URL", "https://itflux-academy.ru").rstrip("/")
 # Базовый API-URL личного кабинета для server-to-server запросов генератора.
 # Если не задан, используем LK_PUBLIC_URL для обратной совместимости.
 CABINET_API_BASE = (
@@ -397,7 +397,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = '/admin/login/'
 LOGIN_REDIRECT_URL = '/'
 # После выхода из админки — на публичную главную (не «/» текущего хоста: на dev это localhost).
-_gen_home = os.environ.get("ITFLUX_PUBLIC_HOME_URL", "https://itflux.ru").strip().rstrip("/")
+_gen_home = os.environ.get("ITFLUX_PUBLIC_HOME_URL", "https://itflux-academy.ru").strip().rstrip("/")
 ITFLUX_PUBLIC_HOME_URL = f"{_gen_home}/"
 LOGOUT_REDIRECT_URL = ITFLUX_PUBLIC_HOME_URL
 
@@ -408,6 +408,10 @@ TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '').strip()
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '').strip()
 # Для личных чатов топиков нет — оставляем None, чтобы не отправлять message_thread_id.
 TELEGRAM_TOPIC_ID = os.environ.get('TELEGRAM_TOPIC_ID', '') or None
+# Публичный username бота без @ — для deep-link t.me/<bot>?start=<token>
+TELEGRAM_BOT_USERNAME = os.environ.get('TELEGRAM_BOT_USERNAME', '').strip().lstrip('@')
+# Секрет для Telegram webhook (заголовок X-Telegram-Bot-Api-Secret-Token)
+TELEGRAM_WEBHOOK_SECRET = os.environ.get('TELEGRAM_WEBHOOK_SECRET', '').strip()
 
 # Сообщения об ошибках в заданиях — мгновенное уведомление на почту
 ERROR_REPORT_NOTIFY_EMAIL = os.environ.get(

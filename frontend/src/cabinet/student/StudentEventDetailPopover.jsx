@@ -104,7 +104,12 @@ export default function StudentEventDetailPopover({ eventId, onClose }) {
   const [event, setEvent] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const canConnect = useLessonConnectAvailable(event?.startsAt, event?.endsAt);
+  const meetingStatusForConnect = event?.videoMeeting?.status || event?.video_meeting?.status || "";
+  const canConnect = useLessonConnectAvailable(
+    event?.startsAt,
+    event?.endsAt,
+    meetingStatusForConnect,
+  );
 
   useEffect(() => {
     if (!eventId) return;
@@ -151,8 +156,10 @@ export default function StudentEventDetailPopover({ eventId, onClose }) {
     hasText(planItem.goal) || hasText(planItem.description) || hasText(planItem.teacherComment)
   );
   const meetingHref = event.videoMeeting?.pageUrl || event.link || "";
+  const meetingStatus = event.videoMeeting?.status || null;
   const hasMeetingLink = Boolean(meetingHref);
-  const hasLink = hasMeetingLink && canConnect;
+  const isLiveMeeting = meetingStatus === "live";
+  const hasLink = hasMeetingLink && canConnect && (isLiveMeeting || !meetingStatus);
   const isDone = event.status === "done" || event.status === "completed";
   const assignmentId = event.assignment_id;
 
@@ -186,7 +193,7 @@ export default function StudentEventDetailPopover({ eventId, onClose }) {
       isDone={isDone}
       canStart={event.format === "Онлайн" && !isDone && canConnect}
       hasLink={hasLink}
-      hasMeetingLinkPending={hasMeetingLink && !canConnect}
+      hasMeetingLinkPending={hasMeetingLink && meetingStatus === "scheduled"}
       canEditLink={false}
       materials={materials}
       homework={homework}

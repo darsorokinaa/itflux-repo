@@ -1,18 +1,70 @@
 #!/usr/bin/env bash
-# На сервере: bash fix-jwt-prosody.sh
-# Синхронизирует Prosody JWT с Django (generator_test) и перезапускает prosody.
+# На сервере: sudo bash /opt/itflux/deploy/jitsi/fix-jwt-prosody.sh
+# Синхронизирует Prosody JWT с Django (JITSI_APP_ID / JITSI_APP_SECRET) и перезапускает prosody.
+#
+# Канонические значения для lesson.itflux-academy.ru:
+#   JITSI_APP_ID=generator_test
+#   JITSI_SUB=lesson.itflux-academy.ru
+#   JITSI_APP_SECRET — тот же, что в Generator/.env
 set -euo pipefail
 
 DOMAIN="${1:-lesson.itflux-academy.ru}"
 CFG="/etc/prosody/conf.d/${DOMAIN}.cfg.lua"
-APP_ID="${JITSI_APP_ID:-generator_test}"
-APP_SECRET="${JITSI_APP_SECRET:-y4vz0t7pmGM8uppejoQwhGxIZv1vtWF3}"
+
+# Ищем Generator/.env рядом с репозиторием или в типовых путях.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CANDIDATE_ENVS=(
+  "${JITSI_DJANGO_ENV:-}"
+  "${SCRIPT_DIR}/../../Generator/.env"
+  "${SCRIPT_DIR}/../../Generator/Generator/.env"
+  "/opt/itflux/Generator/.env"
+  "/opt/itfluxacademy/itflux/Generator/.env"
+)
+
+load_env_var() {
+  local key="$1" file="$2"
+  [[ -n "$file" && -f "$file" ]] || return 1
+  local line
+  line="$(grep -E "^${key}=" "$file" | tail -1 || true)"
+  [[ -n "$line" ]] || return 1
+  printf '%s' "${line#*=}"
+}
+
+DJANGO_ENV=""
+for f in "${CANDIDATE_ENVS[@]}"; do
+  [[ -n "$f" && -f "$f" ]] || continue
+  DJANGO_ENV="$f"
+  break
+done
+
+APP_ID="${JITSI_APP_ID:-}"
+APP_SECRET="${JITSI_APP_SECRET:-}"
+
+if [[ -z "$APP_ID" && -n "$DJANGO_ENV" ]]; then
+  APP_ID="$(load_env_var JITSI_APP_ID "$DJANGO_ENV" || true)"
+fi
+if [[ -z "$APP_SECRET" && -n "$DJANGO_ENV" ]]; then
+  APP_SECRET="$(load_env_var JITSI_APP_SECRET "$DJANGO_ENV" || true)"
+fi
+
+APP_ID="${APP_ID:-generator_test}"
+
+if [[ -z "$APP_SECRET" ]]; then
+  echo "ERROR: не задан JITSI_APP_SECRET."
+  echo "Экспортируйте переменную или положите её в Generator/.env (рядом с manage.py)."
+  echo "Найденный .env: ${DJANGO_ENV:-нет}"
+  exit 1
+fi
 
 if [[ ! -f "$CFG" ]]; then
   echo "нет файла $CFG"
   ls -la /etc/prosody/conf.d/ || true
   exit 1
 fi
+
+echo "Django .env: ${DJANGO_ENV:-не найден (используются env/defaults)}"
+echo "Prosody cfg: $CFG"
+echo "APP_ID: $APP_ID (secret len ${#APP_SECRET})"
 
 cp -a "$CFG" "${CFG}.bak-$(date +%Y%m%d%H%M%S)"
 
@@ -21,17 +73,15 @@ from pathlib import Path
 import re
 path = Path("$CFG")
 text = path.read_text()
-app_id = "$APP_ID"
-app_secret = "$APP_SECRET"
+app_id = """$APP_ID"""
+app_secret = """$APP_SECRET"""
 
 def set_assign(src: str, key: str, value: str) -> str:
-    # app_id="..." или app_id = "..."
     pat = rf'(^\s*{re.escape(key)}\s*=\s*)(["\']).*\2'
     repl = rf'\1"{value}"'
     new, n = re.subn(pat, repl, src, count=1, flags=re.M)
     if n:
         return new
-    # вставить после authentication = "token"
     pat2 = r'(^\s*authentication\s*=\s*"token"[^\n]*\n)'
     insert = rf'\1    {key}="{value}"\n'
     new, n = re.subn(pat2, insert, src, count=1, flags=re.M)
@@ -39,10 +89,40 @@ def set_assign(src: str, key: str, value: str) -> str:
         return new
     raise SystemExit(f"не удалось прописать {key}")
 
+# Главный VirtualHost должен быть authentication = "token".
+# Если остаётся anonymous — кабинет шлёт JWT, а Prosody его не принимает:
+# кнопка «Присоединиться» в Jitsi не пускает в комнату.
+if 'VirtualHost "lesson.itflux-academy.ru"' in text:
+    # В блоке основного VH заменить anonymous → token (только первое authentication после VH).
+    m = re.search(
+        r'(VirtualHost\s+"lesson\.itflux-academy\.ru"\s*\n)(.*?)(?=\nVirtualHost|\nComponent|\Z)',
+        text,
+        flags=re.S,
+    )
+    if m:
+        head, body = m.group(1), m.group(2)
+        if re.search(r'^\s*authentication\s*=', body, flags=re.M):
+            body = re.sub(
+                r'^\s*authentication\s*=\s*["\'][^"\']*["\']',
+                '    authentication = "token"',
+                body,
+                count=1,
+                flags=re.M,
+            )
+        else:
+            body = '    authentication = "token"\n' + body
+        text = text[:m.start()] + head + body + text[m.end():]
+        print('set main VirtualHost authentication = "token"')
+    else:
+        print('WARN: не удалось найти блок VirtualHost lesson.itflux-academy.ru')
+else:
+    print('WARN: VirtualHost "lesson.itflux-academy.ru" не найден')
+
 text = set_assign(text, "app_id", app_id)
 text = set_assign(text, "app_secret", app_secret)
 
-# для диагностики временно разрешаем вход без токена (потом можно вернуть false)
+# allow_empty_token=true — оба могут войти даже при рассинхроне секрета (диагностика MUC).
+# После проверки поставьте false.
 if re.search(r'^\s*allow_empty_token\s*=', text, flags=re.M):
     text = re.sub(r'^\s*allow_empty_token\s*=\s*\w+', '    allow_empty_token = true', text, count=1, flags=re.M)
 else:
@@ -54,16 +134,48 @@ else:
         flags=re.M,
     )
 
+# Гостевой VirtualHost + JWT часто даёт «каждый один в комнате» (auth vs guest MUC).
+# Комментируем authentication = "jitsi-anonymous" на guest.* если есть — не трогаем весь блок.
+text = re.sub(
+    r'(^\s*VirtualHost\s+"guest\.[^"]+"\s*\n(?:.*\n)*?)(^\s*authentication\s*=\s*"jitsi-anonymous")',
+    r'\1-- disabled to keep JWT users in one MUC:\n    -- \2',
+    text,
+    count=1,
+    flags=re.M,
+)
+
 path.write_text(text)
 print("updated", path)
 for line in path.read_text().splitlines():
-    if re.search(r'app_id|app_secret|allow_empty_token|authentication', line):
+    if re.search(r'app_id|allow_empty_token|authentication|VirtualHost', line) and "app_secret" not in line:
         print(line)
+    elif re.search(r'^\s*app_secret\s*=', line):
+        print('    app_secret="***"')
 PY
 
+# Docker Jitsi: выключить гостей в .env, иначе JWT-учитель и «guest»-ученик в разных MUC.
+for COMPOSE_ENV in /opt/jitsi/docker-jitsi-meet/.env /opt/docker-jitsi-meet/.env; do
+  if [[ -f "$COMPOSE_ENV" ]]; then
+    echo "Docker env: $COMPOSE_ENV"
+    if grep -qE '^ENABLE_GUESTS=' "$COMPOSE_ENV"; then
+      sed -i 's/^ENABLE_GUESTS=.*/ENABLE_GUESTS=0/' "$COMPOSE_ENV"
+    else
+      echo 'ENABLE_GUESTS=0' >> "$COMPOSE_ENV"
+    fi
+    if grep -qE '^JWT_APP_ID=' "$COMPOSE_ENV"; then
+      sed -i "s/^JWT_APP_ID=.*/JWT_APP_ID=${APP_ID}/" "$COMPOSE_ENV"
+    fi
+    if grep -qE '^JWT_APP_SECRET=' "$COMPOSE_ENV"; then
+      sed -i "s/^JWT_APP_SECRET=.*/JWT_APP_SECRET=${APP_SECRET}/" "$COMPOSE_ENV"
+    fi
+    (cd "$(dirname "$COMPOSE_ENV")" && docker compose up -d) || true
+  fi
+done
+
 prosodyctl check config 2>&1 | tail -20 || true
-systemctl restart prosody
+systemctl restart prosody 2>/dev/null || true
 sleep 2
-systemctl is-active prosody
-echo "OK: Prosody JWT = ${APP_ID} / (secret len ${#APP_SECRET}), allow_empty_token=true"
-echo "Проверьте урок снова. Когда заработает — поставьте allow_empty_token = false"
+systemctl is-active prosody 2>/dev/null || true
+echo "OK: Prosody JWT app_id=${APP_ID} синхронизирован с Django."
+echo "Важно: локальный JITSI_APP_SECRET должен совпадать с app_secret Prosody (скопируйте с Mac в Generator/.env на сервере или наоборот)."
+echo "Проверьте урок (учитель + ученик). Затем в $CFG поставьте allow_empty_token = false"

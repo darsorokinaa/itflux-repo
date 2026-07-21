@@ -9,9 +9,9 @@ urlpatterns = [
         name="video_meeting_for_event",
     ),
     path(
-        "<uuid:meeting_uuid>/",
-        video_meeting_api.VideoMeetingDetailView.as_view(),
-        name="video_meeting_detail",
+        "<uuid:meeting_uuid>/status/",
+        video_meeting_api.VideoMeetingStatusView.as_view(),
+        name="video_meeting_status",
     ),
     path(
         "<uuid:meeting_uuid>/join-config/",
@@ -42,5 +42,20 @@ urlpatterns = [
         "<uuid:meeting_uuid>/attendance/",
         video_meeting_api.VideoMeetingAttendanceListView.as_view(),
         name="video_meeting_attendance_list",
+    ),
+    path(
+        "<uuid:meeting_uuid>/present/",
+        video_meeting_api.VideoMeetingPresentView.as_view(),
+        name="video_meeting_present",
+    ),
+    path(
+        "<uuid:meeting_uuid>/live-answers/",
+        video_meeting_api.VideoMeetingLiveAnswersView.as_view(),
+        name="video_meeting_live_answers",
+    ),
+    path(
+        "<uuid:meeting_uuid>/",
+        video_meeting_api.VideoMeetingDetailView.as_view(),
+        name="video_meeting_detail",
     ),
 ]

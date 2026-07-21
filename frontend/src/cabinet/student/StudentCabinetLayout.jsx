@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 import { displayName } from "../../pages/CabinetAuthPage";
 import {
@@ -8,6 +8,7 @@ import {
 } from "../../utils/cabinetAuth";
 import CabinetIcon from "../CabinetIcons";
 import CabinetNotificationsBell from "../components/CabinetNotificationsBell";
+import ConfirmActionModal from "../components/ConfirmActionModal";
 import {
   STUDENT_MOBILE_NAV,
   STUDENT_NAV,
@@ -36,11 +37,10 @@ function NavSidebarItem({ item, active }) {
 
 export default function StudentCabinetLayout() {
   const location = useLocation();
-  const [loading,    setLoading]    = useState(true);
-  const [user,       setUser]       = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const searchInputRef = useRef(null);
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
 
   useEffect(() => { document.title = PAGE_TITLE; }, []);
 
@@ -53,17 +53,11 @@ export default function StudentCabinetLayout() {
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => { setSearchOpen(false); }, [location.pathname]);
-
-  useEffect(() => {
-    if (searchOpen && searchInputRef.current) searchInputRef.current.focus();
-  }, [searchOpen]);
-
   const handleLogout = async () => {
     setLoggingOut(true);
     try { await logoutCabinet(); window.location.href = "/"; }
     catch { /* ignore */ }
-    finally { setLoggingOut(false); }
+    finally { setLoggingOut(false); setLogoutConfirm(false); }
   };
 
   if (loading) {
@@ -106,21 +100,18 @@ export default function StudentCabinetLayout() {
           ))}
         </nav>
         <div className="cabinet-sidebar-bottom">
-          <div
+          <Link
+            to="/cabinet/student/profile"
             className="cabinet-user-avatar"
             title={displayName(user)}
-            onClick={handleLogout}
-            role="button"
-            tabIndex={0}
-            aria-label="Выйти"
-            onKeyDown={(e) => e.key === "Enter" && handleLogout()}
+            aria-label="Профиль"
           >
             {displayName(user).charAt(0).toUpperCase()}
-          </div>
+          </Link>
           <button
             type="button"
             className="cabinet-logout-btn"
-            onClick={handleLogout}
+            onClick={() => setLogoutConfirm(true)}
             disabled={loggingOut}
             aria-label="Выйти"
           >
@@ -133,15 +124,6 @@ export default function StudentCabinetLayout() {
         <header className="cabinet-header cabinet-header--student">
           <div className="cabinet-header-right">
             <CabinetNotificationsBell studentMode />
-            <button
-              type="button"
-              className="cabinet-header-icon-btn"
-              aria-label={searchOpen ? "Закрыть поиск" : "Поиск"}
-              aria-expanded={searchOpen}
-              onClick={() => setSearchOpen((v) => !v)}
-            >
-              <CabinetIcon name="search" />
-            </button>
             <Link
               to="/cabinet/student/profile"
               className="cabinet-user-avatar cabinet-header-avatar"
@@ -151,25 +133,6 @@ export default function StudentCabinetLayout() {
               {displayName(user).charAt(0).toUpperCase()}
             </Link>
           </div>
-          {searchOpen && (
-            <div className="cabinet-header-search cabinet-header-search--mobile is-open">
-              <CabinetIcon name="search" />
-              <input
-                ref={searchInputRef}
-                type="search"
-                placeholder="Поиск по занятиям и заданиям…"
-                aria-label="Поиск"
-              />
-              <button
-                type="button"
-                className="cabinet-header-icon-btn"
-                aria-label="Закрыть поиск"
-                onClick={() => setSearchOpen(false)}
-              >
-                <CabinetIcon name="close" />
-              </button>
-            </div>
-          )}
         </header>
 
         <div className={contentClass}>
@@ -190,6 +153,17 @@ export default function StudentCabinetLayout() {
           </Link>
         ))}
       </nav>
+
+      <ConfirmActionModal
+        open={logoutConfirm}
+        title="Выйти из аккаунта?"
+        text="Вы уверены, что хотите выйти?"
+        confirmLabel="Выйти"
+        danger
+        loading={loggingOut}
+        onClose={() => setLogoutConfirm(false)}
+        onConfirm={handleLogout}
+      />
     </div>
   );
 }

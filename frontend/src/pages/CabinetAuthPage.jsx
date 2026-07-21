@@ -8,7 +8,6 @@ const GUIDE_OPEN_ON_REGISTER_KEY = "cabinet-guide-open-on-register";
 const ROLE_OPTIONS = [
   { value: "student", label: "Ученик" },
   { value: "teacher", label: "Учитель" },
-  { value: "parent", label: "Родитель" },
 ];
 
 function displayName(user) {
@@ -22,7 +21,7 @@ export default function CabinetAuthPage() {
   const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const inviteToken = searchParams.get("invite") || "";
   const referralCode = searchParams.get("ref") || searchParams.get("referral") || "";
-  const redirectTo = location.state?.from || (inviteToken ? `/cabinet/join/${inviteToken}` : "/cabinet");
+  const redirectTo = location.state?.from || (inviteToken ? `/invite/${inviteToken}/` : "/cabinet");
 
   const [mode, setMode] = useState(() => (
     searchParams.get("mode") === "register" ? "register" : "login"

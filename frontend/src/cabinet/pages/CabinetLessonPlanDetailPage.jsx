@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
+import ConfirmActionModal from "../components/ConfirmActionModal";
 import PlanItemDetailModal from "../components/PlanItemDetailModal";
 import { CabinetPageShell } from "../CabinetSectionUi";
 import {
@@ -73,6 +74,7 @@ export default function CabinetLessonPlanDetailPage() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [copying, setCopying] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [actionError, setActionError] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [canPublishCatalog, setCanPublishCatalog] = useState(false);
@@ -128,14 +130,16 @@ export default function CabinetLessonPlanDetailPage() {
     }
   };
 
-  const handleDeletePlan = async () => {
-    if (!window.confirm(`Удалить план «${plan?.title || "без названия"}»? Это действие нельзя отменить.`)) {
-      return;
-    }
+  const handleDeletePlan = () => {
+    setDeleteConfirmOpen(true);
+  };
+
+  const confirmDeletePlan = async () => {
     setDeleting(true);
     setActionError("");
     try {
       await deleteLessonPlan(planId);
+      setDeleteConfirmOpen(false);
       navigate("/cabinet/plans");
     } catch (err) {
       setActionError(err.message || "Не удалось удалить план");
@@ -322,6 +326,19 @@ export default function CabinetLessonPlanDetailPage() {
           onItemUpdated={handleItemUpdated}
         />
       ) : null}
+
+      <ConfirmActionModal
+        open={deleteConfirmOpen}
+        title="Удалить план?"
+        text={`Удалить план «${plan?.title || "без названия"}»? Это действие нельзя отменить.`}
+        confirmLabel="Удалить"
+        danger
+        loading={deleting}
+        onClose={() => {
+          if (!deleting) setDeleteConfirmOpen(false);
+        }}
+        onConfirm={confirmDeletePlan}
+      />
     </CabinetPageShell>
   );
 }

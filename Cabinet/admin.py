@@ -1,6 +1,13 @@
 from django.contrib import admin
 from django.utils.html import format_html
 
+from .journal_models import (
+    AssessmentCriterion,
+    JournalAttentionMarker,
+    JournalAuditLog,
+    LessonJournal,
+    StudentLessonRecord,
+)
 from .models import (
     AIRequestLog,
     AIUsage,
@@ -19,6 +26,9 @@ from .models import (
     InteractiveAssignment,
     InteractiveAttempt,
     InteractiveBackground,
+    InteractiveBoard,
+    InteractiveBoardAccess,
+    InteractiveBoardAsset,
     InteractiveCardStyle,
     InteractiveSoundPack,
     Lesson,
@@ -44,8 +54,10 @@ from .models import (
     StudentGroup,
     StudentInvitation,
     TariffPlan,
+    TeacherApplication,
     TeacherSavedMaterial,
     TeacherSubscription,
+    TelegramConnectToken,
 )
 
 
@@ -55,6 +67,15 @@ class ProfileAdmin(admin.ModelAdmin):
     list_filter = ("role", "account_active", "account_blocked", "email_confirmed")
     search_fields = ("user__username", "user__email", "name", "surname", "display_name")
     ordering = ("-reg_date",)
+
+
+@admin.register(TeacherApplication)
+class TeacherApplicationAdmin(admin.ModelAdmin):
+    list_display = ("name", "contact", "role", "status", "created_at")
+    list_filter = ("status", "role", "created_at")
+    search_fields = ("name", "contact", "teaches", "comment", "materials_url")
+    readonly_fields = ("created_at", "updated_at", "ip_address", "user_agent")
+    ordering = ("-created_at",)
 
 
 @admin.register(Student)
@@ -71,6 +92,15 @@ class StudentInvitationAdmin(admin.ModelAdmin):
     list_filter = ("status", "direction")
     search_fields = ("token", "email", "teacher__username", "group__title")
     readonly_fields = ("token", "accepted_at", "created_at", "updated_at")
+    ordering = ("-created_at",)
+
+
+@admin.register(TelegramConnectToken)
+class TelegramConnectTokenAdmin(admin.ModelAdmin):
+    list_display = ("token", "user", "expires_at", "used_at", "created_at")
+    list_filter = ("used_at",)
+    search_fields = ("token", "user__username", "user__email")
+    readonly_fields = ("token", "created_at", "used_at")
     ordering = ("-created_at",)
 
 
@@ -344,6 +374,34 @@ class InteractiveAttemptAdmin(admin.ModelAdmin):
     ordering = ("-started_at",)
 
 
+class InteractiveBoardAccessInline(admin.TabularInline):
+    model = InteractiveBoardAccess
+    extra = 0
+
+
+@admin.register(InteractiveBoard)
+class InteractiveBoardAdmin(admin.ModelAdmin):
+    list_display = ("title", "owner", "group", "student", "lesson", "version", "updated_at")
+    list_filter = ("is_archived", "allow_export")
+    search_fields = ("title", "description")
+    ordering = ("-updated_at",)
+    readonly_fields = ("id", "created_at", "updated_at", "version")
+    inlines = [InteractiveBoardAccessInline]
+
+
+@admin.register(InteractiveBoardAccess)
+class InteractiveBoardAccessAdmin(admin.ModelAdmin):
+    list_display = ("board", "user", "permission", "updated_at")
+    list_filter = ("permission",)
+    ordering = ("-updated_at",)
+
+
+@admin.register(InteractiveBoardAsset)
+class InteractiveBoardAssetAdmin(admin.ModelAdmin):
+    list_display = ("id", "board", "original_name", "mime_type", "size_bytes", "created_at")
+    ordering = ("-created_at",)
+
+
 class HomeworkTaskInline(admin.TabularInline):
     model = HomeworkTask
     extra = 0
@@ -513,8 +571,16 @@ class NotificationAdmin(admin.ModelAdmin):
 
 @admin.register(NotificationPreference)
 class NotificationPreferenceAdmin(admin.ModelAdmin):
-    list_display = ("user", "in_app_enabled", "vk_enabled", "notify_before_lesson_minutes")
-    list_filter = ("in_app_enabled", "vk_enabled")
+    list_display = (
+        "user",
+        "in_app_enabled",
+        "vk_enabled",
+        "telegram_enabled",
+        "telegram_chat_id",
+        "notify_before_lesson_minutes",
+    )
+    list_filter = ("in_app_enabled", "vk_enabled", "telegram_enabled")
+    search_fields = ("user__username", "user__email", "telegram_chat_id", "telegram_username")
 
 
 @admin.register(TariffPlan)
@@ -637,3 +703,86 @@ class EventReminderLogAdmin(admin.ModelAdmin):
     list_display = ("event", "recipient", "reminder_minutes", "channel", "sent_at")
     list_filter = ("channel",)
     readonly_fields = ("sent_at",)
+
+
+@admin.register(LessonJournal)
+class LessonJournalAdmin(admin.ModelAdmin):
+    list_display = ("id", "lesson_date", "teacher", "status", "actual_topic", "group", "student")
+    list_filter = ("status",)
+    search_fields = ("actual_topic", "planned_topic")
+    raw_id_fields = ("schedule_event", "teacher", "group", "student", "homework")
+
+
+@admin.register(StudentLessonRecord)
+class StudentLessonRecordAdmin(admin.ModelAdmin):
+    list_display = ("id", "journal", "student", "attendance_status", "overall_score", "publish_status")
+    list_filter = ("attendance_status", "publish_status")
+    raw_id_fields = ("journal", "student")
+
+
+@admin.register(AssessmentCriterion)
+class AssessmentCriterionAdmin(admin.ModelAdmin):
+    list_display = ("title", "teacher", "scale_type", "is_active", "sort_order")
+    list_filter = ("scale_type", "is_active")
+
+
+@admin.register(JournalAttentionMarker)
+class JournalAttentionMarkerAdmin(admin.ModelAdmin):
+    list_display = ("student", "teacher", "reason", "is_active", "updated_at")
+    list_filter = ("reason", "is_active")
+
+
+@admin.register(JournalAuditLog)
+class JournalAuditLogAdmin(admin.ModelAdmin):
+    list_display = ("action", "journal", "actor", "field_name", "created_at")
+    list_filter = ("action",)
+    readonly_fields = ("created_at",)
+
+
+# ── Учёт оплат репетитора ────────────────────────────────────────────────────
+from .billing_models import (  # noqa: E402
+    BillingAccount,
+    BillingTransaction,
+    EventBillingRecord,
+    LessonPackage,
+    StudentPayment,
+    TeacherBillingSettings,
+)
+
+
+@admin.register(TeacherBillingSettings)
+class TeacherBillingSettingsAdmin(admin.ModelAdmin):
+    list_display = ("teacher", "currency", "default_billing_type", "default_lesson_price", "updated_at")
+    search_fields = ("teacher__username", "teacher__email")
+
+
+@admin.register(BillingAccount)
+class BillingAccountAdmin(admin.ModelAdmin):
+    list_display = ("id", "teacher", "student", "payer_name", "currency", "is_active")
+    list_filter = ("is_active", "currency")
+    search_fields = ("student__first_name", "student__last_name", "payer_name")
+
+
+@admin.register(LessonPackage)
+class LessonPackageAdmin(admin.ModelAdmin):
+    list_display = ("title", "billing_account", "unit_type", "remaining_units", "total_units", "status")
+    list_filter = ("status", "unit_type")
+
+
+@admin.register(BillingTransaction)
+class BillingTransactionAdmin(admin.ModelAdmin):
+    list_display = ("occurred_at", "student", "transaction_type", "amount", "package_units", "is_reversal")
+    list_filter = ("transaction_type", "is_reversal")
+    readonly_fields = ("created_at",)
+
+
+@admin.register(EventBillingRecord)
+class EventBillingRecordAdmin(admin.ModelAdmin):
+    list_display = ("event", "student", "financial_status", "charged_amount", "paid_amount")
+    list_filter = ("financial_status", "delivery_status")
+
+
+@admin.register(StudentPayment)
+class StudentPaymentAdmin(admin.ModelAdmin):
+    list_display = ("paid_at", "student", "amount", "method", "status")
+    list_filter = ("status", "method")

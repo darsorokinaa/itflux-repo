@@ -122,6 +122,50 @@ def resolve_plan_item_for_event(event):
     return None, None
 
 
+def ensure_event_plan_item(event, *, teacher=None):
+    """
+    Гарантирует пункт плана для прикрепления материалов/ДЗ к занятию.
+    Если пункта нет — создаёт черновик плана с одним пунктом и линкует к событию.
+    """
+    from .choices import Direction, ExamType, PlanStatus, PlanSubject
+    from .models import LessonPlan, LessonPlanItem
+
+    teacher = teacher or event.owner
+    item, lesson_number = resolve_plan_item_for_event(event)
+    if item is not None:
+        update_fields = []
+        if event.lesson_plan_item_id != item.id:
+            event.lesson_plan_item = item
+            update_fields.append("lesson_plan_item")
+        if item.scheduled_event_id != event.pk:
+            item.scheduled_event = event
+            item.save(update_fields=["scheduled_event", "updated_at"])
+        if update_fields:
+            event.save(update_fields=update_fields)
+        return item, lesson_number if lesson_number is not None else (item.order or 1)
+
+    plan = LessonPlan.objects.create(
+        teacher=teacher,
+        title=f"Материалы: {(event.title or 'Урок').strip()}"[:255],
+        description="Автосоздано для материалов занятия",
+        direction=Direction.OTHER,
+        subject=PlanSubject.INFORMATICS,
+        exam_type=ExamType.NONE,
+        status=PlanStatus.DRAFT,
+        lessons_count=1,
+    )
+    item = LessonPlanItem.objects.create(
+        plan=plan,
+        order=1,
+        title=(event.title or "Урок").strip()[:255] or "Урок",
+        topic=(event.topic or "").strip()[:255],
+        scheduled_event=event,
+    )
+    event.lesson_plan_item = item
+    event.save(update_fields=["lesson_plan_item"])
+    return item, 1
+
+
 def mark_plan_item_skipped(plan_item, event=None):
     plan_item.status = PlanItemStatus.SKIPPED
     update_fields = ["status", "updated_at"]

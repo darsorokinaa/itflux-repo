@@ -1103,7 +1103,8 @@ class StudentReleaseTests(TestCase):
             student=self.student,
             status="active",
         )
-        self.starts = timezone.now().replace(hour=12, minute=0, second=0, microsecond=0) - timedelta(hours=2)
+        # Всегда в прошлом, иначе event_is_finished зависит от времени суток.
+        self.starts = timezone.now() - timedelta(hours=5)
         self.ends = self.starts + timedelta(minutes=45)
         self.event = create_single_event(
             teacher=self.teacher,
@@ -1157,6 +1158,90 @@ class StudentReleaseTests(TestCase):
         homework = Homework.objects.filter(student=self.student, lesson_plan_item=self.plan_item).first()
         self.assertIsNotNone(homework)
         self.assertEqual(homework.due_at, next_starts)
+
+    def test_homework_due_at_prefers_same_subject_next_lesson(self):
+        from Cabinet.models import Homework, LessonPlan, LessonPlanItem
+        from Cabinet.student_release import StudentReleaseService
+
+        self.plan.subject = "informatics"
+        self.plan.save(update_fields=["subject"])
+
+        other_plan = LessonPlan.objects.create(
+            teacher=self.teacher,
+            title="Математика",
+            direction="ege",
+            subject="math",
+            status="draft",
+        )
+        other_item = LessonPlanItem.objects.create(
+            plan=other_plan,
+            order=1,
+            title="Алгебра",
+            topic="Алгебра",
+        )
+
+        math_starts = self.ends + timedelta(days=2)
+        math_event = create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": f"{self.student.full_name} math",
+                "starts_at": math_starts,
+                "ends_at": math_starts + timedelta(minutes=45),
+                "event_type": "individual_lesson",
+                "notify_participants": False,
+            },
+            student_ids=[self.student.pk],
+            notify=False,
+        )
+        math_event.lesson_plan_item = other_item
+        math_event.save(update_fields=["lesson_plan_item", "updated_at"])
+
+        same_starts = self.ends + timedelta(days=5)
+        same_event = create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": f"{self.student.full_name} inf",
+                "starts_at": same_starts,
+                "ends_at": same_starts + timedelta(minutes=45),
+                "event_type": "individual_lesson",
+                "notify_participants": False,
+            },
+            student_ids=[self.student.pk],
+            notify=False,
+        )
+        same_event.lesson_plan_item = self.plan_item
+        same_event.save(update_fields=["lesson_plan_item", "updated_at"])
+
+        self.event.lesson_plan_item = self.plan_item
+        self.event.save(update_fields=["lesson_plan_item", "updated_at"])
+
+        StudentReleaseService.release_for_event(self.event)
+        homework = Homework.objects.filter(student=self.student, lesson_plan_item=self.plan_item).first()
+        self.assertIsNotNone(homework)
+        self.assertEqual(homework.due_at, same_starts)
+
+    def test_homework_options_suggests_next_lesson_due(self):
+        from rest_framework.test import APIClient
+
+        next_starts = self.ends + timedelta(days=4)
+        create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": self.student.full_name,
+                "starts_at": next_starts,
+                "ends_at": next_starts + timedelta(minutes=45),
+                "event_type": "individual_lesson",
+                "notify_participants": False,
+            },
+            student_ids=[self.student.pk],
+            notify=False,
+        )
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        response = client.get(f"/api/cabinet/students/{self.student.pk}/homework-options/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data.get("suggested_due_at"), next_starts.isoformat())
 
     def test_student_api_syncs_finished_event_on_lessons_request(self):
         from rest_framework.test import APIClient

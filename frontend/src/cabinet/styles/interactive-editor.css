@@ -1060,3 +1060,35 @@
     min-height: 44px;
   }
 }
+
+.ix-ed-undo-toast {
+  position: sticky;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #0F172A;
+  color: #F8FAFC;
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.2);
+}
+
+.ix-ed-undo-toast__btn {
+  border: none;
+  background: transparent;
+  color: #93C5FD;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.ix-ed-undo-toast__btn:hover {
+  color: #BFDBFE;
+}

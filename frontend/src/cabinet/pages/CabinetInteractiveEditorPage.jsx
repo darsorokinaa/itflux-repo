@@ -136,6 +136,24 @@ function EditorItemShell({
   );
 }
 
+function UndoRemoveToast({ label, onUndo, onDismiss }) {
+  useEffect(() => {
+    const t = window.setTimeout(onDismiss, 6000);
+    return () => window.clearTimeout(t);
+    // Timer starts on mount; remount via key when a new item is removed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="ix-ed-undo-toast" role="status">
+      <span>{label}</span>
+      <button type="button" className="ix-ed-undo-toast__btn" onClick={onUndo}>
+        Отменить
+      </button>
+    </div>
+  );
+}
+
 function FlashcardsEditor({
   data,
   onCardsChange,
@@ -147,6 +165,7 @@ function FlashcardsEditor({
 }) {
   const [dragIndex, setDragIndex] = useState(null);
   const [overIndex, setOverIndex] = useState(null);
+  const [undoRemove, setUndoRemove] = useState(null);
 
   const updateCard = (index, field, value) => {
     const cards = [...data.cards];
@@ -175,8 +194,19 @@ function FlashcardsEditor({
 
   const removeCard = (index) => {
     if (data.cards.length <= 1) return;
+    const item = data.cards[index];
     onCardsChange(data.cards.filter((_, i) => i !== index));
     setOpenIndex((prev) => (prev >= index ? Math.max(0, prev - 1) : prev));
+    setUndoRemove({ item, index });
+  };
+
+  const restoreCard = () => {
+    if (!undoRemove) return;
+    const cards = [...data.cards];
+    cards.splice(undoRemove.index, 0, undoRemove.item);
+    onCardsChange(cards);
+    setOpenIndex(undoRemove.index);
+    setUndoRemove(null);
   };
 
   const moveCard = (from, to) => {
@@ -283,6 +313,14 @@ function FlashcardsEditor({
           );
         })}
       </div>
+      {undoRemove ? (
+        <UndoRemoveToast
+          key={`card-${undoRemove.index}-${undoRemove.item?.front || ""}`}
+          label="Карточка удалена"
+          onUndo={restoreCard}
+          onDismiss={() => setUndoRemove(null)}
+        />
+      ) : null}
     </section>
   );
 }
@@ -298,6 +336,7 @@ function MatchingEditor({
 }) {
   const [dragIndex, setDragIndex] = useState(null);
   const [overIndex, setOverIndex] = useState(null);
+  const [undoRemove, setUndoRemove] = useState(null);
 
   const updatePair = (index, field, value) => {
     const pairs = [...data.pairs];
@@ -318,8 +357,19 @@ function MatchingEditor({
 
   const removePair = (index) => {
     if (data.pairs.length <= 1) return;
+    const item = data.pairs[index];
     onPairsChange(data.pairs.filter((_, i) => i !== index));
     setOpenIndex((prev) => (prev >= index ? Math.max(0, prev - 1) : prev));
+    setUndoRemove({ item, index });
+  };
+
+  const restorePair = () => {
+    if (!undoRemove) return;
+    const pairs = [...data.pairs];
+    pairs.splice(undoRemove.index, 0, undoRemove.item);
+    onPairsChange(pairs);
+    setOpenIndex(undoRemove.index);
+    setUndoRemove(null);
   };
 
   const duplicatePair = (index) => {
@@ -419,6 +469,14 @@ function MatchingEditor({
           );
         })}
       </div>
+      {undoRemove ? (
+        <UndoRemoveToast
+          key={`pair-${undoRemove.index}-${undoRemove.item?.left || ""}`}
+          label="Пара удалена"
+          onUndo={restorePair}
+          onDismiss={() => setUndoRemove(null)}
+        />
+      ) : null}
     </section>
   );
 }
@@ -434,6 +492,7 @@ function SequenceEditor({
 }) {
   const [dragIndex, setDragIndex] = useState(null);
   const [overIndex, setOverIndex] = useState(null);
+  const [undoRemove, setUndoRemove] = useState(null);
 
   const updateStep = (index, field, value) => {
     const steps = [...data.steps];
@@ -454,8 +513,19 @@ function SequenceEditor({
 
   const removeStep = (index) => {
     if (data.steps.length <= 1) return;
+    const item = data.steps[index];
     onStepsChange(data.steps.filter((_, i) => i !== index).map((s, i) => ({ ...s, position: i + 1 })));
     setOpenIndex((prev) => (prev >= index ? Math.max(0, prev - 1) : prev));
+    setUndoRemove({ item, index });
+  };
+
+  const restoreStep = () => {
+    if (!undoRemove) return;
+    const steps = [...data.steps];
+    steps.splice(undoRemove.index, 0, undoRemove.item);
+    onStepsChange(steps.map((s, i) => ({ ...s, position: i + 1 })));
+    setOpenIndex(undoRemove.index);
+    setUndoRemove(null);
   };
 
   const duplicateStep = (index) => {
@@ -541,6 +611,14 @@ function SequenceEditor({
           </EditorItemShell>
         ))}
       </div>
+      {undoRemove ? (
+        <UndoRemoveToast
+          key={`step-${undoRemove.index}-${undoRemove.item?.text || ""}`}
+          label="Шаг удалён"
+          onUndo={restoreStep}
+          onDismiss={() => setUndoRemove(null)}
+        />
+      ) : null}
     </section>
   );
 }

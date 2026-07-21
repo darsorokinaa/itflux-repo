@@ -1,0 +1,86 @@
+.cb-telegram-prompt {
+  margin: 0 0 1.25rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid rgba(30, 58, 95, 0.12);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(232, 244, 255, 0.9), rgba(255, 255, 255, 0.95));
+}
+
+.cb-telegram-prompt__title {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 650;
+  color: #1e3a5f;
+}
+
+.cb-telegram-prompt__text {
+  margin: 0 0 0.85rem;
+  font-size: 0.92rem;
+  color: #4a5d73;
+}
+
+.cb-telegram-prompt__error {
+  margin: 0 0 0.65rem;
+  color: #b42318;
+  font-size: 0.88rem;
+}
+
+.cb-telegram-prompt__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  align-items: center;
+}
+
+.cb-telegram-prompt__link,
+.cb-telegram-prompt__dismiss {
+  border: none;
+  background: transparent;
+  color: #3d5a80;
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.cb-notify-settings {
+  max-width: 640px;
+}
+
+.cb-notify-settings__head {
+  margin-bottom: 1.25rem;
+}
+
+.cb-notify-settings__card {
+  margin-bottom: 1.25rem;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid rgba(30, 58, 95, 0.1);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.cb-notify-settings__card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+}
+
+.cb-notify-settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+}
+
+.cb-notify-settings__toggles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.cb-notify-settings__ok {
+  color: #1b7a40;
+  margin: 0 0 0.85rem;
+}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
+import ConfirmActionModal from "../components/ConfirmActionModal";
 import PlanEditorResourceBlock from "../components/PlanEditorResourceBlock";
 import PlanEditorPreviewModal from "../components/PlanEditorPreviewModal";
 import CreateScheduleLessonModal from "../components/CreateScheduleLessonModal";
@@ -218,7 +219,7 @@ function PlanEditorSessionCard({
             ) : null}
             <button
               type="button"
-              className="cb-pe-btn cb-pe-btn--primary"
+              className="cb-btn cb-btn--primary"
               onClick={() => onSaveSession(index)}
               disabled={savingSession || attaching}
             >
@@ -226,7 +227,7 @@ function PlanEditorSessionCard({
             </button>
             <button
               type="button"
-              className="cb-pe-btn cb-pe-btn--ghost cb-pe-btn--danger"
+              className="cb-btn cb-btn--ghost cb-btn--danger"
               onClick={() => onDeleteSession(index)}
               disabled={savingSession || attaching}
             >
@@ -235,10 +236,10 @@ function PlanEditorSessionCard({
           </div>
 
           <div className="cb-pe-session__reorder">
-            <button type="button" className="cb-pe-btn cb-pe-btn--ghost cb-pe-btn--xs" disabled={index === 0} onClick={() => onMove(index, -1)}>
+            <button type="button" className="cb-btn cb-btn--ghost cb-btn--xs" disabled={index === 0} onClick={() => onMove(index, -1)}>
               ↑ Вверх
             </button>
-            <button type="button" className="cb-pe-btn cb-pe-btn--ghost cb-pe-btn--xs" disabled={index === total - 1} onClick={() => onMove(index, 1)}>
+            <button type="button" className="cb-btn cb-btn--ghost cb-btn--xs" disabled={index === total - 1} onClick={() => onMove(index, 1)}>
               ↓ Вниз
             </button>
           </div>
@@ -289,18 +290,18 @@ function PlanEditorSummary({
         <div className="cb-pe-sidebar__section">
           <h3 className="cb-pe-sidebar__subtitle">Быстрые действия</h3>
           <div className="cb-pe-sidebar__actions">
-            <button type="button" className="cb-pe-btn cb-pe-btn--secondary cb-pe-btn--block" onClick={onAddSession}>
+            <button type="button" className="cb-btn cb-btn--secondary cb-btn--block" onClick={onAddSession}>
               <CabinetIcon name="plus" /> Добавить занятие
             </button>
-            <button type="button" className="cb-pe-btn cb-pe-btn--primary cb-pe-btn--block" onClick={onSave} disabled={saving}>
+            <button type="button" className="cb-btn cb-btn--primary cb-btn--block" onClick={onSave} disabled={saving}>
               {saving ? "Сохранение…" : "Сохранить"}
             </button>
-            <button type="button" className="cb-pe-btn cb-pe-btn--ghost cb-pe-btn--block" onClick={onPreview}>
+            <button type="button" className="cb-btn cb-btn--ghost cb-btn--block" onClick={onPreview}>
               Предпросмотр
             </button>
             <button
               type="button"
-              className="cb-pe-btn cb-pe-btn--ghost cb-pe-btn--block"
+              className="cb-btn cb-btn--ghost cb-btn--block"
               onClick={onScheduleFirst}
               disabled={schedulingFirst || stats.sessions === 0}
             >
@@ -351,6 +352,7 @@ export default function CabinetLessonPlanEditorPage() {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleDraft, setScheduleDraft] = useState(null);
   const [schedulingFirst, setSchedulingFirst] = useState(false);
+  const [deleteSessionIndex, setDeleteSessionIndex] = useState(null);
   const [makePublic, setMakePublic] = useState(false);
   const [canPublishCatalog, setCanPublishCatalog] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
@@ -686,10 +688,20 @@ export default function CabinetLessonPlanEditorPage() {
     }
   }, [ensurePlanId, replaceSession, sessions]);
 
-  const deleteSession = useCallback(async (index) => {
+  const deleteSession = useCallback((index) => {
     const session = sessions[index];
     if (!session) return;
-    if (!window.confirm("Удалить это занятие?")) return;
+    setDeleteSessionIndex(index);
+  }, [sessions]);
+
+  const confirmDeleteSession = useCallback(async () => {
+    if (deleteSessionIndex == null) return;
+    const index = deleteSessionIndex;
+    const session = sessions[index];
+    if (!session) {
+      setDeleteSessionIndex(null);
+      return;
+    }
 
     setSavingSessionIndex(index);
     setSessionErrors((prev) => {
@@ -703,6 +715,7 @@ export default function CabinetLessonPlanEditorPage() {
         await deleteLessonPlanItem(session.id);
       }
       removeSession(index);
+      setDeleteSessionIndex(null);
     } catch (err) {
       setSessionErrors((prev) => ({
         ...prev,
@@ -711,7 +724,7 @@ export default function CabinetLessonPlanEditorPage() {
     } finally {
       setSavingSessionIndex(null);
     }
-  }, [removeSession, sessions]);
+  }, [deleteSessionIndex, removeSession, sessions]);
 
   const duplicateSession = useCallback((index) => {
     setSessions((prev) => {
@@ -975,12 +988,12 @@ export default function CabinetLessonPlanEditorPage() {
           ) : autoSavedAt ? (
             <span className="cb-pe-header__autosave" role="status">Сохранено автоматически</span>
           ) : null}
-          <button type="button" className="cb-pe-btn cb-pe-btn--ghost" onClick={() => navigate(-1)}>
+          <button type="button" className="cb-btn cb-btn--ghost" onClick={() => navigate(-1)}>
             Отмена
           </button>
           <button
             type="button"
-            className="cb-pe-btn cb-pe-btn--primary"
+            className="cb-btn cb-btn--primary"
             onClick={handleSave}
             disabled={saving || !title.trim()}
           >
@@ -1097,7 +1110,7 @@ export default function CabinetLessonPlanEditorPage() {
           <section className="cb-pe-card">
             <div className="cb-pe-card__head">
               <h2 className="cb-pe-card__title">Занятия плана</h2>
-              <button type="button" className="cb-pe-btn cb-pe-btn--secondary cb-pe-btn--sm" onClick={addSession}>
+              <button type="button" className="cb-btn cb-btn--secondary cb-btn--sm" onClick={addSession}>
                 <CabinetIcon name="plus" /> Добавить занятие
               </button>
             </div>
@@ -1106,7 +1119,7 @@ export default function CabinetLessonPlanEditorPage() {
               <div className="cb-pe-empty">
                 <p className="cb-pe-empty__title">Занятий пока нет</p>
                 <p className="cb-pe-empty__text">Добавьте первое занятие в план.</p>
-                <button type="button" className="cb-pe-btn cb-pe-btn--primary" onClick={addSession}>
+                <button type="button" className="cb-btn cb-btn--primary" onClick={addSession}>
                   Добавить занятие
                 </button>
               </div>
@@ -1160,12 +1173,12 @@ export default function CabinetLessonPlanEditorPage() {
       </div>
 
       <div className="cb-pe-mobile-bar" aria-hidden={false}>
-        <button type="button" className="cb-pe-btn cb-pe-btn--secondary" onClick={addSession}>
+        <button type="button" className="cb-btn cb-btn--secondary" onClick={addSession}>
           <CabinetIcon name="plus" /> Занятие
         </button>
         <button
           type="button"
-          className="cb-pe-btn cb-pe-btn--primary"
+          className="cb-btn cb-btn--primary"
           onClick={handleSave}
           disabled={saving || !title.trim()}
         >
@@ -1216,6 +1229,19 @@ export default function CabinetLessonPlanEditorPage() {
           onCreate={handleCreateSchedule}
         />
       ) : null}
+
+      <ConfirmActionModal
+        open={deleteSessionIndex != null}
+        title="Удалить занятие?"
+        text="Удалить это занятие?"
+        confirmLabel="Удалить"
+        danger
+        loading={savingSessionIndex === deleteSessionIndex && deleteSessionIndex != null}
+        onClose={() => {
+          if (savingSessionIndex !== deleteSessionIndex) setDeleteSessionIndex(null);
+        }}
+        onConfirm={confirmDeleteSession}
+      />
     </CabinetPageShell>
   );
 }

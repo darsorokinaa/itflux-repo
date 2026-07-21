@@ -36,6 +36,7 @@ import {
   returnReviewItem,
   uploadReviewFeedback,
 } from "../../utils/cabinetAuth";
+import ConfirmActionModal from "../components/ConfirmActionModal";
 import HomeworkReviewSummary, {
   buildHomeworkReviewFromVariant,
 } from "../HomeworkReviewResults";
@@ -237,6 +238,7 @@ export default function CabinetReviewDetailPage() {
   const [teacherComment, setTeacherComment] = useState("");
   const [scores, setScores] = useState({});
   const [taskComments, setTaskComments] = useState({});
+  const [confirmAction, setConfirmAction] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -335,8 +337,7 @@ export default function CabinetReviewDetailPage() {
     comments_by_task_id: taskComments,
   });
 
-  const handleCheck = async () => {
-    if (!window.confirm("Сохранить оценку и отметить работу проверенной?")) return;
+  const runCheck = async () => {
     setBusy(true);
     setError(null);
     try {
@@ -347,12 +348,11 @@ export default function CabinetReviewDetailPage() {
       setError(err.message || "Не удалось сохранить проверку");
     } finally {
       setBusy(false);
+      setConfirmAction(null);
     }
   };
 
-  const handleReturn = async () => {
-    if (!teacherComment.trim() && !window.confirm("Вернуть работу без общего комментария?")) return;
-    if (teacherComment.trim() && !window.confirm("Вернуть работу ученику на доработку?")) return;
+  const runReturn = async () => {
     setBusy(true);
     setError(null);
     try {
@@ -363,14 +363,13 @@ export default function CabinetReviewDetailPage() {
       setError(err.message || "Не удалось вернуть работу");
     } finally {
       setBusy(false);
+      setConfirmAction(null);
     }
   };
 
-  const handleDeleteHomework = async () => {
+  const runDeleteHomework = async () => {
     const homeworkId = submission?.homework;
     if (!homeworkId) return;
-    const title = review?.title || "это домашнее задание";
-    if (!window.confirm(`Удалить «${title}»?\n\nЭто действие нельзя отменить. Работа ученика тоже будет удалена.`)) return;
     setBusy(true);
     setError(null);
     try {
@@ -379,7 +378,46 @@ export default function CabinetReviewDetailPage() {
     } catch (err) {
       setError(err.message || "Не удалось удалить домашнее задание");
       setBusy(false);
+      setConfirmAction(null);
     }
+  };
+
+  const handleCheck = () => {
+    setConfirmAction({
+      type: "check",
+      title: "Сохранить проверку?",
+      text: "Сохранить оценку и отметить работу проверенной?",
+      confirmLabel: "Проверено",
+      danger: false,
+      onConfirm: runCheck,
+    });
+  };
+
+  const handleReturn = () => {
+    setConfirmAction({
+      type: "return",
+      title: "Вернуть работу?",
+      text: teacherComment.trim()
+        ? "Вернуть работу ученику на доработку?"
+        : "Вернуть работу без общего комментария?",
+      confirmLabel: "Вернуть",
+      danger: false,
+      onConfirm: runReturn,
+    });
+  };
+
+  const handleDeleteHomework = () => {
+    const homeworkId = submission?.homework;
+    if (!homeworkId) return;
+    const title = review?.title || "это домашнее задание";
+    setConfirmAction({
+      type: "delete",
+      title: "Удалить задание?",
+      text: `Удалить «${title}»?\n\nЭто действие нельзя отменить. Работа ученика тоже будет удалена.`,
+      confirmLabel: "Удалить",
+      danger: true,
+      onConfirm: runDeleteHomework,
+    });
   };
 
   const getPart1Verdict = (task, answer) => {
@@ -666,6 +704,12 @@ export default function CabinetReviewDetailPage() {
       </section>
 
       <div className="cb-review-detail__footer">
+        <Link
+          to="/cabinet/journal"
+          className="cb-review-detail__btn cb-review-detail__btn--ghost"
+        >
+          Итоги урока
+        </Link>
         {submission?.homework ? (
           <button
             type="button"
@@ -698,6 +742,17 @@ export default function CabinetReviewDetailPage() {
           </>
         ) : null}
       </div>
+
+      <ConfirmActionModal
+        open={Boolean(confirmAction)}
+        title={confirmAction?.title || "Подтвердите действие"}
+        text={confirmAction?.text || ""}
+        confirmLabel={confirmAction?.confirmLabel || "Подтвердить"}
+        danger={Boolean(confirmAction?.danger)}
+        loading={busy}
+        onClose={() => { if (!busy) setConfirmAction(null); }}
+        onConfirm={() => confirmAction?.onConfirm?.()}
+      />
     </CabinetPageShell>
   );
 }

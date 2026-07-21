@@ -112,7 +112,8 @@ class ReferralService:
     @staticmethod
     @transaction.atomic
     def grant_subscription(teacher: User, plan: TariffPlan, months: int, started_at=None):
-        sub = SubscriptionLimitService.get_or_create_subscription(teacher)
+        # Без apply_promo: иначе ensure_registration_promo → grant → рекурсия.
+        sub = SubscriptionLimitService.get_or_create_subscription(teacher, apply_promo=False)
         base_start = started_at or ReferralService.registration_started_at(teacher)
         expires_at = add_months(base_start, months)
 

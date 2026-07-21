@@ -32,7 +32,7 @@ else:
 LESSON_SECRET = os.environ.get("LESSON_SECRET", "").strip()
 TASKS_GET_SECRET = (os.environ.get("LINK_SECRET_FOR_TASKS") or "").strip()
 # Ссылка «Личный кабинет» в шаблоне урока; должен совпадать с origin из сборки фронта (VITE_LK_PUBLIC_URL).
-LK_PUBLIC_URL = os.environ.get("LK_PUBLIC_URL", "http://lk.itflux.ru").rstrip("/")
+LK_PUBLIC_URL = os.environ.get("LK_PUBLIC_URL", "https://itflux-academy.ru").rstrip("/")
 LK_DASHBOARD_URL = os.environ.get("LK_DASHBOARD_URL", "").strip().rstrip("/")
 # Опционально: явный URL вебхука ЛК при входе ученика в комнату (иначе LK_PUBLIC_URL + /api/lesson/student-joined/).
 LK_LESSON_STUDENT_NOTIFY_URL = os.environ.get("LK_LESSON_STUDENT_NOTIFY_URL", "").strip()
@@ -111,7 +111,7 @@ VK_ACCESS_TOKEN = os.environ.get("VK_ACCESS_TOKEN", "").strip()
 VK_GROUP_ID = os.environ.get("VK_GROUP_ID", "").strip()
 VK_API_VERSION = os.environ.get("VK_API_VERSION", "5.131").strip()
 
-_gen_home_outer = os.environ.get("ITFLUX_PUBLIC_HOME_URL", "https://itflux.ru").strip().rstrip("/")
+_gen_home_outer = os.environ.get("ITFLUX_PUBLIC_HOME_URL", "https://itflux-academy.ru").strip().rstrip("/")
 ITFLUX_PUBLIC_HOME_URL = f"{_gen_home_outer}/"
 LOGOUT_REDIRECT_URL = ITFLUX_PUBLIC_HOME_URL
 

@@ -10,6 +10,7 @@ import {
   publishInteractive,
   updateInteractive,
 } from "../../utils/cabinetAuth";
+import ConfirmActionModal from "../components/ConfirmActionModal";
 import InteractiveAssignModal from "../components/InteractiveAssignModal";
 import InteractiveLaunchScreen, { TemplateSwitcher } from "../components/InteractiveLaunchScreen";
 import {
@@ -68,6 +69,8 @@ export default function CabinetInteractiveDetailPage() {
   const [loading, setLoading] = useState(true);
   const [started, setStarted] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [authorName, setAuthorName] = useState("Учитель");
   const [shareMsg, setShareMsg] = useState("");
 
@@ -244,14 +247,22 @@ export default function CabinetInteractiveDetailPage() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!window.confirm(`Удалить «${getInteractiveDisplayTitle(interactive, "интерактив")}»?`)) return;
+  const handleDelete = () => {
+    setDeleteConfirmOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!interactive) return;
+    setDeleteLoading(true);
     try {
       await deleteInteractiveApi(interactive.id);
+      setDeleteConfirmOpen(false);
       navigate("/cabinet/interactives");
     } catch (err) {
       setShareMsg(err?.message || "Не удалось удалить");
       window.setTimeout(() => setShareMsg(""), 3200);
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -379,6 +390,19 @@ export default function CabinetInteractiveDetailPage() {
           onAssign={handleAssign}
         />
       ) : null}
+
+      <ConfirmActionModal
+        open={deleteConfirmOpen}
+        title="Удалить интерактив?"
+        text={`Удалить «${getInteractiveDisplayTitle(interactive, "интерактив")}»?`}
+        confirmLabel="Удалить"
+        danger
+        loading={deleteLoading}
+        onClose={() => {
+          if (!deleteLoading) setDeleteConfirmOpen(false);
+        }}
+        onConfirm={confirmDelete}
+      />
     </CabinetPageShell>
   );
 }

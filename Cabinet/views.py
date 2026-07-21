@@ -12,10 +12,10 @@ from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
-from .models import Profile, ScheduleEvent
-from .invitations import try_accept_invite_token
+from .models import Profile, ScheduleEvent, TeacherApplication
+from .invitations import invite_accept_api_payload, try_accept_invite_token
 from .plan_catalog import can_publish_catalog_lesson_plan
-from .rate_limit import rate_limit_check, rate_limit_json_response
+from .rate_limit import client_ip, rate_limit_check, rate_limit_json_response
 from .schedule_events import (
     list_schedule_events,
     parse_local_event_id,
@@ -120,8 +120,10 @@ def api_login(request):
     invite_result = try_accept_invite_token(auth_user, data.get("invite_token"))
     payload = {"ok": True, "user": _profile_payload(auth_user)}
     if invite_result:
+        student, invitation = invite_result
         payload["invite_accepted"] = True
-        payload["student_id"] = invite_result.id
+        payload["student_id"] = student.id
+        payload["invite"] = invite_accept_api_payload(student, invitation, auth_user)
     return JsonResponse(payload)
 
 
@@ -167,6 +169,12 @@ def api_register(request):
 
     if role not in Profile.Role.values:
         role = Profile.Role.STUDENT
+    # Кабинет родителя пока не доступен — регистрация с этой ролью отключена.
+    if role == Profile.Role.PARENT:
+        return JsonResponse(
+            {"ok": False, "error": "Регистрация с ролью «Родитель» временно недоступна"},
+            status=400,
+        )
 
     try:
         validate_password(password)
@@ -201,13 +209,24 @@ def api_register(request):
             )
             referral_result = None
 
+    registration_promo = None
+    if role == Profile.Role.TEACHER:
+        from .registration_promo import apply_registration_promo
+
+        # Если рефералка уже выдала Профи — акция не затрёт более выгодный срок.
+        registration_promo = apply_registration_promo(user)
+
     payload = {"ok": True, "user": _profile_payload(user)}
     if invite_result:
+        student, invitation = invite_result
         payload["invite_accepted"] = True
-        payload["student_id"] = invite_result.id
+        payload["student_id"] = student.id
+        payload["invite"] = invite_accept_api_payload(student, invitation, user)
     if referral_result:
         payload["referral_applied"] = True
         payload["referral_reward"] = referral_result
+    if registration_promo:
+        payload["registration_promo"] = registration_promo
     return JsonResponse(payload, status=201)
 
 
@@ -862,5 +881,72 @@ def api_calendar_events(request):
         "ok": True,
         "events": events,
         "source": "yandex_calendar",
+    })
+
+
+@require_http_methods(["POST"])
+def api_teacher_application(request):
+    """Публичная заявка со страницы «Для учителей»."""
+    if not rate_limit_check(request, "teacher_application", 8, 3600):
+        return rate_limit_json_response("teacher_application")
+
+    try:
+        data = json.loads(request.body.decode("utf-8") or "{}")
+    except (TypeError, ValueError, UnicodeDecodeError):
+        return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
+
+    if not isinstance(data, dict):
+        return JsonResponse({"ok": False, "error": "Некорректные данные"}, status=400)
+
+    name = str(data.get("name") or "").strip()
+    contact = str(data.get("contact") or "").strip()
+    role = str(data.get("role") or "").strip()[:64]
+    teaches = str(data.get("teaches") or "").strip()[:500]
+    comment = str(data.get("comment") or "").strip()
+    materials_url = str(
+        data.get("materialsUrl") or data.get("materials_url") or ""
+    ).strip()[:500]
+    help_raw = data.get("help") or data.get("help_topics") or []
+    if isinstance(help_raw, str):
+        help_topics = [help_raw.strip()] if help_raw.strip() else []
+    elif isinstance(help_raw, list):
+        help_topics = [str(item).strip() for item in help_raw if str(item).strip()][:20]
+    else:
+        help_topics = []
+
+    if not name:
+        return JsonResponse({"ok": False, "error": "Укажите имя"}, status=400)
+    if not contact:
+        return JsonResponse({"ok": False, "error": "Укажите email или Telegram"}, status=400)
+    if not role:
+        return JsonResponse({"ok": False, "error": "Выберите, кто вы"}, status=400)
+    if not help_topics:
+        return JsonResponse({"ok": False, "error": "Выберите хотя бы один вариант помощи"}, status=400)
+
+    if materials_url and not (
+        materials_url.startswith("http://") or materials_url.startswith("https://")
+    ):
+        return JsonResponse(
+            {"ok": False, "error": "Ссылка на материалы должна начинаться с http:// или https://"},
+            status=400,
+        )
+
+    ua = (request.META.get("HTTP_USER_AGENT") or "")[:512]
+    application = TeacherApplication.objects.create(
+        name=name[:200],
+        contact=contact[:255],
+        role=role,
+        teaches=teaches,
+        help_topics=help_topics,
+        comment=comment,
+        materials_url=materials_url,
+        ip_address=client_ip(request) or None,
+        user_agent=ua,
+    )
+
+    return JsonResponse({
+        "ok": True,
+        "id": application.id,
+        "message": "Заявка отправлена. Мы свяжемся с вами в ближайшее время.",
     })
 

@@ -576,6 +576,11 @@
     gap: 12px;
   }
 
+  .cb-layout .cb-students-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
   .cb-layout .cb-students-panel {
     border-radius: 20px;
     border: 1px solid #E2E8F0;
@@ -583,11 +588,17 @@
   }
 
   .cb-layout .cb-group-card {
-    border-radius: 18px;
+    border-radius: 14px;
   }
 
-  .cb-layout .cb-student-chip {
+  .cb-layout .cb-student-chip,
+  .cb-layout .cb-student-row--card {
     border-radius: 14px;
+  }
+
+  .cb-layout .cb-students-summary__card {
+    padding: 10px 12px;
+    border-radius: 12px;
   }
 
   /* More page */

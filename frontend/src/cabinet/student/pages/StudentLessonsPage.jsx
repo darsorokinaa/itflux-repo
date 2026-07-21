@@ -2,7 +2,7 @@
  * Занятия — расписание ученика с темами из плана.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { fetchStudentMaterials, fetchStudentSchedule } from "../../../utils/cabinetAuth";
 import { loadStudentData } from "../studentData";
 import StudentEventDetailPopover from "../StudentEventDetailPopover";
@@ -121,15 +121,14 @@ function MeetingConnectLink({ href, className, children, onClick }) {
 }
 
 function FeaturedLessonCard({ event, onOpen }) {
-  const canConnect = useLessonConnectAvailable(event.starts_at, event.ends_at);
+  const vmStatus = event.video_meeting?.status || event.videoMeeting?.status;
+  const canConnect = useLessonConnectAvailable(event.starts_at, event.ends_at, vmStatus);
   const inProgress = useLessonInProgress(event.starts_at, event.ends_at);
   const topic = lessonTopic(event);
   const { formatLine, teacher } = studentLessonMetaParts(event);
   const timeRange = formatLessonTimeRange(event.starts_at, event.ends_at);
   const meetingHref = lessonMeetingHref(event);
-  const joinState = event.video_meeting?.joinState || event.videoMeeting?.joinState;
-  const connectLabel =
-    joinState === "live" || inProgress ? "Подключиться к уроку" : "Подключиться к уроку";
+  const connectLabel = vmStatus === "live" || inProgress ? "Подключиться к уроку" : "Подключиться к уроку";
 
   return (
     <section className={`st-lessons-hero${inProgress ? " st-lessons-hero--live" : ""}`}>
@@ -208,12 +207,15 @@ function SummaryChip({ label, value }) {
 }
 
 function CompactLessonCard({ event, onOpen }) {
-  const canConnect = useLessonConnectAvailable(event.starts_at, event.ends_at);
+  const vmStatus = event.video_meeting?.status || event.videoMeeting?.status;
+  const canConnect = useLessonConnectAvailable(event.starts_at, event.ends_at, vmStatus);
   const inProgress = useLessonInProgress(event.starts_at, event.ends_at);
   const topic = lessonTopic(event);
   const { formatLine, teacher } = studentLessonMetaParts(event);
   const meetingHref = lessonMeetingHref(event);
-  const showConnect = canConnect && meetingHref && (inProgress || isToday(event.starts_at) || isSoon(event.starts_at));
+  const showConnect = canConnect && meetingHref && (
+    vmStatus === "live" || inProgress || isToday(event.starts_at) || isSoon(event.starts_at)
+  );
   const todayClass = isToday(event.starts_at) || inProgress ? " st-lesson-compact__date--today" : "";
 
   return (
@@ -504,6 +506,8 @@ function UpcomingMain({ featured, rest, onOpenEvent }) {
 }
 
 export default function StudentLessonsPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [schedule, setSchedule] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [filter, setFilter] = useState("all");
@@ -521,6 +525,18 @@ export default function StudentLessonsPage() {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  // Deep-link /cabinet/student/lessons?event=<id> — из уведомлений
+  useEffect(() => {
+    if (loading) return;
+    const params = new URLSearchParams(location.search || "");
+    const eventParam = params.get("event");
+    if (!eventParam) return;
+    setSelectedEventId(Number(eventParam) || eventParam);
+    params.delete("event");
+    const next = params.toString();
+    navigate(`${location.pathname}${next ? `?${next}` : ""}`, { replace: true });
+  }, [loading, location.search, location.pathname, navigate]);
 
   const now = useScheduleNow();
 

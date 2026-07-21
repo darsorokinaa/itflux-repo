@@ -11,7 +11,6 @@ import {
   CabinetPageShell,
   CabinetPageHeader,
   CabinetFilterBar,
-  CabinetSectionGrid,
   CabinetEmptyState,
   useSoonToast,
 } from "../CabinetSectionUi";
@@ -27,23 +26,6 @@ const FILTERS = [
   { id: "ege", label: "ЕГЭ" },
   { id: "python", label: "Python" },
   { id: "fipi", label: "ФИПИ" },
-];
-
-const MATERIALS = [
-  {
-    id: "m1", filter: ["all", "oge", "fipi"],
-    title: "Алгебра логики — готовый урок",
-    type: "Готовый урок", exam: "ОГЭ",
-    topic: "Логика и алгоритмы",
-    inside: "Теория · 12 заданий · тетрадь",
-  },
-  {
-    id: "m2", filter: ["all", "ege"],
-    title: "Задание 14 — системы счисления",
-    type: "Банк задач", exam: "ЕГЭ",
-    topic: "Системы счисления",
-    inside: "3 уровня сложности · решения",
-  },
 ];
 
 export default function CabinetLibraryPage() {
@@ -75,11 +57,6 @@ export default function CabinetLibraryPage() {
   useEffect(() => {
     if (section === "lessons") loadCatalogLessons();
   }, [section, loadCatalogLessons]);
-
-  const materials = useMemo(
-    () => MATERIALS.filter((m) => m.filter.includes(filter)),
-    [filter],
-  );
 
   const lessonCards = useMemo(
     () => catalogLessons
@@ -169,34 +146,15 @@ export default function CabinetLibraryPage() {
             ))}
           </div>
         )
-      ) : materials.length === 0 ? (
-        <CabinetEmptyState
-          icon="folder"
-          title="Материалы не найдены"
-          text="Измените фильтры или попробуйте другой запрос."
-        />
       ) : (
-        <CabinetSectionGrid columns="2">
-          {materials.map((m) => (
-            <article key={m.id} className="cb-material-card">
-              <div className="cb-material-card__head">
-                <span className="cb-status-badge cb-status-badge--info">{m.type}</span>
-                <span className="cb-status-badge cb-status-badge--gray">{m.exam}</span>
-              </div>
-              <h3 className="cb-material-card__title">{m.title}</h3>
-              <p className="cb-material-card__topic">{m.topic}</p>
-              <div className="cb-material-card__actions">
-                {section === "tasks" ? (
-                  <Link to="/tasks" className="cb-btn cb-btn--outline cb-btn--sm">Открыть</Link>
-                ) : (
-                  <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={notifySoon}>Открыть</button>
-                )}
-                <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={notifySoon}>Сохранить себе</button>
-                <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={notifySoon}>Выдать ученикам</button>
-              </div>
-            </article>
-          ))}
-        </CabinetSectionGrid>
+        <CabinetEmptyState
+          icon="tasks"
+          title="Банк задач"
+          text="Откройте банк заданий ОГЭ и ЕГЭ: поиск по номеру, теме и типу — с готовыми решениями и вариантами для учеников."
+          actions={[
+            { label: "Перейти в банк задач", primary: true, href: "/tasks" },
+          ]}
+        />
       )}
 
     </CabinetPageShell>

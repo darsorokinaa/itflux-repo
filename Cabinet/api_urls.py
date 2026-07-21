@@ -1,7 +1,17 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from . import ai_api, api_views, schedule_api, student_api, subscription_api
+from . import (
+    ai_api,
+    api_views,
+    billing_api,
+    boards_api,
+    journal_api,
+    schedule_api,
+    student_api,
+    subscription_api,
+    telegram_api,
+)
 
 router = DefaultRouter()
 router.register("students", api_views.StudentViewSet, basename="cabinet-students")
@@ -14,6 +24,11 @@ router.register("lesson-plan-enrollments", api_views.LessonPlanEnrollmentViewSet
 router.register("interactives", api_views.InteractiveViewSet, basename="cabinet-interactives")
 router.register("interactive-assignments", api_views.InteractiveAssignmentViewSet, basename="cabinet-interactive-assignments")
 router.register("interactive-attempts", api_views.InteractiveAttemptViewSet, basename="cabinet-interactive-attempts")
+router.register(
+    "interactive-boards",
+    boards_api.InteractiveBoardViewSet,
+    basename="cabinet-interactive-boards",
+)
 router.register("review", api_views.ReviewViewSet, basename="cabinet-review")
 router.register("schedule", schedule_api.ScheduleEventViewSetExtended, basename="cabinet-schedule")
 router.register("schedule-series", schedule_api.ScheduleSeriesViewSet, basename="cabinet-schedule-series")
@@ -21,6 +36,12 @@ router.register("notifications", schedule_api.NotificationViewSet, basename="cab
 router.register("materials", api_views.MaterialViewSet, basename="cabinet-materials")
 
 urlpatterns = [
+    path(
+        "student/interactive-boards/",
+        boards_api.StudentInteractiveBoardsView.as_view(),
+        name="student_interactive_boards",
+    ),
+
     path("dashboard/", api_views.DashboardView.as_view(), name="cabinet_dashboard"),
     path("student/dashboard/", student_api.StudentDashboardView.as_view(), name="student_dashboard"),
     path("student/lessons/", student_api.StudentLessonsView.as_view(), name="student_lessons"),
@@ -37,6 +58,31 @@ urlpatterns = [
     path("student/notifications/", student_api.StudentNotificationsView.as_view(), name="student_notifications"),
     path("student/notifications/<int:notification_id>/read/", student_api.StudentNotificationReadView.as_view(), name="student_notification_read"),
     path("student/notifications/read-all/", student_api.StudentNotificationsReadAllView.as_view(), name="student_notifications_read_all"),
+    path("student/notifications/clear/", student_api.StudentNotificationsClearView.as_view(), name="student_notifications_clear"),
+    path("student/results/", journal_api.StudentResultsListView.as_view(), name="student_results"),
+    path("student/results/<int:record_id>/", journal_api.StudentResultDetailView.as_view(), name="student_result_detail"),
+    # Журнал успеваемости
+    path("journal/", journal_api.JournalOverviewView.as_view(), name="journal_overview"),
+    path("journal/gradebook/", journal_api.JournalGradebookView.as_view(), name="journal_gradebook"),
+    path("journal/lessons/", journal_api.JournalLessonsListView.as_view(), name="journal_lessons"),
+    path("journal/lessons/<int:lesson_id>/", journal_api.JournalLessonDetailView.as_view(), name="journal_lesson_detail"),
+    path("journal/lessons/<int:lesson_id>/complete/", journal_api.JournalLessonCompleteView.as_view(), name="journal_lesson_complete"),
+    path("journal/lessons/<int:lesson_id>/publish/", journal_api.JournalLessonPublishView.as_view(), name="journal_lesson_publish"),
+    path("journal/lessons/<int:lesson_id>/bulk/", journal_api.JournalLessonBulkView.as_view(), name="journal_lesson_bulk"),
+    path("journal/students/", journal_api.JournalStudentsSummaryView.as_view(), name="journal_students_summary"),
+    path("journal/students/<int:student_id>/", journal_api.JournalStudentView.as_view(), name="journal_student"),
+    path("journal/groups/<int:group_id>/", journal_api.JournalGroupView.as_view(), name="journal_group"),
+    path("journal/attendance/", journal_api.JournalAttendanceView.as_view(), name="journal_attendance"),
+    path("journal/analytics/", journal_api.JournalAnalyticsView.as_view(), name="journal_analytics"),
+    path("journal/criteria/", journal_api.JournalCriteriaView.as_view(), name="journal_criteria"),
+    path("journal/criteria/<int:criterion_id>/", journal_api.JournalCriterionDetailView.as_view(), name="journal_criterion_detail"),
+    path("journal/templates/", journal_api.JournalTemplatesView.as_view(), name="journal_templates"),
+    path("journal/templates/<int:template_id>/", journal_api.JournalTemplateDetailView.as_view(), name="journal_template_detail"),
+    path("journal/tags/", journal_api.JournalTagsView.as_view(), name="journal_tags"),
+    path("journal/settings/", journal_api.JournalSettingsView.as_view(), name="journal_settings"),
+    path("journal/topics/", journal_api.JournalTopicsView.as_view(), name="journal_topics"),
+    path("journal/attention/", journal_api.JournalAttentionView.as_view(), name="journal_attention"),
+    path("journal/export/", journal_api.JournalExportView.as_view(), name="journal_export"),
     path(
         "interactive-appearance/",
         api_views.InteractiveAppearanceView.as_view(),
@@ -54,6 +100,126 @@ urlpatterns = [
     path("lesson-plans/subjects/", api_views.LessonPlanSubjectOptionsView.as_view(), name="cabinet_lesson_plan_subjects"),
     path("invitations/join/<str:token>/", api_views.InvitationPreviewView.as_view(), name="cabinet_invitation_preview"),
     path("invitations/join/<str:token>/accept/", api_views.InvitationAcceptView.as_view(), name="cabinet_invitation_accept"),
+    path("telegram/status/", telegram_api.TelegramStatusView.as_view(), name="cabinet_telegram_status"),
+    path("telegram/connect-link/", telegram_api.TelegramConnectLinkView.as_view(), name="cabinet_telegram_connect_link"),
+    path("telegram/disconnect/", telegram_api.TelegramDisconnectView.as_view(), name="cabinet_telegram_disconnect"),
+    path("telegram/test/", telegram_api.TelegramTestNotificationView.as_view(), name="cabinet_telegram_test"),
+    path("telegram/webhook/", telegram_api.telegram_bot_webhook, name="cabinet_telegram_webhook"),
+    path(
+        "settings/notifications/",
+        telegram_api.NotificationPreferencesView.as_view(),
+        name="cabinet_notification_preferences",
+    ),
+    # Учёт оплат репетитора (не SaaS)
+    path("billing/dashboard/", billing_api.BillingDashboardView.as_view(), name="billing_dashboard"),
+    path("billing/settings/", billing_api.TeacherBillingSettingsView.as_view(), name="billing_settings"),
+    path("billing/accounts/", billing_api.BillingAccountsView.as_view(), name="billing_accounts"),
+    path("billing/accounts/<int:account_id>/", billing_api.BillingAccountDetailView.as_view(), name="billing_account_detail"),
+    path(
+        "billing/accounts/<int:account_id>/settings/",
+        billing_api.BillingAccountSettingsView.as_view(),
+        name="billing_account_settings",
+    ),
+    path(
+        "billing/students/<int:student_id>/account/",
+        billing_api.BillingAccountByStudentView.as_view(),
+        name="billing_account_by_student",
+    ),
+    path("billing/transactions/", billing_api.BillingTransactionsView.as_view(), name="billing_transactions"),
+    path("billing/payments/", billing_api.BillingPaymentsView.as_view(), name="billing_payments"),
+    path("billing/refunds/", billing_api.BillingRefundsView.as_view(), name="billing_refunds"),
+    path("billing/adjustments/", billing_api.BillingAdjustmentsView.as_view(), name="billing_adjustments"),
+    path(
+        "billing/transactions/<uuid:tx_id>/reverse/",
+        billing_api.BillingTransactionReverseView.as_view(),
+        name="billing_transaction_reverse",
+    ),
+    path("billing/packages/", billing_api.BillingPackagesView.as_view(), name="billing_packages"),
+    path("billing/packages/<uuid:package_id>/", billing_api.BillingPackageDetailView.as_view(), name="billing_package_detail"),
+    path(
+        "billing/packages/<uuid:package_id>/freeze/",
+        billing_api.BillingPackageFreezeView.as_view(),
+        name="billing_package_freeze",
+    ),
+    path(
+        "billing/packages/<uuid:package_id>/unfreeze/",
+        billing_api.BillingPackageUnfreezeView.as_view(),
+        name="billing_package_unfreeze",
+    ),
+    path(
+        "billing/packages/<uuid:package_id>/extend/",
+        billing_api.BillingPackageExtendView.as_view(),
+        name="billing_package_extend",
+    ),
+    path(
+        "billing/packages/<uuid:package_id>/adjust/",
+        billing_api.BillingPackageAdjustView.as_view(),
+        name="billing_package_adjust",
+    ),
+    path(
+        "billing/unresolved-lessons/",
+        billing_api.BillingUnresolvedLessonsView.as_view(),
+        name="billing_unresolved_lessons",
+    ),
+    path(
+        "billing/events/<int:event_id>/preview/",
+        billing_api.BillingEventPreviewView.as_view(),
+        name="billing_event_preview",
+    ),
+    path(
+        "billing/events/<int:event_id>/finalize/",
+        billing_api.BillingEventFinalizeView.as_view(),
+        name="billing_event_finalize",
+    ),
+    path(
+        "billing/events/<int:event_id>/unfinalize/",
+        billing_api.BillingEventUnfinalizeView.as_view(),
+        name="billing_event_unfinalize",
+    ),
+    path(
+        "billing/lessons/<int:event_id>/finalize/",
+        billing_api.BillingEventFinalizeView.as_view(),
+        name="billing_lesson_finalize",
+    ),
+    path(
+        "billing/events/<int:event_id>/cancel-finance/",
+        billing_api.BillingEventCancelFinanceView.as_view(),
+        name="billing_event_cancel_finance",
+    ),
+    path(
+        "billing/events/<int:event_id>/no-show/",
+        billing_api.BillingEventNoShowView.as_view(),
+        name="billing_event_no_show",
+    ),
+    path(
+        "billing/events/<int:event_id>/badge/",
+        billing_api.BillingEventBadgeView.as_view(),
+        name="billing_event_badge",
+    ),
+    path(
+        "billing/lessons/bulk-finalize/",
+        billing_api.BillingBulkFinalizeView.as_view(),
+        name="billing_bulk_finalize",
+    ),
+    path("billing/plan-check/", billing_api.BillingPlanCheckView.as_view(), name="billing_plan_check"),
+    path("billing/reports/", billing_api.BillingReportsView.as_view(), name="billing_reports"),
+    path("billing/export/", billing_api.BillingExportView.as_view(), name="billing_export"),
+    path(
+        "billing/reminders/preview/",
+        billing_api.BillingReminderPreviewView.as_view(),
+        name="billing_reminder_preview",
+    ),
+    path(
+        "billing/reminders/",
+        billing_api.BillingReminderSendView.as_view(),
+        name="billing_reminder_send",
+    ),
+    path(
+        "billing/legacy-backfill/",
+        billing_api.BillingLegacyBackfillView.as_view(),
+        name="billing_legacy_backfill",
+    ),
+    path("billing/student/", billing_api.StudentBillingView.as_view(), name="billing_student"),
     # Тарифная система
     path("subscription/current/", subscription_api.SubscriptionCurrentView.as_view(), name="subscription_current"),
     path("subscription/usage/", subscription_api.SubscriptionUsageView.as_view(), name="subscription_usage"),

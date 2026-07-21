@@ -58,7 +58,7 @@ const SCOPE_CONFIG = {
   },
   materials: {
     title: "Добавить материал",
-    hint: "Выберите урок из библиотеки платформы или файл учителя.",
+    hint: "Выберите урок из библиотеки платформы, файл учителя или вариант по номеру.",
   },
 };
 
@@ -154,9 +154,12 @@ export default function PlanItemResourcesPicker({
   useEffect(() => {
     if (!open) {
       setSearch("");
-      setTab(initialTab);
       setError("");
+      return;
     }
+    setTab(initialTab);
+    setSearch("");
+    setError("");
   }, [open, initialTab]);
 
   const attachMaterial = async (payload) => {
@@ -236,6 +239,7 @@ export default function PlanItemResourcesPicker({
           ["library", "Библиотека"],
           ["mine", "Файлы учителя"],
           ["file", "Загрузить"],
+          ["variant", "Вариант"],
         ]
         : [
           ["library", "Библиотека"],

@@ -1,0 +1,114 @@
+/* Таблица ответов ученика на live-варианте (страница варианта у учителя). */
+
+.live-variant-answers {
+  margin: 0 0 20px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(43, 82, 245, 0.18);
+  background: linear-gradient(180deg, #f8faff 0%, #ffffff 100%);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  position: sticky;
+  top: 12px;
+  z-index: 6;
+}
+
+.live-variant-answers-sidebar {
+  margin: 0 0 12px;
+}
+
+.live-variant-answers-sidebar .live-variant-answers {
+  position: static;
+  margin: 0;
+}
+
+.live-variant-answers__title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.live-variant-answers__meta {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.live-variant-answers__empty {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #64748b;
+}
+
+.live-variant-answers__card + .live-variant-answers__card {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.live-variant-answers__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 0.92rem;
+}
+
+.live-variant-answers__head span {
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.live-variant-answers__table-wrap {
+  overflow-x: auto;
+}
+
+.live-variant-answers__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.live-variant-answers__table th,
+.live-variant-answers__table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.95);
+  text-align: left;
+  vertical-align: top;
+}
+
+.live-variant-answers__table th {
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.live-variant-answers__table td:first-child,
+.live-variant-answers__table th:first-child {
+  width: 3rem;
+  white-space: nowrap;
+}
+
+.live-variant-answers__ok {
+  color: #15803d;
+  font-weight: 650;
+  font-size: 0.8rem;
+}
+
+.live-variant-answers__bad {
+  color: #b91c1c;
+  font-weight: 650;
+  font-size: 0.8rem;
+}
+
+.live-variant-answers--compact {
+  padding: 12px;
+  margin: 0;
+  box-shadow: none;
+}

@@ -167,6 +167,20 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
             update_event(event, changed_by=request.user, data=request.data, notify=notify)
         return Response(ScheduleEventSerializer(event, context=self.get_serializer_context()).data)
 
+    @action(detail=True, methods=["post"], url_path="ensure-plan-item")
+    def ensure_plan_item(self, request, pk=None):
+        """Создаёт/линкует пункт плана, чтобы к занятию можно было прикреплять материалы."""
+        from .plan_schedule import ensure_event_plan_item
+        from .schedule_events import _plan_item_to_json
+
+        event = self.get_object()
+        item, lesson_number = ensure_event_plan_item(event, teacher=request.user)
+        return Response({
+            "ok": True,
+            "eventId": event.pk,
+            "planItem": _plan_item_to_json(item, lesson_number=lesson_number),
+        })
+
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):
         event = self.get_object()
@@ -190,6 +204,12 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
         event = self.get_object()
         event.status = ScheduleEvent.Status.COMPLETED
         event.save(update_fields=["status", "updated_at"])
+        try:
+            from .billing_service import auto_finalize_after_lesson_complete
+
+            auto_finalize_after_lesson_complete(event=event, teacher=request.user)
+        except Exception:
+            pass
         return Response(ScheduleEventSerializer(event).data)
 
     @action(detail=True, methods=["post"], url_path="move")
@@ -272,30 +292,43 @@ class NotificationViewSet(
 ):
     serializer_class = NotificationSerializer
 
+    def _in_app_qs(self):
+        from .choices import NotificationChannel
+
+        return Notification.objects.filter(
+            recipient_user=self.request.user,
+            channel=NotificationChannel.IN_APP,
+        )
+
     def get_queryset(self):
-        return Notification.objects.filter(recipient_user=self.request.user).order_by("-created_at")[:100]
+        return self._in_app_qs().order_by("-created_at")[:100]
 
     def list(self, request, *args, **kwargs):
         qs = self.get_queryset()
-        unread = Notification.objects.filter(recipient_user=request.user, is_read=False).count()
+        unread = self._in_app_qs().filter(is_read=False).count()
         return Response({
-            "items": NotificationSerializer(qs, many=True).data,
+            "items": NotificationSerializer(qs, many=True, context={"request": request}).data,
             "unread_count": unread,
         })
 
     @action(detail=True, methods=["post"], url_path="read")
     def mark_read(self, request, pk=None):
-        n = get_object_or_404(Notification, pk=pk, recipient_user=request.user)
+        n = get_object_or_404(self._in_app_qs(), pk=pk)
         n.is_read = True
         n.save(update_fields=["is_read"])
         return Response({"ok": True})
 
     @action(detail=False, methods=["post"], url_path="read-all")
     def read_all(self, request):
-        Notification.objects.filter(recipient_user=request.user, is_read=False).update(is_read=True)
+        self._in_app_qs().filter(is_read=False).update(is_read=True)
         return Response({"ok": True})
+
+    @action(detail=False, methods=["post"], url_path="clear")
+    def clear(self, request):
+        deleted, _ = self._in_app_qs().delete()
+        return Response({"ok": True, "deleted": deleted})
 
     @action(detail=False, methods=["get"], url_path="unread-count")
     def unread_count(self, request):
-        count = Notification.objects.filter(recipient_user=request.user, is_read=False).count()
+        count = self._in_app_qs().filter(is_read=False).count()
         return Response({"count": count})

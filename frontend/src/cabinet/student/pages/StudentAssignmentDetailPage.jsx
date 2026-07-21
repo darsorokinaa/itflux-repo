@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   fetchStudentAssignment,
@@ -187,33 +187,47 @@ export default function StudentAssignmentDetailPage() {
   const [item, setItem] = useState(null);
   const [answer, setAnswer] = useState("");
   const [attachedFile, setAttachedFile] = useState(null);
+  const [isDirty, setIsDirty] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [validationMsg, setValidationMsg] = useState("");
   const [msg, setMsg] = useState("");
   const [variantTasks, setVariantTasks] = useState(null);
+  const isDirtyRef = useRef(false);
 
-  const loadAssignment = () => {
+  useEffect(() => {
+    isDirtyRef.current = isDirty;
+  }, [isDirty]);
+
+  const loadAssignment = useCallback((opts = {}) => {
+    const preserveLocal = opts.preserveLocal ?? isDirtyRef.current;
     setLoading(true);
     return fetchStudentAssignment(id)
       .then((d) => {
         setItem(d);
-        setAnswer(d.answer_text || "");
-        setAttachedFile(null);
+        if (!preserveLocal) {
+          setAnswer(d.answer_text || "");
+          setAttachedFile(null);
+          setIsDirty(false);
+        }
       })
-      .catch(() => setItem(null))
+      .catch(() => {
+        if (!preserveLocal) setItem(null);
+      })
       .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    loadAssignment();
   }, [id]);
 
   useEffect(() => {
-    const onFocus = () => { loadAssignment(); };
+    setIsDirty(false);
+    isDirtyRef.current = false;
+    loadAssignment({ preserveLocal: false });
+  }, [id, loadAssignment]);
+
+  useEffect(() => {
+    const onFocus = () => { loadAssignment({ preserveLocal: true }); };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [id]);
+  }, [loadAssignment]);
 
   useEffect(() => {
     if (!item || item.status !== "checked" || !item.has_variant || !item.result) {
@@ -249,8 +263,6 @@ export default function StudentAssignmentDetailPage() {
   const isChecked = item?.status === "checked";
   const dueLabel = item?.due_at ? formatDueDate(item.due_at) : "";
   const taskCount = item?.tasks?.length || 0;
-  const isSubmitted = item?.status === "submitted" || variantSubmitted;
-
   const homeworkReview = useMemo(() => {
     if (!isChecked || !item?.result || !variantTasks?.length) return null;
     const variantTask = (item.tasks || []).find((t) => t.is_variant);
@@ -295,12 +307,21 @@ export default function StudentAssignmentDetailPage() {
       }
       await submitStudentAssignment(id, formData);
       setMsg("Ответ отправлен");
-      await loadAssignment();
+      setIsDirty(false);
+      isDirtyRef.current = false;
+      await loadAssignment({ preserveLocal: false });
     } catch (e) {
       setMsg(e.message || "Ошибка");
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const clearAttachedFile = () => {
+    setAttachedFile(null);
+    setIsDirty(true);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (validationMsg) setValidationMsg("");
   };
 
   if (loading) {
@@ -416,6 +437,7 @@ export default function StudentAssignmentDetailPage() {
                     value={answer}
                     onChange={(e) => {
                       setAnswer(e.target.value);
+                      setIsDirty(true);
                       if (validationMsg) setValidationMsg("");
                     }}
                     placeholder="Напишите ответ или комментарий к выполненному заданию"
@@ -427,6 +449,7 @@ export default function StudentAssignmentDetailPage() {
                       className="st-hw-file-input"
                       onChange={(e) => {
                         setAttachedFile(e.target.files?.[0] || null);
+                        setIsDirty(true);
                         if (validationMsg) setValidationMsg("");
                       }}
                     />
@@ -443,6 +466,15 @@ export default function StudentAssignmentDetailPage() {
                         || item.attached_file_name
                         || "Можно добавить текст или файл"}
                     </span>
+                    {attachedFile ? (
+                      <button
+                        type="button"
+                        className="st-hw-file-btn st-hw-file-btn--remove"
+                        onClick={clearAttachedFile}
+                      >
+                        Убрать файл
+                      </button>
+                    ) : null}
                   </div>
                   {validationMsg ? (
                     <p className="st-hw-validation" role="alert">{validationMsg}</p>

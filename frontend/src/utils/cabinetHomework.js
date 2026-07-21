@@ -67,12 +67,14 @@ export function parseHomeworkFromSearchParams(search) {
     .trim()
     .toLowerCase();
   const homeworkModeFlag = sp.get("homework_mode") === "1" || sp.get("homework") === "1";
+  const isLiveMeeting = sp.get("live_meeting") === "1" || sp.get("liveMeeting") === "1";
   const isHomework =
     homeworkModeFlag || cabinetSession === "homework" || !!cabinetAssignment;
   return {
     cabinetAssignment,
     cabinetSession,
     isHomework,
+    isLiveMeeting,
   };
 }
 
@@ -96,6 +98,7 @@ export function parseHomeworkFromSearchForExam(search, lessonEmbed) {
         cabinetAssignment: fromParent.cabinetAssignment || fromIframe.cabinetAssignment,
         cabinetSession: fromParent.cabinetSession || fromIframe.cabinetSession,
         isHomework: true,
+        isLiveMeeting: fromParent.isLiveMeeting || fromIframe.isLiveMeeting,
       };
     }
   } catch {
@@ -363,6 +366,42 @@ export function buildHomeworkResultPayload(tasks, userAnswers, scores, checkedTa
     by_task_id: byTaskId,
     scores: { ...scores },
     checked: checkedTasks ? { ...checkedTasks } : undefined,
+  };
+}
+
+/**
+ * Live-урок: на сервер (и учителю) уходят только ответы после «Проверить».
+ * @param {Array<{id: unknown, number?: unknown}>} tasks
+ * @param {Record<string, unknown>} userAnswers
+ * @param {Record<string, unknown>} scores
+ * @param {Record<string, boolean>} checkedTasks
+ */
+export function buildLiveCheckedHomeworkResult(tasks, userAnswers, scores, checkedTasks) {
+  const checked = checkedTasks && typeof checkedTasks === "object" ? checkedTasks : {};
+  const byNumber = {};
+  const byTaskId = {};
+  const outScores = {};
+  const outChecked = {};
+  for (const t of tasks || []) {
+    const id = t?.id;
+    if (id == null) continue;
+    const idKey = String(id);
+    if (checked[id] === undefined && checked[idKey] === undefined) continue;
+    const ok = checked[id] !== undefined ? checked[id] : checked[idKey];
+    outChecked[idKey] = Boolean(ok);
+    if (userAnswers?.[id] != null) byTaskId[idKey] = userAnswers[id];
+    else if (userAnswers?.[idKey] != null) byTaskId[idKey] = userAnswers[idKey];
+    if (t.number != null && byTaskId[idKey] != null) {
+      byNumber[String(t.number)] = byTaskId[idKey];
+    }
+    if (scores?.[id] != null) outScores[idKey] = scores[id];
+    else if (scores?.[idKey] != null) outScores[idKey] = scores[idKey];
+  }
+  return {
+    by_number: byNumber,
+    by_task_id: byTaskId,
+    scores: outScores,
+    checked: outChecked,
   };
 }
 

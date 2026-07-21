@@ -461,36 +461,110 @@ function ApplicationForm() {
       submittedAt: new Date().toISOString(),
     };
 
+    const getCsrfToken = () => {
+      const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+      return match ? decodeURIComponent(match[1]) : "";
+    };
+
     try {
-      if (TEACHER_APPLICATION_ENDPOINT) {
-        const res = await fetch(TEACHER_APPLICATION_ENDPOINT, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || err.detail || "Не удалось отправить заявку");
-        }
-      } else {
+      if (!TEACHER_APPLICATION_ENDPOINT) {
         try {
           localStorage.setItem(TEACHER_APPLICATION_DRAFT_KEY, JSON.stringify(payload));
         } catch {
           /* ignore quota errors */
         }
-        await new Promise((resolve) => setTimeout(resolve, 600));
+        setStatus("unavailable");
+        window.setTimeout(() => successRef.current?.focus(), 50);
+        return;
+      }
+
+      if (!getCsrfToken()) {
+        await fetch("/api/csrf/", { credentials: "same-origin" });
+      }
+      const csrf = getCsrfToken();
+      const res = await fetch(TEACHER_APPLICATION_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...(csrf ? { "X-CSRFToken": csrf } : {}),
+        },
+        credentials: "same-origin",
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || err.detail || "Не удалось отправить заявку");
+      }
+      try {
+        localStorage.removeItem(TEACHER_APPLICATION_DRAFT_KEY);
+      } catch {
+        /* ignore */
       }
       setStatus("success");
       setForm(EMPTY_FORM);
       window.setTimeout(() => successRef.current?.focus(), 50);
     } catch (err) {
+      try {
+        localStorage.setItem(TEACHER_APPLICATION_DRAFT_KEY, JSON.stringify(payload));
+      } catch {
+        /* ignore */
+      }
       setStatus("error");
       setSubmitError(err instanceof Error ? err.message : "Не удалось отправить заявку");
     } finally {
       setSubmitting(false);
     }
   };
+
+  if (status === "unavailable") {
+    return (
+      <div
+        className="t-form t-form-state"
+        role="status"
+        aria-live="polite"
+        ref={successRef}
+        tabIndex={-1}
+      >
+        <div className="t-form-state__icon" aria-hidden="true">
+          <CircleAlert />
+        </div>
+        <h3 className="t-form-state__title">Автоотправка пока недоступна</h3>
+        <p className="t-form-state__text">
+          Форма заявки ещё не подключена к серверу. Черновик сохранён в браузере —
+          напишите нам в сообществе, и мы свяжемся с вами.
+        </p>
+        <div className="t-form-state__links" style={{ display: "flex", flexWrap: "wrap", gap: "12px", justifyContent: "center" }}>
+          <a
+            href={TEACHERS_TELEGRAM_URL}
+            className="t-btn t-btn--primary"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Telegram
+          </a>
+          <a
+            href={TEACHERS_VK_URL}
+            className="t-btn t-btn--secondary"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            ВКонтакте
+          </a>
+        </div>
+        <button
+          type="button"
+          className="t-btn t-btn--secondary"
+          onClick={() => {
+            setStatus(null);
+            setErrors({});
+          }}
+        >
+          Вернуться к форме
+        </button>
+      </div>
+    );
+  }
 
   if (status === "success") {
     return (
@@ -506,9 +580,7 @@ function ApplicationForm() {
         </div>
         <h3 className="t-form-state__title">Спасибо!</h3>
         <p className="t-form-state__text">
-          {TEACHER_APPLICATION_ENDPOINT
-            ? "Заявка отправлена. Мы свяжемся с вами в ближайшее время."
-            : "Заявка сохранена. Мы свяжемся с вами, когда подключим обработку формы."}
+          Заявка отправлена. Мы свяжемся с вами в ближайшее время.
         </p>
         <button
           type="button"

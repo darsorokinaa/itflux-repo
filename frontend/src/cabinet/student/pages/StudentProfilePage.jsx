@@ -1,27 +1,36 @@
 import { useEffect, useState } from "react";
-import { useOutletContext } from "react-router-dom";
-import { fetchStudentProfile, updateStudentProfile } from "../../../utils/cabinetAuth";
+import { Link, useOutletContext } from "react-router-dom";
+import { fetchStudentBilling, fetchStudentProfile, updateStudentProfile } from "../../../utils/cabinetAuth";
+import { billingTypeLabel, formatMoney, formatUnits } from "../../billing/billingFormat";
+import CabinetIcon from "../../CabinetIcons";
 import { loadStudentData } from "../studentData";
 import { StudentPageShell } from "../StudentSectionUi";
+import "../../styles/payments.css";
 
 export default function StudentProfilePage() {
   const { handleLogout, loggingOut } = useOutletContext?.() ?? {};
 
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [saving,  setSaving]  = useState(false);
-  const [msg,     setMsg]     = useState("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [msgType, setMsgType] = useState(null);
+  const [billingAccounts, setBillingAccounts] = useState([]);
 
   useEffect(() => {
     loadStudentData(fetchStudentProfile, "profile")
       .then(setProfile)
       .finally(() => setLoading(false));
+    fetchStudentBilling()
+      .then((data) => setBillingAccounts(data?.accounts || []))
+      .catch(() => setBillingAccounts([]));
   }, []);
 
   const handleSave = async () => {
     if (!profile) return;
     setSaving(true);
     setMsg("");
+    setMsgType(null);
     try {
       await updateStudentProfile({
         name: profile.name,
@@ -29,8 +38,10 @@ export default function StudentProfilePage() {
         notifications_enabled: profile.notifications_enabled,
       });
       setMsg("Сохранено");
+      setMsgType("success");
     } catch (e) {
       setMsg(e.message || "Ошибка сохранения");
+      setMsgType("error");
     } finally {
       setSaving(false);
     }
@@ -82,6 +93,42 @@ export default function StudentProfilePage() {
         )}
       </section>
 
+      {billingAccounts.length ? (
+        <section className="st-profile-section">
+          <h2 className="st-profile-section__title">Оплата занятий</h2>
+          {billingAccounts.map((acc) => (
+            <div key={acc.id} className="pay-student-block" style={{ marginBottom: 10 }}>
+              <div className="pay-student-block__grid">
+                <div>
+                  <span>Схема</span>
+                  <strong>{billingTypeLabel(acc.billing_type)}</strong>
+                </div>
+                <div>
+                  <span>Остаток абонемента</span>
+                  <strong>
+                    {acc.package
+                      ? formatUnits(acc.package.remaining_units, acc.package.unit_type)
+                      : "—"}
+                  </strong>
+                </div>
+                <div>
+                  <span>Задолженность</span>
+                  <strong>{formatMoney(acc.balance?.debt || 0, acc.currency)}</strong>
+                </div>
+                <div>
+                  <span>Цена</span>
+                  <strong>
+                    {acc.default_lesson_price
+                      ? formatMoney(acc.default_lesson_price, acc.currency)
+                      : "—"}
+                  </strong>
+                </div>
+              </div>
+            </div>
+          ))}
+        </section>
+      ) : null}
+
       {/* Обучение */}
       <section className="st-profile-section">
         <h2 className="st-profile-section__title">Обучение</h2>
@@ -102,15 +149,12 @@ export default function StudentProfilePage() {
       {/* Уведомления */}
       <section className="st-profile-section">
         <h2 className="st-profile-section__title">Уведомления</h2>
-        <label className="st-toggle-row">
-          <span>Напоминания о занятиях</span>
-          <input
-            type="checkbox"
-            checked={profile.notifications_enabled !== false}
-            onChange={(e) => setProfile({ ...profile, notifications_enabled: e.target.checked })}
-            aria-label="Напоминания о занятиях"
-          />
-        </label>
+        <p className="cabinet-auth-muted" style={{ marginBottom: "0.75rem" }}>
+          Напоминания об уроках и заданиях — в Telegram и в кабинете.
+        </p>
+        <Link to="/cabinet/settings/notifications/" className="cb-btn cb-btn--outline cb-btn--pill">
+          Настройки уведомлений
+        </Link>
       </section>
 
       {/* Кнопки */}
@@ -135,7 +179,15 @@ export default function StudentProfilePage() {
         )}
       </div>
 
-      {msg && <p className="st-toast" role="status">{msg}</p>}
+      {msg && msgType ? (
+        <p
+          className={`st-toast st-toast--${msgType}`}
+          role={msgType === "error" ? "alert" : "status"}
+        >
+          <CabinetIcon name={msgType === "success" ? "check" : "alert"} />
+          <span>{msg}</span>
+        </p>
+      ) : null}
     </StudentPageShell>
   );
 }

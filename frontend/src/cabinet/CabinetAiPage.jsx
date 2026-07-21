@@ -1,4 +1,12 @@
-import { useRef, useState } from "react";
+// TEMP: ИИ-помощник скрыт — весь интерфейс закомментирован.
+// Чтобы вернуть: раскомментировать ниже, а также пункты в cabinetNav.js и маршрут в App.jsx.
+
+export default function CabinetAiPage() {
+  return null;
+}
+
+/*
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import CabinetIcon from "./CabinetIcons";
 import {
@@ -142,3 +150,4 @@ export default function CabinetAiPage() {
     </CabinetPageShell>
   );
 }
+*/

@@ -259,7 +259,9 @@ export function useLessonInProgress(startsAt, endsAt) {
   return live;
 }
 
-export function canShowLessonConnectButton(startsAt, endsAt, now = Date.now()) {
+export function canShowLessonConnectButton(startsAt, endsAt, now = Date.now(), meetingStatus = "") {
+  // Пока конференция live — кнопка активна до завершения урока учителем.
+  if (meetingStatus === "live") return true;
   if (!startsAt) return false;
   const start = new Date(startsAt).getTime();
   if (Number.isNaN(start)) return false;
@@ -268,6 +270,9 @@ export function canShowLessonConnectButton(startsAt, endsAt, now = Date.now()) {
 }
 
 export function lessonMeetingHref(event) {
+  const status = event?.video_meeting?.status || event?.videoMeeting?.status;
+  // Пока учитель не начал урок — не отдаём ссылку для «Подключиться».
+  if (status && status !== "live") return "";
   const vmUrl = event?.video_meeting?.pageUrl || event?.videoMeeting?.pageUrl;
   if (vmUrl) return vmUrl;
   return event?.meeting_url || event?.link || "";
@@ -277,15 +282,19 @@ export function isInternalMeetingHref(href) {
   return typeof href === "string" && href.startsWith("/cabinet/meetings/");
 }
 
-export function useLessonConnectAvailable(startsAt, endsAt) {
-  const [available, setAvailable] = useState(() => canShowLessonConnectButton(startsAt, endsAt));
+export function useLessonConnectAvailable(startsAt, endsAt, meetingStatus = "") {
+  const [available, setAvailable] = useState(() =>
+    canShowLessonConnectButton(startsAt, endsAt, Date.now(), meetingStatus),
+  );
 
   useEffect(() => {
-    const update = () => setAvailable(canShowLessonConnectButton(startsAt, endsAt));
+    const update = () => setAvailable(
+      canShowLessonConnectButton(startsAt, endsAt, Date.now(), meetingStatus),
+    );
     update();
     const id = window.setInterval(update, 30000);
     return () => window.clearInterval(id);
-  }, [startsAt, endsAt]);
+  }, [startsAt, endsAt, meetingStatus]);
 
   return available;
 }

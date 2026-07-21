@@ -6,7 +6,7 @@
  */
 function lkBuildBase(): string {
   return String(
-    import.meta.env.VITE_LK_PUBLIC_URL || import.meta.env.VITE_LK_URL || "http://lk.itflux.ru"
+    import.meta.env.VITE_LK_PUBLIC_URL || import.meta.env.VITE_LK_URL || "https://itflux-academy.ru"
   )
     .trim()
     .replace(/\/$/, "");

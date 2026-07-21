@@ -3,6 +3,7 @@ import uuid
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 from .choices import (
     AssignmentStatus,
@@ -1853,25 +1854,92 @@ class NotificationPreference(models.Model):
     email_enabled = models.BooleanField("Email", default=False)
     vk_enabled = models.BooleanField("ВКонтакте", default=False)
     vk_user_id = models.CharField("VK user id", max_length=32, blank=True)
+    telegram_enabled = models.BooleanField("Telegram", default=False)
+    telegram_chat_id = models.CharField("Telegram chat id", max_length=64, blank=True, db_index=True)
+    telegram_username = models.CharField("Telegram username", max_length=64, blank=True)
+    telegram_connected_at = models.DateTimeField("Telegram подключён", null=True, blank=True)
     notify_lesson_created = models.BooleanField(default=True)
     notify_lesson_moved = models.BooleanField(default=True)
     notify_lesson_cancelled = models.BooleanField(default=True)
     notify_lesson_updated = models.BooleanField(default=True)
     notify_participants_changed = models.BooleanField(default=True)
+    notify_homework = models.BooleanField("Напоминания о заданиях", default=True)
+    notify_review = models.BooleanField("Уведомления о проверке", default=True)
     notify_before_lesson_minutes = models.PositiveSmallIntegerField(
         null=True,
         blank=True,
         default=15,
     )
+    digest_hour = models.PositiveSmallIntegerField(
+        "Час ежедневной сводки",
+        default=19,
+        help_text="Час локального времени (0–23) для сводки в Telegram",
+    )
+    # Финансовые уведомления (учёт оплат репетитора)
+    notify_payment_received = models.BooleanField("Поступила оплата", default=True)
+    notify_package_low = models.BooleanField("Заканчивается абонемент", default=True)
+    notify_debt_created = models.BooleanField("Возникла задолженность", default=True)
+    notify_billing_daily_digest = models.BooleanField("Ежедневная финансовая сводка", default=False)
+    notify_billing_weekly_digest = models.BooleanField("Еженедельная финансовая сводка", default=False)
+    notify_student_payment_recorded = models.BooleanField("Ученику: оплата зафиксирована", default=False)
+    notify_student_package_low = models.BooleanField("Ученику: мало занятий/минут", default=False)
+    notify_student_package_ended = models.BooleanField("Ученику: абонемент закончился", default=False)
+    notify_student_unpaid_lesson = models.BooleanField("Ученику: неоплаченный урок", default=False)
+    notify_student_payment_due = models.BooleanField("Ученику: приближается срок оплаты", default=False)
+    # Журнал успеваемости
+    notify_journal_results = models.BooleanField("Итоги урока опубликованы", default=True)
+    notify_journal_comment = models.BooleanField("Комментарий учителя (в итогах)", default=True)
+    notify_journal_recommendation = models.BooleanField("Новая рекомендация", default=True)
+    notify_journal_daily_digest = models.BooleanField("Учителю: ежедневная сводка журнала", default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name = "Настройки уведомлений"
         verbose_name_plural = "Настройки уведомлений"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["telegram_chat_id"],
+                condition=~models.Q(telegram_chat_id=""),
+                name="cabinet_unique_telegram_chat_id",
+            ),
+        ]
 
     def __str__(self):
         return f"Уведомления: {self.user}"
+
+    @property
+    def telegram_connected(self) -> bool:
+        return bool(self.telegram_enabled and self.telegram_chat_id)
+
+
+class TelegramConnectToken(models.Model):
+    """Короткоживущий одноразовый токен для привязки Telegram (не путать с приглашением)."""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="telegram_connect_tokens",
+        verbose_name="Пользователь",
+    )
+    token = models.CharField("Токен", max_length=64, unique=True, db_index=True)
+    expires_at = models.DateTimeField("Действует до")
+    used_at = models.DateTimeField("Использован", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Токен подключения Telegram"
+        verbose_name_plural = "Токены подключения Telegram"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"TG connect → {self.user_id}"
+
+    @property
+    def is_active(self) -> bool:
+        if self.used_at is not None:
+            return False
+        return bool(self.expires_at and self.expires_at >= timezone.now())
 
 
 class EventReminderLog(models.Model):
@@ -2341,6 +2409,24 @@ class VideoMeeting(models.Model):
     )
     actual_started_at = models.DateTimeField("Фактическое начало", null=True, blank=True)
     actual_finished_at = models.DateTimeField("Фактическое завершение", null=True, blank=True)
+    # Что учитель сейчас показывает ученику (доска / вариант) — остальное скрыто.
+    presented_kind = models.CharField(
+        "Показанный ресурс",
+        max_length=20,
+        blank=True,
+        default="",
+        help_text="board | variant | пусто",
+    )
+    presented_payload = models.JSONField("Данные показанного ресурса", default=dict, blank=True)
+    presented_at = models.DateTimeField("Показано в", null=True, blank=True)
+    presented_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="presented_video_meetings",
+        verbose_name="Показал",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -2389,3 +2475,270 @@ class MeetingAttendance(models.Model):
 
     def __str__(self):
         return f"{self.user_id} @ {self.meeting_id} ({self.joined_at})"
+
+
+def empty_board_scene():
+    return {"elements": [], "appState": {}, "files": {}}
+
+
+class InteractiveBoard(models.Model):
+    """Интерактивная доска Excalidraw для кабинета учителя."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    title = models.CharField("Название", max_length=255, default="Новая доска")
+    description = models.TextField("Описание", blank=True)
+
+    owner = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="interactive_boards",
+        verbose_name="Владелец",
+    )
+
+    group = models.ForeignKey(
+        StudentGroup,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="interactive_boards",
+        verbose_name="Группа",
+    )
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="interactive_boards",
+        verbose_name="Ученик",
+    )
+    lesson = models.ForeignKey(
+        Lesson,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="interactive_boards",
+        verbose_name="Урок",
+    )
+    schedule_event = models.ForeignKey(
+        "ScheduleEvent",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="interactive_boards",
+        verbose_name="Событие расписания",
+    )
+
+    scene_data = models.JSONField("Данные сцены", default=empty_board_scene)
+    thumbnail = models.TextField("Превью", blank=True)
+    allow_export = models.BooleanField("Разрешить экспорт зрителям", default=True)
+    version = models.PositiveIntegerField("Версия", default=1)
+
+    is_archived = models.BooleanField("В архиве", default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Интерактивная доска"
+        verbose_name_plural = "Интерактивные доски"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["owner", "-updated_at"]),
+            models.Index(fields=["group"]),
+            models.Index(fields=["student"]),
+            models.Index(fields=["lesson"]),
+            models.Index(fields=["schedule_event"]),
+        ]
+
+    def __str__(self):
+        return self.title or "Доска"
+
+    def is_linked_student_user(self, user) -> bool:
+        """True, если user — аккаунт ученика, к которому привязана доска."""
+        if user is None or not getattr(user, "is_authenticated", False):
+            return False
+        if not self.student_id:
+            return False
+        student = self.student
+        return bool(student and student.user_id == user.id)
+
+    def get_permission_for(self, user) -> str | None:
+        """Возвращает 'owner' | 'edit' | 'view' | None."""
+        if user is None or not user.is_authenticated:
+            return None
+        if self.owner_id == user.id:
+            return "owner"
+
+        # Привязанный ученик всегда может совместно редактировать доску.
+        if self.is_linked_student_user(user):
+            return InteractiveBoardAccess.EDIT
+
+        access = self.access_records.filter(user=user).first()
+        if access:
+            return access.permission
+
+        if self.group_id and self.group:
+            roster = Student.objects.filter(user=user, groups=self.group).exists()
+            if roster:
+                return InteractiveBoardAccess.VIEW
+
+        return None
+
+
+class InteractiveBoardAccess(models.Model):
+    VIEW = "view"
+    EDIT = "edit"
+
+    PERMISSION_CHOICES = [
+        (VIEW, "Просмотр"),
+        (EDIT, "Редактирование"),
+    ]
+
+    board = models.ForeignKey(
+        InteractiveBoard,
+        on_delete=models.CASCADE,
+        related_name="access_records",
+        verbose_name="Доска",
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="interactive_board_access",
+        verbose_name="Пользователь",
+    )
+    permission = models.CharField(
+        "Право",
+        max_length=10,
+        choices=PERMISSION_CHOICES,
+        default=VIEW,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Доступ к интерактивной доске"
+        verbose_name_plural = "Доступы к интерактивным доскам"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["board", "user"],
+                name="unique_interactive_board_user_access",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} → {self.board_id} ({self.permission})"
+
+
+class InteractiveBoardAsset(models.Model):
+    """Крупные изображения доски, вынесенные в media storage."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    board = models.ForeignKey(
+        InteractiveBoard,
+        on_delete=models.CASCADE,
+        related_name="assets",
+        verbose_name="Доска",
+    )
+    file = models.FileField("Файл", upload_to="cabinet/boards/%Y/%m/")
+    mime_type = models.CharField("MIME-тип", max_length=64, blank=True)
+    original_name = models.CharField("Исходное имя", max_length=255, blank=True)
+    size_bytes = models.PositiveIntegerField("Размер", default=0)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="uploaded_board_assets",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Файл интерактивной доски"
+        verbose_name_plural = "Файлы интерактивных досок"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.original_name or str(self.id)
+
+
+class TeacherApplication(models.Model):
+    """Заявка со страницы «Для учителей»."""
+
+    class Status(models.TextChoices):
+        NEW = "new", "Новая"
+        IN_PROGRESS = "in_progress", "В работе"
+        DONE = "done", "Обработана"
+        SPAM = "spam", "Спам"
+
+    name = models.CharField("Имя", max_length=200)
+    contact = models.CharField("Контакт", max_length=255)
+    role = models.CharField("Кто вы", max_length=64, blank=True)
+    teaches = models.CharField("Чему учите", max_length=500, blank=True)
+    help_topics = models.JSONField("Чем можете помочь", default=list, blank=True)
+    comment = models.TextField("Комментарий", blank=True)
+    materials_url = models.URLField("Ссылка на материалы", blank=True, max_length=500)
+    status = models.CharField(
+        "Статус",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.NEW,
+    )
+    ip_address = models.GenericIPAddressField("IP", null=True, blank=True)
+    user_agent = models.CharField("User-Agent", max_length=512, blank=True)
+    created_at = models.DateTimeField("Создана", auto_now_add=True)
+    updated_at = models.DateTimeField("Обновлена", auto_now=True)
+
+    class Meta:
+        verbose_name = "Заявка учителя"
+        verbose_name_plural = "Заявки учителей"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} — {self.contact}"
+
+
+# ── Учёт оплат репетитора (см. billing_models.py; не SaaS Payment) ────────────
+from .billing_models import (  # noqa: E402
+    BillingAccount,
+    BillingAuditLog,
+    BillingTransaction,
+    BillingType,
+    DeliveryStatus,
+    EventBillingRecord,
+    FinancialStatus,
+    LateCancelRule,
+    LessonPackage,
+    MonthlyBillingPeriod,
+    PackageBalanceCheckMode,
+    PackageStatus,
+    PackageUnitType,
+    PaymentMethod,
+    PaymentReminderLog,
+    PriceSource,
+    StudentBillingSettings,
+    StudentPayment,
+    StudentPaymentAllocation,
+    StudentPaymentStatus,
+    TeacherBillingSettings,
+    TeacherPriceRule,
+    TransactionType,
+)
+
+# ── Журнал успеваемости (см. journal_models.py) ───────────────────────────────
+from .journal_models import (  # noqa: E402
+    AssessmentCriterion,
+    AssessmentTemplate,
+    AssessmentTemplateCriterion,
+    AttendanceStatus,
+    JournalAttentionMarker,
+    JournalAuditLog,
+    JournalEditLock,
+    JournalStatus,
+    JournalTag,
+    JournalTeacherSettings,
+    LessonJournal,
+    OverallScoreMode,
+    RecordPublishStatus,
+    StudentCriterionScore,
+    StudentLessonRecord,
+    StudentLessonRecordTag,
+)

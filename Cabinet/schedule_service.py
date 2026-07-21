@@ -472,12 +472,35 @@ def move_event_with_scope(event, *, starts_at, ends_at, changed_by, scope=None, 
 
 def cancel_event(event, *, changed_by, notify=True, plan_cancel_action=None):
     from .plan_schedule import apply_plan_cancel_action
+    from .video_meeting_service import cancel_meeting_for_event
 
     old = event_snapshot(event)
     if plan_cancel_action:
         apply_plan_cancel_action(event, plan_cancel_action)
+
+    # Если урок уже был оформлен финансово как проведённый — вернуть списание.
+    try:
+        from .billing_models import DeliveryStatus, EventBillingRecord
+        from .billing_service import unfinalize_event_billing
+
+        has_finalized = EventBillingRecord.objects.filter(
+            event=event,
+            finalized_at__isnull=False,
+            delivery_status=DeliveryStatus.CONDUCTED,
+        ).exists()
+        if has_finalized and changed_by:
+            unfinalize_event_billing(
+                event=event,
+                teacher=changed_by,
+                comment="Отмена урока — возврат списания",
+                reset_event_status=False,
+            )
+    except Exception:
+        pass
+
     event.status = ScheduleEvent.Status.CANCELLED
     event.save(update_fields=["status", "updated_at"])
+    cancel_meeting_for_event(event)
     log_change(
         event,
         changed_by=changed_by,

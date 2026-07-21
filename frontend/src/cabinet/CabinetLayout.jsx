@@ -14,6 +14,8 @@ import { CabinetCallProvider } from "./CabinetCallContext";
 import CabinetGlobalSearch from "./components/CabinetGlobalSearch";
 import CabinetNotificationsBell from "./components/CabinetNotificationsBell";
 import CabinetGuideModal from "./components/CabinetGuideModal";
+import ConfirmActionModal from "./components/ConfirmActionModal";
+import { useSubscription } from "./hooks/useSubscription";
 import "../styles/cabinet-dashboard.css";
 import "../styles/cabinet-mobile-system.css";
 import "./styles/teacher-cabinet.css";
@@ -77,9 +79,12 @@ export default function CabinetLayout() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const searchInputRef = useRef(null);
+  const subscription = useSubscription();
+  const planName = subscription.currentPlan?.name || "";
 
   useEffect(() => { document.title = PAGE_TITLE; }, []);
 
@@ -140,7 +145,7 @@ export default function CabinetLayout() {
     setLoggingOut(true);
     try { await logoutCabinet(); window.location.href = "/"; }
     catch { /* ignore */ }
-    finally { setLoggingOut(false); }
+    finally { setLoggingOut(false); setLogoutConfirm(false); }
   };
 
   if (loading) {
@@ -166,7 +171,14 @@ export default function CabinetLayout() {
     ? "cabinet-content"
     : "cabinet-content cabinet-content--page";
   const sectionTitle = getCabinetSectionTitle(location.pathname);
-  const outletContext = { user, handleLogout, loggingOut, openGuide };
+  const outletContext = {
+    user,
+    handleLogout,
+    loggingOut,
+    openGuide,
+    currentPlan: subscription.currentPlan,
+    subscriptionLoading: subscription.loading,
+  };
 
   return (
     <CabinetCallProvider>
@@ -182,16 +194,47 @@ export default function CabinetLayout() {
           ))}
         </nav>
         <div className="cabinet-sidebar-bottom">
-          <button type="button" className="cabinet-nav-item" aria-label="Настройки">
+          <Link
+            to="/cabinet/upgrade"
+            className="cabinet-plan-chip"
+            title={planName ? `Тариф «${planName}»` : "Тарифы"}
+            aria-label={planName ? `Тариф ${planName}` : "Тарифы"}
+          >
+            <span className="cabinet-plan-chip__icon" aria-hidden="true">
+              <CabinetIcon name="wallet" />
+            </span>
+            <span className="cabinet-plan-chip__body">
+              <span className="cabinet-plan-chip__label">Тариф</span>
+              <span className="cabinet-plan-chip__name">
+                {subscription.loading ? "…" : (planName || "Не выбран")}
+              </span>
+            </span>
+          </Link>
+          <Link
+            to="/cabinet/settings/notifications/"
+            className="cabinet-nav-item"
+            aria-label="Настройки уведомлений"
+          >
             <span className="cabinet-nav-item__icon">
               <CabinetIcon name="settings" />
             </span>
             <span className="cabinet-nav-item__label">Настройки</span>
-          </button>
-          <div className="cabinet-user-avatar" title={displayName(user)} onClick={handleLogout}>
+          </Link>
+          <Link
+            to="/cabinet/more"
+            className="cabinet-user-avatar"
+            title={displayName(user)}
+            aria-label="Профиль"
+          >
             {displayName(user).charAt(0).toUpperCase()}
-          </div>
-          <button type="button" className="cabinet-logout-btn" onClick={handleLogout} disabled={loggingOut} aria-label="Выйти">
+          </Link>
+          <button
+            type="button"
+            className="cabinet-logout-btn"
+            onClick={() => setLogoutConfirm(true)}
+            disabled={loggingOut}
+            aria-label="Выйти"
+          >
             <CabinetIcon name="logout" />
           </button>
         </div>
@@ -260,6 +303,16 @@ export default function CabinetLayout() {
         ))}
       </nav>
       <CabinetGuideModal open={guideOpen} onClose={closeGuide} onComplete={completeGuide} />
+      <ConfirmActionModal
+        open={logoutConfirm}
+        title="Выйти из аккаунта?"
+        text="Вы уверены, что хотите выйти?"
+        confirmLabel="Выйти"
+        danger
+        loading={loggingOut}
+        onClose={() => setLogoutConfirm(false)}
+        onConfirm={handleLogout}
+      />
     </div>
     </CabinetCallProvider>
   );

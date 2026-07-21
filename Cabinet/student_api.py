@@ -226,7 +226,8 @@ def _video_meeting_payload(event):
         "pageUrl": f"/cabinet/meetings/{vm.uuid}",
     }
     meeting_url = event.meeting_url or ""
-    if not meeting_url and vm.status in ("scheduled", "live"):
+    # Постоянная внутренняя ссылка на всём жизненном цикле; вход в Jitsi только при live.
+    if not meeting_url:
         meeting_url = payload["pageUrl"]
     return payload, meeting_url
 
@@ -586,12 +587,17 @@ def _serialize_schedule_event(event, students):
 
 
 def _serialize_student_schedule_event_detail(event, students):
+    from .meeting_present import redact_plan_item_for_student
+
     plan_item_obj, lesson_number = resolve_plan_item_for_event(event)
     local_start = timezone.localtime(event.starts_at)
     local_end = timezone.localtime(event.ends_at)
     plan_item_json = None
     if plan_item_obj:
-        plan_item_json = _plan_item_to_json(plan_item_obj, lesson_number=lesson_number)
+        # Материалы и ДЗ плана видны только учителю; ученик получает их по «Показать».
+        plan_item_json = redact_plan_item_for_student(
+            _plan_item_to_json(plan_item_obj, lesson_number=lesson_number)
+        )
     topic = _schedule_event_topic(event, students)
     homework_id = None
     homework_status = None
@@ -619,7 +625,7 @@ def _serialize_student_schedule_event_detail(event, students):
         "videoMeeting": video_meeting,
         "status": event.status,
         "readOnly": True,
-        "materials": event.materials or "",
+        "materials": "",
         "tags": event.tags or [],
         "participants": _participants_to_json(event),
         "teacher_name": _teacher_name(event.owner),
@@ -1239,24 +1245,31 @@ class StudentProfileView(StudentScopedView):
         return Response({"ok": True})
 
 
+def _student_in_app_notifications(user):
+    from .choices import NotificationChannel
+    from .models import Notification
+
+    return Notification.objects.filter(
+        recipient_user=user,
+        channel=NotificationChannel.IN_APP,
+    )
+
+
 class StudentNotificationsView(StudentScopedView):
     def get(self, request):
-        from .models import Notification
         from .serializers import NotificationSerializer
 
-        qs = Notification.objects.filter(recipient_user=request.user).order_by("-created_at")[:50]
-        unread = Notification.objects.filter(recipient_user=request.user, is_read=False).count()
+        qs = _student_in_app_notifications(request.user).order_by("-created_at")[:50]
+        unread = _student_in_app_notifications(request.user).filter(is_read=False).count()
         return Response({
-            "items": NotificationSerializer(qs, many=True).data,
+            "items": NotificationSerializer(qs, many=True, context={"request": request}).data,
             "unread_count": unread,
         })
 
 
 class StudentNotificationReadView(StudentScopedView):
     def post(self, request, notification_id):
-        from .models import Notification
-
-        n = Notification.objects.filter(pk=notification_id, recipient_user=request.user).first()
+        n = _student_in_app_notifications(request.user).filter(pk=notification_id).first()
         if not n:
             return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         n.is_read = True
@@ -1266,7 +1279,11 @@ class StudentNotificationReadView(StudentScopedView):
 
 class StudentNotificationsReadAllView(StudentScopedView):
     def post(self, request):
-        from .models import Notification
-
-        Notification.objects.filter(recipient_user=request.user, is_read=False).update(is_read=True)
+        _student_in_app_notifications(request.user).filter(is_read=False).update(is_read=True)
         return Response({"ok": True})
+
+
+class StudentNotificationsClearView(StudentScopedView):
+    def post(self, request):
+        deleted, _ = _student_in_app_notifications(request.user).delete()
+        return Response({"ok": True, "deleted": deleted})

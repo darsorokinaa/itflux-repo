@@ -152,7 +152,8 @@ def schedule_event_to_json(event):
             "joinStateLabel": ui_state_message(join_state),
             "pageUrl": f"/cabinet/meetings/{meeting.uuid}",
         }
-        if not link and meeting.status in ("scheduled", "live"):
+        # Постоянная ссылка на страницу платформы на всём жизненном цикле комнаты.
+        if not link:
             link = video_meeting_json["pageUrl"]
 
     recurrence = None

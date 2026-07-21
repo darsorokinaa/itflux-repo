@@ -63,11 +63,11 @@ class SubscriptionLimitService:
         return sub  # возвращаем даже истёкшую — caller решает что делать
 
     @staticmethod
-    def get_or_create_subscription(teacher: User):
+    def get_or_create_subscription(teacher: User, *, apply_promo: bool = True):
         """Возвращает подписку, создавая бесплатный тариф при необходимости."""
         from .models import TariffPlan, TeacherSubscription
         try:
-            return teacher.subscription
+            sub = teacher.subscription
         except TeacherSubscription.DoesNotExist:
             start_plan = TariffPlan.objects.filter(slug="start", is_active=True).first()
             if not start_plan:
@@ -75,11 +75,20 @@ class SubscriptionLimitService:
                     slug="start",
                     defaults={"name": "Старт", "price_month": 0, "sort_order": 0},
                 )
-            return TeacherSubscription.objects.create(
+            sub = TeacherSubscription.objects.create(
                 teacher=teacher,
                 plan=start_plan,
                 status=TeacherSubscription.Status.ACTIVE,
             )
+        if apply_promo:
+            from .registration_promo import ensure_registration_promo
+
+            ensure_registration_promo(teacher)
+            try:
+                sub = TeacherSubscription.objects.select_related("plan").get(teacher=teacher)
+            except TeacherSubscription.DoesNotExist:
+                pass
+        return sub
 
     @staticmethod
     def get_current_plan(teacher: User):

@@ -64,11 +64,11 @@ DOCKER_HOST_ADDRESS=5.42.106.185
 JVB_ADVERTISE_IPS=5.42.106.185
 
 ENABLE_AUTH=1
-ENABLE_GUESTS=1
+ENABLE_GUESTS=0
 AUTH_TYPE=jwt
-JWT_APP_ID=itflux
+JWT_APP_ID=generator_test
 JWT_APP_SECRET=${SECRET}
-JWT_ACCEPTED_ISSUERS=itflux
+JWT_ACCEPTED_ISSUERS=generator_test
 JWT_ACCEPTED_AUDIENCES=jitsi
 EOF
 ```
@@ -122,18 +122,26 @@ sudo nginx -t && sudo systemctl reload nginx
 ```env
 JITSI_DOMAIN=lesson.itflux-academy.ru
 JITSI_AUTH_MODE=jwt
-JITSI_APP_ID=itflux
-JITSI_APP_SECRET=<тот же JWT_APP_SECRET>
+JITSI_APP_ID=generator_test
+JITSI_APP_SECRET=<тот же app_secret, что в Prosody>
 JITSI_SUB=lesson.itflux-academy.ru
 JITSI_AUD=jitsi
 JITSI_EMBED_EXTRA_HOSTS=lesson.itflux-academy.ru
 ```
 
-В nginx платформы для `/cabinet/meetings/` замените `meet.jit.si` на `lesson.itflux-academy.ru` (см. `deploy/nginx.conf`).
+**Обязательно:** `JITSI_APP_ID` / `JITSI_APP_SECRET` в Django и Prosody должны совпадать.
+Для системного Jitsi (не Docker):
+
+```bash
+sudo bash /opt/itflux/deploy/jitsi/fix-jwt-prosody.sh
+sudo systemctl restart itflux   # или gunicorn/daphne
+```
+
+В nginx платформы для `/cabinet/meetings/` должен быть `lesson.itflux-academy.ru` (см. `deploy/nginx.conf`).
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl restart gunicorn   # + daphne при необходимости
+sudo systemctl restart itflux
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
@@ -154,8 +162,17 @@ sudo nginx -t && sudo systemctl reload nginx
 | Порт 8000 занят | `ss -lntp \| grep 8000` — смените `HTTP_PORT` в `.env` Jitsi и в `nginx-lesson.conf` |
 | Редирект на академию | старый nginx `server_name lesson...` с `return 301` |
 | Нет звука/видео | UDP **10000** в firewall + `JVB_ADVERTISE_IPS` = публичный IP |
-| JWT не пускает | один и тот же `JWT_APP_SECRET` / `JITSI_APP_SECRET`; после смены `.env` иногда нужно `rm -rf ~/.jitsi-meet-cfg` и `docker compose up -d` заново |
+| Участники не видят друг друга (у каждого «1») | Чаще `ENABLE_GUESTS=1` (разные MUC) или разный `app_id`. В `.env` Jitsi: `ENABLE_GUESTS=0`. Канон: `JITSI_APP_ID=generator_test`. Затем `sudo bash deploy/jitsi/fix-jwt-prosody.sh`. В кабинете roomName общий — сверьте суффикс комнаты в UI у обоих. |
+| В списке 2+, но нет медиа | JVB / UDP 10000 / `JVB_ADVERTISE_IPS` / ICE; диагностика: `frontend/public/jitsi-direct-test.html` |
+| JWT не пускает / «Присоединиться» не входит | Prosody в `ANONYMOUS`, а Django шлёт JWT. Проверка: `curl` POST на `/http-bind` — в features только `ANONYMOUS`. Фикс: `sudo bash deploy/jitsi/fix-jwt-prosody.sh` (ставит `authentication = "token"` + тот же secret). Затем `sudo systemctl restart prosody jicofo` |
 | Google DNS NXDOMAIN | у Timeweb запись есть — подождите TTL или проверьте `@ns1.timeweb.ru` |
+
+### Быстрая диагностика «не видят друг друга»
+
+1. В двух браузерах:  
+   `https://<платформа>/jitsi-direct-test.html?domain=lesson.itflux-academy.ru&room=itfluxdiagnosticroom001`
+2. Если там друг друга видно — проблема в кабинете (room/JWT). Если нет — Prosody/JVB/UDP.
+3. На сервере синхронизируйте JWT: `sudo bash /opt/itflux/deploy/jitsi/fix-jwt-prosody.sh`
 
 ---
 

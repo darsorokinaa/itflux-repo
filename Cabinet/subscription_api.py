@@ -109,11 +109,20 @@ class SubscriptionPlansView(APIView):
     permission_classes = [IsCabinetTeacher]
 
     def get(self, request):
+        from .registration_promo import promo_payload
+
         plans = TariffPlan.objects.filter(is_active=True).order_by("sort_order", "price_month")
         current_plan = SubscriptionLimitService.get_current_plan(request.user)
+        sub = SubscriptionLimitService.get_or_create_subscription(request.user)
         return Response({
             "current_slug": current_plan.slug,
             "plans": [_plan_short(p) for p in plans],
+            "registration_promo": promo_payload(),
+            "subscription": {
+                "status": sub.status,
+                "expires_at": sub.expires_at.isoformat() if sub.expires_at else None,
+                "started_at": sub.started_at.isoformat() if sub.started_at else None,
+            },
         })
 
 

@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { TEACHERS_TELEGRAM_URL } from "../../config/teacherLinks";
 import { changePlan, createPayment, fetchSubscriptionPlans, validatePromoCode } from "../../utils/cabinetAuth";
 import { CabinetPageHeader, CabinetPageShell } from "../CabinetSectionUi";
 
@@ -18,12 +19,15 @@ function CheckIcon() {
   );
 }
 
-function PlanCard({ plan, isCurrent, onSelect, selecting }) {
+function PlanCard({ plan, isCurrent, onSelect, selecting, promoActive }) {
   const l = plan.limits || {};
+  const isProPromo = promoActive && plan.slug === "pro";
   const price =
     Number(plan.price_month) === 0
       ? "Бесплатно"
-      : `${Number(plan.price_month).toLocaleString("ru-RU")} ₽/мес`;
+      : isProPromo
+        ? "3 месяца в подарок"
+        : `${Number(plan.price_month).toLocaleString("ru-RU")} ₽/мес`;
 
   const features = [
     l.students != null && `${l.students} учеников`,
@@ -43,14 +47,26 @@ function PlanCard({ plan, isCurrent, onSelect, selecting }) {
     <div className={[
       "upg-card",
       isCurrent ? "upg-card--current" : "",
-      plan.is_recommended ? "upg-card--recommended" : "",
+      plan.is_recommended || isProPromo ? "upg-card--recommended" : "",
+      isProPromo ? "upg-card--promo" : "",
     ].filter(Boolean).join(" ")}>
-      {plan.is_recommended && <div className="upg-card__badge">Оптимально</div>}
+      {isProPromo ? (
+        <div className="upg-card__badge upg-card__badge--promo">Акция до 1 октября</div>
+      ) : plan.is_recommended ? (
+        <div className="upg-card__badge">Оптимально</div>
+      ) : null}
       {isCurrent && <div className="upg-card__badge upg-card__badge--current">Текущий</div>}
 
       <div className="upg-card__head">
         <span className="upg-card__name">{plan.name}</span>
-        <span className="upg-card__price">{price}</span>
+        <span className="upg-card__price">
+          {price}
+          {isProPromo && Number(plan.price_month) > 0 ? (
+            <span className="upg-card__price-old">
+              {Number(plan.price_month).toLocaleString("ru-RU")} ₽/мес
+            </span>
+          ) : null}
+        </span>
       </div>
 
       <ul className="upg-card__features">
@@ -60,9 +76,14 @@ function PlanCard({ plan, isCurrent, onSelect, selecting }) {
       </ul>
 
       {plan.slug === "school" ? (
-        <button type="button" className="upg-card__btn upg-card__btn--outline" disabled>
+        <a
+          href={TEACHERS_TELEGRAM_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="upg-card__btn upg-card__btn--outline"
+        >
           Оставить заявку
-        </button>
+        </a>
       ) : isCurrent ? (
         <div className="upg-card__current-label">Текущий тариф</div>
       ) : (
@@ -134,6 +155,16 @@ export default function CabinetUpgradePage() {
 
   const currentSlug = plansData?.current_slug;
   const plans = plansData?.plans || [];
+  const registrationPromo = plansData?.registration_promo;
+  const promoActive = Boolean(registrationPromo?.active);
+  const expiresAt = plansData?.subscription?.expires_at;
+  const expiresLabel = expiresAt
+    ? new Date(expiresAt).toLocaleDateString("ru-RU", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    })
+    : "";
 
   return (
     <CabinetPageShell className="upg-shell">
@@ -151,6 +182,25 @@ export default function CabinetUpgradePage() {
         <p className="st-loading">Загрузка тарифов…</p>
       ) : (
         <>
+          {promoActive ? (
+            <div className="upg-promo-banner" role="status">
+              <strong>{registrationPromo.title || "Акция до 1 октября"}</strong>
+              <p>
+                {registrationPromo.message
+                  || "Всем зарегистрировавшимся — тариф «Профи» на 3 месяца с даты регистрации."}
+              </p>
+              {currentSlug === "pro" && expiresLabel ? (
+                <p className="upg-promo-banner__meta">
+                  Ваш «Профи» действует до {expiresLabel}
+                </p>
+              ) : (
+                <p className="upg-promo-banner__meta">
+                  Тариф выдаётся автоматически при регистрации учителя.
+                </p>
+              )}
+            </div>
+          ) : null}
+
           <div className="upg-promo-row">
             <div className="cum-promo__row">
               <input
@@ -186,6 +236,7 @@ export default function CabinetUpgradePage() {
                 isCurrent={plan.slug === currentSlug}
                 onSelect={handleSelect}
                 selecting={selecting}
+                promoActive={promoActive}
               />
             ))}
           </div>

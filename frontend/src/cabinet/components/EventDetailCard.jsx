@@ -1,5 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import CabinetIcon from "../CabinetIcons";
+import BoardLessonBlock from "./BoardLessonBlock";
+import {
+  compactLessonBillingLabel,
+  financialStatusMod,
+  formatMoney,
+} from "../billing/billingFormat";
 
 const RESOURCE_PREVIEW = 2;
 
@@ -36,6 +42,89 @@ export function StatusBadge({ label, mod = "" }) {
     <span className={`cb-lesson-card__badge cb-lesson-card__badge--${mod}`}>
       {label}
     </span>
+  );
+}
+
+function billingBadgeMod(status) {
+  const mod = financialStatusMod(status);
+  if (mod === "ok") return "ok";
+  if (mod === "warn") return "warn";
+  if (mod === "alert") return "alert";
+  return "muted";
+}
+
+function payableBadges(badges = []) {
+  return badges.filter((b) =>
+    ["awaiting_payment", "partially_paid"].includes(b.financial_status),
+  );
+}
+
+function LessonBillingBlock({
+  badges = [],
+  isGroup = false,
+  onRegisterPayment,
+  event,
+}) {
+  const payable = payableBadges(badges);
+
+  if (!badges.length) {
+    return (
+      <section className="cb-lesson-card__section cb-lesson-card__section--compact cb-lesson-billing">
+        <h3 className="cb-lesson-card__section-title cb-lesson-card__section-title--plain">
+          Оплата
+        </h3>
+        <div className="cb-lesson-billing__empty">
+          <p>Статус оплаты появится после окончания урока</p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="cb-lesson-card__section cb-lesson-card__section--compact cb-lesson-billing">
+      <h3 className="cb-lesson-card__section-title cb-lesson-card__section-title--plain">
+        Оплата
+      </h3>
+      <ul className="cb-lesson-billing__list">
+        {badges.map((b) => {
+          const amount = Number(b.amount || 0);
+          const showAmount =
+            amount > 0
+            && !["paid", "paid_from_package", "not_billable"].includes(b.financial_status);
+          return (
+            <li key={`${b.student_id}-${b.financial_status}-${b.record_id || ""}`} className="cb-lesson-billing__row">
+              <div className="cb-lesson-billing__main">
+                {isGroup && b.student_name ? (
+                  <span className="cb-lesson-billing__student">{b.student_name}</span>
+                ) : null}
+                <span className={`pay-event-badge pay-event-badge--${billingBadgeMod(b.financial_status)}`}>
+                  {compactLessonBillingLabel(b)}
+                </span>
+                {showAmount && b.financial_status === "not_charged" ? (
+                  <span className="cb-lesson-billing__amount">
+                    {formatMoney(amount, b.currency)}
+                  </span>
+                ) : null}
+              </div>
+              {b.price_source_label ? (
+                <span className="cb-lesson-billing__source">{b.price_source_label}</span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      {payable.length && onRegisterPayment ? (
+        <div className="cb-lesson-billing__actions">
+          <button
+            type="button"
+            className="cb-lesson-billing__action cb-lesson-billing__action--primary"
+            onClick={() => onRegisterPayment(event, payable)}
+          >
+            Оплачено
+          </button>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -105,7 +194,7 @@ function ParticipantsRow({ participants }) {
   );
 }
 
-function SectionHead({ title, count, variant = "material" }) {
+function SectionHead({ title, count, variant = "material", onAdd = null, addLabel = "Добавить" }) {
   return (
     <div className="cb-lesson-card__section-head">
       <h3 className="cb-lesson-card__section-title">
@@ -116,9 +205,16 @@ function SectionHead({ title, count, variant = "material" }) {
           </span>
         ) : null}
       </h3>
-      {count > 0 ? (
-        <span className="cb-lesson-card__section-meta">{resourceCountMeta(count, variant)}</span>
-      ) : null}
+      <div className="cb-lesson-card__section-head-aside">
+        {count > 0 ? (
+          <span className="cb-lesson-card__section-meta">{resourceCountMeta(count, variant)}</span>
+        ) : null}
+        {onAdd ? (
+          <button type="button" className="cb-lesson-card__section-add" onClick={onAdd}>
+            {addLabel}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -159,7 +255,7 @@ function ResourceCard({ row, variant = "material" }) {
   );
 }
 
-function CollapsibleBlock({ title, count, countVariant, isMobile, children, className = "" }) {
+function CollapsibleBlock({ title, count, countVariant, isMobile, children, className = "", onAdd = null, addLabel = "Добавить" }) {
   const [open, setOpen] = useState(!isMobile);
 
   useEffect(() => {
@@ -167,7 +263,13 @@ function CollapsibleBlock({ title, count, countVariant, isMobile, children, clas
   }, [isMobile]);
 
   const head = (
-    <SectionHead title={title} count={count} variant={countVariant || "material"} />
+    <SectionHead
+      title={title}
+      count={count}
+      variant={countVariant || "material"}
+      onAdd={onAdd}
+      addLabel={addLabel}
+    />
   );
 
   if (!isMobile) {
@@ -181,22 +283,36 @@ function CollapsibleBlock({ title, count, countVariant, isMobile, children, clas
 
   return (
     <section className={`cb-lesson-card__accordion ${className}`.trim()}>
-      <button
-        type="button"
-        className="cb-lesson-card__accordion-trigger"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-      >
-        <span className="cb-lesson-card__accordion-trigger-main">
-          <span className="cb-lesson-card__section-title-text">{title}</span>
-          {count > 0 ? (
-            <span className={`cb-lesson-card__count-badge cb-lesson-card__count-badge--${countVariant || "material"}`}>
-              {count}
-            </span>
-          ) : null}
-        </span>
-        <span className={`cb-lesson-card__accordion-chevron${open ? " is-open" : ""}`} aria-hidden="true" />
-      </button>
+      <div className="cb-lesson-card__accordion-bar">
+        <button
+          type="button"
+          className="cb-lesson-card__accordion-trigger"
+          onClick={() => setOpen((value) => !value)}
+          aria-expanded={open}
+        >
+          <span className="cb-lesson-card__accordion-trigger-main">
+            <span className="cb-lesson-card__section-title-text">{title}</span>
+            {count > 0 ? (
+              <span className={`cb-lesson-card__count-badge cb-lesson-card__count-badge--${countVariant || "material"}`}>
+                {count}
+              </span>
+            ) : null}
+          </span>
+          <span className={`cb-lesson-card__accordion-chevron${open ? " is-open" : ""}`} aria-hidden="true" />
+        </button>
+        {onAdd ? (
+          <button
+            type="button"
+            className="cb-lesson-card__section-add"
+            onClick={(e) => {
+              e.stopPropagation();
+              onAdd();
+            }}
+          >
+            {addLabel}
+          </button>
+        ) : null}
+      </div>
       {open ? <div className="cb-lesson-card__accordion-body">{children}</div> : null}
     </section>
   );
@@ -208,54 +324,77 @@ function ResourceSection({
   emptyLabel,
   emptyActionLabel,
   onEmptyAction,
+  onAdd = null,
+  addLabel = "Добавить",
   variant = "material",
   isMobile,
+  extra = null,
+  /** Не показывать «пусто», если есть доп. контент (например доска) */
+  suppressEmpty = false,
+  /** Учитывать в бейдже счётчика (например +1 за прикреплённую доску) */
+  extraCount = 0,
 }) {
   const [showAll, setShowAll] = useState(false);
   const visibleRows = showAll ? rows : rows.slice(0, RESOURCE_PREVIEW);
   const hiddenCount = rows.length - RESOURCE_PREVIEW;
   const scrollable = rows.length > RESOURCE_PREVIEW && showAll;
+  const totalCount = rows.length + (extraCount > 0 ? extraCount : 0);
+  const showEmpty = !rows.length && !suppressEmpty;
+  const addHandler = onAdd || onEmptyAction || null;
 
-  const content = rows.length ? (
+  const content = (
     <>
-      <ul
-        className={[
-          "cb-lesson-card__resources",
-          scrollable ? "cb-lesson-card__resources--scroll" : "",
-        ].filter(Boolean).join(" ")}
-      >
-        {visibleRows.map((row) => (
-          <ResourceCard key={row.key} row={row} variant={variant} />
-        ))}
-      </ul>
-      {hiddenCount > 0 && !showAll ? (
-        <button
-          type="button"
-          className="cb-lesson-card__show-more"
-          onClick={() => setShowAll(true)}
-        >
-          Показать ещё ({hiddenCount})
-        </button>
+      {rows.length ? (
+        <>
+          <ul
+            className={[
+              "cb-lesson-card__resources",
+              scrollable ? "cb-lesson-card__resources--scroll" : "",
+            ].filter(Boolean).join(" ")}
+          >
+            {visibleRows.map((row) => (
+              <ResourceCard key={row.key} row={row} variant={variant} />
+            ))}
+          </ul>
+          {hiddenCount > 0 && !showAll ? (
+            <button
+              type="button"
+              className="cb-lesson-card__show-more"
+              onClick={() => setShowAll(true)}
+            >
+              Показать ещё ({hiddenCount})
+            </button>
+          ) : null}
+        </>
+      ) : showEmpty ? (
+        <div className={`cb-lesson-card__empty cb-lesson-card__empty--${variant}`}>
+          <p>{emptyLabel}</p>
+          {addHandler && !onAdd ? (
+            <button type="button" className="cb-lesson-card__empty-btn" onClick={addHandler}>
+              {emptyActionLabel || addLabel}
+            </button>
+          ) : null}
+        </div>
+      ) : addHandler && !rows.length && !onAdd ? (
+        <div className={`cb-lesson-card__empty cb-lesson-card__empty--${variant} cb-lesson-card__empty--compact`}>
+          <button type="button" className="cb-lesson-card__empty-btn" onClick={addHandler}>
+            {emptyActionLabel || addLabel}
+          </button>
+        </div>
       ) : null}
+      {extra}
     </>
-  ) : (
-    <div className={`cb-lesson-card__empty cb-lesson-card__empty--${variant}`}>
-      <p>{emptyLabel}</p>
-      {onEmptyAction ? (
-        <button type="button" className="cb-lesson-card__empty-btn" onClick={onEmptyAction}>
-          {emptyActionLabel}
-        </button>
-      ) : null}
-    </div>
   );
 
   return (
     <CollapsibleBlock
       title={title}
-      count={rows.length}
+      count={totalCount}
       countVariant={variant}
       isMobile={isMobile}
       className={`cb-lesson-card__section--${variant}`}
+      onAdd={addHandler}
+      addLabel={addLabel || emptyActionLabel || "Добавить"}
     >
       {content}
     </CollapsibleBlock>
@@ -311,12 +450,18 @@ function ActionBar({
   isCancelled,
   isDone,
   hasMaterials,
-  hasLink,
+  meetingStatus,
+  canConnect,
+  footerPrimaryLabel,
+  footerPrimaryDisabled,
+  journalAvailable,
   starting,
+  creating,
   isMobile,
   onOpenLesson,
-  onStartMeeting,
+  onFooterPrimary,
   onEdit,
+  onOpenJournal,
   moreItems,
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
@@ -334,14 +479,22 @@ function ActionBar({
               {isDone && hasMaterials ? "Открыть материалы" : "Открыть урок"}
             </button>
           ) : null}
-          {hasLink ? (
+          {canConnect ? (
             <button
               type="button"
               className="cb-lesson-card__btn cb-lesson-card__btn--secondary"
-              onClick={onStartMeeting}
+              onClick={onFooterPrimary}
             >
-              Подключиться
+              Подключиться к уроку
             </button>
+          ) : meetingStatus === "scheduled" ? (
+            <span className="cb-lesson-card__btn cb-lesson-card__btn--ghost" style={{ cursor: "default" }}>
+              Урок ещё не начался
+            </span>
+          ) : meetingStatus === "finished" || meetingStatus === "cancelled" ? (
+            <span className="cb-lesson-card__btn cb-lesson-card__btn--ghost" style={{ cursor: "default" }}>
+              {meetingStatus === "cancelled" ? "Урок отменён" : "Урок завершён"}
+            </span>
           ) : null}
         </div>
       </footer>
@@ -363,66 +516,51 @@ function ActionBar({
     );
   }
 
+  const primaryBusy = starting || creating;
+  const primaryDisabled = Boolean(footerPrimaryDisabled) || primaryBusy;
+
   return (
     <footer className="cb-lesson-card__footer">
       <div className={`cb-lesson-card__footer-row${isMobile ? " cb-lesson-card__footer-row--mobile" : ""}`}>
-        <button
-          type="button"
-          className={`cb-lesson-card__btn cb-lesson-card__btn--primary${isMobile ? " cb-lesson-card__btn--wide" : ""}`}
-          onClick={onOpenLesson}
-        >
-          {isDone && hasMaterials ? "Открыть материалы" : "Открыть урок"}
-        </button>
-        {hasLink ? (
+        {footerPrimaryLabel ? (
+          <button
+            type="button"
+            className={`cb-lesson-card__btn cb-lesson-card__btn--primary${isMobile ? " cb-lesson-card__btn--wide" : ""}`}
+            disabled={primaryDisabled}
+            onClick={onFooterPrimary}
+          >
+            {primaryBusy ? "…" : footerPrimaryLabel}
+          </button>
+        ) : null}
+        {!isCancelled ? (
           <button
             type="button"
             className="cb-lesson-card__btn cb-lesson-card__btn--secondary"
-            disabled={starting}
-            onClick={onStartMeeting}
+            disabled={!journalAvailable}
+            title={journalAvailable ? "Итоги урока" : "Итоги доступны после завершения урока"}
+            onClick={onOpenJournal}
           >
-            {starting ? "Подключение…" : "Начать встречу"}
+            Итоги урока
           </button>
         ) : null}
-        {!isMobile ? (
-          <>
-            {!isCancelled ? (
-              <button type="button" className="cb-lesson-card__btn cb-lesson-card__btn--ghost" onClick={onEdit}>
-                Редактировать
-              </button>
-            ) : null}
-            <div className="cb-lesson-card__more-wrap">
-              <button
-                type="button"
-                className="cb-lesson-card__btn cb-lesson-card__btn--ghost"
-                onClick={() => setMoreOpen((value) => !value)}
-                aria-expanded={moreOpen}
-                aria-haspopup="menu"
-              >
-                Ещё
-              </button>
-              <MoreMenu open={moreOpen} onClose={() => setMoreOpen(false)} items={moreItems} isMobile={false} />
-            </div>
-          </>
-        ) : null}
-      </div>
-      {isMobile && !isCancelled ? (
-        <div className="cb-lesson-card__footer-row cb-lesson-card__footer-row--mobile-sub">
+        {!isCancelled ? (
           <button type="button" className="cb-lesson-card__btn cb-lesson-card__btn--ghost" onClick={onEdit}>
             Редактировать
           </button>
-          <div className="cb-lesson-card__more-wrap">
-            <button
-              type="button"
-              className="cb-lesson-card__btn cb-lesson-card__btn--ghost"
-              onClick={() => setMoreOpen((value) => !value)}
-              aria-expanded={moreOpen}
-            >
-              Ещё
-            </button>
-            <MoreMenu open={moreOpen} onClose={() => setMoreOpen(false)} items={moreItems} isMobile />
-          </div>
+        ) : null}
+        <div className="cb-lesson-card__more-wrap">
+          <button
+            type="button"
+            className="cb-lesson-card__btn cb-lesson-card__btn--ghost"
+            onClick={() => setMoreOpen((value) => !value)}
+            aria-expanded={moreOpen}
+            aria-haspopup="menu"
+          >
+            Ещё
+          </button>
+          <MoreMenu open={moreOpen} onClose={() => setMoreOpen(false)} items={moreItems} isMobile={isMobile} />
         </div>
-      ) : null}
+      </div>
     </footer>
   );
 }
@@ -460,42 +598,81 @@ export default function EventDetailCard({
   onAddMaterials,
   onAddHomework,
   onStart,
+  onCreateLink,
+  onOpenMeetingPage,
   onRequestDelete,
   onRequestCancel,
   onDuplicate,
   onSaveLink,
   savingLinkId,
   startingId,
+  creatingLinkId,
+  onRegisterPayment,
+  onOpenJournal,
+  billingBadges = [],
 }) {
   const [linkDraft, setLinkDraft] = useState(event.link || "");
   const [copied, setCopied] = useState(false);
+  const [copyHint, setCopyHint] = useState("");
   const [notesOpen, setNotesOpen] = useState(false);
+  const [boardPresence, setBoardPresence] = useState({ loading: true, board: null });
+
+  const handleBoardPresenceChange = useCallback((next) => {
+    setBoardPresence(next);
+  }, []);
+
+  const meetingStatus = event.videoMeeting?.status || null;
+  const meetingPageUrl = event.videoMeeting?.pageUrl || event.videoMeeting?.joinUrl || "";
+  const isJitsiMeeting = Boolean(event.videoMeeting?.uuid || event.meetingProvider === "jitsi");
 
   useEffect(() => {
     setLinkDraft(event.link || "");
     setCopied(false);
-  }, [event.id, event.link]);
+    setCopyHint("");
+  }, [event.id, event.link, meetingPageUrl]);
 
   const handleCopyLink = async () => {
-    if (!event.link) return;
+    const raw = meetingPageUrl || event.link || "";
+    if (!raw) return;
+    const absolute = raw.startsWith("http") ? raw : `${window.location.origin}${raw}`;
     try {
-      await navigator.clipboard.writeText(event.link);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(absolute);
+      } else {
+        const input = document.createElement("textarea");
+        input.value = absolute;
+        input.setAttribute("readonly", "");
+        input.style.position = "fixed";
+        input.style.left = "-9999px";
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand("copy");
+        document.body.removeChild(input);
+      }
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
+      setCopyHint("Ссылка скопирована");
+      window.setTimeout(() => {
+        setCopied(false);
+        setCopyHint("");
+      }, 2000);
     } catch {
-      /* ignore */
+      setCopyHint("Не удалось скопировать ссылку");
+      window.setTimeout(() => setCopyHint(""), 2500);
     }
   };
 
-  const handleStartMeeting = () => {
-    const link = event.videoMeeting?.pageUrl || event.link || "";
+  const handleOpenExternalOrMeeting = () => {
+    const link = meetingPageUrl || event.link || "";
     const isInternalJitsi = typeof link === "string" && link.startsWith("/cabinet/meetings/");
-    // Внешний Телемост — новая вкладка; Jitsi и создание комнаты — через onStart.
     if (hasLink && link && !isInternalJitsi && !event.videoMeeting?.uuid) {
       window.open(link, "_blank", "noopener,noreferrer");
       return;
     }
-    onStart(event);
+    if (onOpenMeetingPage) {
+      onOpenMeetingPage(event);
+      return;
+    }
+    onStart?.(event);
   };
 
   const headerTitle = topic?.trim() || typeLabel;
@@ -507,9 +684,10 @@ export default function EventDetailCard({
     : subtitleParts.join(" · ");
 
   const courseTitle = planItem?.planTitle || "";
+  const lessonTopic = topic?.trim() || "";
   const subtopic = planItem?.subtopic || "";
   const taskNumber = planItem?.taskNumber || "";
-  const showAbout = courseTitle || subtopic || taskNumber;
+  const showAbout = courseTitle || lessonTopic || subtopic || taskNumber;
 
   const participantList = Array.isArray(participants) ? participants : [];
   const participantCount = participantList.length
@@ -520,12 +698,46 @@ export default function EventDetailCard({
   const formatMeta = isOnline
     ? (isDone
       ? "Проведено"
-      : (event.videoMeeting || event.meetingProvider === "jitsi")
-        ? "Jitsi"
-        : hasLink
-          ? "Телемост"
-          : (studentMode && hasMeetingLinkPending ? "Скоро" : "Без ссылки"))
+      : meetingStatus === "live"
+        ? "Идёт сейчас"
+        : meetingStatus === "finished"
+          ? "Завершён"
+          : meetingStatus === "cancelled"
+            ? "Отменён"
+            : isJitsiMeeting
+              ? "Jitsi"
+              : hasLink
+                ? "Телемост"
+                : (studentMode && hasMeetingLinkPending ? "Скоро" : "Без ссылки"))
     : null;
+
+  const lessonFinished = Boolean(isDone || meetingStatus === "finished");
+  const journalAvailable = lessonFinished && !isCancelled;
+  const hasAnyMaterials = materials.length > 0 || Boolean(boardPresence.board);
+  const openLesson = () => onOpenLesson(Boolean(isDone && hasAnyMaterials));
+
+  let footerPrimaryLabel = "";
+  let footerPrimaryDisabled = false;
+  if (!studentMode && !isCancelled) {
+    footerPrimaryLabel = "Начать урок";
+    if (lessonFinished) {
+      footerPrimaryDisabled = true;
+    }
+  }
+  const studentCanConnect = studentMode && Boolean(hasLink) && meetingStatus === "live";
+
+  const handleFooterPrimary = () => {
+    if (footerPrimaryDisabled) return;
+    if (!isOnline) {
+      openLesson();
+      return;
+    }
+    if (!studentMode && !meetingStatus && !hasLink) {
+      onCreateLink?.(event);
+      return;
+    }
+    handleOpenExternalOrMeeting();
+  };
 
   const showStatusBadge = !studentMode && statusMeta && ["moved", "cancelled", "done"].includes(statusMeta.mod);
 
@@ -550,7 +762,6 @@ export default function EventDetailCard({
     !studentMode && statusMeta ? `cb-lesson-card--${statusMeta.mod}` : "",
   ].filter(Boolean).join(" ");
 
-  const openLesson = () => onOpenLesson(Boolean(isDone && materials.length));
   const handleAddMaterials = () => {
     if (onAddMaterials) {
       onAddMaterials(event);
@@ -591,6 +802,14 @@ export default function EventDetailCard({
                   ) : null}
                   {!studentMode && recurring ? <StatusBadge label="Повторяется" mod="recurring" /> : null}
                   {!studentMode && isOnline ? <StatusBadge label="Онлайн" mod="online" /> : null}
+                  {!studentMode && (billingBadges || []).slice(0, 2).map((b) => (
+                    <span
+                      key={`${b.student_id}-${b.financial_status}`}
+                      className={`pay-event-badge pay-event-badge--${billingBadgeMod(b.financial_status)}`}
+                    >
+                      {compactLessonBillingLabel(b)}
+                    </span>
+                  ))}
                 </div>
               ) : null}
             </div>
@@ -617,6 +836,7 @@ export default function EventDetailCard({
                   <h3 className="cb-lesson-card__section-title cb-lesson-card__section-title--plain">О занятии</h3>
                   <div className="cb-lesson-card__about">
                     <AboutField label="Курс" value={courseTitle} />
+                    <AboutField label="Тема урока" value={lessonTopic} />
                     <AboutField label="Подтема" value={subtopic} />
                     <AboutField label="№ задания" value={taskNumber} />
                   </div>
@@ -629,7 +849,75 @@ export default function EventDetailCard({
                 <section className="cb-lesson-card__meeting-wrap">
                   <h3 className="cb-lesson-card__section-title cb-lesson-card__section-title--plain">Онлайн-встреча</h3>
                   <div className="cb-lesson-card__meeting">
-                    {hasLink ? (
+                    {!studentMode && isJitsiMeeting && meetingStatus ? (
+                      <>
+                        {meetingStatus === "scheduled" || meetingStatus === "live" ? (
+                          <p className="cb-lesson-card__meeting-empty" style={{ marginBottom: 8 }}>
+                            {meetingStatus === "scheduled" ? "Ссылка создана" : "Идёт сейчас"}
+                          </p>
+                        ) : null}
+                        {meetingStatus === "finished" ? (
+                          <p className="cb-lesson-card__meeting-empty">Урок завершён</p>
+                        ) : null}
+                        {meetingStatus === "cancelled" ? (
+                          <p className="cb-lesson-card__meeting-empty">Урок отменён</p>
+                        ) : null}
+                        {(meetingStatus === "scheduled" || meetingStatus === "live" || meetingStatus === "finished") ? (
+                          <>
+                            <div className="cb-lesson-card__meeting-info">
+                              <span className="cb-lesson-card__meeting-provider">Jitsi</span>
+                              <span className="cb-lesson-card__meeting-url" title={meetingPageUrl || event.link}>
+                                {shortenMeetingUrl(meetingPageUrl || event.link)}
+                              </span>
+                            </div>
+                            <div className="cb-lesson-card__meeting-actions">
+                              {meetingStatus === "scheduled" ? (
+                                <button
+                                  type="button"
+                                  className="cb-lesson-card__meeting-btn cb-lesson-card__meeting-btn--primary"
+                                  disabled={startingId === event.id}
+                                  onClick={handleOpenExternalOrMeeting}
+                                >
+                                  {startingId === event.id ? "…" : "Начать урок"}
+                                </button>
+                              ) : null}
+                              {meetingStatus === "live" ? (
+                                <button
+                                  type="button"
+                                  className="cb-lesson-card__meeting-btn cb-lesson-card__meeting-btn--primary"
+                                  disabled={startingId === event.id}
+                                  onClick={handleOpenExternalOrMeeting}
+                                >
+                                  Войти в урок
+                                </button>
+                              ) : null}
+                              {meetingStatus === "finished" ? (
+                                <button
+                                  type="button"
+                                  className="cb-lesson-card__meeting-btn cb-lesson-card__meeting-btn--primary"
+                                  onClick={handleOpenExternalOrMeeting}
+                                >
+                                  Посмотреть аналитику
+                                </button>
+                              ) : null}
+                              <button type="button" className="cb-lesson-card__meeting-btn" onClick={handleCopyLink}>
+                                {copied ? "Ссылка скопирована" : "Копировать"}
+                              </button>
+                              {meetingStatus === "scheduled" ? (
+                                <button
+                                  type="button"
+                                  className="cb-lesson-card__meeting-btn"
+                                  onClick={handleOpenExternalOrMeeting}
+                                >
+                                  Открыть страницу ожидания
+                                </button>
+                              ) : null}
+                            </div>
+                            {copyHint ? <p className="cb-lesson-card__meeting-empty">{copyHint}</p> : null}
+                          </>
+                        ) : null}
+                      </>
+                    ) : !studentMode && !isJitsiMeeting && hasLink ? (
                       <>
                         <div className="cb-lesson-card__meeting-info">
                           <span className="cb-lesson-card__meeting-provider">Телемост</span>
@@ -641,52 +929,69 @@ export default function EventDetailCard({
                           <button
                             type="button"
                             className="cb-lesson-card__meeting-btn cb-lesson-card__meeting-btn--primary"
-                            onClick={handleStartMeeting}
+                            onClick={handleOpenExternalOrMeeting}
                           >
                             Начать
                           </button>
                           <button type="button" className="cb-lesson-card__meeting-btn" onClick={handleCopyLink}>
-                            {copied ? "Скопировано" : "Скопировать"}
+                            {copied ? "Ссылка скопирована" : "Копировать"}
                           </button>
                         </div>
                       </>
+                    ) : studentMode && meetingStatus === "live" && hasLink ? (
+                      <div className="cb-lesson-card__meeting-actions">
+                        <button
+                          type="button"
+                          className="cb-lesson-card__meeting-btn cb-lesson-card__meeting-btn--primary"
+                          onClick={handleOpenExternalOrMeeting}
+                        >
+                          Подключиться к уроку
+                        </button>
+                      </div>
+                    ) : studentMode && meetingStatus === "scheduled" ? (
+                      <p className="cb-lesson-card__meeting-empty">Урок ещё не начался</p>
+                    ) : studentMode && meetingStatus === "finished" ? (
+                      <p className="cb-lesson-card__meeting-empty">Урок завершён</p>
+                    ) : studentMode && meetingStatus === "cancelled" ? (
+                      <p className="cb-lesson-card__meeting-empty">Урок отменён</p>
                     ) : studentMode && hasMeetingLinkPending && !isDone ? (
                       <p className="cb-lesson-card__meeting-empty">
-                        Подключение откроется за 5 минут до начала
+                        Подключение откроется, когда учитель начнёт урок
                       </p>
-                    ) : (
+                    ) : !studentMode && !hasLink ? (
                       <>
-                        <p className="cb-lesson-card__meeting-empty">Ссылка не добавлена</p>
+                        <p className="cb-lesson-card__meeting-empty">Ссылка не создана</p>
+                        {canStart ? (
+                          <button
+                            type="button"
+                            className="cb-lesson-card__meeting-btn cb-lesson-card__meeting-btn--primary"
+                            disabled={creatingLinkId === event.id}
+                            onClick={() => onCreateLink?.(event)}
+                          >
+                            {creatingLinkId === event.id ? "…" : "Создать ссылку на онлайн-урок"}
+                          </button>
+                        ) : null}
                         {canEditLink ? (
-                          <div className="cb-lesson-card__link-form">
+                          <div className="cb-lesson-card__link-form" style={{ marginTop: 8 }}>
                             <input
                               type="url"
                               value={linkDraft}
                               onChange={(e) => setLinkDraft(e.target.value)}
-                              placeholder="https://telemost.yandex.ru/j/…"
+                              placeholder="или вставьте https://telemost.yandex.ru/j/…"
                               aria-label="Ссылка на встречу"
                             />
                             <button
                               type="button"
-                              className="cb-lesson-card__meeting-btn cb-lesson-card__meeting-btn--primary"
+                              className="cb-lesson-card__meeting-btn"
                               disabled={savingLinkId === event.id}
                               onClick={() => onSaveLink(event, linkDraft.trim())}
                             >
-                              {savingLinkId === event.id ? "…" : "Добавить ссылку"}
+                              {savingLinkId === event.id ? "…" : "Добавить вручную"}
                             </button>
                           </div>
-                        ) : canStart ? (
-                          <button
-                            type="button"
-                            className="cb-lesson-card__meeting-btn cb-lesson-card__meeting-btn--primary"
-                            disabled={startingId === event.id}
-                            onClick={() => onStart(event)}
-                          >
-                            {startingId === event.id ? "…" : "Добавить ссылку"}
-                          </button>
                         ) : null}
                       </>
-                    )}
+                    ) : null}
                   </div>
                 </section>
               ) : null}
@@ -762,9 +1067,27 @@ export default function EventDetailCard({
                 rows={materials}
                 emptyLabel="Материалов нет"
                 emptyActionLabel="Добавить"
-                onEmptyAction={event.readOnly || studentMode ? null : handleAddMaterials}
+                addLabel="Добавить"
+                onAdd={event.readOnly || studentMode ? null : handleAddMaterials}
                 variant="material"
                 isMobile={isMobile}
+                suppressEmpty={
+                  boardPresence.loading
+                  || Boolean(boardPresence.board)
+                  || (!studentMode && !event.readOnly)
+                }
+                extraCount={boardPresence.board ? 1 : 0}
+                extra={
+                  <BoardLessonBlock
+                    embedded
+                    scheduleEventId={event.id}
+                    lessonId={event.lesson || event.lessonId || null}
+                    studentId={event.student || event.studentId || null}
+                    groupId={event.group || event.groupId || null}
+                    studentMode={studentMode || Boolean(event.readOnly)}
+                    onPresenceChange={handleBoardPresenceChange}
+                  />
+                }
               />
 
               <ResourceSection
@@ -776,6 +1099,15 @@ export default function EventDetailCard({
                 variant="homework"
                 isMobile={isMobile}
               />
+
+              {!studentMode && !event.readOnly ? (
+                <LessonBillingBlock
+                  badges={billingBadges}
+                  isGroup={Boolean(event.group || event.groupId || event.eventType === "group" || event.eventType === "group_lesson")}
+                  event={event}
+                  onRegisterPayment={onRegisterPayment}
+                />
+              ) : null}
             </div>
           </div>
         </div>
@@ -786,13 +1118,19 @@ export default function EventDetailCard({
           assignmentId={assignmentId}
           isCancelled={isCancelled}
           isDone={isDone}
-          hasMaterials={materials.length > 0}
-          hasLink={hasLink}
+          hasMaterials={hasAnyMaterials}
+          meetingStatus={meetingStatus}
+          canConnect={studentCanConnect}
+          footerPrimaryLabel={footerPrimaryLabel}
+          footerPrimaryDisabled={footerPrimaryDisabled}
+          journalAvailable={journalAvailable}
           starting={startingId === event.id}
+          creating={creatingLinkId === event.id}
           isMobile={isMobile}
           onOpenLesson={openLesson}
-          onStartMeeting={handleStartMeeting}
+          onFooterPrimary={handleFooterPrimary}
           onEdit={onEdit}
+          onOpenJournal={() => onOpenJournal?.(event)}
           moreItems={moreItems}
         />
       </div>

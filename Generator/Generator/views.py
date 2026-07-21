@@ -1698,7 +1698,7 @@ def lk_nav_password_configured() -> bool:
 
 
 def lk_site_base_url() -> str:
-    return getattr(django_settings, "LK_PUBLIC_URL", "http://lk.itflux.ru").rstrip("/")
+    return getattr(django_settings, "LK_PUBLIC_URL", "https://itflux-academy.ru").rstrip("/")
 
 
 def lk_user_nav_url() -> str:

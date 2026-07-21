@@ -1,8 +1,8 @@
-import { Link, useOutletContext } from "react-router-dom";
+import { Link, useNavigate, useOutletContext } from "react-router-dom";
 import { displayName } from "../../pages/CabinetAuthPage";
 import CabinetIcon from "../CabinetIcons";
 import { CABINET_MORE_ITEMS } from "../cabinetNav";
-import { CabinetPageShell, CabinetPageHeader, CabinetSoonBadge, useSoonToast } from "../CabinetSectionUi";
+import { CabinetPageShell, CabinetPageHeader, CabinetSoonBadge } from "../CabinetSectionUi";
 
 function MoreCard({ item, onSettings, onGuide, onNotifications }) {
   if (item.action === "settings") {
@@ -70,26 +70,27 @@ function MoreCard({ item, onSettings, onGuide, onNotifications }) {
 }
 
 export default function CabinetMorePage() {
-  const { user, handleLogout, loggingOut, openGuide } = useOutletContext();
-  const { notifySoon, toast } = useSoonToast();
+  const navigate = useNavigate();
+  const { user, handleLogout, loggingOut, openGuide, currentPlan, subscriptionLoading } = useOutletContext();
   const name = user ? displayName(user) : "";
+  const planName = currentPlan?.name || "";
 
   const moreItems = [
     ...CABINET_MORE_ITEMS,
     { id: "guide", label: "Инструкция", path: null, icon: "bulb", action: "guide" },
   ];
   const openNotifications = () => window.dispatchEvent(new Event("cabinet:open-notifications"));
+  const openSettings = () => navigate("/cabinet/settings/notifications/");
 
   return (
     <CabinetPageShell>
-      {toast}
       <CabinetPageHeader title="Ещё" />
       <div className="cb-more-grid">
         {moreItems.map((item) => (
           <MoreCard
             key={item.id}
             item={item}
-            onSettings={notifySoon}
+            onSettings={openSettings}
             onGuide={openGuide}
             onNotifications={openNotifications}
           />
@@ -103,6 +104,13 @@ export default function CabinetMorePage() {
           <div className="cb-more-profile__body">
             <strong>{name}</strong>
             <span>Учитель</span>
+            <Link
+              to="/cabinet/upgrade"
+              className="cb-more-profile__plan"
+              title={planName ? `Тариф «${planName}»` : "Тарифы"}
+            >
+              Тариф: {subscriptionLoading ? "…" : (planName || "Не выбран")}
+            </Link>
           </div>
           <button
             type="button"

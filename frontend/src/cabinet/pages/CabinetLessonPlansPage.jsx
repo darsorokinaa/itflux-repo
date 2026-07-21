@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import CabinetHomeworkCard from "../CabinetHomeworkCard";
+import ConfirmActionModal from "../components/ConfirmActionModal";
 import {
   CabinetPageShell,
   CabinetPageHeader,
@@ -25,6 +26,7 @@ export default function CabinetLessonPlansPage() {
   const [loading, setLoading] = useState(true);
   const [copyingId, setCopyingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -80,16 +82,18 @@ export default function CabinetLessonPlansPage() {
     }
   };
 
-  const handleDeletePlan = async (item) => {
-    const planId = item.plan?.id || item.id;
-    const title = item.title || item.plan?.title || "без названия";
-    if (!window.confirm(`Удалить план «${title}»? Это действие нельзя отменить.`)) {
-      return;
-    }
+  const handleDeletePlan = (item) => {
+    setDeleteTarget(item);
+  };
+
+  const confirmDeletePlan = async () => {
+    if (!deleteTarget) return;
+    const planId = deleteTarget.plan?.id || deleteTarget.id;
     setDeletingId(planId);
     setError("");
     try {
       await deleteLessonPlan(planId);
+      setDeleteTarget(null);
       await load();
     } catch (err) {
       setError(err.message || "Не удалось удалить план");
@@ -174,6 +178,19 @@ export default function CabinetLessonPlansPage() {
           })}
         </div>
       )}
+
+      <ConfirmActionModal
+        open={Boolean(deleteTarget)}
+        title="Удалить план?"
+        text={`Удалить план «${deleteTarget?.title || deleteTarget?.plan?.title || "без названия"}»? Это действие нельзя отменить.`}
+        confirmLabel="Удалить"
+        danger
+        loading={Boolean(deletingId)}
+        onClose={() => {
+          if (!deletingId) setDeleteTarget(null);
+        }}
+        onConfirm={confirmDeletePlan}
+      />
     </CabinetPageShell>
   );
 }

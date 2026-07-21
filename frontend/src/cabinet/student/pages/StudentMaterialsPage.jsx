@@ -35,10 +35,12 @@ function MaterialRow({ item }) {
         </span>
         {item.message ? <span className="st-mat-row__msg">{item.message}</span> : null}
       </span>
-      {url && (
+      {url ? (
         <span className="st-mat-row__arrow" aria-hidden="true">
           <CabinetIcon name="arrow" />
         </span>
+      ) : (
+        <span className="st-mat-row__caption">Файл не прикреплён</span>
       )}
     </>
   );
@@ -55,7 +57,7 @@ function MaterialRow({ item }) {
       </a>
     );
   }
-  return <div className="st-mat-row">{inner}</div>;
+  return <div className="st-mat-row st-mat-row--disabled">{inner}</div>;
 }
 
 export default function StudentMaterialsPage() {

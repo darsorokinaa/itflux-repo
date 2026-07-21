@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 import CabinetModal from "./CabinetModal";
+import ConfirmActionModal from "./ConfirmActionModal";
+import StudentBillingPanel from "./StudentBillingPanel";
+import BillingPaymentModal from "./BillingPaymentModal";
+import BillingPackageModal from "./BillingPackageModal";
 import { buildInvitationUrl } from "../../utils/cabinetAuth";
 import {
   GROUP_EXAM_OPTIONS,
@@ -41,6 +45,10 @@ export function StudentFormModal({ student, enrollment, onClose, onSave, onArchi
   ));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [packageOpen, setPackageOpen] = useState(false);
+  const [billingKey, setBillingKey] = useState(0);
 
   useEffect(() => {
     setForm(student?.raw ? studentFormFromApi(student.raw) : emptyStudentForm());
@@ -67,9 +75,14 @@ export function StudentFormModal({ student, enrollment, onClose, onSave, onArchi
     }
   };
 
-  const handleArchive = async () => {
+  const handleArchive = () => {
     if (!isEdit || !onArchive) return;
-    if (!window.confirm(`Архивировать ученика ${student.name}?`)) return;
+    setArchiveConfirmOpen(true);
+  };
+
+  const confirmArchive = async () => {
+    if (!isEdit || !onArchive) return;
+    setArchiveConfirmOpen(false);
     setSaving(true);
     try {
       await onArchive(student.id);
@@ -80,6 +93,7 @@ export function StudentFormModal({ student, enrollment, onClose, onSave, onArchi
   };
 
   return (
+    <>
     <CabinetModal title={isEdit ? "Редактирование ученика" : "Добавить ученика"} onClose={onClose}>
       <form className="cb-modal-form" onSubmit={handleSubmit}>
         {error ? <p className="cb-modal-form__error" role="alert">{error}</p> : null}
@@ -187,6 +201,14 @@ export function StudentFormModal({ student, enrollment, onClose, onSave, onArchi
             )}
           </div>
         ) : null}
+        {isEdit ? (
+          <StudentBillingPanel
+            key={billingKey}
+            studentId={student.id}
+            onAddPayment={() => setPaymentOpen(true)}
+            onNewPackage={() => setPackageOpen(true)}
+          />
+        ) : null}
         <FormActions
           onCancel={onClose}
           submitLabel={isEdit ? "Сохранить" : "Добавить"}
@@ -204,6 +226,30 @@ export function StudentFormModal({ student, enrollment, onClose, onSave, onArchi
         />
       </form>
     </CabinetModal>
+    <ConfirmActionModal
+      open={archiveConfirmOpen}
+      title="Архивировать ученика?"
+      text={`Архивировать ученика ${student?.name || ""}?`}
+      confirmLabel="В архив"
+      danger
+      onClose={() => setArchiveConfirmOpen(false)}
+      onConfirm={confirmArchive}
+    />
+    <BillingPaymentModal
+      open={paymentOpen}
+      onClose={() => setPaymentOpen(false)}
+      students={student ? [{ id: student.id, name: student.name }] : []}
+      defaultStudentId={student?.id}
+      onDone={() => setBillingKey((k) => k + 1)}
+    />
+    <BillingPackageModal
+      open={packageOpen}
+      onClose={() => setPackageOpen(false)}
+      students={student ? [{ id: student.id, name: student.name }] : []}
+      defaultStudentId={student?.id}
+      onDone={() => setBillingKey((k) => k + 1)}
+    />
+    </>
   );
 }
 
@@ -213,12 +259,14 @@ export function InviteFormModal({ group, onClose, onCreate }) {
   const [saving, setSaving] = useState(false);
   const [createdInvite, setCreatedInvite] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [showQr, setShowQr] = useState(false);
 
   useEffect(() => {
     setForm(emptyInviteForm(group));
     setError("");
     setCreatedInvite(null);
     setCopied(false);
+    setShowQr(false);
   }, [group]);
 
   const setField = (field, value) => {
@@ -253,6 +301,23 @@ export function InviteFormModal({ group, onClose, onCreate }) {
     }
   };
 
+  const handleShare = async () => {
+    if (!inviteUrl) return;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "Приглашение на платформу",
+          text: "Присоединяйтесь к занятиям на платформе «Цифровой поток»",
+          url: inviteUrl,
+        });
+        return;
+      } catch {
+        // fall through to copy
+      }
+    }
+    await handleCopy();
+  };
+
   const studentName = createdInvite
     ? [createdInvite.first_name, createdInvite.last_name].filter(Boolean).join(" ")
     : "";
@@ -276,13 +341,29 @@ export function InviteFormModal({ group, onClose, onCreate }) {
             <span>Ссылка для ученика</span>
             <input readOnly value={inviteUrl} onFocus={(e) => e.target.select()} />
           </label>
+          {showQr ? (
+            <div style={{ textAlign: "center", marginBottom: "12px" }}>
+              <img
+                alt="QR-код приглашения"
+                width={220}
+                height={220}
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(inviteUrl)}`}
+              />
+            </div>
+          ) : null}
           <div className="cb-modal-form__actions">
             <div className="cb-modal-form__actions-main">
               <button type="button" className="cb-btn cb-btn--outline" onClick={onClose}>
                 Готово
               </button>
+              <button type="button" className="cb-btn cb-btn--outline" onClick={() => setShowQr((v) => !v)}>
+                {showQr ? "Скрыть QR-код" : "Показать QR-код"}
+              </button>
+              <button type="button" className="cb-btn cb-btn--outline" onClick={handleShare}>
+                Отправить
+              </button>
               <button type="button" className="cb-btn cb-btn--primary" onClick={handleCopy}>
-                {copied ? "Скопировано" : "Копировать ссылку"}
+                {copied ? "Скопировано" : "Скопировать ссылку"}
               </button>
             </div>
           </div>
@@ -369,6 +450,7 @@ export function GroupFormModal({ group, enrollment, onClose, onSave, onArchive, 
   ));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
 
   useEffect(() => {
     setForm(group?.raw ? groupFormFromApi(group.raw) : emptyGroupForm());
@@ -395,9 +477,14 @@ export function GroupFormModal({ group, enrollment, onClose, onSave, onArchive, 
     }
   };
 
-  const handleArchive = async () => {
+  const handleArchive = () => {
     if (!isEdit || !onArchive) return;
-    if (!window.confirm(`Архивировать группу «${group.name}»?`)) return;
+    setArchiveConfirmOpen(true);
+  };
+
+  const confirmArchive = async () => {
+    if (!isEdit || !onArchive) return;
+    setArchiveConfirmOpen(false);
     setSaving(true);
     try {
       await onArchive(group.id);
@@ -408,6 +495,7 @@ export function GroupFormModal({ group, enrollment, onClose, onSave, onArchive, 
   };
 
   return (
+    <>
     <CabinetModal title={isEdit ? "Редактирование группы" : "Создать группу"} onClose={onClose}>
       <form className="cb-modal-form" onSubmit={handleSubmit}>
         {error ? <p className="cb-modal-form__error" role="alert">{error}</p> : null}
@@ -463,6 +551,15 @@ export function GroupFormModal({ group, enrollment, onClose, onSave, onArchive, 
             ) : (
               <p className="cb-entity-plan-block__empty">План не назначен</p>
             )}
+            <div className="cb-entity-plan-block__progress">
+              <div className="cb-entity-plan-block__progress-head">
+                <span>Прогресс</span>
+                <strong>{group?.progress || 0}%</strong>
+              </div>
+              <div className="cb-entity-plan-block__progress-bar" role="progressbar" aria-valuenow={group?.progress || 0} aria-valuemin={0} aria-valuemax={100}>
+                <span style={{ width: `${Math.max(0, Math.min(100, group?.progress || 0))}%` }} />
+              </div>
+            </div>
           </div>
         ) : null}
         <FormActions
@@ -482,5 +579,15 @@ export function GroupFormModal({ group, enrollment, onClose, onSave, onArchive, 
         />
       </form>
     </CabinetModal>
+    <ConfirmActionModal
+      open={archiveConfirmOpen}
+      title="Архивировать группу?"
+      text={`Архивировать группу «${group?.name || ""}»?`}
+      confirmLabel="В архив"
+      danger
+      onClose={() => setArchiveConfirmOpen(false)}
+      onConfirm={confirmArchive}
+    />
+    </>
   );
 }

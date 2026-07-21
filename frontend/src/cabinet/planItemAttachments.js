@@ -109,7 +109,6 @@ export function buildVariantMaterialPayload({ title, url, direction }) {
     title: title.trim(),
     material_type: "task_set",
     external_url: url.trim(),
-    ...(direction ? { direction } : {}),
   };
 }
 

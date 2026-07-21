@@ -38,13 +38,15 @@ JITSI_EMBED_EXTRA_HOSTS=
 Когда появится свой хост (DNS A-запись + установленный Jitsi):
 
 ```env
-JITSI_DOMAIN=meet.example.com
+JITSI_DOMAIN=lesson.itflux-academy.ru
 JITSI_AUTH_MODE=jwt
-JITSI_APP_ID=itflux
+JITSI_APP_ID=generator_test
 JITSI_APP_SECRET=<тот же app_secret, что в Prosody>
-JITSI_SUB=meet.example.com
+JITSI_SUB=lesson.itflux-academy.ru
 JITSI_AUD=jitsi
 ```
+
+Синхронизация Prosody с Django: `sudo bash deploy/jitsi/fix-jwt-prosody.sh`.
 
 Шаблоны: `deploy/.env.production.example`, `deploy/jitsi/.env.jwt.example`.  
 Пошагово: [`deploy/jitsi/README.md`](../deploy/jitsi/README.md).
