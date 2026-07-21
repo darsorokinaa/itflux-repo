@@ -102,7 +102,6 @@
 .cabinet-sidebar:focus-within {
   width: var(--cb-sidebar-expanded);
   box-shadow: 0 20px 50px rgba(15, 23, 42, 0.16);
-  overflow: visible;
 }
 
 .cabinet-sidebar-logo {
@@ -129,16 +128,24 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 10px;
+  gap: 4px;
   width: 100%;
   flex: 1;
   min-height: 0;
-  overflow: visible;
-  scrollbar-width: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
   padding-left: 12px;
+  padding-right: 4px;
   box-sizing: border-box;
 }
-.cabinet-nav::-webkit-scrollbar { display: none; }
+.cabinet-nav::-webkit-scrollbar {
+  width: 4px;
+}
+.cabinet-nav::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.45);
+  border-radius: 4px;
+}
 
 .cabinet-nav-group {
   display: flex;
@@ -146,18 +153,19 @@
   align-items: flex-start;
   gap: 2px;
   width: 100%;
+  flex-shrink: 0;
 }
 
 .cabinet-nav-group + .cabinet-nav-group {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(148, 163, 184, 0.25);
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
 }
 
 .cabinet-nav-group__label {
-  display: none;
-  margin: 0 0 2px;
+  margin: 0;
   padding: 0 4px;
+  height: 0;
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -165,16 +173,17 @@
   color: var(--cb-text-3, #94a3b8);
   white-space: nowrap;
   opacity: 0;
-  width: 0;
   overflow: hidden;
-  transition: opacity 0.18s ease, width 0.2s ease;
+  line-height: 1.2;
+  pointer-events: none;
+  transition: opacity 0.18s ease, height 0.2s ease, margin 0.2s ease;
 }
 
 .cabinet-sidebar:hover .cabinet-nav-group__label,
 .cabinet-sidebar:focus-within .cabinet-nav-group__label {
-  display: block;
+  height: 1.2em;
+  margin-bottom: 2px;
   opacity: 1;
-  width: auto;
   overflow: visible;
 }
 
@@ -333,6 +342,10 @@
   width: 100%;
   padding-left: 12px;
   box-sizing: border-box;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+  background: var(--cb-wrap-bg);
 }
 
 .cabinet-plan-chip {
