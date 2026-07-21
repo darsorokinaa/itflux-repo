@@ -111,10 +111,15 @@ def generate_jitsi_jwt(
     user_info = build_user_info(user, request)
     display_name = user_info["displayName"]
 
+    # Prosody token_moderation/token_affiliation ждут строки "true"/"false", не bool,
+    # и affiliation="owner" — иначе учитель не получает права организатора в MUC.
     user_claims: dict[str, Any] = {
         "id": str(user.pk),
         "name": display_name,
-        "moderator": bool(is_moderator),
+        "email": user_info["email"],
+        "avatar": user_info["avatarUrl"],
+        "moderator": "true" if is_moderator else "false",
+        "affiliation": "owner" if is_moderator else "member",
     }
 
     payload: dict[str, Any] = {
