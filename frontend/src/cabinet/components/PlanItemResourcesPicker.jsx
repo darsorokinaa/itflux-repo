@@ -162,10 +162,15 @@ export default function PlanItemResourcesPicker({
     setError("");
   }, [open, initialTab]);
 
-  const attachMaterial = async (payload) => {
+  const attachMaterial = async (payload, options = {}) => {
     setSaving(true);
     setError("");
     try {
+      // Уже готовый Material из «Моих файлов» — не создаём повторно
+      if (options.fromCabinetFile && payload?.id) {
+        await onAttachMaterial?.(payload);
+        return;
+      }
       const material = await createTeacherMaterial(payload);
       await onAttachMaterial?.(material);
     } catch (err) {

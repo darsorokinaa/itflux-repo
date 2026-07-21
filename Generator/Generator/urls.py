@@ -10,10 +10,14 @@ from Cabinet.views import api_teacher_application
 
 
 def media_serve(request, path):
-    """Публичный media. Файлы досок — только через авторизованный API."""
+    """Публичный media. Файлы досок и «Мои файлы» — только через авторизованный API."""
     normalized = (path or "").lstrip("/").replace("\\", "/")
-    if normalized.startswith("cabinet/boards/") or normalized.startswith("cabinet/boards_private/"):
-        return HttpResponseForbidden("Доступ к файлам доски только через API.")
+    if (
+        normalized.startswith("cabinet/boards/")
+        or normalized.startswith("cabinet/boards_private/")
+        or normalized.startswith("cabinet/my-files/")
+    ):
+        return HttpResponseForbidden("Доступ к файлу только через API.")
     return serve(request, path, document_root=settings.MEDIA_ROOT)
 
 

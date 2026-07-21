@@ -1313,3 +1313,125 @@ export function fetchStudentResults() {
 export function fetchStudentResultDetail(recordId) {
   return cabinetFetch(`/student/results/${recordId}/`, { method: "GET" });
 }
+
+// --- My Files ---
+
+function filesBase(student = false) {
+  return student ? "/student/files" : "/files";
+}
+
+export function fetchMyFiles(params = {}, { student = false } = {}) {
+  return cabinetFetch(buildCabinetQueryPath(`${filesBase(student)}/`, params), { method: "GET" });
+}
+
+export function fetchMyFilesQuota({ student = false } = {}) {
+  return cabinetFetch(`${filesBase(student)}/quota/`, { method: "GET" });
+}
+
+export function createMyFilesFolder(payload, { student = false } = {}) {
+  return cabinetFetch(`${filesBase(student)}/folders/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateMyFilesFolder(folderId, payload, { student = false } = {}) {
+  return cabinetFetch(`${filesBase(student)}/folders/${folderId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function trashMyFilesFolder(folderId, { student = false } = {}) {
+  return cabinetFetch(`${filesBase(student)}/folders/${folderId}/`, { method: "DELETE" });
+}
+
+export function restoreMyFilesFolder(folderId, payload = {}) {
+  return cabinetFetch(`/files/folders/${folderId}/restore/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function uploadMyFile(file, { folderId, displayName, student = false } = {}) {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (folderId) formData.append("folder_id", folderId);
+  if (displayName) formData.append("display_name", displayName);
+  return cabinetFetchMultipart(`${filesBase(student)}/upload/`, formData);
+}
+
+export function fetchMyFile(fileId, { student = false } = {}) {
+  return cabinetFetch(`${filesBase(student)}/${fileId}/`, { method: "GET" });
+}
+
+export function updateMyFile(fileId, payload, { student = false } = {}) {
+  return cabinetFetch(`${filesBase(student)}/${fileId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function trashMyFile(fileId, { student = false } = {}) {
+  return cabinetFetch(`${filesBase(student)}/${fileId}/trash/`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function restoreMyFile(fileId, payload = {}, { student = false } = {}) {
+  return cabinetFetch(`${filesBase(student)}/${fileId}/restore/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function purgeMyFile(fileId, { force = false, student = false } = {}) {
+  const qs = force ? "?force=true" : "";
+  return cabinetFetch(`${filesBase(student)}/${fileId}/${qs}`, { method: "DELETE" });
+}
+
+export function copyMyFile(fileId, payload = {}) {
+  return cabinetFetch(`/files/${fileId}/copy/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function moveMyFiles(payload) {
+  return cabinetFetch("/files/move/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function attachMyFile(fileId, payload) {
+  return cabinetFetch(`/files/${fileId}/attach/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function assignMyFile(fileId, payload) {
+  return cabinetFetch(`/files/${fileId}/assign/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function emptyMyFilesTrash() {
+  return cabinetFetch("/files/trash/empty/", {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function myFileDownloadUrl(fileId, { student = false, shared = false } = {}) {
+  if (shared) return `${apiBase()}/student/files/shared/${fileId}/download/`;
+  return `${apiBase()}${filesBase(student)}/${fileId}/download/`;
+}
+
+export function myFilePreviewUrl(fileId, { student = false, shared = false } = {}) {
+  if (shared) return `${apiBase()}/student/files/shared/${fileId}/preview/`;
+  return `${apiBase()}${filesBase(student)}/${fileId}/preview/`;
+}

@@ -22,9 +22,23 @@ def get_jitsi_domain() -> str:
     return (getattr(settings, "JITSI_DOMAIN", "") or "meet.jit.si").strip()
 
 
+def _is_public_jitsi_domain(domain: str | None = None) -> bool:
+    host = (domain or get_jitsi_domain()).rstrip(".").lower()
+    return host in {"meet.jit.si", "8x8.vc"}
+
+
 def get_jitsi_auth_mode() -> str:
     mode = (getattr(settings, "JITSI_AUTH_MODE", "none") or "none").strip().lower()
-    return mode if mode in ("none", "jwt") else "none"
+    if mode not in ("none", "jwt"):
+        mode = "none"
+    # Свой Jitsi без JWT → учитель зависает на «Я организатор».
+    # Если APP_ID/SECRET уже заданы — включаем jwt даже при AUTH_MODE=none.
+    if mode != "jwt" and not _is_public_jitsi_domain():
+        app_id = (getattr(settings, "JITSI_APP_ID", "") or "").strip()
+        app_secret = (getattr(settings, "JITSI_APP_SECRET", "") or "").strip()
+        if app_id and app_secret:
+            return "jwt"
+    return mode
 
 
 def get_jitsi_display_name(user: User) -> str:

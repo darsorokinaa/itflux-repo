@@ -48,4 +48,12 @@ nginx -t && systemctl reload nginx
 echo "=== Перезапуск Daphne (itflux) ==="
 systemctl restart itflux
 
+if [[ -x "$APP_DIR/deploy/jitsi/fix-jwt-prosody.sh" ]]; then
+  echo "=== Синхронизация JWT Prosody (если Jitsi на этом сервере) ==="
+  bash "$APP_DIR/deploy/jitsi/fix-jwt-prosody.sh" || echo "WARN: fix-jwt-prosody.sh не применился — проверьте вручную"
+fi
+
+echo "=== JITSI (текущие env процесса) ==="
+systemctl show itflux -p Environment --no-pager 2>/dev/null | tr ' ' '\n' | grep -E '^JITSI_' || true
+
 echo "Готово. Проверка: systemctl status itflux --no-pager"

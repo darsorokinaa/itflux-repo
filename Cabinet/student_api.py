@@ -27,6 +27,7 @@ from .models import (
     Student,
     StudentGroup,
 )
+from .files_services import material_file_url, submission_file_url
 from .permissions import IsCabinetStudent
 from .plan_schedule import resolve_plan_item_for_event
 from .schedule_events import _participants_to_json, _plan_item_to_json
@@ -306,7 +307,7 @@ def _collect_student_materials(students, limit=None):
                 "lesson_topic": lesson_topic,
                 "assignment_id": assignment.id,
                 "external_url": material.external_url or "",
-                "file_url": material.file.url if material.file else "",
+                "file_url": material_file_url(material, for_student=True),
                 "cover_theme": "material",
                 "updated_at": material.updated_at.isoformat() if material.updated_at else None,
             })
@@ -849,7 +850,7 @@ class StudentLessonDetailView(StudentScopedView):
                 "type": m.material_type,
                 "type_label": m.get_material_type_display(),
                 "external_url": m.external_url or "",
-                "file_url": m.file.url if m.file else "",
+                "file_url": material_file_url(m, for_student=True),
                 "has_content": bool(m.content and m.content.strip()),
             }
             for m in lesson.materials.all()[:20]
@@ -927,18 +928,31 @@ class StudentAssignmentDetailView(StudentScopedView):
         cleanup_duplicate_homework_tasks(hw)
         token = issue_homework_token(homework_id=hw.id, student_user_id=request.user.id)
         tasks = serialize_homework_tasks(hw, homework_id=hw.id, token=token)
+        attached_name = ""
+        if submission:
+            from .files_models import CabinetFileRelation, CabinetFileRelationType
+
+            rel = (
+                CabinetFileRelation.objects.filter(
+                    submission=submission,
+                    relation_type=CabinetFileRelationType.SUBMISSION,
+                )
+                .select_related("file")
+                .first()
+            )
+            if rel and rel.file_id:
+                attached_name = rel.file.display_name or rel.file.original_name
+            elif submission.attached_file:
+                attached_name = submission.attached_file.name.split("/")[-1]
+
         card = _serialize_assignment_card(hw, students)
         card.update({
             "description": hw.description or "",
             "tasks": tasks,
             "has_variant": homework_has_variant_task(hw),
             "answer_text": submission.answer_text if submission else "",
-            "attached_file_url": submission.attached_file.url if submission and submission.attached_file else "",
-            "attached_file_name": (
-                submission.attached_file.name.split("/")[-1]
-                if submission and submission.attached_file
-                else ""
-            ),
+            "attached_file_url": submission_file_url(submission, for_student=True) if submission else "",
+            "attached_file_name": attached_name,
             "teacher_comment": submission.teacher_comment if submission else "",
             "mistakes": [],
             "variant_submitted": bool(submission and submission.result_payload),
@@ -980,10 +994,22 @@ class StudentAssignmentDetailView(StudentScopedView):
         if not created:
             submission.answer_text = answer_text
             submission.status = SubmissionStatus.SUBMITTED
-        if attached_file:
-            submission.attached_file = attached_file
         submission.submitted_at = timezone.now()
-        submission.save()
+        if attached_file:
+            # Сохраняем в «Мои файлы» ученика и связываем со сдачей без лишней копии
+            from .files_services import FileServiceError, attach_file_for_student, upload_file
+
+            try:
+                cabinet_file = upload_file(request.user, attached_file)
+                submission.save()
+                attach_file_for_student(request.user, cabinet_file.id, submission)
+            except FileServiceError as exc:
+                return Response(
+                    {"error": exc.message, "code": exc.code},
+                    status=exc.status,
+                )
+        else:
+            submission.save()
         from .homework_api import _ensure_review_item
 
         _ensure_review_item(submission)
@@ -1160,7 +1186,7 @@ def _collect_direct_materials(students):
             "lesson_topic": "",
             "assignment_id": None,
             "external_url": m.external_url or "",
-            "file_url": m.file.url if m.file else "",
+            "file_url": material_file_url(m, for_student=True),
             "cover_theme": "material",
             "message": da.message or "",
             "direct": True,

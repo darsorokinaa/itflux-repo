@@ -6,6 +6,7 @@ export const STUDENT_NAV = [
   { id: "assignments", label: "Задания",   path: "/cabinet/student/assignments",   icon: "check"    },
   { id: "results",     label: "Результаты", path: "/cabinet/student/results",      icon: "chart"    },
   { id: "materials",   label: "Материалы", path: "/cabinet/student/materials",     icon: "folder"   },
+  { id: "files",       label: "Мои файлы", path: "/cabinet/student/files",         icon: "folder"   },
   { id: "profile",     label: "Профиль",   path: "/cabinet/student/profile",       icon: "settings" },
 ];
 

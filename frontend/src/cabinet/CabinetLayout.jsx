@@ -5,7 +5,7 @@ import { fetchCabinetSession, logoutCabinet } from "../utils/cabinetAuth";
 import CabinetIcon from "./CabinetIcons";
 import {
   CABINET_MOBILE_NAV,
-  CABINET_NAV,
+  CABINET_NAV_GROUPS,
   getCabinetSectionTitle,
   isCabinetMobileNavActive,
   isCabinetNavActive,
@@ -185,12 +185,19 @@ export default function CabinetLayout() {
     <div className="cabinet-layout cb-layout">
       <aside className="cabinet-sidebar cb-layout__sidebar">
         <nav className="cabinet-nav" aria-label="Разделы кабинета">
-          {CABINET_NAV.map((item) => (
-            <NavSidebarItem
-              key={item.id}
-              item={item}
-              active={isCabinetNavActive(location.pathname, item)}
-            />
+          {CABINET_NAV_GROUPS.map((group) => (
+            <div key={group.id} className="cabinet-nav-group">
+              <p className="cabinet-nav-group__label">{group.label}</p>
+              <div className="cabinet-nav-group__items">
+                {group.items.map((item) => (
+                  <NavSidebarItem
+                    key={item.id}
+                    item={item}
+                    active={isCabinetNavActive(location.pathname, item)}
+                  />
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
         <div className="cabinet-sidebar-bottom">

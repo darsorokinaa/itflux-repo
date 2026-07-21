@@ -313,6 +313,11 @@ if _csrf_extra:
 
 # Cabinet uploads
 CABINET_MAX_UPLOAD_BYTES = int(os.environ.get("CABINET_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+CABINET_FILE_STORAGE_QUOTA_BYTES = int(
+    os.environ.get("CABINET_FILE_STORAGE_QUOTA_BYTES", str(1024 * 1024 * 1024))
+)
+CABINET_FILE_TRASH_DAYS = int(os.environ.get("CABINET_FILE_TRASH_DAYS", "30"))
+
 
 LESSON_PLAN_CATALOG_PUBLISHER_EMAILS = tuple(
     email.strip().lower()

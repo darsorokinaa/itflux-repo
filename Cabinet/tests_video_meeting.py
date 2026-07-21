@@ -414,8 +414,10 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(t_payload["room"], meeting.room_name)
         self.assertEqual(t_payload["context"]["user"]["id"], str(self.teacher.pk))
         self.assertTrue(t_payload["context"]["user"]["moderator"] in (True, "true"))
+        self.assertEqual(t_payload["context"]["user"].get("affiliation"), "owner")
         self.assertEqual(s_payload["context"]["user"]["id"], str(self.student_user.pk))
         self.assertTrue(s_payload["context"]["user"]["moderator"] in (False, "false"))
+        self.assertEqual(s_payload["context"]["user"].get("affiliation"), "member")
         self.assertIn("iat", t_payload)
         self.assertIn("nbf", t_payload)
         self.assertLessEqual(t_payload["nbf"], t_payload["iat"])
@@ -493,7 +495,12 @@ class VideoMeetingApiTests(TestCase):
         res = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/")
         self.assertEqual(res.status_code, 403)
 
-    @override_settings(JITSI_AUTH_MODE="none")
+    @override_settings(
+        JITSI_DOMAIN="meet.jit.si",
+        JITSI_AUTH_MODE="none",
+        JITSI_APP_ID="",
+        JITSI_APP_SECRET="",
+    )
     def test_auth_mode_none_returns_null_jwt(self):
         meeting = self._create_meeting()
         start_meeting(meeting=meeting, user=self.teacher)
@@ -501,7 +508,23 @@ class VideoMeetingApiTests(TestCase):
         res = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/")
         self.assertEqual(res.status_code, 200)
         self.assertIsNone(res.data["jwt"])
+        self.assertTrue(res.data["requiresModeratorLogin"])
         self.assertTrue(str(res.data["userInfo"]["displayName"]).strip())
+
+    @override_settings(JITSI_AUTH_MODE="none")
+    def test_custom_domain_auto_enables_jwt_when_secrets_set(self):
+        """Свой домен + секреты при AUTH_MODE=none всё равно выдаёт JWT (иначе «Я организатор»)."""
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        self.client.force_login(self.teacher)
+        res = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["authMode"], "jwt")
+        self.assertTrue(res.data["jwt"])
+        self.assertFalse(res.data["requiresModeratorLogin"])
+        payload = decode_jitsi_jwt_unsafe_for_tests(res.data["jwt"])
+        self.assertEqual(payload["context"]["user"]["moderator"], "true")
+        self.assertEqual(payload["context"]["user"]["affiliation"], "owner")
 
     def test_join_config_display_name_never_empty(self):
         blank = User.objects.create_user(username="vm_blank_name", password="pass")

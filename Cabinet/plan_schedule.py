@@ -122,16 +122,51 @@ def resolve_plan_item_for_event(event):
     return None, None
 
 
+def explicit_plan_item_for_event(event):
+    """
+    Пункт плана, явно привязанный к занятию (не слот enrollment).
+    Нужен для записи материалов: слот нельзя мутировать для уроков «вне плана».
+    """
+    linked = list(event.plan_items.order_by("order", "id")[:2])
+    if len(linked) == 1:
+        item = linked[0]
+        return item, item.order or None
+    if len(linked) > 1:
+        # Неоднозначная явная связь — берём ту, что указана на событии, иначе первую.
+        if event.lesson_plan_item_id:
+            for item in linked:
+                if item.id == event.lesson_plan_item_id:
+                    return item, item.order or None
+        item = linked[0]
+        return item, item.order or None
+
+    if event.lesson_plan_item_id:
+        item = event.lesson_plan_item
+        return item, item.order or None
+
+    if event.series_id and event.series.lesson_plan_item_id:
+        item = event.series.lesson_plan_item
+        return item, item.order or None
+
+    return None, None
+
+
+AUTO_MATERIALS_PLAN_DESCRIPTION = "Автосоздано для материалов занятия"
+
+
 def ensure_event_plan_item(event, *, teacher=None):
     """
     Гарантирует пункт плана для прикрепления материалов/ДЗ к занятию.
-    Если пункта нет — создаёт черновик плана с одним пунктом и линкует к событию.
+
+    Только явная связь событие↔пункт (или создание черновика «Материалы: …»).
+    Слот enrollment НЕ используется — иначе материалы урока «вне плана»
+    попадают в настоящий план ученика.
     """
     from .choices import Direction, ExamType, PlanStatus, PlanSubject
     from .models import LessonPlan, LessonPlanItem
 
     teacher = teacher or event.owner
-    item, lesson_number = resolve_plan_item_for_event(event)
+    item, lesson_number = explicit_plan_item_for_event(event)
     if item is not None:
         update_fields = []
         if event.lesson_plan_item_id != item.id:
@@ -147,7 +182,7 @@ def ensure_event_plan_item(event, *, teacher=None):
     plan = LessonPlan.objects.create(
         teacher=teacher,
         title=f"Материалы: {(event.title or 'Урок').strip()}"[:255],
-        description="Автосоздано для материалов занятия",
+        description=AUTO_MATERIALS_PLAN_DESCRIPTION,
         direction=Direction.OTHER,
         subject=PlanSubject.INFORMATICS,
         exam_type=ExamType.NONE,

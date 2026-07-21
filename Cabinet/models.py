@@ -310,6 +310,14 @@ class Material(models.Model):
     task_number = models.CharField("Номер задания", max_length=32, blank=True)
     difficulty = models.CharField("Сложность", max_length=32, blank=True)
     file = models.FileField("Файл", upload_to="cabinet/materials/", blank=True, null=True)
+    cabinet_file = models.ForeignKey(
+        "CabinetFile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="materials",
+        verbose_name="Файл из хранилища",
+    )
     external_url = models.URLField("Внешняя ссылка", blank=True)
     content = models.TextField("Содержимое", blank=True)
     is_public = models.BooleanField("Публичный", default=False)
@@ -2741,4 +2749,19 @@ from .journal_models import (  # noqa: E402
     StudentCriterionScore,
     StudentLessonRecord,
     StudentLessonRecordTag,
+)
+
+# ── Личное файловое хранилище (см. files_models.py) ───────────────────────────
+from .files_models import (  # noqa: E402
+    CabinetFile,
+    CabinetFileAuditAction,
+    CabinetFileAuditLog,
+    CabinetFilePermission,
+    CabinetFilePermissionLevel,
+    CabinetFileRelation,
+    CabinetFileRelationType,
+    CabinetFileStatus,
+    CabinetFileVersion,
+    CabinetFolder,
+    UserStorageQuota,
 )

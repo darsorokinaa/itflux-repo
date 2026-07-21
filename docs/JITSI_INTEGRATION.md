@@ -46,6 +46,8 @@ JITSI_SUB=lesson.itflux-academy.ru
 JITSI_AUD=jitsi
 ```
 
+Важно: если свой домен задан вместе с `JITSI_APP_ID` / `JITSI_APP_SECRET`, а `JITSI_AUTH_MODE` случайно остался `none`, бэкенд **всё равно выдаст JWT** — иначе учитель застрянет на экране «Я организатор». На `meet.jit.si` авто-JWT не включается.
+
 Синхронизация Prosody с Django: `sudo bash deploy/jitsi/fix-jwt-prosody.sh`.
 
 Шаблоны: `deploy/.env.production.example`, `deploy/jitsi/.env.jwt.example`.  

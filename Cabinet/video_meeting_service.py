@@ -545,12 +545,9 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
 
     domain = get_jitsi_domain()
     auth_mode = get_jitsi_auth_mode()
-    # meet.jit.si без JWT не доверяет startAsModerator — учитель должен нажать «Я организатор».
-    requires_moderator_login = (
-        access.is_moderator
-        and not jwt_token
-        and domain.rstrip(".").lower() in {"meet.jit.si", "8x8.vc"}
-    )
+    # Без JWT публичный meet.jit.si (и любой хост с wait-for-moderator) не даёт
+    # права организатора из профиля — учителю нужно жать «Я организатор».
+    requires_moderator_login = bool(access.is_moderator and not jwt_token)
 
     # join-config никогда не генерирует новую комнату — только сохранённый room_name.
     meeting.refresh_from_db(fields=["room_name"])

@@ -600,6 +600,9 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         # Личные планы учителя + общедоступные (teacher=None)
         qs = LessonPlan.objects.filter(
             Q(teacher=teacher) | Q(teacher__isnull=True)
+        ).exclude(
+            # Служебные черновики под материалы урока «вне плана» — не в списке планов.
+            description="Автосоздано для материалов занятия",
         ).annotate(items_count=Count("items")).prefetch_related(
             Prefetch(
                 "items",

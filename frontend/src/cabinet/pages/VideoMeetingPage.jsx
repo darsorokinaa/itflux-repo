@@ -320,7 +320,11 @@ export default function VideoMeetingPage() {
       setDisplayName(resolveJitsiDisplayName(config));
       setModeratorLoginHint(
         config.requiresModeratorLogin
-          ? "На meet.jit.si нажмите «Я организатор» и войдите в аккаунт Jitsi — иначе урок не начнётся."
+          ? (
+            config.domain && !String(config.domain).includes("meet.jit.si")
+              ? `На ${config.domain} нет JWT: нажмите «Я организатор» или включите JITSI_AUTH_MODE=jwt на сервере — иначе урок не начнётся.`
+              : "На meet.jit.si нажмите «Я организатор» и войдите в аккаунт Jitsi — иначе урок не начнётся."
+          )
           : "",
       );
 
@@ -813,7 +817,8 @@ export default function VideoMeetingPage() {
 
   const ensurePlanItem = useCallback(async () => {
     if (!event?.id) throw new Error("Нет занятия");
-    if (event?.planItem?.id) return event.planItem;
+    // Всегда ensure на бэкенде: event.planItem из карточки может быть слотом плана,
+    // а не явной привязкой — писать материалы туда нельзя.
     const data = await ensureScheduleEventPlanItem(event.id);
     const planItem = data?.planItem || null;
     if (!planItem?.id) throw new Error("Не удалось подготовить урок для материалов");
@@ -849,17 +854,14 @@ export default function VideoMeetingPage() {
 
   const onAttachPlanMaterial = useCallback(async (material) => {
     setAttachError("");
-    let planItemId = event?.planItem?.id;
-    if (!planItemId) {
-      const ensured = await ensurePlanItem();
-      planItemId = ensured?.id;
-    }
+    const ensured = await ensurePlanItem();
+    const planItemId = ensured?.id;
     if (!planItemId || !material?.id) {
       throw new Error("Не удалось прикрепить материал к уроку");
     }
     setAttachBusy(true);
     try {
-      const current = (event?.planItem?.materials || []).map((m) => m.id).filter(Boolean);
+      const current = (ensured?.materials || event?.planItem?.materials || []).map((m) => m.id).filter(Boolean);
       if (!current.includes(material.id)) current.push(material.id);
       const data = await updateLessonPlanItem(planItemId, { material_ids: current });
       const mapped = mapApiPlanItem(data);
@@ -882,17 +884,15 @@ export default function VideoMeetingPage() {
 
   const onAttachPlanInteractive = useCallback(async (interactive) => {
     setAttachError("");
-    let planItemId = event?.planItem?.id;
-    if (!planItemId) {
-      const ensured = await ensurePlanItem();
-      planItemId = ensured?.id;
-    }
+    const ensured = await ensurePlanItem();
+    const planItemId = ensured?.id;
     if (!planItemId || !interactive?.id) {
       throw new Error("Не удалось прикрепить интерактив к уроку");
     }
     setAttachBusy(true);
     try {
-      const current = (event?.planItem?.attachedInteractives || event?.planItem?.attached_interactives || [])
+      const current = (ensured?.attachedInteractives || ensured?.attached_interactives
+        || event?.planItem?.attachedInteractives || event?.planItem?.attached_interactives || [])
         .map((i) => i.id)
         .filter(Boolean);
       if (!current.includes(interactive.id)) current.push(interactive.id);
@@ -917,17 +917,15 @@ export default function VideoMeetingPage() {
 
   const onAttachHomeworkMaterial = useCallback(async (material) => {
     setAttachError("");
-    let planItemId = event?.planItem?.id;
-    if (!planItemId) {
-      const ensured = await ensurePlanItem();
-      planItemId = ensured?.id;
-    }
+    const ensured = await ensurePlanItem();
+    const planItemId = ensured?.id;
     if (!planItemId || !material?.id) {
       throw new Error("Не удалось прикрепить материал ДЗ");
     }
     setAttachBusy(true);
     try {
-      const current = (event?.planItem?.homeworkMaterials || event?.planItem?.homework_materials || [])
+      const current = (ensured?.homeworkMaterials || ensured?.homework_materials
+        || event?.planItem?.homeworkMaterials || event?.planItem?.homework_materials || [])
         .map((m) => m.id)
         .filter(Boolean);
       if (!current.includes(material.id)) current.push(material.id);
@@ -952,17 +950,15 @@ export default function VideoMeetingPage() {
 
   const onAttachHomeworkInteractive = useCallback(async (interactive) => {
     setAttachError("");
-    let planItemId = event?.planItem?.id;
-    if (!planItemId) {
-      const ensured = await ensurePlanItem();
-      planItemId = ensured?.id;
-    }
+    const ensured = await ensurePlanItem();
+    const planItemId = ensured?.id;
     if (!planItemId || !interactive?.id) {
       throw new Error("Не удалось прикрепить интерактив в ДЗ");
     }
     setAttachBusy(true);
     try {
-      const current = (event?.planItem?.homeworkInteractives || event?.planItem?.homework_interactives || [])
+      const current = (ensured?.homeworkInteractives || ensured?.homework_interactives
+        || event?.planItem?.homeworkInteractives || event?.planItem?.homework_interactives || [])
         .map((i) => i.id)
         .filter(Boolean);
       if (!current.includes(interactive.id)) current.push(interactive.id);

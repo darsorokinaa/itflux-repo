@@ -29,6 +29,11 @@ from Cabinet.schedule_service import (
 )
 from Cabinet.schedule_events import schedule_event_to_json
 from Cabinet.schedule_series import generate_events_for_series
+from Cabinet.plan_schedule import (
+    AUTO_MATERIALS_PLAN_DESCRIPTION,
+    ensure_event_plan_item,
+    resolve_plan_item_for_event,
+)
 from Cabinet.vk_notifications import VKNotificationService, vk_is_configured
 
 
@@ -384,6 +389,34 @@ class PlanScheduleMappingTests(TestCase):
         self.assertEqual(self.item2.status, "skipped")
         payload3 = schedule_event_to_json(event3)
         self.assertEqual(payload3["planItem"]["id"], self.item3.id)
+
+    def test_ensure_out_of_plan_materials_do_not_mutate_enrollment_plan(self):
+        """Урок вне плана + материалы → отдельный черновик, слот плана не трогаем."""
+        display_item, _ = resolve_plan_item_for_event(self.event1)
+        self.assertEqual(display_item.id, self.item1.id)
+
+        ensured, _ = ensure_event_plan_item(self.event1, teacher=self.teacher)
+        self.assertNotEqual(ensured.id, self.item1.id)
+        self.assertEqual(ensured.plan.description, AUTO_MATERIALS_PLAN_DESCRIPTION)
+
+        material = Material.objects.create(
+            teacher=self.teacher,
+            title="Внеплановый материал",
+            material_type="lesson",
+            status="ready",
+        )
+        ensured.materials.add(material)
+
+        self.item1.refresh_from_db()
+        self.assertFalse(self.item1.materials.filter(pk=material.pk).exists())
+        self.assertTrue(ensured.materials.filter(pk=material.pk).exists())
+
+        # Служебные черновики скрыты из списка планов
+        visible = LessonPlan.objects.filter(teacher=self.teacher).exclude(
+            description=AUTO_MATERIALS_PLAN_DESCRIPTION,
+        )
+        self.assertFalse(visible.filter(pk=ensured.plan_id).exists())
+        self.assertTrue(visible.filter(pk=self.plan.id).exists())
 
 
 class LessonPlanItemMaterialsTests(TestCase):

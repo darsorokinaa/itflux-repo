@@ -267,7 +267,9 @@ class MaterialListSerializer(serializers.ModelSerializer):
         ]
 
     def get_file_url(self, obj):
-        return obj.file.url if obj.file else ""
+        from .files_services import material_file_url
+
+        return material_file_url(obj)
 
     def get_is_own(self, obj):
         teacher = self.context.get("teacher")
@@ -359,6 +361,8 @@ def _interactive_attachment_json(interactive):
 
 
 def _material_attachment_json(material):
+    from .files_services import material_file_url
+
     return {
         "id": material.id,
         "title": material.title,
@@ -368,7 +372,8 @@ def _material_attachment_json(material):
         "topic": material.topic or "",
         "subtopic": material.subtopic or "",
         "external_url": material.external_url or "",
-        "file_url": material.file.url if material.file else "",
+        "file_url": material_file_url(material),
+        "cabinet_file_id": str(material.cabinet_file_id) if material.cabinet_file_id else None,
     }
 
 
@@ -1259,11 +1264,23 @@ class HomeworkSubmissionSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at", "updated_at"]
 
     def get_attached_file_url(self, obj):
-        if obj.attached_file:
-            return obj.attached_file.url
-        return ""
+        from .files_services import submission_file_url
+
+        return submission_file_url(obj, for_student=False)
 
     def get_attached_file_name(self, obj):
+        from .files_models import CabinetFileRelation, CabinetFileRelationType
+
+        rel = (
+            CabinetFileRelation.objects.filter(
+                submission=obj,
+                relation_type=CabinetFileRelationType.SUBMISSION,
+            )
+            .select_related("file")
+            .first()
+        )
+        if rel and rel.file_id:
+            return rel.file.display_name or rel.file.original_name
         if obj.attached_file:
             return obj.attached_file.name.split("/")[-1]
         return ""

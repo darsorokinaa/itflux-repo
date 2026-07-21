@@ -37,6 +37,7 @@ import CabinetInteractiveDetailPage from "./cabinet/pages/CabinetInteractiveDeta
 import CabinetInteractivePlayPage from "./cabinet/pages/CabinetInteractivePlayPage";
 import CabinetBoardsPage from "./cabinet/pages/CabinetBoardsPage";
 import CabinetBoardEditorPage from "./cabinet/pages/CabinetBoardEditorPage";
+import CabinetFilesPage from "./cabinet/pages/CabinetFilesPage";
 import VideoMeetingPage from "./cabinet/pages/VideoMeetingPage";
 import MeetingCallDock from "./cabinet/components/MeetingCallDock";
 import CabinetMorePage from "./cabinet/pages/CabinetMorePage";
@@ -56,6 +57,7 @@ import StudentAssignmentsPage from "./cabinet/student/pages/StudentAssignmentsPa
 import StudentAssignmentDetailPage from "./cabinet/student/pages/StudentAssignmentDetailPage";
 import StudentInteractivePlayPage from "./cabinet/student/pages/StudentInteractivePlayPage";
 import StudentMaterialsPage from "./cabinet/student/pages/StudentMaterialsPage";
+import StudentFilesPage from "./cabinet/student/pages/StudentFilesPage";
 import StudentBoardsPage from "./cabinet/student/pages/StudentBoardsPage";
 import StudentProfilePage from "./cabinet/student/pages/StudentProfilePage";
 import StudentResultsPage from "./cabinet/student/pages/StudentResultsPage";
@@ -265,6 +267,7 @@ function App() {
             <Route path="results/:recordId" element={<StudentResultsPage />} />
             <Route path="profile"          element={<StudentProfilePage />} />
             <Route path="materials"        element={<StudentMaterialsPage />} />
+            <Route path="files"            element={<StudentFilesPage />} />
             <Route path="boards"           element={<StudentBoardsPage />} />
             {/* === Интерактив плеер (полноэкранный, без шапки) === */}
             <Route path="interactives/:id/play" element={<StudentInteractivePlayPage />} />
@@ -288,6 +291,7 @@ function App() {
             <Route path="interactives/:id/edit" element={<CabinetInteractiveEditorPage />} />
             <Route path="interactives/:id" element={<CabinetInteractiveDetailPage />} />
             <Route path="boards" element={<CabinetBoardsPage />} />
+            <Route path="files" element={<CabinetFilesPage />} />
             <Route path="review/:reviewId" element={<CabinetReviewDetailPage />} />
             <Route path="review" element={<CabinetReviewPage />} />
             <Route path="journal" element={<CabinetJournalPage />} />

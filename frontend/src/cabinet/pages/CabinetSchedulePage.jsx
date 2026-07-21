@@ -1795,12 +1795,11 @@ export default function CabinetSchedulePage() {
       return;
     }
     try {
-      let planItem = getEventPlanItem(event);
-      if (!planItem?.id) {
-        const data = await ensureScheduleEventPlanItem(eventPk);
-        planItem = data?.planItem || null;
-        if (planItem) patchEventPlanItem(event.id, planItem);
-      }
+      // Всегда ensure: planItem из списка может быть слотом enrollment («вне плана»),
+      // в него нельзя писать материалы — иначе они появятся в настоящем плане.
+      const data = await ensureScheduleEventPlanItem(eventPk);
+      const planItem = data?.planItem || null;
+      if (planItem) patchEventPlanItem(event.id, planItem);
       if (!planItem?.id) {
         showToast("Не удалось подготовить урок для материалов");
         return;
