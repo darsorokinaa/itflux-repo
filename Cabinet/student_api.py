@@ -1195,6 +1195,42 @@ def _collect_direct_materials(students):
     return items
 
 
+def _collect_student_boards(user):
+    """Интерактивные доски, к которым ученику открыт доступ."""
+    from .boards_api import user_accessible_boards_qs
+
+    items = []
+    qs = (
+        user_accessible_boards_qs(user)
+        .filter(is_archived=False)
+        .order_by("-updated_at")[:50]
+    )
+    for board in qs:
+        lesson_topic = ""
+        if board.lesson_id and board.lesson:
+            lesson_topic = board.lesson.topic or board.lesson.title or ""
+        elif board.schedule_event_id and board.schedule_event:
+            lesson_topic = board.schedule_event.topic or board.schedule_event.title or ""
+        items.append({
+            "id": f"board-{board.id}",
+            "board_id": str(board.id),
+            "title": board.title or "Интерактивная доска",
+            "description": board.description or "",
+            "type": "board",
+            "type_label": "Интерактивная доска",
+            "topic": "",
+            "lesson_topic": lesson_topic,
+            "assignment_id": None,
+            "external_url": "",
+            "file_url": "",
+            "board_url": f"/cabinet/boards/{board.id}",
+            "cover_theme": "board",
+            "direct": bool(board.student_id),
+            "updated_at": board.updated_at.isoformat() if board.updated_at else None,
+        })
+    return items
+
+
 class StudentMaterialsView(StudentScopedView):
     def get(self, request):
         students, err = self.student_response_or_error()
@@ -1204,9 +1240,14 @@ class StudentMaterialsView(StudentScopedView):
         q = (request.GET.get("q") or "").strip().lower()
         lesson_items = _collect_student_materials(students, limit=200)
         direct_items = _collect_direct_materials(students)
+        board_items = _collect_student_boards(request.user)
         # merge, deduplicate by id (direct takes priority)
         seen = {it["id"] for it in direct_items}
         for it in lesson_items:
+            if it["id"] not in seen:
+                direct_items.append(it)
+                seen.add(it["id"])
+        for it in board_items:
             if it["id"] not in seen:
                 direct_items.append(it)
                 seen.add(it["id"])
@@ -1218,7 +1259,13 @@ class StudentMaterialsView(StudentScopedView):
                 or q in it.get("description", "").lower()
                 or q in it.get("topic", "").lower()
                 or q in it.get("type_label", "").lower()
+                or q in it.get("lesson_topic", "").lower()
             ]
+        # Доски и материалы: свежие сверху
+        all_items.sort(
+            key=lambda row: row.get("updated_at") or row.get("assigned_at") or "",
+            reverse=True,
+        )
         return Response({"items": all_items[:100]})
 
 

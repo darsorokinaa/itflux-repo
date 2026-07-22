@@ -8,15 +8,14 @@ import {
 } from "../CabinetSectionUi";
 import {
   buildTeacherVariantUrl,
-  computePart1TaskCorrect,
   formatReviewDate,
   homeworkTaskAnswer,
   homeworkTaskAttachments,
-  homeworkTaskChecked,
   homeworkTaskComment,
   homeworkTaskScore,
   homeworkTeacherAttachments,
   inferExamTaskPart,
+  resolvePart1Verdict,
   taskMaxScore,
 } from "../cabinetReviewUtils";
 import {
@@ -265,7 +264,8 @@ export default function CabinetReviewDetailPage() {
   const reviewCtx = review?.homework_review;
   const result = submission?.result_payload || {};
   const isPending = review?.status === "pending";
-  const isReadOnly = !isPending;
+  const awaitingSubmission = isPending && !submission?.submitted_at;
+  const isReadOnly = !isPending || awaitingSubmission;
   const variantUrl = buildTeacherVariantUrl(reviewCtx);
   const level = reviewCtx?.level;
   const subject = reviewCtx?.subject;
@@ -301,16 +301,6 @@ export default function CabinetReviewDetailPage() {
   const homeworkReviewData = useMemo(() => {
     if (!reviewCtx?.has_variant || !variant?.tasks?.length || !level || !subject) return null;
     const data = buildHomeworkReviewFromVariant(variant.tasks, result, level, subject);
-    if (part1Tasks.length) {
-      data.part1 = data.part1.map((row) => {
-        const task = part1Tasks.find((t) => String(t.id) === row.taskId);
-        if (!task) return row;
-        const answer = homeworkTaskAnswer(result, task.id, task.number);
-        const saved = homeworkTaskChecked(result, task.id);
-        const verdict = saved ?? computePart1TaskCorrect(task, answer, subject);
-        return { ...row, verdict };
-      });
-    }
     if (part2Tasks.length) {
       data.part2 = data.part2.map((row) => ({
         ...row,
@@ -318,17 +308,19 @@ export default function CabinetReviewDetailPage() {
       }));
     }
     return data;
-  }, [reviewCtx, variant, result, level, subject, part1Tasks, part2Tasks, scores]);
+  }, [reviewCtx, variant, result, level, subject, part2Tasks, scores]);
 
   const buildAutoChecked = useCallback(() => {
     const autoChecked = {};
+    const allTasks = variant?.tasks || part1Tasks;
     part1Tasks.forEach((task) => {
-      const answer = homeworkTaskAnswer(result, task.id, task.number);
-      const verdict = computePart1TaskCorrect(task, answer, subject);
+      const answer = homeworkTaskAnswer(result, task.id, task.number, allTasks);
+      const verdict = resolvePart1Verdict(task, answer, result, subject);
+      if (verdict === null) return;
       autoChecked[String(task.id)] = verdict === true;
     });
     return autoChecked;
-  }, [part1Tasks, result, subject]);
+  }, [part1Tasks, result, subject, variant?.tasks]);
 
   const buildPayload = () => ({
     teacher_comment: teacherComment.trim(),
@@ -420,13 +412,7 @@ export default function CabinetReviewDetailPage() {
     });
   };
 
-  const getPart1Verdict = (task, answer) => {
-    if (isReadOnly) {
-      const saved = homeworkTaskChecked(result, task.id);
-      if (saved !== null) return saved;
-    }
-    return computePart1TaskCorrect(task, answer, subject);
-  };
+  const getPart1Verdict = (task, answer) => resolvePart1Verdict(task, answer, result, subject);
 
   if (loading) {
     return (
@@ -486,7 +472,16 @@ export default function CabinetReviewDetailPage() {
 
       {error ? <p className="cb-inline-error" role="alert">{error}</p> : null}
 
-      {homeworkReviewData ? (
+      {awaitingSubmission ? (
+        <section className="cb-review-detail__panel">
+          <h2 className="cb-review-detail__panel-title">Ожидает сдачи</h2>
+          <p className="cb-review-detail__empty-answer">
+            Задание выдано. Ответы ученика появятся здесь после сдачи.
+          </p>
+        </section>
+      ) : null}
+
+      {!awaitingSubmission && homeworkReviewData ? (
         <section className="cb-review-detail__panel cb-review-detail__panel--summary">
           <HomeworkReviewSummary
             review={homeworkReviewData}
@@ -495,7 +490,7 @@ export default function CabinetReviewDetailPage() {
         </section>
       ) : null}
 
-      {!reviewCtx?.has_variant ? (
+      {!awaitingSubmission && !reviewCtx?.has_variant ? (
         <section className="cb-review-detail__panel">
           <h2 className="cb-review-detail__panel-title">Ответ ученика</h2>
           <div className="cb-review-detail__simple-answer">
@@ -513,7 +508,7 @@ export default function CabinetReviewDetailPage() {
             ) : null}
           </div>
         </section>
-      ) : (
+      ) : !awaitingSubmission ? (
         <>
           <section className="cb-review-detail__panel">
             <h2 className="cb-review-detail__panel-title">Часть 1 — краткий ответ</h2>
@@ -525,7 +520,7 @@ export default function CabinetReviewDetailPage() {
             ) : (
               <div className="cb-review-detail__tasks">
                 {part1Tasks.map((task) => {
-                  const answer = homeworkTaskAnswer(result, task.id, task.number);
+                  const answer = homeworkTaskAnswer(result, task.id, task.number, variant?.tasks);
                   const verdict = getPart1Verdict(task, answer);
                   const tableAnswer = isTableAnswerTask(subject, task.number);
                   return (
@@ -586,7 +581,7 @@ export default function CabinetReviewDetailPage() {
             ) : (
               <div className="cb-review-detail__tasks">
                 {part2Tasks.map((task) => {
-                  const answer = homeworkTaskAnswer(result, task.id, task.number);
+                  const answer = homeworkTaskAnswer(result, task.id, task.number, variant?.tasks);
                   const studentAttachments = homeworkTaskAttachments(result, task.id, task.number);
                   const teacherAttachments = homeworkTeacherAttachments(result, task.id, task.number);
                   const max = taskMaxScore(task);
@@ -684,8 +679,9 @@ export default function CabinetReviewDetailPage() {
             )}
           </section>
         </>
-      )}
+      ) : null}
 
+      {!awaitingSubmission ? (
       <section className="cb-review-detail__panel">
         <h2 className="cb-review-detail__panel-title">Комментарий учителя</h2>
         {isReadOnly ? (
@@ -702,6 +698,7 @@ export default function CabinetReviewDetailPage() {
           />
         )}
       </section>
+      ) : null}
 
       <div className="cb-review-detail__footer">
         <Link
@@ -721,7 +718,7 @@ export default function CabinetReviewDetailPage() {
             Удалить ДЗ
           </button>
         ) : null}
-        {isPending ? (
+        {isPending && !awaitingSubmission ? (
           <>
             <button
               type="button"

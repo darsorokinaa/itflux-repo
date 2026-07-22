@@ -469,6 +469,60 @@ class VideoMeetingApiTests(TestCase):
             closed = record_attendance_leave(meeting=meeting, user=self.student_user)
         self.assertEqual(closed.duration_seconds, 7 * 60)
 
+    def test_reconnect_reopens_recent_session(self):
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        t0 = timezone.now()
+        with mock.patch("Cabinet.video_meeting_service.timezone.now", return_value=t0):
+            first = record_attendance_join(meeting=meeting, user=self.student_user)
+        t1 = t0 + timedelta(minutes=5)
+        with mock.patch("Cabinet.video_meeting_service.timezone.now", return_value=t1):
+            record_attendance_leave(meeting=meeting, user=self.student_user)
+        t2 = t1 + timedelta(seconds=20)
+        with mock.patch("Cabinet.video_meeting_service.timezone.now", return_value=t2):
+            second = record_attendance_join(meeting=meeting, user=self.student_user)
+        self.assertEqual(first.pk, second.pk)
+        second.refresh_from_db()
+        self.assertIsNone(second.left_at)
+        self.assertEqual(
+            MeetingAttendance.objects.filter(meeting=meeting, user=self.student_user).count(),
+            1,
+        )
+
+    def test_attendance_list_coalesces_short_gaps(self):
+        from Cabinet.video_meeting_service import list_attendance_for_teacher
+
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        t0 = timezone.now().replace(microsecond=0)
+        # Два фрагмента с разрывом 10 сек — должны склеиться в ~70 мин.
+        MeetingAttendance.objects.create(
+            meeting=meeting,
+            user=self.teacher,
+            joined_at=t0,
+            left_at=t0 + timedelta(minutes=11),
+            duration_seconds=11 * 60,
+        )
+        MeetingAttendance.objects.create(
+            meeting=meeting,
+            user=self.teacher,
+            joined_at=t0 + timedelta(minutes=11, seconds=10),
+            left_at=t0 + timedelta(minutes=70),
+            duration_seconds=59 * 60,
+        )
+        MeetingAttendance.objects.create(
+            meeting=meeting,
+            user=self.student_user,
+            joined_at=t0 + timedelta(minutes=1),
+            left_at=t0 + timedelta(minutes=70),
+            duration_seconds=69 * 60,
+        )
+        rows = list_attendance_for_teacher(meeting=meeting, user=self.teacher)
+        teacher_rows = [r for r in rows if r["userId"] == self.teacher.pk]
+        self.assertEqual(len(teacher_rows), 1)
+        self.assertEqual(teacher_rows[0]["durationSeconds"], 70 * 60)
+        self.assertEqual(teacher_rows[0]["sessionCount"], 2)
+
     def test_finish_closes_open_attendance(self):
         meeting = self._create_meeting()
         start_meeting(meeting=meeting, user=self.teacher)
@@ -672,7 +726,7 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual((student_row.get("result") or {}).get("by_number", {}).get("1"), "15")
         self.assertTrue((student_row.get("result") or {}).get("checked", {}).get("1"))
 
-        # Без checked ответ учителю не показываем.
+        # Черновик без «Проверить» тоже виден учителю на live-уроке.
         self.client.force_login(self.student_user)
         draft2 = self.client.post(
             f"/api/homework/assignment/{homework_id}/save-draft/",
@@ -690,10 +744,41 @@ class VideoMeetingApiTests(TestCase):
         answers2 = self.client.get(f"/api/video-meetings/{meeting.uuid}/live-answers/")
         result2 = (answers2.data["students"][0].get("result") or {})
         self.assertEqual(result2.get("by_number", {}).get("1"), "15")
-        self.assertNotIn("2", result2.get("by_number") or {})
-        self.assertNotIn("2", result2.get("by_task_id") or {})
+        self.assertEqual(result2.get("by_number", {}).get("2"), "99")
+        self.assertEqual(result2.get("by_task_id", {}).get("2"), "99")
 
         clear_res = self.client.delete(f"/api/video-meetings/{meeting.uuid}/present/")
         self.assertEqual(clear_res.status_code, 200)
         meeting.refresh_from_db()
         self.assertEqual(meeting.presented_kind, "")
+
+        # Live-вариант с урока не должен попадать в очередь «Проверка».
+        from Cabinet.models import Homework, HomeworkSubmission, ReviewItem
+        from Cabinet.homework_api import exclude_live_meeting_review_items
+
+        self.client.force_login(self.student_user)
+        submit = self.client.post(
+            f"/api/homework/assignment/{homework_id}/submit/",
+            {"result": {"by_number": {"1": "15"}, "checked": {"1": True}}},
+            format="json",
+        )
+        self.assertEqual(submit.status_code, 200, submit.content)
+        homework = Homework.objects.get(pk=homework_id)
+        self.assertIn("live-meeting:", homework.description or "")
+        submission = HomeworkSubmission.objects.get(homework=homework, student=self.student)
+        self.assertFalse(
+            ReviewItem.objects.filter(source_type="homework", source_id=submission.pk).exists()
+        )
+        # Даже если ReviewItem создали вручную — список проверки его скрывает.
+        orphan = ReviewItem.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            source_type="homework",
+            source_id=submission.pk,
+            title=f"{homework.title} — {self.student.full_name}",
+            status="pending",
+        )
+        filtered = exclude_live_meeting_review_items(
+            ReviewItem.objects.filter(teacher=self.teacher)
+        )
+        self.assertFalse(filtered.filter(pk=orphan.pk).exists())

@@ -539,7 +539,10 @@ class InteractiveBoardListSerializer(serializers.ModelSerializer):
 
     def get_collaborative_edit(self, obj):
         student = obj.student
-        return bool(student and student.user_id)
+        if student and student.user_id:
+            return True
+        # Совместная работа также при явном edit-доступе (после «Показать» на уроке и т.п.).
+        return obj.access_records.filter(permission=InteractiveBoardAccess.EDIT).exists()
 
 
 class InteractiveBoardDetailSerializer(InteractiveBoardListSerializer):

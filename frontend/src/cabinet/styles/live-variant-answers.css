@@ -95,6 +95,24 @@
   white-space: nowrap;
 }
 
+.live-variant-answers__table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+
+@media (max-width: 640px) {
+  .live-variant-answers__table {
+    min-width: 420px;
+    font-size: 0.82rem;
+  }
+}
+
+.live-variant-answers__pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .live-variant-answers__ok {
   color: #15803d;
   font-weight: 650;

@@ -80,8 +80,24 @@ export default function BillingPaymentModal({
       fetchBillingPackages().catch(() => []),
       fetchUnresolvedBillingLessons().catch(() => []),
     ]).then(([pkgs, lessons]) => {
-      setPackages(Array.isArray(pkgs) ? pkgs : []);
-      setUnpaidLessons(Array.isArray(lessons) ? lessons : []);
+      const pkgList = Array.isArray(pkgs) ? pkgs : [];
+      const lessonList = Array.isArray(lessons) ? lessons : [];
+      setPackages(pkgList);
+      setUnpaidLessons(lessonList);
+
+      // Если есть незакрытый абонемент и нет неоплаченных уроков — сразу «Оплата абонемента».
+      if (!lessonLinked && defaultStudentId) {
+        const sid = String(defaultStudentId);
+        const hasUnpaidLessons = lessonList.some((l) => String(l.student_id) === sid);
+        const hasUnpaidPkg = pkgList.some((p) => (
+          String(p.student_id) === sid
+          && ["awaiting_payment", "partially_paid"].includes(p.display_status || "")
+          && Number(p.purchase_amount || 0) > Number(p.paid_amount || 0)
+        ));
+        if (hasUnpaidPkg && !hasUnpaidLessons) {
+          setPurposeMode("package");
+        }
+      }
     });
   }, [open, defaultStudentId, defaultAmount, lessonLinked]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -159,6 +175,7 @@ export default function BillingPaymentModal({
         : 0;
 
       onDone?.({
+        studentId: studentId || defaultStudentId,
         closedDebt,
         partialLeft,
         message: partialLeft > 0

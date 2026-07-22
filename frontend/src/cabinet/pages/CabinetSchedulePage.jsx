@@ -28,6 +28,7 @@ import EventDetailCard from "../components/EventDetailCard";
 import HomeworkAssignModal from "../components/HomeworkAssignModal";
 import { openLessonSummaryTab } from "../journal/openLessonSummary";
 import PlanItemDetailModal from "../components/PlanItemDetailModal";
+import "../styles/schedule-mobile.css";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import CabinetIcon from "../CabinetIcons";
 import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
@@ -1236,7 +1237,7 @@ function MonthGrid({
   );
 }
 
-function ListView({ events, onEventClick, onOpen, onStart, onCreateLink, onAddLesson }) {
+function ListView({ events, onOpen, onStart, onCreateLink, onAddLesson }) {
   const grouped = useMemo(() => {
     const map = new Map();
     events.forEach((ev) => {
@@ -1283,48 +1284,57 @@ function ListView({ events, onEventClick, onOpen, onStart, onCreateLink, onAddLe
               else if (vmStatus === "scheduled") startLabel = "Начать урок";
               else if (canStart && !hasLink) startLabel = "Создать ссылку";
               else if (hasLink) startLabel = "Начать урок";
+              const studentName = (ev.audience || ev.title || "Занятие").trim();
+              const typeLabel = EVENT_TYPES[ev.type]?.label || "Занятие";
+              const duration = eventDurationMinutes(ev.startTime, ev.endTime);
+              const showStatus = Boolean(ev.statusLabel) && ev.status !== "planned";
+              const metaParts = [
+                typeLabel,
+                ev.format === "Онлайн" ? "онлайн" : (ev.format === "Офлайн" ? "офлайн" : null),
+                duration > 0 ? `${duration} мин` : null,
+              ].filter(Boolean);
+
               return (
                 <article key={ev.id} className="cb-sch-list-card">
                   <div className="cb-sch-list-card__accent" style={{ background: accent }} aria-hidden="true" />
-                  <div className="cb-sch-list-card__body">
+                  <div className="cb-sch-list-card__content">
                     <div className="cb-sch-list-card__row">
                       <span className="cb-sch-list-card__time">{ev.startTime}–{ev.endTime}</span>
-                      <span className={`cb-sch-list-card__status cb-sch-list-card__status--${ev.status}`}>
-                        {ev.statusLabel}
-                      </span>
+                      {showStatus ? (
+                        <span className={`cb-sch-list-card__status cb-sch-list-card__status--${ev.status}`}>
+                          {ev.statusLabel}
+                        </span>
+                      ) : null}
                     </div>
-                    <h3 className="cb-sch-list-card__title">{eventDisplayTitle(ev)}</h3>
+                    <h3 className="cb-sch-list-card__title">{studentName}</h3>
                     <p className="cb-sch-list-card__meta">
-                      {EVENT_TYPES[ev.type]?.label || "Занятие"}
-                      {eventDisplaySubtitle(ev) ? (
-                        <>
-                          <span>·</span>
-                          {eventDisplaySubtitle(ev)}
-                        </>
-                      ) : null}
-                      {ev.format === "Онлайн" ? (
-                        <>
-                          <span>·</span>
-                          онлайн
-                        </>
-                      ) : null}
+                      {metaParts.map((part, index) => (
+                        <span key={`${ev.id}-meta-${part}`}>
+                          {index > 0 ? <span className="cb-sch-list-card__dot" aria-hidden="true">·</span> : null}
+                          {part}
+                        </span>
+                      ))}
                     </p>
                     {ev.topic ? <p className="cb-sch-list-card__topic">{ev.topic}</p> : null}
-                  </div>
-                  <div className="cb-sch-list-card__actions">
-                    <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={() => onOpen(ev)}>
-                      Открыть
-                    </button>
-                    {canStart && startLabel === "Создать ссылку" && onCreateLink ? (
-                      <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={() => onCreateLink(ev)}>
-                        Создать ссылку
+                    <div className="cb-sch-list-card__actions">
+                      <button
+                        type="button"
+                        className="cb-btn cb-btn--outline cb-btn--sm cb-sch-list-card__open"
+                        onClick={() => onOpen(ev)}
+                      >
+                        Открыть
                       </button>
-                    ) : null}
-                    {canStart && onStart && startLabel && startLabel !== "Создать ссылку" ? (
-                      <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={() => onStart(ev)}>
-                        {startLabel}
-                      </button>
-                    ) : null}
+                      {canStart && startLabel === "Создать ссылку" && onCreateLink ? (
+                        <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={() => onCreateLink(ev)}>
+                          Создать ссылку
+                        </button>
+                      ) : null}
+                      {canStart && onStart && startLabel && startLabel !== "Создать ссылку" ? (
+                        <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={() => onStart(ev)}>
+                          {startLabel}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                 </article>
               );
@@ -1568,15 +1578,6 @@ function shortenMeetingUrl(url) {
   }
 }
 
-function participantInitials(name) {
-  const parts = (name || "").trim().split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) {
-    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-  }
-  const value = (name || "?").trim();
-  return value.slice(0, 2).toUpperCase();
-}
-
 function eventStatusMeta(event) {
   if (event.status === "cancelled") return { label: "Отменено", mod: "cancelled" };
   if (event.status === "done" || event.status === "completed") return { label: "Проведено", mod: "done" };
@@ -1631,11 +1632,11 @@ function EventDetailPopover(props) {
 
 function useMobileDefaultView() {
   const [isMobile, setIsMobile] = useState(() =>
-    typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches,
+    typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches,
   );
 
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 768px)");
+    const mq = window.matchMedia("(max-width: 900px)");
     const handler = (e) => setIsMobile(e.matches);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
@@ -1659,11 +1660,11 @@ export default function CabinetSchedulePage() {
   const [yandexEmbedEnabled, setYandexEmbedEnabled] = useState(false);
   const [yandexLayerIds, setYandexLayerIds] = useState("");
   const [yandexTzId, setYandexTzId] = useState("Europe/Moscow");
-  const [view, setView] = useState(() => (typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches ? "day" : "week"));
+  const [view, setView] = useState(() => (typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches ? "list" : "week"));
   const [focusDate, setFocusDate] = useState(() => startOfDay(new Date()));
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
   const [sidebarOpen, setSidebarOpen] = useState(() =>
-    typeof window !== "undefined" && !window.matchMedia("(max-width: 768px)").matches,
+    typeof window !== "undefined" && !window.matchMedia("(max-width: 900px)").matches,
   );
   const [calendars, setCalendars] = useState({
     all: true,
@@ -1902,7 +1903,7 @@ export default function CabinetSchedulePage() {
   }, [handleAddMaterials]);
 
   useEffect(() => {
-    if (isMobile && (view === "week" || view === "month")) setView("day");
+    if (isMobile && (view === "week" || view === "month")) setView("list");
   }, [isMobile, view]);
 
   useEffect(() => {
@@ -2524,15 +2525,6 @@ export default function CabinetSchedulePage() {
         ) : null}
 
         <div className="cb-sch-main">
-          {isMobile && !yandexEmbedEnabled ? (
-            <div className="cb-sch-mobile-upcoming">
-              <UpcomingLessons
-                events={filteredEvents}
-                onEventClick={handleEventClick}
-                compact
-              />
-            </div>
-          ) : null}
           {!yandexEmbedEnabled && calendarSource === "yandex" && yandexCalendarEnabled && !yandexLayerIds ? (
             <div className="cb-sch-calendar-hint">
               <p>
@@ -2604,7 +2596,6 @@ export default function CabinetSchedulePage() {
           {!yandexEmbedEnabled && view === "list" && (
             <ListView
               events={visibleEvents}
-              onEventClick={handleEventClick}
               onOpen={handleEventClick}
               onStart={handleStartLesson}
               onCreateLink={handleCreateMeetingLink}

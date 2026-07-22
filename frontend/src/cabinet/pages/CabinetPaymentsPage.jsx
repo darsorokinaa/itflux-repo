@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import BillingPaymentModal from "../components/BillingPaymentModal";
 import BillingPackageModal from "../components/BillingPackageModal";
 import ConfirmActionModal from "../components/ConfirmActionModal";
@@ -11,6 +12,7 @@ import {
   fetchBillingTransactions,
   fetchStudents,
   normalizeCabinetList,
+  notifyBillingChanged,
   reverseBillingTransaction,
 } from "../../utils/cabinetAuth";
 import {
@@ -18,6 +20,9 @@ import {
   formatMoney,
   formatShortDate,
   formatUnits,
+  formatTransactionAmount,
+  resolvePaymentsRowState,
+  transactionAmountMod,
 } from "../billing/billingFormat";
 import "../styles/payments.css";
 
@@ -41,18 +46,7 @@ function canReverseTx(tx) {
 }
 
 function txAmountLabel(tx, currency) {
-  const amount = Number(tx.amount || 0);
-  const money = formatMoney(Math.abs(amount), tx.currency || currency);
-  if (!amount) {
-    const units = Number(tx.package_units || 0);
-    if (units) {
-      const sign = units > 0 ? "+" : "−";
-      return `${sign}${formatUnits(Math.abs(units), tx.unit_type || "lesson")}`;
-    }
-    return "—";
-  }
-  const sign = amount > 0 ? "+" : "−";
-  return `${sign}${money}`;
+  return formatTransactionAmount(tx, currency);
 }
 
 function monthBounds(cursor) {
@@ -73,84 +67,11 @@ function formatMonthSwitcherLabel(cursor) {
   return raw.charAt(0).toUpperCase() + raw.slice(1).replace(/\s*г\.?$/, "");
 }
 
-function lessonsCountLabel(n) {
-  const num = Number(n) || 0;
-  const mod10 = num % 10;
-  const mod100 = num % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${num} урок`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${num} урока`;
-  return `${num} уроков`;
-}
-
-function remainingLessonsLabel(n) {
-  const num = Number(n) || 0;
-  const mod10 = num % 10;
-  const mod100 = num % 100;
-  if (mod10 === 1 && mod100 !== 11) return `Осталось ${num} занятие`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `Осталось ${num} занятия`;
-  return `Осталось ${num} занятий`;
-}
-
 function debtLabel(amount, currency) {
   const n = Number(amount) || 0;
   if (n <= 0) return null;
   const formatted = formatMoney(n, currency).replace(/^-/, "");
   return `−${formatted}`;
-}
-
-/** Состояние строки ученика: один главный статус. */
-function resolveRowState(account) {
-  const currency = account.currency || "RUB";
-  const unpaidAmount = Number(account.unpaid_lessons_amount || account.balance?.debt || 0);
-  const unpaidCount = Number(account.unpaid_lessons_count || 0);
-  const pkg = account.package;
-  const remaining = pkg ? Number(pkg.remaining_units || 0) : 0;
-
-  if (unpaidAmount > 0 || unpaidCount > 0) {
-    const sub = unpaidCount > 0
-      ? (pkg && remaining <= 0
-        ? `Абонемент закончился · ${lessonsCountLabel(unpaidCount)}`
-        : (!pkg
-          ? `Абонемента нет · ${lessonsCountLabel(unpaidCount)}`
-          : lessonsCountLabel(unpaidCount)))
-      : (pkg ? `Абонемент: ${formatUnits(pkg.total_units, pkg.unit_type)} · осталось ${formatUnits(pkg.remaining_units, pkg.unit_type)}` : "Абонемента нет");
-    return {
-      subtitle: unpaidCount === 1
-        ? (pkg && remaining <= 0 ? "Абонемент закончился · 1 неоплаченный урок" : (!pkg ? "Абонемента нет · 1 неоплаченный урок" : "1 неоплаченный урок"))
-        : (unpaidCount > 1
-          ? (pkg && remaining <= 0
-            ? `Абонемент закончился · ${unpaidCount} неоплаченных урока`
-            : (!pkg ? `Абонемента нет · ${unpaidCount} неоплаченных урока` : `${unpaidCount} неоплаченных урока`))
-          : sub),
-      balanceText: debtLabel(unpaidAmount, currency) || "Стоимость не указана",
-      balanceMod: "debt",
-    };
-  }
-
-  if (pkg) {
-    const ending = remaining > 0 && remaining <= 2 && pkg.unit_type !== "minute";
-    const endingMin = pkg.unit_type === "minute" && remaining > 0 && remaining <= 120;
-    if (remaining <= 0 || pkg.display_status === "completed") {
-      return {
-        subtitle: "Занятия закончились",
-        balanceText: "Занятия закончились",
-        balanceMod: "warn",
-      };
-    }
-    return {
-      subtitle: `Абонемент: ${formatUnits(pkg.total_units, pkg.unit_type)} · осталось ${formatUnits(pkg.remaining_units, pkg.unit_type)}`,
-      balanceText: ending || endingMin
-        ? remainingLessonsLabel(remaining)
-        : (pkg.display_status === "awaiting_payment" ? "Ожидает оплаты" : "Оплачено"),
-      balanceMod: ending || endingMin ? "warn" : (pkg.display_status === "awaiting_payment" ? "muted" : "ok"),
-    };
-  }
-
-  return {
-    subtitle: "Абонемента нет",
-    balanceText: "Абонемента нет",
-    balanceMod: "muted",
-  };
 }
 
 function AddMenu({ onPayment, onPackage }) {
@@ -302,11 +223,8 @@ function StudentDetailDrawer({
                 <ul className="pay-tx-list">
                   {transactions.map((tx) => {
                     const reversed = Boolean(tx.is_reversed);
-                    const amountClass = Number(tx.amount || 0) < 0 || reversed
-                      ? "pay-balance--debt"
-                      : Number(tx.amount || 0) > 0
-                        ? "pay-balance--ok"
-                        : "pay-balance--muted";
+                    const mod = transactionAmountMod(tx);
+                    const amountClass = `pay-balance--${mod}`;
                     return (
                       <li key={tx.id} className={`pay-tx-item${reversed ? " pay-tx-item--reversed" : ""}`}>
                         <div>
@@ -376,6 +294,7 @@ function CabinetPaymentsPlaceholder() {
 }
 
 function CabinetPaymentsPageInner() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [monthCursor, setMonthCursor] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -394,6 +313,7 @@ function CabinetPaymentsPageInner() {
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [reverseTarget, setReverseTarget] = useState(null);
   const [reversingId, setReversingId] = useState(null);
+  const deepLinkHandled = useRef("");
 
   const currency = dashboard?.currency || "RUB";
   const monthSwitcherLabel = formatMonthSwitcherLabel(monthCursor);
@@ -457,6 +377,27 @@ function CabinetPaymentsPageInner() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  // Deep-link из карточки ученика: /cabinet/payments?student=ID
+  useEffect(() => {
+    const studentId = searchParams.get("student");
+    if (!studentId || loading || !accounts.length) return;
+    if (deepLinkHandled.current === studentId) return;
+    const match = accounts.find((a) => String(a.student_id || a.studentId) === String(studentId));
+    if (match) {
+      deepLinkHandled.current = studentId;
+      setDrawerAccount(match);
+      const next = new URLSearchParams(searchParams);
+      next.delete("student");
+      setSearchParams(next, { replace: true });
+    }
+  }, [accounts, loading, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const onBilling = () => { void reload(); };
+    window.addEventListener("cabinet:billing-changed", onBilling);
+    return () => window.removeEventListener("cabinet:billing-changed", onBilling);
+  }, [reload]);
+
   const recentPayments = useMemo(
     () => monthTx
       .filter((tx) => PAYMENT_TX_TYPES.has(tx.transaction_type) && !tx.is_reversal)
@@ -485,6 +426,7 @@ function CabinetPaymentsPageInner() {
   const onPaymentDone = async (meta) => {
     if (meta?.message) setToast(meta.message);
     else setToast(meta?.closedDebt ? "Задолженность закрыта" : "Оплата добавлена");
+    notifyBillingChanged({ studentId: meta?.studentId || drawerAccount?.student_id || defaultStudentId });
     await reload();
     if (drawerAccount?.id) {
       const data = await fetchBillingAccount(drawerAccount.id).catch(() => null);
@@ -492,8 +434,9 @@ function CabinetPaymentsPageInner() {
     }
   };
 
-  const onPackageDone = async () => {
+  const onPackageDone = async (meta) => {
     setToast("Абонемент создан");
+    notifyBillingChanged({ studentId: meta?.studentId || drawerAccount?.student_id || defaultStudentId });
     await reload();
     if (drawerAccount?.id) {
       const data = await fetchBillingAccount(drawerAccount.id).catch(() => null);
@@ -503,6 +446,7 @@ function CabinetPaymentsPageInner() {
 
   const confirmReverse = async () => {
     if (!reverseTarget?.id) return;
+    const studentId = reverseTarget?.student_id || drawerAccount?.student_id;
     setReversingId(reverseTarget.id);
     try {
       await reverseBillingTransaction(reverseTarget.id, {
@@ -510,13 +454,14 @@ function CabinetPaymentsPageInner() {
       });
       setToast("Операция отменена");
       setReverseTarget(null);
+      notifyBillingChanged({ studentId });
       await reload();
       if (drawerAccount?.id) {
         const data = await fetchBillingAccount(drawerAccount.id).catch(() => null);
         if (data) setDrawerAccount(data);
       }
     } catch (err) {
-      setError(err?.message || "Не удалось отменить операцию");
+      setToast(err.message || "Не удалось отменить операцию");
       setReverseTarget(null);
     } finally {
       setReversingId(null);
@@ -583,7 +528,7 @@ function CabinetPaymentsPageInner() {
         {!loading && accounts.length > 0 ? (
           <ul className="pay-student-list">
             {accounts.map((account) => {
-              const state = resolveRowState(account);
+              const state = resolvePaymentsRowState(account);
               return (
                 <li key={account.id} className="pay-student-row">
                   <div className="pay-student-row__main">

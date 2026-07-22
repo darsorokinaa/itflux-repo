@@ -61,6 +61,7 @@ import StudentFilesPage from "./cabinet/student/pages/StudentFilesPage";
 import StudentBoardsPage from "./cabinet/student/pages/StudentBoardsPage";
 import StudentProfilePage from "./cabinet/student/pages/StudentProfilePage";
 import StudentResultsPage from "./cabinet/student/pages/StudentResultsPage";
+import StudentMorePage from "./cabinet/student/pages/StudentMorePage";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ensureSiteFavicon } from "./utils/ensureSiteFavicon";
 
@@ -275,7 +276,7 @@ function App() {
             <Route path="interactives" element={<Navigate to="/cabinet/student/assignments" replace />} />
             <Route path="schedule"     element={<Navigate to="/cabinet/student/lessons" replace />} />
             <Route path="progress"     element={<Navigate to="/cabinet/student" replace />} />
-            <Route path="more"         element={<Navigate to="/cabinet/student" replace />} />
+            <Route path="more"         element={<StudentMorePage />} />
           </Route>
           <Route path="/cabinet" element={<CabinetPage />}>
             <Route index element={<CabinetDashboard />} />

@@ -321,6 +321,22 @@ a.cb-board-card {
 }
 
 @media (max-width: 640px) {
+  .cb-boards-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .cb-boards-toolbar__search {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+
+  .cb-boards-toolbar__select {
+    width: 100%;
+    min-width: 0;
+  }
+
   .cb-boards-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 1rem 0.75rem;
@@ -333,6 +349,12 @@ a.cb-board-card {
   .cb-board-card__badge {
     font-size: 0.55rem;
     padding: 0.15rem 0.35rem;
+  }
+}
+
+@media (max-width: 380px) {
+  .cb-boards-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -1189,19 +1211,23 @@ a.cb-board-card {
     flex-wrap: wrap;
     min-height: 0;
     padding: 0.4rem 0.55rem;
+    padding-top: max(0.4rem, env(safe-area-inset-top, 0px));
   }
 
   .cb-board-editor__left {
     flex: 1 1 100%;
+    min-width: 0;
   }
 
   .cb-board-editor__title {
     max-width: none;
     flex: 1;
+    min-width: 0;
   }
 
   .cb-board-editor__right {
     flex: 1 1 100%;
+    min-width: 0;
   }
 
   .cb-board-editor__desktop-only {
@@ -1210,14 +1236,19 @@ a.cb-board-card {
 
   .cb-board-editor__btn,
   .cb-board-editor__action {
-    min-height: 36px;
-    height: 36px;
-    padding: 0 0.65rem;
+    min-height: 44px;
+    height: 44px;
+    padding: 0 0.75rem;
   }
 
   .cb-board-editor__action--danger {
-    width: 36px;
+    width: 44px;
     padding: 0;
+  }
+
+  .cb-board-editor {
+    touch-action: none;
+    overscroll-behavior: none;
   }
 }
 

@@ -25,6 +25,7 @@ import {
   archiveStudent,
   buildInvitationUrl,
   deleteInvitation,
+  deleteStudent,
   createGroup,
   createInvitation,
   fetchGroups,
@@ -33,6 +34,7 @@ import {
   fetchStudents,
   normalizeCabinetList,
   removeStudentFromGroup,
+  restoreStudent,
   updateGroup,
   updateStudent,
 } from "../../utils/cabinetAuth";
@@ -45,11 +47,33 @@ const INVITES_PAGE_SIZE = 10;
 
 const ACTIVE_FILTERS = [
   { id: "all", label: "Все" },
-  { id: "groups", label: "Группы" },
-  { id: "individual", label: "Индивидуальные" },
   { id: "oge", label: "ОГЭ" },
   { id: "ege", label: "ЕГЭ" },
 ];
+
+const VISIBILITY_STORAGE_KEY = "cabinet-students-section-visibility";
+
+function readSectionVisibility() {
+  try {
+    const raw = localStorage.getItem(VISIBILITY_STORAGE_KEY);
+    if (!raw) return { groups: true, individual: true };
+    const parsed = JSON.parse(raw);
+    return {
+      groups: parsed?.groups !== false,
+      individual: parsed?.individual !== false,
+    };
+  } catch {
+    return { groups: true, individual: true };
+  }
+}
+
+function writeSectionVisibility(next) {
+  try {
+    localStorage.setItem(VISIBILITY_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // ignore quota / private mode
+  }
+}
 
 const INVITE_FILTERS = [
   { id: "all", label: "Все" },
@@ -88,8 +112,6 @@ function matchesFilter(student, filter) {
   if (filter === "all") return true;
   if (filter === "oge") return student.direction === "ОГЭ";
   if (filter === "ege") return student.direction === "ЕГЭ";
-  if (filter === "groups") return Boolean(student.groupId);
-  if (filter === "individual") return !student.groupId;
   return true;
 }
 
@@ -316,6 +338,8 @@ function GroupCard({
   onAssignMaterialsStudent,
   onAssignMaterialsGroup,
   onArchiveGroup,
+  onArchiveStudent,
+  onDeleteStudent,
 }) {
   const [expanded, setExpanded] = useState(false);
   const exam = groupExamLabel(group);
@@ -387,6 +411,16 @@ function GroupCard({
                   {
                     label: "Успеваемость",
                     onClick: () => { window.location.href = `/cabinet/journal?student=${st.id}`; },
+                  },
+                  {
+                    label: "Архивировать",
+                    onClick: () => onArchiveStudent?.(st.id),
+                    danger: true,
+                  },
+                  {
+                    label: "Удалить",
+                    onClick: () => onDeleteStudent?.(st),
+                    danger: true,
                   },
                 ]}
               />
@@ -670,6 +704,7 @@ function ArchiveTab({
   archivedStudents,
   onRestoreGroup,
   onRestoreStudent,
+  onDeleteStudent,
 }) {
   const showGroups = filter === "all" || filter === "groups";
   const showStudents = filter === "all" || filter === "individual";
@@ -771,6 +806,11 @@ function ArchiveTab({
                 <StuMenu
                   items={[
                     { label: "Восстановить", onClick: () => onRestoreStudent(s.id) },
+                    {
+                      label: "Удалить навсегда",
+                      onClick: () => onDeleteStudent?.(s),
+                      danger: true,
+                    },
                   ]}
                 />
               </div>
@@ -787,6 +827,7 @@ export default function CabinetStudentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [mainTab, setMainTab] = useState("active");
   const [filter, setFilter] = useState("all");
+  const [sectionVisibility, setSectionVisibility] = useState(readSectionVisibility);
   const [inviteFilter, setInviteFilter] = useState("all");
   const [archiveFilter, setArchiveFilter] = useState("all");
   const [invitesShown, setInvitesShown] = useState(INVITES_PAGE_SIZE);
@@ -811,6 +852,7 @@ export default function CabinetStudentsPage() {
   const [materialsAssignModal, setMaterialsAssignModal] = useState(null);
   const [deleteInviteConfirm, setDeleteInviteConfirm] = useState(null);
   const [archiveConfirm, setArchiveConfirm] = useState(null);
+  const [deleteStudentConfirm, setDeleteStudentConfirm] = useState(null);
   const [copiedInviteId, setCopiedInviteId] = useState(null);
 
   const { toast, showToast } = useSoonToast();
@@ -931,12 +973,24 @@ export default function CabinetStudentsPage() {
   );
 
   const visibleGroups = useMemo(() => {
-    if (filter === "individual") return [];
-    if (filter === "all" || filter === "groups") return groupsWithStudents;
+    if (!sectionVisibility.groups) return [];
+    if (filter === "all") return groupsWithStudents;
     return groupsWithStudents.filter((g) => g.students.length > 0);
-  }, [groupsWithStudents, filter]);
+  }, [groupsWithStudents, filter, sectionVisibility.groups]);
 
-  const showIndividuals = filter !== "groups";
+  const showIndividuals = sectionVisibility.individual;
+
+  const toggleSectionVisibility = useCallback((key) => {
+    setSectionVisibility((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      // Не даём скрыть обе секции сразу — иначе страница пустая без понятного выхода.
+      if (!next.groups && !next.individual) {
+        return prev;
+      }
+      writeSectionVisibility(next);
+      return next;
+    });
+  }, []);
 
   const attentionCount = useMemo(
     () => students.filter((s) => (
@@ -1195,6 +1249,15 @@ export default function CabinetStudentsPage() {
     await loadData();
   };
 
+  const handleDeleteStudent = async (studentId) => {
+    await deleteStudent(studentId);
+    showToast("Ученик удалён");
+    closeStudentModal();
+    setArchivedStudents((prev) => prev.filter((s) => s.id !== String(studentId)));
+    setArchiveLoaded(false);
+    await loadData();
+  };
+
   const handleSaveGroup = async (payload) => {
     try {
       if (groupModal?.mode === "edit" && groupModal.group) {
@@ -1219,6 +1282,7 @@ export default function CabinetStudentsPage() {
 
   const requestArchiveGroup = (groupId) => setArchiveConfirm({ type: "group", id: groupId });
   const requestArchiveStudent = (studentId) => setArchiveConfirm({ type: "student", id: studentId });
+  const requestDeleteStudent = (student) => setDeleteStudentConfirm(student);
 
   const confirmArchiveAction = async () => {
     const target = archiveConfirm;
@@ -1228,6 +1292,17 @@ export default function CabinetStudentsPage() {
       await handleArchiveGroup(target.id);
     } else if (target.type === "student") {
       await handleArchiveStudent(target.id);
+    }
+  };
+
+  const confirmDeleteStudentAction = async () => {
+    const target = deleteStudentConfirm;
+    setDeleteStudentConfirm(null);
+    if (!target?.id) return;
+    try {
+      await handleDeleteStudent(target.id);
+    } catch (err) {
+      showToast(err.message || "Не удалось удалить ученика");
     }
   };
 
@@ -1241,7 +1316,7 @@ export default function CabinetStudentsPage() {
 
   const handleRestoreStudent = async (studentId) => {
     try {
-      await updateStudent(studentId, { status: "active" });
+      await restoreStudent(studentId);
       showToast("Ученик восстановлен");
       setArchivedStudents((prev) => prev.filter((s) => s.id !== String(studentId)));
       await loadData();
@@ -1270,6 +1345,7 @@ export default function CabinetStudentsPage() {
           onClose={closeStudentModal}
           onSave={handleSaveStudent}
           onArchive={studentModal.mode === "edit" ? handleArchiveStudent : null}
+          onDelete={studentModal.mode === "edit" ? handleDeleteStudent : null}
           onAttachPlan={studentModal.mode === "edit" ? openAttachPlanForStudent : null}
         />
       ) : null}
@@ -1343,6 +1419,15 @@ export default function CabinetStudentsPage() {
         onClose={() => setArchiveConfirm(null)}
         onConfirm={confirmArchiveAction}
       />
+      <ConfirmActionModal
+        open={Boolean(deleteStudentConfirm)}
+        title="Удалить ученика навсегда?"
+        text={`Ученик ${deleteStudentConfirm?.name || ""} и все связанные данные будут удалены безвозвратно.`}
+        confirmLabel="Удалить навсегда"
+        danger
+        onClose={() => setDeleteStudentConfirm(null)}
+        onConfirm={confirmDeleteStudentAction}
+      />
     </>
   );
 
@@ -1367,7 +1452,9 @@ export default function CabinetStudentsPage() {
     );
   }
 
-  const hasActiveContent = visibleGroups.length > 0 || (showIndividuals && individualStudents.length > 0);
+  const hasActiveContent =
+    (sectionVisibility.groups && (filter === "all" ? groups.length > 0 : visibleGroups.length > 0))
+    || (sectionVisibility.individual && (filter === "all" || individualStudents.length > 0));
   const isBrandNew = students.length === 0 && groups.length === 0;
 
   return (
@@ -1454,91 +1541,134 @@ export default function CabinetStudentsPage() {
               <p className="cb-students-empty__text">Попробуйте изменить фильтр.</p>
             </div>
           ) : (
-            <div className={`cb-students-sections${filter === "individual" || filter === "groups" ? " cb-students-sections--single" : ""}`}>
-              {filter !== "individual" ? (
-                <section className="cb-students-section" aria-label="Группы">
+            <div className={`cb-students-sections${!sectionVisibility.groups || !sectionVisibility.individual ? " cb-students-sections--single" : ""}`}>
+              <section
+                className={`cb-students-section${!sectionVisibility.groups ? " cb-students-section--collapsed" : ""}`}
+                aria-label="Группы"
+              >
+                <div className="cb-students-section__header">
                   <h2 className="cb-students-section__title">Группы</h2>
-                  {visibleGroups.length ? (
-                    <div className="cb-students-grid cb-students-grid--col">
-                      {visibleGroups.map((group) => {
-                        const drop = makeDropHandlers(group.id, (e) => handleDropOnGroup(e, group.id));
-                        return (
-                          <GroupCard
-                            key={group.id}
-                            group={group}
-                            students={group.students}
-                            isDragOver={dropTarget === group.id}
-                            draggingId={draggingId}
+                  <button
+                    type="button"
+                    className="cb-students-section__eye"
+                    aria-pressed={!sectionVisibility.groups}
+                    aria-label={sectionVisibility.groups ? "Скрыть группы" : "Показать группы"}
+                    title={sectionVisibility.groups ? "Скрыть группы" : "Показать группы"}
+                    onClick={() => toggleSectionVisibility("groups")}
+                    disabled={sectionVisibility.groups && !sectionVisibility.individual}
+                  >
+                    <CabinetIcon name={sectionVisibility.groups ? "eye" : "eyeOff"} />
+                  </button>
+                </div>
+                {sectionVisibility.groups ? (
+                  <>
+                    {visibleGroups.length ? (
+                      <div className="cb-students-grid cb-students-grid--col">
+                        {visibleGroups.map((group) => {
+                          const drop = makeDropHandlers(group.id, (e) => handleDropOnGroup(e, group.id));
+                          return (
+                            <GroupCard
+                              key={group.id}
+                              group={group}
+                              students={group.students}
+                              isDragOver={dropTarget === group.id}
+                              draggingId={draggingId}
+                              onDragStart={handleDragStart}
+                              onDragEnd={handleDragEnd}
+                              onOpenGroup={() => openEditGroup(group)}
+                              onOpenStudent={(st) => openEditStudent(st)}
+                              onEditGroup={() => openEditGroup(group)}
+                              onInviteGroup={() => openInviteToGroup(group)}
+                              onScheduleLesson={() => navigate("/cabinet/schedule", {
+                                state: { createWithGroupId: group.id },
+                              })}
+                              onAssignHomeworkStudent={openAssignHomeworkForStudent}
+                              onAssignHomeworkGroup={openAssignHomeworkForGroup}
+                              onAssignMaterialsStudent={openAssignMaterialsForStudent}
+                              onAssignMaterialsGroup={openAssignMaterialsForGroup}
+                              onArchiveGroup={() => requestArchiveGroup(group.id)}
+                              onArchiveStudent={requestArchiveStudent}
+                              onDeleteStudent={requestDeleteStudent}
+                              {...drop}
+                            />
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    <div className="cb-students-section__actions">
+                      <CompactAddCard label="Создать группу" onClick={openCreateGroup} />
+                    </div>
+                  </>
+                ) : null}
+              </section>
+
+              <section
+                className={`cb-students-section${!showIndividuals ? " cb-students-section--collapsed" : ""}`}
+                aria-label="Индивидуальные ученики"
+              >
+                <div className="cb-students-section__header">
+                  <h2 className="cb-students-section__title">Индивидуальные</h2>
+                  <button
+                    type="button"
+                    className="cb-students-section__eye"
+                    aria-pressed={!showIndividuals}
+                    aria-label={showIndividuals ? "Скрыть индивидуальные" : "Показать индивидуальные"}
+                    title={showIndividuals ? "Скрыть индивидуальные" : "Показать индивидуальные"}
+                    onClick={() => toggleSectionVisibility("individual")}
+                    disabled={showIndividuals && !sectionVisibility.groups}
+                  >
+                    <CabinetIcon name={showIndividuals ? "eye" : "eyeOff"} />
+                  </button>
+                </div>
+                {showIndividuals ? (
+                  <>
+                    {individualStudents.length ? (
+                      <div className="cb-students-grid cb-students-grid--col">
+                        {individualStudents.map((st) => (
+                          <StudentRow
+                            key={st.id}
+                            student={st}
+                            variant="card"
+                            showOpenButton
+                            dragging={draggingId === st.id}
                             onDragStart={handleDragStart}
                             onDragEnd={handleDragEnd}
-                            onOpenGroup={() => openEditGroup(group)}
-                            onOpenStudent={(st) => openEditStudent(st)}
-                            onEditGroup={() => openEditGroup(group)}
-                            onInviteGroup={() => openInviteToGroup(group)}
-                            onScheduleLesson={() => navigate("/cabinet/schedule", {
-                              state: { createWithGroupId: group.id },
-                            })}
-                            onAssignHomeworkStudent={openAssignHomeworkForStudent}
-                            onAssignHomeworkGroup={openAssignHomeworkForGroup}
-                            onAssignMaterialsStudent={openAssignMaterialsForStudent}
-                            onAssignMaterialsGroup={openAssignMaterialsForGroup}
-                            onArchiveGroup={() => requestArchiveGroup(group.id)}
-                            {...drop}
+                            onOpen={() => openEditStudent(st)}
+                            extraMeta={
+                              enrollmentsByStudent[st.id]?.planTitle
+                                ? `План: ${enrollmentsByStudent[st.id].planTitle}`
+                                : "Нет запланированного урока"
+                            }
+                            menuItems={[
+                              { label: "Редактировать", onClick: () => openEditStudent(st) },
+                              { label: "Задать ДЗ", onClick: () => openAssignHomeworkForStudent(st) },
+                              { label: "Материалы", onClick: () => openAssignMaterialsForStudent(st) },
+                              { label: "План уроков", onClick: () => openAttachPlanForStudent(st) },
+                              {
+                                label: "Успеваемость",
+                                onClick: () => { window.location.href = `/cabinet/journal?student=${st.id}`; },
+                              },
+                              {
+                                label: "Архивировать",
+                                onClick: () => requestArchiveStudent(st.id),
+                                danger: true,
+                              },
+                              {
+                                label: "Удалить",
+                                onClick: () => requestDeleteStudent(st),
+                                danger: true,
+                              },
+                            ]}
                           />
-                        );
-                      })}
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="cb-students-section__actions">
+                      <CompactAddCard label="Пригласить ученика" onClick={openCreateStudent} />
                     </div>
-                  ) : null}
-                  <div className="cb-students-section__actions">
-                    <CompactAddCard label="Создать группу" onClick={openCreateGroup} />
-                  </div>
-                </section>
-              ) : null}
-
-              {showIndividuals ? (
-                <section className="cb-students-section" aria-label="Индивидуальные ученики">
-                  <h2 className="cb-students-section__title">Индивидуальные</h2>
-                  {individualStudents.length ? (
-                    <div className="cb-students-grid cb-students-grid--col">
-                      {individualStudents.map((st) => (
-                        <StudentRow
-                          key={st.id}
-                          student={st}
-                          variant="card"
-                          showOpenButton
-                          dragging={draggingId === st.id}
-                          onDragStart={handleDragStart}
-                          onDragEnd={handleDragEnd}
-                          onOpen={() => openEditStudent(st)}
-                          extraMeta={
-                            enrollmentsByStudent[st.id]?.planTitle
-                              ? `План: ${enrollmentsByStudent[st.id].planTitle}`
-                              : "Нет запланированного урока"
-                          }
-                          menuItems={[
-                            { label: "Редактировать", onClick: () => openEditStudent(st) },
-                            { label: "Задать ДЗ", onClick: () => openAssignHomeworkForStudent(st) },
-                            { label: "Материалы", onClick: () => openAssignMaterialsForStudent(st) },
-                            { label: "План уроков", onClick: () => openAttachPlanForStudent(st) },
-                            {
-                              label: "Успеваемость",
-                              onClick: () => { window.location.href = `/cabinet/journal?student=${st.id}`; },
-                            },
-                            {
-                              label: "Архивировать",
-                              onClick: () => requestArchiveStudent(st.id),
-                              danger: true,
-                            },
-                          ]}
-                        />
-                      ))}
-                    </div>
-                  ) : null}
-                  <div className="cb-students-section__actions">
-                    <CompactAddCard label="Пригласить ученика" onClick={openCreateStudent} />
-                  </div>
-                </section>
-              ) : null}
+                  </>
+                ) : null}
+              </section>
             </div>
           )}
         </>
@@ -1571,6 +1701,7 @@ export default function CabinetStudentsPage() {
           archivedStudents={archivedStudents}
           onRestoreGroup={handleRestoreGroup}
           onRestoreStudent={handleRestoreStudent}
+          onDeleteStudent={requestDeleteStudent}
         />
       ) : null}
 

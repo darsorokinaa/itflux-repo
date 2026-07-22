@@ -450,6 +450,25 @@ class InteractiveBoardApiTests(TestCase):
         ids = {item["id"] for item in res.json().get("results", [])}
         self.assertIn(str(board.id), ids)
 
+    def test_linked_board_appears_in_student_materials(self):
+        board = InteractiveBoard.objects.create(
+            owner=self.teacher,
+            title="Доска к уроку",
+            student=self.student,
+            lesson=self.lesson,
+        )
+        self._auth(self.student_user)
+        res = self.client.get("/api/cabinet/student/materials/")
+        self.assertEqual(res.status_code, 200, res.content)
+        items = res.json().get("items") or []
+        board_rows = [it for it in items if it.get("type") == "board"]
+        self.assertTrue(board_rows)
+        row = next(it for it in board_rows if it.get("board_id") == str(board.id))
+        self.assertEqual(row["title"], "Доска к уроку")
+        self.assertEqual(row["type_label"], "Интерактивная доска")
+        self.assertEqual(row["board_url"], f"/cabinet/boards/{board.id}")
+        self.assertEqual(row["lesson_topic"], "Урок по алгоритмам")
+
     def test_duplicate_copies_assets(self):
         board = InteractiveBoard.objects.create(owner=self.teacher, title="WithAsset")
         asset = InteractiveBoardAsset(

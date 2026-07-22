@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import CabinetModal from "./CabinetModal";
 import { createBillingPackage } from "../../utils/cabinetAuth";
-import { formatMoney } from "../billing/billingFormat";
+import { formatMoney, formatUnits } from "../billing/billingFormat";
 import "../styles/payments.css";
 
 const LESSON_PRESETS = [4, 8, 12];
@@ -56,11 +56,11 @@ export default function BillingPackageModal({
           <ul className="pay-drawer-facts">
             <li>
               <span>Всего занятий</span>
-              <strong>{createdPkg.total_units}</strong>
+              <strong>{formatUnits(createdPkg.total_units, createdPkg.unit_type || "lesson")}</strong>
             </li>
             <li>
               <span>Осталось</span>
-              <strong>{createdPkg.remaining_units}</strong>
+              <strong>{formatUnits(createdPkg.remaining_units, createdPkg.unit_type || "lesson")}</strong>
             </li>
             <li>
               <span>Стоимость</span>

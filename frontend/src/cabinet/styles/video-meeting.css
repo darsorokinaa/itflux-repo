@@ -1,5 +1,5 @@
 .video-lesson-page {
-  --vl-header-height: 60px;
+  --vl-header-height: 64px;
   --vl-aside-width: min(380px, 35vw);
   --vl-jitsi-compact: min(340px, 32vw);
   --vl-blue: #2563eb;
@@ -23,16 +23,18 @@
   background: var(--vl-surface);
   color: var(--vl-text);
   overflow: hidden;
+  padding-top: env(safe-area-inset-top, 0px);
+  box-sizing: border-box;
 }
 
 .video-lesson-header {
-  flex: 0 0 var(--vl-header-height);
-  height: var(--vl-header-height);
+  flex: 0 0 auto;
+  min-height: var(--vl-header-height);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 12px;
+  padding: 8px 12px;
   background: rgba(15, 23, 42, 0.98);
   border-bottom: 1px solid var(--vl-border);
   z-index: 2;
@@ -92,17 +94,19 @@
 
 .video-lesson-header__title {
   margin: 0;
-  font-size: 0.92rem;
+  font-size: 0.95rem;
   font-weight: 650;
-  line-height: 1.2;
+  line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .video-lesson-header__sub {
-  margin: 1px 0 0;
-  font-size: 0.72rem;
+  margin: 2px 0 0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.2;
   color: var(--vl-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -436,9 +440,14 @@
 /* Блок доски внутри тёмной панели звонка */
 .video-lesson-aside .cb-board-lesson--embedded {
   margin-top: 0;
-  background: rgba(30, 41, 59, 0.85);
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  padding: 0;
+  background: transparent;
+  border: 0;
   color: var(--vl-text);
+}
+
+.video-lesson-aside .cb-board-lesson--embedded .vl-mat-item {
+  list-style: none;
 }
 
 .video-lesson-aside .cb-board-lesson__name {
@@ -446,13 +455,40 @@
 }
 
 .video-lesson-aside .cb-board-lesson__type,
-.video-lesson-aside .cb-lesson-card__empty--compact {
+.video-lesson-aside .cb-lesson-card__empty--compact,
+.video-lesson-aside .cb-lesson-card__meeting-empty {
   color: var(--vl-muted);
 }
 
-.video-lesson-aside .cb-btn,
-.video-lesson-aside button {
-  border-radius: 8px;
+.video-lesson-aside .live-variant-answers {
+  margin: 0;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(30, 41, 59, 0.9);
+  box-shadow: none;
+  position: static;
+  color: var(--vl-text);
+}
+
+.video-lesson-aside .live-variant-answers__title,
+.video-lesson-aside .live-variant-answers__head strong {
+  color: var(--vl-text);
+}
+
+.video-lesson-aside .live-variant-answers__empty,
+.video-lesson-aside .live-variant-answers__meta {
+  color: var(--vl-muted);
+}
+
+.video-lesson-aside .live-variant-answers__table th,
+.video-lesson-aside .live-variant-answers__table td {
+  border-bottom-color: rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
+}
+
+.video-lesson-aside .live-variant-answers__table th {
+  color: #94a3b8;
 }
 
 .video-lesson-live-answers {
@@ -1427,16 +1463,25 @@
   height: 100%;
 }
 
-.video-lesson-page--workspace .video-lesson-content {
-  flex: 0 0 var(--vl-jitsi-compact);
-  width: var(--vl-jitsi-compact);
-  max-width: 360px;
-  min-width: 280px;
-  border-left: 1px solid var(--vl-border);
+/* Материал поверх звонка — звонок остаётся на всю ширину */
+.video-lesson-page--workspace .video-lesson-body {
+  position: relative;
 }
 
-.video-lesson-page--workspace .video-lesson-body {
-  flex-direction: row;
+.video-lesson-page--workspace .video-lesson-content {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  border-left: 0;
+}
+
+.video-lesson-page--workspace .video-lesson-workspace {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  background: var(--vl-surface);
+  border-right: 0;
 }
 
 .video-lesson-mobile-switch {
@@ -1474,10 +1519,6 @@
 }
 
 @media (max-width: 960px) {
-  .video-lesson-page--workspace .video-lesson-content {
-    min-width: 260px;
-  }
-
   .video-lesson-workspace__actions .video-lesson-btn--text {
     font-size: 0.72rem;
   }
@@ -1517,10 +1558,10 @@
   /* Phone: show either call or materials, keep Jitsi mounted */
   .video-lesson-page--mobile-materials:not(.video-lesson-page--workspace) .video-lesson-content {
     position: absolute;
-    width: 120px;
-    height: 90px;
-    right: 10px;
-    bottom: 10px;
+    width: min(34vw, 140px);
+    height: min(24vw, 100px);
+    right: max(10px, env(safe-area-inset-right, 0px));
+    bottom: max(10px, env(safe-area-inset-bottom, 0px));
     z-index: 5;
     border-radius: 12px;
     overflow: hidden;
@@ -1538,12 +1579,14 @@
   }
 
   .video-lesson-page--workspace .video-lesson-workspace {
-    flex: 1 1 auto;
-    min-height: 45vh;
+    position: absolute;
+    inset: 0;
+    z-index: 6;
   }
 
   .video-lesson-page--workspace .video-lesson-content {
-    flex: 0 0 28vh;
-    min-height: 160px;
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 0;
   }
 }

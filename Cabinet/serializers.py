@@ -1569,6 +1569,9 @@ class DashboardSerializer(serializers.Serializer):
 
 
 def build_dashboard_payload(teacher):
+    from .homework_api import exclude_live_meeting_review_items, review_items_ready_to_check
+    from .plan_schedule import AUTO_MATERIALS_PLAN_DESCRIPTION
+
     today = timezone.localdate()
     now = timezone.now()
     start_of_day = timezone.make_aware(datetime.combine(today, datetime.min.time()))
@@ -1578,13 +1581,20 @@ def build_dashboard_payload(teacher):
         teacher=teacher,
         status=StudentStatus.ACTIVE,
     )
-    pending_reviews = ReviewItem.objects.filter(
-        teacher=teacher,
-        status=ReviewStatus.PENDING,
+    pending_reviews = review_items_ready_to_check(
+        exclude_live_meeting_review_items(
+            ReviewItem.objects.filter(
+                teacher=teacher,
+                status=ReviewStatus.PENDING,
+            )
+        )
     )
+    # Как в списке планов: служебные «Материалы: …» не считаем черновиками.
     drafts_count = (
         Lesson.objects.filter(teacher=teacher, status="draft").count()
-        + LessonPlan.objects.filter(teacher=teacher, status="draft").count()
+        + LessonPlan.objects.filter(teacher=teacher, status=PlanStatus.DRAFT)
+        .exclude(description=AUTO_MATERIALS_PLAN_DESCRIPTION)
+        .count()
         + Interactive.objects.filter(teacher=teacher, status="draft").count()
     )
     today_events_qs = ScheduleEvent.objects.filter(
@@ -1595,12 +1605,18 @@ def build_dashboard_payload(teacher):
     new_submissions = HomeworkSubmission.objects.filter(
         homework__teacher=teacher,
         status=SubmissionStatus.SUBMITTED,
+        submitted_at__isnull=False,
+    ).exclude(
+        homework__description__contains="live-meeting:",
     ).select_related("student", "homework").order_by("-submitted_at", "-id")[:5]
 
     pending_reviews_list = pending_reviews.select_related("student", "group").order_by("-created_at")[:8]
 
     groups = StudentGroup.objects.filter(teacher=teacher, status="active").annotate(
-        students_count=Count("students")
+        students_count=Count(
+            "students",
+            filter=~Q(students__status=StudentStatus.ARCHIVED),
+        )
     )[:4]
 
     progress_overview = [

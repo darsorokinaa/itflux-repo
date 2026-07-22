@@ -8,27 +8,39 @@ function stripAnswerHtml(html) {
     .trim();
 }
 
-function liveStudentAnswer(result, task) {
-  // Показываем ответ учителю только после «Проверить».
-  if (liveStudentChecked(result, task) === null) return "";
+function liveStudentAnswer(result, task, tasks) {
   const byNum = result?.by_number || result?.byNumber || {};
   const byId = result?.by_task_id || result?.byTaskId || {};
   const numKey = task.number != null ? String(task.number) : "";
+  const idKey = task.id != null ? String(task.id) : "";
+
+  if (idKey && byId[idKey] != null && String(byId[idKey]).trim() !== "") {
+    return String(byId[idKey]);
+  }
   if (numKey && byNum[numKey] != null && String(byNum[numKey]).trim() !== "") {
     return String(byNum[numKey]);
   }
-  if (task.id != null) {
-    const raw = byId[task.id] ?? byId[String(task.id)];
-    if (raw != null && String(raw).trim() !== "") return String(raw);
+  if (idKey && numKey && idKey !== numKey) {
+    const knownIds = Array.isArray(tasks) ? new Set(tasks.map((t) => String(t.id))) : null;
+    if (!knownIds || !knownIds.has(numKey)) {
+      const legacy = byId[numKey];
+      if (legacy != null && String(legacy).trim() !== "") return String(legacy);
+    }
   }
   return "";
 }
 
 function liveStudentChecked(result, task) {
   const checked = result?.checked || {};
-  if (task.id == null) return null;
-  if (checked[task.id] !== undefined) return checked[task.id];
-  if (checked[String(task.id)] !== undefined) return checked[String(task.id)];
+  if (task.id == null && task.number == null) return null;
+  if (task.id != null) {
+    if (checked[task.id] !== undefined) return checked[task.id];
+    if (checked[String(task.id)] !== undefined) return checked[String(task.id)];
+  }
+  if (task.number != null) {
+    const n = String(task.number);
+    if (checked[n] !== undefined) return checked[n];
+  }
   return null;
 }
 
@@ -75,10 +87,10 @@ export default function LiveVariantAnswersTable({ answers, loading = false, comp
     <section
       className={`live-variant-answers${compact ? " live-variant-answers--compact" : ""}`}
       aria-label="Ответы учеников"
+      aria-busy={loading || undefined}
     >
       <div className="live-variant-answers__title">
-        <strong>{answers?.title || "Вариант"} · ответы ученика</strong>
-        {loading ? <span className="live-variant-answers__meta">обновление…</span> : null}
+        <strong>{answers?.title || "Вариант"} · ответы</strong>
       </div>
       {!students.length && !loading ? (
         <p className="live-variant-answers__empty">Ученик ещё не начал отвечать.</p>
@@ -103,14 +115,14 @@ export default function LiveVariantAnswersTable({ answers, loading = false, comp
                   </thead>
                   <tbody>
                     {tasks.map((task) => {
-                      const value = liveStudentAnswer(result, task);
+                      const value = liveStudentAnswer(result, task, tasks);
                       const ok = liveStudentChecked(result, task);
                       const correct = stripAnswerHtml(task.answer);
                       return (
                         <tr key={`${row.studentId}-${task.id || task.number}`}>
                           <td>{task.number ?? "—"}</td>
-                          <td>{value.trim() ? value : "—"}</td>
-                          <td>{correct || "—"}</td>
+                          <td className="live-variant-answers__pre">{value.trim() ? value : "—"}</td>
+                          <td className="live-variant-answers__pre">{correct || "—"}</td>
                           <td>
                             {ok === true ? (
                               <span className="live-variant-answers__ok">верно</span>

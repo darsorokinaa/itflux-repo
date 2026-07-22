@@ -280,6 +280,63 @@ class PackageTests(BillingTestBase):
         self.assertEqual(pkg.remaining_units, Decimal("7.00"))
         self.assertEqual(records[0].financial_status, FinancialStatus.PAID_FROM_PACKAGE)
 
+    def test_orphan_payment_reconciles_to_awaiting_package(self):
+        """Оплата без package_id должна закрыть абонемент «ожидает оплаты»."""
+        from Cabinet.billing_service import package_display_status, serialize_package
+
+        pkg = create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="2 занятия",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("2"),
+            purchase_amount=Decimal("3000"),
+            create_payment_tx=False,
+        )
+        code, label = package_display_status(pkg)
+        self.assertEqual(code, "awaiting_payment")
+
+        register_payment(
+            teacher=self.teacher,
+            student=self.student,
+            amount=Decimal("3000"),
+            purpose="Оплата уроков",
+        )
+        data = serialize_package(pkg)
+        self.assertEqual(Decimal(data["paid_amount"]), Decimal("3000.00"))
+        self.assertNotEqual(data["display_status"], "awaiting_payment")
+        self.assertTrue(data["is_paid"])
+
+    def test_reconcile_existing_orphan_payment_on_serialize(self):
+        from Cabinet.billing_models import StudentPayment, StudentPaymentStatus
+        from Cabinet.billing_service import serialize_account
+
+        pkg = create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="2 занятия",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("2"),
+            purchase_amount=Decimal("3000"),
+            create_payment_tx=False,
+        )
+        # Старая оплата без привязки к абонементу.
+        StudentPayment.objects.create(
+            billing_account=self.account,
+            student=self.student,
+            amount=Decimal("3000"),
+            currency="RUB",
+            paid_at=timezone.now(),
+            purpose="Оплата",
+            status=StudentPaymentStatus.CONFIRMED,
+            package=None,
+            created_by=self.teacher,
+        )
+        data = serialize_account(self.account)
+        self.assertIsNotNone(data["package"])
+        self.assertEqual(Decimal(data["package"]["paid_amount"]), Decimal("3000.00"))
+        self.assertNotEqual(data["package"]["display_status"], "awaiting_payment")
+
     def test_create_package_switches_billing_type_and_preview(self):
         """Абонемент должен предлагать списание, даже если раньше был тариф «за урок»."""
         self.assertEqual(self.account.settings.billing_type, BillingType.PER_LESSON)
@@ -783,3 +840,28 @@ class BillingSettingsEmptyValueTests(BillingTestBase):
         settings = get_or_create_teacher_settings(self.teacher)
         self.assertIsNone(settings.default_lesson_price)
         self.assertEqual(settings.hourly_rate, Decimal("2500.00"))
+
+
+class ArchivedStudentBillingTests(BillingTestBase):
+    def test_archived_student_hidden_from_accounts_list(self):
+        resp = self.client.get("/api/cabinet/billing/accounts/")
+        self.assertEqual(resp.status_code, 200)
+        ids = {row["student_id"] for row in resp.json()}
+        self.assertIn(self.student.id, ids)
+
+        archive = self.client.patch(f"/api/cabinet/students/{self.student.id}/archive/")
+        self.assertEqual(archive.status_code, 200, archive.content)
+
+        self.account.refresh_from_db()
+        self.assertFalse(self.account.is_active)
+
+        resp = self.client.get("/api/cabinet/billing/accounts/")
+        self.assertEqual(resp.status_code, 200)
+        ids = {row["student_id"] for row in resp.json()}
+        self.assertNotIn(self.student.id, ids)
+
+    def test_cannot_create_billing_for_archived_student(self):
+        self.student.status = "archived"
+        self.student.save(update_fields=["status", "updated_at"])
+        with self.assertRaises(BillingError):
+            get_or_create_billing_account(self.teacher, self.student)

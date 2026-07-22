@@ -202,7 +202,7 @@ export default function VideoLessonMaterialsPanel({
                 onClick={() => setAddOpen((v) => !v)}
               >
                 <CabinetIcon name="plus" />
-                <span>Добавить</span>
+                <span>Добавить материал</span>
               </button>
               {addOpen ? (
                 <div className="vl-dropdown vl-dropdown--add" role="menu">

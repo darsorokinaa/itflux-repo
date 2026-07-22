@@ -5066,6 +5066,7 @@
 .cb-sch-day__body {
   display: flex;
   max-height: min(640px, calc(100vh - 220px));
+  max-height: min(640px, calc(100dvh - 220px));
   overflow: auto;
   position: relative;
 }
@@ -5577,7 +5578,8 @@ button.cb-sch-event {
 .cb-sch-list-card--homework .cb-sch-list-card__accent { background: #D97706; }
 .cb-sch-list-card--review .cb-sch-list-card__accent { background: #DC2626; }
 
-.cb-sch-list-card__body {
+.cb-sch-list-card__body,
+.cb-sch-list-card__content {
   flex: 1;
   min-width: 0;
   padding: 12px 14px;
@@ -5606,6 +5608,18 @@ button.cb-sch-event {
   background: rgba(5, 150, 105, 0.1);
   color: #059669;
 }
+.cb-sch-list-card__status--moved {
+  background: rgba(217, 119, 6, 0.12);
+  color: #B45309;
+}
+.cb-sch-list-card__status--cancelled {
+  background: rgba(220, 38, 38, 0.1);
+  color: #DC2626;
+}
+.cb-sch-list-card__dot {
+  margin: 0 4px;
+  color: #94A3B8;
+}
 .cb-sch-list-card__title {
   margin: 0 0 2px;
   font-size: 0.88rem;
@@ -5627,17 +5641,19 @@ button.cb-sch-event {
 }
 .cb-sch-list-card .cb-btn--sm,
 .cb-sch-list-card .cb-sch-btn--sm {
-  align-self: center;
-  margin-right: 12px;
+  align-self: auto;
+  margin-right: 0;
   flex-shrink: 0;
 }
 
 .cb-sch-list-card__actions {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 6px;
-  padding-right: 12px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-right: 0;
   flex-shrink: 0;
 }
 
@@ -8753,52 +8769,11 @@ button.cb-sch-event {
   .cb-sch-toolbar__title { display: none; }
 }
 
+@media (max-width: 900px) {
+  /* Mobile schedule chrome lives in schedule-mobile.css */
+}
+
 @media (max-width: 768px) {
-  .cb-sch-toolbar {
-    padding: 12px;
-    border-radius: 18px;
-  }
-  .cb-sch-toolbar__left,
-  .cb-sch-toolbar__right {
-    width: 100%;
-    justify-content: space-between;
-  }
-  .cb-sch-toolbar__period {
-    font-size: 0.78rem;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .cb-sch-btn--add { display: none; }
-  .cb-sch-view-switch {
-    overflow-x: auto;
-    scrollbar-width: none;
-    max-width: 100%;
-  }
-  .cb-sch-view-switch::-webkit-scrollbar { display: none; }
-
-  .cb-sch-layout {
-    grid-template-columns: 1fr;
-    gap: 12px;
-  }
-  .cb-sch-sidebar-toggle { display: inline-flex; }
-  .cb-sch-sidebar {
-    width: 100%;
-    max-width: none;
-    position: static;
-  }
-  .cb-sch-sidebar--collapsed { display: none; }
-  .cb-sch-mobile-upcoming { display: block; }
-
-  .cb-sch-week__head,
-  .cb-sch-week__body { display: none; }
-
-  .cb-sch-fab {
-    display: inline-flex;
-    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
-  }
-
   .cb-sch-filter-chips__bar {
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -12917,16 +12892,25 @@ button.cb-sch-event {
   justify-content: center;
   gap: 3px;
   min-height: 44px;
+  min-width: 0;
   padding: 4px 2px;
   border: none;
   border-radius: 12px;
   text-decoration: none;
   color: #667085;
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 600;
   background: transparent;
   cursor: pointer;
   transition: color 0.15s, background 0.15s;
+}
+
+.cb-mobile-nav__item span,
+.st-mobile-nav__item span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cb-mobile-nav__item svg,

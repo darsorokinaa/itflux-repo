@@ -1,10 +1,8 @@
 /** WebSocket-синхронизация совместного редактирования доски. */
 
-export type CollabScene = {
-  elements: unknown[];
-  appState: Record<string, unknown>;
-  files: Record<string, unknown>;
-};
+import { mergeCollabScenes, type CollabScene } from "./boardSceneMerge";
+
+export type { CollabScene } from "./boardSceneMerge";
 
 export type CollabPeer = {
   clientId: string;
@@ -32,6 +30,8 @@ function wsUrl(boardId: string): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}/ws/interactive-boards/${boardId}/`;
 }
+
+export { mergeCollabScenes };
 
 export function createBoardCollabSession(
   boardId: string,
@@ -165,7 +165,8 @@ export function createBoardCollabSession(
       pendingLive = scene;
       pendingVersion = version;
       if (liveTimer != null) return;
-      liveTimer = window.setTimeout(flushLive, 160);
+      // Чаще, чем раньше (160ms) — меньше «отставания» при совместном рисовании.
+      liveTimer = window.setTimeout(flushLive, 80);
     },
     close() {
       closed = true;

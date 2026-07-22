@@ -6,6 +6,7 @@ import {
   financialStatusMod,
   formatMoney,
   formatPaymentTerms,
+  formatTransactionAmount,
   formatUnits,
   isBillingConfigured,
   resolveAccountState,
@@ -22,6 +23,24 @@ describe("billingFormat", () => {
     expect(formatUnits("90", "minute")).toContain("минут");
     expect(formatUnits("2", "lesson")).toContain("занятия");
     expect(formatUnits("1", "lesson")).toContain("занятие");
+    expect(formatUnits("2.00", "lesson")).toBe("2 занятия");
+    expect(formatUnits("1.50", "lesson")).toBe("1,5 занятия");
+    expect(formatUnits("1.55", "lesson")).toBe("1,6 занятия");
+  });
+
+  it("shows package consumption as minus lessons", () => {
+    expect(formatTransactionAmount({
+      transaction_type: "package_consumption",
+      package_units: "1",
+      unit_type: "lesson",
+      amount: "0",
+    })).toBe("−1 занятие");
+    expect(formatTransactionAmount({
+      transaction_type: "package_return",
+      package_units: "1",
+      unit_type: "lesson",
+      amount: "0",
+    })).toBe("+1 занятие");
   });
 
   it("maps labels", () => {

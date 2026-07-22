@@ -135,6 +135,64 @@ def normalize_variant_spa_url(url: str) -> str:
     return raw
 
 
+LIVE_MEETING_HOMEWORK_MARKER = "live-meeting:"
+
+
+def is_live_meeting_homework(homework) -> bool:
+    """Вариант, показанный на видеоуроке — не попадает в очередь «Проверка»."""
+    if homework is None:
+        return False
+    return LIVE_MEETING_HOMEWORK_MARKER in (getattr(homework, "description", None) or "")
+
+
+def exclude_live_meeting_review_items(qs):
+    """Убрать ReviewItem по сдаче live-варианта с урока."""
+    from .models import HomeworkSubmission
+
+    live_submission_ids = HomeworkSubmission.objects.filter(
+        homework__description__contains=LIVE_MEETING_HOMEWORK_MARKER,
+    ).values("pk")
+    return qs.exclude(source_type="homework", source_id__in=live_submission_ids)
+
+
+def review_items_ready_to_check(qs):
+    """Оставить только работы, которые ученик реально сдал (есть submitted_at)."""
+    from django.db.models import Q
+
+    from .models import HomeworkSubmission
+
+    submitted_ids = HomeworkSubmission.objects.filter(submitted_at__isnull=False).values("pk")
+    return qs.filter(Q(source_type="homework", source_id__in=submitted_ids) | ~Q(source_type="homework"))
+
+
+def ensure_homework_in_review_queue(homework: Homework, student: Student):
+    """
+    Показать выданное ДЗ в разделе «Проверка» сразу после назначения.
+    Live-варианты с урока сюда не попадают.
+    """
+    from .models import ReviewItem
+
+    if homework is None or student is None:
+        return None
+    if is_live_meeting_homework(homework):
+        return None
+
+    submission = _get_or_create_submission(homework, student)
+    item, _ = ReviewItem.objects.get_or_create(
+        teacher=homework.teacher,
+        source_type="homework",
+        source_id=submission.pk,
+        defaults={
+            "student": student,
+            "group": homework.group,
+            "title": f"{homework.title} — {student.full_name}",
+            "status": "pending",
+            "priority": "normal",
+        },
+    )
+    return item
+
+
 def build_variant_open_url(
     *,
     base_url: str,
@@ -537,12 +595,17 @@ def _ensure_review_item(submission: HomeworkSubmission):
 
     if submission.status != SubmissionStatus.SUBMITTED:
         return None
+    if not submission.submitted_at:
+        return None
+    if is_live_meeting_homework(submission.homework):
+        return None
     item, _ = ReviewItem.objects.get_or_create(
         teacher=submission.homework.teacher,
         source_type="homework",
         source_id=submission.pk,
         defaults={
             "student": submission.student,
+            "group": submission.homework.group,
             "title": f"{submission.homework.title} — {submission.student.full_name}",
             "status": "pending",
             "priority": "normal",

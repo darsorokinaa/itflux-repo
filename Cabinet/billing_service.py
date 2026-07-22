@@ -39,6 +39,7 @@ from .billing_models import (
     TeacherPriceRule,
     TransactionType,
 )
+from .choices import StudentStatus
 from .models import NotificationPreference, ScheduleEvent, Student, StudentGroup
 
 ZERO = Decimal("0.00")
@@ -51,6 +52,13 @@ class BillingError(Exception):
         self.message = message
         self.status = status
         super().__init__(message)
+
+
+def visible_billing_accounts(teacher: User):
+    """Активные счета без учеников из архива — для оплат и сводок."""
+    return BillingAccount.objects.filter(teacher=teacher, is_active=True).exclude(
+        student__status=StudentStatus.ARCHIVED
+    )
 
 
 def D(value) -> Decimal:
@@ -85,6 +93,8 @@ def get_or_create_teacher_settings(teacher: User) -> TeacherBillingSettings:
 def get_or_create_billing_account(teacher: User, student: Student) -> BillingAccount:
     if student.teacher_id != teacher.id:
         raise BillingError("FORBIDDEN", "Ученик принадлежит другому учителю", 403)
+    if student.status == StudentStatus.ARCHIVED:
+        raise BillingError("ARCHIVED", "Ученик в архиве — оплаты недоступны", 400)
     teacher_settings = get_or_create_teacher_settings(teacher)
     account, created = BillingAccount.objects.get_or_create(
         teacher=teacher,
@@ -489,6 +499,113 @@ def active_package_for_account(
     return qs.first()
 
 
+def package_confirmed_paid_amount(package: LessonPackage) -> Decimal:
+    """Сколько подтверждённых оплат привязано к абонементу."""
+    paid = (
+        StudentPayment.objects.filter(
+            package=package,
+            status=StudentPaymentStatus.CONFIRMED,
+        ).aggregate(t=Sum("amount"))["t"]
+        or ZERO
+    )
+    return D(paid)
+
+
+def package_amount_due(package: LessonPackage) -> Decimal:
+    purchase = D(package.purchase_amount or 0)
+    if purchase <= 0:
+        return ZERO
+    due = purchase - package_confirmed_paid_amount(package)
+    return due if due > 0 else ZERO
+
+
+def awaiting_payment_packages(account: BillingAccount) -> list[LessonPackage]:
+    """Активные абонементы, по которым ещё не закрыта стоимость."""
+    today = timezone.localdate()
+    packages = list(
+        LessonPackage.objects.filter(
+            billing_account=account,
+            status__in=(PackageStatus.ACTIVE, PackageStatus.FROZEN),
+        )
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=today))
+        .filter(purchase_amount__gt=0)
+        .order_by("created_at")
+    )
+    return [pkg for pkg in packages if package_amount_due(pkg) > 0]
+
+
+def _payment_unallocated_amount(payment: StudentPayment) -> Decimal:
+    allocated = payment.allocations.aggregate(t=Sum("amount"))["t"] or ZERO
+    free = D(payment.amount) - D(allocated) - D(payment.refunded_amount or 0)
+    return free if free > 0 else ZERO
+
+
+def link_payment_to_package(payment: StudentPayment, package: LessonPackage) -> None:
+    """Привязать оплату (и связанные проводки) к абонементу."""
+    if payment.package_id and payment.package_id != package.id:
+        return
+    if payment.package_id != package.id:
+        payment.package = package
+        payment.save(update_fields=["package", "updated_at"])
+    BillingTransaction.objects.filter(
+        student_payment=payment,
+        is_reversal=False,
+    ).update(
+        package=package,
+        transaction_type=TransactionType.PACKAGE_PURCHASE,
+    )
+
+
+def reconcile_package_payments(account: BillingAccount) -> None:
+    """
+    Привязать «висящие» оплаты к абонементам, ожидающим оплаты.
+
+    Типичный случай: абонемент создали с «оплатить позже», а оплату внесли
+    без выбора абонемента — в операциях +N ₽, а статус всё ещё «Ожидает оплаты».
+    """
+    awaiting = awaiting_payment_packages(account)
+    if not awaiting:
+        return
+
+    orphans = (
+        StudentPayment.objects.filter(
+            billing_account=account,
+            package__isnull=True,
+            status=StudentPaymentStatus.CONFIRMED,
+        )
+        .prefetch_related("allocations")
+        .order_by("paid_at", "created_at")
+    )
+
+    for payment in orphans:
+        free = _payment_unallocated_amount(payment)
+        if free <= 0:
+            continue
+        purpose = (payment.purpose or "").lower()
+        prefers_package = "абонемент" in purpose
+
+        candidates = [
+            pkg for pkg in awaiting_payment_packages(account) if package_amount_due(pkg) > 0
+        ]
+        if not candidates:
+            break
+
+        target = None
+        if prefers_package and len(candidates) == 1:
+            target = candidates[0]
+        else:
+            exact = [pkg for pkg in candidates if package_amount_due(pkg) == free]
+            if len(exact) == 1:
+                target = exact[0]
+            elif len(candidates) == 1 and not payment.allocations.exists():
+                # Одна незакрытая подписка и оплата без привязки к урокам.
+                target = candidates[0]
+
+        if target is None:
+            continue
+        link_payment_to_package(payment, target)
+
+
 def billing_type_for_package_unit(unit_type: str) -> str:
     if unit_type == PackageUnitType.MINUTE:
         return BillingType.PACKAGE_MINUTES
@@ -599,7 +716,7 @@ def ensure_event_billing_records(event: ScheduleEvent) -> list[EventBillingRecor
     teacher = event.owner
     students: list[Student] = []
     if event.group_id:
-        students = list(event.group.students.all())
+        students = list(event.group.students.exclude(status=StudentStatus.ARCHIVED))
         if event.student_id and event.student not in students:
             students.append(event.student)
     elif event.student_id:
@@ -607,6 +724,8 @@ def ensure_event_billing_records(event: ScheduleEvent) -> list[EventBillingRecor
     else:
         participants = event.participants.filter(student__isnull=False).exclude(status="removed")
         students = [p.student for p in participants if p.student_id]
+
+    students = [s for s in students if s and s.status != StudentStatus.ARCHIVED]
 
     duration = event_duration_minutes(event)
     is_group = bool(event.group_id) or event.event_type in (
@@ -1268,6 +1387,19 @@ def register_payment(
             created_by=teacher,
             create_payment_tx=False,
         )
+    elif not event_billing_ids:
+        # Оплата без выбранных уроков — привязываем к незакрытому абонементу.
+        awaiting = awaiting_payment_packages(account)
+        purpose_l = (purpose or "").lower()
+        if "абонемент" in purpose_l and len(awaiting) >= 1:
+            exact = [pkg for pkg in awaiting if package_amount_due(pkg) == amount]
+            package = exact[0] if len(exact) == 1 else awaiting[0]
+        elif len(awaiting) == 1:
+            package = awaiting[0]
+        else:
+            exact = [pkg for pkg in awaiting if package_amount_due(pkg) == amount]
+            if len(exact) == 1:
+                package = exact[0]
 
     payment = StudentPayment.objects.create(
         billing_account=account,
@@ -1729,9 +1861,15 @@ def preview_finalize(event: ScheduleEvent, teacher: User, student: Optional[Stud
 
 
 def serialize_account(account: BillingAccount, *, include_history: bool = False) -> dict:
+    reconcile_package_payments(account)
     settings = account.settings
     balance = compute_account_balance(account)
     package = active_package_for_account(account)
+    package_data = (
+        serialize_package(package, include_history=False, reconcile=False)
+        if package
+        else None
+    )
     next_event = (
         ScheduleEvent.objects.filter(
             owner=account.teacher,
@@ -1854,14 +1992,14 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
         "balance": {k: str(v) if isinstance(v, Decimal) else v for k, v in balance.items()},
         "package": (
             {
-                **{k: serialize_package(package, include_history=False)[k] for k in (
+                k: package_data[k] for k in (
                     "id", "title", "unit_type", "remaining_units", "total_units",
                     "purchase_amount", "paid_amount", "unit_price", "is_paid",
                     "expires_at", "starts_at", "status", "display_status",
                     "display_status_label", "lesson_duration_minutes",
-                )},
+                )
             }
-            if package
+            if package_data
             else None
         ),
         "next_lesson_at": next_event.starts_at.isoformat() if next_event else None,
@@ -1947,13 +2085,7 @@ def serialize_transaction(tx: BillingTransaction) -> dict:
 def package_display_status(package: LessonPackage) -> tuple[str, str]:
     """Return (code, label) for tutor-facing package status."""
     today = timezone.localdate()
-    paid = (
-        StudentPayment.objects.filter(
-            package=package,
-            status=StudentPaymentStatus.CONFIRMED,
-        ).aggregate(t=Sum("amount"))["t"]
-        or ZERO
-    )
+    paid = package_confirmed_paid_amount(package)
     purchase = D(package.purchase_amount or 0)
     if package.status == PackageStatus.CANCELLED:
         return "cancelled", "Отменён"
@@ -1975,15 +2107,17 @@ def package_display_status(package: LessonPackage) -> tuple[str, str]:
     return "active", "Активен"
 
 
-def serialize_package(package: LessonPackage, *, include_history: bool = True) -> dict:
+def serialize_package(
+    package: LessonPackage,
+    *,
+    include_history: bool = True,
+    reconcile: bool = True,
+) -> dict:
+    if reconcile:
+        reconcile_package_payments(package.billing_account)
+        package.refresh_from_db()
     used = D_units(package.total_units - package.remaining_units)
-    paid = (
-        StudentPayment.objects.filter(
-            package=package,
-            status=StudentPaymentStatus.CONFIRMED,
-        ).aggregate(t=Sum("amount"))["t"]
-        or ZERO
-    )
+    paid = package_confirmed_paid_amount(package)
     display_code, display_label = package_display_status(package)
     per_unit = ZERO
     if D_units(package.total_units) > 0 and D(package.purchase_amount) > 0:
@@ -2266,9 +2400,12 @@ def dashboard_received_details(teacher: User, *, year=None, month=None) -> dict:
 
 
 def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
-    accounts = BillingAccount.objects.filter(teacher=teacher, is_active=True)
+    accounts = visible_billing_accounts(teacher)
     month_start, month_end, month_label = _month_bounds(year, month)
     day_start = timezone.localtime().replace(hour=0, minute=0, second=0, microsecond=0)
+    archived_student = Q(student__status=StudentStatus.ARCHIVED) | Q(
+        billing_account__student__status=StudentStatus.ARCHIVED
+    )
 
     # Фактический доход — по дате поступления денег (не по дате урока).
     month_paid = BillingTransaction.objects.filter(
@@ -2302,7 +2439,7 @@ def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
             FinancialStatus.AWAITING_PAYMENT,
             FinancialStatus.PARTIALLY_PAID,
         ),
-    )
+    ).exclude(archived_student)
     awaiting_count = awaiting.count()
     awaiting_sum = awaiting.aggregate(t=Sum("charged_amount"))["t"] or ZERO
     awaiting_paid = awaiting.aggregate(t=Sum("paid_amount"))["t"] or ZERO
@@ -2317,7 +2454,7 @@ def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
             FinancialStatus.PARTIALLY_PAID,
             FinancialStatus.NEEDS_DECISION,
         ),
-    )
+    ).exclude(archived_student)
     unpaid_count = unpaid_qs.count()
     unpaid_charged = unpaid_qs.aggregate(t=Sum("charged_amount"))["t"] or ZERO
     unpaid_paid = unpaid_qs.aggregate(t=Sum("paid_amount"))["t"] or ZERO
@@ -2331,13 +2468,13 @@ def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
     needs_decision = EventBillingRecord.objects.filter(
         billing_account__teacher=teacher,
         financial_status=FinancialStatus.NEEDS_DECISION,
-    ).count()
+    ).exclude(archived_student).count()
 
     low_packages = 0
     teacher_settings = get_or_create_teacher_settings(teacher)
     for pkg in LessonPackage.objects.filter(
         billing_account__teacher=teacher, status=PackageStatus.ACTIVE
-    ):
+    ).exclude(billing_account__student__status=StudentStatus.ARCHIVED):
         thr_l = teacher_settings.low_balance_threshold_lessons or 2
         thr_m = teacher_settings.low_balance_threshold_minutes or 120
         if pkg.unit_type == PackageUnitType.LESSON and pkg.remaining_units <= thr_l:
@@ -2453,7 +2590,7 @@ def reports(
     forecast = planned.aggregate(t=Sum("calculated_amount"))["t"] or ZERO
 
     debt = ZERO
-    for acc in BillingAccount.objects.filter(teacher=teacher, is_active=True):
+    for acc in visible_billing_accounts(teacher):
         debt += compute_account_balance(acc)["debt"]
 
     return {
@@ -2549,6 +2686,8 @@ def unresolved_lessons(teacher: User) -> list[dict]:
             FinancialStatus.PARTIALLY_PAID,
             FinancialStatus.NEEDS_DECISION,
         ),
+    ).exclude(
+        student__status=StudentStatus.ARCHIVED,
     ).select_related("event", "student", "billing_account").order_by("-event__starts_at")
     # Prefer conducted / past
     return [serialize_event_billing(r) for r in qs[:200]]

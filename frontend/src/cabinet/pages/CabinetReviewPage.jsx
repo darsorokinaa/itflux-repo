@@ -9,7 +9,7 @@ import {
   CabinetMetricsRow,
   CabinetEmptyState,
 } from "../CabinetSectionUi";
-import { deleteHomework, fetchReviewItems } from "../../utils/cabinetAuth";
+import { deleteHomework, fetchReviewItems, normalizeCabinetList } from "../../utils/cabinetAuth";
 
 const FILTERS = [
   { id: "all", label: "Все" },
@@ -18,6 +18,7 @@ const FILTERS = [
   { id: "students", label: "По ученикам" },
   { id: "groups", label: "По группам" },
   { id: "overdue", label: "Просроченные" },
+  { id: "assigned", label: "Выданные" },
   { id: "new", label: "Новые" },
   { id: "done", label: "Проверенные" },
 ];
@@ -50,7 +51,14 @@ function mapReviewItem(item) {
     .slice(0, 2)
     .toUpperCase();
   const overdue = isReviewOverdue(item);
-  const filter = ["all", item.status === "pending" ? "new" : "done"];
+  const awaitingSubmission = item.status === "pending" && !item.homework_submission?.submitted_at;
+  const filter = ["all"];
+  if (item.status === "pending") {
+    if (awaitingSubmission) filter.push("assigned");
+    else filter.push("new");
+  } else {
+    filter.push("done");
+  }
   if (overdue) filter.push("overdue");
   const level = (item.homework_review?.level || "").toLowerCase();
   if (level.includes("oge") || level === "огэ") filter.push("oge");
@@ -58,21 +66,45 @@ function mapReviewItem(item) {
   if (item.student || item.student_name) filter.push("students");
   if (item.group) filter.push("groups");
 
+  let deadlineLabel = item.status_label || item.status;
+  let deadlineTone = item.status === "pending" ? "review" : "completed";
+  let progressLabel = item.status_label;
+  let progressTone = item.status === "pending" ? "review" : "completed";
+  let progressPercent = item.status === "pending" ? 50 : 100;
+  let actionLabel = item.status === "pending" ? "Проверить" : "Открыть";
+
+  if (awaitingSubmission) {
+    deadlineLabel = "Выдано";
+    deadlineTone = "info";
+    progressLabel = "Ожидает сдачи";
+    progressTone = "default";
+    progressPercent = 15;
+    actionLabel = "Открыть";
+  }
+  if (overdue) {
+    deadlineLabel = "Просрочено";
+    deadlineTone = "overdue";
+    if (item.status === "pending") {
+      progressLabel = "Просрочено";
+      progressTone = "overdue";
+    }
+  }
+
   return {
     id: String(item.id),
     homeworkId: item.homework_submission?.homework ?? item.homework_review?.homework_id ?? null,
     filter,
     coverType: item.source_type === "homework" ? "exam" : "general",
-    deadlineLabel: overdue ? "Просрочено" : (item.status_label || item.status),
-    deadlineTone: overdue ? "overdue" : (item.status === "pending" ? "review" : "completed"),
+    deadlineLabel,
+    deadlineTone,
     subject: item.source_type_label || item.source_type,
     title: item.title,
     description: item.student_name || "",
-    progressLabel: overdue && item.status === "pending" ? "Просрочено" : item.status_label,
-    progressPercent: item.status === "pending" ? 50 : 100,
-    progressTone: overdue ? "overdue" : (item.status === "pending" ? "review" : "completed"),
+    progressLabel,
+    progressPercent,
+    progressTone,
     students: [{ initials }],
-    actionLabel: item.status === "pending" ? "Проверить" : "Открыть",
+    actionLabel,
   };
 }
 
@@ -90,7 +122,7 @@ export default function CabinetReviewPage() {
     (async () => {
       try {
         const data = await fetchReviewItems();
-        if (!cancelled) setWorks((data || []).map(mapReviewItem));
+        if (!cancelled) setWorks(normalizeCabinetList(data).map(mapReviewItem));
       } catch (err) {
         if (!cancelled) setError(err.message);
       } finally {
@@ -117,9 +149,9 @@ export default function CabinetReviewPage() {
 
   const metrics = useMemo(() => [
     { label: "На проверке", value: works.filter((w) => w.filter.includes("new")).length, icon: "pencil", tone: "review", accent: "review" },
+    { label: "Выдано", value: works.filter((w) => w.filter.includes("assigned")).length, icon: "tasks", tone: "info", accent: "info" },
     { label: "Просрочено", value: works.filter((w) => w.filter.includes("overdue")).length, icon: "alert", tone: "danger", accent: "danger" },
     { label: "Проверено", value: works.filter((w) => w.filter.includes("done")).length, icon: "check", tone: "success", accent: "success" },
-    { label: "Всего", value: works.length, icon: "tasks", tone: "info", accent: "info" },
   ], [works]);
 
   const items = useMemo(
@@ -145,7 +177,7 @@ export default function CabinetReviewPage() {
         <CabinetEmptyState
           icon="check"
           title="Нет работ"
-          text="Ответы учеников появятся здесь."
+          text="Выданные и сданные домашние задания появятся здесь."
         />
       ) : (
         <div className="cb-hw-grid">

@@ -164,16 +164,31 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         return Response(StudentListSerializer(instance).data)
 
     def destroy(self, request, *args, **kwargs):
+        """Безвозвратное удаление ученика (со всеми связанными данными)."""
         student = self.get_object()
-        student.status = StudentStatus.ARCHIVED
-        student.save(update_fields=["status", "updated_at"])
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        student_id = student.pk
+        student.delete()
+        return Response({"ok": True, "deleted_id": student_id}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["patch"], url_path="archive")
     def archive(self, request, pk=None):
         student = self.get_object()
         student.status = StudentStatus.ARCHIVED
         student.save(update_fields=["status", "updated_at"])
+        # Скрываем из вкладки «Оплаты».
+        from .billing_models import BillingAccount
+
+        BillingAccount.objects.filter(student=student, teacher=self.get_teacher()).update(is_active=False)
+        return Response(StudentDetailSerializer(student).data)
+
+    @action(detail=True, methods=["patch"], url_path="restore")
+    def restore(self, request, pk=None):
+        student = self.get_object()
+        student.status = StudentStatus.ACTIVE
+        student.save(update_fields=["status", "updated_at"])
+        from .billing_models import BillingAccount
+
+        BillingAccount.objects.filter(student=student, teacher=self.get_teacher()).update(is_active=True)
         return Response(StudentDetailSerializer(student).data)
 
     @action(detail=True, methods=["get"], url_path="check-variant-tasks")
@@ -433,7 +448,10 @@ class InvitationAcceptView(APIView):
 class StudentGroupViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         qs = StudentGroup.objects.filter(teacher=self.get_teacher()).annotate(
-            students_count=Count("students")
+            students_count=Count(
+                "students",
+                filter=~Q(students__status=StudentStatus.ARCHIVED),
+            )
         )
         params = self.request.query_params
 
@@ -455,7 +473,14 @@ class StudentGroupViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         if search:
             qs = qs.filter(title__icontains=search)
 
-        return qs.prefetch_related("students").order_by("title")
+        return qs.prefetch_related(
+            Prefetch(
+                "students",
+                queryset=Student.objects.exclude(status=StudentStatus.ARCHIVED).order_by(
+                    "last_name", "first_name"
+                ),
+            )
+        ).order_by("title")
 
     def get_serializer_class(self):
         if self.action == "retrieve":
@@ -477,7 +502,10 @@ class StudentGroupViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         group = StudentGroup.objects.filter(pk=serializer.instance.pk).annotate(
-            students_count=Count("students")
+            students_count=Count(
+                "students",
+                filter=~Q(students__status=StudentStatus.ARCHIVED),
+            )
         ).first()
         return Response(StudentGroupListSerializer(group).data, status=status.HTTP_201_CREATED)
 
@@ -488,7 +516,10 @@ class StudentGroupViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         group = StudentGroup.objects.filter(pk=instance.pk).annotate(
-            students_count=Count("students")
+            students_count=Count(
+                "students",
+                filter=~Q(students__status=StudentStatus.ARCHIVED),
+            )
         ).first()
         return Response(StudentGroupListSerializer(group).data)
 
@@ -497,6 +528,11 @@ class StudentGroupViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         group = self.get_object()
         student_id = request.data.get("student_id")
         student = get_object_or_404(Student, pk=student_id, teacher=self.get_teacher())
+        if student.status == StudentStatus.ARCHIVED:
+            return Response(
+                {"detail": "Нельзя добавить ученика из архива."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         group.students.add(student)
         return Response(StudentGroupDetailSerializer(group).data)
 
@@ -1041,7 +1077,11 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
     serializer_class = ReviewItemSerializer
 
     def get_queryset(self):
+        from .homework_api import exclude_live_meeting_review_items
+
         qs = ReviewItem.objects.filter(teacher=self.get_teacher()).select_related("student", "group")
+        qs = exclude_live_meeting_review_items(qs)
+        qs = qs.exclude(student__status=StudentStatus.ARCHIVED)
         status_param = self.request.query_params.get("status")
         if status_param:
             qs = qs.filter(status=status_param)
@@ -1416,14 +1456,22 @@ class DashboardView(TeacherScopedMixin, APIView):
 
 class ReportsOverviewView(TeacherScopedMixin, APIView):
     def get(self, request):
+        from .homework_api import exclude_live_meeting_review_items, review_items_ready_to_check
+
         teacher = request.user
         return Response({
-            "students_total": Student.objects.filter(teacher=teacher).count(),
+            "students_total": Student.objects.filter(teacher=teacher)
+            .exclude(status=StudentStatus.ARCHIVED)
+            .count(),
             "groups_total": StudentGroup.objects.filter(teacher=teacher).count(),
             "lessons_total": Lesson.objects.filter(teacher=teacher).count(),
             "homework_assigned": Homework.objects.filter(teacher=teacher, status="assigned").count(),
             "homework_completed": Homework.objects.filter(teacher=teacher, status="completed").count(),
-            "pending_reviews": ReviewItem.objects.filter(teacher=teacher, status=ReviewStatus.PENDING).count(),
+            "pending_reviews": review_items_ready_to_check(
+                exclude_live_meeting_review_items(
+                    ReviewItem.objects.filter(teacher=teacher, status=ReviewStatus.PENDING)
+                )
+            ).count(),
         })
 
 
@@ -1447,7 +1495,9 @@ class ReportsStudentView(TeacherScopedMixin, APIView):
 class ReportsGroupView(TeacherScopedMixin, APIView):
     def get(self, request, group_id):
         group = get_object_or_404(StudentGroup, pk=group_id, teacher=request.user)
-        student_ids = group.students.values_list("id", flat=True)
+        student_ids = group.students.exclude(status=StudentStatus.ARCHIVED).values_list(
+            "id", flat=True
+        )
         submissions = HomeworkSubmission.objects.filter(student_id__in=student_ids)
         total = submissions.count()
         checked = submissions.filter(status=SubmissionStatus.CHECKED).count()

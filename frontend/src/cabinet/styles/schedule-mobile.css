@@ -1,0 +1,445 @@
+/* ============================================================
+   Schedule — mobile redesign (Цифровой поток)
+   Scoped to ≤900px. Desktop styles remain in cabinet-dashboard.css
+   ============================================================ */
+
+@media (max-width: 900px) {
+  /* —— Page shell: flat, no nested chrome —— */
+  .cb-layout:has(.cb-section--schedule) .cabinet-header--teacher {
+    min-height: 56px;
+    height: 56px;
+    padding: 0 16px;
+    border-bottom: 1px solid #E8EDF5;
+    box-shadow: none;
+  }
+
+  .cb-layout:has(.cb-section--schedule) .cabinet-header-guide-btn {
+    display: none;
+  }
+
+  .cb-layout:has(.cb-section--schedule) .cabinet-header-section {
+    font-size: 1.25rem; /* ~20px */
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #0F172A;
+  }
+
+  .cb-layout:has(.cb-section--schedule) .cabinet-header-icon-btn,
+  .cb-layout:has(.cb-section--schedule) .cabinet-header-avatar,
+  .cb-layout:has(.cb-section--schedule) .cabinet-notifications__btn {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .cb-layout:has(.cb-section--schedule) .cabinet-header-icon-btn svg,
+  .cb-layout:has(.cb-section--schedule) .cabinet-notifications__btn svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .cb-layout:has(.cb-section--schedule) .cabinet-header-avatar {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    font-size: 0.75rem;
+  }
+
+  .cb-layout:has(.cb-section--schedule) .cabinet-content--page {
+    padding: 12px 16px !important;
+    padding-bottom: calc(var(--cb-mobile-nav-height, 64px) + 72px) !important;
+    background: #F5F7FB;
+    gap: 12px;
+  }
+
+  .cb-layout:has(.cb-section--schedule) .cabinet-content--page > .cb-section--schedule {
+    padding: 0 !important;
+    gap: 12px;
+    max-width: none;
+  }
+
+  /* —— Hide week chrome / sidebar —— */
+  .cb-sch-week > .cb-sch-week__head,
+  .cb-sch-week > .cb-sch-week__body {
+    display: none !important;
+  }
+
+  .cb-sch-day > .cb-sch-week__body,
+  .cb-sch-day > .cb-sch-day__body {
+    display: flex !important;
+    max-height: calc(100dvh - var(--cb-mobile-nav-height, 64px) - 200px);
+    min-height: 280px;
+  }
+
+  .cb-sch-sidebar,
+  .cb-sch-sidebar-toggle,
+  .cb-sch-mobile-upcoming {
+    display: none !important;
+  }
+
+  .cb-sch-layout {
+    display: block;
+    gap: 0;
+  }
+
+  .cb-sch-main {
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    min-width: 0;
+  }
+
+  /* —— Toolbar: compact date row + segmented control —— */
+  .cb-sch-toolbar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "today period nav"
+      "views views views";
+    gap: 8px 8px;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .cb-sch-toolbar__left,
+  .cb-sch-toolbar__right {
+    display: contents;
+  }
+
+  .cb-sch-toolbar__title,
+  .cb-sch-toolbar__account,
+  .cb-btn.cb-sch-btn--add,
+  .cb-btn--primary.cb-sch-btn--add {
+    display: none !important;
+  }
+
+  .cb-section--schedule .cb-sch-btn--today,
+  .cb-sch-btn--today {
+    grid-area: today;
+    min-height: 36px;
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 10px;
+    border: 1px solid #E2E8F0;
+    background: #FFFFFF;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #334155;
+  }
+
+  .cb-sch-toolbar__period {
+    grid-area: period;
+    align-self: center;
+    min-width: 0;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.25;
+    color: #0F172A;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+  }
+
+  .cb-sch-toolbar__nav {
+    grid-area: nav;
+    display: inline-flex;
+    gap: 4px;
+  }
+
+  .cb-sch-icon-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 10px;
+    border: 1px solid #E2E8F0;
+    background: #FFFFFF;
+    color: #475569;
+  }
+
+  .cb-sch-icon-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .cb-sch-view-switch {
+    grid-area: views;
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    padding: 3px;
+    border-radius: 12px;
+    border: none;
+    background: #E8EEF7;
+    overflow: visible;
+    max-width: none;
+  }
+
+  .cb-sch-view-btn {
+    min-height: 36px;
+    height: 36px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: #64748B;
+    font-size: 0.875rem;
+    font-weight: 600;
+    justify-content: center;
+  }
+
+  .cb-sch-view-btn--active {
+    background: #2563EB;
+    color: #FFFFFF;
+    box-shadow: 0 1px 2px rgba(37, 99, 235, 0.25);
+  }
+
+  .cb-sch-view-btn:hover:not(.cb-sch-view-btn--active) {
+    background: rgba(255, 255, 255, 0.55);
+  }
+
+  /* —— List —— */
+  .cb-sch-list {
+    padding: 0;
+    gap: 0;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .cb-sch-list__group + .cb-sch-list__group {
+    margin-top: 8px;
+  }
+
+  .cb-sch-list__day {
+    margin: 20px 0 10px;
+    font-size: 1.125rem; /* 18px */
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    color: #0F172A;
+  }
+
+  .cb-sch-list__group:first-child .cb-sch-list__day {
+    margin-top: 8px;
+  }
+
+  .cb-sch-list__items {
+    gap: 8px;
+  }
+
+  .cb-sch-list-card {
+    border: 1px solid #E5EAF2;
+    border-radius: 14px;
+    background: #FFFFFF;
+    box-shadow: none;
+  }
+
+  .cb-sch-list-card__accent {
+    width: 3px;
+  }
+
+  .cb-sch-list-card__content,
+  .cb-sch-list-card__body {
+    padding: 14px;
+  }
+
+  .cb-sch-list-card__row {
+    margin-bottom: 6px;
+    gap: 8px;
+  }
+
+  .cb-sch-list-card__time {
+    font-size: 0.9375rem;
+    font-weight: 650;
+    color: #2563EB;
+  }
+
+  .cb-sch-list-card__status {
+    flex-shrink: 0;
+    max-width: 45%;
+    padding: 3px 8px;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .cb-sch-list-card__title {
+    margin: 0 0 4px;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: #0F172A;
+    overflow-wrap: anywhere;
+  }
+
+  .cb-sch-list-card__meta {
+    margin: 0;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #64748B;
+    line-height: 1.35;
+    flex-wrap: wrap;
+  }
+
+  .cb-sch-list-card__topic {
+    margin: 6px 0 0;
+    font-size: 0.8125rem;
+    color: #94A3B8;
+    line-height: 1.35;
+  }
+
+  .cb-sch-list-card__actions {
+    margin-top: 12px;
+    gap: 8px;
+  }
+
+  .cb-section--schedule .cb-sch-list-card__actions .cb-btn,
+  .cb-sch-list-card__actions .cb-btn {
+    min-height: 36px;
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 10px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+
+  .cb-sch-list-card__open {
+    margin-left: auto;
+  }
+
+  .cb-sch-empty--card {
+    margin: 16px 0;
+    padding: 28px 20px;
+    border-radius: 14px;
+    border: 1px solid #E5EAF2;
+    box-shadow: none;
+  }
+
+  .cb-sch-empty--card .cb-btn {
+    min-height: 40px;
+    width: 100%;
+    max-width: 240px;
+    border-radius: 10px;
+  }
+
+  /* —— Day / Month —— */
+  .cb-sch-day__head {
+    padding: 8px 0 12px;
+    border: none;
+    font-size: 1.125rem;
+    font-weight: 650;
+    background: transparent;
+  }
+
+  .cb-sch-day,
+  .cb-sch-month {
+    border: 1px solid #E5EAF2;
+    border-radius: 14px;
+    background: #FFFFFF;
+    overflow: hidden;
+  }
+
+  .cb-sch-week-empty--day {
+    position: relative;
+    left: auto;
+    top: auto;
+    transform: none;
+    width: auto;
+    margin: 20px 14px;
+    padding: 20px 16px;
+    border-radius: 12px;
+    box-shadow: none;
+  }
+
+  /* —— FAB above bottom nav —— */
+  .cb-sch-fab {
+    display: inline-flex !important;
+    width: 52px;
+    height: 52px;
+    right: max(16px, env(safe-area-inset-right, 0px));
+    bottom: calc(var(--cb-mobile-nav-height, 64px) + 16px);
+    z-index: 1100;
+    box-shadow: 0 8px 20px rgba(37, 99, 235, 0.32);
+  }
+
+  /* —— Bottom nav: calmer active state —— */
+  .cb-layout:has(.cb-section--schedule) .cb-mobile-nav,
+  .cb-layout:has(.cb-section--schedule) .cb-teacher-mobile-nav {
+    height: calc(64px + env(safe-area-inset-bottom, 0px));
+    padding: 6px 6px env(safe-area-inset-bottom, 0px);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.06);
+  }
+
+  .cb-layout:has(.cb-section--schedule) .cb-mobile-nav__item {
+    gap: 2px;
+    padding: 4px 2px;
+    border-radius: 10px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+  }
+
+  .cb-layout:has(.cb-section--schedule) .cb-mobile-nav__item svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .cb-layout:has(.cb-section--schedule) .cb-mobile-nav__item.is-active {
+    background: rgba(37, 99, 235, 0.1);
+    color: #2563EB;
+  }
+}
+
+@media (max-width: 360px) {
+  .cb-layout:has(.cb-section--schedule) .cabinet-content--page {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  .cb-sch-toolbar {
+    grid-template-areas:
+      "today nav nav"
+      "period period period"
+      "views views views";
+  }
+
+  .cb-sch-toolbar__period {
+    text-align: left;
+  }
+
+  .cb-sch-list-card__open {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .cb-sch-list-card__actions .cb-btn {
+    flex: 1 1 100%;
+  }
+}
+
+@media (max-width: 320px) {
+  .cb-layout:has(.cb-section--schedule) .cabinet-header-section {
+    font-size: 1.125rem;
+  }
+
+  .cb-sch-view-btn {
+    font-size: 0.8125rem;
+    padding: 0 4px;
+  }
+}

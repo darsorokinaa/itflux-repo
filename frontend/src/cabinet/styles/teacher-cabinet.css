@@ -41,7 +41,7 @@
     padding-left: 0 !important;
     padding-right: 0 !important;
     border-radius: 0 !important;
-    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+    padding-bottom: var(--cb-mobile-nav-height, calc(64px + env(safe-area-inset-bottom, 0px)));
   }
 
   .cb-teacher-mobile-nav {
@@ -159,7 +159,7 @@
 
 @media (max-width: 768px) {
   .cb-layout {
-    --teacher-mobile-nav-height: calc(72px + env(safe-area-inset-bottom));
+    --teacher-mobile-nav-height: var(--cb-mobile-nav-height, calc(64px + env(safe-area-inset-bottom, 0px)));
     --teacher-mobile-space: 16px;
   }
 
@@ -186,10 +186,10 @@
     background: #F5F7FB;
   }
 
-  /* Section pages — match student cabinet: padding on the scroll container, not the section */
+  /* Section pages — padding once on scroll container (nav height already includes safe-area) */
   .cb-layout .cabinet-content--page {
     padding: 16px !important;
-    padding-bottom: calc(var(--teacher-mobile-nav-height, 72px) + env(safe-area-inset-bottom)) !important;
+    padding-bottom: 24px !important;
     background: #F5F7FB;
     gap: 16px;
   }

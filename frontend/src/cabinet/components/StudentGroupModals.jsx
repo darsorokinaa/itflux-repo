@@ -4,7 +4,7 @@ import ConfirmActionModal from "./ConfirmActionModal";
 import StudentBillingPanel from "./StudentBillingPanel";
 import BillingPaymentModal from "./BillingPaymentModal";
 import BillingPackageModal from "./BillingPackageModal";
-import { buildInvitationUrl } from "../../utils/cabinetAuth";
+import { buildInvitationUrl, notifyBillingChanged } from "../../utils/cabinetAuth";
 import {
   GROUP_EXAM_OPTIONS,
   STUDENT_DIRECTION_OPTIONS,
@@ -37,7 +37,7 @@ function FormActions({ onCancel, submitLabel, saving, dangerAction }) {
   );
 }
 
-export function StudentFormModal({ student, enrollment, onClose, onSave, onArchive, onAttachPlan }) {
+export function StudentFormModal({ student, enrollment, onClose, onSave, onArchive, onDelete, onAttachPlan }) {
   const isEdit = Boolean(student?.id);
   const isRegistered = Boolean(student?.raw?.is_registered);
   const [form, setForm] = useState(() => (
@@ -46,6 +46,7 @@ export function StudentFormModal({ student, enrollment, onClose, onSave, onArchi
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [packageOpen, setPackageOpen] = useState(false);
   const [billingKey, setBillingKey] = useState(0);
@@ -90,6 +91,28 @@ export function StudentFormModal({ student, enrollment, onClose, onSave, onArchi
       setError(err.message || "Не удалось архивировать ученика");
       setSaving(false);
     }
+  };
+
+  const handleDelete = () => {
+    if (!isEdit || !onDelete) return;
+    setDeleteConfirmOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!isEdit || !onDelete) return;
+    setDeleteConfirmOpen(false);
+    setSaving(true);
+    try {
+      await onDelete(student.id);
+    } catch (err) {
+      setError(err.message || "Не удалось удалить ученика");
+      setSaving(false);
+    }
+  };
+
+  const bumpBilling = (meta) => {
+    setBillingKey((k) => k + 1);
+    notifyBillingChanged({ studentId: meta?.studentId || meta?.student_id || student?.id });
   };
 
   return (
@@ -213,15 +236,29 @@ export function StudentFormModal({ student, enrollment, onClose, onSave, onArchi
           onCancel={onClose}
           submitLabel={isEdit ? "Сохранить" : "Добавить"}
           saving={saving}
-          dangerAction={isEdit && onArchive ? (
-            <button
-              type="button"
-              className="cb-btn cb-btn--outline cb-btn--danger"
-              onClick={handleArchive}
-              disabled={saving}
-            >
-              В архив
-            </button>
+          dangerAction={isEdit && (onArchive || onDelete) ? (
+            <>
+              {onArchive ? (
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--outline cb-btn--danger"
+                  onClick={handleArchive}
+                  disabled={saving}
+                >
+                  В архив
+                </button>
+              ) : null}
+              {onDelete ? (
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--outline cb-btn--danger"
+                  onClick={handleDelete}
+                  disabled={saving}
+                >
+                  Удалить
+                </button>
+              ) : null}
+            </>
           ) : null}
         />
       </form>
@@ -229,25 +266,34 @@ export function StudentFormModal({ student, enrollment, onClose, onSave, onArchi
     <ConfirmActionModal
       open={archiveConfirmOpen}
       title="Архивировать ученика?"
-      text={`Архивировать ученика ${student?.name || ""}?`}
+      text={`Архивировать ученика ${student?.name || ""}? Его можно будет восстановить во вкладке «Архив».`}
       confirmLabel="В архив"
       danger
       onClose={() => setArchiveConfirmOpen(false)}
       onConfirm={confirmArchive}
+    />
+    <ConfirmActionModal
+      open={deleteConfirmOpen}
+      title="Удалить ученика навсегда?"
+      text={`Ученик ${student?.name || ""} и все связанные данные (оплаты, абонементы, ДЗ) будут удалены безвозвратно.`}
+      confirmLabel="Удалить навсегда"
+      danger
+      onClose={() => setDeleteConfirmOpen(false)}
+      onConfirm={confirmDelete}
     />
     <BillingPaymentModal
       open={paymentOpen}
       onClose={() => setPaymentOpen(false)}
       students={student ? [{ id: student.id, name: student.name }] : []}
       defaultStudentId={student?.id}
-      onDone={() => setBillingKey((k) => k + 1)}
+      onDone={bumpBilling}
     />
     <BillingPackageModal
       open={packageOpen}
       onClose={() => setPackageOpen(false)}
       students={student ? [{ id: student.id, name: student.name }] : []}
       defaultStudentId={student?.id}
-      onDone={() => setBillingKey((k) => k + 1)}
+      onDone={bumpBilling}
     />
     </>
   );

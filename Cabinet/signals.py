@@ -2,8 +2,11 @@ from django.contrib.auth.models import User
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
-from .models import HomeworkSubmission, Profile, ReviewItem, ScheduleEvent
-from .choices import SubmissionStatus
+from .models import HomeworkSubmission, Profile, ReviewItem, ScheduleEvent, Student
+from .choices import StudentStatus, SubmissionStatus
+
+# Статус ученика до save: {student_pk: old_status}
+_pre_save_student_statuses: dict[int, str] = {}
 
 
 @receiver(post_save, sender=User)
@@ -14,17 +17,53 @@ def ensure_user_profile(sender, instance, created, **kwargs):
         instance.profile.save()
 
 
+@receiver(pre_save, sender=Student)
+def capture_student_status_before_save(sender, instance, **kwargs):
+    if not instance.pk:
+        return
+    old = Student.objects.filter(pk=instance.pk).values_list("status", flat=True).first()
+    if old is not None:
+        _pre_save_student_statuses[instance.pk] = old
+
+
+@receiver(post_save, sender=Student)
+def sync_billing_account_on_student_status(sender, instance, created, **kwargs):
+    """Архив скрывает ученика из оплат; восстановление — снова показывает."""
+    old_status = _pre_save_student_statuses.pop(instance.pk, None)
+    if not created and old_status == instance.status:
+        return
+
+    from .billing_models import BillingAccount
+
+    if instance.status == StudentStatus.ARCHIVED:
+        BillingAccount.objects.filter(student=instance, teacher_id=instance.teacher_id).update(
+            is_active=False
+        )
+    elif old_status == StudentStatus.ARCHIVED:
+        BillingAccount.objects.filter(student=instance, teacher_id=instance.teacher_id).update(
+            is_active=True
+        )
+
+
 @receiver(post_save, sender=HomeworkSubmission)
 def ensure_review_item_for_submission(sender, instance, created, **kwargs):
+    # Только после реальной сдачи. Выдача через «Задать ДЗ» ставит в очередь отдельно.
     if instance.status != SubmissionStatus.SUBMITTED:
         return
+    if not instance.submitted_at:
+        return
     homework = instance.homework
+    from .homework_api import is_live_meeting_homework
+
+    if is_live_meeting_homework(homework):
+        return
     ReviewItem.objects.get_or_create(
         teacher=homework.teacher,
         source_type="homework",
         source_id=instance.pk,
         defaults={
             "student": instance.student,
+            "group": homework.group,
             "title": f"{homework.title} — {instance.student.full_name}",
             "status": "pending",
             "priority": "normal",

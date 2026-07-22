@@ -46,6 +46,7 @@ import {
   postMeetingUnpresent,
 } from "../meetingPresent";
 import "../styles/video-meeting.css";
+import "../styles/live-variant-answers.css";
 
 function formatWhen(startsAt, endsAt) {
   if (!startsAt) return "";
@@ -191,6 +192,7 @@ export default function VideoMeetingPage() {
   const containerRef = useRef(null);
   const apiRef = useRef(null);
   const leavingRef = useRef(false);
+  const leaveTimerRef = useRef(null);
   const participantIdRef = useRef("");
   const returnUrlRef = useRef("/cabinet/schedule");
   const jitsiInitRef = useRef(false);
@@ -211,7 +213,6 @@ export default function VideoMeetingPage() {
   const [presented, setPresented] = useState(null);
   const [presentBusy, setPresentBusy] = useState(false);
   const [workspaceMaterial, setWorkspaceMaterial] = useState(null);
-  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [materialsToast, setMaterialsToast] = useState("");
   const [mobilePane, setMobilePane] = useState("call"); // call | materials
   const [boardInfo, setBoardInfo] = useState({ loading: true, board: null });
@@ -266,28 +267,50 @@ export default function VideoMeetingPage() {
     }
   }, []);
 
-  const sendLeave = useCallback(() => {
-    if (leavingRef.current || !meetingUuid) return;
-    leavingRef.current = true;
-    const csrf = getCsrfToken();
-    const url = `/api/video-meetings/${meetingUuid}/attendance/leave/`;
-    const form = new FormData();
-    if (csrf) form.append("csrfmiddlewaretoken", csrf);
-    if (participantIdRef.current) {
-      form.append("jitsiParticipantId", participantIdRef.current);
+  const sendLeave = useCallback((immediate = false) => {
+    if (!meetingUuid) return;
+    if (leaveTimerRef.current) {
+      window.clearTimeout(leaveTimerRef.current);
+      leaveTimerRef.current = null;
     }
-    try {
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon(url, form);
-        return;
+    const run = () => {
+      if (leavingRef.current) return;
+      leavingRef.current = true;
+      const csrf = getCsrfToken();
+      const url = `/api/video-meetings/${meetingUuid}/attendance/leave/`;
+      const form = new FormData();
+      if (csrf) form.append("csrfmiddlewaretoken", csrf);
+      if (participantIdRef.current) {
+        form.append("jitsiParticipantId", participantIdRef.current);
       }
-    } catch {
-      /* fallback below */
+      try {
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon(url, form);
+          return;
+        }
+      } catch {
+        /* fallback below */
+      }
+      void recordVideoMeetingLeave(meetingUuid, {
+        jitsiParticipantId: participantIdRef.current,
+      }).catch(() => {});
+    };
+    if (immediate) {
+      run();
+      return;
     }
-    void recordVideoMeetingLeave(meetingUuid, {
-      jitsiParticipantId: participantIdRef.current,
-    }).catch(() => {});
+    // Даём время на remount / reload — сервер склеит короткие разрывы,
+    // а если join успеет раньше, leave отменим.
+    leaveTimerRef.current = window.setTimeout(run, 2500);
   }, [meetingUuid]);
+
+  const cancelPendingLeave = useCallback(() => {
+    if (leaveTimerRef.current) {
+      window.clearTimeout(leaveTimerRef.current);
+      leaveTimerRef.current = null;
+    }
+    leavingRef.current = false;
+  }, []);
 
   const initializeJitsi = useCallback(async () => {
     if (!meetingUuid || jitsiInitRef.current || apiRef.current) {
@@ -415,6 +438,7 @@ export default function VideoMeetingPage() {
       }
 
       try {
+        cancelPendingLeave();
         await recordVideoMeetingJoin(meetingUuid, { jitsiParticipantId: "" });
       } catch {
         /* посещаемость не должна ломать конференцию */
@@ -438,7 +462,7 @@ export default function VideoMeetingPage() {
       }
       setPageState("error");
     }
-  }, [disposeApi, meetingUuid]);
+  }, [cancelPendingLeave, disposeApi, meetingUuid]);
 
   /** Первый вход — спросить про камеру; повторный (док/материалы) — взять сохранённый выбор. */
   const requestJoin = useCallback(async ({ skipCameraPrompt = false } = {}) => {
@@ -481,10 +505,10 @@ export default function VideoMeetingPage() {
   const bootstrap = useCallback(async () => {
     if (!meetingUuid) return;
     setPageState("loading");
-    setError("");
-    setAttendance(null);
-    leavingRef.current = false;
-    disposeApi();
+      setError("");
+      setAttendance(null);
+      cancelPendingLeave();
+      disposeApi();
 
     try {
       const meta = await fetchVideoMeetingDetail(meetingUuid);
@@ -523,13 +547,13 @@ export default function VideoMeetingPage() {
       setError(mapJoinError(err));
       setPageState("error");
     }
-  }, [disposeApi, loadFinishedAttendance, meetingUuid, requestJoin]);
+  }, [cancelPendingLeave, disposeApi, loadFinishedAttendance, meetingUuid, requestJoin]);
 
   useEffect(() => {
     void bootstrap();
     return () => {
       stopPolling();
-      sendLeave();
+      sendLeave(false);
       disposeApi();
     };
   }, [bootstrap, disposeApi, sendLeave, stopPolling]);
@@ -710,7 +734,7 @@ export default function VideoMeetingPage() {
   }, [detail?.canManage, meetingUuid, pageState, presented?.kind, presented?.homeworkId, presented?.presentedAt]);
 
   useEffect(() => {
-    const onPageHide = () => sendLeave();
+    const onPageHide = () => sendLeave(true);
     window.addEventListener("pagehide", onPageHide);
     return () => window.removeEventListener("pagehide", onPageHide);
   }, [sendLeave]);
@@ -745,7 +769,7 @@ export default function VideoMeetingPage() {
       } catch {
         /* ignore */
       }
-      sendLeave();
+      sendLeave(true);
       disposeApi();
       setPageState("finished");
       setFinishConfirm(false);
@@ -1149,15 +1173,17 @@ export default function VideoMeetingPage() {
     ? (materialRows.length + homeworkRows.length + (boardInfo?.board ? 1 : 0))
     : (presented?.openUrl ? 1 : 0);
   const whenLabel = formatWhen(event?.startsAt, event?.endsAt);
-  const statusLiveLabel = status === "live"
-    ? "Урок идёт"
-    : (meeting?.statusLabel || "");
-  const headerTitle = [event?.title || "Урок", displayName].filter(Boolean).join(" · ");
-  const headerSub = [
-    whenLabel,
-    statusLiveLabel,
-    typeof participantCount === "number" ? `${participantCount} уч.` : null,
-  ].filter(Boolean).join(" · ");
+  const studentLabel = String(event?.audience || "").trim();
+  const subjectLabel = String(
+    event?.topic
+    || event?.eventTitle
+    || "",
+  ).trim();
+  const headerTitle = [studentLabel, subjectLabel].filter(Boolean).join(" · ")
+    || subjectLabel
+    || studentLabel
+    || "Урок";
+  const headerSub = whenLabel || "";
   const workspaceOpen = Boolean(workspaceMaterial);
   const showAside = showJitsi && asideOpen && !workspaceOpen;
 
@@ -1196,9 +1222,11 @@ export default function VideoMeetingPage() {
             <h1 className="video-lesson-header__title" title={headerTitle}>
               {headerTitle}
             </h1>
-            <p className="video-lesson-header__sub" title={headerSub}>
-              {headerSub || roleLabel || "Онлайн-урок"}
-            </p>
+            {headerSub ? (
+              <p className="video-lesson-header__sub" title={headerSub}>
+                {headerSub}
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -1219,70 +1247,16 @@ export default function VideoMeetingPage() {
             </button>
           ) : null}
 
-          <div className="vl-header-menu">
+          {canManage && status === "live" && showJitsi ? (
             <button
               type="button"
-              className="video-lesson-icon-btn"
-              aria-label="Меню урока"
-              aria-expanded={headerMenuOpen}
-              title="Ещё"
-              onClick={() => setHeaderMenuOpen((v) => !v)}
+              className="video-lesson-btn video-lesson-btn--danger"
+              disabled={finishing}
+              onClick={() => setFinishConfirm(true)}
             >
-              <span aria-hidden="true">•••</span>
+              {finishing ? "…" : "Завершить урок"}
             </button>
-            {headerMenuOpen ? (
-              <div className="vl-dropdown vl-dropdown--header" role="menu">
-                <Link
-                  role="menuitem"
-                  to={returnUrl}
-                  onClick={() => {
-                    setHeaderMenuOpen(false);
-                    sendLeave();
-                  }}
-                >
-                  К расписанию
-                </Link>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setHeaderMenuOpen(false);
-                    void onCopyLink();
-                  }}
-                >
-                  {copied ? "Ссылка скопирована" : "Скопировать ссылку на урок"}
-                </button>
-                {directMeetUrl ? (
-                  <a
-                    role="menuitem"
-                    href={directMeetUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => setHeaderMenuOpen(false)}
-                  >
-                    Открыть Jitsi на весь экран
-                  </a>
-                ) : null}
-                {canManage && status === "live" && showJitsi ? (
-                  <>
-                    <div className="vl-dropdown__sep" />
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="is-danger"
-                      disabled={finishing}
-                      onClick={() => {
-                        setHeaderMenuOpen(false);
-                        setFinishConfirm(true);
-                      }}
-                    >
-                      Завершить урок
-                    </button>
-                  </>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
+          ) : null}
         </div>
       </header>
 
@@ -1324,38 +1298,14 @@ export default function VideoMeetingPage() {
               <div className="video-lesson-workspace__actions">
                 <button
                   type="button"
-                  className="video-lesson-btn video-lesson-btn--text"
+                  className="video-lesson-icon-btn"
+                  aria-label="Закрыть материал"
+                  title="Закрыть"
                   onClick={() => {
                     closeWorkspaceMaterial();
                     setAsideOpen(true);
                     setMobilePane("materials");
                   }}
-                >
-                  Назад к списку
-                </button>
-                {workspaceMaterial.url ? (
-                  <a
-                    className="video-lesson-btn video-lesson-btn--text"
-                    href={workspaceMaterial.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Открыть в новой вкладке
-                  </a>
-                ) : null}
-                <button
-                  type="button"
-                  className="video-lesson-btn video-lesson-btn--text"
-                  onClick={closeWorkspaceMaterial}
-                >
-                  Вернуть звонок на весь экран
-                </button>
-                <button
-                  type="button"
-                  className="video-lesson-icon-btn"
-                  aria-label="Закрыть материал"
-                  title="Закрыть"
-                  onClick={closeWorkspaceMaterial}
                 >
                   <CabinetIcon name="close" />
                 </button>
@@ -1484,7 +1434,7 @@ export default function VideoMeetingPage() {
               <p className="video-lesson-state__text">
                 {canManage
                   ? (attendance?.length
-                    ? "Сессии подключений участников (время посчитано на сервере)."
+                    ? "Время присутствия участников (короткие переподключения склеены)."
                     : "Подключений пока не было.")
                   : "Повторный вход в конференцию недоступен."}
               </p>
@@ -1579,48 +1529,6 @@ export default function VideoMeetingPage() {
           {materialsToast && showJitsi ? (
             <div className="video-lesson-toast" role="status">
               <span>{materialsToast}</span>
-            </div>
-          ) : null}
-          {moderatorLoginHint && showJitsi && !error ? (
-            <div className="video-lesson-moderator-hint" role="status">
-              <strong>Нужно подтвердить роль организатора</strong>
-              <p>{moderatorLoginHint}</p>
-              <button type="button" onClick={() => setModeratorLoginHint("")} aria-label="Скрыть подсказку">
-                Понятно
-              </button>
-            </div>
-          ) : null}
-          {mediaWarning && showJitsi && !error ? (
-            <div className="video-lesson-media-warning" role="status">
-              <span>{mediaWarning}</span>
-              <button type="button" onClick={() => setMediaWarning("")} aria-label="Закрыть">
-                ×
-              </button>
-            </div>
-          ) : null}
-          {connectionHint && showJitsi && !error ? (
-            <div className="video-lesson-media-warning" role="status">
-              <span>{connectionHint}</span>
-            </div>
-          ) : null}
-          {showJitsi && showJoinFallback && directMeetUrl && joinState !== "joined" ? (
-            <div className="video-lesson-media-warning" role="status">
-              <span>
-                Кнопка «Присоединиться» не срабатывает? Откройте комнату в новой вкладке
-                (часто из‑за JWT/Prosody на сервере).
-              </span>
-              <a
-                className="video-lesson-btn"
-                href={directMeetUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ textDecoration: "none" }}
-              >
-                Открыть
-              </a>
-              <button type="button" onClick={() => setShowJoinFallback(false)} aria-label="Закрыть">
-                ×
-              </button>
             </div>
           ) : null}
 

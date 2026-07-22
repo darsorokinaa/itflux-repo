@@ -1,5 +1,8 @@
 import { homeworkTaskAttachments } from "../utils/cabinetHomework";
-import { computePart1TaskCorrect } from "../utils/examAnswerCheck";
+import {
+  computePart1TaskCorrect,
+  formatCorrectAnswerPlain,
+} from "../utils/examAnswerCheck";
 
 export function isMathLikeSubject(subject) {
   const s = String(subject || "").toLowerCase();
@@ -18,16 +21,45 @@ export function inferExamTaskPart(task, level, subject) {
   return n <= 19 ? 1 : 2;
 }
 
-export function homeworkTaskAnswer(result, taskId, taskNumber) {
+function answerValue(raw) {
+  if (raw == null) return "";
+  if (typeof raw === "string") return raw;
+  if (typeof raw === "object" && raw && "text" in raw) return String(raw.text ?? "");
+  return String(raw);
+}
+
+/**
+ * Ответ ученика по заданию.
+ * Учитывает legacy, когда by_task_id заполняли ключами-номерами заданий.
+ * @param {object} result
+ * @param {string|number} taskId
+ * @param {string|number} taskNumber
+ * @param {Array<{id?: string|number, number?: string|number}>} [tasks]
+ */
+export function homeworkTaskAnswer(result, taskId, taskNumber, tasks) {
   if (!result || typeof result !== "object") return "";
   const byId = result.by_task_id || result.byTaskId || {};
   const byNum = result.by_number || result.byNumber || {};
   const id = String(taskId);
   const num = String(taskNumber);
-  if (byId[id] != null && String(byId[id]).trim() !== "") return String(byId[id]);
-  if (byNum[num] != null && String(byNum[num]).trim() !== "") return String(byNum[num]);
-  const alt = byNum[String(Number(num))];
-  if (alt != null && String(alt).trim() !== "") return String(alt);
+
+  const fromId = answerValue(byId[id]);
+  if (fromId.trim() !== "") return fromId;
+
+  const fromNum = answerValue(byNum[num] ?? byNum[String(Number(num))]);
+  if (fromNum.trim() !== "") return fromNum;
+
+  // Legacy: by_task_id["6"] = ответ на задание №6 (ключ — номер, не TaskList.id)
+  if (id !== num) {
+    const knownIds = Array.isArray(tasks)
+      ? new Set(tasks.map((t) => String(t.id)))
+      : null;
+    const numIsRealTaskId = knownIds ? knownIds.has(num) : false;
+    if (!numIsRealTaskId) {
+      const legacy = answerValue(byId[num] ?? byId[String(Number(num))]);
+      if (legacy.trim() !== "") return legacy;
+    }
+  }
   return "";
 }
 
@@ -90,7 +122,16 @@ export function homeworkTeacherAttachments(result, taskId, taskNumber) {
 }
 
 export { homeworkTaskAttachments };
-export { computePart1TaskCorrect } from "../utils/examAnswerCheck";
+export { computePart1TaskCorrect, formatCorrectAnswerPlain } from "../utils/examAnswerCheck";
+
+/** Вердикт ч.1: без ответа всегда «Нет ответа», даже если checked=false. */
+export function resolvePart1Verdict(task, answer, result, subject) {
+  const text = String(answer ?? "").trim();
+  if (!text) return null;
+  const saved = homeworkTaskChecked(result, task.id);
+  if (typeof saved === "boolean") return saved;
+  return computePart1TaskCorrect(task, text, subject);
+}
 
 export function buildStudentHomeworkReviewRows(tasks, result, level, subject) {
   if (!Array.isArray(tasks) || !tasks.length || !result || typeof result !== "object") {
@@ -101,21 +142,21 @@ export function buildStudentHomeworkReviewRows(tasks, result, level, subject) {
   ).trim();
   const part1 = [];
   const part2 = [];
-  for (const task of [...tasks].sort((a, b) => a.number - b.number)) {
+  const list = [...tasks].sort((a, b) => a.number - b.number);
+  for (const task of list) {
     const part = inferExamTaskPart(task, level, subject);
-    const answer = homeworkTaskAnswer(result, task.id, task.number);
+    const answer = homeworkTaskAnswer(result, task.id, task.number, list);
     const comment = homeworkTaskComment(result, task.id, task.number);
     const teacherFiles = homeworkTeacherAttachments(result, task.id, task.number);
     const studentFiles = homeworkTaskAttachments(result, task.id, task.number);
+    const correctAnswer = formatCorrectAnswerPlain(task.answer);
     if (part === 1) {
-      const saved = homeworkTaskChecked(result, task.id);
-      const verdict = saved ?? computePart1TaskCorrect(task, answer, subject);
       part1.push({
         taskId: String(task.id),
         number: task.number,
         answer,
-        correctAnswer: task.answer,
-        verdict,
+        correctAnswer,
+        verdict: resolvePart1Verdict(task, answer, result, subject),
         comment,
         teacherFiles,
         studentFiles,
@@ -125,7 +166,7 @@ export function buildStudentHomeworkReviewRows(tasks, result, level, subject) {
         taskId: String(task.id),
         number: task.number,
         answer,
-        correctAnswer: task.answer,
+        correctAnswer,
         score: homeworkTaskScore(result, task.id),
         maxScore: taskMaxScore(task),
         comment,

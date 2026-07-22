@@ -429,6 +429,20 @@ export function archiveStudent(id) {
   return cabinetFetch(`/students/${id}/archive/`, { method: "PATCH" });
 }
 
+export function restoreStudent(id) {
+  return cabinetFetch(`/students/${id}/restore/`, { method: "PATCH" });
+}
+
+/** Безвозвратное удаление ученика. */
+export function deleteStudent(id) {
+  return cabinetFetch(`/students/${id}/`, { method: "DELETE" });
+}
+
+export function notifyBillingChanged(detail = {}) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("cabinet:billing-changed", { detail }));
+}
+
 export function fetchStudentHomeworkOptions(studentId, { scheduleEventId } = {}) {
   const params = new URLSearchParams();
   if (scheduleEventId) params.set("schedule_event_id", String(scheduleEventId));

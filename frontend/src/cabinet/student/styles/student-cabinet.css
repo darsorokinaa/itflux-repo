@@ -1122,7 +1122,67 @@
   font-size: 0.85rem;
 }
 
-/* More menu */
+/* Mobile nav — 5 tabs for student */
+.st-mobile-nav {
+  display: none;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1200;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+  background: #FFFFFF;
+  border-top: 1px solid #E2E8F0;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.st-mobile-nav__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 2px;
+  border-radius: 10px;
+  text-decoration: none;
+  color: #64748B;
+  font-size: 0.68rem;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.st-mobile-nav__item span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.st-mobile-nav__item.is-active {
+  color: #2563EB;
+  background: #EFF6FF;
+}
+
+/* Student «Ещё» */
+.st-more-page {
+  gap: 20px;
+}
+
+.st-more-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.st-more-section__title {
+  margin: 0 0 10px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748B;
+}
+
 .st-more-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1133,15 +1193,79 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 20px 14px;
+  justify-content: center;
+  gap: 10px;
+  min-height: 96px;
+  padding: 18px 14px;
   border-radius: 16px;
   background: #FFFFFF;
-  border: 1px solid #CBD5E1;
+  border: 1px solid #E2E8F0;
   text-decoration: none;
   color: #0F172A;
   font-weight: 700;
+  font-size: 0.9rem;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+}
+
+.st-more-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: #EFF6FF;
+  color: #2563EB;
+}
+
+.st-more-card__icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.st-more-profile {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 16px;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+}
+
+.st-more-profile__avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #2563EB;
+  color: #FFFFFF;
+  font-weight: 800;
+}
+
+.st-more-profile__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.st-more-profile__body strong {
+  font-size: 1rem;
+  color: #0F172A;
+}
+
+.st-more-profile__body span {
   font-size: 0.85rem;
+  color: #64748B;
+}
+
+.st-more-profile__logout {
+  margin-left: auto;
 }
 
 /* Play */
@@ -1166,51 +1290,34 @@
   justify-content: center;
   gap: 12px;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 20px;
 }
 
-/* Mobile nav — 4 tabs for student MVP */
-.st-mobile-nav {
-  display: none;
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 40;
-  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
-  background: #FFFFFF;
-  border-top: 1px solid #E2E8F0;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px;
-}
-
-.st-mobile-nav__item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 4px;
-  border-radius: 10px;
-  text-decoration: none;
-  color: #64748B;
-  font-size: 0.62rem;
-  font-weight: 700;
-}
-
-.st-mobile-nav__item.is-active {
-  color: #2563EB;
-  background: #EFF6FF;
-}
-
 .st-layout .cabinet-header--student {
-  justify-content: flex-end;
+  justify-content: space-between;
   min-height: 56px;
   padding-top: 12px;
   padding-bottom: 12px;
+  gap: 8px;
+}
+
+.st-layout .cabinet-header--student .cabinet-header-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.st-layout .cabinet-header--student .cabinet-header-section {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #0F172A;
+  letter-spacing: -0.02em;
 }
 
 .st-layout .cabinet-header--student .cabinet-header-right {
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 @media (max-width: 1100px) {
@@ -1337,7 +1444,7 @@
   /* cabinet-content--page has no explicit padding — fix that */
   .st-layout .cabinet-content--page {
     padding: 16px !important;
-    padding-bottom: calc(88px + env(safe-area-inset-bottom)) !important;
+    padding-bottom: 24px !important;
   }
 
   /* Page header on mobile: title wraps, actions below */
@@ -2876,10 +2983,10 @@
    ============================================================ */
 
 @media (max-width: 768px) {
-  /* 4-col student nav */
+  /* 5-col student nav */
   .st-mobile-nav,
   .cb-mobile-nav.st-mobile-nav {
-    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
   }
 
   /* Hero compact */
@@ -3459,9 +3566,9 @@
     padding: 16px !important;
   }
 
-  /* Bottom clearance for fixed nav */
+  /* Bottom clearance for fixed nav (safe-area already in --cb-mobile-nav-height) */
   .st-layout .cabinet-main {
-    padding-bottom: calc(88px + env(safe-area-inset-bottom)) !important;
+    padding-bottom: var(--cb-mobile-nav-height, calc(64px + env(safe-area-inset-bottom, 0px))) !important;
   }
 
   /* ── Dashboard ───────────────────────────────────────────────────── */

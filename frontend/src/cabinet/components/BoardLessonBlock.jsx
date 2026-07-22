@@ -136,84 +136,167 @@ export default function BoardLessonBlock({
     return null;
   }
 
+  const btnPrimary = embedded
+    ? "video-lesson-btn video-lesson-btn--secondary"
+    : "cb-lesson-card__meeting-btn cb-lesson-card__meeting-btn--primary";
+  const btnSecondary = embedded
+    ? "vl-mat-item__toggle"
+    : "cb-lesson-card__meeting-btn";
+
   const body = (
     <>
       {loading ? (
         <p className="cb-lesson-card__meeting-empty">Загрузка…</p>
       ) : board ? (
-        <div className="cb-board-lesson__row">
+        <div className={embedded ? "vl-mat-item" : "cb-board-lesson__row"}>
           {embedded ? (
-            <div className="cb-board-lesson__meta">
-              <span className="cb-board-lesson__name">{board.title || "Доска"}</span>
-              <span className="cb-board-lesson__type">Интерактивная доска</span>
-            </div>
+            <>
+              <div className="vl-mat-item__main">
+                <div className="vl-mat-item__body">
+                  <div className="vl-mat-item__title">{board.title || "Доска"}</div>
+                  <div className="vl-mat-item__meta">
+                    Интерактивная доска
+                    {typeof onShowToStudent === "function" ? (
+                      <span className={`vl-mat-item__vis ${showingToStudent ? "is-on" : "is-off"}`}>
+                        {showingToStudent ? "Показан ученику" : "Скрыт от ученика"}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+              <div className="vl-mat-item__actions">
+                <button
+                  type="button"
+                  className={btnPrimary}
+                  onClick={() => {
+                    if (typeof onOpenLocally === "function") {
+                      onOpenLocally(board);
+                      return;
+                    }
+                    if (typeof onShowToStudent === "function") {
+                      window.open(`/cabinet/boards/${board.id}`, "_blank");
+                      return;
+                    }
+                    navigate(`/cabinet/boards/${board.id}`);
+                  }}
+                >
+                  Открыть
+                </button>
+                {typeof onShowToStudent === "function" ? (
+                  showingToStudent && typeof onHideFromStudent === "function" ? (
+                    <button
+                      type="button"
+                      className={btnSecondary}
+                      disabled={showBusy}
+                      aria-pressed="true"
+                      onClick={() => onHideFromStudent()}
+                    >
+                      {showBusy ? "…" : "Скрыть"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className={btnSecondary}
+                      disabled={showBusy}
+                      aria-pressed="false"
+                      onClick={() => onShowToStudent(board)}
+                    >
+                      {showBusy ? "…" : "Показать"}
+                    </button>
+                  )
+                ) : null}
+                <button type="button" className={btnSecondary} onClick={openPicker}>
+                  Другая
+                </button>
+              </div>
+            </>
           ) : (
-            <span className="cb-board-lesson__name">{board.title || "Доска"}</span>
+            <>
+              <span className="cb-board-lesson__name">{board.title || "Доска"}</span>
+              <button
+                type="button"
+                className={btnPrimary}
+                onClick={() => {
+                  if (typeof onOpenLocally === "function") {
+                    onOpenLocally(board);
+                    return;
+                  }
+                  if (typeof onShowToStudent === "function") {
+                    window.open(`/cabinet/boards/${board.id}`, "_blank");
+                    return;
+                  }
+                  navigate(`/cabinet/boards/${board.id}`);
+                }}
+              >
+                Открыть
+              </button>
+              {typeof onShowToStudent === "function" ? (
+                showingToStudent && typeof onHideFromStudent === "function" ? (
+                  <button
+                    type="button"
+                    className={btnSecondary}
+                    disabled={showBusy}
+                    onClick={() => onHideFromStudent()}
+                  >
+                    {showBusy ? "…" : "Скрыть"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className={btnSecondary}
+                    disabled={showBusy}
+                    onClick={() => onShowToStudent(board)}
+                  >
+                    {showBusy ? "Показ…" : "Показать ученику"}
+                  </button>
+                )
+              ) : null}
+              <button type="button" className={btnSecondary} onClick={openPicker}>
+                Выбрать другую
+              </button>
+            </>
           )}
-          <button
-            type="button"
-            className="cb-lesson-card__meeting-btn cb-lesson-card__meeting-btn--primary"
-            onClick={() => {
-              if (typeof onOpenLocally === "function") {
-                onOpenLocally(board);
-                return;
-              }
-              if (typeof onShowToStudent === "function") {
-                // Fallback: открыть с ?meeting= нельзя без uuid — хотя бы вкладка.
-                window.open(`/cabinet/boards/${board.id}`, "_blank");
-                return;
-              }
-              navigate(`/cabinet/boards/${board.id}`);
-            }}
-          >
-            Открыть
-          </button>
-          {!studentMode && typeof onShowToStudent === "function" ? (
-            showingToStudent && typeof onHideFromStudent === "function" ? (
-              <button
-                type="button"
-                className="cb-lesson-card__meeting-btn"
-                disabled={showBusy}
-                onClick={() => onHideFromStudent()}
-              >
-                {showBusy ? "…" : "Скрыть"}
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="cb-lesson-card__meeting-btn"
-                disabled={showBusy}
-                onClick={() => onShowToStudent(board)}
-              >
-                {showBusy ? "Показ…" : "Показать ученику"}
-              </button>
-            )
-          ) : null}
-          {!studentMode ? (
-            <button
-              type="button"
-              className="cb-lesson-card__meeting-btn"
-              onClick={openPicker}
-            >
-              Выбрать другую
-            </button>
-          ) : null}
         </div>
       ) : !studentMode ? (
-        <div className="cb-board-lesson__row">
-          <p className="cb-lesson-card__meeting-empty" style={{ margin: 0, flex: "1 1 100%" }}>
-            {embedded ? "Интерактивная доска не прикреплена" : "Доска не прикреплена"}
-          </p>
-          <button
-            type="button"
-            className="cb-lesson-card__meeting-btn cb-lesson-card__meeting-btn--primary"
-            onClick={() => setShowCreate(true)}
-          >
-            Создать новую
-          </button>
-          <button type="button" className="cb-lesson-card__meeting-btn" onClick={openPicker}>
-            Выбрать существующую
-          </button>
+        <div className={embedded ? "vl-mat-item" : "cb-board-lesson__row"}>
+          {embedded ? (
+            <>
+              <div className="vl-mat-item__main">
+                <div className="vl-mat-item__body">
+                  <div className="vl-mat-item__title">Интерактивная доска</div>
+                  <div className="vl-mat-item__meta">Не прикреплена</div>
+                </div>
+              </div>
+              <div className="vl-mat-item__actions">
+                <button
+                  type="button"
+                  className={btnPrimary}
+                  onClick={() => setShowCreate(true)}
+                >
+                  Создать
+                </button>
+                <button type="button" className={btnSecondary} onClick={openPicker}>
+                  Выбрать
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="cb-lesson-card__meeting-empty" style={{ margin: 0, flex: "1 1 100%" }}>
+                Доска не прикреплена
+              </p>
+              <button
+                type="button"
+                className={btnPrimary}
+                onClick={() => setShowCreate(true)}
+              >
+                Создать новую
+              </button>
+              <button type="button" className={btnSecondary} onClick={openPicker}>
+                Выбрать существующую
+              </button>
+            </>
+          )}
         </div>
       ) : (
         <p className="cb-lesson-card__meeting-empty">Доска пока недоступна</p>

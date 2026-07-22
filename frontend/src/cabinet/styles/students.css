@@ -212,6 +212,12 @@
   display: none;
 }
 
+@media (max-width: 720px) {
+  .cb-students-filters {
+    flex-wrap: wrap;
+  }
+}
+
 .cb-students-filters .cb-filter-bar {
   padding: 0;
   flex-wrap: nowrap;
@@ -763,11 +769,60 @@
   min-width: 0;
 }
 
+.cb-students-section--collapsed {
+  gap: 0;
+}
+
+.cb-students-section__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+}
+
 .cb-students-section__title {
   margin: 0;
   font-size: 0.95rem;
   font-weight: 700;
   color: #0F172A;
+}
+
+.cb-students-section__eye {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #94A3B8;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.cb-students-section__eye svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cb-students-section__eye:hover:not(:disabled) {
+  background: #F1F5F9;
+  color: #2563EB;
+}
+
+.cb-students-section__eye:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.cb-students-section--collapsed .cb-students-section__title {
+  color: #94A3B8;
+}
+
+.cb-students-section--collapsed .cb-students-section__eye {
+  color: #64748B;
 }
 
 .cb-students-section__actions {
@@ -1108,25 +1163,25 @@
   }
 }
 
-@media (max-width: 720px) {
-  .cb-section--students.cb-page {
-    padding-bottom: calc(96px + env(safe-area-inset-bottom));
-  }
-
-  .cb-students-summary {
-    display: flex;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    gap: 8px;
-  }
-
-  .cb-students-summary::-webkit-scrollbar {
-    display: none;
+@media (max-width: 900px) {
+  .cb-students-summary,
+  .cb-section--students .cb-students-summary {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+    gap: 10px;
   }
 
   .cb-students-summary__card {
-    flex: 0 0 min(46vw, 180px);
+    flex: none;
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .cb-section--students.cb-page {
+    padding-bottom: 24px;
   }
 
   .cb-section--students .cb-page-actions {
@@ -1135,10 +1190,12 @@
 
   .cb-section--students .cb-page-actions .cb-btn {
     flex: 1 1 auto;
+    min-height: 44px;
   }
 
   .cb-group-card__actions .cb-btn {
     flex: 1 1 auto;
+    min-height: 44px;
   }
 
   .cb-archive-item {

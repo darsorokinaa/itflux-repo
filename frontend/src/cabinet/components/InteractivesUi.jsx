@@ -15,6 +15,7 @@ import {
   getTypeMeta,
   isInteractiveTypeAvailable,
   canAssignInteractive,
+  formatUpdatedAt,
   INTERACTIVE_TYPE_LIST,
 } from "../interactivesData";
 
@@ -119,11 +120,11 @@ export function InteractiveTypeCard({ type, onCreate, compact = false }) {
         compact ? "ix-type-card--compact" : "",
         available ? "ix-type-card--active" : "ix-type-card--soon",
       ].filter(Boolean).join(" ")}
+      aria-disabled={!available}
     >
-      <div className="ix-type-card__accent" aria-hidden="true" />
       <div className="ix-type-card__body">
         <header className="ix-type-card__head">
-          <div className={`ix-type-card__icon ix-type-card__icon--${meta.accent}`}>
+          <div className={`ix-type-card__icon ix-type-card__icon--${meta.accent}`} aria-hidden="true">
             <CabinetIcon name={meta.icon} />
           </div>
           {!available ? (
@@ -133,6 +134,9 @@ export function InteractiveTypeCard({ type, onCreate, compact = false }) {
 
         <h3 className="ix-type-card__title">{meta.label}</h3>
         <p className="ix-type-card__desc">{meta.description}</p>
+        {meta.useCase ? (
+          <p className="ix-type-card__usecase">{meta.useCase}</p>
+        ) : null}
 
         {available ? (
           <button
@@ -143,7 +147,9 @@ export function InteractiveTypeCard({ type, onCreate, compact = false }) {
             {meta.createLabel}
           </button>
         ) : (
-          <p className="ix-type-card__muted">Формат в разработке</p>
+          <span className="ix-type-card__disabled" aria-hidden="true">
+            В разработке
+          </span>
         )}
       </div>
     </article>
@@ -264,11 +270,11 @@ export function InteractiveActivityCard({
           ? "секторов"
           : "элементов";
 
-  const metaLine = [
-    `${count} ${itemLabel}`,
+  const metaParts = [
+    typeMeta.shortLabel,
+    count > 0 ? `${count} ${itemLabel}` : null,
     interactive.exam !== "без экзамена" ? interactive.exam : null,
-    interactive.topic || null,
-  ].filter(Boolean).join(" · ");
+  ].filter(Boolean);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
@@ -279,13 +285,20 @@ export function InteractiveActivityCard({
     const close = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
     };
+    const onKey = (e) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
     document.addEventListener("click", close);
-    return () => document.removeEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("click", close);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [menuOpen]);
 
   return (
     <article
-      className="ix-activity-card ix-activity-card--clickable"
+      className={`ix-activity-card ix-activity-card--clickable${menuOpen ? " is-menu-open" : ""}`}
       onClick={() => onOpen?.()}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -328,91 +341,86 @@ export function InteractiveActivityCard({
             <button
               type="button"
               className="ix-activity-card__menu-btn"
-              aria-label="Меню"
+              aria-label="Действия"
+              aria-expanded={menuOpen}
               onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
             >
               ⋯
             </button>
             {menuOpen ? (
-              <div className="ix-activity-card__dropdown">
-                <button type="button" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onOpen?.(); }}>Открыть</button>
-                <button type="button" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit?.(); }}>Редактировать</button>
-                <button type="button" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDuplicate?.(); }}>Дублировать</button>
+              <div className="ix-activity-card__dropdown" role="menu">
+                <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onOpen?.(); }}>Открыть</button>
+                <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit?.(); }}>Редактировать</button>
+                <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDuplicate?.(); }}>Дублировать</button>
                 <button
                   type="button"
+                  role="menuitem"
                   disabled={!canAssign}
                   title={canAssign ? "" : "Сначала опубликуйте"}
                   onClick={(e) => { e.stopPropagation(); if (!canAssign) return; setMenuOpen(false); onAssign?.(); }}
                 >
                   Выдать
                 </button>
-                <button type="button" className="danger" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDelete?.(); }}>Удалить</button>
+                <button type="button" role="menuitem" className="danger" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDelete?.(); }}>Удалить</button>
               </div>
             ) : null}
           </div>
         </div>
-        <p className="ix-activity-card__meta">{metaLine}</p>
-        <span className={`ix-status-badge ix-status-badge--${statusBadgeClass(interactive.status)}`}>
-          {statusMeta.label}
-        </span>
+        <p className="ix-activity-card__meta">{metaParts.join(" · ")}</p>
+        <div className="ix-activity-card__footer">
+          <span className={`ix-status-badge ix-status-badge--${statusBadgeClass(interactive.status)}`}>
+            {statusMeta.label}
+          </span>
+          <time className="ix-activity-card__date" dateTime={interactive.updatedAt || undefined}>
+            {formatUpdatedAt(interactive.updatedAt)}
+          </time>
+        </div>
       </div>
     </article>
   );
 }
 
-export function InteractivesEmptyState({ onCreate, onQuickCreate, onTemplates }) {
+export function InteractivesEmptyState({ onCreate, onQuickCreate }) {
   const quickTypes = INTERACTIVE_TYPE_LIST.filter(isInteractiveTypeAvailable);
 
   return (
-    <div className="ix-empty ix-empty--rich">
+    <div className="ix-empty">
       <div className="ix-empty__panel">
         <div className="ix-empty__icon" aria-hidden="true">
           <CabinetIcon name="interactives" />
         </div>
         <h3 className="ix-empty__title">Создайте первый интерактив</h3>
         <p className="ix-empty__text">
-          Интерактивы помогают закрепить материал: карточки для терминов,
-          викторина для проверки, порядок шагов для алгоритмов.
+          Выберите формат, добавьте содержание и используйте задание на уроке
+          или отправьте его ученикам.
         </p>
 
-        <ol className="ix-empty__steps">
-          <li>Выберите тип задания</li>
-          <li>Добавьте вопросы или пары</li>
-          <li>Опубликуйте и выдайте ученикам</li>
-        </ol>
+        <button type="button" className="ix-empty__cta" onClick={onCreate}>
+          Создать интерактив
+        </button>
 
         {quickTypes.length > 0 ? (
           <div className="ix-empty__quick">
-            <span className="ix-empty__quick-label">Быстрый старт</span>
-            <div className="ix-empty__quick-list">
-              {quickTypes.map((type) => {
+            <span className="ix-empty__quick-label">Быстрый выбор</span>
+            <div className="ix-empty__quick-list" role="list">
+              {quickTypes.map((type, index) => {
                 const meta = INTERACTIVE_TYPES[type];
                 return (
-                  <button
-                    key={type}
-                    type="button"
-                    className={`ix-empty__quick-chip ix-empty__quick-chip--${meta.accent}`}
-                    onClick={() => (onQuickCreate ? onQuickCreate(type) : onCreate())}
-                  >
-                    <CabinetIcon name={meta.icon} />
-                    {meta.shortLabel || meta.label}
-                  </button>
+                  <span key={type} className="ix-empty__quick-item" role="listitem">
+                    {index > 0 ? <span className="ix-empty__quick-sep" aria-hidden="true">·</span> : null}
+                    <button
+                      type="button"
+                      className="ix-empty__quick-link"
+                      onClick={() => (onQuickCreate ? onQuickCreate(type) : onCreate())}
+                    >
+                      {meta.shortLabel || meta.label}
+                    </button>
+                  </span>
                 );
               })}
             </div>
           </div>
         ) : null}
-
-        <div className="ix-empty__actions">
-          <button type="button" className="ix-empty__cta" onClick={onCreate}>
-            Создать интерактив
-          </button>
-          {onTemplates ? (
-            <button type="button" className="ix-empty__cta ix-empty__cta--ghost" onClick={onTemplates}>
-              Шаблоны
-            </button>
-          ) : null}
-        </div>
       </div>
     </div>
   );
@@ -429,12 +437,21 @@ export function TypeSelectModal({ onClose, onSelect }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="ix-modal__head">
-          <h2 id="ix-type-modal-title" className="ix-modal__title">Тип интерактива</h2>
+          <h2 id="ix-type-modal-title" className="ix-modal__title">Выберите формат</h2>
           <button type="button" className="ix-modal__close" onClick={onClose} aria-label="Закрыть">×</button>
         </div>
         <div className="ix-modal__body ix-modal__body--types">
-          {Object.keys(INTERACTIVE_TYPES).map((type) => (
-            <InteractiveTypeCard key={type} type={type} onCreate={(t) => { onSelect(t); onClose(); }} compact />
+          {INTERACTIVE_TYPE_LIST.map((type) => (
+            <InteractiveTypeCard
+              key={type}
+              type={type}
+              compact
+              onCreate={(t) => {
+                if (!isInteractiveTypeAvailable(t)) return;
+                onSelect(t);
+                onClose();
+              }}
+            />
           ))}
         </div>
       </div>

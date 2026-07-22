@@ -168,28 +168,54 @@ export function homeworkResultToUiState(result, taskByNumber) {
   const outSc = {};
   const outCh = {};
 
-  const byId = r.by_task_id || r.byTaskId || r.answers;
-  const hasById = byId && typeof byId === "object" && Object.keys(byId).length > 0;
+  const numberMap = taskByNumber instanceof Map ? taskByNumber : new Map();
+  const knownIds = new Set();
+  for (const t of numberMap.values()) {
+    if (t?.id != null) knownIds.add(String(t.id));
+  }
+
+  const stringifyAnswer = (val) => {
+    if (typeof val === "string") return val;
+    if (val && typeof val === "object" && "text" in /** @type {object} */ (val)) {
+      return String(/** @type {{ text?: string }} */ (val).text ?? "");
+    }
+    if (val == null) return "";
+    return String(val);
+  };
 
   const byNum = r.by_number || r.byNumber || r.answersByNumber;
-  if (byNum && typeof byNum === "object" && !hasById) {
+  if (byNum && typeof byNum === "object") {
     for (const [num, val] of Object.entries(/** @type {Record<string, unknown>} */ (byNum))) {
-      const t = taskByNumber.get(String(num)) || taskByNumber.get(String(Number(num)));
-      if (t) {
-        if (typeof val === "string") outUa[t.id] = val;
-        else if (val && typeof val === "object" && "text" in (/** @type {object} */ (val)))
-          outUa[t.id] = String(/** @type {{ text?: string }} */ (val).text ?? "");
-        else if (val != null) outUa[t.id] = String(val);
+      const t = numberMap.get(String(num)) || numberMap.get(String(Number(num)));
+      if (!t?.id) continue;
+      const text = stringifyAnswer(val);
+      if (text.trim() !== "") outUa[String(t.id)] = text;
+    }
+  }
+
+  const byId = r.by_task_id || r.byTaskId || r.answers;
+  if (byId && typeof byId === "object") {
+    for (const [key, val] of Object.entries(/** @type {Record<string, unknown>} */ (byId))) {
+      const text = stringifyAnswer(val);
+      if (text.trim() === "") continue;
+      const keyStr = String(key);
+      if (knownIds.has(keyStr)) {
+        outUa[keyStr] = text;
+        continue;
+      }
+      // Legacy: ключ — номер задания, а не TaskList.id
+      const t = numberMap.get(keyStr) || numberMap.get(String(Number(keyStr)));
+      if (t?.id != null) {
+        const idKey = String(t.id);
+        if (outUa[idKey] == null || String(outUa[idKey]).trim() === "") {
+          outUa[idKey] = text;
+        }
+      } else {
+        outUa[keyStr] = text;
       }
     }
   }
-  
-  if (hasById) {
-    for (const [id, val] of Object.entries(/** @type {Record<string, unknown>} */ (byId))) {
-      if (typeof val === "string") outUa[id] = val;
-      else if (val != null) outUa[id] = String(val);
-    }
-  }
+
   if (r.scores && typeof r.scores === "object") {
     for (const [id, v] of Object.entries(/** @type {Record<string, unknown>} */ (r.scores))) {
       const n = Number(v);
@@ -355,12 +381,35 @@ export async function deleteHomeworkAnswer(assignmentId, params, opts) {
 
 export function buildHomeworkResultPayload(tasks, userAnswers, scores, checkedTasks) {
   const byNumber = {};
-  const byTaskId = { ...userAnswers };
-  for (const t of tasks) {
+  const byTaskId = {};
+  const list = Array.isArray(tasks) ? tasks : [];
+  const knownIds = new Set(list.map((t) => String(t.id)));
+
+  for (const t of list) {
     const id = String(t.id);
     const num = String(t.number);
-    if (userAnswers[id] != null) byNumber[num] = userAnswers[id];
+    let val = userAnswers?.[id];
+    if (val == null || String(val).trim() === "") {
+      // Legacy-ключи-номера в userAnswers
+      if (!knownIds.has(num)) {
+        val = userAnswers?.[num] ?? userAnswers?.[String(Number(num))];
+      }
+    }
+    if (val != null && String(val).trim() !== "") {
+      byTaskId[id] = val;
+      byNumber[num] = val;
+    }
   }
+
+  // Сохраняем прочие ключи userAnswers (на всякий случай), но не затираем id.
+  if (userAnswers && typeof userAnswers === "object") {
+    for (const [key, val] of Object.entries(userAnswers)) {
+      if (val == null || String(val).trim() === "") continue;
+      if (byTaskId[key] != null) continue;
+      if (knownIds.has(String(key))) byTaskId[String(key)] = val;
+    }
+  }
+
   return {
     by_number: byNumber,
     by_task_id: byTaskId,

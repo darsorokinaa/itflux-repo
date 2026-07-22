@@ -61,7 +61,7 @@ def event_duration_minutes(event: ScheduleEvent) -> int | None:
 def resolve_event_students(event: ScheduleEvent) -> list[Student]:
     students: list[Student] = []
     if event.group_id:
-        students = list(event.group.students.all())
+        students = list(event.group.students.exclude(status="archived"))
         if event.student_id and event.student not in students:
             students.append(event.student)
     elif event.student_id:
@@ -77,7 +77,7 @@ def resolve_event_students(event: ScheduleEvent) -> list[Student]:
             if p.student_id and p.student_id not in seen:
                 seen.add(p.student_id)
                 students.append(p.student)
-    return students
+    return [s for s in students if s and getattr(s, "status", None) != "archived"]
 
 
 def planned_topic_for_event(event: ScheduleEvent) -> str:

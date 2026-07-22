@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { fetchStudentMaterials } from "../../../utils/cabinetAuth";
 import {
   StudentEmptyState,
@@ -14,12 +15,17 @@ const TYPE_ICONS = {
   methodic:     { icon: "book",      color: "#059669", bg: "#D1FAE5" },
   link:         { icon: "arrow",     color: "#2F5EF5", bg: "#EEF2FF" },
   file:         { icon: "folder",    color: "#D97706", bg: "#FEF3C7" },
+  board:        { icon: "board",     color: "#0D9488", bg: "#CCFBF1" },
 };
 
 function MaterialRow({ item }) {
   const { icon, color, bg } = TYPE_ICONS[item.type] || { icon: "note", color: "#667085", bg: "#F3F4F6" };
-  const url = item.external_url || item.file_url;
-  const isExternal = Boolean(item.external_url);
+  const boardUrl = item.type === "board"
+    ? (item.board_url || (item.board_id ? `/cabinet/boards/${item.board_id}` : ""))
+    : "";
+  const url = boardUrl || item.external_url || item.file_url;
+  const isExternal = Boolean(item.external_url) && item.type !== "board";
+  const isInternalBoard = item.type === "board" && Boolean(boardUrl);
 
   const inner = (
     <>
@@ -44,6 +50,14 @@ function MaterialRow({ item }) {
       )}
     </>
   );
+
+  if (isInternalBoard) {
+    return (
+      <Link to={boardUrl} className="st-mat-row st-mat-row--link">
+        {inner}
+      </Link>
+    );
+  }
 
   if (url) {
     return (
@@ -90,7 +104,7 @@ export default function StudentMaterialsPage() {
       {/* Header */}
       <div className="st-mat-header">
         <h1 className="st-mat-header__title">Материалы</h1>
-        <p className="st-mat-header__sub">Теория, файлы и ссылки от учителя</p>
+        <p className="st-mat-header__sub">Теория, файлы, ссылки и доски от учителя</p>
       </div>
 
       {/* Search */}

@@ -44,8 +44,9 @@ export const INTERACTIVE_TYPES = {
     id: "flashcards",
     label: "Карточки",
     shortLabel: "Карточки",
-    description: "Термин → определение",
-    longDescription: "Термин → определение",
+    description: "Термин и определение",
+    longDescription: "Термин и определение",
+    useCase: "Подойдут для повторения понятий и формул.",
     icon: "cards",
     accent: "ege",
     coverTheme: "ege",
@@ -57,8 +58,9 @@ export const INTERACTIVE_TYPES = {
     id: "matching",
     label: "Сопоставление",
     shortLabel: "Сопоставление",
-    description: "Понятие ↔ ответ",
-    longDescription: "Понятие ↔ ответ",
+    description: "Соединение понятий и ответов",
+    longDescription: "Соединение понятий и ответов",
+    useCase: "Для закрепления связей между терминами.",
     icon: "match",
     accent: "oge",
     coverTheme: "oge",
@@ -71,8 +73,9 @@ export const INTERACTIVE_TYPES = {
     id: "sequence",
     label: "Порядок",
     shortLabel: "Порядок",
-    description: "Шаг 1 → Шаг 2 → Шаг 3",
-    longDescription: "Шаг 1 → Шаг 2 → Шаг 3",
+    description: "Шаги в правильной последовательности",
+    longDescription: "Шаги в правильной последовательности",
+    useCase: "Удобно для алгоритмов и разборов задач.",
     icon: "order",
     accent: "school",
     coverTheme: "school",
@@ -86,6 +89,7 @@ export const INTERACTIVE_TYPES = {
     shortLabel: "Викторина",
     description: "Один или несколько правильных ответов",
     longDescription: "Вопросы с вариантами ответов",
+    useCase: "Проверка понимания темы на уроке.",
     icon: "quiz",
     accent: "quiz",
     coverTheme: "quiz",
@@ -96,9 +100,10 @@ export const INTERACTIVE_TYPES = {
   wheel: {
     id: "wheel",
     label: "Колесо фортуны",
-    shortLabel: "Случайное колесо",
-    description: "Случайный выбор сектора",
-    longDescription: "Случайный выбор сектора",
+    shortLabel: "Колесо",
+    description: "Случайный выбор вопроса, ученика или темы",
+    longDescription: "Случайный выбор вопроса, ученика или темы",
+    useCase: "Оживит опрос и разминку на уроке.",
     icon: "wheel",
     accent: "wheel",
     coverTheme: "wheel",
@@ -380,11 +385,14 @@ export function createEmptyInteractive(type) {
 }
 
 export function getItemCount(interactive) {
+  if (typeof interactive?.itemsCount === "number" && interactive.itemsCount > 0) {
+    return interactive.itemsCount;
+  }
   if (interactive.type === "flashcards") return interactive.cards?.length || 0;
   if (interactive.type === "matching") return interactive.pairs?.length || 0;
   if (interactive.type === "quiz") return interactive.questions?.length || 0;
   if (interactive.type === "wheel") return interactive.segments?.length || 0;
-  return interactive.steps?.length || 0;
+  return interactive.steps?.length || interactive.itemsCount || 0;
 }
 
 export function getInteractiveFirstSlide(interactive) {

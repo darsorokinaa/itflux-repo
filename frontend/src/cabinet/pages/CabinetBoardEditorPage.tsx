@@ -48,6 +48,7 @@ import {
 } from "../boards/boardGrid";
 import {
   createBoardCollabSession,
+  mergeCollabScenes,
   type CollabPeer,
 } from "../boards/boardCollab";
 import "../styles/boards.css";
@@ -91,6 +92,8 @@ function applyRemoteSceneToApi(
       scrollY: local.scrollY,
       zoom: local.zoom,
       collaborators: local.collaborators,
+      selectedElementIds: local.selectedElementIds,
+      selectedGroupIds: local.selectedGroupIds,
       // Keep local UI theme — remote scene shouldn't flip chrome.
       theme: local.theme === "dark" ? "dark" : "light",
     },
@@ -447,32 +450,42 @@ export default function CabinetBoardEditorPage() {
           versionRef.current = meta.version;
           setBoard((prev) => (prev ? { ...prev, version: meta.version! } : prev));
         }
-        // Не затираем локальные несохранённые правки более старым live-кадром.
-        if (!meta.fromSaved && dirtyRef.current && savingRef.current) return;
+
+        const localElements = (apiRef.current.getSceneElements?.() || []) as unknown[];
+        const localApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
+        const localFiles = (apiRef.current.getFiles?.() || {}) as Record<string, unknown>;
+        // Element-level merge: иначе чужой live-кадр затирает наш незавершённый штрих.
+        const merged = mergeCollabScenes(
+          { elements: localElements, appState: localApp, files: localFiles },
+          scene,
+        );
 
         applyingRemoteRef.current = true;
-        applyRemoteSceneToApi(apiRef.current, scene);
+        applyRemoteSceneToApi(apiRef.current, merged);
         const local = apiRef.current.getAppState?.() || {};
         const nextApp = {
-          ...scene.appState,
+          ...merged.appState,
           scrollX: local.scrollX,
           scrollY: local.scrollY,
           zoom: local.zoom,
           collaborators: local.collaborators,
+          selectedElementIds: local.selectedElementIds,
           theme: boardThemeRef.current,
         };
-        const payload = buildScenePayload(scene.elements, nextApp, scene.files);
+        const payload = buildScenePayload(merged.elements, nextApp, merged.files);
         latestSceneRef.current = payload;
-        lastElementsRef.current = scene.elements;
-        lastFilesRef.current = scene.files;
+        lastElementsRef.current = merged.elements;
+        lastFilesRef.current = merged.files;
         if (meta.fromSaved) {
-          dirtyRef.current = false;
-          setSaveStatus("saved");
-          setConflict(false);
+          // После сохранения партнёра не сбрасываем свой dirty, если мы тоже правили.
+          if (!dirtyRef.current) {
+            setSaveStatus("saved");
+            setConflict(false);
+          }
         }
         window.setTimeout(() => {
           applyingRemoteRef.current = false;
-        }, 120);
+        }, 80);
       },
     });
     collabRef.current = session;

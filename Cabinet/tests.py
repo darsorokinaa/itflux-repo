@@ -1325,7 +1325,7 @@ class StudentReleaseTests(TestCase):
 
     def test_teacher_can_assign_homework_manually(self):
         from rest_framework.test import APIClient
-        from Cabinet.models import Homework
+        from Cabinet.models import Homework, HomeworkSubmission, ReviewItem
 
         client = APIClient()
         client.force_login(self.teacher)
@@ -1343,9 +1343,14 @@ class StudentReleaseTests(TestCase):
         options = client.get(f"/api/cabinet/students/{self.student.pk}/homework-options/").json()
         self.assertTrue(options["items"][0]["assigned"])
 
+        submission = HomeworkSubmission.objects.get(homework=homework, student=self.student)
+        self.assertTrue(
+            ReviewItem.objects.filter(source_type="homework", source_id=submission.pk).exists()
+        )
+
     def test_teacher_can_assign_custom_homework(self):
         from rest_framework.test import APIClient
-        from Cabinet.models import Homework
+        from Cabinet.models import Homework, HomeworkSubmission, ReviewItem
 
         client = APIClient()
         client.force_login(self.teacher)
@@ -1366,6 +1371,20 @@ class StudentReleaseTests(TestCase):
         self.assertIsNotNone(homework)
         self.assertEqual(homework.status, "assigned")
         self.assertEqual(homework.tasks.count(), 1)
+
+        submission = HomeworkSubmission.objects.get(homework=homework, student=self.student)
+        self.assertIsNone(submission.submitted_at)
+        review = ReviewItem.objects.filter(source_type="homework", source_id=submission.pk).first()
+        self.assertIsNotNone(review)
+        self.assertEqual(review.status, "pending")
+
+        # Дополнительное ДЗ видно в списке проверки сразу после выдачи.
+        review_list = client.get("/api/cabinet/review/")
+        self.assertEqual(review_list.status_code, 200)
+        payload = review_list.json()
+        rows = payload if isinstance(payload, list) else payload.get("results", [])
+        ids = [row["id"] for row in rows]
+        self.assertIn(review.pk, ids)
 
 
 class HomeworkSubmissionApiTests(TestCase):

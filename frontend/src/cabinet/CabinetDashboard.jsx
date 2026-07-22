@@ -117,7 +117,12 @@ function mapTodayLesson(ev, now) {
   const isSoon = Boolean(
     startsAt && !isCurrent && startsAt > now && (startsAt - now) / 60000 <= 60,
   );
-  const ready = Boolean(ev.topic || ev.link || ev.plan_item_id);
+  const isDone = ev.status === "done" || ev.status === "completed"
+    || Boolean(endsAt && endsAt < now);
+  const ready = isDone || Boolean(
+    ev.topic || ev.link || ev.telemost_url || ev.meeting_url
+      || ev.plan_item_id || ev.lesson_plan_item,
+  );
   return {
     id: ev.id,
     time,
@@ -126,8 +131,11 @@ function mapTodayLesson(ev, now) {
     audience: ev.student_name || ev.group_title || ev.audience || "",
     startsAt: ev.starts_at,
     ready,
+    isDone,
     isCurrent: isCurrent || isSoon,
-    countdown: formatTimeUntil(time, now),
+    countdown: isDone && !isCurrent
+      ? "пройден"
+      : formatTimeUntil(time, now),
   };
 }
 
@@ -249,16 +257,7 @@ export default function CabinetDashboard() {
         action: "Начать проверку →",
       });
     }
-    if (draftsCount > 0) {
-      items.push({
-        important: false,
-        title: "Незавершённые черновики",
-        text: `${draftsCount} ${pluralRu(draftsCount, "черновик", "черновика", "черновиков")} уроков, планов или интерактивов.`,
-        href: "/cabinet/plans",
-        action: "Открыть черновики →",
-      });
-    }
-    const unfinished = todayLessons.find((lesson) => !lesson.ready);
+    const unfinished = todayLessons.find((lesson) => !lesson.ready && !lesson.isDone);
     if (unfinished) {
       items.push({
         important: true,
@@ -299,7 +298,7 @@ export default function CabinetDashboard() {
       });
     }
     return items.slice(0, 4);
-  }, [reviewsCount, draftsCount, todayLessons, progressItems.length, journalDash]);
+  }, [reviewsCount, todayLessons, progressItems.length, journalDash]);
 
   const notes = useMemo(() => {
     const list = [];
@@ -400,7 +399,7 @@ export default function CabinetDashboard() {
                 <span className="td-status-label">Черновики</span>
                 <strong className="td-status-value">{draftsCount}</strong>
                 <span className="td-status-note">
-                  {draftsCount === 0 ? "всё в порядке" : "нужно доделать"}
+                  {draftsCount === 0 ? "всё в порядке" : "уроки, планы, интерактивы"}
                 </span>
               </div>
             </div>
@@ -442,11 +441,11 @@ export default function CabinetDashboard() {
                           </p>
                         </div>
                         <div className="td-lesson-meta">
-                          <span className={`td-chip${lesson.ready ? "" : " is-yellow"}`}>
-                            {lesson.ready ? "Готово" : "Не всё готово"}
+                          <span className={`td-chip${lesson.ready || lesson.isDone ? "" : " is-yellow"}`}>
+                            {lesson.isDone ? "Пройден" : lesson.ready ? "Готово" : "Не всё готово"}
                           </span>
                           <Link to="/cabinet/schedule" className="td-lesson-action">
-                            {lesson.ready ? "Открыть урок →" : "Доделать →"}
+                            {lesson.ready || lesson.isDone ? "Открыть урок →" : "Доделать →"}
                           </Link>
                         </div>
                       </article>

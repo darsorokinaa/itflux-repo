@@ -3,6 +3,13 @@
    Breakpoints: 360, 390, 414, 430, 768, 900
    ============================================================ */
 
+:root {
+  --cb-mobile-nav-base: 64px;
+  --cb-mobile-nav-height: calc(var(--cb-mobile-nav-base) + env(safe-area-inset-bottom, 0px));
+  --cb-mobile-page-pad: 16px;
+  --cb-mobile-page-pad-sm: 12px;
+}
+
 /* --- Global overflow guard (cabinet shell only) --- */
 .cabinet-layout,
 .cb-layout,
@@ -17,6 +24,16 @@
 .cabinet-content > *,
 .cabinet-content--page > * {
   min-width: 0;
+}
+
+img,
+video {
+  max-width: 100%;
+  height: auto;
+}
+
+.cabinet-layout svg {
+  max-width: 100%;
 }
 
 /* --- Header: compact title with ellipsis --- */
@@ -57,27 +74,34 @@
     gap: 6px;
   }
 
+  .cabinet-main {
+    padding-bottom: var(--cb-mobile-nav-height);
+  }
+
   /* Secondary action bars sit above bottom navigation */
-  .cb-pe-mobile-bar {
-    bottom: calc(64px + env(safe-area-inset-bottom));
+  .cb-pe-mobile-bar,
+  .ix-ed-mobile-bar,
+  .ix-launch-mobile-bar,
+  .st-hw-submit--mobile,
+  .cb-sticky-action-bar,
+  .cb-interactive-editor__footer {
+    bottom: var(--cb-mobile-nav-height);
     z-index: 1190;
   }
 
   .cb-section--plan-editor {
-    padding-bottom: calc(152px + env(safe-area-inset-bottom));
+    padding-bottom: calc(var(--cb-mobile-nav-height) + 88px);
   }
 
   .cb-section--interactive-editor,
   .cb-section--interactive-detail,
   .cb-section--interactive-launch {
-    padding-bottom: calc(88px + env(safe-area-inset-bottom));
+    padding-bottom: calc(var(--cb-mobile-nav-height) + 24px);
   }
 
   .ix-ed-mobile-bar,
   .ix-launch-mobile-bar {
     position: sticky;
-    bottom: calc(64px + env(safe-area-inset-bottom));
-    z-index: 1190;
     padding-left: 14px;
     padding-right: 14px;
     margin-left: -14px;
@@ -86,13 +110,26 @@
     border-top: 1px solid #E2E8F0;
   }
 
-  .st-hw-submit--mobile {
-    bottom: calc(64px + env(safe-area-inset-bottom));
-    z-index: 1190;
+  .st-hw-page {
+    padding-bottom: calc(var(--cb-mobile-nav-height) + 72px);
   }
 
-  .st-hw-page {
-    padding-bottom: calc(136px + env(safe-area-inset-bottom));
+  .cb-mobile-nav,
+  .st-mobile-nav,
+  .cb-mobile-nav.st-mobile-nav {
+    z-index: 1200;
+    height: var(--cb-mobile-nav-height);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .cb-mobile-nav__item span,
+  .st-mobile-nav__item span {
+    font-size: 0.68rem;
+    line-height: 1.15;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
@@ -105,10 +142,17 @@
     height: 44px;
   }
 
+  .cb-layout .cabinet-header--teacher .cabinet-header-guide-btn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
   .cb-mobile-nav__item,
   .st-mobile-nav__item {
     min-height: 44px;
-    padding: 6px 4px;
+    padding: 6px 2px;
   }
 
   .cb-btn,
@@ -135,13 +179,13 @@
 
   /* Page shells: consistent horizontal padding */
   .cabinet-content:not(.cabinet-content--page):not(.cabinet-content--reports) {
-    padding: 16px;
+    padding: var(--cb-mobile-page-pad);
   }
 
   .cabinet-content--page .cb-section.cb-page,
   .cabinet-content--page > .cb-section {
-    padding-left: 12px;
-    padding-right: 12px;
+    padding-left: var(--cb-mobile-page-pad-sm);
+    padding-right: var(--cb-mobile-page-pad-sm);
     box-sizing: border-box;
   }
 
@@ -179,26 +223,26 @@
   .hw-review-table-wrap,
   .ix-results-table-wrap,
   .cb-results-table-wrap,
-  .cb-table-scroll {
+  .cb-table-scroll,
+  .pay-table-wrap,
+  .jg-lessons-table-wrap,
+  .jl-table-scroll {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     max-width: 100%;
     margin-left: 0;
     margin-right: 0;
-    padding: 0;
     border-radius: 12px;
-    border: 1px solid #E2E8F0;
-    background: #FFFFFF;
   }
 
   .hw-review-table,
   .ix-results-table,
   .cb-results-table {
-    min-width: 520px;
-    font-size: 0.82rem;
+    min-width: 480px;
+    font-size: 0.875rem;
   }
 
-  /* Modals & upgrade sheets */
+  /* Modals & upgrade sheets — bottom sheet with internal scroll */
   .cb-modal-backdrop,
   .upm-backdrop,
   .ix-modal-backdrop {
@@ -211,9 +255,38 @@
   .ix-modal {
     width: 100%;
     max-width: none;
-    max-height: min(92vh, 100dvh);
+    max-height: min(92dvh, 100%);
     border-radius: 24px 24px 0 0;
     margin: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .cb-modal__head,
+  .cb-modal__footer {
+    flex: 0 0 auto;
+  }
+
+  .cb-modal__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .cb-modal__close {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .cb-modal--lesson {
+    max-height: 100dvh;
+    height: 100dvh;
+    border-radius: 0;
   }
 
   .upm-backdrop {
@@ -223,7 +296,7 @@
   .upm-sheet {
     border-radius: 24px 24px 0 0;
     max-width: none;
-    padding: 28px 20px calc(20px + env(safe-area-inset-bottom));
+    padding: 28px 20px calc(20px + env(safe-area-inset-bottom, 0px));
   }
 
   /* Forms: full-width fields, readable size (no iOS zoom) */
@@ -242,14 +315,18 @@
   .cb-input,
   .cb-select,
   .cabinet-auth-field input,
-  .cabinet-auth-field select {
+  .cabinet-auth-field select,
+  .pay-field input,
+  .pay-field select,
+  .pay-field textarea {
     width: 100%;
     min-height: 44px;
     font-size: 16px;
     box-sizing: border-box;
   }
 
-  .cb-form-field textarea {
+  .cb-form-field textarea,
+  .pay-field textarea {
     min-height: 96px;
   }
 
@@ -277,7 +354,8 @@
   .cb-more-card,
   .st-lesson-card,
   .st-assignment-card,
-  .st-assign-card {
+  .st-assign-card,
+  .st-more-card {
     overflow-wrap: anywhere;
     word-break: break-word;
   }
@@ -296,14 +374,12 @@
     -webkit-box-orient: vertical;
   }
 
-  /* Sticky bars above bottom nav */
   .cb-sticky-action-bar,
   .cb-interactive-editor__footer {
-    bottom: calc(64px + env(safe-area-inset-bottom));
-    margin-left: -12px;
-    margin-right: -12px;
-    padding-left: 12px;
-    padding-right: 12px;
+    margin-left: calc(-1 * var(--cb-mobile-page-pad-sm));
+    margin-right: calc(-1 * var(--cb-mobile-page-pad-sm));
+    padding-left: var(--cb-mobile-page-pad-sm);
+    padding-right: var(--cb-mobile-page-pad-sm);
   }
 }
 
@@ -320,12 +396,12 @@
   }
 
   .cabinet-content:not(.cabinet-content--page):not(.cabinet-content--reports) {
-    padding: 12px;
+    padding: var(--cb-mobile-page-pad-sm);
   }
 
   .cb-mobile-nav__item span,
   .st-mobile-nav__item span {
-    font-size: 0.6rem;
+    font-size: 0.62rem;
   }
 }
 
@@ -346,10 +422,29 @@
 
   .cb-mobile-nav__item span,
   .st-mobile-nav__item span {
-    font-size: 0.54rem;
+    font-size: 0.58rem;
   }
 
   .cb-card {
     padding: 12px 14px;
+  }
+}
+
+@media (max-width: 320px) {
+  :root {
+    --cb-mobile-page-pad: 12px;
+    --cb-mobile-page-pad-sm: 10px;
+  }
+
+  .cb-mobile-nav__item,
+  .st-mobile-nav__item {
+    padding: 4px 1px;
+    gap: 2px;
+  }
+
+  .cb-mobile-nav__item svg,
+  .st-mobile-nav__item svg {
+    width: 20px;
+    height: 20px;
   }
 }

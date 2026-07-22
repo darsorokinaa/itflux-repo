@@ -11,6 +11,7 @@ from django.utils import timezone
 from .boards_api import ensure_linked_student_edit_access
 from .choices import HomeworkStatus, HomeworkTaskType
 from .homework_api import (
+    LIVE_MEETING_HOMEWORK_MARKER,
     build_variant_open_url,
     extract_variant_id,
     issue_homework_token,
@@ -125,7 +126,7 @@ def _ensure_live_variant_homework(
         raise VideoMeetingError("Не удалось определить вариант по ссылке", code="invalid_variant", status=400)
 
     live_title = f"Вариант №{variant_id}"
-    marker = f"live-meeting:{event.pk}:variant:{variant_id}"
+    marker = f"{LIVE_MEETING_HOMEWORK_MARKER}{event.pk}:variant:{variant_id}"
     students = list_event_students(event)
     primary = event.student or (students[0] if students else None)
     group = event.group
@@ -489,7 +490,13 @@ def live_variant_answers(*, meeting: VideoMeeting, user: User) -> dict:
                 "displayName": student.full_name,
                 "status": assignment.get("status"),
                 "score": assignment.get("score"),
-                "result": _live_result_only_checked(assignment.get("result"), tasks),
+                # На уроке учителю нужны и черновик ученика, и правильные ответы в таблице.
+                "result": assignment.get("result") if isinstance(assignment.get("result"), dict) else {
+                    "checked": {},
+                    "by_number": {},
+                    "by_task_id": {},
+                    "scores": {},
+                },
                 "updatedAt": submission.updated_at.isoformat() if submission else None,
             }
         )

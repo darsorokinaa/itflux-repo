@@ -566,8 +566,13 @@ export async function createJitsiMeetSession(config, container, hooks = {}) {
           throw err;
         }
         console.warn("[Jitsi] External API недоступен, fallback iframe", err?.code || err?.message);
+        const likelyWaitForModerator =
+          enriched?.requiresModeratorLogin
+          || (enriched?.meeting?.isModerator && !enriched?.jwt);
         onMediaWarning?.(
-          "Автовход не подтверждён — открываем встроенное окно. Если снова увидите «Присоединиться», нажмите или откройте в новой вкладке.",
+          likelyWaitForModerator
+            ? "Организатор не подтверждён на сервере Jitsi (JWT). На проде: проверьте JITSI_* в .env и выполните sudo bash deploy/jitsi/fix-jwt-prosody.sh — иначе урок не начнётся без «Я организатор»."
+            : "Не удалось подтвердить вход через API — открываем встроенное окно. Если видите «Я организатор» / «Присоединитесь», откройте в новой вкладке или проверьте JWT на сервере.",
         );
       }
     }

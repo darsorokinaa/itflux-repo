@@ -3,14 +3,12 @@ import {
   computeHomeworkReviewSummary,
   formatHomeworkVerdict,
   homeworkTaskAnswer,
-  homeworkTaskChecked,
   homeworkTaskComment,
   homeworkTaskScore,
   homeworkTeacherAttachments,
+  resolvePart1Verdict,
   taskMaxScore,
 } from "./cabinetReviewUtils";
-import { computePart1TaskCorrect } from "../utils/examAnswerCheck";
-import MathContent from "../components/MathContent";
 
 function normalizeMediaUrl(url) {
   if (!url) return "";
@@ -134,7 +132,8 @@ function Part1Table({ rows }) {
         <table className="hw-review-table">
           <thead>
             <tr>
-              <th>№</th>
+              <th>№ п/п</th>
+              <th>Задание</th>
               <th>Ответ ученика</th>
               <th>Правильный ответ</th>
               <th>Решения</th>
@@ -143,17 +142,12 @@ function Part1Table({ rows }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {rows.map((row, index) => (
               <tr key={row.taskId}>
+                <td className="hw-review-table__ord">{index + 1}</td>
                 <td>{row.number}</td>
-                <td>{row.answer || "—"}</td>
-                <td>
-                  {row.correctAnswer ? (
-                    <MathContent html={String(row.correctAnswer)} plainHtml />
-                  ) : (
-                    "—"
-                  )}
-                </td>
+                <td className="hw-review-table__pre">{row.answer || "—"}</td>
+                <td className="hw-review-table__pre">{row.correctAnswer || "—"}</td>
                 <td>
                   <FileLinks files={row.studentFiles} emptyLabel="—" />
                 </td>
@@ -187,7 +181,8 @@ function Part2Table({ rows }) {
         <table className="hw-review-table">
           <thead>
             <tr>
-              <th>№</th>
+              <th>№ п/п</th>
+              <th>Задание</th>
               <th>Ответ ученика</th>
               <th>Правильный ответ</th>
               <th>Решения</th>
@@ -196,17 +191,12 @@ function Part2Table({ rows }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {rows.map((row, index) => (
               <tr key={row.taskId}>
+                <td className="hw-review-table__ord">{index + 1}</td>
                 <td>{row.number}</td>
-                <td>{row.answer || "—"}</td>
-                <td>
-                  {row.correctAnswer ? (
-                    <MathContent html={String(row.correctAnswer)} plainHtml />
-                  ) : (
-                    "—"
-                  )}
-                </td>
+                <td className="hw-review-table__pre">{row.answer || "—"}</td>
+                <td className="hw-review-table__pre">{row.correctAnswer || "—"}</td>
                 <td>
                   <FileLinks files={row.studentFiles} emptyLabel="—" />
                 </td>
@@ -284,8 +274,7 @@ export function HomeworkTaskReviewNote({ task, result, level, subject, part }) {
   let maxScore = null;
 
   if (part === 1) {
-    const saved = homeworkTaskChecked(result, task.id);
-    verdict = saved ?? computePart1TaskCorrect(task, answer, subject);
+    verdict = resolvePart1Verdict(task, answer, result, subject);
   } else {
     score = homeworkTaskScore(result, task.id);
     maxScore = taskMaxScore(task);

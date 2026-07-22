@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import secrets
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Literal
 
 from django.conf import settings
@@ -24,6 +25,9 @@ from .jitsi_service import (
 )
 from .models import MeetingAttendance, Profile, ScheduleEvent, Student, VideoMeeting
 from .schedule_series import _ensure_organizer
+
+# Краткий разрыв (reload вкладки, Strict Mode, мигание сети) не считается уходом.
+ATTENDANCE_RECONNECT_GRACE = timedelta(seconds=180)
 
 
 class VideoMeetingError(Exception):
@@ -410,7 +414,7 @@ def record_attendance_join(
 ) -> MeetingAttendance:
     """
     Идемпотентный вход: при открытой сессии того же пользователя возвращаем её.
-    После выхода (left_at задан) следующее подключение создаёт новую сессию.
+    После короткого выхода (reload / сеть) в пределах grace — продолжаем ту же сессию.
     """
     assert_can_join_meeting(user, meeting, for_config=False)
     now = timezone.now()
@@ -428,6 +432,28 @@ def record_attendance_join(
                 open_session.jitsi_participant_id = participant_id
                 open_session.save(update_fields=["jitsi_participant_id"])
             return open_session
+
+        recent = (
+            MeetingAttendance.objects.select_for_update()
+            .filter(meeting=meeting, user=user, left_at__isnull=False)
+            .order_by("-left_at")
+            .first()
+        )
+        if (
+            recent
+            and recent.left_at
+            and (now - recent.left_at) <= ATTENDANCE_RECONNECT_GRACE
+        ):
+            recent.left_at = None
+            recent.duration_seconds = 0
+            if participant_id:
+                recent.jitsi_participant_id = participant_id
+                recent.save(
+                    update_fields=["left_at", "duration_seconds", "jitsi_participant_id"]
+                )
+            else:
+                recent.save(update_fields=["left_at", "duration_seconds"])
+            return recent
 
         return MeetingAttendance.objects.create(
             meeting=meeting,
@@ -479,6 +505,92 @@ def record_attendance_leave(
             session.jitsi_participant_id = participant_id
         session.save(update_fields=["left_at", "duration_seconds", "jitsi_participant_id"])
         return session
+
+
+def _session_display_name(user: User) -> str:
+    profile = getattr(user, "profile", None)
+    name = profile.get_display_name() if profile else ""
+    if not name:
+        name = user.get_full_name() or user.username
+    return name
+
+
+def _session_end(session: MeetingAttendance, *, now=None):
+    if session.left_at:
+        return session.left_at
+    return now or timezone.now()
+
+
+def coalesce_attendance_sessions(
+    sessions: list[MeetingAttendance],
+    *,
+    grace: timedelta = ATTENDANCE_RECONNECT_GRACE,
+    now=None,
+) -> list[dict]:
+    """
+    Склеивает короткие разрывы одного участника в непрерывное присутствие.
+    Полезно и для уже записанных фрагментов после reload.
+    """
+    now = now or timezone.now()
+    by_user: dict[int, list[MeetingAttendance]] = {}
+    for row in sessions:
+        by_user.setdefault(row.user_id, []).append(row)
+
+    result = []
+    for user_id, user_sessions in by_user.items():
+        ordered = sorted(user_sessions, key=lambda s: s.joined_at)
+        if not ordered:
+            continue
+
+        segments = []
+        cur_start = ordered[0].joined_at
+        cur_end = _session_end(ordered[0], now=now)
+        cur_open = ordered[0].left_at is None
+        ids = [ordered[0].pk]
+
+        for session in ordered[1:]:
+            sess_end = _session_end(session, now=now)
+            gap = session.joined_at - cur_end
+            if gap <= grace:
+                if sess_end > cur_end:
+                    cur_end = sess_end
+                cur_open = cur_open or session.left_at is None
+                ids.append(session.pk)
+            else:
+                segments.append((cur_start, cur_end, cur_open, ids))
+                cur_start = session.joined_at
+                cur_end = sess_end
+                cur_open = session.left_at is None
+                ids = [session.pk]
+        segments.append((cur_start, cur_end, cur_open, ids))
+
+        user = ordered[0].user
+        name = _session_display_name(user)
+        for start, end, still_open, seg_ids in segments:
+            duration = max(0, int((end - start).total_seconds()))
+            result.append({
+                "id": seg_ids[0],
+                "userId": user_id,
+                "displayName": name,
+                "joinedAt": start.isoformat(),
+                "leftAt": None if still_open else end.isoformat(),
+                "durationSeconds": duration,
+                "jitsiParticipantId": "",
+                "sessionCount": len(seg_ids),
+            })
+
+    result.sort(key=lambda row: row["joinedAt"], reverse=True)
+    return result
+
+
+def list_attendance_for_teacher(*, meeting: VideoMeeting, user: User) -> list[dict]:
+    assert_can_manage_meeting(user, meeting)
+    rows = list(
+        MeetingAttendance.objects.filter(meeting=meeting)
+        .select_related("user", "user__profile")
+        .order_by("joined_at")
+    )
+    return coalesce_attendance_sessions(rows)
 
 
 def ensure_muc_safe_room_name(meeting: VideoMeeting) -> str:
@@ -681,31 +793,6 @@ def serialize_meeting_compact(meeting: VideoMeeting) -> dict:
         "joinUrl": page_url,
         "pageUrl": page_url,
     }
-
-
-def list_attendance_for_teacher(*, meeting: VideoMeeting, user: User) -> list[dict]:
-    assert_can_manage_meeting(user, meeting)
-    rows = (
-        MeetingAttendance.objects.filter(meeting=meeting)
-        .select_related("user", "user__profile")
-        .order_by("-joined_at")
-    )
-    result = []
-    for row in rows:
-        profile = getattr(row.user, "profile", None)
-        name = profile.get_display_name() if profile else ""
-        if not name:
-            name = row.user.get_full_name() or row.user.username
-        result.append({
-            "id": row.pk,
-            "userId": row.user_id,
-            "displayName": name,
-            "joinedAt": row.joined_at.isoformat(),
-            "leftAt": row.left_at.isoformat() if row.left_at else None,
-            "durationSeconds": row.duration_seconds,
-            "jitsiParticipantId": row.jitsi_participant_id,
-        })
-    return result
 
 
 def get_meeting_by_uuid(meeting_uuid) -> VideoMeeting:

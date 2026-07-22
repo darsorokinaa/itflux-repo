@@ -62,7 +62,9 @@ from .billing_service import (
     unresolved_lessons,
     update_student_settings,
     update_teacher_settings,
+    visible_billing_accounts,
 )
+from .choices import StudentStatus
 from .models import Profile, ScheduleEvent, Student
 from .permissions import IsCabinetStudent, IsCabinetTeacher
 
@@ -137,15 +139,10 @@ class BillingAccountsView(APIView):
     permission_classes = [IsAuthenticated, IsCabinetTeacher]
 
     def get(self, request):
-        qs = BillingAccount.objects.filter(teacher=request.user, is_active=True).select_related(
-            "student", "settings"
-        )
         # Ensure accounts exist for all active students
         for student in Student.objects.filter(teacher=request.user, status="active"):
             get_or_create_billing_account(request.user, student)
-        qs = BillingAccount.objects.filter(teacher=request.user, is_active=True).select_related(
-            "student", "settings"
-        )
+        qs = visible_billing_accounts(request.user).select_related("student", "settings")
         debt_only = request.query_params.get("debt") == "1"
         low_package = request.query_params.get("low_package") == "1"
         no_package = request.query_params.get("no_package") == "1"
@@ -159,7 +156,7 @@ class BillingAccountsView(APIView):
                 data.get("payer_name") or ""
             ).lower():
                 continue
-            if debt_only and Decimal(data["balance"]["debt"]) <= 0:
+            if debt_only and Decimal(data.get("unpaid_lessons_amount") or data["balance"]["debt"]) <= 0:
                 continue
             if billing_type and data["billing_type"] != billing_type:
                 continue
@@ -331,6 +328,8 @@ class BillingPackagesView(APIView):
     def get(self, request):
         qs = LessonPackage.objects.filter(
             billing_account__teacher=request.user
+        ).exclude(
+            billing_account__student__status=StudentStatus.ARCHIVED,
         ).select_related("billing_account__student")
         status = request.query_params.get("status")
         if status:

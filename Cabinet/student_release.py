@@ -467,6 +467,9 @@ def assign_homework_manually(*, teacher, student, plan_item, due_at=None):
         )
 
     _record_variant_tasks_for_homework(homework, student, teacher)
+    from .homework_api import ensure_homework_in_review_queue
+
+    ensure_homework_in_review_queue(homework, student)
     return homework
 
 
@@ -548,6 +551,9 @@ def assign_custom_homework(
         )
 
     _record_variant_tasks_for_homework(homework, student, teacher)
+    from .homework_api import ensure_homework_in_review_queue
+
+    ensure_homework_in_review_queue(homework, student)
     return homework
 
 

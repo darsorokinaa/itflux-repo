@@ -16,12 +16,28 @@ export function normalize(str) {
 export function getTextFromHtml(html) {
   if (!html || typeof html !== "string") return "";
   try {
+    const withBreaks = html
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|li|tr|h[1-6])>/gi, "\n");
     const div = document.createElement("div");
-    div.innerHTML = html;
-    return (div.textContent || div.innerText || "").trim();
+    div.innerHTML = withBreaks;
+    return (div.textContent || div.innerText || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
   } catch {
-    return String(html).replace(/<[^>]+>/g, "");
+    return String(html)
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
   }
+}
+
+/** Текст эталона для таблицы результатов (без HTML-таблиц, ломающих вёрстку). */
+export function formatCorrectAnswerPlain(html) {
+  return getTextFromHtml(html || "");
 }
 
 function tryNumericAnswerEqual(rawUserValue, correctAnswerHtml) {

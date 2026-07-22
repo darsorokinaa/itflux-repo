@@ -503,13 +503,21 @@
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 0;
-    z-index: 40;
+    bottom: var(--cb-mobile-nav-height, 64px);
+    z-index: 1190;
     margin: 0;
     border-radius: 16px 16px 0 0;
-    max-height: 78vh;
+    max-height: min(78dvh, calc(100dvh - var(--cb-mobile-nav-height, 64px) - 12px));
     overflow: auto;
+    -webkit-overflow-scrolling: touch;
     box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.15);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .cb-files__name,
+  .cb-files__item-name {
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 }
 

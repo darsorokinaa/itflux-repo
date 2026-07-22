@@ -164,7 +164,7 @@ sudo nginx -t && sudo systemctl reload nginx
 | Нет звука/видео | UDP **10000** в firewall + `JVB_ADVERTISE_IPS` = публичный IP |
 | Участники не видят друг друга (у каждого «1») | Чаще `ENABLE_GUESTS=1` (разные MUC) или разный `app_id`. В `.env` Jitsi: `ENABLE_GUESTS=0`. Канон: `JITSI_APP_ID=generator_test`. Затем `sudo bash deploy/jitsi/fix-jwt-prosody.sh`. В кабинете roomName общий — сверьте суффикс комнаты в UI у обоих. |
 | В списке 2+, но нет медиа | JVB / UDP 10000 / `JVB_ADVERTISE_IPS` / ICE; диагностика: `frontend/public/jitsi-direct-test.html` |
-| JWT не пускает / «Присоединиться» не входит | Prosody в `ANONYMOUS`, а Django шлёт JWT. Проверка: `curl` POST на `/http-bind` — в features только `ANONYMOUS`. Фикс: `sudo bash deploy/jitsi/fix-jwt-prosody.sh` (ставит `authentication = "token"` + тот же secret). Затем `sudo systemctl restart prosody jicofo` |
+| JWT не пускает / «Я организатор» / «Автовход не подтверждён» | 1) В Network → `join-config`: `domain=lesson.itflux-academy.ru`, `jwt` не пустой, `requiresModeratorLogin=false`. 2) Секрет Django = Prosody: `sudo bash /opt/itflux/deploy/jitsi/fix-jwt-prosody.sh` (ставит `authentication=token`, `allow_empty_token=false`, `token_affiliation`). 3) `sudo systemctl restart itflux prosody jicofo`. 4) Если раньше оставляли `allow_empty_token=true`, учитель мог входить анонимно без прав организатора — так и появляется «Я организатор». |
 | Google DNS NXDOMAIN | у Timeweb запись есть — подождите TTL или проверьте `@ns1.timeweb.ru` |
 
 ### Быстрая диагностика «не видят друг друга»

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import InteractiveAssignModal from "../components/InteractiveAssignModal";
@@ -9,7 +9,6 @@ import {
   TypeSelectModal,
 } from "../components/InteractivesUi";
 import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
-import LimitBadge from "../components/LimitBadge";
 import UpgradeLimitModal from "../components/UpgradeLimitModal";
 import CompactUpgradeModal from "../components/CompactUpgradeModal";
 import { useSubscription } from "../hooks/useSubscription";
@@ -17,7 +16,10 @@ import { useLimitModal } from "../hooks/useLimitModal";
 import {
   SORT_OPTIONS,
   INTERACTIVE_TYPE_LIST,
+  INTERACTIVE_TYPES,
   canAssignInteractive,
+  filterInteractives,
+  getInteractiveDisplayTitle,
   isInteractiveTypeAvailable,
   sortInteractives,
 } from "../interactivesData";
@@ -37,10 +39,38 @@ import {
 import "../styles/interactives-catalog.css";
 import "../styles/interactive-launch.css";
 
+const TYPE_FILTER_OPTIONS = [
+  { id: "all", label: "Все типы" },
+  ...INTERACTIVE_TYPE_LIST.map((id) => ({
+    id,
+    label: INTERACTIVE_TYPES[id]?.shortLabel || INTERACTIVE_TYPES[id]?.label || id,
+  })),
+];
+
+const STATUS_FILTER_OPTIONS = [
+  { id: "all", label: "Все статусы" },
+  { id: "draft", label: "Черновики" },
+  { id: "published", label: "Опубликованные" },
+  { id: "assigned", label: "Выданные" },
+];
+
+function InteractivesSkeleton() {
+  return (
+    <div className="ix-activity-grid" aria-busy="true" aria-label="Загрузка интерактивов">
+      {Array.from({ length: 6 }, (_, i) => (
+        <div key={i} className="ix-skeleton-card" />
+      ))}
+    </div>
+  );
+}
+
 export default function CabinetInteractivesPage() {
   const navigate = useNavigate();
-  const listRef = useRef(null);
   const [sort, setSort] = useState("updated");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -53,10 +83,34 @@ export default function CabinetInteractivesPage() {
   const subscription = useSubscription();
   const { limitModalProps, upgradeModalProps, handleApiLimitError } = useLimitModal(subscription.currentPlan);
 
-  const sorted = useMemo(
-    () => sortInteractives(items, sort),
-    [items, sort],
-  );
+  const usageLabel = useMemo(() => {
+    if (subscription.loading || subscription.limits.interactives == null) return null;
+    const used = subscription.usage.interactives ?? 0;
+    const limit = subscription.limits.interactives;
+    return `${used} из ${limit} создано`;
+  }, [subscription]);
+
+  const filtered = useMemo(() => {
+    let list = items;
+    if (typeFilter !== "all") {
+      list = filterInteractives(list, typeFilter);
+    }
+    if (statusFilter !== "all") {
+      list = filterInteractives(list, statusFilter);
+    }
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter((item) => {
+        const title = getInteractiveDisplayTitle(item).toLowerCase();
+        const topic = String(item.topic || "").toLowerCase();
+        const typeLabel = String(INTERACTIVE_TYPES[item.type]?.label || "").toLowerCase();
+        return title.includes(q) || topic.includes(q) || typeLabel.includes(q);
+      });
+    }
+    return sortInteractives(list, sort);
+  }, [items, typeFilter, statusFilter, search, sort]);
+
+  const hasActiveFilters = typeFilter !== "all" || statusFilter !== "all" || search.trim() !== "";
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -75,6 +129,8 @@ export default function CabinetInteractivesPage() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  const openCreateFlow = () => setShowTypeModal(true);
 
   const handleTypeSelect = (type) => {
     if (!isInteractiveTypeAvailable(type)) {
@@ -114,8 +170,11 @@ export default function CabinetInteractivesPage() {
     }
   };
 
-  const scrollToList = () => {
-    listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const resetFilters = () => {
+    setSearch("");
+    setTypeFilter("all");
+    setStatusFilter("all");
+    setSort("updated");
   };
 
   return (
@@ -125,15 +184,31 @@ export default function CabinetInteractivesPage() {
       {upgradeModalProps && <CompactUpgradeModal {...upgradeModalProps} />}
       {notice ? <div className="cb-soon-toast" role="status">{notice}</div> : null}
 
-      <div className="cb-limit-row cb-limit-row--standalone ix-page__limit">
-        <LimitBadge label="Интерактивы" used={subscription.usage.interactives} limit={subscription.limits.interactives} loading={subscription.loading} />
-      </div>
+      <header className="ix-page-head">
+        <div className="ix-page-head__text">
+          <h1 className="ix-page-head__title">Интерактивы</h1>
+          <p className="ix-page-head__sub">
+            Создавайте задания для объяснения, закрепления и проверки материала.
+          </p>
+          {usageLabel ? (
+            <p className="ix-page-head__usage ix-page-head__usage--mobile">{usageLabel}</p>
+          ) : null}
+        </div>
+        <div className="ix-page-head__actions">
+          {usageLabel ? (
+            <p className="ix-page-head__usage ix-page-head__usage--desktop">{usageLabel}</p>
+          ) : null}
+          <button type="button" className="ix-page-head__cta" onClick={openCreateFlow}>
+            Создать интерактив
+          </button>
+        </div>
+      </header>
 
       <section className="ix-section ix-section--types" aria-labelledby="ix-types-title">
         <div className="ix-section__intro">
-          <h2 id="ix-types-title" className="ix-section__title">Типы</h2>
+          <h2 id="ix-types-title" className="ix-section__title">Выберите формат</h2>
           <p className="ix-section__sub">
-            Выберите формат задания — каждый тип подходит для своей задачи на уроке.
+            Выберите формат задания, который подходит для текущего урока.
           </p>
         </div>
         <div className="ix-type-grid">
@@ -143,42 +218,103 @@ export default function CabinetInteractivesPage() {
         </div>
       </section>
 
-      <section ref={listRef} className="ix-section ix-section--mine" aria-labelledby="ix-mine-title">
+      <section className="ix-section ix-section--mine" aria-labelledby="ix-mine-title">
         <div className="ix-section__head">
           <div className="ix-section__intro">
             <h2 id="ix-mine-title" className="ix-section__title">Мои интерактивы</h2>
-            {items.length === 0 && !loading ? (
-              <p className="ix-section__sub">Здесь появятся созданные задания — начните с любого типа выше.</p>
-            ) : null}
+            <p className="ix-section__sub">
+              Созданные задания, черновики и материалы, выданные ученикам.
+            </p>
           </div>
-          {items.length > 0 ? (
-            <button type="button" className="ix-section__link" onClick={scrollToList}>
-              Смотреть все
-            </button>
-          ) : null}
         </div>
-        {items.length > 0 ? (
-          <div className="ix-catalog-toolbar ix-catalog-toolbar--sort-only">
-            <select className="ix-sort-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Сортировка">
-              {SORT_OPTIONS.map((opt) => (
-                <option key={opt.id} value={opt.id}>{opt.label}</option>
-              ))}
-            </select>
+
+        {!loading && !loadError && items.length > 0 ? (
+          <div className="ix-catalog-toolbar">
+            <div className="ix-catalog-toolbar__search-row">
+              <input
+                className="ix-catalog-search"
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Поиск по названию"
+                aria-label="Поиск по названию"
+              />
+              <button
+                type="button"
+                className={`ix-catalog-filters-toggle${filtersOpen || hasActiveFilters ? " is-active" : ""}`}
+                aria-expanded={filtersOpen}
+                onClick={() => setFiltersOpen((v) => !v)}
+              >
+                Фильтры
+              </button>
+              <button type="button" className="ix-catalog-create" onClick={openCreateFlow}>
+                Создать
+              </button>
+            </div>
+            <div className={`ix-catalog-toolbar__filters${filtersOpen ? " is-open" : ""}`}>
+              <select
+                className="ix-catalog-select"
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                aria-label="Фильтр по типу"
+              >
+                {TYPE_FILTER_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>{opt.label}</option>
+                ))}
+              </select>
+              <select
+                className="ix-catalog-select"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                aria-label="Фильтр по статусу"
+              >
+                {STATUS_FILTER_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>{opt.label}</option>
+                ))}
+              </select>
+              <select
+                className="ix-catalog-select"
+                value={sort}
+                onChange={(e) => setSort(e.target.value)}
+                aria-label="Сортировка"
+              >
+                {SORT_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
         ) : null}
 
         {loading ? (
-          <p className="cb-loading">Загрузка…</p>
+          <InteractivesSkeleton />
         ) : loadError ? (
-          <p className="cb-inline-error" role="alert">{loadError}</p>
+          <div className="ix-error" role="alert">
+            <p className="ix-error__text">{loadError}</p>
+            <button type="button" className="ix-error__retry" onClick={refresh}>
+              Повторить
+            </button>
+          </div>
         ) : items.length === 0 ? (
           <InteractivesEmptyState
-            onCreate={() => setShowTypeModal(true)}
+            onCreate={openCreateFlow}
             onQuickCreate={handleTypeSelect}
           />
+        ) : filtered.length === 0 ? (
+          <div className="ix-empty ix-empty--filtered">
+            <div className="ix-empty__panel">
+              <h3 className="ix-empty__title">Ничего не найдено</h3>
+              <p className="ix-empty__text">
+                Измените поиск или фильтры, чтобы увидеть созданные интерактивы.
+              </p>
+              <button type="button" className="ix-empty__cta ix-empty__cta--ghost" onClick={resetFilters}>
+                Сбросить фильтры
+              </button>
+            </div>
+          </div>
         ) : (
           <div className="ix-activity-grid">
-            {sorted.map((item) => (
+            {filtered.map((item) => (
               <InteractiveActivityCard
                 key={item.id}
                 interactive={item}
@@ -230,7 +366,7 @@ export default function CabinetInteractivesPage() {
       <ConfirmActionModal
         open={Boolean(deleteTarget)}
         title="Удалить интерактив?"
-        text={`Удалить «${deleteTarget?.title || "интерактив"}»?`}
+        text={`Удалить «${deleteTarget ? getInteractiveDisplayTitle(deleteTarget) : "интерактив"}»?`}
         confirmLabel="Удалить"
         danger
         loading={deleteLoading}

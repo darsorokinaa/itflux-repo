@@ -71,31 +71,77 @@ export function formatMoney(amount, currency = "RUB") {
 }
 
 export function formatUnits(units, unitType) {
-  if (units == null) return "—";
+  if (units == null || units === "") return "—";
   const n = Number(units);
-  const value = Number.isNaN(n) ? units : String(n).replace(/\.00$/, "");
+  if (Number.isNaN(n)) return String(units);
+
+  // Не больше одного знака после запятой: 1,5 а не 1,50 / 2,00.
+  const rounded = Math.round(n * 10) / 10;
+  const isInt = Number.isInteger(rounded);
+  const value = isInt
+    ? String(rounded)
+    : rounded.toFixed(1).replace(".", ",");
+
   if (unitType === "minute") {
-    const num = Number(value);
-    if (!Number.isNaN(num)) {
-      const mod10 = num % 10;
-      const mod100 = num % 100;
-      let word = "минут";
+    let word = "минут";
+    if (isInt) {
+      const mod10 = rounded % 10;
+      const mod100 = rounded % 100;
       if (mod10 === 1 && mod100 !== 11) word = "минута";
       else if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) word = "минуты";
-      return `${value} ${word}`;
+    } else {
+      word = "минуты";
     }
-    return `${value} мин`;
-  }
-  const num = Number(value);
-  if (!Number.isNaN(num)) {
-    const mod10 = num % 10;
-    const mod100 = num % 100;
-    let word = "занятий";
-    if (mod10 === 1 && mod100 !== 11) word = "занятие";
-    else if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) word = "занятия";
     return `${value} ${word}`;
   }
-  return `${value} ур.`;
+
+  let word = "занятий";
+  if (isInt) {
+    const mod10 = rounded % 10;
+    const mod100 = rounded % 100;
+    if (mod10 === 1 && mod100 !== 11) word = "занятие";
+    else if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) word = "занятия";
+  } else {
+    word = "занятия";
+  }
+  return `${value} ${word}`;
+}
+
+/** Сумма/единицы операции для списка оплат: списание абонемента → «−1 занятие». */
+export function formatTransactionAmount(tx, currency = "RUB") {
+  const type = tx?.transaction_type || "";
+  const amount = Number(tx?.amount || 0);
+  const units = Number(tx?.package_units || 0);
+  const unitType = tx?.unit_type || "lesson";
+
+  if (type === "package_consumption" && units) {
+    return `−${formatUnits(Math.abs(units), unitType)}`;
+  }
+  if (type === "package_return" && units) {
+    return `+${formatUnits(Math.abs(units), unitType)}`;
+  }
+  if (!amount && units) {
+    const debit = type === "package_consumption" || type === "write_off";
+    return `${debit ? "−" : "+"}${formatUnits(Math.abs(units), unitType)}`;
+  }
+  if (!amount) return "—";
+  const sign = amount > 0 ? "+" : "−";
+  return `${sign}${formatMoney(Math.abs(amount), tx?.currency || currency)}`;
+}
+
+export function transactionAmountMod(tx) {
+  const type = tx?.transaction_type || "";
+  if (tx?.is_reversed) return "debt";
+  if (type === "package_consumption" || type === "write_off" || type === "charge" || type === "refund") {
+    return "debt";
+  }
+  if (type === "package_return" || type === "payment" || type === "package_purchase") {
+    return "ok";
+  }
+  const amount = Number(tx?.amount || 0);
+  if (amount < 0) return "debt";
+  if (amount > 0) return "ok";
+  return "muted";
 }
 
 export function financialStatusMod(status) {
@@ -148,8 +194,8 @@ export function needsDecision(account) {
 }
 
 /**
- * Вычисляемое состояние ученика для UI.
- * kind: not_configured | debt | low_package | needs_decision | advance | paid
+ * Вычисляемое состояние ученика для UI (карточка и вкладка «Оплаты»).
+ * Долг считаем по неоплаченным урокам (как во вкладке оплат), иначе по ledger.
  */
 export function resolveAccountState(account) {
   if (!account) {
@@ -165,14 +211,19 @@ export function resolveAccountState(account) {
   }
 
   const currency = account.currency || "RUB";
-  const debt = Number(account.balance?.debt || 0);
+  const unpaidAmount = Number(
+    account.unpaid_lessons_amount != null
+      ? account.unpaid_lessons_amount
+      : (account.balance?.debt || 0),
+  );
+  const unpaidCount = Number(account.unpaid_lessons_count || (account.unpaid_lessons || []).length || 0);
   const credit = Number(account.balance?.credit || 0);
   const configured = isBillingConfigured(account);
   const pkg = account.package;
   const decision = needsDecision(account);
   const lowPkg = isLowPackage(account);
 
-  if (!configured) {
+  if (!configured && unpaidAmount <= 0 && unpaidCount <= 0) {
     return {
       kind: "not_configured",
       mod: "muted",
@@ -196,16 +247,22 @@ export function resolveAccountState(account) {
     };
   }
 
-  if (debt > 0) {
+  if (unpaidAmount > 0 || unpaidCount > 0) {
+    const debtText = unpaidAmount > 0
+      ? `Долг ${formatMoney(unpaidAmount, currency)}`
+      : "Есть неоплаченные уроки";
     return {
       kind: "debt",
       mod: "alert",
-      headline: `Долг ${formatMoney(debt, currency)}`,
-      detail: "Есть неоплаченные уроки",
+      headline: debtText,
+      detail: unpaidCount > 0
+        ? (unpaidCount === 1 ? "1 неоплаченный урок" : `${unpaidCount} неоплаченных урока`)
+        : "Есть неоплаченные уроки",
       primaryAction: "payment",
       primaryLabel: "Добавить оплату",
       showReminder: true,
-      debt,
+      debt: unpaidAmount,
+      unpaidCount,
       credit: 0,
     };
   }
@@ -262,6 +319,93 @@ export function resolveAccountState(account) {
     primaryAction: "open",
     primaryLabel: "Открыть",
     showReminder: false,
+  };
+}
+
+function lessonsCountLabel(n) {
+  const num = Number(n) || 0;
+  const mod10 = num % 10;
+  const mod100 = num % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${num} урок`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${num} урока`;
+  return `${num} уроков`;
+}
+
+function remainingLessonsLabel(n) {
+  const num = Number(n) || 0;
+  const mod10 = num % 10;
+  const mod100 = num % 100;
+  if (mod10 === 1 && mod100 !== 11) return `Осталось ${num} занятие`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `Осталось ${num} занятия`;
+  return `Осталось ${num} занятий`;
+}
+
+function debtLabel(amount, currency) {
+  const n = Number(amount) || 0;
+  if (n <= 0) return null;
+  const formatted = formatMoney(n, currency).replace(/^-/, "");
+  return `−${formatted}`;
+}
+
+/** Состояние строки ученика во вкладке «Оплаты» — тот же смысл, что resolveAccountState. */
+export function resolvePaymentsRowState(account) {
+  const currency = account.currency || "RUB";
+  const unpaidAmount = Number(account.unpaid_lessons_amount || account.balance?.debt || 0);
+  const unpaidCount = Number(account.unpaid_lessons_count || 0);
+  const pkg = account.package;
+  const remaining = pkg ? Number(pkg.remaining_units || 0) : 0;
+  const state = resolveAccountState(account);
+
+  if (unpaidAmount > 0 || unpaidCount > 0) {
+    const sub = unpaidCount > 0
+      ? (pkg && remaining <= 0
+        ? `Абонемент закончился · ${lessonsCountLabel(unpaidCount)}`
+        : (!pkg
+          ? `Абонемента нет · ${lessonsCountLabel(unpaidCount)}`
+          : lessonsCountLabel(unpaidCount)))
+      : (pkg
+        ? `Абонемент: ${formatUnits(pkg.total_units, pkg.unit_type)} · осталось ${formatUnits(pkg.remaining_units, pkg.unit_type)}`
+        : "Абонемента нет");
+    return {
+      subtitle: unpaidCount === 1
+        ? (pkg && remaining <= 0 ? "Абонемент закончился · 1 неоплаченный урок" : (!pkg ? "Абонемента нет · 1 неоплаченный урок" : "1 неоплаченный урок"))
+        : (unpaidCount > 1
+          ? (pkg && remaining <= 0
+            ? `Абонемент закончился · ${unpaidCount} неоплаченных урока`
+            : (!pkg ? `Абонемента нет · ${unpaidCount} неоплаченных урока` : `${unpaidCount} неоплаченных урока`))
+          : sub),
+      balanceText: debtLabel(unpaidAmount, currency) || "Стоимость не указана",
+      balanceMod: "debt",
+      kind: state.kind,
+    };
+  }
+
+  if (pkg) {
+    const ending = remaining > 0 && remaining <= 2 && pkg.unit_type !== "minute";
+    const endingMin = pkg.unit_type === "minute" && remaining > 0 && remaining <= 120;
+    if (remaining <= 0 || pkg.display_status === "completed") {
+      return {
+        subtitle: "Занятия закончились",
+        balanceText: "Занятия закончились",
+        balanceMod: "warn",
+        kind: state.kind,
+      };
+    }
+    return {
+      subtitle: `Абонемент: ${formatUnits(pkg.total_units, pkg.unit_type)} · осталось ${formatUnits(pkg.remaining_units, pkg.unit_type)}`,
+      balanceText: ending || endingMin
+        ? remainingLessonsLabel(remaining)
+        : (pkg.display_status === "awaiting_payment" ? "Ожидает оплаты" : "Оплачено"),
+      balanceMod: ending || endingMin ? "warn" : (pkg.display_status === "awaiting_payment" ? "muted" : "ok"),
+      kind: state.kind,
+    };
+  }
+
+  return {
+    subtitle: state.detail || "Абонемента нет",
+    balanceText: state.headline || "Абонемента нет",
+    balanceMod: state.mod === "alert" ? "debt" : (state.mod === "ok" ? "ok" : "muted"),
+    kind: state.kind,
   };
 }
 

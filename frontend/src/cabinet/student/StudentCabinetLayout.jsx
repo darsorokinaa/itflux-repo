@@ -12,6 +12,8 @@ import ConfirmActionModal from "../components/ConfirmActionModal";
 import {
   STUDENT_MOBILE_NAV,
   STUDENT_NAV,
+  getStudentSectionTitle,
+  isStudentMobileNavActive,
   isStudentNavActive,
 } from "./studentNav";
 import "../../styles/cabinet-dashboard.css";
@@ -122,6 +124,9 @@ export default function StudentCabinetLayout() {
 
       <main className="cabinet-main">
         <header className="cabinet-header cabinet-header--student">
+          <div className="cabinet-header-title">
+            <h1 className="cabinet-header-section">{getStudentSectionTitle(location.pathname)}</h1>
+          </div>
           <div className="cabinet-header-right">
             <CabinetNotificationsBell studentMode />
             <Link
@@ -140,13 +145,13 @@ export default function StudentCabinetLayout() {
         </div>
       </main>
 
-      {/* Mobile bottom navigation — 4 tabs */}
+      {/* Mobile bottom navigation — 5 tabs */}
       <nav className="cb-mobile-nav st-mobile-nav" aria-label="Навигация">
         {STUDENT_MOBILE_NAV.map((item) => (
           <Link
             key={item.id}
             to={item.path}
-            className={`cb-mobile-nav__item st-mobile-nav__item${isStudentNavActive(location.pathname, item) ? " is-active" : ""}`}
+            className={`cb-mobile-nav__item st-mobile-nav__item${isStudentMobileNavActive(location.pathname, item) ? " is-active" : ""}`}
           >
             <CabinetIcon name={item.icon} />
             <span>{item.label}</span>

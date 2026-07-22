@@ -4965,6 +4965,18 @@ input.tasks-page-subtopic-num-input::-webkit-inner-spin-button {
 .hw-review-verdict--bad { color: #dc2626; }
 .hw-review-verdict--empty { color: #94a3b8; }
 
+.hw-review-table__pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.hw-review-table__ord {
+    width: 3.25rem;
+    white-space: nowrap;
+    color: #64748b;
+    font-variant-numeric: tabular-nums;
+}
+
 .hw-review-files {
     margin-top: 0.45rem;
 }
