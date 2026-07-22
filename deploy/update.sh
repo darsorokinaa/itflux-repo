@@ -2,14 +2,14 @@
 # Обновление приложения на сервере после push в git.
 #
 # Запуск от root (нужны systemctl, nginx, запись в /etc):
-#   bash /opt/itflux/deploy/update.sh
+#   bash /opt/itfluxacademy/itflux/deploy/update.sh
 #
 # При необходимости (редко):
-#   APP_DIR=/opt/itflux DEPLOY_BRANCH=main NGINX_SITE_NAME=itflux bash .../update.sh
+#   APP_DIR=/opt/itfluxacademy/itflux DEPLOY_BRANCH=main NGINX_SITE_NAME=itflux bash .../update.sh
 #
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/opt/itflux}"
+APP_DIR="${APP_DIR:-/opt/itfluxacademy/itflux}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 NGINX_SITE_NAME="${NGINX_SITE_NAME:-itflux}"
 
@@ -32,7 +32,7 @@ echo "=== Python-зависимости (requirements.txt) ==="
 "$VENV_PIP" install -r "$APP_DIR/requirements.txt"
 
 echo "=== Миграции и статика ==="
-cd "$APP_DIR/Generator"
+cd "$APP_DIR"
 "$VENV_PY" manage.py migrate --noinput
 "$VENV_PY" manage.py collectstatic --noinput
 

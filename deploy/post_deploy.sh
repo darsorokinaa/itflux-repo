@@ -1,9 +1,9 @@
 #!/bin/bash
 # Запускать после копирования файлов проекта на сервер
-# bash /opt/itflux/deploy/post_deploy.sh
+# bash /opt/itfluxacademy/itflux/deploy/post_deploy.sh
 set -e
 
-APP_DIR="/opt/itflux"
+APP_DIR="/opt/itfluxacademy/itflux"
 DB_NAME="itflux"
 DB_USER="itflux_user"
 DOMAIN="ВАШ_ДОМЕН.ru"
@@ -26,7 +26,7 @@ npm install
 npm run build
 
 echo "=== Миграции и статика ==="
-cd $APP_DIR/Generator
+cd $APP_DIR
 source $APP_DIR/venv/bin/activate
 python manage.py migrate --noinput
 python manage.py collectstatic --noinput

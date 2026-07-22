@@ -6,14 +6,14 @@ After=network.target postgresql.service
 [Service]
 User=root
 Group=root
-WorkingDirectory=/opt/itflux/Generator
+WorkingDirectory=/opt/itfluxacademy/itflux
 
 RuntimeDirectory=itflux
 LogsDirectory=itflux
 
 # WSGI (Gunicorn) не обрабатывает WebSocket: комната урока (/ws/lesson/…) не работает.
 # Нужен ASGI — Daphne, иначе ученик не получает вариант и fetch к API не вызывается / падает по таймауту.
-ExecStart=/opt/itflux/venv/bin/python3 -m daphne \
+ExecStart=/opt/itfluxacademy/itflux/venv/bin/python3 -m daphne \
     -b 127.0.0.1 \
     -p 8002 \
     --access-log - \
@@ -49,6 +49,21 @@ Environment="LESSON_SECRET=eKPoaKBpV0QeRzYi3YWUV3gBNfWamBmGwK5MgLWvSoKmenpLVQGf7
 # Прямой HTTP к ЛК (порт 8003) — минует nginx и самоподписанный SSL-сертификат.
 # Генератор и ЛК на одном сервере, поэтому http://127.0.0.1:8003 работает без TLS.
 Environment="LK_LESSON_NOTIFY_URL=http://127.0.0.1:8003/api/lesson/teacher-joined/"
+# —— Telegram-уведомления (расписание, публикация оценок, привязка аккаунта) ——
+# Токен бота от @BotFather. Без него отправка молча не работает (send_telegram_message
+# логирует warning и возвращает False), а команда set_telegram_webhook откажет с ошибкой.
+# Environment="TELEGRAM_BOT_TOKEN=..."
+# Username бота без @ — для кнопки «Подключить Telegram» (t.me/<bot>?start=...).
+# Environment="TELEGRAM_BOT_USERNAME=..."
+# Секрет вебхука (setWebhook secret_token → заголовок X-Telegram-Bot-Api-Secret-Token).
+# Environment="TELEGRAM_WEBHOOK_SECRET=..."
+# Опционально — общий чат для отчётов об ошибках (TELEGRAM_CHAT_ID/TELEGRAM_TOPIC_ID),
+# на личные уведомления пользователям не влияет — там используется их привязанный chat_id.
+# Environment="TELEGRAM_CHAT_ID=..."
+# Environment="TELEGRAM_TOPIC_ID=..."
+# После заполнения токена/секрета и рестарта сервиса один раз выполните:
+#   cd /opt/itfluxacademy/itflux && venv/bin/python manage.py set_telegram_webhook
+# Без этого шага привязка Telegram и личные уведомления не работают.
 # —— Jitsi Meet (кабинет /cabinet/meetings/) ——
 # Системный Jitsi на lesson.itflux-academy.ru (Prosody token).
 Environment="JITSI_DOMAIN=lesson.itflux-academy.ru"

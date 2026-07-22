@@ -8,7 +8,7 @@
 
 ## База данных
 
-- **Только PostgreSQL** (см. `Generator/Generator/settings.py`, переменные `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGHOST`, `PGPORT`).
+- **Только PostgreSQL** (см. `Generator/settings.py`, переменные `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGHOST`, `PGPORT`).
 - Создайте БД и пользователя заранее, выдайте права, затем на сервере: `python manage.py migrate --noinput`.
 - Бэкапы: `pg_dump` по расписанию; каталог `media/` — в резервной копии вместе с БД (файлы заданий/вложения).
 
@@ -43,8 +43,8 @@
 2. **Миграции БД** — на сервере после обновления кода:
 
    ```bash
-   cd /opt/itflux/Generator   # ваш путь к проекту
-   source ../venv/bin/activate
+   cd /opt/itfluxacademy/itflux   # ваш путь к проекту (корень репозитория — там же manage.py)
+   source venv/bin/activate
    python manage.py migrate --noinput
    ```
 
@@ -76,6 +76,8 @@
 | `SECURE_SSL_REDIRECT` | По умолчанию при `DEBUG=false` — `false` (редирект в nginx). `true` — только если Django сам принимает HTTP и отдаёт 301 |
 | `SESSION_COOKIE_SECURE` / `CSRF_COOKIE_SECURE` | При `DEBUG=false` по умолчанию `true` (куки только по HTTPS) |
 | `CHANNEL_LAYER_BACKEND` | `inmemory` — один процесс Daphne. Для нескольких воркеров — Redis (см. ниже) |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_WEBHOOK_SECRET` | Токен от @BotFather, username бота без `@`, секрет вебхука. Без токена отправка молча не работает (`send_telegram_message` возвращает `False` и пишет warning в лог). После задания — один раз выполнить `python manage.py set_telegram_webhook` (иначе привязка Telegram и личные уведомления не работают) |
+| `TELEGRAM_CHAT_ID` / `TELEGRAM_TOPIC_ID` | Опционально: общий чат для отчётов об ошибках. На личные уведомления пользователям не влияет |
 
 Пример фрагмента unit-файла см. `deploy/gunicorn.service`.
 
@@ -83,20 +85,21 @@
 
 - HTTP + WebSocket обрабатывает **Daphne** (ASGI), не Gunicorn WSGI.
 - Nginx должен проксировать и обычные запросы, и `Upgrade` для `/ws/` на тот же порт ASGI (в чеклисте ниже — 8002).
-- При **нескольких** процессах Daphne/Gunicorn для каналов нужен **Redis**: уберите `CHANNEL_LAYER_BACKEND=inmemory`, задайте `REDIS_HOST` / `REDIS_PORT` (см. `Generator/Generator/settings.py`).
+- При **нескольких** процессах Daphne/Gunicorn для каналов нужен **Redis** (см. `Generator/settings.py`).
+- Важно: `Generator.asgi:application` и `Generator.settings` резолвятся относительно **рабочей директории** процесса. `WorkingDirectory` в `deploy/gunicorn.service` — корень репозитория (например, `/opt/itfluxacademy/itflux`), а **не** `.../Generator`: в корне лежит пакет `Cabinet` (доски/Excalidraw и т.д.), который подключает `Generator/asgi.py`. Если запустить Daphne с `cwd=.../Generator`, `Cabinet` не найдётся и ASGI-приложение не поднимется (упадёт `ModuleNotFoundError`/`AppRegistryNotReady`) — сломается не только совместное редактирование досок, а весь бэкенд.
 
 ## Команды на сервере (по порядку)
 
 **Рекомендуется:** один скрипт из репозитория (ветка по умолчанию `itflux`, nginx-файл `itflux`; см. переменные в шапке скрипта):
 
 ```bash
-sudo bash /opt/itflux/deploy/update.sh
+sudo bash /opt/itfluxacademy/itflux/deploy/update.sh
 ```
 
 **Вручную** (если нужно обойти скрипт):
 
 ```bash
-cd /opt/itflux
+cd /opt/itfluxacademy/itflux
 git pull origin itflux
 
 sudo cp deploy/gunicorn.service /etc/systemd/system/itflux.service
@@ -108,12 +111,11 @@ sudo ln -sf /etc/nginx/sites-available/itflux /etc/nginx/sites-enabled/itflux
 sudo nginx -t && sudo systemctl reload nginx
 
 source venv/bin/activate
-cd Generator
-pip install -r ../requirements.txt
+pip install -r requirements.txt
 python manage.py migrate --noinput
 python manage.py collectstatic --noinput
 
-cd ../frontend && rm -rf dist && npm ci && npm run build
+cd frontend && rm -rf dist && npm ci && npm run build && cd ..
 
 sudo systemctl restart itflux
 sudo systemctl status itflux
@@ -128,9 +130,11 @@ sudo systemctl status itflux
 3. `GET /api/lesson/verify/?token=…` — `ok: true` для валидного JWT.
 4. `GET /lesson/join/?token=…` — HTML комнаты урока, не пустая SPA-ошибка.
 5. WebSocket: `wss://домен/ws/lesson/<room_id>/` подключается без ошибки.
+6. WebSocket досок (совместное редактирование Excalidraw в кабинете): `wss://домен/ws/interactive-boards/<board_id>/` подключается без ошибки; `systemctl status itflux` — процесс не в цикле рестартов, в логах нет `ModuleNotFoundError: No module named 'Cabinet'` / `AppRegistryNotReady`.
 
 ## Типичные проблемы
 
 - **Разный `LESSON_SECRET`** в генераторе и ЛК — проверка токена падает.
 - **`ROOT_URLCONF`** должен включать маршруты приложения (в актуальной конфигурации — `Generator.urls` внутри пакета `Generator`).
 - **Кнопка ЛК ведёт на главную генератора** — не задан или неверен `LK_PUBLIC_URL` на сервере.
+- **Не работает совместное редактирование досок (Excalidraw) или сайт вообще не отвечает** — Daphne запущен не из корня репозитория (см. `WorkingDirectory` выше). Проверьте `systemctl status itflux --no-pager` и `journalctl -u itflux -n 50`.

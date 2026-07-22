@@ -113,6 +113,10 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = Student.objects.filter(teacher=self.get_teacher()).prefetch_related("groups")
+        # Detail/custom actions must see archived students (restore / permanent delete).
+        if getattr(self, "action", None) != "list":
+            return qs.order_by("last_name", "first_name")
+
         params = self.request.query_params
 
         direction = params.get("direction")
@@ -454,6 +458,17 @@ class StudentGroupViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                 filter=~Q(students__status=StudentStatus.ARCHIVED),
             )
         )
+        # Detail/update must see archived groups (restore from archive).
+        if getattr(self, "action", None) != "list":
+            return qs.prefetch_related(
+                Prefetch(
+                    "students",
+                    queryset=Student.objects.exclude(status=StudentStatus.ARCHIVED).order_by(
+                        "last_name", "first_name"
+                    ),
+                )
+            ).order_by("title")
+
         params = self.request.query_params
 
         direction = params.get("direction")

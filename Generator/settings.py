@@ -111,6 +111,16 @@ VK_ACCESS_TOKEN = os.environ.get("VK_ACCESS_TOKEN", "").strip()
 VK_GROUP_ID = os.environ.get("VK_GROUP_ID", "").strip()
 VK_API_VERSION = os.environ.get("VK_API_VERSION", "5.131").strip()
 
+# Telegram bot для уведомлений (кабинет: занятия, публикация оценок и т.д.)
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+# Для личных чатов топиков нет — оставляем None, чтобы не отправлять message_thread_id.
+TELEGRAM_TOPIC_ID = os.environ.get("TELEGRAM_TOPIC_ID", "") or None
+# Публичный username бота без @ — для deep-link t.me/<bot>?start=<token>
+TELEGRAM_BOT_USERNAME = os.environ.get("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
+# Секрет для Telegram webhook (заголовок X-Telegram-Bot-Api-Secret-Token)
+TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
+
 _gen_home_outer = os.environ.get("ITFLUX_PUBLIC_HOME_URL", "https://itflux-academy.ru").strip().rstrip("/")
 ITFLUX_PUBLIC_HOME_URL = f"{_gen_home_outer}/"
 LOGOUT_REDIRECT_URL = ITFLUX_PUBLIC_HOME_URL
