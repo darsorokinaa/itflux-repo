@@ -45,16 +45,25 @@ export const ENROLLMENT_STATUS_LABELS = {
 };
 
 const PLAN_DIRECTION_LABELS = {
+  vpr: "ВПР",
   oge: "ОГЭ",
   ege: "ЕГЭ",
   python: "Python",
-  school: "Школьная база",
+  school: "Школьная программа",
   other: "Другое",
 };
+
+export const PLAN_LEVELS = [
+  { id: "oge", label: "ОГЭ" },
+  { id: "ege", label: "ЕГЭ" },
+  { id: "school", label: "Школьная программа" },
+  { id: "vpr", label: "ВПР" },
+];
 
 export const PLAN_SUBJECTS = [
   { id: "inf", label: "Информатика" },
   { id: "math", label: "Математика" },
+  { id: "prog", label: "Программирование" },
   { id: "rus", label: "Русский язык" },
   { id: "other", label: "Другое" },
 ];
@@ -64,6 +73,7 @@ const PLAN_SUBJECT_LABELS = {
   informatics: "Информатика",
   math: "Математика",
   math_base: "Математика базовая",
+  prog: "Программирование",
   rus: "Русский язык",
   other: "Другое",
 };
@@ -73,7 +83,8 @@ export function planSubjectLabelFromId(subjectId) {
 }
 
 export function defaultSubjectForDirection(direction) {
-  if (direction === "school") return "math";
+  if (direction === "school") return "prog";
+  if (direction === "vpr") return "math";
   return "inf";
 }
 
@@ -187,8 +198,8 @@ export function itemStatusTone(status) {
   return map[status] || "gray";
 }
 
-const INFORMATICS_DIRECTIONS = new Set(["oge", "ege", "python"]);
-const MATH_DIRECTIONS = new Set(["school"]);
+const INFORMATICS_DIRECTIONS = new Set(["oge", "ege", "python", "school"]);
+const MATH_DIRECTIONS = new Set(["vpr"]);
 
 const INFORMATICS_KEYWORDS = /информат|логик|алгоритм|python|программ|булев|систем.*счисл|компьютер/i;
 const MATH_KEYWORDS = /математ|алгебр|геометр|уравнен|функци|график|теорем|тригоном/i;

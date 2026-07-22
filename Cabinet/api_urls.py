@@ -132,6 +132,7 @@ urlpatterns = [
     path("direct-materials/", api_views.DirectMaterialAssignView.as_view(), name="direct_materials"),
     path("direct-materials/<int:pk>/", api_views.DirectMaterialAssignView.as_view(), name="direct_materials_delete"),
     path("lesson-plans/subjects/", api_views.LessonPlanSubjectOptionsView.as_view(), name="cabinet_lesson_plan_subjects"),
+    path("lesson-plans/levels/", api_views.LessonPlanLevelOptionsView.as_view(), name="cabinet_lesson_plan_levels"),
     path("invitations/join/<str:token>/", api_views.InvitationPreviewView.as_view(), name="cabinet_invitation_preview"),
     path("invitations/join/<str:token>/accept/", api_views.InvitationAcceptView.as_view(), name="cabinet_invitation_accept"),
     path("telegram/status/", telegram_api.TelegramStatusView.as_view(), name="cabinet_telegram_status"),

@@ -490,6 +490,108 @@
   overflow: visible;
 }
 
+.all-tasks-item--prog-sheet .all-tasks-item__card {
+  border-color: #e7e5e4;
+  box-shadow: 0 10px 28px rgba(28, 25, 23, 0.06);
+}
+
+.all-tasks-item--prog-sheet .all-tasks-item__head {
+  background: #fff;
+  border-bottom-color: #ece7e2;
+}
+
+.all-tasks-item--prog-sheet .all-tasks-item__content {
+  padding: 8px 4px 4px;
+}
+
+/* Программирование: табличный task sheet (ряд = отдельный grid, без display:contents) */
+.prog-task-sheet {
+  margin: 0;
+  padding: 4px 12px 8px;
+  color: #1c1917;
+}
+
+.prog-task-sheet__title {
+  margin: 0 0 0.75rem;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: #1c1917;
+}
+
+.prog-task-sheet__grid {
+  width: 100%;
+  border: 1px solid #c4bfb9;
+  background: #fff;
+  overflow: hidden;
+}
+
+.prog-task-sheet__row {
+  display: grid;
+  grid-template-columns: 12rem minmax(0, 1fr);
+  border-bottom: 1px solid #c4bfb9;
+}
+
+.prog-task-sheet__row:last-child {
+  border-bottom: none;
+}
+
+.prog-task-sheet__cell {
+  padding: 0.8rem 0.95rem;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: 1.02rem;
+  line-height: 1.7;
+  color: #1c1917;
+}
+
+.prog-task-sheet__cell--head,
+.prog-task-sheet__cell--label {
+  border-right: 1px solid #c4bfb9;
+  background: #f5f2ed;
+  font-weight: 700;
+  color: #44403c;
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+  hyphens: none !important;
+}
+
+.prog-task-sheet__cell--head {
+  font-size: 0.95rem;
+}
+
+.prog-task-sheet__cell--body {
+  background: #fff;
+  min-width: 0;
+}
+
+.prog-task-sheet code {
+  display: inline-block;
+  margin: 0 0.1em;
+  padding: 0.12em 0.45em;
+  border: 1px solid #fecdd3;
+  border-radius: 0.45rem;
+  background: #fff1f2;
+  color: #9f1239;
+  font-family: "IBM Plex Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  line-height: 1.45;
+  white-space: break-spaces;
+  word-break: break-word;
+}
+
+@media (max-width: 720px) {
+  .prog-task-sheet__title {
+    font-size: 0.8rem;
+  }
+
+  .prog-task-sheet__row {
+    grid-template-columns: 9.5rem minmax(0, 1fr);
+  }
+}
+
 .all-tasks-item__head {
   display: flex;
   align-items: center;
@@ -778,12 +880,11 @@
   display: table;
 }
 
-.all-tasks-item__html :is(thead, tbody, tfoot, tr) {
+.all-tasks-item__html table :is(thead, tbody, tfoot, tr) {
   border: none !important;
 }
 
-.all-tasks-item__html th,
-.all-tasks-item__html td {
+.all-tasks-item__html table :is(th, td) {
   padding: 8px 12px;
   vertical-align: middle;
   text-align: inherit;
@@ -791,10 +892,41 @@
   border: 1px solid #cbd5e1 !important;
 }
 
-.all-tasks-item__html th {
+.all-tasks-item__html table th {
   font-weight: 600;
   background: #f1f5f9;
   color: #334155;
+}
+
+#root .all-tasks-item__html .prog-task-sheet__grid {
+  display: block !important;
+  width: 100% !important;
+  border: 1px solid #c4bfb9 !important;
+  background: #fff !important;
+  box-sizing: border-box !important;
+}
+
+#root .all-tasks-item__html .prog-task-sheet__row {
+  display: grid !important;
+  grid-template-columns: 12rem minmax(0, 1fr) !important;
+  border-bottom: 1px solid #c4bfb9 !important;
+}
+
+#root .all-tasks-item__html .prog-task-sheet__row:last-child {
+  border-bottom: none !important;
+}
+
+#root .all-tasks-item__html .prog-task-sheet__cell--head,
+#root .all-tasks-item__html .prog-task-sheet__cell--label {
+  border-right: 1px solid #c4bfb9 !important;
+  background: #f5f2ed !important;
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+}
+
+#root .all-tasks-item__html .prog-task-sheet__cell--body {
+  background: #fff !important;
 }
 
 .all-tasks-item__html table:has(> tbody > tr:only-child > td:only-child) > tbody > tr > td {

@@ -1400,6 +1400,48 @@ button,
   background: #f8fafc !important;
 }
 
+#root .all-tasks-item__html .prog-task-sheet__grid {
+  display: block !important;
+  width: 100% !important;
+  border: 1px solid #c4bfb9 !important;
+  background: #fff !important;
+  box-sizing: border-box !important;
+}
+
+#root .all-tasks-item__html .prog-task-sheet__row {
+  display: grid !important;
+  grid-template-columns: 12rem minmax(0, 1fr) !important;
+  border-bottom: 1px solid #c4bfb9 !important;
+  box-sizing: border-box !important;
+}
+
+#root .all-tasks-item__html .prog-task-sheet__row:last-child {
+  border-bottom: none !important;
+}
+
+#root .all-tasks-item__html .prog-task-sheet__cell--head,
+#root .all-tasks-item__html .prog-task-sheet__cell--label {
+  border-right: 1px solid #c4bfb9 !important;
+  background: #f5f2ed !important;
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+  hyphens: none !important;
+}
+
+#root .all-tasks-item__html .prog-task-sheet__cell--body {
+  background: #fff !important;
+  min-width: 0 !important;
+}
+
+#root .all-tasks-item__html .prog-task-sheet code {
+  border: 1px solid #fecdd3 !important;
+  border-radius: 0.45rem !important;
+  background: #fff1f2 !important;
+  color: #9f1239 !important;
+  padding: 0.12em 0.45em !important;
+}
+
 #root .all-tasks-item__content,
 #root .all-tasks-item__content .exam-task-card__body,
 #root .all-tasks-item__content .exam-task-card__body-inner,

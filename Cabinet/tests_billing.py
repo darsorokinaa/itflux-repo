@@ -861,7 +861,35 @@ class ArchivedStudentBillingTests(BillingTestBase):
         self.assertNotIn(self.student.id, ids)
 
     def test_cannot_create_billing_for_archived_student(self):
+        # Существующий счёт архивного ученика можно прочитать.
         self.student.status = "archived"
         self.student.save(update_fields=["status", "updated_at"])
+        existing = get_or_create_billing_account(self.teacher, self.student)
+        self.assertEqual(existing.pk, self.account.pk)
+
+        # Новый счёт для архивного ученика без истории создать нельзя.
+        other = Student.objects.create(
+            teacher=self.teacher,
+            first_name="Arch",
+            last_name="Ived",
+            status="archived",
+        )
         with self.assertRaises(BillingError):
-            get_or_create_billing_account(self.teacher, self.student)
+            get_or_create_billing_account(self.teacher, other)
+
+    def test_dashboard_ok_with_archived_student_events(self):
+        """Плановый доход не должен ронять dashboard из‑за архивных учеников."""
+        event = ScheduleEvent.objects.create(
+            owner=self.teacher,
+            student=self.student,
+            title="Урок с архивным",
+            starts_at=timezone.now(),
+            ends_at=timezone.now() + timedelta(hours=1),
+            event_type=ScheduleEvent.EventType.INDIVIDUAL,
+            status=ScheduleEvent.Status.PLANNED,
+        )
+        self.student.status = "archived"
+        self.student.save(update_fields=["status", "updated_at"])
+        data = dashboard_summary(self.teacher)
+        self.assertIn("planned_income", data)
+        self.assertEqual(event.student_id, self.student.id)

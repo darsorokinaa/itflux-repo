@@ -193,7 +193,10 @@ class BillingAccountByStudentView(APIView):
 
     def get(self, request, student_id):
         student = get_object_or_404(Student, pk=student_id, teacher=request.user)
-        account = get_or_create_billing_account(request.user, student)
+        try:
+            account = get_or_create_billing_account(request.user, student)
+        except BillingError as exc:
+            return _err(exc)
         return Response(serialize_account(account, include_history=True))
 
 

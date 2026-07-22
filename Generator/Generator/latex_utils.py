@@ -866,8 +866,10 @@ def process_latex(
         return _render_math_block(latex, False, for_pdf=for_pdf, for_browser=for_browser)
 
     html_text = _RE_NAKED_LATEX_SYMBOLS.sub(replace_naked_symbols, html_text)
-    # 7. \texttt{...} в оставшемся plain HTML → моноширинный код (после math, чтобы не трогать data-latex)
+    # 7. Текстовые LaTeX-команды в оставшемся plain HTML (после math, чтобы не трогать data-latex)
     html_text = _RE_TEXTTT.sub(r'<code>\1</code>', html_text)
+    html_text = _RE_TEXTBF.sub(r'<strong>\1</strong>', html_text)
+    html_text = _RE_TEXTIT.sub(r'<em>\1</em>', html_text)
     # 8. Исправление &аmp; (кириллическая 'а') → & — corruption в некоторых данных
     html_text = html_text.replace("&\u0430mp;", "&")
     # 8b. LaTeX \& в условиях (таблицы запросов) → видимый &

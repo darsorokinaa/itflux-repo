@@ -16,6 +16,11 @@ from .choices import (
     SubmissionStatus,
 )
 from .invitations import invitation_join_path
+from .plan_levels import (
+    get_plan_level_label,
+    get_plan_level_options,
+    normalize_plan_level_id,
+)
 from .plan_subjects import (
     get_plan_subject_label,
     get_plan_subject_options,
@@ -675,7 +680,7 @@ class LessonPlanItemEditorSerializer(LessonPlanItemWriteSerializer):
 
 
 class LessonPlanListSerializer(serializers.ModelSerializer):
-    direction_label = serializers.CharField(source="get_direction_display", read_only=True)
+    direction_label = serializers.SerializerMethodField()
     subject_label = serializers.SerializerMethodField()
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     progress_percent = serializers.IntegerField(read_only=True)
@@ -708,6 +713,9 @@ class LessonPlanListSerializer(serializers.ModelSerializer):
     def get_is_public(self, obj):
         return obj.teacher is None
 
+    def get_direction_label(self, obj):
+        return get_plan_level_label(obj.direction)
+
     def get_subject_label(self, obj):
         return get_plan_subject_label(obj.subject)
 
@@ -721,6 +729,7 @@ class LessonPlanDetailSerializer(LessonPlanListSerializer):
 
 class LessonPlanWriteSerializer(serializers.ModelSerializer):
     is_public = serializers.BooleanField(required=False, write_only=True)
+    direction = serializers.CharField(max_length=20)
     subject = serializers.CharField(max_length=20)
 
     class Meta:
@@ -739,6 +748,20 @@ class LessonPlanWriteSerializer(serializers.ModelSerializer):
             "is_public",
         ]
         read_only_fields = ["id"]
+
+    def validate_direction(self, value):
+        level_id = normalize_plan_level_id(value)
+        if not level_id:
+            raise serializers.ValidationError("Выберите уровень.")
+
+        allowed_ids = {item["id"] for item in get_plan_level_options()}
+        if self.instance is not None and self.instance.direction:
+            # Старые значения вне Generator.Level оставляем редактируемыми без смены уровня.
+            allowed_ids.add(normalize_plan_level_id(self.instance.direction))
+            allowed_ids.add(str(self.instance.direction).strip().lower())
+        if allowed_ids and level_id not in allowed_ids:
+            raise serializers.ValidationError("Выберите уровень из списка базы.")
+        return level_id
 
     def validate_subject(self, value):
         subject_id = normalize_plan_subject_id(value)

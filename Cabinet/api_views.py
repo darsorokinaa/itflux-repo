@@ -21,6 +21,7 @@ from .choices import (
 )
 from .subscription_service import LimitExceeded, SubscriptionLimitService
 from .plan_catalog import can_publish_catalog_lesson_plan
+from .plan_levels import get_plan_level_options
 from .plan_subjects import get_plan_subject_options
 from .invitations import (
     accept_student_invitation,
@@ -774,6 +775,11 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
 class LessonPlanSubjectOptionsView(TeacherScopedMixin, APIView):
     def get(self, request):
         return Response({"subjects": get_plan_subject_options()})
+
+
+class LessonPlanLevelOptionsView(TeacherScopedMixin, APIView):
+    def get(self, request):
+        return Response({"levels": get_plan_level_options()})
 
 
 class LessonPlanItemViewSet(

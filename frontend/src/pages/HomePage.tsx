@@ -50,8 +50,16 @@ const HOME_LEVELS: ReadonlyArray<HomeLevel> = [
     fallbackCountLabel: "запуск скоро",
   },
   {
+    id: "school",
+    title: "Школьная программа",
+    classLabel: "5–11 класс",
+    description: "Программирование и курсы школьной программы",
+    icon: "</>",
+    styleVariant: "base",
+  },
+  {
     id: "vpr",
-    title: "Школьная база",
+    title: "ВПР",
     classLabel: "7–8 класс",
     description: "Тренировка базовых тем до уверенного уровня",
     icon: "∑",

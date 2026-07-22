@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import GeneratorCategoryCard from "../components/GeneratorCategoryCard";
 import StepIndicator from "../components/StepIndicator";
+import { getLevelDef, levelLabel } from "../data/levels";
 import { formatTasksCount } from "../utils/formatTasksCount";
 import "../styles/tool-workspace.css";
 
-const GENERATOR_LEVELS = [
+const FALLBACK_LEVELS = [
   {
     id: "oge",
     title: "ОГЭ",
@@ -22,8 +23,16 @@ const GENERATOR_LEVELS = [
     to: "/subject/ege",
   },
   {
+    id: "school",
+    title: "Школьная программа",
+    classLabel: "5-11 класс",
+    lead: "Программирование и курсы школьной программы.",
+    fallbackCount: 40,
+    to: "/subject/school",
+  },
+  {
     id: "vpr",
-    title: "Школьная база",
+    title: "ВПР",
     classLabel: "7-10 класс",
     lead: "Базовые темы и задания для регулярной учебной практики.",
     fallbackCount: 184,
@@ -33,10 +42,11 @@ const GENERATOR_LEVELS = [
 
 export default function GeneratorHubPage() {
   const [stats, setStats] = useState(null);
+  const [levels, setLevels] = useState(FALLBACK_LEVELS);
 
   useEffect(() => {
     let cancelled = false;
-    const loadStats = async () => {
+    const load = async () => {
       try {
         const overviewRes = await fetch("/api/generator/overview/", {
           credentials: "same-origin",
@@ -45,29 +55,67 @@ export default function GeneratorHubPage() {
           const payload = await overviewRes.json();
           if (!cancelled) {
             setStats(payload);
+            const apiLevels = Array.isArray(payload?.levels) ? payload.levels : [];
+            if (apiLevels.length) {
+              setLevels(
+                apiLevels.map((item) => {
+                  const id = String(item?.id || "").trim().toLowerCase();
+                  const def = getLevelDef(id);
+                  const fallback = FALLBACK_LEVELS.find((row) => row.id === id);
+                  return {
+                    id,
+                    title: String(item?.title || "").trim() || levelLabel(id, fallback?.title || id),
+                    classLabel: def?.stripLabel || fallback?.classLabel || "",
+                    lead: def?.description || fallback?.lead || "Задания и варианты для выбранного уровня.",
+                    fallbackCount: def?.fallbackTaskCount || fallback?.fallbackCount || 0,
+                    to: `/subject/${id}`,
+                  };
+                }),
+              );
+            }
           }
           return;
         }
       } catch {
-        // fallback to legacy endpoint below
+        // fallback below
       }
 
       try {
-        const legacyRes = await fetch("/api/platform-stats/", {
-          credentials: "same-origin",
-        });
-        const payload = legacyRes.ok ? await legacyRes.json() : null;
-        if (!cancelled) {
-          setStats(payload);
+        const [catalogRes, legacyRes] = await Promise.all([
+          fetch("/api/catalog/", { credentials: "same-origin" }),
+          fetch("/api/platform-stats/", { credentials: "same-origin" }),
+        ]);
+        const catalogPayload = catalogRes.ok ? await catalogRes.json() : null;
+        const statsPayload = legacyRes.ok ? await legacyRes.json() : null;
+        if (cancelled) return;
+        setStats(statsPayload);
+        const rows = Array.isArray(catalogPayload?.catalog) ? catalogPayload.catalog : [];
+        if (rows.length) {
+          setLevels(
+            rows.map((row) => {
+              const id = String(row?.level || "").trim().toLowerCase();
+              const def = getLevelDef(id);
+              const fallback = FALLBACK_LEVELS.find((item) => item.id === id);
+              return {
+                id,
+                title: String(row?.level_rus || "").trim() || levelLabel(id, fallback?.title || id),
+                classLabel: def?.stripLabel || fallback?.classLabel || "",
+                lead: def?.description || fallback?.lead || "Задания и варианты для выбранного уровня.",
+                fallbackCount: def?.fallbackTaskCount || fallback?.fallbackCount || 0,
+                to: `/subject/${id}`,
+              };
+            }),
+          );
         }
       } catch {
         if (!cancelled) {
           setStats(null);
+          setLevels(FALLBACK_LEVELS);
         }
       }
     };
 
-    loadStats();
+    load();
     return () => {
       cancelled = true;
     };
@@ -75,7 +123,7 @@ export default function GeneratorHubPage() {
 
   const cards = useMemo(
     () =>
-      GENERATOR_LEVELS.map((level) => {
+      levels.map((level) => {
         const count = stats?.tasks_by_level?.[level.id];
         const tasksLabel = typeof count === "number" && count > 0
           ? formatTasksCount(count)
@@ -85,11 +133,11 @@ export default function GeneratorHubPage() {
           tasksLabel,
         };
       }),
-    [stats],
+    [levels, stats],
   );
 
   const steps = [
-    { title: "Выбери направление", caption: "ОГЭ, ЕГЭ или школьная база" },
+    { title: "Выбери направление", caption: "Уровень подготовки из базы" },
     { title: "Выбери предмет", caption: "Подходящий курс подготовки" },
     { title: "Настрой вариант", caption: "Темы, объём и сложность" },
     { title: "Начни решать", caption: "Результат и разбор ошибок" },

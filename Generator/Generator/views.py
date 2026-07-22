@@ -1744,6 +1744,13 @@ _SUBJECT_SHORTS_BY_LEVEL = {
 
 _SUBJECT_CATALOG_CORE_SHORTS = ("inf", "math", "rus")
 
+_LEVEL_CATALOG_SORT = {
+    "oge": 0,
+    "ege": 1,
+    "school": 2,
+    "vpr": 3,
+}
+
 
 def _subject_background_payload(subject_instance, request):
     """Фон предмета для карточек и hero-блоков на фронте."""
@@ -1766,20 +1773,41 @@ def _subjects_by_short(shorts):
     return {row.subject_short.lower(): row for row in rows}
 
 
+def _subject_shorts_for_level(level_str: str):
+    """Предметы уровня: сначала из БД (TaskList), затем legacy-карточки «Скоро»."""
+    level_str = _normalize_level_slug(level_str) or ""
+    level_instance = _level_instance_for_canonical_slug(level_str)
+    db_shorts = []
+    if level_instance is not None:
+        db_shorts = [
+            (short or "").strip().lower()
+            for short in (
+                Subject.objects.filter(tasklist__level=level_instance)
+                .distinct()
+                .order_by("subject_name", "subject_short")
+                .values_list("subject_short", flat=True)
+            )
+            if (short or "").strip()
+        ]
+
+    legacy = _SUBJECT_SHORTS_BY_LEVEL.get(level_str, ())
+    # Для уровней без legacy-списка (например school) показываем только то, что есть в БД.
+    if not legacy:
+        return list(dict.fromkeys(db_shorts))
+    return list(dict.fromkeys(list(db_shorts) + list(legacy)))
+
+
 def _subject_task_counts_payload(request, level_str: str):
     """
-    Счётчики активных заданий по предметам для уровня (vpr / oge / ege).
+    Счётчики активных заданий по предметам для уровня.
     Для ВПР: с query grade / advanced — как у api_tasks.
     """
-    level_str = (level_str or "").lower()
-    shorts = _SUBJECT_SHORTS_BY_LEVEL.get(level_str)
-    if not shorts:
-        return None
-
+    level_str = _normalize_level_slug(level_str) or ""
     level_instance = _level_instance_for_canonical_slug(level_str)
     if not level_instance:
-        return {}
+        return None
 
+    shorts = _subject_shorts_for_level(level_str)
     vf = {}
     if level_str == "vpr":
         vf = _vpr_counts_filters_from_request(request)
@@ -1828,15 +1856,19 @@ def api_level_subject_task_counts(request, level):
 @require_http_methods(["GET"])
 def api_level_subject_catalog(request, level):
     """
-    GET /api/<level>/subject-catalog/ — данные карточек предметов для нового продуктового экрана.
-    Возвращает счётчик задач и признак доступности (is_available) для inf/math/rus.
+    GET /api/<level>/subject-catalog/ — данные карточек предметов для продуктового экрана.
+    Предметы берутся из БД (TaskList + Subject), с legacy-дополнением для карточек «Скоро».
     """
-    counts = _subject_task_counts_payload(request, level)
+    level_str = _normalize_level_slug(level) or ""
+    counts = _subject_task_counts_payload(request, level_str)
     if counts is None:
         return JsonResponse({"error": "unknown level"}, status=400)
 
-    level_shorts = _SUBJECT_SHORTS_BY_LEVEL.get((level or "").lower(), ())
-    subject_ids = list(dict.fromkeys(list(level_shorts) + list(_SUBJECT_CATALOG_CORE_SHORTS)))
+    subject_ids = _subject_shorts_for_level(level_str)
+    # Для экзаменационных уровней оставляем базовые карточки, даже если TaskList ещё пуст.
+    if level_str in _SUBJECT_SHORTS_BY_LEVEL:
+        subject_ids = list(dict.fromkeys(list(subject_ids) + list(_SUBJECT_CATALOG_CORE_SHORTS)))
+
     subjects_by_short = _subjects_by_short(subject_ids)
 
     subjects = []
@@ -1845,6 +1877,10 @@ def api_level_subject_catalog(request, level):
         subject_row = subjects_by_short.get(subject_id)
         entry = {
             "id": subject_id,
+            "title": (
+                (getattr(subject_row, "subject_name", None) or "").strip()
+                or subject_id
+            ),
             "tasks_count": task_count,
             "is_available": task_count > 0,
         }
@@ -1852,14 +1888,20 @@ def api_level_subject_catalog(request, level):
         subjects.append(entry)
 
     backgrounds = {}
-    for row in Subject.objects.all().only("subject_short", "background_color", "background_image"):
+    bg_fields = ["subject_short"]
+    subject_field_names = {f.name for f in Subject._meta.fields}
+    if "background_color" in subject_field_names:
+        bg_fields.append("background_color")
+    if "background_image" in subject_field_names:
+        bg_fields.append("background_image")
+    for row in Subject.objects.all().only(*bg_fields):
         short = (row.subject_short or "").lower()
         if not short:
             continue
         backgrounds[short] = _subject_background_payload(row, request)
 
     return JsonResponse({
-        "level": (level or "").lower(),
+        "level": level_str,
         "subjects": subjects,
         "backgrounds": backgrounds,
     })
@@ -2253,9 +2295,21 @@ def api_generate_variant(request, level, subject):
 
 @require_http_methods(["GET"])
 def api_catalog(request):
-    """GET /api/catalog/ — subjects grouped by level, for the LK variant picker."""
+    """GET /api/catalog/ — все уровни из БД и предметы с TaskList для каждого уровня."""
     result = []
-    for level in Level.objects.all().order_by('level'):
+    level_field_names = {f.name for f in Level._meta.fields}
+    has_level_rus = "level_rus" in level_field_names
+
+    levels = list(Level.objects.all())
+    levels.sort(
+        key=lambda lev: (
+            _LEVEL_CATALOG_SORT.get(_normalize_level_slug(lev.level), 99),
+            (getattr(lev, "level_rus", "") if has_level_rus else "") or "",
+            lev.level or "",
+        )
+    )
+
+    for level in levels:
         subjects = (
             Subject.objects
             .filter(tasklist__level=level)
@@ -2263,18 +2317,20 @@ def api_catalog(request):
             .order_by('subject_name')
             .values('subject_short', 'subject_name')
         )
-        subj_list = list(subjects)
-        if subj_list:
-            result.append({
-                'level': level.level,
-                'level_rus': level.level_rus,
-                'subjects': subj_list,
-            })
+        level_slug = _normalize_level_slug(level.level) or (level.level or "").lower()
+        level_rus = ""
+        if has_level_rus:
+            level_rus = (getattr(level, "level_rus", "") or "").strip()
+        result.append({
+            'level': level_slug,
+            'level_rus': level_rus or level_slug,
+            'subjects': list(subjects),
+        })
     return JsonResponse({'catalog': result})
 
 
 def _normalize_level_slug(value):
-    """Привести значение Level.level к каноническому slug vpr | oge | ege."""
+    """Привести значение Level.level к каноническому slug (vpr/oge/ege/school/…)."""
     if value is None:
         return None
     s = str(value).strip().lower()
@@ -2283,14 +2339,21 @@ def _normalize_level_slug(value):
         "огэ": "oge",
         "егэ": "ege",
         "ёгэ": "ege",
+        "школа": "school",
+        "школьная программа": "school",
+        "школьная база": "school",
     }
     return cyr.get(s, s)
 
 
 def _level_instance_for_canonical_slug(canonical: str):
-    """Найти запись Level по латинскому slug из URL (vpr/oge/ege), если в БД level хранится по-русски или иначе."""
-    if canonical not in ("vpr", "oge", "ege"):
+    """Найти запись Level по slug из URL; поддерживает любые уровни из БД."""
+    canonical = _normalize_level_slug(canonical)
+    if not canonical:
         return None
+    exact = Level.objects.filter(level__iexact=canonical).first()
+    if exact is not None:
+        return exact
     for lev in Level.objects.all():
         if _normalize_level_slug(lev.level) == canonical:
             return lev
@@ -2304,15 +2367,27 @@ def api_generator_overview(request):
     """
     tasks_by_level = {}
     levels = []
-    for level_id in ("oge", "ege", "vpr"):
-        level_instance = _level_instance_for_canonical_slug(level_id)
-        tasks_count = (
-            int(Task.active_objects.filter(task__level=level_instance).count())
-            if level_instance
-            else 0
+    level_rows = list(Level.objects.all())
+    level_rows.sort(
+        key=lambda lev: (
+            _LEVEL_CATALOG_SORT.get(_normalize_level_slug(lev.level), 99),
+            lev.level or "",
         )
+    )
+    for level_instance in level_rows:
+        level_id = _normalize_level_slug(level_instance.level) or (level_instance.level or "").lower()
+        if not level_id:
+            continue
+        tasks_count = int(Task.active_objects.filter(task__level=level_instance).count())
+        level_rus = ""
+        if hasattr(level_instance, "level_rus"):
+            level_rus = (level_instance.level_rus or "").strip()
         tasks_by_level[level_id] = tasks_count
-        levels.append({"id": level_id, "tasks_count": tasks_count})
+        levels.append({
+            "id": level_id,
+            "title": level_rus or level_id,
+            "tasks_count": tasks_count,
+        })
 
     return JsonResponse({"tasks_by_level": tasks_by_level, "levels": levels})
 
@@ -2330,10 +2405,12 @@ def api_platform_stats(request):
     generated_variants_count = Variant.objects.count()
 
     tasks_by_level = {}
-    for level_str in ("vpr", "oge", "ege"):
-        li = _level_instance_for_canonical_slug(level_str)
-        tasks_by_level[level_str] = (
-            int(Task.active_objects.filter(task__level=li).count()) if li else 0
+    for level_instance in Level.objects.all():
+        level_str = _normalize_level_slug(level_instance.level) or (level_instance.level or "").lower()
+        if not level_str:
+            continue
+        tasks_by_level[level_str] = int(
+            Task.active_objects.filter(task__level=level_instance).count()
         )
     return JsonResponse(
         {

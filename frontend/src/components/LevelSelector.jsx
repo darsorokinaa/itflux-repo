@@ -1,12 +1,5 @@
 const LEVEL_OPTIONS = [
   {
-    id: "vpr",
-    title: "ВПР",
-    grade: "7, 8, 10 класс",
-    description: "Задания по темам, варианты, автопроверка.",
-    route: "/subject/vpr",
-  },
-  {
     id: "oge",
     title: "ОГЭ",
     grade: "9 класс",
@@ -19,6 +12,20 @@ const LEVEL_OPTIONS = [
     grade: "11 класс",
     description: "Профильная математика и информатика.",
     route: "/subject/ege",
+  },
+  {
+    id: "school",
+    title: "Школьная программа",
+    grade: "5–11 класс",
+    description: "Программирование и школьные курсы.",
+    route: "/subject/school",
+  },
+  {
+    id: "vpr",
+    title: "ВПР",
+    grade: "7, 8, 10 класс",
+    description: "Задания по темам, варианты, автопроверка.",
+    route: "/subject/vpr",
   },
 ];
 

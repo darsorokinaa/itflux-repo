@@ -11,6 +11,7 @@ import {
   addLessonPlanItem,
   createLessonPlan,
   createScheduleEvent,
+  fetchLessonPlanLevels,
   fetchLessonPlanSubjects,
   deleteLessonPlanItem,
   fetchCabinetSession,
@@ -20,7 +21,14 @@ import {
   updateLessonPlanItem,
 } from "../../utils/cabinetAuth";
 import { canPublishCatalogPlans } from "../planCatalogPublish";
-import { mapApiMaterial, PLAN_STATUS_LABELS, PLAN_SUBJECTS, defaultSubjectForDirection, planSubjectLabelFromId } from "../lessonPlansData";
+import {
+  mapApiMaterial,
+  PLAN_LEVELS,
+  PLAN_STATUS_LABELS,
+  PLAN_SUBJECTS,
+  defaultSubjectForDirection,
+  planSubjectLabelFromId,
+} from "../lessonPlansData";
 import { mapApiInteractiveAttachment } from "../planItemAttachments";
 import {
   EMPTY_PLAN_SESSION,
@@ -36,16 +44,8 @@ import {
 } from "../planEditorSession";
 import { useAutoSave } from "../hooks/useAutoSave";
 
-const PLAN_TYPES = [
-  { id: "oge", label: "ОГЭ" },
-  { id: "ege", label: "ЕГЭ" },
-  { id: "python", label: "Python" },
-  { id: "school", label: "Школьная база" },
-  { id: "other", label: "Другое" },
-];
-
-function planTypeLabel(id) {
-  return PLAN_TYPES.find((t) => t.id === id)?.label || id;
+function planTypeLabel(id, options = PLAN_LEVELS) {
+  return options.find((t) => t.id === id)?.label || id;
 }
 
 function planSubjectLabel(id) {
@@ -335,6 +335,8 @@ export default function CabinetLessonPlanEditorPage() {
   const [subject, setSubject] = useState(defaultSubjectForDirection("oge"));
   const [subjectOptions, setSubjectOptions] = useState(PLAN_SUBJECTS);
   const [subjectsLoading, setSubjectsLoading] = useState(true);
+  const [levelOptions, setLevelOptions] = useState(PLAN_LEVELS);
+  const [levelsLoading, setLevelsLoading] = useState(true);
   const [goal, setGoal] = useState("");
   const [description, setDescription] = useState("");
   const [grade, setGrade] = useState("");
@@ -381,6 +383,11 @@ export default function CabinetLessonPlanEditorPage() {
     const ids = new Set(list.map((item) => String(item.id)));
 
     if (direction === "school") {
+      if (ids.has("prog")) return "prog";
+      if (ids.has("inf")) return "inf";
+    }
+
+    if (direction === "vpr") {
       if (ids.has("math")) return "math";
       if (ids.has("math_base")) return "math_base";
     }
@@ -409,6 +416,20 @@ export default function CabinetLessonPlanEditorPage() {
     return defaultSubjectFromOptions(direction, list);
   }, [defaultSubjectFromOptions]);
 
+  const normalizeLevelSelection = useCallback((value, options) => {
+    const list = Array.isArray(options) && options.length ? options : PLAN_LEVELS;
+    const ids = new Set(list.map((item) => String(item.id)));
+    const current = String(value || "").trim().toLowerCase();
+
+    if (!current) {
+      if (ids.has("oge")) return "oge";
+      return list[0]?.id || "oge";
+    }
+    if (ids.has(current)) return current;
+    // Старое значение (python/other и т.п.) не перетираем — покажем его в select отдельно.
+    return current;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     fetchLessonPlanSubjects()
@@ -434,12 +455,44 @@ export default function CabinetLessonPlanEditorPage() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    fetchLessonPlanLevels()
+      .then((data) => {
+        if (cancelled) return;
+        const next = (data?.levels || [])
+          .map((item) => ({
+            id: String(item?.id || "").trim(),
+            label: String(item?.label || item?.id || "").trim(),
+          }))
+          .filter((item) => item.id && item.label);
+        setLevelOptions(next.length ? next : PLAN_LEVELS);
+      })
+      .catch(() => {
+        if (!cancelled) setLevelOptions(PLAN_LEVELS);
+      })
+      .finally(() => {
+        if (!cancelled) setLevelsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!subjectOptions.length) return;
     setSubject((prev) => {
       const next = normalizeSubjectSelection(prev, type, subjectOptions);
       return next === prev ? prev : next;
     });
   }, [normalizeSubjectSelection, subjectOptions, type]);
+
+  useEffect(() => {
+    if (!levelOptions.length) return;
+    setType((prev) => {
+      const next = normalizeLevelSelection(prev, levelOptions);
+      return next === prev ? prev : next;
+    });
+  }, [levelOptions, normalizeLevelSelection]);
 
   useEffect(() => {
     if (!sessionReady || isNew) {
@@ -490,6 +543,11 @@ export default function CabinetLessonPlanEditorPage() {
     description,
     items: sessions.map((session, index) => editorSessionToPlanItem(session, index + 1)),
   }), [activePlanId, description, goal, grade, planId, sessions, subject, title, type]);
+
+  const levelSelectOptions = useMemo(() => {
+    if (!type || levelOptions.some((item) => item.id === type)) return levelOptions;
+    return [...levelOptions, { id: type, label: planTypeLabel(type, levelOptions) }];
+  }, [levelOptions, type]);
 
   const replaceSession = useCallback((index, nextSession) => {
     skipDirtyRef.current = true;
@@ -1029,9 +1087,10 @@ export default function CabinetLessonPlanEditorPage() {
                   </select>
                 </label>
                 <label className="cb-pe-field">
-                  <span>Направление</span>
+                  <span>Уровень</span>
                   <select
                     value={type}
+                    disabled={levelsLoading && !levelOptions.length}
                     onChange={(e) => {
                       const nextType = e.target.value;
                       const prevDefault = defaultSubjectFromOptions(type, subjectOptions);
@@ -1044,7 +1103,7 @@ export default function CabinetLessonPlanEditorPage() {
                       ));
                     }}
                   >
-                    {PLAN_TYPES.map((t) => (
+                    {levelSelectOptions.map((t) => (
                       <option key={t.id} value={t.id}>{t.label}</option>
                     ))}
                   </select>
@@ -1158,7 +1217,7 @@ export default function CabinetLessonPlanEditorPage() {
         <PlanEditorSummary
           progress={progress}
           stats={stats}
-          directionLabel={planTypeLabel(type)}
+          directionLabel={planTypeLabel(type, levelOptions)}
           subjectLabel={planSubjectLabel(subject)}
           grade={grade}
           saving={saving}

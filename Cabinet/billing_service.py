@@ -93,7 +93,14 @@ def get_or_create_teacher_settings(teacher: User) -> TeacherBillingSettings:
 def get_or_create_billing_account(teacher: User, student: Student) -> BillingAccount:
     if student.teacher_id != teacher.id:
         raise BillingError("FORBIDDEN", "Ученик принадлежит другому учителю", 403)
+    # Для архивных учеников разрешаем только чтение уже существующего счёта
+    # (иначе плановый доход в dashboard и карточка ученика падают с 500).
     if student.status == StudentStatus.ARCHIVED:
+        existing = BillingAccount.objects.filter(teacher=teacher, student=student).first()
+        if existing is not None:
+            if not hasattr(existing, "settings"):
+                StudentBillingSettings.objects.get_or_create(billing_account=existing)
+            return existing
         raise BillingError("ARCHIVED", "Ученик в архиве — оплаты недоступны", 400)
     teacher_settings = get_or_create_teacher_settings(teacher)
     account, created = BillingAccount.objects.get_or_create(
@@ -2280,9 +2287,12 @@ def _month_schedule_events(teacher: User, month_start, month_end):
 
 def _event_billable_students(event) -> list:
     if event.student_id:
-        return [event.student] if event.student else []
+        student = event.student
+        if student and student.status != StudentStatus.ARCHIVED:
+            return [student]
+        return []
     if event.group_id:
-        return list(event.group.students.filter(status="active"))
+        return list(event.group.students.exclude(status=StudentStatus.ARCHIVED))
     return []
 
 
@@ -2493,7 +2503,10 @@ def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
     planned_income = ZERO
     for event in _month_schedule_events(teacher, month_start, month_end):
         for student in _event_billable_students(event):
-            planned_income += _estimate_event_student_price(teacher, event, student)
+            try:
+                planned_income += _estimate_event_student_price(teacher, event, student)
+            except BillingError:
+                continue
 
     return {
         "currency": teacher_settings.currency,

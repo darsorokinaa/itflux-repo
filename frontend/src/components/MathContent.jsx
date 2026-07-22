@@ -9,6 +9,7 @@ import { stripFipiAttachedFileMarkup } from "../utils/formatEgeInfAttachedFileHt
 import { formatOgeInf6TaskHtml } from "../utils/formatOgeInf6TaskHtml";
 import { formatOgeRus13TaskHtml } from "../utils/formatOgeRus13TaskHtml";
 import { formatTaskCodeBlocksHtml } from "../utils/formatTaskCodeBlocksHtml";
+import { formatProgTaskSheetHtml, convertLatexTextCommandsHtml } from "../utils/formatProgTaskSheetHtml";
 import { formatFipiUnicodeMathHtml } from "../utils/formatFipiUnicodeMathHtml";
 import { parseTaskHtmlFragment } from "../utils/parseTaskHtmlFragment";
 import { repairOrphanSpanTags } from "../utils/repairTaskHtmlSpans";
@@ -582,13 +583,18 @@ function pipeTaskHtmlFormatter(html, formatter) {
 }
 
 function preparePlainBankTaskHtml(raw, options = {}) {
-  const { ogeMathChoiceEnhance = true } = options;
+  const {
+    ogeMathChoiceEnhance = true,
+    progTaskSheet = false,
+    taskNumber = null,
+  } = options;
   const decoded = decodeHtmlEntityLayersIfStoredEscaped(raw);
   let s = stripEmbeddedStyleBlocks(decoded);
   s = normalizeEscapedTaskSymbols(s);
   s = repairFipiSpanAndLogicMarkup(s);
   s = convertLogicSpansInsideMathDelimitersToTex(s);
   s = sanitizeTexInsideMathDelimiters(s);
+  s = convertLatexTextCommandsHtml(s);
   s = formatTaskCodeBlocksHtml(s);
   s = pipeTaskHtmlFormatter(s, formatEgeInf2TruthTableHtml);
   s = pipeTaskHtmlFormatter(s, formatEgeInf22ParallelProcessesHtml);
@@ -596,6 +602,11 @@ function preparePlainBankTaskHtml(raw, options = {}) {
   s = pipeTaskHtmlFormatter(s, formatOgeInformaticsTask13Html);
   s = pipeTaskHtmlFormatter(s, formatOgeRus13TaskHtml);
   s = pipeTaskHtmlFormatter(s, formatOgeInf6TaskHtml);
+
+  if (progTaskSheet) {
+    const sheet = formatProgTaskSheetHtml(s, { taskNumber, force: true });
+    if (sheet) return repairOrphanSpanTags(sheet);
+  }
   
   // Unconditionally remove CKEditor's <figure class="table"> wrappers
   if (typeof document !== "undefined") {
@@ -782,6 +793,7 @@ function polishBankTaskTables(root) {
     if (table.closest(".oge-math-choice-task")) continue;
     if (table.closest(".oge-math-matching-answer-table")) continue;
     if (table.closest(".math-inline, .math-display, .math-env")) continue;
+    if (table.classList.contains("prog-task-sheet__table") || table.closest(".prog-task-sheet")) continue;
 
     if (table.classList.contains("cases-table")) {
       table.style.setProperty("border", "none", "important");
@@ -1383,7 +1395,22 @@ function removeDuplicateRoadGraphImages(root, isEgeInf1) {
 
 let mathJaxPromise = Promise.resolve();
 
-function MathContentInner({ html, className, onImageClick, plainHtml = false, ogeMathChoiceEnhance = true, ogeInf13Enhance = false, ogeRus13Enhance = false, ogeInf6Enhance = false, egeInfFileEnhance = false, egeInf22Enhance = false, egeInf1Enhance = false, egeInf2Enhance = false }) {
+function MathContentInner({
+  html,
+  className,
+  onImageClick,
+  plainHtml = false,
+  ogeMathChoiceEnhance = true,
+  ogeInf13Enhance = false,
+  ogeRus13Enhance = false,
+  ogeInf6Enhance = false,
+  egeInfFileEnhance = false,
+  egeInf22Enhance = false,
+  egeInf1Enhance = false,
+  egeInf2Enhance = false,
+  progTaskSheet = false,
+  taskNumber = null,
+}) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -1397,7 +1424,11 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
     // размонтирует всё дерево при выбросе из эффекта → пустой экран).
     try {
       if (plainHtml) {
-        el.innerHTML = prepareBankTaskDisplayHtml(decoded, { ogeMathChoiceEnhance });
+        el.innerHTML = prepareBankTaskDisplayHtml(decoded, {
+          ogeMathChoiceEnhance,
+          progTaskSheet,
+          taskNumber,
+        });
       } else {
       const normalized = normalizeEscapedTaskSymbols(decoded);
       const afterFipiMath = repairFipiSpanAndLogicMarkup(normalized);
@@ -1509,7 +1540,7 @@ function MathContentInner({ html, className, onImageClick, plainHtml = false, og
     return () => {
       cancelled = true;
     };
-  }, [html, plainHtml, ogeMathChoiceEnhance, ogeInf13Enhance, ogeRus13Enhance, ogeInf6Enhance, egeInfFileEnhance, egeInf22Enhance, egeInf1Enhance, egeInf2Enhance]);
+  }, [html, plainHtml, ogeMathChoiceEnhance, ogeInf13Enhance, ogeRus13Enhance, ogeInf6Enhance, egeInfFileEnhance, egeInf22Enhance, egeInf1Enhance, egeInf2Enhance, progTaskSheet, taskNumber]);
 
   useEffect(() => {
     if (!onImageClick || !ref.current) return;
@@ -1554,7 +1585,11 @@ export function prepareBankTaskDisplayHtml(raw, options = {}) {
   if (raw == null || raw === "") return "";
   try {
     const decoded = decodeHtmlEntityLayersIfStoredEscaped(String(raw));
-    const html = preparePlainBankTaskHtml(decoded, options);
+    const html = preparePlainBankTaskHtml(decoded, {
+      ogeMathChoiceEnhance: options.ogeMathChoiceEnhance,
+      progTaskSheet: options.progTaskSheet,
+      taskNumber: options.taskNumber,
+    });
     if (typeof document === "undefined") return html;
     const el = document.createElement("div");
     el.innerHTML = html;

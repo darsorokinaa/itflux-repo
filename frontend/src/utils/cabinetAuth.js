@@ -618,6 +618,10 @@ export function fetchLessonPlanSubjects() {
   return cabinetFetch("/lesson-plans/subjects/", { method: "GET" });
 }
 
+export function fetchLessonPlanLevels() {
+  return cabinetFetch("/lesson-plans/levels/", { method: "GET" });
+}
+
 export function createLessonPlan(payload) {
   return cabinetFetch("/lesson-plans/", {
     method: "POST",

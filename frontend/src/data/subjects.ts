@@ -1,6 +1,16 @@
 import type { LevelId } from "./levels";
 
-export type SubjectId = "math" | "math_base" | "inf" | "phys" | "chem" | "rus" | "lit" | "history";
+export type SubjectId =
+  | "math"
+  | "math_base"
+  | "inf"
+  | "prog"
+  | "phys"
+  | "chem"
+  | "rus"
+  | "lit"
+  | "history"
+  | string;
 
 export type SubjectIconKind = "sum" | "code" | "atom" | "aa" | "section";
 
@@ -99,6 +109,18 @@ const SUBJECT_INF: SubjectDefinition = {
   motifs: ["code", "algorithm", "data"],
 };
 
+const SUBJECT_PROG: SubjectDefinition = {
+  id: "prog",
+  title: "Программирование",
+  description: "Код, алгоритмы и практика решения задач",
+  bg: "#0F766E",
+  accent: "#2DD4BF",
+  icon: "code",
+  pattern: "flow",
+  patternAsset: PATTERN_INF,
+  motifs: ["code", "algorithm", "data"],
+};
+
 const SUBJECT_PHYS: SubjectDefinition = {
   id: "phys",
   title: "Физика",
@@ -168,13 +190,55 @@ export const SUBJECTS_BY_LEVEL: Record<LevelId, SubjectDefinition[]> = {
   vpr: [SUBJECT_INF, SUBJECT_MATH, SUBJECT_PHYS, SUBJECT_RUS, SUBJECT_HIST],
   oge: [SUBJECT_MATH_OGE, SUBJECT_INF, SUBJECT_PHYS, SUBJECT_CHEM, SUBJECT_RUS, SUBJECT_LIT],
   ege: [SUBJECT_INF, SUBJECT_MATH_EGE_PROF, SUBJECT_MATH_EGE_BASE, SUBJECT_RUS],
+  school: [SUBJECT_PROG],
 };
 
 export const GRADES_BY_LEVEL: Record<LevelId, number[]> = {
   vpr: [7, 8, 10],
   oge: [9],
   ege: [11],
+  school: [],
 };
+
+const SUBJECT_FALLBACK_BY_ID: Record<string, SubjectDefinition> = {
+  math: SUBJECT_MATH_BASE,
+  math_base: SUBJECT_MATH_EGE_BASE,
+  inf: SUBJECT_INF,
+  prog: SUBJECT_PROG,
+  phys: SUBJECT_PHYS,
+  chem: SUBJECT_CHEM,
+  rus: SUBJECT_RUS,
+  lit: SUBJECT_LIT,
+  history: SUBJECT_HIST,
+};
+
+/** Собрать карточку предмета из API/БД, дополнив статическим оформлением. */
+export function buildSubjectDefinition(
+  id: string,
+  overrides: Partial<SubjectDefinition> = {},
+): SubjectDefinition {
+  const base = SUBJECT_FALLBACK_BY_ID[id];
+  if (base) {
+    return {
+      ...base,
+      ...overrides,
+      id,
+      title: overrides.title || base.title,
+    };
+  }
+  return {
+    id,
+    title: overrides.title || id,
+    description: overrides.description || "Задания и практика по предмету",
+    bg: overrides.bg || "#334155",
+    accent: overrides.accent || "#94A3B8",
+    icon: overrides.icon || "code",
+    pattern: overrides.pattern || "flow",
+    patternAsset: overrides.patternAsset || PATTERN_INF,
+    motifs: overrides.motifs || ["code", "algorithm", "data"],
+    ...overrides,
+  };
+}
 
 /** Уникальные предметы без бейджа «Скоро» — для счётчика «доступно сейчас» на главной. */
 export function countAvailableSubjectIds(): number {

@@ -210,7 +210,8 @@ const LazyVisible = memo(function LazyVisible({
 const LEVEL_OPTIONS: ReadonlyArray<{ id: LevelId; label: string }> = [
   { id: "oge", label: "ОГЭ" },
   { id: "ege", label: "ЕГЭ" },
-  { id: "vpr", label: "Школьная база (ВПР)" },
+  { id: "school", label: "Школьная программа" },
+  { id: "vpr", label: "ВПР" },
 ];
 
 function buildQuery(
@@ -376,6 +377,7 @@ export default function AllTasksPage() {
 
   const subjects = getActiveSubjectsForAllTasks(level);
   const levelDef = getLevelDef(level);
+  const useProgTaskSheet = subject === "prog" || level === "school";
 
   const subtopicsForTask = useMemo(() => {
     if (!filterOptions) return [];
@@ -1169,6 +1171,8 @@ export default function AllTasksPage() {
                                           className="all-tasks-item__html"
                                           plainHtml
                                           ogeMathChoiceEnhance={subject === "math"}
+                                          progTaskSheet={useProgTaskSheet}
+                                          taskNumber={taskNumber}
                                         />
                                         {t.file_url ? (
                                           <TaskFileAttachment href={t.file_url} />
@@ -1248,6 +1252,7 @@ export default function AllTasksPage() {
                   <article
                     className={[
                       "all-tasks-item",
+                      useProgTaskSheet ? "all-tasks-item--prog-sheet" : "",
                       t.subdivision === "geom" ? "all-tasks-item--geom" : "",
                       t.subdivision === "alg" ? "all-tasks-item--alg" : "",
                       isFunctionGraphTask(t) ? "all-tasks-item--function-graphs" : "",
@@ -1323,6 +1328,8 @@ export default function AllTasksPage() {
                               className="all-tasks-item__html"
                               plainHtml
                               ogeMathChoiceEnhance={subject === "math"}
+                              progTaskSheet={useProgTaskSheet}
+                              taskNumber={taskNumber}
                             />
                             {t.file_url ? <TaskFileAttachment href={t.file_url} /> : null}
                             {t.author ? (

@@ -173,6 +173,10 @@
   background: linear-gradient(160deg, #ecf7f8 0%, #d7f0f3 100%);
 }
 
+.generator-category-card--school::before {
+  background: linear-gradient(160deg, #ecfdf8 0%, #ccfbf1 100%);
+}
+
 .generator-category-card > * {
   position: relative;
   z-index: 1;
@@ -355,6 +359,10 @@
 
 .subject-dashboard-page__level-option--vpr {
   background: linear-gradient(135deg, #e05a00 0%, #ff8c38 100%);
+}
+
+.subject-dashboard-page__level-option--school {
+  background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%);
 }
 
 .subject-dashboard-page__level-option input {
