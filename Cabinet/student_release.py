@@ -783,6 +783,10 @@ def release_for_student(event, student, plan_item, lesson):
                 ]
             )
         _sync_homework_tasks(homework, plan_item)
+        # Как при ручной выдаче: сразу показать ДЗ в разделе «Проверка».
+        from .homework_api import ensure_homework_in_review_queue
+
+        ensure_homework_in_review_queue(homework, student)
 
     for interactive in plan_item.attached_interactives.all():
         _ensure_interactive_assignment(

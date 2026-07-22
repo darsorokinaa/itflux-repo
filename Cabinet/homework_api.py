@@ -193,6 +193,47 @@ def ensure_homework_in_review_queue(homework: Homework, student: Student):
     return item
 
 
+def sync_assigned_homework_into_review_queue(teacher) -> int:
+    """
+    Догнать уже выданные ДЗ, у которых ещё нет ReviewItem
+    (например, авто-выдача после урока до фикса).
+    """
+    from .choices import HomeworkStatus, StudentStatus
+    from .models import ReviewItem
+
+    if teacher is None:
+        return 0
+
+    qs = (
+        Homework.objects.filter(teacher=teacher, status=HomeworkStatus.ASSIGNED)
+        .filter(student__isnull=False)
+        .exclude(student__status=StudentStatus.ARCHIVED)
+        .select_related("student", "group")
+        .order_by("-id")[:300]
+    )
+
+    created = 0
+    for homework in qs:
+        if is_live_meeting_homework(homework):
+            continue
+        try:
+            submission = _get_or_create_submission(homework, homework.student)
+            if ReviewItem.objects.filter(
+                teacher=teacher,
+                source_type="homework",
+                source_id=submission.pk,
+            ).exists():
+                continue
+            if ensure_homework_in_review_queue(homework, homework.student) is not None:
+                created += 1
+        except Exception:
+            logger.exception(
+                "sync_assigned_homework_into_review_queue failed for homework_id=%s",
+                getattr(homework, "pk", None),
+            )
+    return created
+
+
 def build_variant_open_url(
     *,
     base_url: str,
@@ -360,12 +401,25 @@ def _resolve_access(request, homework_id: int):
 
 
 def _get_or_create_submission(homework: Homework, student: Student) -> HomeworkSubmission:
-    submission, _ = HomeworkSubmission.objects.get_or_create(
-        homework=homework,
-        student=student,
-        defaults={},
+    qs = HomeworkSubmission.objects.filter(homework=homework, student=student).order_by(
+        "-submitted_at", "-id"
     )
-    return submission
+    existing = qs.first()
+    if existing is not None:
+        return existing
+    try:
+        submission, _ = HomeworkSubmission.objects.get_or_create(
+            homework=homework,
+            student=student,
+            defaults={},
+        )
+        return submission
+    except HomeworkSubmission.MultipleObjectsReturned:
+        return (
+            HomeworkSubmission.objects.filter(homework=homework, student=student)
+            .order_by("-submitted_at", "-id")
+            .first()
+        )
 
 
 def _safe_upload_filename(name: str) -> str:

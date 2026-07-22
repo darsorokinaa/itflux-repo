@@ -1082,6 +1082,13 @@ class InteractiveAttemptViewSet(TeacherScopedMixin, mixins.CreateModelMixin, vie
 class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     serializer_class = ReviewItemSerializer
 
+    def list(self, request, *args, **kwargs):
+        from .homework_api import sync_assigned_homework_into_review_queue
+
+        # Подтянуть выданные ДЗ без ReviewItem (авто-выдача после урока).
+        sync_assigned_homework_into_review_queue(self.get_teacher())
+        return super().list(request, *args, **kwargs)
+
     def get_queryset(self):
         from .homework_api import exclude_live_meeting_review_items
 
