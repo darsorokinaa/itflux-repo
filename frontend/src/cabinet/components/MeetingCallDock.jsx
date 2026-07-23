@@ -162,7 +162,10 @@ export default function MeetingCallDock() {
       try {
         const status = await fetchVideoMeetingStatus(meetingUuid);
         if (cancelled) return;
-        if (!status?.presented?.openUrl) {
+        // Файлы идут через materialSession — не считаем «пусто», если файл открыт.
+        const hasPresented = Boolean(status?.presented?.openUrl);
+        const hasMaterialSession = Boolean(status?.materialSession?.material);
+        if (!hasPresented && !hasMaterialSession) {
           returnToCall();
         }
       } catch {

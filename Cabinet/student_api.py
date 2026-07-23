@@ -623,10 +623,14 @@ def _serialize_student_schedule_event_detail(event, students):
     homework_id = None
     homework_status = None
     hw = None
+    # Только ДЗ, явно привязанное к этому событию — без поиска по пункту плана.
     if event.homework_id:
-        hw = _homework_qs(students).filter(pk=event.homework_id).first()
-    if hw is None and plan_item_obj:
-        hw = _homework_qs(students).filter(lesson_plan_item_id=plan_item_obj.id).first()
+        hw = (
+            _homework_qs(students)
+            .filter(pk=event.homework_id)
+            .exclude(status=HomeworkStatus.ARCHIVED)
+            .first()
+        )
     if hw is not None:
         homework_id = hw.id
         student_obj = _pick_student(students, hw.teacher)
@@ -638,7 +642,8 @@ def _serialize_student_schedule_event_detail(event, students):
     if hw is not None:
         from .schedule_events import _assigned_homework_to_json
 
-        assigned_homework = _assigned_homework_to_json(hw, plan_item=plan_item_obj)
+        # Материалы берём из пункта плана самого ДЗ, не из пункта урока.
+        assigned_homework = _assigned_homework_to_json(hw)
 
     video_meeting, meeting_url = _video_meeting_payload(event)
     return {

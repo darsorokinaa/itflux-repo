@@ -1,6 +1,3 @@
-from datetime import timedelta
-
-from django.db.models import Q
 from django.utils import timezone
 
 from .choices import HomeworkStatus, ParticipantStatus
@@ -91,82 +88,18 @@ def _plan_item_to_json(item, *, lesson_number=None):
     }
 
 
-def _event_student_ids(event) -> list[int]:
-    ids = list(
-        event.participants.exclude(status=ParticipantStatus.REMOVED)
-        .exclude(student_id__isnull=True)
-        .values_list("student_id", flat=True)
-    )
-    if event.student_id and event.student_id not in ids:
-        ids.append(event.student_id)
-    return [pk for pk in ids if pk]
-
-
 def resolve_assigned_homework_for_event(event) -> Homework | None:
-    """Выданное ДЗ для карточки урока: прямая связь или по пункту плана/ученикам."""
-    if event.homework_id:
-        hw = getattr(event, "homework", None)
-        if hw is not None and hw.status != HomeworkStatus.ARCHIVED:
-            return hw
-        return (
-            Homework.objects.filter(pk=event.homework_id)
-            .exclude(status=HomeworkStatus.ARCHIVED)
-            .first()
-        )
-
-    plan_item, _ = resolve_plan_item_for_event(event)
-    qs = Homework.objects.filter(teacher_id=event.owner_id).exclude(
-        status__in=[HomeworkStatus.ARCHIVED, HomeworkStatus.DRAFT]
+    """Выданное ДЗ для карточки урока — только явно привязанное к событию."""
+    if not event.homework_id:
+        return None
+    hw = getattr(event, "homework", None)
+    if hw is not None and hw.status != HomeworkStatus.ARCHIVED:
+        return hw
+    return (
+        Homework.objects.filter(pk=event.homework_id)
+        .exclude(status=HomeworkStatus.ARCHIVED)
+        .first()
     )
-    student_ids = _event_student_ids(event)
-    if plan_item is not None:
-        plan_qs = qs.filter(lesson_plan_item_id=plan_item.id)
-        if student_ids:
-            plan_qs = plan_qs.filter(Q(student_id__in=student_ids) | Q(group_id=event.group_id))
-        elif event.group_id:
-            plan_qs = plan_qs.filter(group_id=event.group_id)
-        found = plan_qs.order_by("-created_at", "-id").first()
-        if found:
-            return found
-
-    # Кастомное ДЗ без пункта плана: показываем только на ближайшем уроке к моменту выдачи.
-    if not student_ids and not event.group_id:
-        return None
-    linked_ids = ScheduleEvent.objects.filter(homework_id__isnull=False).exclude(
-        pk=event.pk
-    ).values_list("homework_id", flat=True)
-    custom_qs = qs.filter(lesson_plan_item__isnull=True).exclude(pk__in=linked_ids)
-    if student_ids:
-        custom_qs = custom_qs.filter(Q(student_id__in=student_ids) | Q(group_id=event.group_id))
-    elif event.group_id:
-        custom_qs = custom_qs.filter(group_id=event.group_id)
-    homework = custom_qs.order_by("-created_at", "-id").first()
-    if homework is None or not event.starts_at or not homework.created_at:
-        return None
-    sibling_filter = Q(owner_id=event.owner_id)
-    if event.student_id:
-        sibling_filter &= Q(student_id=event.student_id)
-    elif event.group_id:
-        sibling_filter &= Q(group_id=event.group_id)
-    else:
-        return None
-    siblings = list(
-        ScheduleEvent.objects.filter(sibling_filter)
-        .filter(
-            starts_at__gte=homework.created_at - timedelta(days=2),
-            starts_at__lte=homework.created_at + timedelta(days=3),
-        )
-        .only("id", "starts_at")
-    )
-    if not siblings:
-        return None
-    nearest = min(
-        siblings,
-        key=lambda row: abs((row.starts_at - homework.created_at).total_seconds()),
-    )
-    if nearest.pk != event.pk:
-        return None
-    return homework
 
 
 def _assigned_homework_to_json(homework: Homework | None, *, plan_item=None) -> dict | None:
@@ -331,7 +264,6 @@ def schedule_event_to_json(event):
     has_plan = plan_item_json is not None or get_active_enrollment(event) is not None
     assigned_homework = _assigned_homework_to_json(
         resolve_assigned_homework_for_event(event),
-        plan_item=plan_item,
     )
 
     return {

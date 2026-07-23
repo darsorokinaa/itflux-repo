@@ -64,13 +64,16 @@ export default function SyncedMaterialWorkspace({
   const hitRef = useRef(null);
   const drawingRef = useRef(null);
   const [localStroke, setLocalStroke] = useState(null);
-  const [tool, setTool] = useState("pointer");
+  const [localPointer, setLocalPointer] = useState(null);
+  // «Рука» — просмотр/скролл без hit-layer; перо/маркер/указка — поверх контента.
+  const [tool, setTool] = useState("hand");
   const isCollaborative = interactionMode === "collaborative";
   const locked = !canManage && !isCollaborative;
   const contentLocked = locked || (!canManage && !canEditContent);
   const showTools = canManage || isCollaborative;
-  // Поверх iframe нужен hit-layer: иначе PDF перехватывает все pointer-события.
-  const toolsCaptureInput = showTools && !contentLocked;
+  const drawToolActive = tool === "pen" || tool === "highlighter" || tool === "pointer";
+  // Hit-layer только для рисования/указки — иначе нельзя скроллить PDF/картинку.
+  const toolsCaptureInput = showTools && drawToolActive && (canManage || !contentLocked);
 
   const annotations = useMemo(
     () => (Array.isArray(state?.annotations) ? state.annotations : []),
@@ -96,43 +99,67 @@ export default function SyncedMaterialWorkspace({
     const p = toNorm(e.clientX, e.clientY);
     if (!p) return;
     if (tool === "pointer") {
+      setLocalPointer(p);
       if (canManage) onSendPointer?.(p.x, p.y);
       else onSendCursor?.(p.x, p.y);
-    } else if (tool === "pen" || tool === "highlighter") {
+      return;
+    }
+    if (tool === "pen" || tool === "highlighter") {
       onSendCursor?.(p.x, p.y);
     }
     if (!drawingRef.current) return;
     drawingRef.current.points.push([p.x, p.y]);
-    setLocalStroke({ ...drawingRef.current, points: [...drawingRef.current.points] });
+    setLocalStroke({
+      ...drawingRef.current,
+      points: drawingRef.current.points.slice(),
+    });
   }, [canManage, onSendCursor, onSendPointer, toNorm, tool, toolsCaptureInput]);
 
   const handlePointerDown = useCallback((e) => {
     if (!toolsCaptureInput) return;
     if (tool !== "pen" && tool !== "highlighter" && tool !== "pointer") return;
     e.preventDefault();
+    e.stopPropagation();
     try {
       e.currentTarget.setPointerCapture?.(e.pointerId);
     } catch {
       /* ignore */
     }
-    if (tool === "pointer") {
-      const p = toNorm(e.clientX, e.clientY);
-      if (p && canManage) onSendPointer?.(p.x, p.y);
-      return;
-    }
     const p = toNorm(e.clientX, e.clientY);
     if (!p) return;
+    if (tool === "pointer") {
+      setLocalPointer(p);
+      if (canManage) onSendPointer?.(p.x, p.y);
+      return;
+    }
     const stroke = {
       id: `ann-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       tool: tool === "highlighter" ? "highlighter" : "pen",
-      color: tool === "highlighter" ? "rgba(250, 204, 21, 0.45)" : "#e11d48",
-      width: tool === "highlighter" ? 12 : 2.5,
-      points: [[p.x, p.y]],
+      color: tool === "highlighter" ? "rgba(250, 204, 21, 0.55)" : "#e11d48",
+      width: tool === "highlighter" ? 18 : 3,
+      // Две точки сразу — точка видна до первого move.
+      points: [[p.x, p.y], [p.x + 0.0001, p.y]],
       page,
     };
     drawingRef.current = stroke;
-    setLocalStroke(stroke);
+    setLocalStroke({ ...stroke, points: stroke.points.slice() });
   }, [canManage, onSendPointer, page, toNorm, tool, toolsCaptureInput]);
+
+  const finishStroke = useCallback(() => {
+    const stroke = drawingRef.current;
+    drawingRef.current = null;
+    if (!stroke) {
+      setLocalStroke(null);
+      return;
+    }
+    if (stroke.points.length < 2) {
+      setLocalStroke(null);
+      return;
+    }
+    // Оставляем штрих видимым до прихода в state через onDrawComplete.
+    onDrawComplete?.(stroke);
+    setLocalStroke(null);
+  }, [onDrawComplete]);
 
   const handlePointerUp = useCallback((e) => {
     try {
@@ -140,12 +167,12 @@ export default function SyncedMaterialWorkspace({
     } catch {
       /* ignore */
     }
-    const stroke = drawingRef.current;
-    drawingRef.current = null;
-    setLocalStroke(null);
-    if (!stroke || stroke.points.length < 2) return;
-    onDrawComplete?.(stroke);
-  }, [onDrawComplete]);
+    finishStroke();
+  }, [finishStroke]);
+
+  useEffect(() => {
+    if (tool !== "pointer") setLocalPointer(null);
+  }, [tool]);
 
   useEffect(() => {
     const el = stageRef.current;
@@ -193,6 +220,14 @@ export default function SyncedMaterialWorkspace({
           <div className="vl-collab-tools" role="toolbar" aria-label="Инструменты">
             <button
               type="button"
+              className={tool === "hand" ? "is-active" : ""}
+              onClick={() => setTool("hand")}
+              title="Просмотр и прокрутка"
+            >
+              Рука
+            </button>
+            <button
+              type="button"
               className={tool === "pointer" ? "is-active" : ""}
               onClick={() => setTool("pointer")}
               title="Указатель"
@@ -202,7 +237,7 @@ export default function SyncedMaterialWorkspace({
             <button
               type="button"
               className={tool === "pen" ? "is-active" : ""}
-              disabled={contentLocked}
+              disabled={contentLocked && !canManage}
               onClick={() => setTool("pen")}
               title="Перо"
             >
@@ -211,7 +246,7 @@ export default function SyncedMaterialWorkspace({
             <button
               type="button"
               className={tool === "highlighter" ? "is-active" : ""}
-              disabled={contentLocked}
+              disabled={contentLocked && !canManage}
               onClick={() => setTool("highlighter")}
               title="Маркер"
             >
@@ -296,14 +331,21 @@ export default function SyncedMaterialWorkspace({
           {allStrokes
             .filter((a) => !a.page || Number(a.page) === page)
             .map((ann) => {
-              const pts = (ann.points || []).map((p) => `${p[0]},${p[1]}`).join(" ");
+              const pts = (ann.points || [])
+                .filter((p) => Array.isArray(p) && p.length >= 2)
+                .map((p) => `${Number(p[0])},${Number(p[1])}`)
+                .join(" ");
+              if (!pts) return null;
+              // strokeWidth в пикселях экрана (vectorEffect), иначе /400 даёт ~0px.
+              const px = Math.max(2, Number(ann.width) || 3);
               return (
                 <polyline
                   key={ann.id}
                   points={pts}
                   fill="none"
                   stroke={ann.color || "#e11d48"}
-                  strokeWidth={(Number(ann.width) || 2) / 400}
+                  strokeWidth={px}
+                  strokeOpacity={ann.tool === "highlighter" ? 0.65 : 1}
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   vectorEffect="non-scaling-stroke"
@@ -311,6 +353,13 @@ export default function SyncedMaterialWorkspace({
               );
             })}
         </svg>
+        {localPointer && tool === "pointer" ? (
+          <div
+            className="vl-local-pointer"
+            style={{ left: `${localPointer.x * 100}%`, top: `${localPointer.y * 100}%` }}
+            aria-hidden="true"
+          />
+        ) : null}
         {remotePointer ? (
           <div
             className="vl-remote-pointer"
@@ -322,18 +371,12 @@ export default function SyncedMaterialWorkspace({
           <div
             ref={hitRef}
             className={`vl-synced-hit vl-synced-hit--${tool}`}
-            onPointerMove={handlePointerMove}
             onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
-            onPointerLeave={(e) => {
-              // Не завершаем штрих при уходе курсора, если capture активен.
-              if (drawingRef.current && e.buttons === 0) handlePointerUp(e);
-            }}
             role="presentation"
           />
-        ) : contentLocked ? (
-          <div className="vl-synced-lock" aria-hidden="true" />
         ) : null}
       </div>
     </section>

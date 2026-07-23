@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import {
-  planItemHomeworkPopoverRows,
   planItemLessonPopoverRows,
   planItemTaskPopoverRows,
 } from "../planItemAttachments";
@@ -54,6 +53,7 @@ import {
   createMeetingMaterialCollab,
   inferSyncResourceKind,
 } from "../meetingMaterialCollab";
+import { useFloatingDrag } from "../useFloatingDrag";
 import "../styles/video-meeting.css";
 import "../styles/live-variant-answers.css";
 
@@ -232,6 +232,8 @@ export default function VideoMeetingPage() {
   const remotePointerTimerRef = useRef(null);
   const [materialsToast, setMaterialsToast] = useState("");
   const [mobilePane, setMobilePane] = useState("call"); // call | materials
+  const [callCollapsed, setCallCollapsed] = useState(false);
+  const [focusCall, setFocusCall] = useState(false);
   const [boardInfo, setBoardInfo] = useState({ loading: true, board: null });
   const [liveAnswers, setLiveAnswers] = useState(null);
   const [liveAnswersLoading, setLiveAnswersLoading] = useState(false);
@@ -663,7 +665,10 @@ export default function VideoMeetingPage() {
         openedPresentKeyRef.current = "";
         if (baselineReady && hadOpen) {
           setWorkspaceMaterial(null);
-          setMobilePane("call");
+          setMaterialSession((prev) => {
+            if (!prev?.material) setMobilePane("call");
+            return prev;
+          });
         }
         baselineReady = true;
         return;
@@ -686,6 +691,25 @@ export default function VideoMeetingPage() {
         const statusPayload = await fetchVideoMeetingStatus(meetingUuid);
         if (cancelled) return;
         applyPresented(statusPayload?.presented || null);
+        // Файлы идут через materialSession — подстраховываем, если WS не доставил событие.
+        if (!canManageRef.current) {
+          const session = statusPayload?.materialSession || null;
+          if (session?.material) {
+            setMaterialSession((prev) => {
+              if (
+                prev?.sessionId
+                && session.sessionId
+                && String(prev.sessionId) === String(session.sessionId)
+              ) {
+                return prev;
+              }
+              return session;
+            });
+            setWorkspaceMaterial(null);
+            setFocusCall(false);
+            setMobilePane("materials");
+          }
+        }
         if (statusPayload?.status === "finished") {
           setPageState("finished");
         }
@@ -829,9 +853,9 @@ export default function VideoMeetingPage() {
   const returnUrl = returnUrlRef.current || (canManage ? "/cabinet/schedule" : "/cabinet/student/lessons");
   const scheduleUrl = "/cabinet/schedule";
 
-  const { materialRows, homeworkRows } = useMemo(() => {
+  const materialRows = useMemo(() => {
     const planItem = event?.planItem || null;
-    // Варианты — тоже материалы урока, без отдельного блока.
+    // Только материалы урока — ДЗ не смешиваем во вкладку урока.
     const materials = [
       ...planItemLessonPopoverRows(planItem),
       ...planItemTaskPopoverRows(planItem),
@@ -844,10 +868,7 @@ export default function VideoMeetingPage() {
         text: event.materials.trim(),
       });
     }
-    return {
-      materialRows: materials,
-      homeworkRows: planItemHomeworkPopoverRows(planItem),
-    };
+    return materials;
   }, [event]);
 
   const refreshMeetingDetail = useCallback(async () => {
@@ -1046,6 +1067,8 @@ export default function VideoMeetingPage() {
       return;
     }
     setPresented(null);
+    setFocusCall(false);
+    setCallCollapsed(false);
     setAsideOpen(false);
     setMobilePane("materials");
     setWorkspaceMaterial(null);
@@ -1187,12 +1210,16 @@ export default function VideoMeetingPage() {
         interactiveId: row.interactiveId || null,
         interactiveType: row.interactiveType || "",
       };
+      // REST гарантирует сессию и ответ ученику; WS дублирует событие, если уже открыт.
+      const data = await openMeetingMaterialSession(meetingUuid, payload);
+      applyMaterialSession(data?.materialSession || null);
       const collab = materialCollabRef.current;
-      if (collab?.isOpen()) {
-        collab.openMaterial(payload);
-      } else {
-        const data = await openMeetingMaterialSession(meetingUuid, payload);
-        applyMaterialSession(data?.materialSession || null);
+      if (collab?.isOpen() && data?.materialSession) {
+        try {
+          collab.openMaterial(payload);
+        } catch {
+          /* ignore — сессия уже создана через REST */
+        }
       }
       showMaterialsToast("Материал показан ученику");
     } catch (err) {
@@ -1217,6 +1244,8 @@ export default function VideoMeetingPage() {
       return;
     }
     setMaterialSession(null);
+    setFocusCall(false);
+    setCallCollapsed(false);
     setWorkspaceMaterial({
       title: payload.title || "Материал",
       url: payload.url || "",
@@ -1410,7 +1439,7 @@ export default function VideoMeetingPage() {
   }, [openAddHomework, openAddMaterials]);
 
   const materialsCount = canManage
-    ? (materialRows.length + homeworkRows.length + (boardInfo?.board ? 1 : 0))
+    ? (materialRows.length + (boardInfo?.board ? 1 : 0))
     : ((materialSession?.material || presented?.openUrl) ? 1 : 0);
   const whenLabel = formatWhen(event?.startsAt, event?.endsAt);
   const studentLabel = String(event?.audience || "").trim();
@@ -1425,7 +1454,7 @@ export default function VideoMeetingPage() {
     || "Урок";
   const headerSub = whenLabel || "";
   const syncedWorkspaceOpen = Boolean(materialSession?.material);
-  const workspaceOpen = Boolean(workspaceMaterial) || syncedWorkspaceOpen;
+  const workspaceOpen = (Boolean(workspaceMaterial) || syncedWorkspaceOpen) && !focusCall;
   const workspaceTitle = workspaceMaterial?.title
     || materialSession?.material?.title
     || "";
@@ -1434,6 +1463,21 @@ export default function VideoMeetingPage() {
   const compactCall = Boolean(workspaceOpen && showJitsi);
   // Панель материалов/ответов можно держать рядом с вариантом.
   const showAside = showJitsi && asideOpen && (!workspaceOpen || liveVariantAnswers);
+
+  const {
+    nodeRef: compactCallRef,
+    style: compactCallStyle,
+    dragging: compactCallDragging,
+    onPointerDown: onCompactCallPointerDown,
+  } = useFloatingDrag({
+    enabled: compactCall,
+    storageKey: meetingUuid ? `vl-compact-call:${meetingUuid}` : null,
+    handleSelector: ".video-lesson-compact-drag",
+  });
+
+  useEffect(() => {
+    if (!compactCall) setCallCollapsed(false);
+  }, [compactCall]);
 
   const studentMaterialRowsResolved = canManage
     ? materialRows
@@ -1523,6 +1567,7 @@ export default function VideoMeetingPage() {
               type="button"
               className={`video-lesson-btn video-lesson-btn--ghost${asideOpen ? " is-active" : ""}`}
               onClick={() => {
+                setFocusCall(false);
                 setAsideOpen((v) => !v);
                 setMobilePane((prev) => (prev === "materials" && asideOpen ? "call" : "materials"));
               }}
@@ -1577,6 +1622,21 @@ export default function VideoMeetingPage() {
       ) : null}
 
       <div className="video-lesson-body">
+        {focusCall && (syncedWorkspaceOpen || workspaceMaterial) && showJitsi ? (
+          <div className="video-lesson-material-chip" role="status">
+            <span>Материал открыт у ученика</span>
+            <button
+              type="button"
+              className="video-lesson-btn video-lesson-btn--ghost"
+              onClick={() => {
+                setFocusCall(false);
+                setMobilePane("materials");
+              }}
+            >
+              Вернуться к материалу
+            </button>
+          </div>
+        ) : null}
         {syncedWorkspaceOpen && showJitsi ? (
           <SyncedMaterialWorkspace
             canManage={canManage}
@@ -1616,7 +1676,6 @@ export default function VideoMeetingPage() {
             onSendPointer={(x, y) => materialCollabRef.current?.sendPointer(x, y)}
             onDrawComplete={(stroke) => {
               if (!canManage && materialSession.interactionMode !== "collaborative") return;
-              if (materialSyncStatus !== "synced" && !canManage) return;
               materialCollabRef.current?.sendOperation({
                 action: "annotation_added",
                 payload: { annotation: stroke },
@@ -1624,7 +1683,7 @@ export default function VideoMeetingPage() {
               setMaterialSession((prev) => {
                 if (!prev) return prev;
                 const list = Array.isArray(prev.state?.annotations) ? [...prev.state.annotations] : [];
-                list.push(stroke);
+                if (!list.some((a) => a.id === stroke.id)) list.push(stroke);
                 return { ...prev, state: { ...(prev.state || {}), annotations: list } };
               });
             }}
@@ -1662,7 +1721,16 @@ export default function VideoMeetingPage() {
           </section>
         ) : null}
 
-        <main className="video-lesson-content">
+        <main
+          ref={compactCall ? compactCallRef : undefined}
+          className={[
+            "video-lesson-content",
+            compactCallDragging ? "video-lesson-content--dragging" : "",
+            compactCall && callCollapsed ? "video-lesson-content--call-collapsed" : "",
+          ].filter(Boolean).join(" ")}
+          style={compactCall ? compactCallStyle : undefined}
+          onPointerDown={compactCall ? onCompactCallPointerDown : undefined}
+        >
           {pageState === "loading" ? (
             <div className="video-lesson-state">
               <div className="video-lesson-state__spinner" aria-hidden="true" />
@@ -1856,29 +1924,35 @@ export default function VideoMeetingPage() {
 
           {compactCall ? (
             <div className="video-lesson-compact-drag">
-              <span>Звонок</span>
-              <button
-                type="button"
-                className="video-lesson-compact-drag__expand"
-                onClick={() => {
-                  if (syncedWorkspaceOpen) {
-                    if (canManage) void onClearPresented();
-                    else applyMaterialSession(null);
-                  } else {
-                    closeWorkspaceMaterial();
-                  }
-                  setMobilePane("call");
-                }}
-              >
-                Развернуть
-              </button>
+              <span>{callCollapsed ? "Звонок скрыт" : "Звонок"}</span>
+              <div className="video-lesson-compact-drag__actions">
+                <button
+                  type="button"
+                  className="video-lesson-compact-drag__expand"
+                  onClick={() => setCallCollapsed((v) => !v)}
+                >
+                  {callCollapsed ? "Показать" : "Скрыть"}
+                </button>
+                <button
+                  type="button"
+                  className="video-lesson-compact-drag__expand"
+                  onClick={() => {
+                    // Только локально убрать материал с экрана — ученику сессия остаётся.
+                    setFocusCall(true);
+                    setCallCollapsed(false);
+                    setMobilePane("call");
+                  }}
+                >
+                  На весь экран
+                </button>
+              </div>
             </div>
           ) : null}
 
           <div
             id="jitsi-container"
             ref={containerRef}
-            hidden={!showJitsi}
+            hidden={!showJitsi || (compactCall && callCollapsed)}
           />
         </main>
 
@@ -1886,7 +1960,7 @@ export default function VideoMeetingPage() {
           <VideoLessonMaterialsPanel
             canManage={canManage}
             materialRows={canManage ? materialRows : studentMaterialRowsResolved}
-            homeworkRows={canManage ? homeworkRows : []}
+            homeworkRows={[]}
             presented={presented}
             materialSession={materialSession}
             presentBusy={presentBusy}

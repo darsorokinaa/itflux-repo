@@ -76,19 +76,7 @@ function getEventPlanMaterials(event) {
 }
 
 function getEventPlanHomework(event) {
-  const rows = eventAssignedHomeworkRows(event);
-  if (rows.length) return rows;
-  // Фоллбек: если API ещё без assignedHomework, но homework_id есть.
-  if (event.homework_id) {
-    return [{
-      key: `hw-${event.homework_id}`,
-      kind: "notes",
-      label: "Домашнее задание",
-      text: event.homework_status ? `Статус: ${event.homework_status}` : "Выдано",
-      typeLabel: "Выдано",
-    }];
-  }
-  return [];
+  return eventAssignedHomeworkRows(event);
 }
 
 function hasText(value) {
