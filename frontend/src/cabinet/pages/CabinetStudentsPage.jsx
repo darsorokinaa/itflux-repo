@@ -288,14 +288,12 @@ function StudentRow({
           </span>
           <span className="cb-student-row__meta">
             {student.grade ? formatGrade(student.grade) : null}
-            {student.grade && (student.subject || student.direction) ? (
+            {student.grade && (student.subjects?.length || student.subject || student.direction) ? (
               <span className="cb-group-card__dot">·</span>
             ) : null}
-            {student.subject || null}
-            {(student.subject || student.grade) && student.direction ? (
-              <span className="cb-group-card__dot">·</span>
-            ) : null}
-            {student.direction || null}
+            {student.subjects?.length
+              ? `${student.subjects.slice(0, 2).join(" · ")}${student.subjects.length > 2 ? ` +${student.subjects.length - 2}` : ""}`
+              : (student.subject || student.direction || null)}
           </span>
           {extraMeta ? <span className="cb-student-row__lesson">{extraMeta}</span> : null}
         </span>
@@ -1341,12 +1339,14 @@ export default function CabinetStudentsPage() {
       {studentModal ? (
         <StudentFormModal
           student={studentModal.mode === "edit" ? studentModal.student : null}
-          enrollment={studentModal.mode === "edit" ? enrollmentsByStudent[studentModal.student?.id] : null}
           onClose={closeStudentModal}
           onSave={handleSaveStudent}
           onArchive={studentModal.mode === "edit" ? handleArchiveStudent : null}
           onDelete={studentModal.mode === "edit" ? handleDeleteStudent : null}
-          onAttachPlan={studentModal.mode === "edit" ? openAttachPlanForStudent : null}
+          onSubjectsChanged={async () => {
+            await loadData();
+            await loadEnrollments();
+          }}
         />
       ) : null}
       {groupModal ? (

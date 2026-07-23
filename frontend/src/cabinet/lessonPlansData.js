@@ -269,6 +269,8 @@ export function mapApiMaterial(material) {
     subtopic: material.subtopic || "",
     externalUrl: material.external_url || material.externalUrl || "",
     fileUrl: material.file_url || material.fileUrl || "",
+    previewUrl: material.preview_url || material.previewUrl || "",
+    cabinetFileId: material.cabinet_file_id || material.cabinetFileId || null,
     isOwn: material.is_own || material.isOwn || false,
     isPublic: material.is_public || material.isPublic || false,
   };

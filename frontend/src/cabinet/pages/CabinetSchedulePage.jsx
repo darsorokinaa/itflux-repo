@@ -39,7 +39,7 @@ import {
 } from "../scheduleLessonUtils";
 import {
   planItemForScheduleEvent,
-  planItemHomeworkPopoverRows,
+  eventAssignedHomeworkRows,
   planItemLessonPopoverRows,
   planItemTaskPopoverRows,
   scheduleEventPlanItemToModalItem,
@@ -778,8 +778,12 @@ function eventDisplayTitle(event) {
 function eventDisplaySubtitle(event) {
   const title = eventDisplayTitle(event);
   const audience = (event.audience || "").trim();
-  if (!audience || audience === title) return null;
-  return audience;
+  const subject = (event.studentSubjectLabel || "").trim();
+  const parts = [];
+  if (audience && audience !== title) parts.push(audience);
+  if (subject) parts.push(subject);
+  if (!parts.length) return null;
+  return parts.join(" · ");
 }
 
 function CalendarEventBlock({
@@ -1536,7 +1540,8 @@ function getEventPlanMaterials(event) {
 }
 
 function getEventPlanHomework(event) {
-  return planItemHomeworkPopoverRows(getEventPlanItem(event));
+  // Показываем выданное ДЗ, а не черновик материалов в пункте плана.
+  return eventAssignedHomeworkRows(event);
 }
 
 function hasText(value) {
@@ -1877,10 +1882,12 @@ export default function CabinetSchedulePage() {
         return;
       }
       const eventPk = scheduleEventNumericId(event?.id);
+      const subjectId = event?.studentSubjectId || event?.student_subject_id || null;
       setSelectedEvent(null);
       setHomeworkAssignModal({
         ...target,
         scheduleEventId: eventPk || null,
+        studentSubjectId: subjectId ? Number(subjectId) : null,
       });
     } catch (err) {
       showToast(err.message || "Не удалось открыть выдачу ДЗ");
@@ -2706,10 +2713,22 @@ export default function CabinetSchedulePage() {
           group={homeworkAssignModal.group || null}
           students={homeworkAssignModal.students || null}
           scheduleEventId={homeworkAssignModal.scheduleEventId || null}
+          studentSubjectId={homeworkAssignModal.studentSubjectId || null}
           onClose={() => setHomeworkAssignModal(null)}
           onAssigned={() => {
+            const eventPk = homeworkAssignModal.scheduleEventId || null;
             setHomeworkAssignModal(null);
             showToast("Домашнее задание выдано");
+            if (!eventPk) return;
+            const range = getCalendarFetchRange(view, focusDate);
+            fetchScheduleEvents(range)
+              .then((data) => {
+                const next = Array.isArray(data?.events) ? data.events : [];
+                setEvents(next);
+                const refreshed = next.find((ev) => scheduleEventNumericId(ev.id) === Number(eventPk));
+                if (refreshed) setSelectedEvent(refreshed);
+              })
+              .catch(() => {});
           }}
         />
       ) : null}

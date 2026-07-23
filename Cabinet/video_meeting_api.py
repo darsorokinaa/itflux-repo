@@ -7,6 +7,15 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .meeting_material_session import (
+    apply_material_operation,
+    broadcast_material_event,
+    close_material_session,
+    get_active_material_session,
+    open_material_session,
+    serialize_material_session,
+    set_interaction_mode,
+)
 from .meeting_present import (
     clear_presented,
     live_variant_answers,
@@ -149,6 +158,11 @@ class VideoMeetingDetailView(APIView):
             "joinStateLabel": ui_state_message(state),
             "canManage": can_manage,
             "presented": serialize_presented(meeting, user=request.user),
+            "materialSession": serialize_material_session(
+                get_active_material_session(meeting),
+                user=request.user,
+                include_state=True,
+            ),
         })
 
 
@@ -183,6 +197,11 @@ class VideoMeetingStatusView(APIView):
                 meeting.actual_finished_at.isoformat() if meeting.actual_finished_at else None
             ),
             "presented": serialize_presented(meeting, user=request.user),
+            "materialSession": serialize_material_session(
+                get_active_material_session(meeting),
+                user=request.user,
+                include_state=True,
+            ),
         })
 
 
@@ -365,3 +384,152 @@ class VideoMeetingLiveAnswersView(APIView):
         except VideoMeetingError as exc:
             return _error_response(exc)
         return Response(payload)
+
+
+class VideoMeetingMaterialSessionView(APIView):
+    """
+    REST-управление синхронным материалом (дублирует WS для надёжности и тестов).
+    GET — текущая сессия; POST — открыть; DELETE — закрыть.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, meeting_uuid):
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+            access = resolve_access(request.user, meeting.schedule_event)
+            if not access.allowed:
+                raise VideoMeetingError(access.reason or "Доступ запрещён", code="forbidden", status=403)
+        except VideoMeetingError as exc:
+            return _error_response(exc)
+        session = get_active_material_session(meeting)
+        return Response({
+            "materialSession": serialize_material_session(session, user=request.user, include_state=True),
+        })
+
+    def post(self, request, meeting_uuid):
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+            data = request.data if isinstance(request.data, dict) else {}
+            session = open_material_session(
+                meeting=meeting,
+                user=request.user,
+                resource_kind=str(data.get("resourceKind") or data.get("resource_kind") or ""),
+                title=str(data.get("title") or ""),
+                open_url=str(data.get("openUrl") or data.get("open_url") or data.get("url") or ""),
+                content_text=str(data.get("contentText") or data.get("content_text") or data.get("text") or ""),
+                material_id=data.get("materialId") or data.get("material_id"),
+                interactive_id=data.get("interactiveId") or data.get("interactive_id"),
+                cabinet_file_id=data.get("cabinetFileId") or data.get("cabinet_file_id"),
+                row_kind=str(data.get("kind") or data.get("rowKind") or ""),
+                material_type=str(data.get("materialType") or data.get("material_type") or ""),
+                interactive_type=str(data.get("interactiveType") or data.get("interactive_type") or ""),
+                initial_state=data.get("state") if isinstance(data.get("state"), dict) else None,
+            )
+        except VideoMeetingError as exc:
+            return _error_response(exc)
+        serialized = serialize_material_session(session, user=request.user, include_state=True)
+        broadcast_material_event(
+            meeting.uuid,
+            {
+                "type": "material.opened",
+                "lesson_id": serialized.get("lessonId"),
+                "session_id": serialized.get("sessionId"),
+                "material": serialized.get("material"),
+                "interaction_mode": serialized.get("interactionMode"),
+                "state": serialized.get("state"),
+                "version": serialized.get("version"),
+                "materialSession": serialized,
+            },
+        )
+        return Response({
+            "success": True,
+            "materialSession": serialized,
+        })
+
+    def delete(self, request, meeting_uuid):
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+            data = request.data if isinstance(request.data, dict) else {}
+            close_material_session(
+                meeting=meeting,
+                user=request.user,
+                session_id=data.get("sessionId") or data.get("session_id"),
+            )
+        except VideoMeetingError as exc:
+            return _error_response(exc)
+        return Response({"success": True, "materialSession": None})
+
+
+class VideoMeetingMaterialPermissionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, meeting_uuid):
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+            data = request.data if isinstance(request.data, dict) else {}
+            mode = data.get("mode") or data.get("interactionMode") or data.get("interaction_mode")
+            session = set_interaction_mode(
+                meeting=meeting,
+                user=request.user,
+                mode=str(mode or ""),
+                session_id=data.get("sessionId") or data.get("session_id"),
+                collaborative_scope=data.get("collaborativeScope") or data.get("collaborative_scope"),
+                collaborative_user_ids=data.get("collaborativeUserIds") or data.get("collaborative_user_ids"),
+            )
+        except VideoMeetingError as exc:
+            return _error_response(exc)
+        serialized = serialize_material_session(session, user=request.user, include_state=True)
+        broadcast_material_event(
+            meeting.uuid,
+            {
+                "type": "material.permission_changed",
+                "session_id": session.pk,
+                "interaction_mode": session.interaction_mode,
+                "collaborative_scope": session.collaborative_scope,
+                "collaborative_user_ids": list(session.collaborative_user_ids or []),
+                "version": session.version,
+                "materialSession": serialized,
+            },
+        )
+        return Response({
+            "success": True,
+            "materialSession": serialized,
+        })
+
+
+class VideoMeetingMaterialOperationView(APIView):
+    """REST-применение операции (для тестов и fallback при проблемах WS)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, meeting_uuid):
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+            data = request.data if isinstance(request.data, dict) else {}
+            result = apply_material_operation(
+                meeting=meeting,
+                user=request.user,
+                action=str(data.get("action") or ""),
+                payload=data.get("payload") if isinstance(data.get("payload"), dict) else {},
+                operation_id=str(data.get("operationId") or data.get("operation_id") or ""),
+                session_id=data.get("sessionId") or data.get("session_id"),
+                base_version=data.get("baseVersion") if data.get("baseVersion") is not None else data.get("base_version"),
+            )
+        except VideoMeetingError as exc:
+            return _error_response(exc)
+        operation = result.get("operation")
+        if operation and not result.get("duplicate"):
+            broadcast_material_event(meeting.uuid, operation)
+        return Response({
+            "success": True,
+            "duplicate": bool(result.get("duplicate")),
+            "ephemeral": bool(result.get("ephemeral")),
+            "operation": operation,
+            "version": result.get("version"),
+            "materialSession": serialize_material_session(
+                result.get("session"),
+                user=request.user,
+                include_state=True,
+            ),
+        })

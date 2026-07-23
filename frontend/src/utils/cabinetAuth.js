@@ -235,6 +235,38 @@ export function fetchVideoMeetingLiveAnswers(meetingUuid) {
   return videoMeetingFetch(`/${meetingUuid}/live-answers/`, { method: "GET" });
 }
 
+export function fetchMeetingMaterialSession(meetingUuid) {
+  return videoMeetingFetch(`/${meetingUuid}/material-session/`, { method: "GET" });
+}
+
+export function openMeetingMaterialSession(meetingUuid, payload) {
+  return videoMeetingFetch(`/${meetingUuid}/material-session/`, {
+    method: "POST",
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export function closeMeetingMaterialSession(meetingUuid, payload = {}) {
+  return videoMeetingFetch(`/${meetingUuid}/material-session/`, {
+    method: "DELETE",
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export function setMeetingMaterialPermission(meetingUuid, payload) {
+  return videoMeetingFetch(`/${meetingUuid}/material-session/permission/`, {
+    method: "POST",
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export function sendMeetingMaterialOperation(meetingUuid, payload) {
+  return videoMeetingFetch(`/${meetingUuid}/material-session/operation/`, {
+    method: "POST",
+    body: JSON.stringify(payload || {}),
+  });
+}
+
 export function fetchTelemostStatus() {
   return cabinetFetch("/telemost/status/", { method: "GET" });
 }
@@ -438,14 +470,50 @@ export function deleteStudent(id) {
   return cabinetFetch(`/students/${id}/`, { method: "DELETE" });
 }
 
+export function fetchStudentSubjects(studentId, params = {}) {
+  return cabinetFetch(
+    buildCabinetQueryPath(`/students/${studentId}/subjects/`, params),
+    { method: "GET" },
+  );
+}
+
+export function createStudentSubject(studentId, payload) {
+  return cabinetFetch(`/students/${studentId}/subjects/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateStudentSubject(studentId, subjectId, payload) {
+  return cabinetFetch(`/students/${studentId}/subjects/${subjectId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteStudentSubject(studentId, subjectId, { force = false } = {}) {
+  const qs = force ? "?force=1" : "";
+  return cabinetFetch(`/students/${studentId}/subjects/${subjectId}/${qs}`, {
+    method: "DELETE",
+  });
+}
+
+export function fetchOwnStudentSubjects() {
+  return cabinetFetch("/student/subjects/", { method: "GET" });
+}
+
 export function notifyBillingChanged(detail = {}) {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent("cabinet:billing-changed", { detail }));
 }
 
-export function fetchStudentHomeworkOptions(studentId, { scheduleEventId } = {}) {
+export function fetchStudentHomeworkOptions(
+  studentId,
+  { scheduleEventId, studentSubjectId } = {},
+) {
   const params = new URLSearchParams();
   if (scheduleEventId) params.set("schedule_event_id", String(scheduleEventId));
+  if (studentSubjectId) params.set("student_subject_id", String(studentSubjectId));
   const qs = params.toString();
   return cabinetFetch(
     `/students/${studentId}/homework-options/${qs ? `?${qs}` : ""}`,
@@ -964,8 +1032,11 @@ export function completeStudentLesson(assignmentId) {
   return cabinetFetch(`/student/lessons/${assignmentId}/`, { method: "POST", body: "{}" });
 }
 
-export function fetchStudentAssignments() {
-  return cabinetFetch("/student/assignments/", { method: "GET" });
+export function fetchStudentAssignments({ studentSubjectId } = {}) {
+  const params = new URLSearchParams();
+  if (studentSubjectId) params.set("student_subject", String(studentSubjectId));
+  const qs = params.toString();
+  return cabinetFetch(`/student/assignments/${qs ? `?${qs}` : ""}`, { method: "GET" });
 }
 
 export function fetchStudentAssignment(homeworkId) {
@@ -997,8 +1068,11 @@ export function submitStudentInteractiveAttempt(assignmentId, payload) {
   });
 }
 
-export function fetchStudentSchedule() {
-  return cabinetFetch("/student/schedule/", { method: "GET" });
+export function fetchStudentSchedule({ studentSubjectId } = {}) {
+  const params = new URLSearchParams();
+  if (studentSubjectId) params.set("student_subject", String(studentSubjectId));
+  const qs = params.toString();
+  return cabinetFetch(`/student/schedule/${qs ? `?${qs}` : ""}`, { method: "GET" });
 }
 
 export function fetchStudentScheduleEvent(eventId) {
@@ -1009,9 +1083,12 @@ export function fetchStudentProgress() {
   return cabinetFetch("/student/progress/", { method: "GET" });
 }
 
-export function fetchStudentMaterials(query = "") {
-  const qs = query ? `?q=${encodeURIComponent(query)}` : "";
-  return cabinetFetch(`/student/materials/${qs}`, { method: "GET" });
+export function fetchStudentMaterials(query = "", { studentSubjectId } = {}) {
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  if (studentSubjectId) params.set("student_subject", String(studentSubjectId));
+  const qs = params.toString();
+  return cabinetFetch(`/student/materials/${qs ? `?${qs}` : ""}`, { method: "GET" });
 }
 
 export function fetchDirectMaterials() {

@@ -628,36 +628,120 @@ def check_variant_tasks_overlap(*, student, variant_id):
         return []
 
 
-def homework_options_for_student(*, teacher, student):
-    """Пункты плана с ДЗ для выдачи конкретному ученику."""
+def _active_enrollment_for_homework(
+    *,
+    teacher,
+    student,
+    student_subject_id=None,
+    schedule_event=None,
+):
+    """
+    Enrollment для выдачи ДЗ: как get_active_enrollment для урока —
+    учитываем предмет занятия, иначе берём непривязанный/последний план.
+    """
     from .choices import EnrollmentStatus, GroupStatus
     from .models import LessonPlanEnrollment
 
-    enrollment = (
-        LessonPlanEnrollment.objects.filter(
-            teacher=teacher,
-            student=student,
-        )
-        .exclude(status__in=[EnrollmentStatus.CANCELLED, EnrollmentStatus.COMPLETED])
-        .select_related("plan")
-        .order_by("-created_at")
-        .first()
-    )
-    if not enrollment:
-        group_ids = list(
-            student.groups.filter(status=GroupStatus.ACTIVE).values_list("pk", flat=True)
-        )
-        if group_ids:
-            enrollment = (
+    if schedule_event is not None:
+        if getattr(schedule_event, "student_subject_id", None) and not student_subject_id:
+            student_subject_id = schedule_event.student_subject_id
+        # Прямая привязка урока к пункту плана — приоритетнее «последнего» enrollment.
+        plan_item = getattr(schedule_event, "lesson_plan_item", None)
+        if plan_item is not None and plan_item.plan_id:
+            linked = (
                 LessonPlanEnrollment.objects.filter(
                     teacher=teacher,
-                    group_id__in=group_ids,
+                    student=student,
+                    plan_id=plan_item.plan_id,
                 )
                 .exclude(status__in=[EnrollmentStatus.CANCELLED, EnrollmentStatus.COMPLETED])
-                .select_related("plan")
+                .select_related("plan", "student_subject")
                 .order_by("-created_at")
                 .first()
             )
+            if linked:
+                return linked
+
+    qs = (
+        LessonPlanEnrollment.objects.filter(teacher=teacher, student=student)
+        .exclude(status__in=[EnrollmentStatus.CANCELLED, EnrollmentStatus.COMPLETED])
+        .select_related("plan", "student_subject")
+    )
+    if student_subject_id:
+        subject_qs = qs.filter(student_subject_id=student_subject_id)
+        if subject_qs.exists():
+            qs = subject_qs
+        else:
+            qs = qs.filter(student_subject__isnull=True)
+    else:
+        unbound = qs.filter(student_subject__isnull=True)
+        # Если все enrollment с предметом — не отбрасываем их при отсутствии subject_id.
+        if unbound.exists():
+            qs = unbound
+
+    enrollment = qs.order_by("-created_at").first()
+    if enrollment:
+        return enrollment
+
+    group_ids = list(
+        student.groups.filter(status=GroupStatus.ACTIVE).values_list("pk", flat=True)
+    )
+    if not group_ids:
+        return None
+    return (
+        LessonPlanEnrollment.objects.filter(
+            teacher=teacher,
+            group_id__in=group_ids,
+        )
+        .exclude(status__in=[EnrollmentStatus.CANCELLED, EnrollmentStatus.COMPLETED])
+        .select_related("plan", "student_subject")
+        .order_by("-created_at")
+        .first()
+    )
+
+
+def student_can_receive_plan_item_homework(*, teacher, student, plan_item, student_subject_id=None):
+    """Пункт плана доступен ученику через активный enrollment (с учётом предмета)."""
+    from .choices import EnrollmentStatus, GroupStatus
+    from .models import LessonPlanEnrollment
+
+    qs = LessonPlanEnrollment.objects.filter(
+        teacher=teacher,
+        plan_id=plan_item.plan_id,
+    ).exclude(status__in=[EnrollmentStatus.CANCELLED, EnrollmentStatus.COMPLETED])
+
+    student_match = qs.filter(student=student)
+    if student_subject_id:
+        subject_qs = student_match.filter(student_subject_id=student_subject_id)
+        if subject_qs.exists():
+            return True
+        if student_match.filter(student_subject__isnull=True).exists():
+            return True
+    elif student_match.exists():
+        return True
+
+    group_ids = list(
+        student.groups.filter(status=GroupStatus.ACTIVE).values_list("pk", flat=True)
+    )
+    if group_ids and qs.filter(group_id__in=group_ids).exists():
+        return True
+    return False
+
+
+def homework_options_for_student(
+    *,
+    teacher,
+    student,
+    student_subject_id=None,
+    schedule_event=None,
+):
+    """Пункты плана с ДЗ для выдачи конкретному ученику."""
+    enrollment = _active_enrollment_for_homework(
+        teacher=teacher,
+        student=student,
+        student_subject_id=student_subject_id,
+        schedule_event=schedule_event,
+    )
 
     if not enrollment:
         suggested = suggest_homework_due_at(
@@ -672,6 +756,7 @@ def homework_options_for_student(*, teacher, student):
             "plan_title": "",
             "items": [],
             "allow_custom": True,
+            "preferred_plan_item_id": None,
             "suggested_due_at": suggested.isoformat() if suggested else None,
             "suggested_due_source": "next_lesson" if suggested else None,
         }
@@ -723,6 +808,19 @@ def homework_options_for_student(*, teacher, student):
         after=timezone.now(),
     )
 
+    preferred_plan_item_id = None
+    if schedule_event is not None:
+        event_item_id = getattr(schedule_event, "lesson_plan_item_id", None)
+        if event_item_id and any(item["id"] == event_item_id for item in items):
+            preferred_plan_item_id = event_item_id
+        else:
+            # Пункт текущего урока может быть без материалов ДЗ в списке —
+            # всё равно подсветим его, если он из того же плана.
+            if event_item_id:
+                for plan_item in enrollment.plan.items.filter(pk=event_item_id):
+                    preferred_plan_item_id = plan_item.pk
+                    break
+
     return {
         "enrollment_id": enrollment.pk,
         "plan_id": enrollment.plan_id,
@@ -730,6 +828,7 @@ def homework_options_for_student(*, teacher, student):
         "plan_subject": subject or "",
         "items": items,
         "allow_custom": True,
+        "preferred_plan_item_id": preferred_plan_item_id,
         "suggested_due_at": suggested.isoformat() if suggested else None,
         "suggested_due_source": "next_lesson" if suggested else None,
     }
@@ -763,6 +862,7 @@ def release_for_student(event, student, plan_item, lesson):
                 "lesson": lesson,
                 "status": HomeworkStatus.ASSIGNED,
                 "due_at": due_at,
+                "student_subject": event.student_subject if event.student_subject_id else None,
             },
         )
         if not hw_created:
@@ -772,21 +872,26 @@ def release_for_student(event, student, plan_item, lesson):
             homework.due_at = due_at
             if homework.status == HomeworkStatus.DRAFT:
                 homework.status = HomeworkStatus.ASSIGNED
-            homework.save(
-                update_fields=[
-                    "title",
-                    "description",
-                    "lesson",
-                    "due_at",
-                    "status",
-                    "updated_at",
-                ]
-            )
+            update_fields = [
+                "title",
+                "description",
+                "lesson",
+                "due_at",
+                "status",
+                "updated_at",
+            ]
+            if event.student_subject_id and homework.student_subject_id != event.student_subject_id:
+                homework.student_subject_id = event.student_subject_id
+                update_fields.append("student_subject")
+            homework.save(update_fields=update_fields)
         _sync_homework_tasks(homework, plan_item)
         # Как при ручной выдаче: сразу показать ДЗ в разделе «Проверка».
         from .homework_api import ensure_homework_in_review_queue
 
         ensure_homework_in_review_queue(homework, student)
+        if event.homework_id != homework.id:
+            event.homework = homework
+            event.save(update_fields=["homework", "updated_at"])
 
     for interactive in plan_item.attached_interactives.all():
         _ensure_interactive_assignment(

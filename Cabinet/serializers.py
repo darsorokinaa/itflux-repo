@@ -13,6 +13,7 @@ from .choices import (
     PlanStatus,
     ReviewStatus,
     StudentStatus,
+    StudentSubjectStatus,
     SubmissionStatus,
 )
 from .invitations import invitation_join_path
@@ -56,7 +57,12 @@ from .models import (
     Student,
     StudentGroup,
     StudentInvitation,
+    StudentSubject,
     TeacherSavedMaterial,
+)
+from .student_subjects import (
+    student_subject_has_history,
+    subjects_compatible,
 )
 
 
@@ -66,6 +72,8 @@ class StudentListSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     group_ids = serializers.SerializerMethodField()
     is_registered = serializers.BooleanField(read_only=True)
+    subjects_count = serializers.SerializerMethodField()
+    subjects_preview = serializers.SerializerMethodField()
 
     class Meta:
         model = Student
@@ -85,6 +93,8 @@ class StudentListSerializer(serializers.ModelSerializer):
             "notes",
             "group_ids",
             "is_registered",
+            "subjects_count",
+            "subjects_preview",
             "created_at",
             "updated_at",
         ]
@@ -93,18 +103,165 @@ class StudentListSerializer(serializers.ModelSerializer):
     def get_group_ids(self, obj):
         return list(obj.groups.filter(status="active").values_list("id", flat=True))
 
+    def get_subjects_count(self, obj):
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get("subjects")
+        if prefetched is not None:
+            return sum(1 for s in prefetched if s.status == StudentSubjectStatus.ACTIVE)
+        return obj.subjects.filter(status=StudentSubjectStatus.ACTIVE).count()
+
+    def get_subjects_preview(self, obj):
+        qs = obj.subjects.filter(status=StudentSubjectStatus.ACTIVE).order_by("subject", "title", "id")[:5]
+        return [
+            {
+                "id": s.id,
+                "subject": s.subject,
+                "subject_label": s.subject_label,
+                "display_label": s.display_label,
+            }
+            for s in qs
+        ]
+
+
+class StudentSubjectSerializer(serializers.ModelSerializer):
+    subject_label = serializers.CharField(read_only=True)
+    direction_label = serializers.CharField(source="get_direction_display", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    display_label = serializers.CharField(read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
+    plan_enrollment = serializers.SerializerMethodField()
+    has_history = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StudentSubject
+        fields = [
+            "id",
+            "student",
+            "subject",
+            "subject_label",
+            "title",
+            "direction",
+            "direction_label",
+            "level",
+            "status",
+            "status_label",
+            "display_label",
+            "is_active",
+            "notes",
+            "plan_enrollment",
+            "has_history",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["student", "created_at", "updated_at"]
+
+    def get_plan_enrollment(self, obj):
+        enrollment = (
+            obj.plan_enrollments.filter(
+                status__in=[EnrollmentStatus.ACTIVE, EnrollmentStatus.PAUSED],
+            )
+            .select_related("plan")
+            .order_by("-created_at")
+            .first()
+        )
+        if not enrollment:
+            return None
+        return {
+            "id": enrollment.id,
+            "plan_id": enrollment.plan_id,
+            "plan_title": enrollment.plan.title if enrollment.plan_id else "",
+            "status": enrollment.status,
+        }
+
+    def get_has_history(self, obj):
+        return student_subject_has_history(obj)
+
+
+class StudentSubjectWriteSerializer(serializers.ModelSerializer):
+    plan_id = serializers.IntegerField(required=False, allow_null=True, write_only=True)
+
+    class Meta:
+        model = StudentSubject
+        fields = [
+            "subject",
+            "title",
+            "direction",
+            "level",
+            "status",
+            "notes",
+            "plan_id",
+        ]
+
+    def validate_subject(self, value):
+        subject_id = normalize_plan_subject_id(value)
+        if not subject_id:
+            raise serializers.ValidationError("Укажите предмет.")
+        options = {item["id"] for item in get_plan_subject_options()}
+        # Allow known options and legacy aliases; reject empty garbage.
+        if options and subject_id not in options and subject_id not in {
+            "informatics", "inf", "math", "math_base", "prog", "rus", "other",
+        }:
+            # Still allow unknown codes so teachers aren't blocked if catalog lags.
+            pass
+        return subject_id
+
+    def validate(self, attrs):
+        instance = getattr(self, "instance", None)
+        student = self.context.get("student") or (instance.student if instance else None)
+        subject = attrs.get("subject", getattr(instance, "subject", None))
+        title = attrs.get("title", getattr(instance, "title", "") if instance else "")
+        direction = attrs.get(
+            "direction",
+            getattr(instance, "direction", "other") if instance else "other",
+        )
+        status = attrs.get(
+            "status",
+            getattr(instance, "status", StudentSubjectStatus.ACTIVE) if instance else StudentSubjectStatus.ACTIVE,
+        )
+        if student and status == StudentSubjectStatus.ACTIVE:
+            qs = StudentSubject.objects.filter(
+                student=student,
+                subject=subject,
+                direction=direction or "",
+                title=(title or "").strip(),
+                status=StudentSubjectStatus.ACTIVE,
+            )
+            if instance:
+                qs = qs.exclude(pk=instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    "У этого ученика уже есть такой активный предмет с тем же направлением."
+                )
+        if "title" in attrs:
+            attrs["title"] = (attrs.get("title") or "").strip()
+        if "level" in attrs:
+            attrs["level"] = (attrs.get("level") or "").strip()
+        return attrs
+
 
 class StudentDetailSerializer(StudentListSerializer):
     groups = serializers.SerializerMethodField()
+    subjects = serializers.SerializerMethodField()
+    subjects_count = serializers.SerializerMethodField()
 
     class Meta(StudentListSerializer.Meta):
-        fields = StudentListSerializer.Meta.fields + ["groups"]
+        fields = StudentListSerializer.Meta.fields + ["groups", "subjects", "subjects_count"]
 
     def get_groups(self, obj):
         return [
             {"id": g.id, "title": g.title}
             for g in obj.groups.filter(status="active")
         ]
+
+    def get_subjects(self, obj):
+        include_archived = bool(self.context.get("include_archived_subjects"))
+        qs = obj.subjects.all()
+        if not include_archived:
+            qs = qs.filter(status=StudentSubjectStatus.ACTIVE)
+        qs = qs.prefetch_related("plan_enrollments__plan").order_by("subject", "title", "id")
+        return StudentSubjectSerializer(qs, many=True, context=self.context).data
+
+    def get_subjects_count(self, obj):
+        return obj.subjects.filter(status=StudentSubjectStatus.ACTIVE).count()
 
 
 class StudentWriteSerializer(serializers.ModelSerializer):
@@ -245,6 +402,8 @@ class MaterialListSerializer(serializers.ModelSerializer):
     direction_label = serializers.CharField(source="get_direction_display", read_only=True)
     is_saved = serializers.SerializerMethodField()
     file_url = serializers.SerializerMethodField()
+    preview_url = serializers.SerializerMethodField()
+    cabinet_file_id = serializers.SerializerMethodField()
     is_own = serializers.SerializerMethodField()
 
     class Meta:
@@ -264,6 +423,8 @@ class MaterialListSerializer(serializers.ModelSerializer):
             "difficulty",
             "external_url",
             "file_url",
+            "preview_url",
+            "cabinet_file_id",
             "is_public",
             "is_own",
             "status",
@@ -275,6 +436,14 @@ class MaterialListSerializer(serializers.ModelSerializer):
         from .files_services import material_file_url
 
         return material_file_url(obj)
+
+    def get_preview_url(self, obj):
+        from .files_services import material_view_url
+
+        return material_view_url(obj)
+
+    def get_cabinet_file_id(self, obj):
+        return str(obj.cabinet_file_id) if obj.cabinet_file_id else None
 
     def get_is_own(self, obj):
         teacher = self.context.get("teacher")
@@ -366,7 +535,7 @@ def _interactive_attachment_json(interactive):
 
 
 def _material_attachment_json(material):
-    from .files_services import material_file_url
+    from .files_services import material_file_url, material_view_url
 
     return {
         "id": material.id,
@@ -378,6 +547,7 @@ def _material_attachment_json(material):
         "subtopic": material.subtopic or "",
         "external_url": material.external_url or "",
         "file_url": material_file_url(material),
+        "preview_url": material_view_url(material),
         "cabinet_file_id": str(material.cabinet_file_id) if material.cabinet_file_id else None,
     }
 
@@ -780,6 +950,7 @@ class LessonPlanEnrollmentSerializer(serializers.ModelSerializer):
     group_name = serializers.SerializerMethodField()
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     format_label = serializers.CharField(source="get_format_display", read_only=True)
+    student_subject_label = serializers.SerializerMethodField()
 
     class Meta:
         model = LessonPlanEnrollment
@@ -789,6 +960,8 @@ class LessonPlanEnrollmentSerializer(serializers.ModelSerializer):
             "plan_title",
             "student",
             "student_name",
+            "student_subject",
+            "student_subject_label",
             "group",
             "group_name",
             "format",
@@ -811,6 +984,11 @@ class LessonPlanEnrollmentSerializer(serializers.ModelSerializer):
     def get_group_name(self, obj):
         return obj.group.title if obj.group else None
 
+    def get_student_subject_label(self, obj):
+        if obj.student_subject_id and obj.student_subject:
+            return obj.student_subject.display_label
+        return None
+
 
 class LessonPlanEnrollmentWriteSerializer(serializers.ModelSerializer):
     class Meta:
@@ -818,6 +996,7 @@ class LessonPlanEnrollmentWriteSerializer(serializers.ModelSerializer):
         fields = [
             "plan",
             "student",
+            "student_subject",
             "group",
             "format",
             "start_date",
@@ -837,10 +1016,25 @@ class LessonPlanEnrollmentWriteSerializer(serializers.ModelSerializer):
     def validate(self, data):
         student = data["student"] if "student" in data else getattr(self.instance, "student", None)
         group = data["group"] if "group" in data else getattr(self.instance, "group", None)
+        student_subject = (
+            data["student_subject"]
+            if "student_subject" in data
+            else getattr(self.instance, "student_subject", None)
+        )
         if not student and not group:
             raise serializers.ValidationError("Укажите ученика или группу.")
         if student and group:
             raise serializers.ValidationError("Укажите либо ученика, либо группу.")
+
+        if student_subject:
+            if not student:
+                raise serializers.ValidationError({
+                    "student_subject": "Предмет можно указать только для индивидуального ученика.",
+                })
+            if student_subject.student_id != student.id:
+                raise serializers.ValidationError({
+                    "student_subject": "Предмет не принадлежит выбранному ученику.",
+                })
 
         plan = data.get("plan") or getattr(self.instance, "plan", None)
         status = data.get("status", getattr(self.instance, "status", EnrollmentStatus.ACTIVE))
@@ -852,6 +1046,23 @@ class LessonPlanEnrollmentWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "plan": "Черновик плана нельзя назначить ученику или группе. Сначала опубликуйте план.",
             })
+        if plan and student_subject and not subjects_compatible(plan.subject, student_subject.subject):
+            raise serializers.ValidationError({
+                "plan": (
+                    f"Предмет плана ({get_plan_subject_label(plan.subject)}) "
+                    f"не совпадает с предметом ученика ({student_subject.subject_label})."
+                ),
+            })
+        if student and not group and not student_subject:
+            active_count = student.subjects.filter(status=StudentSubjectStatus.ACTIVE).count()
+            if active_count > 1:
+                raise serializers.ValidationError({
+                    "student_subject": "Укажите предмет ученика, к которому назначается план.",
+                })
+            if active_count == 1 and "student_subject" not in data:
+                data["student_subject"] = student.subjects.filter(
+                    status=StudentSubjectStatus.ACTIVE
+                ).first()
         return data
 
 
@@ -1232,6 +1443,7 @@ class HomeworkTaskSerializer(serializers.ModelSerializer):
 
 class HomeworkListSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source="get_status_display", read_only=True)
+    student_subject_label = serializers.SerializerMethodField()
 
     class Meta:
         model = Homework
@@ -1242,6 +1454,8 @@ class HomeworkListSerializer(serializers.ModelSerializer):
             "lesson",
             "lesson_plan_item",
             "student",
+            "student_subject",
+            "student_subject_label",
             "group",
             "due_at",
             "status",
@@ -1249,6 +1463,11 @@ class HomeworkListSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def get_student_subject_label(self, obj):
+        if obj.student_subject_id and obj.student_subject:
+            return obj.student_subject.display_label
+        return None
 
 
 class HomeworkDetailSerializer(HomeworkListSerializer):
@@ -1394,6 +1613,7 @@ class ScheduleEventSerializer(serializers.ModelSerializer):
     meeting_url = serializers.URLField(read_only=True)
     participants = ScheduleEventParticipantSerializer(many=True, read_only=True)
     series_id = serializers.IntegerField(read_only=True)
+    student_subject_label = serializers.SerializerMethodField()
 
     class Meta:
         model = ScheduleEvent
@@ -1409,6 +1629,8 @@ class ScheduleEventSerializer(serializers.ModelSerializer):
             "format",
             "student",
             "student_name",
+            "student_subject",
+            "student_subject_label",
             "group",
             "group_title",
             "lesson",
@@ -1436,11 +1658,17 @@ class ScheduleEventSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["created_at", "updated_at"]
 
+    def get_student_subject_label(self, obj):
+        if obj.student_subject_id and obj.student_subject:
+            return obj.student_subject.display_label
+        return None
+
 
 class ScheduleEventSeriesSerializer(serializers.ModelSerializer):
     event_type_label = serializers.CharField(source="get_event_type_display", read_only=True)
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     recurrence_type_label = serializers.CharField(source="get_recurrence_type_display", read_only=True)
+    student_subject_label = serializers.SerializerMethodField()
 
     class Meta:
         model = ScheduleEventSeries
@@ -1453,6 +1681,8 @@ class ScheduleEventSeriesSerializer(serializers.ModelSerializer):
             "lesson",
             "lesson_plan_item",
             "group",
+            "student_subject",
+            "student_subject_label",
             "timezone",
             "start_date",
             "start_time",
@@ -1476,6 +1706,11 @@ class ScheduleEventSeriesSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["created_at", "updated_at"]
 
+    def get_student_subject_label(self, obj):
+        if obj.student_subject_id and obj.student_subject:
+            return obj.student_subject.display_label
+        return None
+
 
 class ScheduleSeriesCreateSerializer(ScheduleEventSeriesSerializer):
     student_ids = serializers.ListField(
@@ -1491,6 +1726,7 @@ class ScheduleSeriesCreateSerializer(ScheduleEventSeriesSerializer):
         write_only=True,
     )
     group_id = serializers.IntegerField(required=False, allow_null=True, write_only=True)
+    student_subject_id = serializers.IntegerField(required=False, allow_null=True, write_only=True)
     notify_participants = serializers.BooleanField(default=True, write_only=True)
 
     class Meta(ScheduleEventSeriesSerializer.Meta):
@@ -1498,6 +1734,7 @@ class ScheduleSeriesCreateSerializer(ScheduleEventSeriesSerializer):
             "student_ids",
             "extra_student_ids",
             "group_id",
+            "student_subject_id",
             "notify_participants",
         ]
 
@@ -1623,7 +1860,9 @@ def build_dashboard_payload(teacher):
     today_events_qs = ScheduleEvent.objects.filter(
         owner=teacher,
         starts_at__date=today,
-    ).exclude(status=ScheduleEvent.Status.CANCELLED).select_related("student", "group")
+    ).exclude(status=ScheduleEvent.Status.CANCELLED).select_related(
+        "student", "student_subject", "group",
+    )
 
     new_submissions = HomeworkSubmission.objects.filter(
         homework__teacher=teacher,

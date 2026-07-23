@@ -23,11 +23,24 @@ def get_active_enrollment(event):
     )
     if event.student_id:
         qs = qs.filter(student_id=event.student_id)
+        if event.student_subject_id:
+            # Предмет занятия → enrollment этого предмета, иначе старый без предмета.
+            subject_qs = qs.filter(student_subject_id=event.student_subject_id)
+            if subject_qs.exists():
+                qs = subject_qs
+            else:
+                qs = qs.filter(student_subject__isnull=True)
+        else:
+            # Старые уроки без предмета не должны «прилипать» к новому
+            # subject-specific плану — иначе ломается тема/материалы в календаре.
+            unbound = qs.filter(student_subject__isnull=True)
+            if unbound.exists():
+                qs = unbound
     elif event.group_id:
         qs = qs.filter(group_id=event.group_id)
     else:
         return None
-    return qs.select_related("plan").prefetch_related(
+    return qs.select_related("plan", "student_subject").prefetch_related(
         "plan__items__materials",
         "plan__items__attached_interactives",
         "plan__items__homework_materials",
@@ -41,6 +54,11 @@ def events_for_enrollment(enrollment, owner):
     qs = ScheduleEvent.objects.filter(owner=owner)
     if enrollment.student_id:
         qs = qs.filter(student_id=enrollment.student_id)
+        if enrollment.student_subject_id:
+            # Только уроки этого предмета — не смешиваем слоты планов.
+            qs = qs.filter(student_subject_id=enrollment.student_subject_id)
+        else:
+            qs = qs.filter(student_subject__isnull=True)
     elif enrollment.group_id:
         qs = qs.filter(group_id=enrollment.group_id)
     else:

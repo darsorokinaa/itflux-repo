@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import CabinetIcon from "../CabinetIcons";
 import CabinetModal from "./CabinetModal";
 import PlanItemResourcesPicker from "./PlanItemResourcesPicker";
-import { assignMaterialDirect } from "../../utils/cabinetAuth";
+import { assignMaterialDirect, fetchStudentSubjects } from "../../utils/cabinetAuth";
 
 function materialMeta(material) {
   return material.material_type_label
@@ -42,12 +42,35 @@ export default function MaterialsAssignModal({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [subjects, setSubjects] = useState([]);
+  const [studentSubjectId, setStudentSubjectId] = useState("");
 
   const targetLabel = group?.name || student?.name || "";
   const materialIds = useMemo(
     () => materials.map((item) => item.id).filter(Boolean),
     [materials],
   );
+
+  useEffect(() => {
+    if (!student?.id || group?.id) {
+      setSubjects([]);
+      setStudentSubjectId("");
+      return undefined;
+    }
+    let cancelled = false;
+    fetchStudentSubjects(student.id)
+      .then((data) => {
+        if (cancelled) return;
+        const list = (Array.isArray(data) ? data : data?.items || [])
+          .filter((s) => s.status !== "archived");
+        setSubjects(list);
+        if (list.length === 1) setStudentSubjectId(String(list[0].id));
+      })
+      .catch(() => {
+        if (!cancelled) setSubjects([]);
+      });
+    return () => { cancelled = true; };
+  }, [student?.id, group?.id]);
 
   const handleAttachMaterial = async (material) => {
     if (!material?.id) return;
@@ -67,13 +90,26 @@ export default function MaterialsAssignModal({
       setError("Не выбран получатель");
       return;
     }
+    if (!group?.id && subjects.length > 1 && !studentSubjectId) {
+      setError("Выберите предмет ученика");
+      return;
+    }
+    if (!group?.id && subjects.length === 0) {
+      setError("У ученика нет предметов. Добавьте предмет в карточке ученика.");
+      return;
+    }
 
     setSubmitting(true);
     setError("");
     try {
       const base = {
         message: message.trim() || undefined,
-        ...(group?.id ? { group_id: group.id } : { student_id: student.id }),
+        ...(group?.id
+          ? { group_id: group.id }
+          : {
+              student_id: student.id,
+              student_subject_id: studentSubjectId ? Number(studentSubjectId) : undefined,
+            }),
       };
       for (const materialId of materialIds) {
         await assignMaterialDirect({ ...base, material_id: materialId });
@@ -96,6 +132,24 @@ export default function MaterialsAssignModal({
           <p className="cabinet-auth-muted">
             Материалы появятся у ученика во вкладке «Материалы» — без домашнего задания.
           </p>
+
+          {!group?.id && subjects.length ? (
+            <label className="cb-field">
+              <span>Предмет{subjects.length > 1 ? " *" : ""}</span>
+              <select
+                value={studentSubjectId}
+                onChange={(e) => setStudentSubjectId(e.target.value)}
+                required={subjects.length > 1}
+              >
+                {subjects.length > 1 ? <option value="">Выберите предмет</option> : null}
+                {subjects.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.display_label || s.subject_label || s.subject}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
           <div className="cb-attach-section">
             <div className="cb-hw-assign-section-head">

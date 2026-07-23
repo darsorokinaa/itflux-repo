@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import CabinetIcon from "../../CabinetIcons";
-import TelegramConnectPrompt from "../../components/TelegramConnectPrompt";
 import { fetchStudentDashboard } from "../../../utils/cabinetAuth";
 import { loadStudentData } from "../studentData";
 import StudentEventDetailPopover from "../StudentEventDetailPopover";
@@ -241,7 +240,6 @@ export default function StudentDashboard() {
 
   return (
     <StudentPageShell className="st-dashboard">
-      <TelegramConnectPrompt />
       <section className="st-dash-hero">
         <div className="st-dash-hero__content">
           <h1 className="st-dash-hero__title">Привет, {data.greeting_name}!</h1>

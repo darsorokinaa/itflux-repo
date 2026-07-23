@@ -409,7 +409,36 @@ function decorateFipiBitmapImages(root, mode) {
       img.removeAttribute("width");
       img.removeAttribute("height");
     }
-    if (!src.endsWith(".gif")) return;
+    // PNG/JPEG формулы вперемешку с текстом («Найдите [tg α], если…»).
+    if (!src.endsWith(".gif")) {
+      const isRaster =
+        src.endsWith(".png") ||
+        src.endsWith(".jpg") ||
+        src.endsWith(".jpeg") ||
+        src.endsWith(".webp") ||
+        src.includes("tasks_images");
+      if (isRaster && mode === "question") {
+        if (isFipiDiagramImage(img)) {
+          img.classList.add("oge-math-fipi-bitmap", "oge-math-fipi-diagram");
+          img.removeAttribute("width");
+          img.removeAttribute("height");
+          return;
+        }
+        const siblings = [...(img.parentElement?.childNodes || [])];
+        const hasTextSibling = siblings.some(
+          (n) =>
+            n !== img &&
+            ((n.nodeType === 3 && (n.textContent || "").trim()) ||
+              (n.nodeType === 1 && n !== img && !n.contains?.(img) && normalizeCellText(n)))
+        );
+        if (hasTextSibling) {
+          img.classList.add("oge-math-fipi-inline-frac");
+          img.removeAttribute("width");
+          img.removeAttribute("height");
+        }
+      }
+      return;
+    }
     if (mode === "question" && isFipiDiagramImage(img)) {
       img.classList.add("oge-math-fipi-bitmap", "oge-math-fipi-diagram");
       img.removeAttribute("width");

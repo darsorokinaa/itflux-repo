@@ -530,6 +530,8 @@ def api_schedule_create(request):
         for ev in created_events:
             get_or_create_meeting_for_event(event=ev, created_by=request.user)
 
+    student_subject_id = data.get("student_subject_id") or data.get("student_subject")
+
     if recurrence_type and recurrence_type != "none":
         start_date = starts_at.date()
         series_data = {
@@ -556,17 +558,21 @@ def api_schedule_create(request):
             "materials": (data.get("materials") or "").strip(),
             "reminder_minutes": data.get("reminder_minutes"),
             "notify_participants": notify,
+            "student_subject_id": student_subject_id,
         }
         if series_data["recurrence_until"] and isinstance(series_data["recurrence_until"], str):
             series_data["recurrence_until"] = dt.strptime(series_data["recurrence_until"], "%Y-%m-%d").date()
-        series, events = create_series(
-            teacher=request.user,
-            series_data=series_data,
-            student_ids=student_ids,
-            group_id=group_id,
-            extra_student_ids=extra_student_ids,
-            notify=notify,
-        )
+        try:
+            series, events = create_series(
+                teacher=request.user,
+                series_data=series_data,
+                student_ids=student_ids,
+                group_id=group_id,
+                extra_student_ids=extra_student_ids,
+                notify=notify,
+            )
+        except ValueError as exc:
+            return JsonResponse({"ok": False, "error": str(exc)}, status=400)
         first = events[0] if events else None
         if not first:
             return JsonResponse({"ok": False, "error": "Не удалось создать занятия серии."}, status=400)
@@ -578,33 +584,37 @@ def api_schedule_create(request):
             "events_created": len(events),
         }, status=201)
 
-    event = create_single_event(
-        teacher=request.user,
-        data={
-            "title": title,
-            "description": (data.get("description") or "").strip(),
-            "topic": (data.get("topic") or "").strip(),
-            "starts_at": starts_at,
-            "ends_at": ends_at,
-            "event_type": event_type,
-            "format": ScheduleEvent.Format.ONLINE if is_online else ScheduleEvent.Format.OFFLINE,
-            "telemost_url": telemost_url if is_online else "",
-            "meeting_provider": meeting_provider,
-            "audience": (data.get("audience") or "").strip(),
-            "materials": (data.get("materials") or "").strip(),
-            "teacher_comment": (data.get("teacher_comment") or data.get("comment") or "").strip(),
-            "lesson": data.get("lesson_id") or data.get("lesson"),
-            "lesson_plan_item": data.get("lesson_plan_item_id") or data.get("lesson_plan_item"),
-            "homework": data.get("homework_id") or data.get("homework"),
-            "timezone": data.get("timezone") or "Europe/Moscow",
-            "reminder_minutes": data.get("reminder_minutes"),
-            "notify_participants": notify,
-        },
-        student_ids=student_ids,
-        group_id=group_id,
-        extra_student_ids=extra_student_ids,
-        notify=notify,
-    )
+    try:
+        event = create_single_event(
+            teacher=request.user,
+            data={
+                "title": title,
+                "description": (data.get("description") or "").strip(),
+                "topic": (data.get("topic") or "").strip(),
+                "starts_at": starts_at,
+                "ends_at": ends_at,
+                "event_type": event_type,
+                "format": ScheduleEvent.Format.ONLINE if is_online else ScheduleEvent.Format.OFFLINE,
+                "telemost_url": telemost_url if is_online else "",
+                "meeting_provider": meeting_provider,
+                "audience": (data.get("audience") or "").strip(),
+                "materials": (data.get("materials") or "").strip(),
+                "teacher_comment": (data.get("teacher_comment") or data.get("comment") or "").strip(),
+                "lesson": data.get("lesson_id") or data.get("lesson"),
+                "lesson_plan_item": data.get("lesson_plan_item_id") or data.get("lesson_plan_item"),
+                "homework": data.get("homework_id") or data.get("homework"),
+                "timezone": data.get("timezone") or "Europe/Moscow",
+                "reminder_minutes": data.get("reminder_minutes"),
+                "notify_participants": notify,
+                "student_subject_id": student_subject_id,
+            },
+            student_ids=student_ids,
+            group_id=group_id,
+            extra_student_ids=extra_student_ids,
+            notify=notify,
+        )
+    except ValueError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
     if data.get("audience"):
         event.audience = data.get("audience")
         event.save(update_fields=["audience"])
@@ -731,6 +741,22 @@ def api_schedule_update(request, event_id):
         update_fields["reminder_minutes"] = data.get("reminder_minutes")
     if "tags" in data and isinstance(data.get("tags"), list):
         event.tags = data.get("tags")
+    if "student_subject" in data or "student_subject_id" in data:
+        from .student_subjects import resolve_student_subject_for_write
+
+        ss_id = data.get("student_subject_id")
+        if ss_id is None:
+            ss_id = data.get("student_subject")
+        try:
+            ss = resolve_student_subject_for_write(
+                teacher=request.user,
+                student=event.student,
+                student_subject_id=ss_id,
+                allow_empty=True,
+            )
+        except ValueError as exc:
+            return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+        update_fields["student_subject"] = ss.id if ss else None
 
     notify_updates = notify and not time_rescheduled
 
@@ -741,6 +767,7 @@ def api_schedule_update(request, event_id):
     else:
         event.save()
 
+    event.refresh_from_db()
     return JsonResponse({"ok": True, "event": schedule_event_to_json(event)})
 
 

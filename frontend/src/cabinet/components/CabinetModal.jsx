@@ -1,7 +1,10 @@
+import { createPortal } from "react-dom";
 import CabinetIcon from "../CabinetIcons";
 
 export default function CabinetModal({ title, onClose, children, wide, lesson, footer, hideHead }) {
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div className="cb-modal-backdrop" role="presentation" onClick={onClose}>
       <div
         className={[
@@ -25,6 +28,7 @@ export default function CabinetModal({ title, onClose, children, wide, lesson, f
         <div className="cb-modal__body">{children}</div>
         {footer ? <div className="cb-modal__footer">{footer}</div> : null}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

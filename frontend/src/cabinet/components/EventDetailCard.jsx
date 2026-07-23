@@ -1094,7 +1094,9 @@ export default function EventDetailCard({
                 title="Домашнее задание"
                 rows={homework}
                 emptyLabel="Домашнее задание не выдано"
-                emptyActionLabel="Добавить ДЗ"
+                emptyActionLabel="Выдать ДЗ"
+                addLabel="Выдать ДЗ"
+                onAdd={event.readOnly || studentMode ? null : handleAddHomework}
                 onEmptyAction={event.readOnly || studentMode ? null : handleAddHomework}
                 variant="homework"
                 isMobile={isMobile}

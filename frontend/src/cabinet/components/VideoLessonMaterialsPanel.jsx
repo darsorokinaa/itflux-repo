@@ -12,8 +12,19 @@ function kindIcon(kind) {
   return "folder";
 }
 
-function isRowShowing(row, presented) {
-  if (!presented?.kind || !row) return false;
+function isRowShowing(row, presented, materialSession) {
+  if (!row) return false;
+  if (materialSession?.material) {
+    const m = materialSession.material;
+    if (row.materialId && m.id && Number(row.materialId) === Number(m.id)) return true;
+    if (row.interactiveId && m.interactiveId && Number(row.interactiveId) === Number(m.interactiveId)) {
+      return true;
+    }
+    if (row.label && m.title && row.label === m.title && row.url && m.openUrl) {
+      return String(m.openUrl).includes(String(row.url).split("?")[0]);
+    }
+  }
+  if (!presented?.kind) return false;
   if (row.kind === "board" && presented.kind === "board") {
     return Boolean(row.boardId && String(presented.boardId) === String(row.boardId));
   }
@@ -32,13 +43,17 @@ function isRowShowing(row, presented) {
 }
 
 function canPresentRow(row) {
-  return row?.kind === "variant" || row?.kind === "board";
+  if (!row) return false;
+  if (row.kind === "variant" || row.kind === "board") return true;
+  // Остальные материалы синхронизируются через material session.
+  return row.kind !== "board";
 }
 
 function MaterialRow({
   row,
   canManage,
   presented,
+  materialSession = null,
   presentBusy,
   menuKey,
   setMenuKey,
@@ -46,7 +61,7 @@ function MaterialRow({
   onToggleVisibility,
   onOpenInNewTab,
 }) {
-  const showing = isRowShowing(row, presented);
+  const showing = isRowShowing(row, presented, materialSession);
   const presentable = canPresentRow(row);
   const menuOpen = menuKey === row.key;
 
@@ -145,6 +160,7 @@ export default function VideoLessonMaterialsPanel({
   homeworkRows,
   boardRow = null,
   presented,
+  materialSession = null,
   presentBusy,
   event,
   liveAnswers,
@@ -280,6 +296,7 @@ export default function VideoLessonMaterialsPanel({
                 row={row}
                 canManage={canManage}
                 presented={presented}
+                materialSession={materialSession}
                 presentBusy={presentBusy}
                 menuKey={menuKey}
                 setMenuKey={setMenuKey}

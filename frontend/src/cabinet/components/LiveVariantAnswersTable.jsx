@@ -105,11 +105,17 @@ export default function LiveVariantAnswersTable({ answers, loading = false, comp
             {tasks.length ? (
               <div className="live-variant-answers__table-wrap">
                 <table className="live-variant-answers__table">
+                  <colgroup>
+                    <col className="live-variant-answers__col-num" />
+                    <col />
+                    <col />
+                    <col className="live-variant-answers__col-status" />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th>№</th>
-                      <th>Ответ ученика</th>
-                      <th>Правильный</th>
+                      <th>Ответ</th>
+                      <th>Верный</th>
                       <th></th>
                     </tr>
                   </thead>

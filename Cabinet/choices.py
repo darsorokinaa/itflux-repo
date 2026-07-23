@@ -21,6 +21,11 @@ class StudentStatus(models.TextChoices):
     ARCHIVED = "archived", "В архиве"
 
 
+class StudentSubjectStatus(models.TextChoices):
+    ACTIVE = "active", "Активен"
+    ARCHIVED = "archived", "В архиве"
+
+
 class InvitationStatus(models.TextChoices):
     PENDING = "pending", "Ожидает"
     ACCEPTED = "accepted", "Принято"

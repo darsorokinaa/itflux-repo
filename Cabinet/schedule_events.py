@@ -1,7 +1,10 @@
+from datetime import timedelta
+
+from django.db.models import Q
 from django.utils import timezone
 
-from .choices import ParticipantStatus
-from .models import ScheduleEvent
+from .choices import HomeworkStatus, ParticipantStatus
+from .models import Homework, ScheduleEvent
 from .plan_schedule import (
     get_active_enrollment,
     resolve_plan_item_for_event,
@@ -88,6 +91,133 @@ def _plan_item_to_json(item, *, lesson_number=None):
     }
 
 
+def _event_student_ids(event) -> list[int]:
+    ids = list(
+        event.participants.exclude(status=ParticipantStatus.REMOVED)
+        .exclude(student_id__isnull=True)
+        .values_list("student_id", flat=True)
+    )
+    if event.student_id and event.student_id not in ids:
+        ids.append(event.student_id)
+    return [pk for pk in ids if pk]
+
+
+def resolve_assigned_homework_for_event(event) -> Homework | None:
+    """Выданное ДЗ для карточки урока: прямая связь или по пункту плана/ученикам."""
+    if event.homework_id:
+        hw = getattr(event, "homework", None)
+        if hw is not None and hw.status != HomeworkStatus.ARCHIVED:
+            return hw
+        return (
+            Homework.objects.filter(pk=event.homework_id)
+            .exclude(status=HomeworkStatus.ARCHIVED)
+            .first()
+        )
+
+    plan_item, _ = resolve_plan_item_for_event(event)
+    qs = Homework.objects.filter(teacher_id=event.owner_id).exclude(
+        status__in=[HomeworkStatus.ARCHIVED, HomeworkStatus.DRAFT]
+    )
+    student_ids = _event_student_ids(event)
+    if plan_item is not None:
+        plan_qs = qs.filter(lesson_plan_item_id=plan_item.id)
+        if student_ids:
+            plan_qs = plan_qs.filter(Q(student_id__in=student_ids) | Q(group_id=event.group_id))
+        elif event.group_id:
+            plan_qs = plan_qs.filter(group_id=event.group_id)
+        found = plan_qs.order_by("-created_at", "-id").first()
+        if found:
+            return found
+
+    # Кастомное ДЗ без пункта плана: показываем только на ближайшем уроке к моменту выдачи.
+    if not student_ids and not event.group_id:
+        return None
+    linked_ids = ScheduleEvent.objects.filter(homework_id__isnull=False).exclude(
+        pk=event.pk
+    ).values_list("homework_id", flat=True)
+    custom_qs = qs.filter(lesson_plan_item__isnull=True).exclude(pk__in=linked_ids)
+    if student_ids:
+        custom_qs = custom_qs.filter(Q(student_id__in=student_ids) | Q(group_id=event.group_id))
+    elif event.group_id:
+        custom_qs = custom_qs.filter(group_id=event.group_id)
+    homework = custom_qs.order_by("-created_at", "-id").first()
+    if homework is None or not event.starts_at or not homework.created_at:
+        return None
+    sibling_filter = Q(owner_id=event.owner_id)
+    if event.student_id:
+        sibling_filter &= Q(student_id=event.student_id)
+    elif event.group_id:
+        sibling_filter &= Q(group_id=event.group_id)
+    else:
+        return None
+    siblings = list(
+        ScheduleEvent.objects.filter(sibling_filter)
+        .filter(
+            starts_at__gte=homework.created_at - timedelta(days=2),
+            starts_at__lte=homework.created_at + timedelta(days=3),
+        )
+        .only("id", "starts_at")
+    )
+    if not siblings:
+        return None
+    nearest = min(
+        siblings,
+        key=lambda row: abs((row.starts_at - homework.created_at).total_seconds()),
+    )
+    if nearest.pk != event.pk:
+        return None
+    return homework
+
+
+def _assigned_homework_to_json(homework: Homework | None, *, plan_item=None) -> dict | None:
+    if homework is None:
+        return None
+    item = plan_item
+    if item is None and homework.lesson_plan_item_id:
+        item = homework.lesson_plan_item
+    materials = []
+    interactives = []
+    description = (homework.description or "").strip()
+    if item is not None:
+        materials = [_material_to_json(m) for m in item.homework_materials.all()]
+        interactives = [_interactive_to_json(i) for i in item.homework_interactives.all()]
+        if not description:
+            description = (item.homework_description or "").strip()
+    if not materials and not interactives:
+        # Кастомное ДЗ: собираем строки из задач.
+        for task in homework.tasks.all():
+            if task.interactive_id and task.interactive:
+                interactives.append(_interactive_to_json(task.interactive))
+            elif (task.description or "").strip() and task.task_type != "text":
+                materials.append({
+                    "id": f"task-{task.id}",
+                    "title": task.title or "Материал",
+                    "description": "",
+                    "materialType": "file" if task.task_type == "file" else "link",
+                    "materialTypeLabel": task.get_task_type_display(),
+                    "topic": "",
+                    "subtopic": "",
+                    "externalUrl": (task.description or "").strip(),
+                    "fileUrl": "",
+                })
+            elif (task.description or "").strip() and not description:
+                description = task.description.strip()
+    return {
+        "id": homework.id,
+        "title": homework.title or "Домашнее задание",
+        "description": homework.description or "",
+        "status": homework.status,
+        "statusLabel": homework.get_status_display(),
+        "dueAt": homework.due_at.isoformat() if homework.due_at else None,
+        "studentId": homework.student_id,
+        "groupId": homework.group_id,
+        "planItemId": homework.lesson_plan_item_id,
+        "homeworkDescription": description,
+        "homeworkMaterials": materials,
+        "homeworkInteractives": interactives,
+    }
+
+
 def _participants_to_json(event):
     participants = []
     for participant in event.participants.exclude(status=ParticipantStatus.REMOVED):
@@ -126,6 +256,21 @@ def _participants_to_json(event):
         })
 
     return participants
+
+
+def _student_subject_label(event):
+    if not event.student_subject_id:
+        return ""
+    try:
+        ss = event.student_subject
+    except Exception:
+        return ""
+    if not ss:
+        return ""
+    try:
+        return ss.display_label or ""
+    except Exception:
+        return getattr(ss, "subject", "") or ""
 
 
 def schedule_event_to_json(event):
@@ -184,6 +329,10 @@ def schedule_event_to_json(event):
         topic = plan_item_json.get("topic") or plan_item_json.get("title") or topic
 
     has_plan = plan_item_json is not None or get_active_enrollment(event) is not None
+    assigned_homework = _assigned_homework_to_json(
+        resolve_assigned_homework_for_event(event),
+        plan_item=plan_item,
+    )
 
     return {
         "id": local_event_id(event.pk),
@@ -215,6 +364,8 @@ def schedule_event_to_json(event):
             and event.is_recurring_instance
         ),
         "studentId": event.student_id,
+        "studentSubjectId": event.student_subject_id,
+        "studentSubjectLabel": _student_subject_label(event),
         "groupId": event.group_id,
         "lessonId": event.lesson_id,
         "lessonPlanItemId": plan_item.id if plan_item else event.lesson_plan_item_id,
@@ -226,6 +377,8 @@ def schedule_event_to_json(event):
         "participants": participants,
         "planItem": plan_item_json,
         "planItems": [plan_item_json] if plan_item_json else [],
+        "assignedHomework": assigned_homework,
+        "homeworkId": assigned_homework["id"] if assigned_homework else None,
         "teacherComment": event.teacher_comment or "",
     }
 
@@ -240,11 +393,17 @@ def list_schedule_events(*, user, date_from, date_to, include_cancelled=False):
         "series__lesson_plan_item",
         "series__lesson_plan_item__plan",
         "student",
+        "student_subject",
         "group",
+        "homework",
         "lesson_plan_item",
         "lesson_plan_item__plan",
         "lesson_plan_item__linked_lesson",
     ).prefetch_related(
+        "homework__tasks",
+        "homework__tasks__interactive",
+        "homework__lesson_plan_item__homework_materials",
+        "homework__lesson_plan_item__homework_interactives",
         "participants",
         "participants__student",
         "participants__teacher",
@@ -266,4 +425,11 @@ def list_schedule_events(*, user, date_from, date_to, include_cancelled=False):
     )
     if not include_cancelled:
         qs = qs.exclude(status=ScheduleEvent.Status.CANCELLED)
-    return [schedule_event_to_json(ev) for ev in qs.order_by("starts_at")]
+    events = []
+    for ev in qs.order_by("starts_at"):
+        try:
+            events.append(schedule_event_to_json(ev))
+        except Exception:
+            # Один битый урок не должен обнулять весь календарь.
+            continue
+    return events

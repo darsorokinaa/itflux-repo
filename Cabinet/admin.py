@@ -53,6 +53,7 @@ from .models import (
     Student,
     StudentGroup,
     StudentInvitation,
+    StudentSubject,
     TariffPlan,
     TeacherApplication,
     TeacherSavedMaterial,
@@ -84,6 +85,20 @@ class StudentAdmin(admin.ModelAdmin):
     list_filter = ("direction", "status", "grade")
     search_fields = ("first_name", "last_name", "email", "phone", "user__username", "user__email")
     ordering = ("last_name", "first_name")
+
+
+@admin.register(StudentSubject)
+class StudentSubjectAdmin(admin.ModelAdmin):
+    list_display = ("student", "subject", "title", "direction", "status", "created_at")
+    list_filter = ("subject", "direction", "status")
+    search_fields = (
+        "student__first_name",
+        "student__last_name",
+        "title",
+        "subject",
+        "level",
+    )
+    ordering = ("-created_at",)
 
 
 @admin.register(StudentInvitation)

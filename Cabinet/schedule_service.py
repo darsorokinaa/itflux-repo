@@ -239,9 +239,33 @@ def create_single_event(
 ):
     from datetime import timedelta
 
+    from .student_subjects import resolve_student_subject_for_write
+
     group = None
     if group_id:
         group = StudentGroup.objects.filter(pk=group_id, teacher=teacher).first()
+
+    student_subject = None
+    student_subject_id = data.get("student_subject") or data.get("student_subject_id")
+    primary_student = None
+    if student_ids and len(student_ids) == 1 and not group_id:
+        primary_student = Student.objects.filter(pk=student_ids[0], teacher=teacher).first()
+        if primary_student is not None:
+            student_subject = resolve_student_subject_for_write(
+                teacher=teacher,
+                student=primary_student,
+                student_subject_id=student_subject_id,
+                allow_empty=True,
+            )
+            # Individual lesson with subjects: require subject when student has any active ones
+            active_count = primary_student.subjects.filter(status="active").count()
+            if active_count and student_subject is None:
+                student_subject = resolve_student_subject_for_write(
+                    teacher=teacher,
+                    student=primary_student,
+                    student_subject_id=student_subject_id,
+                    allow_empty=False,
+                )
 
     event = ScheduleEvent.objects.create(
         owner=teacher,
@@ -256,6 +280,7 @@ def create_single_event(
         lesson_plan_item_id=data.get("lesson_plan_item"),
         homework_id=data.get("homework"),
         group=group,
+        student_subject=student_subject,
         timezone=data.get("timezone", "Europe/Moscow"),
         telemost_url=data.get("telemost_url", data.get("meeting_url", "")),
         meeting_provider=data.get("meeting_provider", "none"),
@@ -298,6 +323,29 @@ def create_series(
     if group_id:
         group = StudentGroup.objects.filter(pk=group_id, teacher=teacher).first()
 
+    from .student_subjects import resolve_student_subject_for_write
+
+    student_subject = None
+    student_subject_id = series_data.get("student_subject") or series_data.get("student_subject_id")
+    if student_ids and len(student_ids) == 1 and not group_id:
+        primary_student = Student.objects.filter(pk=student_ids[0], teacher=teacher).first()
+        if primary_student is not None:
+            active_count = primary_student.subjects.filter(status="active").count()
+            student_subject = resolve_student_subject_for_write(
+                teacher=teacher,
+                student=primary_student,
+                student_subject_id=student_subject_id,
+                # Без id: автоподстановка при одном предмете; при нескольких — ошибка.
+                allow_empty=not active_count,
+            )
+            if active_count and student_subject is None:
+                student_subject = resolve_student_subject_for_write(
+                    teacher=teacher,
+                    student=primary_student,
+                    student_subject_id=student_subject_id,
+                    allow_empty=False,
+                )
+
     series = ScheduleEventSeries.objects.create(
         teacher=teacher,
         created_by=teacher,
@@ -308,6 +356,7 @@ def create_series(
         lesson_plan_item_id=series_data.get("lesson_plan_item"),
         homework_id=series_data.get("homework"),
         group=group,
+        student_subject=student_subject,
         timezone=series_data.get("timezone", "Europe/Moscow"),
         start_date=series_data["start_date"],
         start_time=series_data["start_time"],
@@ -340,6 +389,16 @@ def create_series(
                 extra_student_ids=extra_student_ids,
                 teacher=teacher,
             )
+            if student_ids and len(student_ids) == 1:
+                update_fields = []
+                if event.student_id != student_ids[0]:
+                    event.student_id = student_ids[0]
+                    update_fields.append("student_id")
+                if student_subject and event.student_subject_id != student_subject.id:
+                    event.student_subject = student_subject
+                    update_fields.append("student_subject")
+                if update_fields:
+                    event.save(update_fields=update_fields)
 
     if notify and series.notify_on_create:
         for event in events[:1]:
@@ -572,6 +631,14 @@ def update_event(event, *, changed_by, data, notify=True):
         event.starts_at = data["starts_at"]
     if "ends_at" in data:
         event.ends_at = data["ends_at"]
+    if "student_subject" in data:
+        ss_val = data["student_subject"]
+        if ss_val in (None, "", 0, "0"):
+            event.student_subject = None
+        elif hasattr(ss_val, "pk"):
+            event.student_subject = ss_val
+        else:
+            event.student_subject_id = int(ss_val)
     event.save()
     log_change(
         event,

@@ -17,7 +17,16 @@ export function mapApiInteractiveAttachment(interactive) {
 }
 
 export function materialOpenUrl(material) {
-  return material.externalUrl || material.fileUrl || material.external_url || material.file_url || "";
+  // Preview API — для iframe; download/media из my-files в браузере не открываются.
+  return (
+    material.previewUrl
+    || material.preview_url
+    || material.externalUrl
+    || material.external_url
+    || material.fileUrl
+    || material.file_url
+    || ""
+  );
 }
 
 export function lessonResourceRows(item) {
@@ -37,6 +46,7 @@ export function lessonResourceRows(item) {
       typeLabel: material.materialTypeLabel || "Материал",
       url: materialOpenUrl(material),
       materialId: material.id,
+      cabinetFileId: material.cabinetFileId || material.cabinet_file_id || null,
     });
   });
   if (item?.linkedLessonTitle) {
@@ -56,6 +66,7 @@ export function lessonResourceRows(item) {
       typeLabel: interactive.interactiveTypeLabel || "Интерактив",
       url: `/cabinet/interactives/${interactive.id}`,
       interactiveId: interactive.id,
+      interactiveType: interactive.interactiveType || interactive.interactive_type || "",
     });
   });
   return rows;
@@ -76,6 +87,7 @@ export function homeworkResourceRows(item) {
       typeLabel: material.materialTypeLabel || "Материал",
       url: materialOpenUrl(material),
       materialId: material.id,
+      cabinetFileId: material.cabinetFileId || material.cabinet_file_id || null,
     });
   });
   (item?.homeworkInteractives || []).forEach((interactive) => {
@@ -86,6 +98,7 @@ export function homeworkResourceRows(item) {
       typeLabel: interactive.interactiveTypeLabel || "Интерактив",
       url: `/cabinet/interactives/${interactive.id}`,
       interactiveId: interactive.id,
+      interactiveType: interactive.interactiveType || interactive.interactive_type || "",
     });
   });
   return rows;
@@ -168,6 +181,11 @@ function toPopoverRow(row, extra = {}, submitted = false) {
     url: row.url || "",
     typeLabel: row.typeLabel || "",
     submitted,
+    materialId: row.materialId || null,
+    cabinetFileId: row.cabinetFileId || null,
+    interactiveId: row.interactiveId || null,
+    interactiveType: row.interactiveType || "",
+    boardId: row.boardId || null,
   };
 }
 
@@ -240,4 +258,24 @@ export function planItemHomeworkPopoverRows(item, hwStatus = null) {
     });
   }
   return rows;
+}
+
+/** Строки блока «Домашнее задание» в карточке урока — только выданное ДЗ. */
+export function eventAssignedHomeworkRows(event) {
+  const assigned = event?.assignedHomework || event?.assigned_homework;
+  if (!assigned?.id) return [];
+  const rows = planItemHomeworkPopoverRows({
+    id: assigned.planItemId || assigned.id,
+    homeworkDescription: assigned.homeworkDescription || assigned.description || "",
+    homeworkMaterials: assigned.homeworkMaterials || assigned.homework_materials || [],
+    homeworkInteractives: assigned.homeworkInteractives || assigned.homework_interactives || [],
+  });
+  if (rows.length) return rows;
+  return [{
+    key: `assigned-hw-${assigned.id}`,
+    kind: "notes",
+    label: assigned.title || "Домашнее задание",
+    text: assigned.description?.trim() || assigned.statusLabel || "Выдано",
+    typeLabel: assigned.statusLabel || "Выдано",
+  }];
 }

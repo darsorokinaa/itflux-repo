@@ -146,6 +146,24 @@ class MyFilesApiTests(TestCase):
         self.assertEqual(res.status_code, 400)
         self.assertEqual(res.json().get("code"), "QUOTA_EXCEEDED")
 
+    def test_attach_file_as_material_without_target_id(self):
+        """Добавление на урок через «Файлы»: target_type=material, target_id не нужен."""
+        res = self._upload(self.teacher, name="lesson-file.png", content=b"\x89PNG\r\n")
+        self.assertEqual(res.status_code, 201, res.content)
+        file_id = res.json()["id"]
+        self._auth(self.teacher)
+        attached = self.client.post(
+            f"/api/cabinet/files/{file_id}/attach/",
+            {"target_type": "material"},
+            format="json",
+        )
+        self.assertEqual(attached.status_code, 201, attached.content)
+        body = attached.json()
+        self.assertTrue(body.get("material_id"))
+        self.assertEqual(body.get("material", {}).get("cabinet_file_id"), str(file_id))
+        material = Material.objects.get(pk=body["material_id"])
+        self.assertEqual(str(material.cabinet_file_id), str(file_id))
+
     def test_attach_same_file_to_two_plan_items_no_extra_copy(self):
         res = self._upload(self.teacher, name="shared.pdf", content=b"%PDF-1.4 test")
         self.assertEqual(res.status_code, 201, res.content)

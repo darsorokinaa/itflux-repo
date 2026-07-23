@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import CabinetModal from "./CabinetModal";
 import ConfirmActionModal from "./ConfirmActionModal";
 import StudentBillingPanel from "./StudentBillingPanel";
+import StudentSubjectsBlock from "./StudentSubjectsBlock";
 import BillingPaymentModal from "./BillingPaymentModal";
 import BillingPackageModal from "./BillingPackageModal";
+import BillingTermsModal from "./BillingTermsModal";
 import { buildInvitationUrl, notifyBillingChanged } from "../../utils/cabinetAuth";
 import {
   GROUP_EXAM_OPTIONS,
@@ -21,7 +23,7 @@ import {
 
 const GRADE_OPTIONS = ["", 5, 6, 7, 8, 9, 10, 11];
 
-function FormActions({ onCancel, submitLabel, saving, dangerAction }) {
+function FormActions({ onCancel, submitLabel, saving, dangerAction, formId }) {
   return (
     <div className="cb-modal-form__actions">
       {dangerAction}
@@ -29,7 +31,12 @@ function FormActions({ onCancel, submitLabel, saving, dangerAction }) {
         <button type="button" className="cb-btn cb-btn--outline" onClick={onCancel} disabled={saving}>
           Отмена
         </button>
-        <button type="submit" className="cb-btn cb-btn--primary" disabled={saving}>
+        <button
+          type="submit"
+          className="cb-btn cb-btn--primary"
+          disabled={saving}
+          form={formId || undefined}
+        >
           {saving ? "Сохранение…" : submitLabel}
         </button>
       </div>
@@ -37,7 +44,7 @@ function FormActions({ onCancel, submitLabel, saving, dangerAction }) {
   );
 }
 
-export function StudentFormModal({ student, enrollment, onClose, onSave, onArchive, onDelete, onAttachPlan }) {
+export function StudentFormModal({ student, onClose, onSave, onArchive, onDelete, onSubjectsChanged }) {
   const isEdit = Boolean(student?.id);
   const isRegistered = Boolean(student?.raw?.is_registered);
   const [form, setForm] = useState(() => (
@@ -49,6 +56,7 @@ export function StudentFormModal({ student, enrollment, onClose, onSave, onArchi
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [packageOpen, setPackageOpen] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
   const [billingKey, setBillingKey] = useState(0);
 
   useEffect(() => {
@@ -118,111 +126,100 @@ export function StudentFormModal({ student, enrollment, onClose, onSave, onArchi
   return (
     <>
     <CabinetModal title={isEdit ? "Редактирование ученика" : "Добавить ученика"} onClose={onClose}>
-      <form className="cb-modal-form" onSubmit={handleSubmit}>
+      <div className="cb-modal-form">
         {error ? <p className="cb-modal-form__error" role="alert">{error}</p> : null}
-        {isRegistered ? (
-          <p className="cabinet-auth-muted cb-modal-form__hint">
-            Имя, фамилия и email берутся из аккаунта ученика.
-          </p>
-        ) : null}
-        <div className="cb-plan-editor__grid">
-          <label className={`cb-field${isRegistered ? " cb-field--locked" : ""}`}>
-            <span>Имя *</span>
-            <input
-              value={form.first_name}
-              onChange={(e) => setField("first_name", e.target.value)}
-              autoFocus={!isRegistered}
-              required={!isRegistered}
-              readOnly={isRegistered}
-              tabIndex={isRegistered ? -1 : undefined}
-            />
-          </label>
-          <label className={`cb-field${isRegistered ? " cb-field--locked" : ""}`}>
-            <span>Фамилия</span>
-            <input
-              value={form.last_name}
-              onChange={(e) => setField("last_name", e.target.value)}
-              readOnly={isRegistered}
-              tabIndex={isRegistered ? -1 : undefined}
-            />
-          </label>
-          <label className="cb-field">
-            <span>Направление</span>
-            <select value={form.direction} onChange={(e) => setField("direction", e.target.value)}>
-              {STUDENT_DIRECTION_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="cb-field">
-            <span>Класс</span>
-            <select value={form.grade} onChange={(e) => setField("grade", e.target.value)}>
-              {GRADE_OPTIONS.map((g) => (
-                <option key={g || "none"} value={g}>{g ? `${g} класс` : "Не указан"}</option>
-              ))}
-            </select>
-          </label>
-          <label className={`cb-field${isRegistered ? " cb-field--locked" : ""}`}>
-            <span>Email</span>
-            <input
-              type="email"
-              value={form.email}
-              onChange={(e) => setField("email", e.target.value)}
-              readOnly={isRegistered}
-              tabIndex={isRegistered ? -1 : undefined}
-            />
-          </label>
-          <label className="cb-field">
-            <span>Телефон</span>
-            <input
-              value={form.phone}
-              onChange={(e) => setField("phone", e.target.value)}
-            />
-          </label>
-          <label className="cb-field cb-field--wide">
-            <span>Контакт родителя</span>
-            <input
-              value={form.parent_contact}
-              onChange={(e) => setField("parent_contact", e.target.value)}
-            />
-          </label>
-          {isEdit ? (
+        <form id="student-edit-form" onSubmit={handleSubmit}>
+          {isRegistered ? (
+            <p className="cabinet-auth-muted cb-modal-form__hint">
+              Имя, фамилия и email берутся из аккаунта ученика.
+            </p>
+          ) : null}
+          <div className="cb-plan-editor__grid">
+            <label className={`cb-field${isRegistered ? " cb-field--locked" : ""}`}>
+              <span>Имя *</span>
+              <input
+                value={form.first_name}
+                onChange={(e) => setField("first_name", e.target.value)}
+                autoFocus={!isRegistered}
+                required={!isRegistered}
+                readOnly={isRegistered}
+                tabIndex={isRegistered ? -1 : undefined}
+              />
+            </label>
+            <label className={`cb-field${isRegistered ? " cb-field--locked" : ""}`}>
+              <span>Фамилия</span>
+              <input
+                value={form.last_name}
+                onChange={(e) => setField("last_name", e.target.value)}
+                readOnly={isRegistered}
+                tabIndex={isRegistered ? -1 : undefined}
+              />
+            </label>
             <label className="cb-field">
-              <span>Статус</span>
-              <select value={form.status} onChange={(e) => setField("status", e.target.value)}>
-                {STUDENT_STATUS_OPTIONS.map((opt) => (
+              <span>Направление</span>
+              <select value={form.direction} onChange={(e) => setField("direction", e.target.value)}>
+                {STUDENT_DIRECTION_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
             </label>
-          ) : null}
-          <label className="cb-field cb-field--wide">
-            <span>Заметки</span>
-            <textarea
-              rows={3}
-              value={form.notes}
-              onChange={(e) => setField("notes", e.target.value)}
-            />
-          </label>
-        </div>
-        {isEdit && onAttachPlan ? (
-          <div className="cb-entity-plan-block">
-            <div className="cb-entity-plan-block__head">
-              <span className="cb-entity-plan-block__label">План уроков</span>
-              <button
-                type="button"
-                className="cb-btn cb-btn--outline cb-btn--sm"
-                onClick={() => onAttachPlan(student)}
-              >
-                {enrollment ? "Сменить план" : "Привязать план"}
-              </button>
-            </div>
-            {enrollment?.planTitle ? (
-              <p className="cb-entity-plan-block__title">{enrollment.planTitle}</p>
-            ) : (
-              <p className="cb-entity-plan-block__empty">План не назначен</p>
-            )}
+            <label className="cb-field">
+              <span>Класс</span>
+              <select value={form.grade} onChange={(e) => setField("grade", e.target.value)}>
+                {GRADE_OPTIONS.map((g) => (
+                  <option key={g || "none"} value={g}>{g ? `${g} класс` : "Не указан"}</option>
+                ))}
+              </select>
+            </label>
+            <label className={`cb-field${isRegistered ? " cb-field--locked" : ""}`}>
+              <span>Email</span>
+              <input
+                type="email"
+                value={form.email}
+                onChange={(e) => setField("email", e.target.value)}
+                readOnly={isRegistered}
+                tabIndex={isRegistered ? -1 : undefined}
+              />
+            </label>
+            <label className="cb-field">
+              <span>Телефон</span>
+              <input
+                value={form.phone}
+                onChange={(e) => setField("phone", e.target.value)}
+              />
+            </label>
+            <label className="cb-field cb-field--wide">
+              <span>Контакт родителя</span>
+              <input
+                value={form.parent_contact}
+                onChange={(e) => setField("parent_contact", e.target.value)}
+              />
+            </label>
+            {isEdit ? (
+              <label className="cb-field">
+                <span>Статус</span>
+                <select value={form.status} onChange={(e) => setField("status", e.target.value)}>
+                  {STUDENT_STATUS_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <label className="cb-field cb-field--wide">
+              <span>Заметки</span>
+              <textarea
+                rows={3}
+                value={form.notes}
+                onChange={(e) => setField("notes", e.target.value)}
+              />
+            </label>
           </div>
+        </form>
+        {isEdit ? (
+          <StudentSubjectsBlock
+            studentId={student.id}
+            onChanged={() => onSubjectsChanged?.(student.id)}
+          />
         ) : null}
         {isEdit ? (
           <StudentBillingPanel
@@ -230,9 +227,11 @@ export function StudentFormModal({ student, enrollment, onClose, onSave, onArchi
             studentId={student.id}
             onAddPayment={() => setPaymentOpen(true)}
             onNewPackage={() => setPackageOpen(true)}
+            onEditTerms={() => setTermsOpen(true)}
           />
         ) : null}
         <FormActions
+          formId="student-edit-form"
           onCancel={onClose}
           submitLabel={isEdit ? "Сохранить" : "Добавить"}
           saving={saving}
@@ -261,7 +260,7 @@ export function StudentFormModal({ student, enrollment, onClose, onSave, onArchi
             </>
           ) : null}
         />
-      </form>
+      </div>
     </CabinetModal>
     <ConfirmActionModal
       open={archiveConfirmOpen}
@@ -293,6 +292,13 @@ export function StudentFormModal({ student, enrollment, onClose, onSave, onArchi
       onClose={() => setPackageOpen(false)}
       students={student ? [{ id: student.id, name: student.name }] : []}
       defaultStudentId={student?.id}
+      onDone={bumpBilling}
+    />
+    <BillingTermsModal
+      open={termsOpen}
+      onClose={() => setTermsOpen(false)}
+      studentId={student?.id}
+      studentName={student?.name || ""}
       onDone={bumpBilling}
     />
     </>

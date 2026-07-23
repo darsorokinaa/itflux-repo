@@ -1281,3 +1281,64 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Student subjects block in student card */
+.cb-student-subjects__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cb-student-subjects__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+  background: #F8FAFC;
+}
+
+.cb-student-subjects__item--archived {
+  opacity: 0.72;
+}
+
+.cb-student-subjects__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cb-student-subjects__meta {
+  font-size: 0.8125rem;
+  color: #64748B;
+}
+
+.cb-student-subjects__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cb-student-subjects__editor {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #E2E8F0;
+}
+
+.cb-student-subjects__editor h4 {
+  margin: 0 0 10px;
+  font-size: 0.9375rem;
+}
+
+.cb-student-subjects__archived {
+  margin-top: 10px;
+  font-size: 0.875rem;
+  color: #64748B;
+}

@@ -7,7 +7,15 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .choices import AssignmentStatus, HomeworkStatus, MaterialStatus, MeetingProvider, StudentStatus, SubmissionStatus
+from .choices import (
+    AssignmentStatus,
+    HomeworkStatus,
+    MaterialStatus,
+    MeetingProvider,
+    StudentStatus,
+    StudentSubjectStatus,
+    SubmissionStatus,
+)
 from .models import (
     FlashcardItem,
     Homework,
@@ -26,7 +34,9 @@ from .models import (
     ScheduleEvent,
     Student,
     StudentGroup,
+    StudentSubject,
 )
+from .serializers import StudentSubjectSerializer
 from .files_services import material_file_url, submission_file_url
 from .permissions import IsCabinetStudent
 from .plan_schedule import resolve_plan_item_for_event
@@ -82,7 +92,7 @@ def _homework_qs(students):
     return (
         Homework.objects.filter(Q(student_id__in=student_ids) | Q(group__in=groups))
         .exclude(status=HomeworkStatus.DRAFT)
-        .select_related("lesson", "teacher", "teacher__profile")
+        .select_related("lesson", "teacher", "teacher__profile", "student_subject")
         .prefetch_related("tasks")
     )
 
@@ -104,7 +114,7 @@ def _schedule_qs(students):
             participants__status__in=["invited", "accepted"],
         )
     ).exclude(status=ScheduleEvent.Status.CANCELLED).select_related(
-        "owner", "owner__profile", "lesson", "student", "group",
+        "owner", "owner__profile", "lesson", "student", "student_subject", "group",
         "lesson_plan_item", "lesson_plan_item__plan",
         "series", "series__lesson_plan_item", "series__lesson_plan_item__plan",
     ).prefetch_related("plan_items", "plan_items__plan").distinct()
@@ -388,6 +398,9 @@ def _homework_student_status(homework, student):
 def _serialize_assignment_card(homework, students):
     student = _pick_student(students, homework.teacher)
     sid, slabel, submission = _homework_student_status(homework, student)
+    subject_label = ""
+    if homework.student_subject_id and homework.student_subject:
+        subject_label = homework.student_subject.display_label
     return {
         "id": homework.id,
         "title": homework.title,
@@ -400,6 +413,8 @@ def _serialize_assignment_card(homework, students):
         "topic": (homework.lesson.topic or homework.lesson.title) if homework.lesson else "",
         "cover_theme": _cover_theme_from_lesson(homework.lesson) if homework.lesson else "ege",
         "lesson_id": homework.lesson_id,
+        "student_subject_id": homework.student_subject_id,
+        "student_subject_label": subject_label,
     }
 
 
@@ -566,6 +581,9 @@ def _assignment_id_for_event(event, students):
 def _serialize_schedule_event(event, students):
     topic = _schedule_event_topic(event, students)
     video_meeting, meeting_url = _video_meeting_payload(event)
+    subject_label = ""
+    if event.student_subject_id and event.student_subject:
+        subject_label = event.student_subject.display_label
     return {
         "id": event.id,
         "topic": topic,
@@ -584,6 +602,8 @@ def _serialize_schedule_event(event, students):
         "status_label": event.get_status_display(),
         "lesson_id": event.lesson_id,
         "assignment_id": _assignment_id_for_event(event, students),
+        "student_subject_id": event.student_subject_id,
+        "student_subject_label": subject_label,
     }
 
 
@@ -602,14 +622,23 @@ def _serialize_student_schedule_event_detail(event, students):
     topic = _schedule_event_topic(event, students)
     homework_id = None
     homework_status = None
-    if plan_item_obj:
+    hw = None
+    if event.homework_id:
+        hw = _homework_qs(students).filter(pk=event.homework_id).first()
+    if hw is None and plan_item_obj:
         hw = _homework_qs(students).filter(lesson_plan_item_id=plan_item_obj.id).first()
-        if hw:
-            homework_id = hw.id
-            student_obj = _pick_student(students, hw.teacher)
-            if student_obj:
-                sid, _, _ = _homework_student_status(hw, student_obj)
-                homework_status = sid
+    if hw is not None:
+        homework_id = hw.id
+        student_obj = _pick_student(students, hw.teacher)
+        if student_obj:
+            sid, _, _ = _homework_student_status(hw, student_obj)
+            homework_status = sid
+
+    assigned_homework = None
+    if hw is not None:
+        from .schedule_events import _assigned_homework_to_json
+
+        assigned_homework = _assigned_homework_to_json(hw, plan_item=plan_item_obj)
 
     video_meeting, meeting_url = _video_meeting_payload(event)
     return {
@@ -633,6 +662,7 @@ def _serialize_student_schedule_event_detail(event, students):
         "assignment_id": _assignment_id_for_event(event, students),
         "homework_id": homework_id,
         "homework_status": homework_status,
+        "assignedHomework": assigned_homework,
         "planItem": plan_item_json,
         "planItems": [plan_item_json] if plan_item_json else [],
     }
@@ -893,7 +923,13 @@ class StudentAssignmentsView(StudentScopedView):
         if err:
             return err
         self.sync_student_releases(students)
-        items = [_serialize_assignment_card(hw, students) for hw in _homework_qs(students)]
+        qs = _homework_qs(students)
+        subject_id = request.GET.get("student_subject") or request.GET.get("subject")
+        if subject_id:
+            qs = qs.filter(
+                Q(student_subject_id=subject_id) | Q(student_subject__isnull=True)
+            )
+        items = [_serialize_assignment_card(hw, students) for hw in qs]
         return Response({"items": items})
 
 
@@ -1075,7 +1111,13 @@ class StudentScheduleView(StudentScopedView):
         if err:
             return err
         self.sync_student_releases(students)
-        events = _schedule_qs(students).order_by("starts_at")[:50]
+        events = _schedule_qs(students).order_by("starts_at")
+        subject_id = request.GET.get("student_subject") or request.GET.get("subject")
+        if subject_id:
+            events = events.filter(
+                Q(student_subject_id=subject_id) | Q(student_subject__isnull=True)
+            )
+        events = list(events[:50])
         return Response({
             "items": [_serialize_schedule_event(e, students) for e in events]
         })
@@ -1156,7 +1198,7 @@ class StudentProgressView(StudentScopedView):
         })
 
 
-def _collect_direct_materials(students):
+def _collect_direct_materials(students, student_subject_id=None):
     """Materials assigned directly by teachers to students or their groups."""
     from .models import DirectMaterialAssignment
     items = []
@@ -1169,13 +1211,21 @@ def _collect_direct_materials(students):
 
     qs = DirectMaterialAssignment.objects.filter(
         models.Q(student__in=student_objs) | models.Q(group_id__in=group_ids)
-    ).select_related("material", "teacher").order_by("-assigned_at")
+    ).select_related("material", "teacher", "student_subject").order_by("-assigned_at")
+    if student_subject_id:
+        qs = qs.filter(
+            models.Q(student_subject_id=student_subject_id)
+            | models.Q(student_subject__isnull=True, group_id__isnull=False)
+        )
 
     for da in qs:
         m = da.material
         if m.id in seen:
             continue
         seen.add(m.id)
+        subject_label = ""
+        if da.student_subject_id and da.student_subject:
+            subject_label = da.student_subject.display_label
         items.append({
             "id": m.id,
             "title": m.title,
@@ -1191,6 +1241,8 @@ def _collect_direct_materials(students):
             "message": da.message or "",
             "direct": True,
             "assigned_at": da.assigned_at.isoformat(),
+            "student_subject_id": da.student_subject_id,
+            "student_subject_label": subject_label,
         })
     return items
 
@@ -1231,6 +1283,33 @@ def _collect_student_boards(user):
     return items
 
 
+class StudentSubjectsView(StudentScopedView):
+    """Список предметов ученика у всех его преподавателей."""
+
+    def get(self, request):
+        students, err = self.student_response_or_error()
+        if err:
+            return err
+        qs = (
+            StudentSubject.objects.filter(
+                student__in=students,
+                status=StudentSubjectStatus.ACTIVE,
+            )
+            .select_related("student", "student__teacher", "student__teacher__profile")
+            .prefetch_related("plan_enrollments__plan")
+            .order_by("subject", "title", "id")
+        )
+        items = []
+        for ss in qs:
+            payload = StudentSubjectSerializer(ss).data
+            teacher = ss.student.teacher
+            payload["teacher_id"] = teacher.id if teacher else None
+            payload["teacher_name"] = _teacher_name(teacher) if teacher else ""
+            payload["student_id"] = ss.student_id
+            items.append(payload)
+        return Response({"items": items})
+
+
 class StudentMaterialsView(StudentScopedView):
     def get(self, request):
         students, err = self.student_response_or_error()
@@ -1238,8 +1317,9 @@ class StudentMaterialsView(StudentScopedView):
             return err
         self.sync_student_releases(students)
         q = (request.GET.get("q") or "").strip().lower()
+        subject_id = request.GET.get("student_subject") or request.GET.get("subject")
         lesson_items = _collect_student_materials(students, limit=200)
-        direct_items = _collect_direct_materials(students)
+        direct_items = _collect_direct_materials(students, student_subject_id=subject_id or None)
         board_items = _collect_student_boards(request.user)
         # merge, deduplicate by id (direct takes priority)
         seen = {it["id"] for it in direct_items}
@@ -1252,6 +1332,13 @@ class StudentMaterialsView(StudentScopedView):
                 direct_items.append(it)
                 seen.add(it["id"])
         all_items = direct_items
+        if subject_id:
+            sid = int(subject_id)
+            all_items = [
+                it for it in all_items
+                if it.get("student_subject_id") in (None, sid)
+                or it.get("type") == "board"
+            ]
         if q:
             all_items = [
                 it for it in all_items
@@ -1260,6 +1347,7 @@ class StudentMaterialsView(StudentScopedView):
                 or q in it.get("topic", "").lower()
                 or q in it.get("type_label", "").lower()
                 or q in it.get("lesson_topic", "").lower()
+                or q in (it.get("student_subject_label") or "").lower()
             ]
         # Доски и материалы: свежие сверху
         all_items.sort(

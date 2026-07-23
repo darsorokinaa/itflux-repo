@@ -37,6 +37,7 @@ from .choices import (
     ScheduleEventType,
     SeriesStatus,
     StudentStatus,
+    StudentSubjectStatus,
     SubmissionStatus,
 )
 
@@ -157,6 +158,87 @@ class Student(models.Model):
     @property
     def is_registered(self):
         return self.user_id is not None
+
+
+class StudentSubject(models.Model):
+    """
+    Направление обучения ученика у конкретного преподавателя.
+    Связь идёт через Student (у которого уже есть teacher), поэтому один ученик
+    может иметь разные предметы у разных преподавателей.
+    """
+
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.CASCADE,
+        related_name="subjects",
+        verbose_name="Ученик",
+    )
+    subject = models.CharField(
+        "Предмет",
+        max_length=32,
+        help_text="Код предмета (как в планах: inf, math, prog, …)",
+    )
+    title = models.CharField(
+        "Название направления",
+        max_length=255,
+        blank=True,
+        help_text="Например: ОГЭ, программирование, школьная программа",
+    )
+    direction = models.CharField(
+        "Направление / уровень",
+        max_length=20,
+        choices=Direction.choices,
+        default=Direction.OTHER,
+        blank=True,
+    )
+    level = models.CharField("Уровень", max_length=100, blank=True)
+    status = models.CharField(
+        "Статус",
+        max_length=20,
+        choices=StudentSubjectStatus.choices,
+        default=StudentSubjectStatus.ACTIVE,
+    )
+    notes = models.TextField("Заметки", blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Предмет ученика"
+        verbose_name_plural = "Предметы учеников"
+        ordering = ["subject", "title", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["student", "subject", "direction", "title"],
+                condition=models.Q(status=StudentSubjectStatus.ACTIVE),
+                name="cabinet_unique_active_student_subject",
+            ),
+        ]
+
+    def __str__(self):
+        label = self.display_label
+        return f"{self.student} — {label}"
+
+    @property
+    def is_active(self):
+        return self.status == StudentSubjectStatus.ACTIVE
+
+    @property
+    def subject_label(self):
+        from .plan_subjects import get_plan_subject_label
+
+        return get_plan_subject_label(self.subject) or self.subject
+
+    @property
+    def display_label(self):
+        parts = [self.subject_label]
+        extra = (self.title or "").strip()
+        if not extra and self.direction and self.direction != Direction.OTHER:
+            extra = self.get_direction_display()
+        if not extra and (self.level or "").strip():
+            extra = self.level.strip()
+        if extra:
+            parts.append(extra)
+        return " · ".join(parts)
 
 
 class StudentGroup(models.Model):
@@ -396,6 +478,14 @@ class DirectMaterialAssignment(models.Model):
         related_name="direct_material_assignments",
         verbose_name="Ученик",
     )
+    student_subject = models.ForeignKey(
+        "StudentSubject",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="direct_material_assignments",
+        verbose_name="Предмет ученика",
+    )
     message = models.TextField("Сообщение для ученика", blank=True)
     assigned_at = models.DateTimeField(auto_now_add=True)
 
@@ -620,6 +710,15 @@ class LessonPlanEnrollment(models.Model):
         blank=True,
         related_name="plan_enrollments",
         verbose_name="Ученик",
+    )
+    student_subject = models.ForeignKey(
+        "StudentSubject",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="plan_enrollments",
+        verbose_name="Предмет ученика",
+        help_text="План назначается конкретному предмету ученика",
     )
     group = models.ForeignKey(
         StudentGroup,
@@ -1281,6 +1380,14 @@ class Homework(models.Model):
         related_name="homeworks",
         verbose_name="Ученик",
     )
+    student_subject = models.ForeignKey(
+        "StudentSubject",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="homeworks",
+        verbose_name="Предмет ученика",
+    )
     group = models.ForeignKey(
         StudentGroup,
         on_delete=models.CASCADE,
@@ -1500,6 +1607,15 @@ class ScheduleEvent(models.Model):
         related_name="schedule_events",
         verbose_name="Ученик",
     )
+    student_subject = models.ForeignKey(
+        "StudentSubject",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="schedule_events",
+        verbose_name="Предмет ученика",
+        help_text="Предмет занятия для индивидуального ученика",
+    )
     group = models.ForeignKey(
         StudentGroup,
         on_delete=models.SET_NULL,
@@ -1630,6 +1746,14 @@ class ScheduleEventSeries(models.Model):
         blank=True,
         related_name="schedule_series",
         verbose_name="Группа",
+    )
+    student_subject = models.ForeignKey(
+        "StudentSubject",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="schedule_series",
+        verbose_name="Предмет ученика",
     )
     homework = models.ForeignKey(
         Homework,
@@ -2764,4 +2888,12 @@ from .files_models import (  # noqa: E402
     CabinetFileVersion,
     CabinetFolder,
     UserStorageQuota,
+)
+
+# ── Синхронные материалы видеоурока (см. meeting_material_models.py) ──────────
+from .meeting_material_models import (  # noqa: E402
+    MeetingMaterialCollaborativeScope,
+    MeetingMaterialInteractionMode,
+    MeetingMaterialSession,
+    MeetingMaterialWork,
 )

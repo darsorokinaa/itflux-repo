@@ -883,6 +883,119 @@ def _refresh_financial_status(record: EventBillingRecord):
     record.save(update_fields=["financial_status", "updated_at"])
 
 
+def _payment_unallocated_amount(payment: StudentPayment) -> Decimal:
+    allocated = payment.allocations.aggregate(t=Sum("amount"))["t"] or ZERO
+    left = D(payment.amount) - D(allocated) - D(payment.refunded_amount or 0)
+    return left if left > 0 else ZERO
+
+
+def _allocate_payment_to_record(
+    *,
+    payment: StudentPayment,
+    record: EventBillingRecord,
+    amount: Decimal,
+) -> Decimal:
+    """Привязать часть оплаты учителя к уроку. Урок оплачен только так или из абонемента."""
+    amount = D(amount)
+    if amount <= 0:
+        return ZERO
+    due = D(record.charged_amount or 0) - D(record.paid_amount or 0)
+    if due <= 0:
+        return ZERO
+    alloc = min(due, amount)
+    existing = StudentPaymentAllocation.objects.filter(
+        payment=payment, event_billing=record
+    ).first()
+    if existing:
+        existing.amount = D(existing.amount) + alloc
+        existing.save(update_fields=["amount"])
+    else:
+        StudentPaymentAllocation.objects.create(
+            payment=payment, event_billing=record, amount=alloc
+        )
+    record.paid_amount = D(record.paid_amount or 0) + alloc
+    record.save(update_fields=["paid_amount", "updated_at"])
+    _refresh_financial_status(record)
+    return alloc
+
+
+def allocate_available_payments_to_record(record: EventBillingRecord) -> Decimal:
+    """Закрыть долг по уроку нераспределёнными оплатами учителя (FIFO)."""
+    if record.financial_status in (
+        FinancialStatus.PAID,
+        FinancialStatus.PAID_FROM_PACKAGE,
+        FinancialStatus.NOT_BILLABLE,
+        FinancialStatus.REFUNDED,
+    ):
+        return ZERO
+    due = D(record.charged_amount or 0) - D(record.paid_amount or 0)
+    if due <= 0:
+        return ZERO
+    applied = ZERO
+    payments = (
+        StudentPayment.objects.filter(
+            billing_account_id=record.billing_account_id,
+            status=StudentPaymentStatus.CONFIRMED,
+            package__isnull=True,
+        )
+        .prefetch_related("allocations")
+        .order_by("paid_at", "created_at")
+    )
+    for payment in payments:
+        if due <= 0:
+            break
+        left = _payment_unallocated_amount(payment)
+        if left <= 0:
+            continue
+        used = _allocate_payment_to_record(payment=payment, record=record, amount=min(left, due))
+        applied = D(applied + used)
+        due = D(due - used)
+        record.refresh_from_db()
+    return applied
+
+
+def allocate_payment_to_unpaid_lessons(
+    *,
+    account: BillingAccount,
+    payment: StudentPayment,
+    event_billing_ids: Optional[list] = None,
+) -> Decimal:
+    """Распределить оплату по неоплаченным проведённым урокам."""
+    remaining = _payment_unallocated_amount(payment)
+    if remaining <= 0:
+        return ZERO
+    if event_billing_ids:
+        found = {
+            str(r.pk): r
+            for r in EventBillingRecord.objects.select_for_update().filter(
+                billing_account=account,
+                pk__in=event_billing_ids,
+            )
+        }
+        records = [found[str(i)] for i in event_billing_ids if str(i) in found]
+    else:
+        records = list(
+            EventBillingRecord.objects.select_for_update()
+            .filter(
+                billing_account=account,
+                delivery_status__in=(DeliveryStatus.CONDUCTED, DeliveryStatus.NO_SHOW),
+                financial_status__in=(
+                    FinancialStatus.AWAITING_PAYMENT,
+                    FinancialStatus.PARTIALLY_PAID,
+                ),
+            )
+            .order_by("event__starts_at", "created_at")
+        )
+    applied = ZERO
+    for record in records:
+        if remaining <= 0:
+            break
+        used = _allocate_payment_to_record(payment=payment, record=record, amount=remaining)
+        remaining = D(remaining - used)
+        applied = D(applied + used)
+    return applied
+
+
 @transaction.atomic
 def finalize_event_billing(
     *,
@@ -1146,32 +1259,17 @@ def finalize_event_billing(
                 related_transaction=tx,
             )
 
-        # Apply credit balance automatically to paid_amount display
-        bal = compute_account_balance(account)
-        record.paid_amount = min(record.charged_amount, max(ZERO, bal["credit"] + record.paid_amount))
-        # Actually paid_amount should come from allocations; keep charged and refresh status
+        # Настройки цены / начисление ≠ оплата. Урок оплачен только из абонемента
+        # или после распределения реальной оплаты учителя.
         record.finalized_at = timezone.now()
         if calc_amount <= 0:
-            # Нет цены — урок всё равно «не оплачен», учитель укажет сумму позже.
             record.financial_status = FinancialStatus.AWAITING_PAYMENT
             record.price_source_label = record.price_source_label or "Стоимость не указана"
             record.save()
         else:
             record.financial_status = FinancialStatus.AWAITING_PAYMENT
             record.save()
-            # If account has credit (overpayment), auto-allocate conceptually via balance
-            bal_after = compute_account_balance(account)
-            if bal_after["balance"] >= ZERO:
-                record.paid_amount = record.charged_amount
-                record.financial_status = FinancialStatus.PAID
-                record.save(update_fields=["paid_amount", "financial_status", "updated_at"])
-            elif bal_after["balance"] > -record.charged_amount:
-                # partial via previous credit
-                covered = record.charged_amount + bal_after["balance"]
-                if covered > 0:
-                    record.paid_amount = D(covered)
-                    record.financial_status = FinancialStatus.PARTIALLY_PAID
-                    record.save(update_fields=["paid_amount", "financial_status", "updated_at"])
+            allocate_available_payments_to_record(record)
 
         results.append(record)
 
@@ -1438,27 +1536,13 @@ def register_payment(
         comment=comment or purpose or "Оплата",
     )
 
-    remaining = amount
-    if event_billing_ids:
-        for eb_id in event_billing_ids:
-            if remaining <= 0:
-                break
-            record = EventBillingRecord.objects.select_for_update().filter(
-                pk=eb_id, billing_account=account
-            ).first()
-            if not record:
-                continue
-            due = D(record.charged_amount - record.paid_amount)
-            if due <= 0:
-                continue
-            alloc = min(due, remaining)
-            StudentPaymentAllocation.objects.create(
-                payment=payment, event_billing=record, amount=alloc
-            )
-            record.paid_amount = D(record.paid_amount + alloc)
-            record.save(update_fields=["paid_amount", "updated_at"])
-            remaining = D(remaining - alloc)
-            _refresh_financial_status(record)
+    # Оплата учителя закрывает уроки только через allocation, не «по балансу».
+    if not package:
+        allocate_payment_to_unpaid_lessons(
+            account=account,
+            payment=payment,
+            event_billing_ids=event_billing_ids,
+        )
 
     audit(
         teacher=teacher,
@@ -1894,10 +1978,39 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
         or settings.per_minute_rate is not None
         or settings.monthly_fee is not None
     )
-    status_label = "всё оплачено"
+    unpaid_qs = EventBillingRecord.objects.filter(
+        billing_account=account,
+        delivery_status__in=(DeliveryStatus.CONDUCTED, DeliveryStatus.NO_SHOW),
+        financial_status__in=(
+            FinancialStatus.AWAITING_PAYMENT,
+            FinancialStatus.PARTIALLY_PAID,
+            FinancialStatus.NEEDS_DECISION,
+        ),
+    ).select_related("event")
+    unpaid_count = unpaid_qs.count()
+    unpaid_amount = ZERO
+    unpaid_items = []
+    for rec in unpaid_qs.order_by("-event__starts_at")[:50]:
+        due = D(rec.charged_amount or 0) - D(rec.paid_amount or 0)
+        if due <= 0:
+            due = D(rec.calculated_amount or 0) if rec.financial_status == FinancialStatus.NEEDS_DECISION else ZERO
+        unpaid_amount += due
+        unpaid_items.append({
+            **serialize_event_billing(rec),
+            "due_amount": str(due),
+            "price_missing": due <= 0 and D(rec.charged_amount or 0) <= 0,
+        })
+
+    needs = EventBillingRecord.objects.filter(
+        billing_account=account,
+        financial_status=FinancialStatus.NEEDS_DECISION,
+    ).exists()
+    # Настройки тарифа ≠ «всё оплачено». Оплаченность — по урокам/абонементу.
     if not has_tariff:
         status_label = "оплата не настроена"
-    elif balance["debt"] > 0:
+    elif needs:
+        status_label = "требуется оформление"
+    elif unpaid_count > 0 or unpaid_amount > 0 or balance["debt"] > 0:
         status_label = "есть задолженность"
     elif package and (
         (
@@ -1912,34 +2025,16 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
         )
     ):
         status_label = "заканчивается абонемент"
-    needs = EventBillingRecord.objects.filter(
+    elif package or EventBillingRecord.objects.filter(
         billing_account=account,
-        financial_status=FinancialStatus.NEEDS_DECISION,
-    ).exists()
-    if needs:
-        status_label = "требуется оформление"
-
-    unpaid_qs = EventBillingRecord.objects.filter(
-        billing_account=account,
-        delivery_status__in=(DeliveryStatus.CONDUCTED, DeliveryStatus.NO_SHOW),
         financial_status__in=(
-            FinancialStatus.AWAITING_PAYMENT,
-            FinancialStatus.PARTIALLY_PAID,
+            FinancialStatus.PAID,
+            FinancialStatus.PAID_FROM_PACKAGE,
         ),
-    ).select_related("event")
-    unpaid_count = unpaid_qs.count()
-    unpaid_amount = ZERO
-    unpaid_items = []
-    for rec in unpaid_qs.order_by("-event__starts_at")[:50]:
-        due = D(rec.charged_amount or 0) - D(rec.paid_amount or 0)
-        if due < 0:
-            due = ZERO
-        unpaid_amount += due
-        unpaid_items.append({
-            **serialize_event_billing(rec),
-            "due_amount": str(due),
-            "price_missing": due <= 0 and D(rec.charged_amount or 0) <= 0,
-        })
+    ).exists():
+        status_label = "всё оплачено"
+    else:
+        status_label = "условия заданы"
 
     data = {
         "id": account.id,
@@ -2183,12 +2278,13 @@ def serialize_event_billing(record: EventBillingRecord) -> dict:
         "delivery_status": record.delivery_status,
         "financial_status": record.financial_status,
         "financial_status_label": (
-            "Не оплачен"
-            if record.financial_status in (
-                FinancialStatus.AWAITING_PAYMENT,
-                FinancialStatus.PARTIALLY_PAID,
+            "Не оплачен (в долг)"
+            if record.financial_status == FinancialStatus.AWAITING_PAYMENT
+            else (
+                "Частично оплачен"
+                if record.financial_status == FinancialStatus.PARTIALLY_PAID
+                else record.get_financial_status_display()
             )
-            else record.get_financial_status_display()
         ),
         "billing_type": record.billing_type,
         "planned_duration_minutes": record.planned_duration_minutes,
@@ -2981,7 +3077,7 @@ def event_billing_badge(event: ScheduleEvent) -> list[dict]:
             else:
                 label = "Оплачено из абонемента"
         elif r.financial_status == FinancialStatus.AWAITING_PAYMENT:
-            label = f"Ожидает оплаты · {due} ₽" if due > 0 else "Ожидает оплаты"
+            label = f"Не оплачен · {due} ₽" if due > 0 else "Не оплачен"
         elif r.financial_status == FinancialStatus.PARTIALLY_PAID:
             label = f"Частично оплачен · долг {due} ₽" if due > 0 else "Частично оплачен"
         elif r.financial_status == FinancialStatus.NOT_CHARGED:

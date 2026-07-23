@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import CabinetIcon from "../CabinetIcons";
 import SeriesScopeModal from "./SeriesScopeModal";
+import { fetchStudentSubjects } from "../../utils/cabinetAuth";
 import {
   buildScheduleDateTimePayload,
   eventScheduleDate,
@@ -17,6 +18,10 @@ export default function EditScheduleLessonModal({ event, onClose, onSave }) {
   const [error, setError] = useState("");
   const [scopeOpen, setScopeOpen] = useState(false);
   const [scopeTimeChanged, setScopeTimeChanged] = useState(false);
+  const [studentSubjects, setStudentSubjects] = useState([]);
+  const [studentSubjectId, setStudentSubjectId] = useState(
+    event.studentSubjectId ? String(event.studentSubjectId) : "",
+  );
   const savingRef = useRef(false);
 
   useEffect(() => {
@@ -24,7 +29,27 @@ export default function EditScheduleLessonModal({ event, onClose, onSave }) {
     setStartTime(normalizeTimeValue(event.startTime || "15:00"));
     setEndTime(normalizeTimeValue(event.endTime || "15:45"));
     setLink(event.link || "");
+    setStudentSubjectId(event.studentSubjectId ? String(event.studentSubjectId) : "");
   }, [event]);
+
+  useEffect(() => {
+    if (!event.studentId) {
+      setStudentSubjects([]);
+      return undefined;
+    }
+    let cancelled = false;
+    fetchStudentSubjects(event.studentId)
+      .then((data) => {
+        if (cancelled) return;
+        const list = (Array.isArray(data) ? data : data?.items || [])
+          .filter((s) => s.status !== "archived");
+        setStudentSubjects(list);
+      })
+      .catch(() => {
+        if (!cancelled) setStudentSubjects([]);
+      });
+    return () => { cancelled = true; };
+  }, [event.studentId]);
 
   const buildPayload = () => ({
     title: (event.audience || event.title || "").trim(),
@@ -32,6 +57,8 @@ export default function EditScheduleLessonModal({ event, onClose, onSave }) {
     telemost_url: link.trim(),
     link: link.trim(),
     notify_participants: notifyParticipants,
+    student_subject: studentSubjectId ? Number(studentSubjectId) : null,
+    student_subject_id: studentSubjectId ? Number(studentSubjectId) : null,
   });
 
   const eventTimesUnchanged = () => (
@@ -116,7 +143,25 @@ export default function EditScheduleLessonModal({ event, onClose, onSave }) {
               <h3>Занятие</h3>
               <p className="cb-sch-form__hint">
                 {event.audience || event.title || "Участники не указаны"}
+                {event.studentSubjectLabel ? ` · ${event.studentSubjectLabel}` : ""}
               </p>
+              {event.studentId && studentSubjects.length ? (
+                <label className="cb-sch-field">
+                  <span>Предмет занятия</span>
+                  <select
+                    value={studentSubjectId}
+                    onChange={(e) => setStudentSubjectId(e.target.value)}
+                    disabled={saving}
+                  >
+                    <option value="">Не указан</option>
+                    {studentSubjects.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.display_label || s.subject_label || s.subject}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
             </section>
 
             <section className="cb-sch-form__section">

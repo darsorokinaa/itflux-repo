@@ -13,7 +13,7 @@ const BILLING_TYPE_LABELS = {
 const FINANCIAL_STATUS_LABELS = {
   not_specified: "Не указано",
   not_charged: "Не начислен",
-  awaiting_payment: "Ожидает оплаты",
+  awaiting_payment: "Не оплачен",
   partially_paid: "Частично оплачен",
   paid: "Оплачено",
   paid_from_package: "Из абонемента",
@@ -303,11 +303,23 @@ export function resolveAccountState(account) {
       kind: "advance",
       mod: "ok",
       headline: `Аванс ${formatMoney(credit, currency)}`,
-      detail: "Всё оплачено",
+      detail: account.status_label === "условия заданы" ? "Условия заданы" : "Нет неоплаченных уроков",
       primaryAction: "open",
       primaryLabel: "Открыть",
       showReminder: false,
       credit,
+    };
+  }
+
+  if (account.status_label === "условия заданы" || (configured && unpaidCount <= 0 && unpaidAmount <= 0 && !pkg)) {
+    return {
+      kind: "configured",
+      mod: "muted",
+      headline: "Условия заданы",
+      detail: "Уроки ещё не оплачивались",
+      primaryAction: "open",
+      primaryLabel: "Открыть",
+      showReminder: false,
     };
   }
 
@@ -490,8 +502,8 @@ export function compactLessonBillingLabel(badge) {
   }
   if (status === "awaiting_payment") {
     const amount = Number(badge.amount || 0);
-    if (amount > 0) return `Ожидает оплаты · ${formatMoney(amount, badge.currency)}`;
-    return "Ожидает оплаты";
+    if (amount > 0) return `Не оплачен · ${formatMoney(amount, badge.currency)}`;
+    return "Не оплачен";
   }
   if (status === "partially_paid") {
     const amount = Number(badge.amount || 0);

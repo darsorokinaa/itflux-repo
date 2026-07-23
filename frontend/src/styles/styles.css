@@ -8578,8 +8578,6 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .exam-page .exam-task-card.task-alg .task-text img,
 .exam-page .exam-task-card.task-alg .exam-task-card__text figure img,
 .exam-page .exam-task-card.task-alg .exam-task-card__text img.oge-math-fipi-diagram,
-.exam-page[data-level="ege"][data-subject="math"] .task-text img:not(.oge-math-fipi-inline-letter):not(.oge-math-fipi-inline-frac):not(.oge-math-fipi-bitmap),
-.exam-page[data-level="ege"][data-subject="math"] .exam-task-card__text img:not(.oge-math-fipi-inline-letter):not(.oge-math-fipi-inline-frac):not(.oge-math-fipi-bitmap),
 .all-tasks-item__html.task-geom img,
 .all-tasks-item__html.task-geom figure img,
 .all-tasks-item__html.task-geom figure.image img,
@@ -8597,9 +8595,7 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .all-tasks-item__html .task-alg figure.image img,
 .all-tasks-item--alg .all-tasks-item__html img,
 .all-tasks-item--alg .all-tasks-item__html figure img,
-.all-tasks-item--alg .all-tasks-item__html figure.image img,
-.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__html img:not(.oge-math-fipi-inline-letter):not(.oge-math-fipi-inline-frac):not(.oge-math-fipi-bitmap),
-.all-tasks-page[data-level="ege"][data-subject="math"] .all-tasks-item__html figure img:not(.oge-math-fipi-inline-letter):not(.oge-math-fipi-inline-frac):not(.oge-math-fipi-bitmap) {
+.all-tasks-item--alg .all-tasks-item__html figure.image img {
     display: block !important;
     margin: 0 auto !important;
     width: min(300px, 70vw) !important;
@@ -8705,6 +8701,66 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     cursor: pointer;
 }
 
+/*
+ * Математика (не геом/алг): формулы-картинки не растягивать на ⅔ ширины.
+ * Иначе мелкие PNG/GIF формул (тригонометрия и т.п.) становятся огромными и «мыльными».
+ */
+.exam-page[data-subject="math"] .task:not(.task-geom):not(.task-alg) .task-text figure,
+.exam-page[data-subject="math"] .task:not(.task-geom):not(.task-alg) .task-text figure.image,
+.exam-page[data-subject="math"] .exam-task-card:not(.task-geom):not(.task-alg) .exam-task-card__text figure,
+.exam-page[data-subject="math"] .exam-task-card:not(.task-geom):not(.task-alg) .exam-task-card__text figure.image,
+.all-tasks-page[data-subject="math"] .all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html figure,
+.all-tasks-page[data-subject="math"] .all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html figure.image {
+    width: auto !important;
+    max-width: 100% !important;
+}
+.exam-page[data-subject="math"] .task:not(.task-geom):not(.task-alg) .task-img-zoomable,
+.exam-page[data-subject="math"] .exam-task-card:not(.task-geom):not(.task-alg) .task-img-zoomable,
+.all-tasks-page[data-subject="math"] .all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html .task-img-zoomable {
+    width: auto !important;
+    max-width: 100% !important;
+    display: inline-block !important;
+}
+.exam-page[data-subject="math"] .task:not(.task-geom):not(.task-alg) .task-text img:not(.oge-math-fipi-diagram),
+.exam-page[data-subject="math"] .exam-task-card:not(.task-geom):not(.task-alg) .exam-task-card__text img:not(.oge-math-fipi-diagram),
+.exam-page[data-subject="math"] .task:not(.task-geom):not(.task-alg) .correct-answer-content img:not(.oge-math-fipi-diagram),
+.exam-page[data-subject="math"] .task:not(.task-geom):not(.task-alg) .part2-answer-content img:not(.oge-math-fipi-diagram),
+.all-tasks-page[data-subject="math"] .all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html img:not(.oge-math-fipi-diagram) {
+    display: inline-block !important;
+    width: auto !important;
+    max-width: min(100%, 36rem) !important;
+    height: auto !important;
+    max-height: 3.75em !important;
+    margin: 0.12em 0.1em !important;
+    vertical-align: middle;
+    object-fit: contain !important;
+    object-position: center !important;
+}
+/* Отдельная картинка в абзаце/figure — формула блоком, без раздувания на всю карточку */
+.exam-page[data-subject="math"] .task:not(.task-geom):not(.task-alg) .task-text p:has(> img:only-child) > img:not(.oge-math-fipi-diagram),
+.exam-page[data-subject="math"] .task:not(.task-geom):not(.task-alg) .task-text figure:has(> img:only-child) > img:not(.oge-math-fipi-diagram),
+.exam-page[data-subject="math"] .exam-task-card:not(.task-geom):not(.task-alg) .exam-task-card__text p:has(> img:only-child) > img:not(.oge-math-fipi-diagram),
+.exam-page[data-subject="math"] .exam-task-card:not(.task-geom):not(.task-alg) .exam-task-card__text figure:has(> img:only-child) > img:not(.oge-math-fipi-diagram),
+.all-tasks-page[data-subject="math"] .all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html p:has(> img:only-child) > img:not(.oge-math-fipi-diagram),
+.all-tasks-page[data-subject="math"] .all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html figure:has(> img:only-child) > img:not(.oge-math-fipi-diagram),
+.all-tasks-page[data-subject="math"] .all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html .task-html-block:has(> img:only-child) > img:not(.oge-math-fipi-diagram) {
+    display: block !important;
+    max-height: min(7.5em, 220px) !important;
+    margin: 0.5rem auto 0.35rem !important;
+}
+/* Схемы/рисунки в математике — натуральный размер, без растягивания на ⅔ */
+.exam-page[data-subject="math"] .task:not(.task-geom):not(.task-alg) .task-text img.oge-math-fipi-diagram,
+.exam-page[data-subject="math"] .exam-task-card:not(.task-geom):not(.task-alg) .exam-task-card__text img.oge-math-fipi-diagram,
+.all-tasks-page[data-subject="math"] .all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html img.oge-math-fipi-diagram {
+    display: block !important;
+    width: auto !important;
+    max-width: min(520px, 100%) !important;
+    height: auto !important;
+    max-height: min(420px, 70vh) !important;
+    margin: 0.5rem auto 0.35rem !important;
+    object-fit: contain !important;
+}
+
 /* Алгебра: ещё компактнее MathJax (раньше казались слишком крупными) */
 .exam-page .task-alg .task-text mjx-container,
 .exam-page .task-alg .task-text mjx-container[display="true"],
@@ -8715,8 +8771,6 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .exam-page .task-alg .criteria-text mjx-container {
     font-size: 1.325em !important;
 }
-
-/* ЕГЭ профильная математика: все картинки как в геометрии (кроме явно-inline). */
 
 .math-vector-inline {
     position: relative;
@@ -14861,6 +14915,17 @@ body.exam-variant-view--edu main.container {
     grid-template-columns: minmax(0, 1fr) 272px;
     gap: 18px;
     align-items: start;
+}
+
+/* Учитель на уроке: шире сайдбар, чтобы таблица ответов вмещалась без горизонтального скролла */
+#main-wrapper.exam-page--edu.exam-page--live-teacher .exam-edu-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+    max-width: 1280px;
+    margin-inline: auto;
+}
+
+#main-wrapper.exam-page--edu.exam-page--live-teacher .exam-page-container.exam-edu {
+    max-width: 1280px;
 }
 
 #main-wrapper.exam-page--edu .exam-edu-layout--single {

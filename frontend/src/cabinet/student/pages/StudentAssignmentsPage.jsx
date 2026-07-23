@@ -15,6 +15,7 @@ import {
   StudentLoadingState,
   StudentPageShell,
 } from "../StudentSectionUi";
+import StudentSubjectTabs, { getStoredStudentSubjectId } from "../StudentSubjectTabs";
 
 const FILTERS = [
   { id: "all", label: "Все" },
@@ -58,6 +59,7 @@ export default function StudentAssignmentsPage() {
   const [assignments, setAssignments] = useState([]);
   const [interactives, setInteractives] = useState([]);
   const [filter, setFilter] = useState("all");
+  const [subjectId, setSubjectId] = useState(() => getStoredStudentSubjectId());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -66,7 +68,7 @@ export default function StudentAssignmentsPage() {
     setError("");
 
     const [assignmentsRes, interactivesRes] = await Promise.allSettled([
-      fetchStudentAssignments(),
+      fetchStudentAssignments({ studentSubjectId: subjectId || undefined }),
       fetchStudentInteractives(),
     ]);
 
@@ -90,7 +92,7 @@ export default function StudentAssignmentsPage() {
       setError(errors[0]);
     }
     setLoading(false);
-  }, []);
+  }, [subjectId]);
 
   useEffect(() => {
     loadItems();
@@ -125,6 +127,7 @@ export default function StudentAssignmentsPage() {
 
   return (
     <StudentPageShell className="st-assignments-page">
+      <StudentSubjectTabs value={subjectId} onChange={setSubjectId} />
       <StudentFilterPills filters={FILTERS} active={filter} onChange={setFilter} />
 
       {!loading && error ? (

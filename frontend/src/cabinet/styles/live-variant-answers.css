@@ -2,18 +2,17 @@
 
 .live-variant-answers {
   margin: 0 0 20px;
-  padding: 16px 18px;
+  padding: 14px 14px;
   border-radius: 14px;
   border: 1px solid rgba(43, 82, 245, 0.18);
   background: linear-gradient(180deg, #f8faff 0%, #ffffff 100%);
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
-  position: sticky;
-  top: 12px;
-  z-index: 6;
+  min-width: 0;
 }
 
 .live-variant-answers-sidebar {
   margin: 0 0 12px;
+  min-width: 0;
 }
 
 .live-variant-answers-sidebar .live-variant-answers {
@@ -25,10 +24,12 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 8px;
+  margin-bottom: 10px;
   color: #0f172a;
-  font-size: 1rem;
+  font-size: 0.95rem;
+  line-height: 1.3;
+  word-break: break-word;
 }
 
 .live-variant-answers__meta {
@@ -64,48 +65,60 @@
 }
 
 .live-variant-answers__table-wrap {
-  overflow-x: auto;
+  overflow-x: visible;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .live-variant-answers__table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
-  font-size: 0.88rem;
+  font-size: 0.82rem;
 }
 
 .live-variant-answers__table th,
 .live-variant-answers__table td {
-  padding: 8px 10px;
+  padding: 6px 6px;
   border-bottom: 1px solid rgba(226, 232, 240, 0.95);
   text-align: left;
   vertical-align: top;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .live-variant-answers__table th {
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   font-weight: 650;
   color: #64748b;
   text-transform: uppercase;
   letter-spacing: 0.02em;
+  white-space: normal;
+  line-height: 1.25;
+}
+
+.live-variant-answers__table col.live-variant-answers__col-num {
+  width: 2.2rem;
+}
+
+.live-variant-answers__table col.live-variant-answers__col-status {
+  width: 4.2rem;
 }
 
 .live-variant-answers__table td:first-child,
 .live-variant-answers__table th:first-child {
-  width: 3rem;
+  width: 2.2rem;
   white-space: nowrap;
+  padding-left: 2px;
+  padding-right: 4px;
 }
 
-.live-variant-answers__table-wrap {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  max-width: 100%;
-}
-
-@media (max-width: 640px) {
-  .live-variant-answers__table {
-    min-width: 420px;
-    font-size: 0.82rem;
-  }
+.live-variant-answers__table td:last-child,
+.live-variant-answers__table th:last-child {
+  width: 4.2rem;
+  white-space: nowrap;
+  text-align: right;
+  padding-right: 2px;
 }
 
 .live-variant-answers__pre {
@@ -116,17 +129,21 @@
 .live-variant-answers__ok {
   color: #15803d;
   font-weight: 650;
-  font-size: 0.8rem;
+  font-size: 0.72rem;
 }
 
 .live-variant-answers__bad {
   color: #b91c1c;
   font-weight: 650;
-  font-size: 0.8rem;
+  font-size: 0.72rem;
 }
 
 .live-variant-answers--compact {
-  padding: 12px;
+  padding: 10px;
   margin: 0;
   box-shadow: none;
+}
+
+.live-variant-answers--compact .live-variant-answers__table {
+  font-size: 0.78rem;
 }

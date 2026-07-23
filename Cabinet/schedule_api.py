@@ -67,10 +67,15 @@ class ScheduleSeriesViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         extra_student_ids = data.pop("extra_student_ids", None)
         group_id = data.pop("group_id", None) or (data.get("group") and data["group"].pk)
         notify = data.pop("notify_participants", True)
+        student_subject_id = data.pop("student_subject_id", None)
+        if student_subject_id is None and data.get("student_subject"):
+            ss = data.pop("student_subject", None)
+            student_subject_id = ss.pk if ss else None
 
         series_data = {
             **data,
             "notify_participants": notify,
+            "student_subject_id": student_subject_id,
         }
         if isinstance(series_data.get("start_date"), str):
             series_data["start_date"] = datetime.strptime(series_data["start_date"], "%Y-%m-%d").date()
@@ -88,7 +93,10 @@ class ScheduleSeriesViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
+        try:
+            self.perform_create(serializer)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         out = ScheduleEventSeriesSerializer(serializer.instance, context=self.get_serializer_context()).data
         out["events_created"] = len(getattr(serializer, "created_events", []))
         return Response(out, status=status.HTTP_201_CREATED)
@@ -123,7 +131,7 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = ScheduleEvent.objects.filter(owner=self.get_teacher()).select_related(
-            "student", "group", "lesson", "series",
+            "student", "student_subject", "group", "lesson", "series",
         ).prefetch_related("participants")
         params = self.request.query_params
         date_from = params.get("date_from")
@@ -144,12 +152,15 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
         extra_student_ids = self.request.data.get("extra_student_ids")
         group_id = data.get("group") and data["group"].pk
         notify = self.request.data.get("notify_participants", True)
+        payload = {
+            **data,
+            "notify_participants": notify,
+            "student_subject": self.request.data.get("student_subject")
+            or self.request.data.get("student_subject_id"),
+        }
         event = create_single_event(
             teacher=teacher,
-            data={
-                **data,
-                "notify_participants": notify,
-            },
+            data=payload,
             student_ids=student_ids,
             group_id=group_id,
             extra_student_ids=extra_student_ids,
@@ -157,14 +168,44 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
         )
         serializer.instance = event
 
+    def create(self, request, *args, **kwargs):
+        try:
+            return super().create(request, *args, **kwargs)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
     def update(self, request, *args, **kwargs):
         event = self.get_object()
         scope = request.data.get("scope")
         notify = request.data.get("notify_participants", True)
-        if scope and event.series_id:
-            apply_series_edit(event, scope=scope, changed_by=request.user, data=request.data, notify=notify)
-        else:
-            update_event(event, changed_by=request.user, data=request.data, notify=notify)
+        data = dict(request.data)
+        if "student_subject" in data or "student_subject_id" in data:
+            from .student_subjects import resolve_student_subject_for_write
+
+            ss_id = data.get("student_subject") or data.get("student_subject_id")
+            try:
+                student = event.student
+                if student is None and data.get("student"):
+                    student = Student.objects.filter(
+                        pk=data.get("student"), teacher=self.get_teacher()
+                    ).first()
+                ss = resolve_student_subject_for_write(
+                    teacher=self.get_teacher(),
+                    student=student,
+                    student_subject_id=ss_id,
+                    allow_empty=True,
+                )
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            data["student_subject"] = ss.id if ss else None
+        try:
+            if scope and event.series_id:
+                apply_series_edit(event, scope=scope, changed_by=request.user, data=data, notify=notify)
+            else:
+                update_event(event, changed_by=request.user, data=data, notify=notify)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        event.refresh_from_db()
         return Response(ScheduleEventSerializer(event, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["post"], url_path="ensure-plan-item")

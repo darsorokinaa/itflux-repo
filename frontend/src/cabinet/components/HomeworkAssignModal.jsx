@@ -59,6 +59,7 @@ export default function HomeworkAssignModal({
   group = null,
   enrollment,
   scheduleEventId = null,
+  studentSubjectId = null,
   onClose,
   onAssigned,
   onAttachPlan,
@@ -139,9 +140,17 @@ export default function HomeworkAssignModal({
     try {
       const data = await fetchStudentHomeworkOptions(primaryStudent.id, {
         scheduleEventId: scheduleEventId || undefined,
+        studentSubjectId: studentSubjectId || undefined,
       });
       setOptions(data || null);
-      const first = (data?.items || []).find((item) => !item.assigned) || (data?.items || [])[0];
+      const preferredId = data?.preferred_plan_item_id;
+      const preferred = preferredId
+        ? (data?.items || []).find((item) => Number(item.id) === Number(preferredId))
+        : null;
+      const first =
+        preferred
+        || (data?.items || []).find((item) => !item.assigned)
+        || (data?.items || [])[0];
       setSelectedId(first ? String(first.id) : "");
       const suggested = data?.suggested_due_at || "";
       setSuggestedDueAt(suggested);
@@ -153,7 +162,7 @@ export default function HomeworkAssignModal({
     } finally {
       setLoading(false);
     }
-  }, [primaryStudent?.id, isGroupAssign, scheduleEventId]);
+  }, [primaryStudent?.id, isGroupAssign, scheduleEventId, studentSubjectId]);
 
   useEffect(() => {
     loadOptions();
@@ -215,6 +224,7 @@ export default function HomeworkAssignModal({
         plan_item_id: Number(selectedId),
         due_at: resolveDueAtPayload(),
         ...(scheduleEventId ? { schedule_event_id: Number(scheduleEventId) } : {}),
+        ...(studentSubjectId ? { student_subject_id: Number(studentSubjectId) } : {}),
       });
       onAssigned?.();
       onClose?.();
@@ -247,6 +257,7 @@ export default function HomeworkAssignModal({
         interactive_ids: customInteractiveIds,
         due_at: resolveDueAtPayload(),
         ...(scheduleEventId ? { schedule_event_id: Number(scheduleEventId) } : {}),
+        ...(studentSubjectId ? { student_subject_id: Number(studentSubjectId) } : {}),
       });
       onAssigned?.();
       onClose?.();

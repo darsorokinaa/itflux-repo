@@ -20,6 +20,7 @@ export default function BillingPackageModal({
   const [duration, setDuration] = useState("60");
   const [customDuration, setCustomDuration] = useState(false);
   const [amount, setAmount] = useState("");
+  const [unitPrice, setUnitPrice] = useState("");
   const [startsAt, setStartsAt] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -28,10 +29,24 @@ export default function BillingPackageModal({
 
   const unitsNum = Number(totalUnits) || 0;
   const amountNum = Number(amount) || 0;
+  const unitNum = Number(unitPrice) || 0;
   const perUnit = useMemo(
-    () => (unitsNum > 0 && amountNum > 0 ? amountNum / unitsNum : null),
-    [unitsNum, amountNum],
+    () => (unitsNum > 0 && amountNum > 0 ? amountNum / unitsNum : (unitNum || null)),
+    [unitsNum, amountNum, unitNum],
   );
+
+  const setTotalUnitsAndRecalc = (value, { keepUnit = false } = {}) => {
+    setTotalUnits(value);
+    const count = Number(value) || 0;
+    if (count <= 0) return;
+    if (keepUnit && unitNum > 0) {
+      setAmount(String(Math.round(unitNum * count * 100) / 100));
+    } else if (amountNum > 0) {
+      setUnitPrice(String(Math.round((amountNum / count) * 100) / 100));
+    } else if (unitNum > 0) {
+      setAmount(String(Math.round(unitNum * count * 100) / 100));
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -41,6 +56,7 @@ export default function BillingPackageModal({
     setDuration("60");
     setCustomDuration(false);
     setAmount("");
+    setUnitPrice("");
     setStartsAt(new Date().toISOString().slice(0, 10));
     setExpiresAt("");
     setError("");
@@ -149,7 +165,10 @@ export default function BillingPackageModal({
                 key={n}
                 type="button"
                 className={`pay-chip${!customUnits && totalUnits === String(n) ? " pay-chip--active" : ""}`}
-                onClick={() => { setCustomUnits(false); setTotalUnits(String(n)); }}
+                onClick={() => {
+                  setCustomUnits(false);
+                  setTotalUnitsAndRecalc(String(n), { keepUnit: Boolean(unitNum) });
+                }}
               >
                 {n}
               </button>
@@ -168,7 +187,7 @@ export default function BillingPackageModal({
               type="number"
               min="1"
               value={totalUnits}
-              onChange={(e) => setTotalUnits(e.target.value)}
+              onChange={(e) => setTotalUnitsAndRecalc(e.target.value, { keepUnit: Boolean(unitNum) })}
               style={{ marginTop: 8 }}
             />
           ) : null}
@@ -207,25 +226,55 @@ export default function BillingPackageModal({
           ) : null}
         </div>
 
-        <div className="pay-field">
-          <label>Общая стоимость, ₽</label>
-          <input
-            className="pay-input"
-            type="number"
-            min="0"
-            step="1"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="8000"
-          />
-          {unitsNum > 0 && amountNum > 0 ? (
-            <p className="pay-hint" style={{ marginTop: 6 }}>
-              {unitsNum} занятий · {formatMoney(amountNum)}
-              <br />
-              Стоимость занятия: {formatMoney(perUnit)}
-            </p>
-          ) : null}
+        <div className="pay-field-row">
+          <div className="pay-field">
+            <label>Сумма абонемента, ₽</label>
+            <input
+              className="pay-input"
+              type="number"
+              min="0"
+              step="1"
+              value={amount}
+              onChange={(e) => {
+                const next = e.target.value;
+                setAmount(next);
+                const total = Number(next) || 0;
+                if (unitsNum > 0 && total > 0) {
+                  setUnitPrice(String(Math.round((total / unitsNum) * 100) / 100));
+                }
+              }}
+              placeholder="8000"
+            />
+          </div>
+          <div className="pay-field">
+            <label>Цена одного урока, ₽</label>
+            <input
+              className="pay-input"
+              type="number"
+              min="0"
+              step="1"
+              value={unitPrice}
+              onChange={(e) => {
+                const next = e.target.value;
+                setUnitPrice(next);
+                const unit = Number(next) || 0;
+                if (unitsNum > 0 && unit > 0) {
+                  setAmount(String(Math.round(unit * unitsNum * 100) / 100));
+                }
+              }}
+              placeholder="1000"
+            />
+          </div>
         </div>
+        {unitsNum > 0 && (amountNum > 0 || unitNum > 0) ? (
+          <p className="pay-hint">
+            {unitsNum} занятий
+            {amountNum > 0 ? ` · ${formatMoney(amountNum)}` : ""}
+            {perUnit ? ` · ${formatMoney(perUnit)} за урок` : ""}
+            <br />
+            Заполните сумму или цену урока — второе поле посчитается само.
+          </p>
+        ) : null}
 
         <div className="pay-field-row">
           <div className="pay-field">

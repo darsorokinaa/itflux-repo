@@ -4,12 +4,16 @@ import { fetchTelegramStatus, openTelegramConnect } from "../../utils/cabinetAut
 
 const DISMISS_KEY = "cabinet_telegram_prompt_dismissed";
 
+/** Временно скрыто везде — вернуть в `true`, когда промпт снова нужен. */
+const TELEGRAM_CONNECT_PROMPT_ENABLED = false;
+
 export default function TelegramConnectPrompt({ settingsPath = "/cabinet/settings/notifications/" }) {
   const [visible, setVisible] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (!TELEGRAM_CONNECT_PROMPT_ENABLED) return undefined;
     let cancelled = false;
     try {
       if (sessionStorage.getItem(DISMISS_KEY) === "1") return undefined;
@@ -37,7 +41,7 @@ export default function TelegramConnectPrompt({ settingsPath = "/cabinet/setting
     };
   }, []);
 
-  if (!visible) return null;
+  if (!TELEGRAM_CONNECT_PROMPT_ENABLED || !visible) return null;
 
   const dismiss = () => {
     try {

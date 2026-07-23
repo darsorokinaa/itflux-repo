@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import EventDetailCard from "../components/EventDetailCard";
 import {
-  planItemHomeworkPopoverRows,
+  eventAssignedHomeworkRows,
   planItemLessonPopoverRows,
   planItemTaskPopoverRows,
 } from "../planItemAttachments";
@@ -76,7 +76,19 @@ function getEventPlanMaterials(event) {
 }
 
 function getEventPlanHomework(event) {
-  return planItemHomeworkPopoverRows(getEventPlanItem(event), event.homework_status || null);
+  const rows = eventAssignedHomeworkRows(event);
+  if (rows.length) return rows;
+  // Фоллбек: если API ещё без assignedHomework, но homework_id есть.
+  if (event.homework_id) {
+    return [{
+      key: `hw-${event.homework_id}`,
+      kind: "notes",
+      label: "Домашнее задание",
+      text: event.homework_status ? `Статус: ${event.homework_status}` : "Выдано",
+      typeLabel: "Выдано",
+    }];
+  }
+  return [];
 }
 
 function hasText(value) {

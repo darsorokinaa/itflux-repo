@@ -237,6 +237,14 @@ def present_board(*, meeting: VideoMeeting, user: User, board_id: str) -> dict:
     if meeting.status != VideoMeeting.Status.LIVE:
         raise VideoMeetingError("Показать можно только во время урока", code="not_live", status=409)
 
+    # Не смешиваем показ доски с сессией синхронного материала.
+    try:
+        from .meeting_material_session import close_material_session
+
+        close_material_session(meeting=meeting, user=user)
+    except Exception:
+        pass
+
     board = InteractiveBoard.objects.filter(pk=board_id, owner=meeting.schedule_event.owner).first()
     if board is None:
         board = InteractiveBoard.objects.filter(pk=board_id).first()
@@ -284,6 +292,13 @@ def present_variant(
     assert_can_manage_meeting(user, meeting)
     if meeting.status != VideoMeeting.Status.LIVE:
         raise VideoMeetingError("Показать можно только во время урока", code="not_live", status=409)
+
+    try:
+        from .meeting_material_session import close_material_session
+
+        close_material_session(meeting=meeting, user=user)
+    except Exception:
+        pass
 
     event = meeting.schedule_event
     variant_url = (url or "").strip()

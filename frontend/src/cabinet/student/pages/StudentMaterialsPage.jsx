@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchStudentMaterials } from "../../../utils/cabinetAuth";
 import {
   StudentEmptyState,
   StudentPageShell,
 } from "../StudentSectionUi";
+import StudentSubjectTabs, { getStoredStudentSubjectId } from "../StudentSubjectTabs";
 import CabinetIcon from "../../CabinetIcons";
 
 const TYPE_ICONS = {
@@ -35,6 +36,10 @@ function MaterialRow({ item }) {
       <span className="st-mat-row__body">
         <span className="st-mat-row__title">{item.title}</span>
         <span className="st-mat-row__meta">
+          {item.student_subject_label ? (
+            <span className="st-mat-row__subject">{item.student_subject_label}</span>
+          ) : null}
+          {item.student_subject_label ? " · " : ""}
           {item.type_label}
           {item.lesson_topic ? ` · ${item.lesson_topic}` : ""}
           {item.direct ? " · Выдано учителем" : ""}
@@ -78,14 +83,20 @@ export default function StudentMaterialsPage() {
   const [allItems, setAllItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [subjectId, setSubjectId] = useState(() => getStoredStudentSubjectId());
   const inputRef = useRef(null);
 
+  const handleSubjectChange = useCallback((id) => {
+    setSubjectId(id || "");
+  }, []);
+
   useEffect(() => {
-    fetchStudentMaterials()
+    setLoading(true);
+    fetchStudentMaterials(query, { studentSubjectId: subjectId || undefined })
       .then((d) => setAllItems(d?.items || []))
       .catch(() => setAllItems([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [subjectId]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -95,7 +106,8 @@ export default function StudentMaterialsPage() {
         it.title.toLowerCase().includes(q) ||
         (it.topic || "").toLowerCase().includes(q) ||
         (it.lesson_topic || "").toLowerCase().includes(q) ||
-        (it.type_label || "").toLowerCase().includes(q),
+        (it.type_label || "").toLowerCase().includes(q) ||
+        (it.student_subject_label || "").toLowerCase().includes(q),
     );
   }, [allItems, query]);
 
@@ -106,6 +118,8 @@ export default function StudentMaterialsPage() {
         <h1 className="st-mat-header__title">Материалы</h1>
         <p className="st-mat-header__sub">Теория, файлы, ссылки и доски от учителя</p>
       </div>
+
+      <StudentSubjectTabs value={subjectId} onChange={handleSubjectChange} />
 
       {/* Search */}
       <div className="st-mat-search">

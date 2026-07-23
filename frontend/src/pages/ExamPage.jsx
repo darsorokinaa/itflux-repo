@@ -886,8 +886,8 @@ function ExamPage() {
     };
   }, []);
 
-  // Учитель на вкладке варианта (?meeting=): таблица ответов прямо на странице.
-  // Не завязаны на live_meeting в URL — достаточно доступа к live-answers.
+  // Учитель на вкладке варианта (?meeting=): таблица ответов только в сайдбаре,
+  // чтобы не перекрывать задачи. Не завязаны на live_meeting в URL — достаточно live-answers.
   useEffect(() => {
     if (!meetingUuid) {
       setIsLiveTeacherView(false);
@@ -2208,7 +2208,7 @@ function ExamPage() {
     </div>
     <div
       ref={mainRef}
-      className={`main-wrapper exam-page${isEmbeddedHomework ? " exam-page--homework" : ""}${showExamEducationShell ? " exam-page--edu" : ""}`}
+      className={`main-wrapper exam-page${isEmbeddedHomework ? " exam-page--homework" : ""}${showExamEducationShell ? " exam-page--edu" : ""}${isLiveTeacherView ? " exam-page--live-teacher" : ""}`}
       id="main-wrapper"
       data-level={level}
       data-subject={subject}
@@ -2430,13 +2430,6 @@ function ExamPage() {
                 </div>
               </div>
             </header>
-
-            {isLiveTeacherView ? (
-              <LiveVariantAnswersTable
-                answers={liveAnswers}
-                loading={liveAnswersLoading}
-              />
-            ) : null}
 
             {/* ===== ЧАСТЬ 1 ===== */}
             {part1Tasks.length > 0 && (

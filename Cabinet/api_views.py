@@ -11,12 +11,14 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .choices import (
+    EnrollmentStatus,
     GroupStatus,
     InvitationStatus,
     PlanItemStatus,
     PlanStatus,
     ReviewStatus,
     StudentStatus,
+    StudentSubjectStatus,
     SubmissionStatus,
 )
 from .subscription_service import LimitExceeded, SubscriptionLimitService
@@ -53,7 +55,13 @@ from .models import (
     Student,
     StudentGroup,
     StudentInvitation,
+    StudentSubject,
     TeacherSavedMaterial,
+)
+from .student_subjects import (
+    archive_student_subject,
+    student_subject_has_history,
+    subjects_compatible,
 )
 from .permissions import IsCabinetTeacher
 from .serializers import (
@@ -93,6 +101,8 @@ from .serializers import (
     StudentInvitationCreateSerializer,
     StudentInvitationSerializer,
     StudentListSerializer,
+    StudentSubjectSerializer,
+    StudentSubjectWriteSerializer,
     StudentWriteSerializer,
     build_dashboard_payload,
 )
@@ -112,7 +122,10 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
     http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
-        qs = Student.objects.filter(teacher=self.get_teacher()).prefetch_related("groups")
+        qs = Student.objects.filter(teacher=self.get_teacher()).prefetch_related(
+            "groups",
+            "subjects",
+        )
         # Detail/custom actions must see archived students (restore / permanent delete).
         if getattr(self, "action", None) != "list":
             return qs.order_by("last_name", "first_name")
@@ -175,6 +188,137 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         student.delete()
         return Response({"ok": True, "deleted_id": student_id}, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["get", "post"], url_path="subjects")
+    def subjects(self, request, pk=None):
+        student = self.get_object()
+        if request.method == "GET":
+            include_archived = (request.query_params.get("include_archived") or "").lower() in (
+                "1", "true", "yes",
+            )
+            qs = student.subjects.all().prefetch_related("plan_enrollments__plan")
+            if not include_archived:
+                qs = qs.filter(status=StudentSubjectStatus.ACTIVE)
+            return Response(
+                StudentSubjectSerializer(qs.order_by("subject", "title", "id"), many=True).data
+            )
+
+        serializer = StudentSubjectWriteSerializer(
+            data=request.data,
+            context={"student": student, "request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        plan_id = serializer.validated_data.pop("plan_id", None)
+        subject = serializer.save(student=student)
+        if plan_id:
+            plan = get_object_or_404(LessonPlan, pk=plan_id)
+            if plan.teacher_id not in (None, self.get_teacher().id) and plan.status != PlanStatus.PUBLISHED:
+                return Response({"detail": "План не найден."}, status=status.HTTP_404_NOT_FOUND)
+            if plan.status == PlanStatus.DRAFT:
+                return Response(
+                    {"detail": "Черновик плана нельзя назначить. Сначала опубликуйте план."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if not subjects_compatible(plan.subject, subject.subject):
+                return Response(
+                    {"detail": "Предмет плана не совпадает с предметом ученика."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            LessonPlanEnrollment.objects.create(
+                teacher=self.get_teacher(),
+                plan=plan,
+                student=student,
+                student_subject=subject,
+                format="individual",
+                status=EnrollmentStatus.ACTIVE,
+            )
+        return Response(
+            StudentSubjectSerializer(subject).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(
+        detail=True,
+        methods=["get", "patch", "delete"],
+        url_path=r"subjects/(?P<subject_id>[0-9]+)",
+    )
+    def subject_detail(self, request, pk=None, subject_id=None):
+        student = self.get_object()
+        subject = get_object_or_404(StudentSubject, pk=subject_id, student=student)
+        if request.method == "GET":
+            return Response(StudentSubjectSerializer(subject).data)
+
+        if request.method == "DELETE":
+            force = (request.query_params.get("force") or "").lower() in ("1", "true", "yes")
+            if student_subject_has_history(subject) and not force:
+                archive_student_subject(subject)
+                return Response({
+                    "ok": True,
+                    "archived": True,
+                    "detail": (
+                        "По предмету есть связанные данные. Предмет переведён в архив; "
+                        "история уроков и отчётов сохранена."
+                    ),
+                    "subject": StudentSubjectSerializer(subject).data,
+                })
+            if force and student_subject_has_history(subject):
+                archive_student_subject(subject)
+                return Response({
+                    "ok": True,
+                    "archived": True,
+                    "subject": StudentSubjectSerializer(subject).data,
+                })
+            subject_id_val = subject.pk
+            subject.delete()
+            return Response({"ok": True, "deleted_id": subject_id_val})
+
+        serializer = StudentSubjectWriteSerializer(
+            subject,
+            data=request.data,
+            partial=True,
+            context={"student": student, "request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.validated_data.pop("plan_id", None)
+        # plan_id is optional on patch; only handle if explicitly provided
+        plan_provided = "plan_id" in request.data
+        raw_plan = request.data.get("plan_id")
+        subject = serializer.save()
+        if plan_provided:
+            if raw_plan in (None, "", 0, "0"):
+                LessonPlanEnrollment.objects.filter(
+                    student_subject=subject,
+                    status__in=[EnrollmentStatus.ACTIVE, EnrollmentStatus.PAUSED],
+                ).update(status=EnrollmentStatus.CANCELLED)
+            else:
+                plan = get_object_or_404(LessonPlan, pk=raw_plan)
+                if plan.status == PlanStatus.DRAFT:
+                    return Response(
+                        {"detail": "Черновик плана нельзя назначить."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if not subjects_compatible(plan.subject, subject.subject):
+                    return Response(
+                        {"detail": "Предмет плана не совпадает с предметом ученика."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                enrollment = LessonPlanEnrollment.objects.filter(
+                    student_subject=subject,
+                    status__in=[EnrollmentStatus.ACTIVE, EnrollmentStatus.PAUSED],
+                ).first()
+                if enrollment:
+                    enrollment.plan = plan
+                    enrollment.save(update_fields=["plan", "updated_at"])
+                else:
+                    LessonPlanEnrollment.objects.create(
+                        teacher=self.get_teacher(),
+                        plan=plan,
+                        student=student,
+                        student_subject=subject,
+                        format="individual",
+                        status=EnrollmentStatus.ACTIVE,
+                    )
+        return Response(StudentSubjectSerializer(subject).data)
+
     @action(detail=True, methods=["patch"], url_path="archive")
     def archive(self, request, pk=None):
         student = self.get_object()
@@ -223,27 +367,47 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             suggest_homework_due_at,
         )
 
-        payload = homework_options_for_student(teacher=self.get_teacher(), student=student)
-        schedule_event_id = request.query_params.get("schedule_event_id")
+        schedule_event_id = (
+            request.query_params.get("schedule_event_id")
+            or request.query_params.get("schedule_event")
+        )
+        ss_id = (
+            request.query_params.get("student_subject_id")
+            or request.query_params.get("student_subject")
+        )
+        event = None
         if schedule_event_id:
             event = ScheduleEvent.objects.filter(
                 pk=schedule_event_id,
                 owner=self.get_teacher(),
-            ).select_related("lesson_plan_item", "lesson_plan_item__plan").first()
-            if event is not None:
-                subject = _subject_for_event(event) or payload.get("plan_subject") or None
-                suggested = suggest_homework_due_at(
-                    teacher=self.get_teacher(),
-                    student=student,
-                    subject=subject or None,
-                    after=event.ends_at or event.starts_at or timezone.now(),
-                    exclude_event_id=event.pk,
-                    group=event.group if event.group_id else None,
-                )
-                payload["suggested_due_at"] = suggested.isoformat() if suggested else None
-                payload["suggested_due_source"] = "next_lesson" if suggested else None
-                if subject:
-                    payload["plan_subject"] = subject
+            ).select_related(
+                "lesson_plan_item",
+                "lesson_plan_item__plan",
+                "student_subject",
+            ).first()
+            if event is not None and not ss_id and event.student_subject_id:
+                ss_id = event.student_subject_id
+
+        payload = homework_options_for_student(
+            teacher=self.get_teacher(),
+            student=student,
+            student_subject_id=ss_id,
+            schedule_event=event,
+        )
+        if event is not None:
+            subject = _subject_for_event(event) or payload.get("plan_subject") or None
+            suggested = suggest_homework_due_at(
+                teacher=self.get_teacher(),
+                student=student,
+                subject=subject or None,
+                after=event.ends_at or event.starts_at or timezone.now(),
+                exclude_event_id=event.pk,
+                group=event.group if event.group_id else None,
+            )
+            payload["suggested_due_at"] = suggested.isoformat() if suggested else None
+            payload["suggested_due_source"] = "next_lesson" if suggested else None
+            if subject:
+                payload["plan_subject"] = subject
         return Response(payload)
 
     @action(detail=True, methods=["post"], url_path="assign-homework")
@@ -256,7 +420,7 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             _subject_for_event,
             assign_custom_homework,
             assign_homework_manually,
-            homework_options_for_student,
+            student_can_receive_plan_item_homework,
             suggest_homework_due_at,
         )
 
@@ -278,15 +442,23 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         after = timezone.now()
         exclude_event_id = None
         subject = None
+        event = None
+        ss_id = request.data.get("student_subject_id") or request.data.get("student_subject")
         if schedule_event_id:
             event = ScheduleEvent.objects.filter(
                 pk=schedule_event_id,
                 owner=self.get_teacher(),
-            ).select_related("lesson_plan_item", "lesson_plan_item__plan").first()
+            ).select_related(
+                "lesson_plan_item",
+                "lesson_plan_item__plan",
+                "student_subject",
+            ).first()
             if event is not None:
                 after = event.ends_at or event.starts_at or after
                 exclude_event_id = event.pk
                 subject = _subject_for_event(event) or None
+                if not ss_id and event.student_subject_id:
+                    ss_id = event.student_subject_id
 
         plan_item_id = request.data.get("plan_item_id")
         try:
@@ -295,8 +467,12 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                     LessonPlanItem.objects.select_related("plan"),
                     pk=plan_item_id,
                 )
-                options = homework_options_for_student(teacher=self.get_teacher(), student=student)
-                if not options.get("plan_id") or plan_item.plan_id != options["plan_id"]:
+                if not student_can_receive_plan_item_homework(
+                    teacher=self.get_teacher(),
+                    student=student,
+                    plan_item=plan_item,
+                    student_subject_id=ss_id,
+                ):
                     return Response(
                         {"detail": "Пункт не принадлежит плану, назначенному ученику."},
                         status=status.HTTP_400_BAD_REQUEST,
@@ -338,6 +514,27 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except PermissionError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+
+        if ss_id:
+            from .student_subjects import get_teacher_student_subject
+
+            ss = get_teacher_student_subject(
+                teacher=self.get_teacher(),
+                student_subject_id=ss_id,
+                student=student,
+            )
+            if ss is None:
+                return Response(
+                    {"detail": "Предмет не принадлежит выбранному ученику."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            homework.student_subject = ss
+            homework.save(update_fields=["student_subject", "updated_at"])
+
+        # Привязываем выдачу к уроку в расписании — иначе карточка урока не видит ДЗ.
+        if event is not None and event.homework_id != homework.id:
+            event.homework = homework
+            event.save(update_fields=["homework", "updated_at"])
 
         from .serializers import HomeworkListSerializer
 
@@ -901,13 +1098,16 @@ class LessonPlanEnrollmentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         qs = LessonPlanEnrollment.objects.filter(
             teacher=self.get_teacher()
-        ).select_related("plan", "student", "group")
+        ).select_related("plan", "student", "student_subject", "group")
         plan_id = self.request.query_params.get("plan")
         if plan_id:
             qs = qs.filter(plan_id=plan_id)
         student_id = self.request.query_params.get("student")
         if student_id:
             qs = qs.filter(student_id=student_id)
+        student_subject_id = self.request.query_params.get("student_subject")
+        if student_subject_id:
+            qs = qs.filter(student_subject_id=student_subject_id)
         group_id = self.request.query_params.get("group")
         if group_id:
             qs = qs.filter(group_id=group_id)
@@ -924,10 +1124,18 @@ class LessonPlanEnrollmentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         student = serializer.validated_data.get("student")
         group = serializer.validated_data.get("group")
+        student_subject = serializer.validated_data.get("student_subject")
         if student:
             get_object_or_404(Student, pk=student.pk, teacher=self.get_teacher())
         if group:
             get_object_or_404(StudentGroup, pk=group.pk, teacher=self.get_teacher())
+        if student_subject:
+            get_object_or_404(
+                StudentSubject,
+                pk=student_subject.pk,
+                student=student,
+                student__teacher=self.get_teacher(),
+            )
         enrollment = serializer.save(teacher=self.get_teacher())
         # Помечаем первый пункт плана как PLANNED
         from .plan_sync import PlanSyncService
@@ -1597,7 +1805,7 @@ class DirectMaterialAssignView(TeacherScopedMixin, APIView):
         teacher = self.get_teacher()
         qs = DirectMaterialAssignment.objects.filter(
             teacher=teacher
-        ).select_related("material", "group", "student").order_by("-assigned_at")
+        ).select_related("material", "group", "student", "student_subject").order_by("-assigned_at")
         items = []
         for da in qs:
             items.append({
@@ -1609,6 +1817,10 @@ class DirectMaterialAssignView(TeacherScopedMixin, APIView):
                 "group_title": da.group.title if da.group else None,
                 "student_id": da.student_id,
                 "student_name": str(da.student) if da.student else None,
+                "student_subject_id": da.student_subject_id,
+                "student_subject_label": (
+                    da.student_subject.display_label if da.student_subject_id else None
+                ),
                 "message": da.message,
                 "assigned_at": da.assigned_at.isoformat(),
             })
@@ -1619,6 +1831,7 @@ class DirectMaterialAssignView(TeacherScopedMixin, APIView):
         material_id = request.data.get("material_id")
         group_id = request.data.get("group_id")
         student_id = request.data.get("student_id")
+        student_subject_id = request.data.get("student_subject_id") or request.data.get("student_subject")
         message = (request.data.get("message") or "").strip()
 
         if not material_id:
@@ -1636,6 +1849,7 @@ class DirectMaterialAssignView(TeacherScopedMixin, APIView):
 
         group = None
         student = None
+        student_subject = None
         if group_id:
             try:
                 group = StudentGroup.objects.get(pk=group_id, teacher=teacher)
@@ -1643,15 +1857,26 @@ class DirectMaterialAssignView(TeacherScopedMixin, APIView):
                 return Response({"error": "Группа не найдена."}, status=status.HTTP_404_NOT_FOUND)
         if student_id:
             try:
-                student = Student.objects.get(pk=student_id)
+                student = Student.objects.get(pk=student_id, teacher=teacher)
             except Student.DoesNotExist:
                 return Response({"error": "Ученик не найден."}, status=status.HTTP_404_NOT_FOUND)
+            from .student_subjects import resolve_student_subject_for_write
+            try:
+                student_subject = resolve_student_subject_for_write(
+                    teacher=teacher,
+                    student=student,
+                    student_subject_id=student_subject_id,
+                    allow_empty=not student.subjects.filter(status=StudentSubjectStatus.ACTIVE).exists(),
+                )
+            except ValueError as exc:
+                return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         da = DirectMaterialAssignment.objects.create(
             teacher=teacher,
             material=material,
             group=group,
             student=student,
+            student_subject=student_subject,
             message=message,
         )
         return Response({"id": da.id, "ok": True}, status=status.HTTP_201_CREATED)

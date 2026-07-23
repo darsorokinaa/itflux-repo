@@ -54,6 +54,21 @@ urlpatterns = [
         name="video_meeting_live_answers",
     ),
     path(
+        "<uuid:meeting_uuid>/material-session/",
+        video_meeting_api.VideoMeetingMaterialSessionView.as_view(),
+        name="video_meeting_material_session",
+    ),
+    path(
+        "<uuid:meeting_uuid>/material-session/permission/",
+        video_meeting_api.VideoMeetingMaterialPermissionView.as_view(),
+        name="video_meeting_material_permission",
+    ),
+    path(
+        "<uuid:meeting_uuid>/material-session/operation/",
+        video_meeting_api.VideoMeetingMaterialOperationView.as_view(),
+        name="video_meeting_material_operation",
+    ),
+    path(
         "<uuid:meeting_uuid>/",
         video_meeting_api.VideoMeetingDetailView.as_view(),
         name="video_meeting_detail",

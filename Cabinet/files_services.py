@@ -820,7 +820,13 @@ def list_directory(
 def attach_file(user, file_id, target_type: str, target_id) -> dict:
     file_obj = get_owned_file(user, file_id)
     target_type = (target_type or "").strip()
-    if not target_type or target_id in (None, ""):
+    # material / as_material — создать TeacherMaterial из файла; target_id не нужен
+    material_only = target_type in (
+        CabinetFileRelationType.MATERIAL,
+        "material",
+        "as_material",
+    )
+    if not target_type or (not material_only and target_id in (None, "")):
         raise FileServiceError("Укажите объект для прикрепления", code="TARGET_REQUIRED", status=400)
 
     rel_kwargs = {
@@ -830,7 +836,7 @@ def attach_file(user, file_id, target_type: str, target_id) -> dict:
     }
     material = None
 
-    if target_type in (CabinetFileRelationType.MATERIAL, "material", "as_material"):
+    if material_only:
         material = _ensure_material_bridge(user, file_obj)
         log_action(
             user,
@@ -1209,3 +1215,34 @@ def material_file_url(material: Material, *, for_student: bool = False) -> str:
             return ""
         return material.file.url
     return ""
+
+
+def material_view_url(material: Material, *, for_student: bool = False) -> str:
+    """
+    URL для просмотра в iframe/img (inline), а не скачивания.
+    Для файлов из хранилища всегда API preview — /media/cabinet/my-files/ закрыт.
+    """
+    if material.cabinet_file_id:
+        if for_student:
+            return f"/api/cabinet/student/files/shared/{material.cabinet_file_id}/preview/"
+        return f"/api/cabinet/files/{material.cabinet_file_id}/preview/"
+    if material.file:
+        name = material.file.name or ""
+        if name.startswith("cabinet/my-files/") or name.startswith("cabinet/boards_private/"):
+            # Без cabinet_file публичный media недоступен — вернём пусто.
+            return ""
+        return material.file.url
+    return (material.external_url or "").strip()
+
+
+def is_blocked_media_url(url: str) -> bool:
+    raw = (url or "").strip().lower()
+    if not raw:
+        return False
+    path = raw.split("?", 1)[0]
+    return (
+        "/media/cabinet/my-files/" in path
+        or "/media/cabinet/boards_private/" in path
+        or path.startswith("cabinet/my-files/")
+        or path.startswith("cabinet/boards_private/")
+    )

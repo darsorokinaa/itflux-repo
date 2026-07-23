@@ -516,6 +516,41 @@ class PackageTests(BillingTestBase):
         self.assertEqual(data["unpaid_lessons_count"], 1)
         self.assertGreater(Decimal(data["unpaid_lessons_amount"]), 0)
 
+    def test_tariff_settings_alone_are_not_paid(self):
+        """Настройки цены ≠ оплаченный урок."""
+        data = serialize_account(self.account)
+        self.assertEqual(data["status_label"], "условия заданы")
+        event = self._event()
+        records = finalize_event_billing(
+            event=event,
+            teacher=self.teacher,
+            financial_action="charge",
+            idempotency_key="settings-not-paid",
+        )
+        self.assertEqual(records[0].financial_status, FinancialStatus.AWAITING_PAYMENT)
+        data = serialize_account(self.account)
+        self.assertEqual(data["status_label"], "есть задолженность")
+        self.assertEqual(data["unpaid_lessons_count"], 1)
+
+    def test_advance_payment_covers_lesson_via_allocation(self):
+        """Аванс учителя закрывает урок только через allocation, не «по балансу»."""
+        register_payment(
+            teacher=self.teacher,
+            student=self.student,
+            amount=Decimal("1600"),
+        )
+        event = self._event()
+        records = finalize_event_billing(
+            event=event,
+            teacher=self.teacher,
+            financial_action="charge",
+            idempotency_key="advance-alloc",
+        )
+        records[0].refresh_from_db()
+        self.assertEqual(records[0].financial_status, FinancialStatus.PAID)
+        self.assertEqual(records[0].paid_amount, Decimal("1600.00"))
+        self.assertTrue(records[0].payment_allocations.exists())
+
     def test_unfinalize_returns_package_unit(self):
         pkg = create_package(
             teacher=self.teacher,

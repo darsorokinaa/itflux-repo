@@ -31,10 +31,21 @@ export function mapApiStudent(apiStudent) {
   const name = apiStudent.full_name
     || [apiStudent.first_name, apiStudent.last_name].filter(Boolean).join(" ")
     || "Без имени";
+  const subjectsPreview = Array.isArray(apiStudent.subjects_preview)
+    ? apiStudent.subjects_preview
+    : Array.isArray(apiStudent.subjects)
+      ? apiStudent.subjects
+      : [];
+  const subjectLabels = subjectsPreview
+    .map((s) => s.display_label || s.subject_label || s.subject)
+    .filter(Boolean);
   return {
     id: String(apiStudent.id),
     name,
-    subject: apiStudent.direction === "python" ? "Python" : "Информатика",
+    subject: subjectLabels[0]
+      || (apiStudent.direction === "python" ? "Python" : direction || "Без предмета"),
+    subjects: subjectLabels,
+    subjectsCount: apiStudent.subjects_count ?? subjectLabels.length,
     grade: apiStudent.grade,
     direction,
     groupId: groupIds[0] || null,

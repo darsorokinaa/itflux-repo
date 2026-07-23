@@ -348,6 +348,16 @@ def finish_meeting(*, meeting: VideoMeeting, user: User) -> VideoMeeting:
             ]
         )
 
+        try:
+            from .meeting_material_session import finalize_material_sessions_for_meeting
+
+            finalize_material_sessions_for_meeting(locked)
+        except Exception:
+            logger.exception(
+                "Failed to finalize material sessions meeting=%s",
+                locked.uuid,
+            )
+
         open_sessions = (
             MeetingAttendance.objects.select_for_update()
             .filter(meeting=locked, left_at__isnull=True)
@@ -782,7 +792,18 @@ def serialize_meeting_summary(meeting: VideoMeeting | None, *, event: ScheduleEv
         "actualStartedAt": meeting.actual_started_at.isoformat() if meeting.actual_started_at else None,
         "actualFinishedAt": meeting.actual_finished_at.isoformat() if meeting.actual_finished_at else None,
         "presented": serialize_presented(meeting, user=user),
+        "materialSession": _serialize_active_material_session(meeting, user=user),
     }
+
+
+def _serialize_active_material_session(meeting: VideoMeeting, *, user: User | None = None) -> dict | None:
+    try:
+        from .meeting_material_session import get_active_material_session, serialize_material_session
+
+        return serialize_material_session(get_active_material_session(meeting), user=user, include_state=True)
+    except Exception:
+        logger.exception("Failed to serialize material session meeting=%s", meeting.uuid)
+        return None
 
 
 def serialize_meeting_compact(meeting: VideoMeeting) -> dict:

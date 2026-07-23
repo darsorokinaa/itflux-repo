@@ -45,7 +45,7 @@ describe("billingFormat", () => {
 
   it("maps labels", () => {
     expect(billingTypeLabel("per_lesson")).toBe("За урок");
-    expect(financialStatusLabel("awaiting_payment")).toBe("Ожидает оплаты");
+    expect(financialStatusLabel("awaiting_payment")).toBe("Не оплачен");
     expect(financialStatusLabel("needs_decision")).toBe("Требует оформления");
     expect(transactionTypeLabel("charge")).toBe("Начисление");
   });
@@ -69,6 +69,20 @@ describe("billingFormat", () => {
     expect(state.primaryLabel).toBe("Настроить");
   });
 
+  it("does not treat configured tariff alone as paid", () => {
+    const state = resolveAccountState({
+      billing_type: "per_lesson",
+      default_lesson_price: "1600",
+      balance: { debt: "0", credit: "0" },
+      currency: "RUB",
+      status_label: "условия заданы",
+      unpaid_lessons_count: 0,
+      unpaid_lessons_amount: "0",
+    });
+    expect(state.kind).toBe("configured");
+    expect(state.headline).toBe("Условия заданы");
+  });
+
   it("labels debt and advance clearly", () => {
     const debt = resolveAccountState({
       billing_type: "per_lesson",
@@ -76,6 +90,8 @@ describe("billingFormat", () => {
       balance: { debt: "3200", credit: "0" },
       currency: "RUB",
       status_label: "есть задолженность",
+      unpaid_lessons_amount: "3200",
+      unpaid_lessons_count: 2,
     });
     expect(debt.kind).toBe("debt");
     expect(debt.headline).toContain("Долг");
@@ -107,7 +123,7 @@ describe("billingFormat", () => {
       financial_status: "awaiting_payment",
       amount: "1600",
       currency: "RUB",
-    })).toContain("Ожидает оплаты");
+    })).toContain("Не оплачен");
     expect(compactLessonBillingLabel({ financial_status: "needs_decision" })).toBe("Требует оформления");
     expect(compactLessonBillingLabel({
       financial_status: "paid_from_package",

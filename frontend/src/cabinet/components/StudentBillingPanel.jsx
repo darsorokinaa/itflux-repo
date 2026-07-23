@@ -176,13 +176,35 @@ export default function StudentBillingPanel({
           type="button"
           className="pay-btn pay-btn--primary"
           onClick={() => {
-            if (state.primaryAction === "setup" && onEditTerms) onEditTerms(studentId);
-            else if (state.primaryAction === "package") onNewPackage?.(studentId);
-            else onAddPayment?.(studentId);
+            if (state.primaryAction === "setup") {
+              onEditTerms?.(studentId);
+              return;
+            }
+            if (state.primaryAction === "package") {
+              onNewPackage?.(studentId);
+              return;
+            }
+            if (state.primaryAction === "payment" || state.primaryAction === "finalize") {
+              onAddPayment?.(studentId);
+              return;
+            }
+            // Уже настроено — по умолчанию фиксируем поступление, условия меняют отдельно.
+            onAddPayment?.(studentId);
           }}
         >
-          {state.primaryLabel === "Открыть" ? "Добавить оплату" : state.primaryLabel}
+          {state.primaryAction === "setup"
+            ? "Настроить оплату"
+            : (state.primaryLabel === "Открыть" ? "Добавить оплату" : state.primaryLabel)}
         </button>
+        {onEditTerms && state.primaryAction !== "setup" ? (
+          <button
+            type="button"
+            className="pay-btn"
+            onClick={() => onEditTerms(studentId)}
+          >
+            Условия
+          </button>
+        ) : null}
         <Link className="pay-btn" to={`/cabinet/payments?student=${studentId}`}>
           Все оплаты
         </Link>

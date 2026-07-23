@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import CabinetIcon from "../CabinetIcons";
-import { billingPlanCheck, fetchGroups, fetchStudents } from "../../utils/cabinetAuth";
+import {
+  billingPlanCheck,
+  fetchGroups,
+  fetchStudentSubjects,
+  fetchStudents,
+} from "../../utils/cabinetAuth";
 import { formatMoney, formatUnits } from "../billing/billingFormat";
 import "../styles/payments.css";
 
@@ -112,6 +117,9 @@ export default function CreateScheduleLessonModal({
   const [students, setStudents] = useState([]);
   const [groups, setGroups] = useState([]);
   const [billingPreview, setBillingPreview] = useState(null);
+  const [studentSubjects, setStudentSubjects] = useState([]);
+  const [studentSubjectId, setStudentSubjectId] = useState("");
+  const [subjectsLoading, setSubjectsLoading] = useState(false);
 
   useEffect(() => {
     if (defaultDate) setDate(defaultDate);
@@ -186,6 +194,40 @@ export default function CreateScheduleLessonModal({
     return () => { cancelled = true; };
   }, [studentId, startTime, endTime]);
 
+  useEffect(() => {
+    if (!isIndividual || !studentId) {
+      setStudentSubjects([]);
+      setStudentSubjectId("");
+      return undefined;
+    }
+    let cancelled = false;
+    setSubjectsLoading(true);
+    fetchStudentSubjects(studentId)
+      .then((data) => {
+        if (cancelled) return;
+        const list = (Array.isArray(data) ? data : data?.items || [])
+          .filter((s) => s.status !== "archived");
+        setStudentSubjects(list);
+        if (list.length === 1) {
+          setStudentSubjectId(String(list[0].id));
+        } else {
+          setStudentSubjectId((prev) => (
+            list.some((s) => String(s.id) === String(prev)) ? prev : ""
+          ));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStudentSubjects([]);
+          setStudentSubjectId("");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSubjectsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [isIndividual, studentId]);
+
   const audienceLabel = useMemo(() => {
     if (groupId) {
       const g = groups.find((x) => String(x.id) === String(groupId));
@@ -255,6 +297,8 @@ export default function CreateScheduleLessonModal({
       notify_participants: notifyParticipants,
       lesson_plan_item: lessonPlanItemId || undefined,
       lesson_plan_item_id: lessonPlanItemId || undefined,
+      student_subject: studentSubjectId ? Number(studentSubjectId) : undefined,
+      student_subject_id: studentSubjectId ? Number(studentSubjectId) : undefined,
       force,
     };
     if (meetingMode === "manual" && manualLink.trim()) {
@@ -277,6 +321,14 @@ export default function CreateScheduleLessonModal({
     setConflict(null);
     if (!groupId && !studentId && !selectedStudentIds.length) {
       setError(isIndividual ? "Выберите ученика." : "Выберите группу или ученика.");
+      return;
+    }
+    if (isIndividual && studentId && studentSubjects.length === 0 && !subjectsLoading) {
+      setError("У ученика нет предметов. Добавьте предмет в карточке ученика, чтобы создать занятие.");
+      return;
+    }
+    if (isIndividual && studentSubjects.length > 1 && !studentSubjectId) {
+      setError("Выберите предмет занятия.");
       return;
     }
     if (billingPreview?.block && !force) {
@@ -419,6 +471,33 @@ export default function CreateScheduleLessonModal({
                     ))}
                   </select>
                 </label>
+                {isIndividual && studentId ? (
+                  <label className="cb-sch-field">
+                    <span>Предмет занятия{studentSubjects.length > 1 ? " *" : ""}</span>
+                    {subjectsLoading ? (
+                      <p className="cb-sch-form__hint">Загрузка предметов…</p>
+                    ) : studentSubjects.length === 0 ? (
+                      <p className="cb-sch-form__hint">
+                        У ученика пока нет предметов. Добавьте предмет в карточке ученика.
+                      </p>
+                    ) : (
+                      <select
+                        value={studentSubjectId}
+                        onChange={(e) => setStudentSubjectId(e.target.value)}
+                        required={studentSubjects.length > 1}
+                      >
+                        {studentSubjects.length > 1 ? (
+                          <option value="">Выберите предмет</option>
+                        ) : null}
+                        {studentSubjects.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.display_label || s.subject_label || s.subject}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </label>
+                ) : null}
                 {!isIndividual && (
                   <div className="cb-sch-field">
                     <span>Или несколько учеников</span>
