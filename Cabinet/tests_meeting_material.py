@@ -545,7 +545,7 @@ class MeetingMaterialSessionApiTests(TestCase):
         self.assertEqual(present.status_code, 200, present.content)
         self.assertIsNone(get_active_material_session(self.meeting))
 
-    def test_student_navigation_locked_in_collaborative(self):
+    def test_student_navigation_allowed_in_collaborative(self):
         open_res = self._open()
         session_id = open_res.data["materialSession"]["sessionId"]
         self.meeting.refresh_from_db()
@@ -556,12 +556,46 @@ class MeetingMaterialSessionApiTests(TestCase):
             format="json",
         )
         self.assertEqual(perm.status_code, 200, perm.content)
-        with self.assertRaises(VideoMeetingError):
+        result = apply_material_operation(
+            meeting=self.meeting,
+            user=self.student_user,
+            action="page_changed",
+            payload={"page": 9},
+            operation_id="nav-student",
+            session_id=session_id,
+        )
+        self.assertFalse(result.get("duplicate"))
+        self.assertEqual(result["session"].current_state.get("page"), 9)
+
+    def test_student_navigation_locked_in_view_only(self):
+        open_res = self._open()
+        session_id = open_res.data["materialSession"]["sessionId"]
+        self.meeting.refresh_from_db()
+        with self.assertRaises(VideoMeetingError) as ctx:
             apply_material_operation(
                 meeting=self.meeting,
                 user=self.student_user,
                 action="page_changed",
                 payload={"page": 9},
-                operation_id="nav-student",
+                operation_id="nav-student-view",
                 session_id=session_id,
             )
+        self.assertIn(ctx.exception.code, ("forbidden", "nav_locked", "view_only"))
+
+    def test_annotation_preview_is_ephemeral(self):
+        open_res = self._open()
+        session_id = open_res.data["materialSession"]["sessionId"]
+        self.meeting.refresh_from_db()
+        before = MeetingMaterialSession.objects.get(pk=session_id).version
+        result = apply_material_operation(
+            meeting=self.meeting,
+            user=self.teacher,
+            action="annotation_preview",
+            payload={"annotation": {"id": "live-1", "points": [[0.1, 0.1], [0.2, 0.2]]}},
+            operation_id="preview-1",
+            session_id=session_id,
+        )
+        self.assertTrue(result.get("ephemeral"))
+        session = MeetingMaterialSession.objects.get(pk=session_id)
+        self.assertEqual(session.version, before)
+        self.assertEqual(result["operation"]["type"], "material.annotation_preview")

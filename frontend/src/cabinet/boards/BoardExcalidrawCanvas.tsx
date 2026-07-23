@@ -23,6 +23,9 @@ type Props = {
     files: SceneFiles,
   ) => void;
   onApiReady: (api: ExcalidrawAPI) => void;
+  /** Scene-space pointer (Excalidraw coordinates) for remote cursors. */
+  onPointerSceneMove?: (x: number, y: number, tool: string) => void;
+  generateIdForFile?: (file: File) => string | Promise<string>;
 };
 
 const UI_OPTIONS = {
@@ -36,10 +39,21 @@ const UI_OPTIONS = {
   },
 } as const;
 
+function zoomValue(appState: Record<string, unknown>): number {
+  const z = appState.zoom;
+  if (typeof z === "number" && z > 0) return z;
+  if (z && typeof z === "object" && typeof (z as { value?: number }).value === "number") {
+    return (z as { value: number }).value || 1;
+  }
+  return 1;
+}
+
 function BoardExcalidrawInner({
   boot,
   onChangeRef,
   onApiReadyRef,
+  onPointerSceneMoveRef,
+  generateIdForFileRef,
 }: {
   boot: {
     initialElements: unknown[];
@@ -49,10 +63,13 @@ function BoardExcalidrawInner({
   };
   onChangeRef: MutableRefObject<Props["onChange"]>;
   onApiReadyRef: MutableRefObject<Props["onApiReady"]>;
+  onPointerSceneMoveRef: MutableRefObject<Props["onPointerSceneMove"]>;
+  generateIdForFileRef: MutableRefObject<Props["generateIdForFile"]>;
 }) {
   const [api, setApi] = useState<ExcalidrawAPI | null>(null);
   const apiRef = useRef<ExcalidrawAPI | null>(null);
   const prevCountRef = useRef(boot.initialElements.length);
+  const hostRef = useRef<HTMLDivElement | null>(null);
 
   useHandleLibrary({
     excalidrawAPI: api as never,
@@ -73,8 +90,31 @@ function BoardExcalidrawInner({
       ? `${window.location.origin}${window.location.pathname}${window.location.search}`
       : undefined;
 
+  const handleHostPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const cb = onPointerSceneMoveRef.current;
+    const current = apiRef.current;
+    if (!cb || !current) return;
+    const host = hostRef.current;
+    if (!host) return;
+    const canvas = host.querySelector("canvas.excalidraw__canvas") as HTMLCanvasElement | null;
+    const rect = (canvas || host).getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const appState = current.getAppState?.() || {};
+    const zoom = zoomValue(appState);
+    const scrollX = Number(appState.scrollX) || 0;
+    const scrollY = Number(appState.scrollY) || 0;
+    const x = (e.clientX - rect.left) / zoom - scrollX;
+    const y = (e.clientY - rect.top) / zoom - scrollY;
+    const activeTool = appState.activeTool as { type?: string } | undefined;
+    cb(x, y, String(activeTool?.type || "pointer"));
+  }, [onPointerSceneMoveRef]);
+
   return (
-    <div className="cb-board-excalidraw-host">
+    <div
+      className="cb-board-excalidraw-host"
+      ref={hostRef}
+      onPointerMove={handleHostPointerMove}
+    >
       <Excalidraw
         langCode="ru-RU"
         libraryReturnUrl={libraryReturnUrl}
@@ -89,9 +129,14 @@ function BoardExcalidrawInner({
           scrollToContent: true,
         }}
         viewModeEnabled={boot.viewModeEnabled}
+        generateIdForFile={async (file) => {
+          const custom = generateIdForFileRef.current;
+          if (custom) return custom(file);
+          if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+          return `file-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        }}
         onChange={(elements, appState, files) => {
           const state = appState as unknown as Record<string, unknown>;
-          // Вставка из библиотеки (сайдбар открыт): показать новые элементы в кадре
           const added = elements.length - prevCountRef.current;
           if (added > 0 && added <= 40 && state.openSidebar) {
             try {
@@ -127,6 +172,8 @@ const ExcalidrawHost = memo(
     };
     onChangeRef: MutableRefObject<Props["onChange"]>;
     onApiReadyRef: MutableRefObject<Props["onApiReady"]>;
+    onPointerSceneMoveRef: MutableRefObject<Props["onPointerSceneMove"]>;
+    generateIdForFileRef: MutableRefObject<Props["generateIdForFile"]>;
   }) {
     return <BoardExcalidrawInner {...props} />;
   },
@@ -140,11 +187,17 @@ function BoardExcalidrawCanvas({
   viewModeEnabled,
   onChange,
   onApiReady,
+  onPointerSceneMove,
+  generateIdForFile,
 }: Props) {
   const onChangeRef = useRef(onChange);
   const onApiReadyRef = useRef(onApiReady);
+  const onPointerSceneMoveRef = useRef(onPointerSceneMove);
+  const generateIdForFileRef = useRef(generateIdForFile);
   onChangeRef.current = onChange;
   onApiReadyRef.current = onApiReady;
+  onPointerSceneMoveRef.current = onPointerSceneMove;
+  generateIdForFileRef.current = generateIdForFile;
 
   const boot = useRef({
     initialElements,
@@ -158,6 +211,8 @@ function BoardExcalidrawCanvas({
       boot={boot}
       onChangeRef={onChangeRef}
       onApiReadyRef={onApiReadyRef}
+      onPointerSceneMoveRef={onPointerSceneMoveRef}
+      generateIdForFileRef={generateIdForFileRef}
     />
   );
 }

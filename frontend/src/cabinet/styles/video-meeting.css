@@ -1946,9 +1946,100 @@
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.28);
 }
 
-.vl-remote-pointer {
+.vl-collab-tools__color {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.vl-collab-tools__swatches {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.vl-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.2);
+  padding: 0;
+  cursor: pointer;
+}
+
+.vl-swatch.is-active {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.vl-collab-tools__color input[type="color"] {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.vl-collab-tools__width select {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  font-size: 0.75rem;
+  padding: 2px 4px;
+}
+
+.vl-remote-cursor {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  transform: translate(-2px, -2px);
+}
+
+.vl-remote-cursor__dot {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
+}
+
+.vl-remote-cursor.is-teacher .vl-remote-cursor__dot {
+  background: #2563eb;
+}
+
+.vl-remote-cursor.is-student .vl-remote-cursor__dot {
   background: #e11d48;
-  box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.25);
+}
+
+.vl-remote-cursor__label {
+  display: inline-block;
+  margin-top: 2px;
+  margin-left: 2px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.78);
+}
+
+.vl-remote-cursor.is-teacher .vl-remote-cursor__label {
+  background: rgba(37, 99, 235, 0.9);
+}
+
+.vl-remote-cursor.is-student .vl-remote-cursor__label {
+  background: rgba(225, 29, 72, 0.9);
+}
+
+.video-lesson-workspace__stage.is-eraser .vl-synced-hit {
+  cursor: cell;
+}
+
+.vl-synced-interactive {
+  width: 100%;
+  min-height: 420px;
+  padding: 12px;
+  overflow: auto;
 }
 
 .vl-synced-lock {

@@ -1,10 +1,32 @@
 /** Слияние сцен Excalidraw для совместного рисования (element-level, не last-writer-wins). */
 
+import { preferStableFile } from "./boardFiles";
+
 export type CollabScene = {
   elements: unknown[];
   appState: Record<string, unknown>;
   files: Record<string, unknown>;
 };
+
+export function mergeSceneFiles(
+  local: Record<string, unknown> | null | undefined,
+  remote: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...(local || {}) };
+  for (const [id, remoteFile] of Object.entries(remote || {})) {
+    if (!remoteFile || typeof remoteFile !== "object") continue;
+    const localFile = out[id];
+    if (!localFile || typeof localFile !== "object") {
+      out[id] = remoteFile;
+      continue;
+    }
+    out[id] = preferStableFile(
+      localFile as Record<string, unknown>,
+      remoteFile as Record<string, unknown>,
+    );
+  }
+  return out;
+}
 
 type BoardElement = {
   id?: string;
@@ -138,9 +160,6 @@ export function mergeCollabScenes(local: CollabScene, remote: CollabScene): Coll
   return {
     elements: mergeBoardElements(local.elements || [], remote.elements || []),
     appState,
-    files: {
-      ...(remote.files || {}),
-      ...(local.files || {}),
-    },
+    files: mergeSceneFiles(local.files, remote.files),
   };
 }

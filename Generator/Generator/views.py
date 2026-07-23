@@ -1735,15 +1735,6 @@ def _vpr_counts_filters_from_request(request):
     return flt
 
 
-_SUBJECT_SHORTS_BY_LEVEL = {
-    "vpr": ("math", "inf", "phys", "rus", "history"),
-    "oge": ("math", "inf", "phys", "rus"),
-    # На карточках выбора предмета для ЕГЭ теперь есть и русский язык.
-    "ege": ("math", "inf", "rus"),
-}
-
-_SUBJECT_CATALOG_CORE_SHORTS = ("inf", "math", "rus")
-
 _LEVEL_CATALOG_SORT = {
     "oge": 0,
     "ege": 1,
@@ -1774,27 +1765,22 @@ def _subjects_by_short(shorts):
 
 
 def _subject_shorts_for_level(level_str: str):
-    """Предметы уровня: сначала из БД (TaskList), затем legacy-карточки «Скоро»."""
+    """Предметы уровня только из БД (Subject через TaskList)."""
     level_str = _normalize_level_slug(level_str) or ""
     level_instance = _level_instance_for_canonical_slug(level_str)
-    db_shorts = []
-    if level_instance is not None:
-        db_shorts = [
-            (short or "").strip().lower()
-            for short in (
-                Subject.objects.filter(tasklist__level=level_instance)
-                .distinct()
-                .order_by("subject_name", "subject_short")
-                .values_list("subject_short", flat=True)
-            )
-            if (short or "").strip()
-        ]
-
-    legacy = _SUBJECT_SHORTS_BY_LEVEL.get(level_str, ())
-    # Для уровней без legacy-списка (например school) показываем только то, что есть в БД.
-    if not legacy:
-        return list(dict.fromkeys(db_shorts))
-    return list(dict.fromkeys(list(db_shorts) + list(legacy)))
+    if level_instance is None:
+        return []
+    return [
+        (short or "").strip().lower()
+        for short in (
+            Subject.objects
+            .filter(tasklist__level=level_instance)
+            .distinct()
+            .order_by("subject_name", "subject_short")
+            .values_list("subject_short", flat=True)
+        )
+        if (short or "").strip()
+    ]
 
 
 def _subject_task_counts_payload(request, level_str: str):
@@ -1857,7 +1843,7 @@ def api_level_subject_task_counts(request, level):
 def api_level_subject_catalog(request, level):
     """
     GET /api/<level>/subject-catalog/ — данные карточек предметов для продуктового экрана.
-    Предметы берутся из БД (TaskList + Subject), с legacy-дополнением для карточек «Скоро».
+    Предметы берутся только из БД (TaskList + Subject).
     """
     level_str = _normalize_level_slug(level) or ""
     counts = _subject_task_counts_payload(request, level_str)
@@ -1865,10 +1851,6 @@ def api_level_subject_catalog(request, level):
         return JsonResponse({"error": "unknown level"}, status=400)
 
     subject_ids = _subject_shorts_for_level(level_str)
-    # Для экзаменационных уровней оставляем базовые карточки, даже если TaskList ещё пуст.
-    if level_str in _SUBJECT_SHORTS_BY_LEVEL:
-        subject_ids = list(dict.fromkeys(list(subject_ids) + list(_SUBJECT_CATALOG_CORE_SHORTS)))
-
     subjects_by_short = _subjects_by_short(subject_ids)
 
     subjects = []

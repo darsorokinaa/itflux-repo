@@ -1,6 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import MaterialCollabBar from "./MaterialCollabBar";
+import InteractivePlayer from "./InteractivePlayer";
+import { fetchInteractive } from "../../utils/cabinetAuth";
+
+const PEN_COLORS = ["#e11d48", "#2563eb", "#16a34a", "#ca8a04", "#7c3aed", "#0f172a"];
+const WIDTHS = [2, 3, 5, 8];
+const TOOL_STORAGE_KEY = "itflux.material.drawTools";
+
+function loadToolPrefs() {
+  try {
+    const raw = localStorage.getItem(TOOL_STORAGE_KEY);
+    if (!raw) return { color: "#e11d48", width: 3 };
+    const parsed = JSON.parse(raw);
+    return {
+      color: String(parsed.color || "#e11d48"),
+      width: Number(parsed.width) || 3,
+    };
+  } catch {
+    return { color: "#e11d48", width: 3 };
+  }
+}
+
+function saveToolPrefs(prefs) {
+  try {
+    localStorage.setItem(TOOL_STORAGE_KEY, JSON.stringify(prefs));
+  } catch {
+    /* ignore */
+  }
+}
 
 function resourceTypeLabel(kind) {
   const map = {
@@ -29,15 +57,40 @@ function isImageUrl(url, kind = "") {
 function isPdfUrl(url, kind = "") {
   if (kind === "pdf" || kind === "presentation") return true;
   const path = String(url || "").split("?")[0].toLowerCase();
-  if (path.endsWith(".pdf")) return true;
-  return false;
+  return path.endsWith(".pdf");
 }
 
 function viewerSrc(url, { page, showPdf } = {}) {
   const raw = String(url || "").trim();
   if (!raw) return "";
-  if (!showPdf || raw.includes("#")) return raw;
-  return `${raw}#page=${page || 1}`;
+  if (!showPdf) return raw;
+  const base = raw.split("#")[0];
+  return `${base}#page=${page || 1}`;
+}
+
+function distToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  if (dx === 0 && dy === 0) return Math.hypot(px - x1, py - y1);
+  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
+function strokeNearPoint(ann, x, y, threshold = 0.02) {
+  const pts = ann?.points || [];
+  for (let i = 1; i < pts.length; i += 1) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    if (!Array.isArray(a) || !Array.isArray(b)) continue;
+    if (distToSegment(x, y, Number(a[0]), Number(a[1]), Number(b[0]), Number(b[1])) <= threshold) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function roleCursorClass(role) {
+  return role === "teacher" || role === "staff" ? "is-teacher" : "is-student";
 }
 
 /**
@@ -49,9 +102,12 @@ export default function SyncedMaterialWorkspace({
   state,
   interactionMode = "view_only",
   syncStatus = "synced",
-  remotePointer = null,
+  remoteCursors = [],
+  remotePreviews = {},
+  presence = [],
   notice = "",
   canEditContent = false,
+  currentUserId = null,
   onCloseLocal,
   onCloseForAll,
   onToggleCollaborative,
@@ -59,21 +115,36 @@ export default function SyncedMaterialWorkspace({
   onSendCursor,
   onSendPointer,
   onDrawComplete,
+  onDrawPreview,
+  onEraseAnnotation,
+  onClearOwnAnnotations,
+  onInteractiveOp,
+  remoteApplyGuard = null,
 }) {
   const stageRef = useRef(null);
   const hitRef = useRef(null);
   const drawingRef = useRef(null);
+  const interactiveRootRef = useRef(null);
+  const undoStackRef = useRef([]);
+  const redoStackRef = useRef([]);
+  const fieldDebounceRef = useRef(new Map());
+  const prefs = useMemo(() => loadToolPrefs(), []);
   const [localStroke, setLocalStroke] = useState(null);
   const [localPointer, setLocalPointer] = useState(null);
-  // «Рука» — просмотр/скролл без hit-layer; перо/маркер/указка — поверх контента.
   const [tool, setTool] = useState("hand");
+  const [penColor, setPenColor] = useState(prefs.color);
+  const [penWidth, setPenWidth] = useState(prefs.width);
+  const [customColor, setCustomColor] = useState(prefs.color);
+  const [interactive, setInteractive] = useState(null);
+  const [interactiveError, setInteractiveError] = useState("");
+
   const isCollaborative = interactionMode === "collaborative";
   const locked = !canManage && !isCollaborative;
   const contentLocked = locked || (!canManage && !canEditContent);
   const showTools = canManage || isCollaborative;
-  const drawToolActive = tool === "pen" || tool === "highlighter" || tool === "pointer";
-  // Hit-layer только для рисования/указки — иначе нельзя скроллить PDF/картинку.
-  const toolsCaptureInput = showTools && drawToolActive && (canManage || !contentLocked);
+  const canNavigate = canManage || isCollaborative;
+  const drawToolActive = tool === "pen" || tool === "highlighter" || tool === "pointer" || tool === "eraser";
+  const toolsCaptureInput = showTools && drawToolActive && (canManage || !contentLocked || tool === "pointer");
 
   const annotations = useMemo(
     () => (Array.isArray(state?.annotations) ? state.annotations : []),
@@ -82,6 +153,39 @@ export default function SyncedMaterialWorkspace({
   const page = Number(state?.page || 1);
   const zoom = Number(state?.zoom || 1);
   const scroll = Number(state?.scroll || 0);
+
+  useEffect(() => {
+    saveToolPrefs({ color: penColor, width: penWidth });
+  }, [penColor, penWidth]);
+
+  useEffect(() => {
+    const id = material?.interactiveId;
+    if (!id) {
+      setInteractive(null);
+      setInteractiveError("");
+      return undefined;
+    }
+    let cancelled = false;
+    setInteractiveError("");
+    fetchInteractive(id)
+      .then((data) => {
+        if (!cancelled) setInteractive(data);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setInteractive(null);
+          setInteractiveError(err?.message || "Не удалось загрузить интерактив");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [material?.interactiveId]);
+
+  const patchState = useCallback((action, payload) => {
+    if (remoteApplyGuard?.isRemote?.()) return;
+    onStatePatch?.({ action, payload });
+  }, [onStatePatch, remoteApplyGuard]);
 
   const toNorm = useCallback((clientX, clientY) => {
     const el = stageRef.current;
@@ -104,20 +208,23 @@ export default function SyncedMaterialWorkspace({
       else onSendCursor?.(p.x, p.y);
       return;
     }
-    if (tool === "pen" || tool === "highlighter") {
+    if (tool === "pen" || tool === "highlighter" || tool === "eraser") {
       onSendCursor?.(p.x, p.y);
     }
     if (!drawingRef.current) return;
+    if (tool === "eraser") return;
     drawingRef.current.points.push([p.x, p.y]);
-    setLocalStroke({
+    const stroke = {
       ...drawingRef.current,
       points: drawingRef.current.points.slice(),
-    });
-  }, [canManage, onSendCursor, onSendPointer, toNorm, tool, toolsCaptureInput]);
+    };
+    setLocalStroke(stroke);
+    onDrawPreview?.(stroke);
+  }, [canManage, onDrawPreview, onSendCursor, onSendPointer, toNorm, tool, toolsCaptureInput]);
 
   const handlePointerDown = useCallback((e) => {
     if (!toolsCaptureInput) return;
-    if (tool !== "pen" && tool !== "highlighter" && tool !== "pointer") return;
+    if (tool !== "pen" && tool !== "highlighter" && tool !== "pointer" && tool !== "eraser") return;
     e.preventDefault();
     e.stopPropagation();
     try {
@@ -132,18 +239,48 @@ export default function SyncedMaterialWorkspace({
       if (canManage) onSendPointer?.(p.x, p.y);
       return;
     }
+    if (tool === "eraser") {
+      const pageAnns = annotations.filter((a) => !a.page || Number(a.page) === page);
+      const hit = [...pageAnns].reverse().find((ann) => {
+        if (!canManage && currentUserId != null && Number(ann.author_id) !== Number(currentUserId)) {
+          return false;
+        }
+        return strokeNearPoint(ann, p.x, p.y, Math.max(0.015, (Number(ann.width) || 3) / 400));
+      });
+      if (hit?.id) {
+        onEraseAnnotation?.(hit);
+        undoStackRef.current.push({ type: "delete", annotation: hit });
+        redoStackRef.current = [];
+      }
+      return;
+    }
     const stroke = {
       id: `ann-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       tool: tool === "highlighter" ? "highlighter" : "pen",
-      color: tool === "highlighter" ? "rgba(250, 204, 21, 0.55)" : "#e11d48",
-      width: tool === "highlighter" ? 18 : 3,
-      // Две точки сразу — точка видна до первого move.
+      color: tool === "highlighter" ? "rgba(250, 204, 21, 0.55)" : penColor,
+      width: tool === "highlighter" ? Math.max(12, penWidth * 3) : penWidth,
       points: [[p.x, p.y], [p.x + 0.0001, p.y]],
       page,
+      created_at: Date.now(),
+      version: 1,
     };
     drawingRef.current = stroke;
     setLocalStroke({ ...stroke, points: stroke.points.slice() });
-  }, [canManage, onSendPointer, page, toNorm, tool, toolsCaptureInput]);
+    onDrawPreview?.(stroke);
+  }, [
+    annotations,
+    canManage,
+    currentUserId,
+    onDrawPreview,
+    onEraseAnnotation,
+    onSendPointer,
+    page,
+    penColor,
+    penWidth,
+    toNorm,
+    tool,
+    toolsCaptureInput,
+  ]);
 
   const finishStroke = useCallback(() => {
     const stroke = drawingRef.current;
@@ -156,8 +293,9 @@ export default function SyncedMaterialWorkspace({
       setLocalStroke(null);
       return;
     }
-    // Оставляем штрих видимым до прихода в state через onDrawComplete.
     onDrawComplete?.(stroke);
+    undoStackRef.current.push({ type: "add", annotation: stroke });
+    redoStackRef.current = [];
     setLocalStroke(null);
   }, [onDrawComplete]);
 
@@ -176,21 +314,128 @@ export default function SyncedMaterialWorkspace({
 
   useEffect(() => {
     const el = stageRef.current;
-    if (!el || !canManage) return undefined;
+    if (!el || !canNavigate) return undefined;
     const onScroll = () => {
+      if (remoteApplyGuard?.isRemote?.()) return;
       const max = Math.max(1, el.scrollHeight - el.clientHeight);
-      onStatePatch?.({ action: "scrolled", payload: { scroll: el.scrollTop / max } });
+      patchState("scrolled", { scroll: el.scrollTop / max });
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, [canManage, onStatePatch]);
+  }, [canNavigate, patchState, remoteApplyGuard]);
 
   useEffect(() => {
     const el = stageRef.current;
-    if (!el || canManage) return;
+    if (!el || canManage || canNavigate) return;
     const max = Math.max(1, el.scrollHeight - el.clientHeight);
     el.scrollTop = scroll * max;
-  }, [scroll, canManage, material?.openUrl, material?.contentText]);
+  }, [scroll, canManage, canNavigate, material?.openUrl, material?.contentText]);
+
+  // Синхронизация интерактивных полей внутри корневого контейнера (input/select/checkbox).
+  useEffect(() => {
+    const root = interactiveRootRef.current;
+    if (!root || (contentLocked && !canManage)) return undefined;
+
+    const emitField = (fieldId, value, action = "field_changed") => {
+      if (remoteApplyGuard?.isRemote?.()) return;
+      onInteractiveOp?.({ action, payload: { fieldId, value } });
+    };
+
+    const onInput = (e) => {
+      const el = e.target;
+      if (!(el instanceof HTMLElement)) return;
+      if (!["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) return;
+      const fieldId = el.getAttribute("name") || el.id || el.getAttribute("data-field-id");
+      if (!fieldId) return;
+      let value;
+      if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) {
+        value = el.type === "checkbox" ? el.checked : el.value;
+      } else {
+        value = "value" in el ? el.value : "";
+      }
+      const timers = fieldDebounceRef.current;
+      if (timers.has(fieldId)) window.clearTimeout(timers.get(fieldId));
+      timers.set(fieldId, window.setTimeout(() => {
+        emitField(
+          fieldId,
+          value,
+          el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")
+            ? "answer_selected"
+            : "field_changed",
+        );
+      }, 120));
+    };
+
+    root.addEventListener("input", onInput, true);
+    root.addEventListener("change", onInput, true);
+    return () => {
+      root.removeEventListener("input", onInput, true);
+      root.removeEventListener("change", onInput, true);
+    };
+  }, [canManage, contentLocked, onInteractiveOp, remoteApplyGuard, interactive, material?.interactiveId]);
+
+  // Применить удалённые fields/answers к DOM.
+  useEffect(() => {
+    const root = interactiveRootRef.current;
+    if (!root) return;
+    const fields = state?.fields || {};
+    const answers = state?.answers || {};
+    const findField = (id) => {
+      try {
+        const esc = CSS.escape(String(id));
+        return root.querySelector(`[name="${esc}"], #${esc}, [data-field-id="${esc}"]`);
+      } catch {
+        return root.querySelector(`[name="${id}"], [data-field-id="${id}"]`);
+      }
+    };
+    remoteApplyGuard?.run?.(() => {
+      for (const [fieldId, row] of Object.entries(fields)) {
+        const el = findField(fieldId);
+        if (!el) continue;
+        const value = row?.value;
+        if (el instanceof HTMLInputElement && el.type === "checkbox") {
+          el.checked = Boolean(value);
+        } else if (el instanceof HTMLInputElement && el.type === "radio") {
+          if (String(el.value) === String(value)) el.checked = true;
+        } else if ("value" in el) {
+          el.value = value == null ? "" : String(value);
+        }
+      }
+      for (const [qid, row] of Object.entries(answers)) {
+        const el = findField(qid);
+        if (!el || !("value" in el)) continue;
+        if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) {
+          el.checked = Boolean(row?.value) || String(el.value) === String(row?.value);
+        } else {
+          el.value = row?.value == null ? "" : String(row.value);
+        }
+      }
+    });
+  }, [state?.fields, state?.answers, remoteApplyGuard, interactive]);
+
+  const handleUndo = useCallback(() => {
+    const entry = undoStackRef.current.pop();
+    if (!entry) return;
+    if (entry.type === "add") {
+      onEraseAnnotation?.(entry.annotation);
+      redoStackRef.current.push(entry);
+    } else if (entry.type === "delete") {
+      onDrawComplete?.(entry.annotation);
+      redoStackRef.current.push(entry);
+    }
+  }, [onDrawComplete, onEraseAnnotation]);
+
+  const handleRedo = useCallback(() => {
+    const entry = redoStackRef.current.pop();
+    if (!entry) return;
+    if (entry.type === "add") {
+      onDrawComplete?.(entry.annotation);
+      undoStackRef.current.push(entry);
+    } else if (entry.type === "delete") {
+      onEraseAnnotation?.(entry.annotation);
+      undoStackRef.current.push(entry);
+    }
+  }, [onDrawComplete, onEraseAnnotation]);
 
   const url = material?.openUrl || material?.url || "";
   const text = material?.contentText || material?.text || "";
@@ -198,10 +443,26 @@ export default function SyncedMaterialWorkspace({
   const showImage = isImageUrl(url, kind);
   const showPdf = isPdfUrl(url, kind);
   const frameSrc = viewerSrc(url, { page, showPdf });
+  const showInteractive = Boolean(material?.interactiveId);
 
-  const allStrokes = localStroke ? [...annotations, localStroke] : annotations;
+  const allStrokes = useMemo(() => {
+    const map = new Map();
+    for (const a of annotations) {
+      if (a?.id) map.set(a.id, a);
+    }
+    for (const a of Object.values(remotePreviews || {})) {
+      if (a?.id) map.set(a.id, a);
+    }
+    if (localStroke?.id) map.set(localStroke.id, localStroke);
+    return Array.from(map.values());
+  }, [annotations, localStroke, remotePreviews]);
+
   const cursorClass = toolsCaptureInput
-    ? (tool === "pointer" ? " is-pointer" : tool === "pen" || tool === "highlighter" ? " is-draw" : "")
+    ? (tool === "pointer" ? " is-pointer" : tool === "eraser" ? " is-eraser" : tool === "pen" || tool === "highlighter" ? " is-draw" : "")
+    : "";
+
+  const presenceLabel = presence.length
+    ? presence.map((p) => p.displayName || p.display_name || "Участник").join(", ")
     : "";
 
   return (
@@ -216,81 +477,73 @@ export default function SyncedMaterialWorkspace({
         onToggleCollaborative={onToggleCollaborative}
         onClose={onCloseForAll}
         notice={notice}
+        presenceLabel={presenceLabel}
         tools={showTools ? (
           <div className="vl-collab-tools" role="toolbar" aria-label="Инструменты">
+            <button type="button" className={tool === "hand" ? "is-active" : ""} onClick={() => setTool("hand")} title="Курсор / просмотр">Курсор</button>
+            <button type="button" className={tool === "pointer" ? "is-active" : ""} onClick={() => setTool("pointer")} title="Указка">Указка</button>
+            <button type="button" className={tool === "pen" ? "is-active" : ""} disabled={contentLocked && !canManage} onClick={() => setTool("pen")} title="Перо">Перо</button>
+            <button type="button" className={tool === "eraser" ? "is-active" : ""} disabled={contentLocked && !canManage} onClick={() => setTool("eraser")} title="Ластик">Ластик</button>
+            <label className="vl-collab-tools__color" title="Цвет">
+              <span className="vl-collab-tools__swatches">
+                {PEN_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`vl-swatch${penColor === c ? " is-active" : ""}`}
+                    style={{ background: c }}
+                    aria-label={c}
+                    onClick={() => { setPenColor(c); setCustomColor(c); setTool("pen"); }}
+                  />
+                ))}
+              </span>
+              <input
+                type="color"
+                value={customColor.startsWith("#") ? customColor : "#e11d48"}
+                onChange={(e) => {
+                  setCustomColor(e.target.value);
+                  setPenColor(e.target.value);
+                  setTool("pen");
+                }}
+                aria-label="Свой цвет"
+              />
+            </label>
+            <label className="vl-collab-tools__width" title="Толщина">
+              <select
+                value={penWidth}
+                onChange={(e) => setPenWidth(Number(e.target.value) || 3)}
+                aria-label="Толщина линии"
+              >
+                {WIDTHS.map((w) => <option key={w} value={w}>{w}px</option>)}
+              </select>
+            </label>
+            <button type="button" disabled={contentLocked && !canManage} onClick={handleUndo} title="Отменить">↩</button>
+            <button type="button" disabled={contentLocked && !canManage} onClick={handleRedo} title="Повторить">↪</button>
             <button
               type="button"
-              className={tool === "hand" ? "is-active" : ""}
-              onClick={() => setTool("hand")}
-              title="Просмотр и прокрутка"
-            >
-              Рука
-            </button>
-            <button
-              type="button"
-              className={tool === "pointer" ? "is-active" : ""}
-              onClick={() => setTool("pointer")}
-              title="Указатель"
-            >
-              Указка
-            </button>
-            <button
-              type="button"
-              className={tool === "pen" ? "is-active" : ""}
               disabled={contentLocked && !canManage}
-              onClick={() => setTool("pen")}
-              title="Перо"
+              onClick={() => onClearOwnAnnotations?.()}
+              title="Очистить свои пометки"
             >
-              Перо
+              Очистить
             </button>
-            <button
-              type="button"
-              className={tool === "highlighter" ? "is-active" : ""}
-              disabled={contentLocked && !canManage}
-              onClick={() => setTool("highlighter")}
-              title="Маркер"
-            >
-              Маркер
-            </button>
-            {canManage ? (
+            {canNavigate ? (
               <>
                 <button
                   type="button"
-                  onClick={() => onStatePatch?.({
-                    action: "page_changed",
-                    payload: { page: Math.max(1, page - 1) },
-                  })}
+                  onClick={() => patchState("page_changed", { page: Math.max(1, page - 1) })}
                 >
                   ←
                 </button>
                 <span className="vl-collab-tools__page">стр. {page}</span>
                 <button
                   type="button"
-                  onClick={() => onStatePatch?.({
-                    action: "page_changed",
-                    payload: { page: page + 1 },
-                  })}
+                  onClick={() => patchState("page_changed", { page: page + 1 })}
                 >
                   →
                 </button>
-                <button
-                  type="button"
-                  onClick={() => onStatePatch?.({
-                    action: "zoom_changed",
-                    payload: { zoom: Math.max(0.5, zoom - 0.25) },
-                  })}
-                >
-                  −
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onStatePatch?.({
-                    action: "zoom_changed",
-                    payload: { zoom: Math.min(3, zoom + 0.25) },
-                  })}
-                >
-                  +
-                </button>
+                <button type="button" onClick={() => patchState("zoom_changed", { zoom: Math.max(0.5, zoom - 0.25) })}>−</button>
+                <button type="button" onClick={() => patchState("zoom_changed", { zoom: Math.min(3, zoom + 0.25) })}>+</button>
               </>
             ) : null}
           </div>
@@ -307,14 +560,24 @@ export default function SyncedMaterialWorkspace({
         <div
           className={`vl-synced-content${toolsCaptureInput ? " is-tools-active" : ""}`}
           style={zoom !== 1 ? { transform: `scale(${zoom})`, transformOrigin: "top center" } : undefined}
+          ref={interactiveRootRef}
         >
-          {text && !url ? (
+          {showInteractive && interactive ? (
+            <div className="vl-synced-interactive">
+              <InteractivePlayer interactive={interactive} bare playing />
+            </div>
+          ) : showInteractive && interactiveError ? (
+            <div className="vl-empty">
+              <p className="vl-empty__title">Интерактив недоступен</p>
+              <p className="vl-empty__text">{interactiveError}</p>
+            </div>
+          ) : text && !url ? (
             <div className="video-lesson-workspace__text">{text}</div>
           ) : showImage && url ? (
             <img src={url} alt={material?.title || ""} className="vl-synced-image" draggable={false} />
           ) : frameSrc ? (
             <iframe
-              key={`${frameSrc}|${page}`}
+              key={`${frameSrc.split("#")[0]}|${page}`}
               title={material?.title || "Материал"}
               src={frameSrc}
               className="video-lesson-workspace__frame"
@@ -336,7 +599,6 @@ export default function SyncedMaterialWorkspace({
                 .map((p) => `${Number(p[0])},${Number(p[1])}`)
                 .join(" ");
               if (!pts) return null;
-              // strokeWidth в пикселях экрана (vectorEffect), иначе /400 даёт ~0px.
               const px = Math.max(2, Number(ann.width) || 3);
               return (
                 <polyline
@@ -360,13 +622,17 @@ export default function SyncedMaterialWorkspace({
             aria-hidden="true"
           />
         ) : null}
-        {remotePointer ? (
+        {remoteCursors.map((cursor) => (
           <div
-            className="vl-remote-pointer"
-            style={{ left: `${remotePointer.x * 100}%`, top: `${remotePointer.y * 100}%` }}
+            key={cursor.clientId || cursor.authorId || `${cursor.x}-${cursor.y}`}
+            className={`vl-remote-cursor ${roleCursorClass(cursor.authorRole || cursor.role)}`}
+            style={{ left: `${cursor.x * 100}%`, top: `${cursor.y * 100}%` }}
             aria-hidden="true"
-          />
-        ) : null}
+          >
+            <span className="vl-remote-cursor__dot" />
+            <span className="vl-remote-cursor__label">{cursor.displayName || "Участник"}</span>
+          </div>
+        ))}
         {toolsCaptureInput ? (
           <div
             ref={hitRef}
@@ -382,3 +648,4 @@ export default function SyncedMaterialWorkspace({
     </section>
   );
 }
+

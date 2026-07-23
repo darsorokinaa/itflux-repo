@@ -73,6 +73,9 @@ function throttle(fn, waitMs) {
  *   onPermissionChanged?: (payload: any) => void,
  *   onOperation?: (payload: any) => void,
  *   onCursor?: (payload: any) => void,
+ *   onAnnotationPreview?: (payload: any) => void,
+ *   onPresenceJoin?: (payload: any) => void,
+ *   onPresenceLeave?: (payload: any) => void,
  *   onError?: (payload: any) => void,
  *   onStatus?: (status: 'connecting'|'open'|'closed'|'error') => void,
  * }} handlers
@@ -81,13 +84,31 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
   let socket = null;
   let closed = false;
   let reconnectTimer = null;
+  let heartbeatTimer = null;
   let version = 0;
   let sessionId = null;
+  const seenOperationIds = new Set();
+  let lastPresenceReplyAt = 0;
+  const knownPeers = new Set();
 
   const send = (payload) => {
     if (!socket || socket.readyState !== WebSocket.OPEN) return false;
     socket.send(JSON.stringify(payload));
     return true;
+  };
+
+  const stopHeartbeat = () => {
+    if (heartbeatTimer) {
+      window.clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  };
+
+  const startHeartbeat = () => {
+    stopHeartbeat();
+    heartbeatTimer = window.setInterval(() => {
+      send({ type: "ping", t: Date.now() });
+    }, 25000);
   };
 
   const connect = () => {
@@ -97,6 +118,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
 
     socket.onopen = () => {
       handlers.onStatus?.("open");
+      startHeartbeat();
       send({ type: "material.request_sync" });
     };
 
@@ -134,12 +156,45 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
         return;
       }
       if (data.type === "material.operation") {
+        const opId = data.operation_id || data.operationId;
+        if (opId) {
+          if (seenOperationIds.has(opId)) return;
+          seenOperationIds.add(opId);
+          if (seenOperationIds.size > 500) {
+            const first = seenOperationIds.values().next().value;
+            seenOperationIds.delete(first);
+          }
+        }
         if (data.version) version = data.version;
         handlers.onOperation?.(data);
         return;
       }
+      if (data.type === "material.annotation_preview") {
+        handlers.onAnnotationPreview?.(data);
+        return;
+      }
       if (data.type === "material.cursor" || data.type === "material.pointer") {
         handlers.onCursor?.(data);
+        return;
+      }
+      if (data.type === "material.presence_join") {
+        const uid = data.user_id || data.author_id;
+        const isNew = uid != null && !knownPeers.has(uid);
+        if (uid != null) knownPeers.add(uid);
+        handlers.onPresenceJoin?.(data);
+        if (isNew) {
+          const now = Date.now();
+          if (now - lastPresenceReplyAt > 400) {
+            lastPresenceReplyAt = now;
+            send({ type: "material.presence_ping" });
+          }
+        }
+        return;
+      }
+      if (data.type === "material.presence_leave") {
+        const uid = data.user_id || data.author_id;
+        if (uid != null) knownPeers.delete(uid);
+        handlers.onPresenceLeave?.(data);
         return;
       }
       if (data.type === "material.error") {
@@ -157,6 +212,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
 
     socket.onclose = () => {
       handlers.onStatus?.("closed");
+      stopHeartbeat();
       if (closed) return;
       reconnectTimer = window.setTimeout(connect, 1500);
     };
@@ -173,6 +229,17 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       payload: { x, y },
     });
   }, 50);
+
+  const sendAnnotationPreview = throttle((annotation) => {
+    send({
+      type: "material.operation",
+      action: "annotation_preview",
+      session_id: sessionId,
+      operation_id: newId(),
+      payload: { annotation },
+      base_version: version,
+    });
+  }, 40);
 
   return {
     getVersion: () => version,
@@ -209,9 +276,11 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     },
     sendCursor: (x, y) => sendCursor(x, y, false),
     sendPointer: (x, y) => sendCursor(x, y, true),
+    sendAnnotationPreview,
     close: () => {
       closed = true;
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      stopHeartbeat();
       try {
         socket?.close();
       } catch {
@@ -219,5 +288,24 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       }
       socket = null;
     },
+  };
+}
+
+/** Флаг удалённого обновления — чтобы не эхоить page_changed обратно. */
+export function createRemoteApplyGuard() {
+  let remote = false;
+  return {
+    run(fn) {
+      remote = true;
+      try {
+        return fn();
+      } finally {
+        // Микротаск: обработчики React успеют отработать в том же тике.
+        queueMicrotask(() => {
+          remote = false;
+        });
+      }
+    },
+    isRemote: () => remote,
   };
 }

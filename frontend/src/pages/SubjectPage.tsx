@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import SubjectCard from "../components/SubjectCard";
 import NotFoundPage from "./NotFoundPage";
-import { getLevelDef, isLevelId, levelLabel, type LevelId } from "../data/levels";
+import { getLevelDef, levelLabel } from "../data/levels";
 import {
   GRADES_BY_LEVEL,
-  SUBJECTS_BY_LEVEL,
   buildSubjectDefinition,
   type SubjectDefinition,
 } from "../data/subjects";
+import { fetchExamCatalog, type CatalogLevel } from "../utils/examCatalog";
 import "../styles/tool-workspace.css";
 
 type AvailabilityMap = Partial<Record<string, boolean>>;
@@ -16,18 +16,6 @@ type AvailabilityMap = Partial<Record<string, boolean>>;
 type SubjectCatalogOverlay = Partial<
   Record<string, Pick<SubjectDefinition, "backgroundColor" | "backgroundImageUrl" | "title">>
 >;
-
-type CatalogLevel = {
-  id: string;
-  label: string;
-};
-
-const FALLBACK_LEVELS: CatalogLevel[] = [
-  { id: "oge", label: "ОГЭ" },
-  { id: "ege", label: "ЕГЭ" },
-  { id: "school", label: "Школьная программа" },
-  { id: "vpr", label: "ВПР" },
-];
 
 const EMPTY_GRADES: number[] = [];
 const EMPTY_SUBJECTS: SubjectDefinition[] = [];
@@ -37,7 +25,7 @@ export default function SubjectPage() {
   const navigate = useNavigate();
   const levelStr = (levelParam || "").toLowerCase();
 
-  const [catalogLevels, setCatalogLevels] = useState<CatalogLevel[]>(FALLBACK_LEVELS);
+  const [catalogLevels, setCatalogLevels] = useState<CatalogLevel[]>([]);
   const [levelsReady, setLevelsReady] = useState(false);
 
   const knownLevelIds = useMemo(
@@ -47,16 +35,16 @@ export default function SubjectPage() {
 
   const level: string = knownLevelIds.has(levelStr)
     ? levelStr
-    : isLevelId(levelStr)
-      ? levelStr
-      : "oge";
-  const levelParamIsInvalid = Boolean(levelParam) && levelsReady && !knownLevelIds.has(levelStr) && !isLevelId(levelStr);
+    : (catalogLevels[0]?.id || levelStr || "oge");
+  const levelParamIsInvalid = Boolean(levelParam) && levelsReady && !knownLevelIds.has(levelStr);
   const def = getLevelDef(level);
-  const levelId = (isLevelId(level) ? level : "oge") as LevelId;
 
-  const grades = GRADES_BY_LEVEL[levelId] ?? EMPTY_GRADES;
-  const staticSubjects = SUBJECTS_BY_LEVEL[levelId] ?? EMPTY_SUBJECTS;
+  const grades = (GRADES_BY_LEVEL as Record<string, number[]>)[level] ?? EMPTY_GRADES;
   const singleGrade = grades.length === 1;
+  const catalogSubjectsForLevel = useMemo(
+    () => catalogLevels.find((row) => row.id === level)?.subjects || [],
+    [catalogLevels, level],
+  );
 
   const [selectedClass, setSelectedClass] = useState<number | null>(() =>
     grades[0] ?? null,
@@ -68,25 +56,13 @@ export default function SubjectPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/catalog/", { credentials: "same-origin" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
+    fetchExamCatalog()
+      .then((rows) => {
         if (cancelled) return;
-        const rows = Array.isArray(data?.catalog) ? data.catalog : [];
-        const next = rows
-          .map((row: { level?: string; level_rus?: string }) => {
-            const id = String(row?.level || "").trim().toLowerCase();
-            if (!id) return null;
-            return {
-              id,
-              label: String(row?.level_rus || "").trim() || levelLabel(id, id),
-            };
-          })
-          .filter(Boolean) as CatalogLevel[];
-        setCatalogLevels(next.length ? next : FALLBACK_LEVELS);
+        setCatalogLevels(rows);
       })
       .catch(() => {
-        if (!cancelled) setCatalogLevels(FALLBACK_LEVELS);
+        if (!cancelled) setCatalogLevels([]);
       })
       .finally(() => {
         if (!cancelled) setLevelsReady(true);
@@ -97,7 +73,7 @@ export default function SubjectPage() {
   }, []);
 
   useEffect(() => {
-    const nextGrades = GRADES_BY_LEVEL[isLevelId(level) ? level : "oge"] ?? EMPTY_GRADES;
+    const nextGrades = (GRADES_BY_LEVEL as Record<string, number[]>)[level] ?? EMPTY_GRADES;
     if (nextGrades.length === 0) {
       setSelectedClass(null);
       setAdvancedLevel(false);
@@ -107,61 +83,46 @@ export default function SubjectPage() {
     setAdvancedLevel(false);
   }, [level]);
 
+  const countsQuery = useMemo(() => {
+    if (level !== "vpr" || selectedClass == null) return "";
+    const q = new URLSearchParams();
+    q.set("grade", String(selectedClass));
+    if (advancedLevel) q.set("advanced", "1");
+    return `?${q.toString()}`;
+  }, [level, selectedClass, advancedLevel]);
+
   const dashboardSubjects = useMemo(() => {
-    const staticById = new Map(staticSubjects.map((subject) => [subject.id, subject]));
     const ids = catalogSubjectIds.length
       ? catalogSubjectIds
-      : staticSubjects.map((subject) => subject.id);
+      : catalogSubjectsForLevel.map((s) => s.id);
+    const titleById = new Map(catalogSubjectsForLevel.map((s) => [s.id, s.title]));
 
     return ids.map((id) => {
       const overlay = catalogOverlay[id];
-      const base = staticById.get(id) || buildSubjectDefinition(id, {
-        title: overlay?.title,
+      return buildSubjectDefinition(id, {
+        title: overlay?.title || titleById.get(id),
+        backgroundColor: overlay?.backgroundColor,
+        backgroundImageUrl: overlay?.backgroundImageUrl,
+        comingSoon: availability[id] === false,
       });
-      return {
-        ...base,
-        ...(overlay?.title ? { title: overlay.title } : {}),
-        ...(overlay?.backgroundColor ? { backgroundColor: overlay.backgroundColor } : {}),
-        ...(overlay?.backgroundImageUrl ? { backgroundImageUrl: overlay.backgroundImageUrl } : {}),
-      };
     });
-  }, [staticSubjects, catalogOverlay, catalogSubjectIds]);
+  }, [availability, catalogOverlay, catalogSubjectIds, catalogSubjectsForLevel]);
+
+  const orderedSubjects = dashboardSubjects.length ? dashboardSubjects : EMPTY_SUBJECTS;
 
   const isSubjectLocked = (subject: SubjectDefinition) => {
-    const endpointValue = availability[subject.id];
-    if (typeof endpointValue === "boolean") {
-      return !endpointValue;
-    }
+    if (availability[subject.id] === false) return true;
+    if (availability[subject.id] === true) return false;
     return Boolean(subject.comingSoon);
   };
-
-  const orderedSubjects = useMemo(() => {
-    const list = [...dashboardSubjects];
-    const preferred = list.find((s) => s.id === "inf" || s.id === "prog");
-    const rest = list.filter((s) => s.id !== preferred?.id);
-
-    const available = rest.filter((s) => !isSubjectLocked(s));
-    const lockedSorted = rest
-      .filter((s) => isSubjectLocked(s))
-      .sort((a, b) => a.title.localeCompare(b.title, "ru"));
-
-    return preferred ? [preferred, ...available, ...lockedSorted] : [...available, ...lockedSorted];
-  }, [dashboardSubjects, availability]);
-
-  const countsQuery = useMemo(() => {
-    if (!level) return "";
-    if (level !== "vpr" || selectedClass == null) return "";
-    const p = new URLSearchParams();
-    p.set("grade", String(selectedClass));
-    p.set("advanced", advancedLevel ? "1" : "0");
-    return `?${p.toString()}`;
-  }, [level, selectedClass, advancedLevel]);
 
   useEffect(() => {
     let cancelled = false;
     setAvailability({});
     setCatalogOverlay({});
     setCatalogSubjectIds([]);
+    if (!level || !levelsReady || !knownLevelIds.has(level)) return undefined;
+
     const loadCatalog = async () => {
       try {
         const catalogRes = await fetch(`/api/${level}/subject-catalog/${countsQuery}`, {
@@ -186,7 +147,7 @@ export default function SubjectPage() {
                 ...(backgroundColor ? { backgroundColor } : {}),
                 ...(backgroundImageUrl ? { backgroundImageUrl } : {}),
                 ...(title ? { title } : {}),
-              };
+              } as SubjectCatalogOverlay[string];
             }
           };
 
@@ -212,19 +173,11 @@ export default function SubjectPage() {
           return;
         }
       } catch {
-        // fallback to legacy endpoint below
+        // keep catalog subjects from /api/catalog/
       }
 
-      try {
-        await fetch(`/api/${level}/subject-task-counts/${countsQuery}`, {
-          credentials: "same-origin",
-        });
-      } catch {
-        if (!cancelled) {
-          setAvailability({});
-          setCatalogOverlay({});
-          setCatalogSubjectIds([]);
-        }
+      if (!cancelled) {
+        setCatalogSubjectIds(catalogSubjectsForLevel.map((s) => s.id));
       }
     };
 
@@ -232,7 +185,7 @@ export default function SubjectPage() {
     return () => {
       cancelled = true;
     };
-  }, [level, countsQuery]);
+  }, [level, countsQuery, levelsReady, knownLevelIds, catalogSubjectsForLevel]);
 
   const handleSubjectOpen = (subjectId: string) => {
     const subject = dashboardSubjects.find((item) => item.id === subjectId);
@@ -270,7 +223,7 @@ export default function SubjectPage() {
   const promoSteps = [
     "Выберите уровень в переключателе над карточками — список берётся из базы.",
     "Для ВПР можно выбрать класс и включить «Углублённый уровень».",
-    "Нажмите на доступный предмет в сетке справа: карточки «Скоро» пока не открываются.",
+    "Нажмите на доступный предмет в сетке справа: карточки без заданий пока недоступны.",
   ];
 
   return (
@@ -301,27 +254,35 @@ export default function SubjectPage() {
               <div className="subject-dashboard-page__level-switch" aria-label="Выберите уровень подготовки">
                 <p className="subject-dashboard-page__level-switch-label">Выберите уровень</p>
                 <div className="subject-dashboard-page__level-switch-list" role="radiogroup">
-                  {catalogLevels.map((item) => {
-                    const checked = level === item.id;
-                    return (
-                      <label
-                        key={item.id}
-                        className={
-                          checked
-                            ? `subject-dashboard-page__level-option subject-dashboard-page__level-option--${item.id} is-active`
-                            : `subject-dashboard-page__level-option subject-dashboard-page__level-option--${item.id}`
-                        }
-                      >
-                        <input
-                          type="radio"
-                          name="subject-level"
-                          checked={checked}
-                          onChange={() => handleLevelChange(item.id)}
-                        />
-                        <span>{item.label}</span>
-                      </label>
-                    );
-                  })}
+                  {!levelsReady ? (
+                    <span className="subject-dashboard-page__level-option">Загрузка…</span>
+                  ) : catalogLevels.length === 0 ? (
+                    <span className="subject-dashboard-page__level-option">
+                      Уровни не найдены ({levelLabel(levelStr, levelStr)})
+                    </span>
+                  ) : (
+                    catalogLevels.map((item) => {
+                      const checked = level === item.id;
+                      return (
+                        <label
+                          key={item.id}
+                          className={
+                            checked
+                              ? `subject-dashboard-page__level-option subject-dashboard-page__level-option--${item.id} is-active`
+                              : `subject-dashboard-page__level-option subject-dashboard-page__level-option--${item.id}`
+                          }
+                        >
+                          <input
+                            type="radio"
+                            name="subject-level"
+                            checked={checked}
+                            onChange={() => handleLevelChange(item.id)}
+                          />
+                          <span>{item.label}</span>
+                        </label>
+                      );
+                    })
+                  )}
                 </div>
 
                 {level === "vpr" && !singleGrade ? (
@@ -361,14 +322,20 @@ export default function SubjectPage() {
               </div>
 
               <div className="subject-dashboard-page__subjects">
-                {orderedSubjects.map((s) => (
-                  <SubjectCard
-                    key={s.id}
-                    subject={s}
-                    locked={isSubjectLocked(s)}
-                    onClick={() => handleSubjectOpen(s.id)}
-                  />
-                ))}
+                {orderedSubjects.length === 0 && levelsReady ? (
+                  <p className="subject-dashboard-page__empty">
+                    Для этого уровня в базе пока нет предметов с заданиями.
+                  </p>
+                ) : (
+                  orderedSubjects.map((s) => (
+                    <SubjectCard
+                      key={s.id}
+                      subject={s}
+                      locked={isSubjectLocked(s)}
+                      onClick={() => handleSubjectOpen(s.id)}
+                    />
+                  ))
+                )}
               </div>
             </section>
           </div>

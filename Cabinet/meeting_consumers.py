@@ -48,6 +48,8 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
 
         self.meeting_id = meeting.pk
         self.role = access.role
+        self.display_name = await self._display_name()
+        self.client_id = ""
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
         logger.info(
@@ -58,9 +60,25 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         )
         payload = await self._sync_state()
         await self.send(text_data=json.dumps(payload, ensure_ascii=False))
+        await self._broadcast({
+            "type": "material.presence_join",
+            "lesson_id": str(self.meeting_uuid),
+            "user_id": self.user.pk,
+            "author_id": self.user.pk,
+            "author_role": self.role,
+            "display_name": self.display_name,
+        })
 
     async def disconnect(self, close_code):
         if getattr(self, "group_name", None):
+            await self._broadcast({
+                "type": "material.presence_leave",
+                "lesson_id": str(getattr(self, "meeting_uuid", "")),
+                "user_id": getattr(self.user, "pk", None),
+                "author_id": getattr(self.user, "pk", None),
+                "author_role": getattr(self, "role", ""),
+                "display_name": getattr(self, "display_name", ""),
+            })
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
         logger.info(
             "material_ws_disconnect meeting=%s user=%s code=%s",
@@ -91,6 +109,30 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         if msg_type == "material.request_sync":
             payload = await self._sync_state()
             await self.send(text_data=json.dumps(payload, ensure_ascii=False))
+            # Повторно заявляем presence после reconnect.
+            await self._broadcast({
+                "type": "material.presence_join",
+                "lesson_id": str(self.meeting_uuid),
+                "user_id": self.user.pk,
+                "author_id": self.user.pk,
+                "author_role": self.role,
+                "display_name": self.display_name,
+            })
+            return
+
+        if msg_type == "material.presence_ping":
+            await self._broadcast({
+                "type": "material.presence_join",
+                "lesson_id": str(self.meeting_uuid),
+                "user_id": self.user.pk,
+                "author_id": self.user.pk,
+                "author_role": self.role,
+                "display_name": self.display_name,
+            })
+            return
+
+        if msg_type == "ping":
+            await self.send(text_data=json.dumps({"type": "pong", "t": data.get("t")}))
             return
 
         if msg_type == "material.open":
@@ -119,9 +161,15 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         payload = event.get("payload")
         if not payload:
             return
-        # Не отправляем автору эхо курсора — он уже видит свой.
-        if payload.get("type") in ("material.cursor", "material.pointer"):
+        # Не отправляем автору эхо курсора / preview — он уже видит свой.
+        if payload.get("type") in ("material.cursor", "material.pointer", "material.annotation_preview"):
             if payload.get("author_id") == getattr(self.user, "id", None):
+                return
+        if payload.get("type") == "material.presence_join":
+            if payload.get("user_id") == getattr(self.user, "id", None):
+                return
+        if payload.get("type") == "material.presence_leave":
+            if payload.get("user_id") == getattr(self.user, "id", None):
                 return
         # openUrl зависит от роли: учитель и ученик ходят в разные preview API.
         if payload.get("type") in ("material.opened", "material.permission_changed", "material.sync_state"):
@@ -265,6 +313,18 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
                 "operation_id": operation.get("operation_id"),
                 "version": operation.get("version"),
             }, ensure_ascii=False))
+
+    @database_sync_to_async
+    def _display_name(self):
+        user = self.user
+        profile = getattr(user, "profile", None)
+        name = (getattr(profile, "name", None) or "").strip()
+        if name:
+            return name[:120]
+        full = f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip()
+        if full:
+            return full[:120]
+        return str(getattr(user, "username", "") or "Участник")[:120]
 
     @database_sync_to_async
     def _resolve_meeting_access(self):

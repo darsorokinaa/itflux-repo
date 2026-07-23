@@ -20,6 +20,7 @@ EPHEMERAL_ACTIONS = frozenset({
     "cursor",
     "pointer",
     "drag_preview",
+    "annotation_preview",
 })
 
 CONTENT_ACTIONS = frozenset({
@@ -84,10 +85,10 @@ class MaterialCollaborationAdapter:
         if role in ("teacher", "staff"):
             return self.supported_actions | EPHEMERAL_ACTIONS
         if interaction_mode != "collaborative" or not can_collaborate:
-            return EPHEMERAL_ACTIONS & frozenset()  # ученик в view_only не шлёт даже курсор по умолчанию
+            return frozenset()  # ученик в view_only не шлёт даже курсор
         allowed = set(self.student_content_actions) | set(EPHEMERAL_ACTIONS)
-        if self.student_can_navigate:
-            allowed |= NAVIGATION_ACTIONS & self.supported_actions
+        # В режиме совместного управления ученик может переключать страницы/слайды.
+        allowed |= NAVIGATION_ACTIONS & self.supported_actions
         return frozenset(allowed)
 
     def validate_payload(self, action: str, payload: dict) -> dict:
@@ -180,6 +181,8 @@ class MaterialCollaborationAdapter:
             "page": int(annotation.get("page") or 1),
             "author_id": author_id,
             "author_role": author_role,
+            "created_at": annotation.get("created_at") or annotation.get("createdAt"),
+            "version": int(annotation.get("version") or 1),
         }
 
     def _apply_annotation_added(self, state, *, payload, author_id, author_role):

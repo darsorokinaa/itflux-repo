@@ -580,6 +580,12 @@ def apply_material_operation(
                     "operation_id": operation_id,
                     "author_id": user.pk,
                     "author_role": role,
+                    "display_name": (
+                        (getattr(getattr(user, "profile", None), "name", None) or "").strip()
+                        or f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip()
+                        or getattr(user, "username", "")
+                        or "Участник"
+                    )[:120],
                     "action": action,
                     "payload": payload if isinstance(payload, dict) else {},
                     "base_version": session.version,
@@ -600,9 +606,9 @@ def apply_material_operation(
             )
             raise VideoMeetingError("Действие запрещено", code="forbidden", status=403)
 
-        # Навигация учеником запрещена даже если случайно попала в allowed.
+        # Навигация учеником: разрешена только в collaborative (через allowed_actions_for).
         if role == "student" and action in ("page_changed", "zoom_changed", "scrolled", "tab_changed", "viewport_changed"):
-            if not adapter.student_can_navigate:
+            if session.interaction_mode != "collaborative" or not can_collab:
                 raise VideoMeetingError("Навигацией управляет преподаватель", code="nav_locked", status=403)
 
         if base_version is not None and int(base_version) > int(session.version) + 50:

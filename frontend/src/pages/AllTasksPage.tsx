@@ -13,13 +13,14 @@ import {
 import { useSearchParams } from "react-router-dom";
 // @ts-ignore JSX module without d.ts
 import ExamTaskDrawingShell, { ExamTaskDrawingHeaderButton } from "../components/ExamTaskDrawingShell";
-import { getLevelDef, type LevelId } from "../data/levels";
+import { getLevelDef } from "../data/levels";
 import {
   GRADES_BY_LEVEL,
-  SUBJECTS_BY_LEVEL,
+  buildSubjectDefinition,
   type SubjectDefinition,
   type SubjectId,
 } from "../data/subjects";
+import { fetchExamCatalog, type CatalogLevel } from "../utils/examCatalog";
 import { formatGroupsCount, formatTasksCount } from "../utils/formatTasksCount";
 import VariantCreateBar from "../components/VariantCreateBar";
 import WorkbookCreateBar from "../components/WorkbookCreateBar";
@@ -207,15 +208,10 @@ const LazyVisible = memo(function LazyVisible({
   );
 });
 
-const LEVEL_OPTIONS: ReadonlyArray<{ id: LevelId; label: string }> = [
-  { id: "oge", label: "ОГЭ" },
-  { id: "ege", label: "ЕГЭ" },
-  { id: "school", label: "Школьная программа" },
-  { id: "vpr", label: "ВПР" },
-];
+const DEFAULT_VPR_GRADES = [7, 8, 10];
 
 function buildQuery(
-  level: LevelId,
+  level: string,
   vprGrade: number,
   extra?: Record<string, string | undefined>
 ): string {
@@ -231,7 +227,7 @@ function buildQuery(
 }
 
 type AllTasksFilters = {
-  level: LevelId;
+  level: string;
   subject: SubjectId;
   vprGrade: number;
   taskListId: string;
@@ -240,26 +236,29 @@ type AllTasksFilters = {
   page: number;
 };
 
-function getActiveSubjectsForAllTasks(level: LevelId) {
-  return (SUBJECTS_BY_LEVEL[level] ?? []).map((s) =>
-    s.id === "rus" ? { ...s, comingSoon: false } : s
-  );
+function subjectsFromCatalog(catalog: CatalogLevel[], level: string): SubjectDefinition[] {
+  const row = catalog.find((item) => item.id === level);
+  if (!row?.subjects?.length) return [];
+  return row.subjects.map((s) => buildSubjectDefinition(s.id, { title: s.title, comingSoon: false }));
 }
 
-function readFiltersFromSearchParams(sp: URLSearchParams): AllTasksFilters {
-  const levelRaw = sp.get("level");
-  const level = LEVEL_OPTIONS.some((o) => o.id === levelRaw)
-    ? (levelRaw as LevelId)
-    : "oge";
+function readFiltersFromSearchParams(
+  sp: URLSearchParams,
+  catalog: CatalogLevel[],
+): AllTasksFilters {
+  const levelRaw = (sp.get("level") || "").toLowerCase();
+  const level = catalog.some((o) => o.id === levelRaw)
+    ? levelRaw
+    : (catalog[0]?.id || "oge");
 
-  const subjects = getActiveSubjectsForAllTasks(level);
+  const subjects = subjectsFromCatalog(catalog, level);
   const subjectRaw = sp.get("subject");
   const subject =
-    subjects.find((s) => s.id === subjectRaw && !s.comingSoon)?.id ??
-    subjects.find((s) => !s.comingSoon)?.id ??
+    subjects.find((s) => s.id === subjectRaw)?.id ??
+    subjects[0]?.id ??
     "inf";
 
-  const grades = GRADES_BY_LEVEL.vpr;
+  const grades = (GRADES_BY_LEVEL as Record<string, number[]>).vpr || DEFAULT_VPR_GRADES;
   const gradeRaw = Number(sp.get("grade"));
   const vprGrade =
     level === "vpr" && grades.includes(gradeRaw) ? gradeRaw : (grades[0] ?? 7);
@@ -287,13 +286,33 @@ function writeFiltersToSearchParams(f: AllTasksFilters): URLSearchParams {
 
 export default function AllTasksPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const [catalog, setCatalog] = useState<CatalogLevel[]>([]);
+  const [catalogReady, setCatalogReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchExamCatalog()
+      .then((rows) => {
+        if (!cancelled) setCatalog(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCatalog([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCatalogReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const initialFilters = useMemo(
-    () => readFiltersFromSearchParams(searchParams),
+    () => readFiltersFromSearchParams(searchParams, []),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- только при первом монтировании
     []
   );
 
-  const [level, setLevel] = useState<LevelId>(initialFilters.level);
+  const [level, setLevel] = useState<string>(initialFilters.level);
   const [subject, setSubject] = useState<SubjectId>(initialFilters.subject);
   const [onlyFipi, setOnlyFipi] = useState(initialFilters.onlyFipi);
   const [vprGrade, setVprGrade] = useState<number>(initialFilters.vprGrade);
@@ -301,7 +320,7 @@ export default function AllTasksPage() {
   const [subtopicId, setSubtopicId] = useState(initialFilters.subtopicId);
   const [page, setPage] = useState(initialFilters.page);
 
-  const levelSubjectRef = useRef<{ level: LevelId; subject: SubjectId } | null>(
+  const levelSubjectRef = useRef<{ level: string; subject: SubjectId } | null>(
     null
   );
 
@@ -375,8 +394,12 @@ export default function AllTasksPage() {
     }));
   }, []);
 
-  const subjects = getActiveSubjectsForAllTasks(level);
+  const subjects = useMemo(() => subjectsFromCatalog(catalog, level), [catalog, level]);
+  const levelOptions = catalog;
   const levelDef = getLevelDef(level);
+  const levelTitle = levelOptions.find((row) => row.id === level)?.label
+    || levelDef?.title
+    || level.toUpperCase();
   const useProgTaskSheet = subject === "prog" || level === "school";
 
   const subtopicsForTask = useMemo(() => {
@@ -408,13 +431,20 @@ export default function AllTasksPage() {
   }, [level, subject, vprGrade, taskListId, subtopicId, onlyFipi, page, setSearchParams]);
 
   useEffect(() => {
-    const list = getActiveSubjectsForAllTasks(level);
+    if (!catalogReady || !catalog.length) return;
+    const next = readFiltersFromSearchParams(searchParams, catalog);
+    if (!catalog.some((row) => row.id === level)) {
+      setLevel(next.level);
+      setSubject(next.subject);
+      return;
+    }
+    const list = subjectsFromCatalog(catalog, level);
     if (!list.some((s) => s.id === subject)) {
-      setSubject(list[0]?.id ?? "inf");
+      setSubject(list[0]?.id ?? next.subject);
       return;
     }
     if (level === "vpr") {
-      const grades = GRADES_BY_LEVEL.vpr;
+      const grades = (GRADES_BY_LEVEL as Record<string, number[]>).vpr || DEFAULT_VPR_GRADES;
       if (grades.length && !grades.includes(vprGrade)) {
         setVprGrade(grades[0]);
       }
@@ -426,7 +456,7 @@ export default function AllTasksPage() {
       setPage(1);
     }
     levelSubjectRef.current = { level, subject };
-  }, [level, subject, vprGrade]);
+  }, [catalog, catalogReady, level, subject, vprGrade, searchParams]);
 
   useEffect(() => {
     if (!filterOptions || !taskListId) return;
@@ -618,7 +648,7 @@ export default function AllTasksPage() {
   );
 
   const workbookMeta = useMemo(() => {
-    const subtitleParts = [levelDef?.label ?? level.toUpperCase(), subjectTitle];
+    const subtitleParts = [levelTitle, subjectTitle];
 
     if (level === "vpr") {
       subtitleParts.push(`${vprGrade} класс`);
@@ -645,7 +675,7 @@ export default function AllTasksPage() {
   }, [
     filterOptions?.task_numbers,
     level,
-    levelDef?.label,
+    levelTitle,
     subject,
     subjectTitle,
     taskListId,
@@ -785,7 +815,7 @@ export default function AllTasksPage() {
           >
             <span>Фильтры</span>
             <span className="all-tasks-filters-toggle__meta">
-              {levelDef?.label ?? level.toUpperCase()}
+              {levelTitle}
               {onlyFipi ? " · ФИПИ" : ""}
             </span>
           </button>
@@ -801,13 +831,13 @@ export default function AllTasksPage() {
                 className="all-tasks-filter__control"
                 value={level}
                 onChange={(e) => {
-                  setLevel(e.target.value as LevelId);
+                  setLevel(e.target.value);
                   setTaskListId("");
                   setSubtopicId("");
                   resetPage();
                 }}
               >
-                {LEVEL_OPTIONS.map((opt) => (
+                {levelOptions.map((opt) => (
                   <option key={opt.id} value={opt.id}>
                     {opt.label}
                   </option>
@@ -847,7 +877,7 @@ export default function AllTasksPage() {
                     resetPage();
                   }}
                 >
-                  {GRADES_BY_LEVEL.vpr.map((g) => (
+                  {((GRADES_BY_LEVEL as Record<string, number[]>).vpr || DEFAULT_VPR_GRADES).map((g) => (
                     <option key={g} value={g}>
                       {g} класс
                     </option>

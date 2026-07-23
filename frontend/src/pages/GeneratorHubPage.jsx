@@ -2,47 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import GeneratorCategoryCard from "../components/GeneratorCategoryCard";
 import StepIndicator from "../components/StepIndicator";
 import { getLevelDef, levelLabel } from "../data/levels";
+import { fetchExamCatalog } from "../utils/examCatalog";
 import { formatTasksCount } from "../utils/formatTasksCount";
 import "../styles/tool-workspace.css";
 
-const FALLBACK_LEVELS = [
-  {
-    id: "oge",
-    title: "ОГЭ",
-    classLabel: "9 класс",
-    lead: "Тренировочные варианты с заданиями в экзаменационном формате.",
-    fallbackCount: 312,
-    to: "/subject/oge",
-  },
-  {
-    id: "ege",
-    title: "ЕГЭ",
-    classLabel: "11 класс",
-    lead: "Сценарии для системной подготовки и отработки сложных тем.",
-    fallbackCount: 278,
-    to: "/subject/ege",
-  },
-  {
-    id: "school",
-    title: "Школьная программа",
-    classLabel: "5-11 класс",
-    lead: "Программирование и курсы школьной программы.",
-    fallbackCount: 40,
-    to: "/subject/school",
-  },
-  {
-    id: "vpr",
-    title: "ВПР",
-    classLabel: "7-10 класс",
-    lead: "Базовые темы и задания для регулярной учебной практики.",
-    fallbackCount: 184,
-    to: "/subject/vpr",
-  },
-];
-
 export default function GeneratorHubPage() {
   const [stats, setStats] = useState(null);
-  const [levels, setLevels] = useState(FALLBACK_LEVELS);
+  const [levels, setLevels] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,57 +28,53 @@ export default function GeneratorHubPage() {
                 apiLevels.map((item) => {
                   const id = String(item?.id || "").trim().toLowerCase();
                   const def = getLevelDef(id);
-                  const fallback = FALLBACK_LEVELS.find((row) => row.id === id);
                   return {
                     id,
-                    title: String(item?.title || "").trim() || levelLabel(id, fallback?.title || id),
-                    classLabel: def?.stripLabel || fallback?.classLabel || "",
-                    lead: def?.description || fallback?.lead || "Задания и варианты для выбранного уровня.",
-                    fallbackCount: def?.fallbackTaskCount || fallback?.fallbackCount || 0,
+                    title: String(item?.title || "").trim() || levelLabel(id, id),
+                    classLabel: def?.stripLabel || "",
+                    lead: def?.description || "Задания и варианты для выбранного уровня.",
+                    fallbackCount: Number(item?.tasks_count) || def?.fallbackTaskCount || 0,
                     to: `/subject/${id}`,
                   };
                 }),
               );
+              setLoading(false);
+              return;
             }
           }
-          return;
         }
       } catch {
         // fallback below
       }
 
       try {
-        const [catalogRes, legacyRes] = await Promise.all([
-          fetch("/api/catalog/", { credentials: "same-origin" }),
+        const [catalogRows, legacyRes] = await Promise.all([
+          fetchExamCatalog(),
           fetch("/api/platform-stats/", { credentials: "same-origin" }),
         ]);
-        const catalogPayload = catalogRes.ok ? await catalogRes.json() : null;
         const statsPayload = legacyRes.ok ? await legacyRes.json() : null;
         if (cancelled) return;
         setStats(statsPayload);
-        const rows = Array.isArray(catalogPayload?.catalog) ? catalogPayload.catalog : [];
-        if (rows.length) {
-          setLevels(
-            rows.map((row) => {
-              const id = String(row?.level || "").trim().toLowerCase();
-              const def = getLevelDef(id);
-              const fallback = FALLBACK_LEVELS.find((item) => item.id === id);
-              return {
-                id,
-                title: String(row?.level_rus || "").trim() || levelLabel(id, fallback?.title || id),
-                classLabel: def?.stripLabel || fallback?.classLabel || "",
-                lead: def?.description || fallback?.lead || "Задания и варианты для выбранного уровня.",
-                fallbackCount: def?.fallbackTaskCount || fallback?.fallbackCount || 0,
-                to: `/subject/${id}`,
-              };
-            }),
-          );
-        }
+        setLevels(
+          catalogRows.map((row) => {
+            const def = getLevelDef(row.id);
+            return {
+              id: row.id,
+              title: row.label || levelLabel(row.id, row.id),
+              classLabel: def?.stripLabel || "",
+              lead: def?.description || "Задания и варианты для выбранного уровня.",
+              fallbackCount: def?.fallbackTaskCount || 0,
+              to: `/subject/${row.id}`,
+            };
+          }),
+        );
       } catch {
         if (!cancelled) {
           setStats(null);
-          setLevels(FALLBACK_LEVELS);
+          setLevels([]);
         }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     };
 
@@ -162,19 +125,25 @@ export default function GeneratorHubPage() {
               <h2 id="generator-levels-title">Выбор направления</h2>
               <p>Начните с формата подготовки — дальше система покажет доступные предметы.</p>
             </div>
-            <div className="generator-tool-page__grid">
-              {cards.map((level) => (
-                <GeneratorCategoryCard
-                  key={level.id}
-                  id={level.id}
-                  title={level.title}
-                  classLabel={level.classLabel}
-                  description={level.lead}
-                  tasksLabel={level.tasksLabel}
-                  to={level.to}
-                />
-              ))}
-            </div>
+            {loading ? (
+              <p className="generator-tool-page__empty">Загрузка уровней…</p>
+            ) : cards.length === 0 ? (
+              <p className="generator-tool-page__empty">Уровни пока не добавлены в базу.</p>
+            ) : (
+              <div className="generator-tool-page__grid">
+                {cards.map((level) => (
+                  <GeneratorCategoryCard
+                    key={level.id}
+                    id={level.id}
+                    title={level.title}
+                    classLabel={level.classLabel}
+                    description={level.lead}
+                    tasksLabel={level.tasksLabel}
+                    to={level.to}
+                  />
+                ))}
+              </div>
+            )}
           </section>
         </main>
       </div>

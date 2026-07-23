@@ -12,6 +12,7 @@ export default function MaterialCollabBar({
   onCloseLocal,
   tools = null,
   notice = "",
+  presenceLabel = "",
 }) {
   const statusLabel = {
     synced: "Синхронизировано",
@@ -36,6 +37,7 @@ export default function MaterialCollabBar({
             {modeLabel}
             {" · "}
             <span className={`vl-collab-bar__sync is-${syncStatus}`}>{statusLabel}</span>
+            {presenceLabel ? ` · ${presenceLabel}` : ""}
           </span>
         </div>
         {notice ? <p className="vl-collab-bar__notice">{notice}</p> : null}

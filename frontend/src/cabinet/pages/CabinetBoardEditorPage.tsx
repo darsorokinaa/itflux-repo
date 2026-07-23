@@ -35,7 +35,10 @@ import {
   copyBlobToClipboard,
   downloadBlob,
 } from "../boards/boardExport";
-import { externalizeSceneFiles } from "../boards/boardFiles";
+import {
+  externalizeSceneFiles,
+  isTransientFileUrl,
+} from "../boards/boardFiles";
 import {
   BG_COLOR_KEY,
   GRID_STYLE_KEY,
@@ -50,8 +53,33 @@ import {
   createBoardCollabSession,
   mergeCollabScenes,
   type CollabPeer,
+  type RemoteCursor,
 } from "../boards/boardCollab";
 import "../styles/boards.css";
+
+const TEACHER_CURSOR = { background: "#2563eb", stroke: "#1d4ed8" };
+const STUDENT_CURSOR = { background: "#e11d48", stroke: "#be123c" };
+
+function cursorColorsForRole(role?: string) {
+  return role === "teacher" ? TEACHER_CURSOR : STUDENT_CURSOR;
+}
+
+function buildCollaboratorsMap(
+  cursors: Map<string, RemoteCursor>,
+): Map<string, Record<string, unknown>> {
+  const map = new Map<string, Record<string, unknown>>();
+  for (const [clientId, cursor] of cursors) {
+    map.set(clientId, {
+      pointer: { x: cursor.x, y: cursor.y, tool: "pointer", renderCursor: true },
+      button: "up",
+      username: cursor.displayName,
+      color: cursorColorsForRole(cursor.role),
+      id: String(cursor.userId || clientId),
+      socketId: clientId,
+    });
+  }
+  return map;
+}
 
 type BoardDetail = {
   id: string;
@@ -181,6 +209,11 @@ export default function CabinetBoardEditorPage() {
   const hadSelectionRef = useRef(false);
   const applyingRemoteRef = useRef(false);
   const collabRef = useRef<ReturnType<typeof createBoardCollabSession> | null>(null);
+  const remoteCursorsRef = useRef(new Map<string, RemoteCursor>());
+  const uploadingFileIdsRef = useRef(new Set<string>());
+  const lastActiveToolRef = useRef("");
+  const imageUploadStatusRef = useRef<"idle" | "uploading" | "error">("idle");
+  const [imageUploadStatus, setImageUploadStatus] = useState<"idle" | "uploading" | "error">("idle");
   gridStyleRef.current = gridStyle;
   bgColorRef.current = bgColor;
   boardThemeRef.current = boardTheme;
@@ -389,6 +422,67 @@ export default function CabinetBoardEditorPage() {
     }
   }, []);
 
+  const publishLiveScene = useCallback((scene: BoardScenePayload) => {
+    collabRef.current?.publishLive(
+      {
+        elements: scene.elements as unknown[],
+        appState: scene.appState,
+        files: scene.files as Record<string, unknown>,
+      },
+      versionRef.current,
+    );
+  }, []);
+
+  const externalizeAndSyncFiles = useCallback(async (scene: BoardScenePayload) => {
+    if (!boardId || !apiRef.current) return scene;
+    const files = (scene.files || {}) as Record<string, Record<string, unknown>>;
+    const pendingIds = Object.entries(files)
+      .filter(([id, meta]) => {
+        const url = String(meta?.dataURL || meta?.url || "");
+        return isTransientFileUrl(url) && !uploadingFileIdsRef.current.has(id);
+      })
+      .map(([id]) => id);
+    if (!pendingIds.length) {
+      publishLiveScene(scene);
+      return scene;
+    }
+    pendingIds.forEach((id) => uploadingFileIdsRef.current.add(id));
+    imageUploadStatusRef.current = "uploading";
+    setImageUploadStatus("uploading");
+    try {
+      const nextFiles = await externalizeSceneFiles(files, (form) =>
+        uploadInteractiveBoardImage(boardId, form),
+      );
+      pendingIds.forEach((id) => uploadingFileIdsRef.current.delete(id));
+      const nextScene = { ...scene, files: nextFiles };
+      latestSceneRef.current = nextScene;
+      lastFilesRef.current = nextFiles;
+      applyingRemoteRef.current = true;
+      apiRef.current.updateScene?.({
+        files: nextFiles,
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+      window.setTimeout(() => {
+        applyingRemoteRef.current = false;
+      }, 60);
+      imageUploadStatusRef.current = "idle";
+      setImageUploadStatus("idle");
+      publishLiveScene(nextScene);
+      dirtyRef.current = true;
+      setSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));
+      debouncedSaver.schedule();
+      return nextScene;
+    } catch (err: unknown) {
+      pendingIds.forEach((id) => uploadingFileIdsRef.current.delete(id));
+      imageUploadStatusRef.current = "error";
+      setImageUploadStatus("error");
+      const error = err as { message?: string };
+      showNotice(error?.message || "Не удалось загрузить изображение на доску");
+      // Не публикуем blob:/data: пирам — только локальный предпросмотр.
+      return scene;
+    }
+  }, [boardId, debouncedSaver, publishLiveScene, showNotice]);
+
   const handleChange = useCallback(
     (elements: readonly unknown[], appState: Record<string, unknown>, files: Record<string, unknown>) => {
       syncPaperOverlay(appState);
@@ -411,22 +505,30 @@ export default function CabinetBoardEditorPage() {
         latestSceneRef.current?.appState?.[GRID_STYLE_KEY] !== scene.appState[GRID_STYLE_KEY];
       const themeChanged = latestSceneRef.current?.appState?.theme !== scene.appState.theme;
       latestSceneRef.current = scene;
+      const toolType = String((appState.activeTool as { type?: string } | undefined)?.type || "");
+      if (toolType && toolType !== lastActiveToolRef.current) {
+        lastActiveToolRef.current = toolType;
+        collabRef.current?.publishActiveTool(toolType);
+      }
       if (!elementsChanged && !filesChanged && !bgChanged && !gridChanged && !themeChanged) return;
       lastElementsRef.current = elements;
       lastFilesRef.current = files;
       dirtyRef.current = true;
       setSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));
       debouncedSaver.schedule();
-      collabRef.current?.publishLive(
-        {
-          elements: scene.elements as unknown[],
-          appState: scene.appState,
-          files: scene.files as Record<string, unknown>,
-        },
-        versionRef.current,
-      );
+      const hasTransient = Object.values(files).some((meta) => {
+        if (!meta || typeof meta !== "object") return false;
+        const url = String((meta as { dataURL?: string; url?: string }).dataURL
+          || (meta as { url?: string }).url || "");
+        return isTransientFileUrl(url);
+      });
+      if (hasTransient) {
+        void externalizeAndSyncFiles(scene);
+      } else {
+        publishLiveScene(scene);
+      }
     },
-    [debouncedSaver, syncPaperOverlay, syncLeftPanels],
+    [debouncedSaver, externalizeAndSyncFiles, publishLiveScene, syncPaperOverlay, syncLeftPanels],
   );
 
   // Совместное редактирование с привязанным учеником (WebSocket live + REST persist).
@@ -437,68 +539,115 @@ export default function CabinetBoardEditorPage() {
     const displayName =
       (canManage ? board.owner_name : board.student_name)
       || (canManage ? "Учитель" : "Ученик");
+    const role = canManage ? "teacher" : "student";
 
-    const session = createBoardCollabSession(boardId, displayName, {
-      onStatus: (status) => {
-        setCollabStatus(status === "connecting" ? "connecting" : status);
-      },
-      onPeersChange: setCollabPeers,
-      onRemoteScene: (scene, meta) => {
-        if (!apiRef.current) return;
-        if (meta.fromSaved && typeof meta.version === "number") {
-          if (meta.version < versionRef.current) return;
-          versionRef.current = meta.version;
-          setBoard((prev) => (prev ? { ...prev, version: meta.version! } : prev));
-        }
+    const applyCollaborators = () => {
+      if (!apiRef.current) return;
+      const collaborators = buildCollaboratorsMap(remoteCursorsRef.current);
+      applyingRemoteRef.current = true;
+      apiRef.current.updateScene?.({
+        collaborators,
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+      window.setTimeout(() => {
+        applyingRemoteRef.current = false;
+      }, 40);
+    };
 
-        const localElements = (apiRef.current.getSceneElements?.() || []) as unknown[];
-        const localApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
-        const localFiles = (apiRef.current.getFiles?.() || {}) as Record<string, unknown>;
-        // Element-level merge: иначе чужой live-кадр затирает наш незавершённый штрих.
-        const merged = mergeCollabScenes(
-          { elements: localElements, appState: localApp, files: localFiles },
-          scene,
-        );
-
-        applyingRemoteRef.current = true;
-        applyRemoteSceneToApi(apiRef.current, merged);
-        const local = apiRef.current.getAppState?.() || {};
-        const nextApp = {
-          ...merged.appState,
-          scrollX: local.scrollX,
-          scrollY: local.scrollY,
-          zoom: local.zoom,
-          collaborators: local.collaborators,
-          selectedElementIds: local.selectedElementIds,
-          theme: boardThemeRef.current,
-        };
-        const payload = buildScenePayload(merged.elements, nextApp, merged.files);
-        latestSceneRef.current = payload;
-        lastElementsRef.current = merged.elements;
-        lastFilesRef.current = merged.files;
-        if (meta.fromSaved) {
-          // После сохранения партнёра не сбрасываем свой dirty, если мы тоже правили.
-          if (!dirtyRef.current) {
-            setSaveStatus("saved");
-            setConflict(false);
+    const session = createBoardCollabSession(
+      boardId,
+      displayName,
+      {
+        onStatus: (status) => {
+          setCollabStatus(status === "connecting" ? "connecting" : status);
+        },
+        onPeersChange: setCollabPeers,
+        onRemoteCursor: (cursor, clientId) => {
+          if (!cursor) {
+            remoteCursorsRef.current.delete(clientId);
+          } else {
+            remoteCursorsRef.current.set(clientId, cursor);
           }
-        }
-        window.setTimeout(() => {
-          applyingRemoteRef.current = false;
-        }, 80);
+          applyCollaborators();
+        },
+        onRemoteScene: (scene, meta) => {
+          if (!apiRef.current) return;
+          if (meta.fromSaved && typeof meta.version === "number") {
+            if (meta.version < versionRef.current) return;
+            versionRef.current = meta.version;
+            setBoard((prev) => (prev ? { ...prev, version: meta.version! } : prev));
+          }
+
+          const localElements = (apiRef.current.getSceneElements?.() || []) as unknown[];
+          const localApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
+          const localFiles = (apiRef.current.getFiles?.() || {}) as Record<string, unknown>;
+          const merged = mergeCollabScenes(
+            { elements: localElements, appState: localApp, files: localFiles },
+            scene,
+          );
+
+          applyingRemoteRef.current = true;
+          const collaborators = buildCollaboratorsMap(remoteCursorsRef.current);
+          applyRemoteSceneToApi(apiRef.current, {
+            ...merged,
+            appState: {
+              ...merged.appState,
+              collaborators,
+            },
+          });
+          // Excalidraw expects collaborators on SceneData root as well.
+          apiRef.current.updateScene?.({
+            collaborators,
+            captureUpdate: CaptureUpdateAction.NEVER,
+          });
+          const local = apiRef.current.getAppState?.() || {};
+          const nextApp = {
+            ...merged.appState,
+            scrollX: local.scrollX,
+            scrollY: local.scrollY,
+            zoom: local.zoom,
+            collaborators,
+            selectedElementIds: local.selectedElementIds,
+            theme: boardThemeRef.current,
+          };
+          const payload = buildScenePayload(merged.elements, nextApp, merged.files);
+          latestSceneRef.current = payload;
+          lastElementsRef.current = merged.elements;
+          lastFilesRef.current = merged.files;
+          if (meta.fromSaved) {
+            if (!dirtyRef.current) {
+              setSaveStatus("saved");
+              setConflict(false);
+            }
+          }
+          window.setTimeout(() => {
+            applyingRemoteRef.current = false;
+          }, 80);
+        },
       },
-    });
+      { role },
+    );
     collabRef.current = session;
     setCollabStatus("connecting");
 
     return () => {
       session.close();
       collabRef.current = null;
+      remoteCursorsRef.current.clear();
       setCollabPeers([]);
       setCollabStatus("off");
     };
   }, [board, boardId, canEdit, canManage, collaborative, excalidrawReady, loading]);
 
+  const handlePointerSceneMove = useCallback((x: number, y: number, tool: string) => {
+    if (!collaborative && !canEdit) return;
+    collabRef.current?.publishCursor(x, y, tool);
+  }, [canEdit, collaborative]);
+
+  const generateIdForFile = useCallback(async (_file: File) => {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+    return `file-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }, []);
   const handleApiReady = useCallback((api: ExcalidrawAPI) => {
     apiRef.current = api;
     setExcalidrawReady(true);
@@ -1147,8 +1296,17 @@ export default function CabinetBoardEditorPage() {
           viewModeEnabled={viewModeEnabled}
           onChange={handleChange}
           onApiReady={handleApiReady}
+          onPointerSceneMove={handlePointerSceneMove}
+          generateIdForFile={generateIdForFile}
         />
       </div>
+
+      {imageUploadStatus === "uploading" ? (
+        <div className="cb-soon-toast" role="status">Загрузка изображения…</div>
+      ) : null}
+      {imageUploadStatus === "error" ? (
+        <div className="cb-soon-toast" role="status">Ошибка загрузки изображения. Повторите вставку.</div>
+      ) : null}
 
       {/* Скрытый input для программной загрузки — Excalidraw имеет свой UI; серверная загрузка через API при необходимости */}
       <input

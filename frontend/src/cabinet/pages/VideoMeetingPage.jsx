@@ -51,6 +51,7 @@ import {
 import {
   canSyncPresentRow,
   createMeetingMaterialCollab,
+  createRemoteApplyGuard,
   inferSyncResourceKind,
 } from "../meetingMaterialCollab";
 import { useFloatingDrag } from "../useFloatingDrag";
@@ -227,9 +228,13 @@ export default function VideoMeetingPage() {
   const [materialSession, setMaterialSession] = useState(null);
   const [materialSyncStatus, setMaterialSyncStatus] = useState("synced");
   const [materialNotice, setMaterialNotice] = useState("");
-  const [remotePointer, setRemotePointer] = useState(null);
+  const [remoteCursors, setRemoteCursors] = useState([]);
+  const [remotePreviews, setRemotePreviews] = useState({});
+  const [materialPresence, setMaterialPresence] = useState([]);
   const materialCollabRef = useRef(null);
-  const remotePointerTimerRef = useRef(null);
+  const remoteCursorTimersRef = useRef(new Map());
+  const remoteApplyGuardRef = useRef(createRemoteApplyGuard());
+  const seenOpIdsRef = useRef(new Set());
   const [materialsToast, setMaterialsToast] = useState("");
   const [mobilePane, setMobilePane] = useState("call"); // call | materials
   const [callCollapsed, setCallCollapsed] = useState(false);
@@ -1077,6 +1082,7 @@ export default function VideoMeetingPage() {
   // WebSocket синхронизации материалов (доска/вариант — отдельно).
   useEffect(() => {
     if (!meetingUuid || pageState !== "live") return undefined;
+    const remoteGuard = remoteApplyGuardRef.current;
     const collab = createMeetingMaterialCollab(meetingUuid, {
       onStatus: (status) => {
         if (status === "open") setMaterialSyncStatus("synced");
@@ -1084,22 +1090,24 @@ export default function VideoMeetingPage() {
         else if (status === "closed" || status === "error") setMaterialSyncStatus("reconnecting");
       },
       onSyncState: (payload) => {
-        applyMaterialSession(payload?.materialSession || null);
+        remoteGuard.run(() => applyMaterialSession(payload?.materialSession || null));
       },
       onOpened: (payload) => {
-        applyMaterialSession(payload?.materialSession || {
+        remoteGuard.run(() => applyMaterialSession(payload?.materialSession || {
           sessionId: payload.session_id,
           interactionMode: payload.interaction_mode,
           version: payload.version,
           state: payload.state,
           material: payload.material,
-        });
+        }));
         if (!canManageRef.current) {
           showMaterialNotice("Преподаватель открыл материал");
         }
       },
       onClosed: () => {
-        applyMaterialSession(null);
+        remoteGuard.run(() => applyMaterialSession(null));
+        setRemotePreviews({});
+        setRemoteCursors([]);
         if (!canManageRef.current) {
           showMaterialNotice("Преподаватель закрыл материал");
           setMobilePane("call");
@@ -1107,13 +1115,15 @@ export default function VideoMeetingPage() {
       },
       onPermissionChanged: (payload) => {
         const mode = payload?.interaction_mode || payload?.materialSession?.interactionMode;
-        setMaterialSession((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            ...(payload.materialSession || {}),
-            interactionMode: mode || prev.interactionMode,
-          };
+        remoteGuard.run(() => {
+          setMaterialSession((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              ...(payload.materialSession || {}),
+              interactionMode: mode || prev.interactionMode,
+            };
+          });
         });
         if (!canManageRef.current) {
           if (mode === "collaborative") {
@@ -1124,62 +1134,144 @@ export default function VideoMeetingPage() {
         }
       },
       onOperation: (op) => {
-        setMaterialSession((prev) => {
-          if (!prev) return prev;
-          const nextState = { ...(prev.state || {}) };
-          const action = op.action;
-          const payload = op.payload || {};
-          if (action === "page_changed") nextState.page = payload.page;
-          if (action === "zoom_changed") nextState.zoom = payload.zoom;
-          if (action === "scrolled") {
-            nextState.scroll = payload.scroll;
-            nextState.scrollX = payload.scrollX ?? payload.scroll_x;
+        const opId = op.operation_id || op.operationId;
+        if (opId) {
+          if (seenOpIdsRef.current.has(opId)) return;
+          seenOpIdsRef.current.add(opId);
+          if (seenOpIdsRef.current.size > 400) {
+            const first = seenOpIdsRef.current.values().next().value;
+            seenOpIdsRef.current.delete(first);
           }
-          if (action === "tab_changed") nextState.tab = payload.tab;
-          if (action === "annotation_added" || action === "annotation_updated") {
-            const ann = payload.annotation || payload;
-            const list = Array.isArray(nextState.annotations) ? [...nextState.annotations] : [];
-            const idx = list.findIndex((a) => a.id === ann.id);
-            if (idx >= 0) list[idx] = { ...list[idx], ...ann };
-            else list.push(ann);
-            nextState.annotations = list;
-          }
-          if (action === "annotation_deleted") {
-            const id = payload.id || payload.annotation_id;
-            nextState.annotations = (nextState.annotations || []).filter((a) => a.id !== id);
-          }
-          if (action === "answer_selected") {
-            nextState.answers = {
-              ...(nextState.answers || {}),
-              [payload.questionId || payload.question_id]: {
-                value: payload.value,
-                author_id: op.author_id,
-                author_role: op.author_role,
-              },
-            };
-          }
-          if (action === "field_changed") {
-            nextState.fields = {
-              ...(nextState.fields || {}),
-              [payload.fieldId || payload.field_id]: {
-                value: payload.value,
-                author_id: op.author_id,
-                author_role: op.author_role,
-              },
-            };
-          }
-          return { ...prev, state: nextState, version: op.version || prev.version };
+        }
+        remoteGuard.run(() => {
+          setMaterialSession((prev) => {
+            if (!prev) return prev;
+            const nextState = { ...(prev.state || {}) };
+            const action = op.action;
+            const payload = op.payload || {};
+            if (action === "page_changed") nextState.page = payload.page;
+            if (action === "zoom_changed") nextState.zoom = payload.zoom;
+            if (action === "scrolled") {
+              nextState.scroll = payload.scroll;
+              nextState.scrollX = payload.scrollX ?? payload.scroll_x;
+            }
+            if (action === "tab_changed") nextState.tab = payload.tab;
+            if (action === "annotation_added" || action === "annotation_updated") {
+              const ann = payload.annotation || payload;
+              const list = Array.isArray(nextState.annotations) ? [...nextState.annotations] : [];
+              const idx = list.findIndex((a) => a.id === ann.id);
+              if (idx >= 0) list[idx] = { ...list[idx], ...ann };
+              else list.push(ann);
+              nextState.annotations = list;
+              setRemotePreviews((rp) => {
+                if (!ann?.id || !rp[ann.id]) return rp;
+                const next = { ...rp };
+                delete next[ann.id];
+                return next;
+              });
+            }
+            if (action === "annotation_deleted") {
+              const id = payload.id || payload.annotation_id;
+              nextState.annotations = (nextState.annotations || []).filter((a) => a.id !== id);
+            }
+            if (action === "answer_selected") {
+              nextState.answers = {
+                ...(nextState.answers || {}),
+                [payload.questionId || payload.question_id || payload.fieldId]: {
+                  value: payload.value,
+                  author_id: op.author_id,
+                  author_role: op.author_role,
+                },
+              };
+            }
+            if (action === "field_changed") {
+              nextState.fields = {
+                ...(nextState.fields || {}),
+                [payload.fieldId || payload.field_id]: {
+                  value: payload.value,
+                  author_id: op.author_id,
+                  author_role: op.author_role,
+                },
+              };
+            }
+            if (action === "item_moved" || action === "item_selected") {
+              const itemId = payload.itemId || payload.item_id;
+              if (itemId) {
+                nextState.items = {
+                  ...(nextState.items || {}),
+                  [itemId]: {
+                    ...(payload || {}),
+                    author_id: op.author_id,
+                    author_role: op.author_role,
+                  },
+                };
+              }
+            }
+            if (action === "pair_connected" || action === "pair_disconnected" || action === "cards_flipped") {
+              nextState.pairs = Array.isArray(payload.pairs) ? payload.pairs : (nextState.pairs || []);
+              if (payload.cards) nextState.cards = payload.cards;
+            }
+            return { ...prev, state: nextState, version: op.version || prev.version };
+          });
         });
+      },
+      onAnnotationPreview: (payload) => {
+        const ann = payload?.payload?.annotation || payload?.annotation || payload?.payload;
+        if (!ann?.id) return;
+        setRemotePreviews((prev) => ({ ...prev, [ann.id]: ann }));
       },
       onCursor: (payload) => {
         const p = payload?.payload || {};
         if (typeof p.x !== "number" || typeof p.y !== "number") return;
-        setRemotePointer({ x: p.x, y: p.y, authorId: payload.author_id });
-        if (remotePointerTimerRef.current) window.clearTimeout(remotePointerTimerRef.current);
-        remotePointerTimerRef.current = window.setTimeout(() => setRemotePointer(null), 1800);
+        const authorId = payload.author_id;
+        const key = String(authorId || "remote");
+        setRemoteCursors((prev) => {
+          const next = prev.filter((c) => String(c.authorId) !== key);
+          next.push({
+            authorId,
+            clientId: key,
+            x: p.x,
+            y: p.y,
+            displayName: payload.display_name || (payload.author_role === "teacher" ? "Учитель" : "Ученик"),
+            authorRole: payload.author_role,
+            role: payload.author_role,
+          });
+          return next;
+        });
+        const timers = remoteCursorTimersRef.current;
+        if (timers.has(key)) window.clearTimeout(timers.get(key));
+        timers.set(key, window.setTimeout(() => {
+          setRemoteCursors((prev) => prev.filter((c) => String(c.authorId) !== key));
+          timers.delete(key);
+        }, 1800));
+      },
+      onPresenceJoin: (payload) => {
+        const userId = payload.user_id || payload.author_id;
+        if (userId == null) return;
+        setMaterialPresence((prev) => {
+          if (prev.some((p) => Number(p.userId) === Number(userId))) {
+            return prev.map((p) => (Number(p.userId) === Number(userId)
+              ? {
+                ...p,
+                displayName: payload.display_name || p.displayName,
+                role: payload.author_role || p.role,
+              }
+              : p));
+          }
+          return [...prev, {
+            userId,
+            displayName: payload.display_name || "Участник",
+            role: payload.author_role,
+          }];
+        });
+      },
+      onPresenceLeave: (payload) => {
+        const userId = payload.user_id || payload.author_id;
+        setMaterialPresence((prev) => prev.filter((p) => Number(p.userId) !== Number(userId)));
+        setRemoteCursors((prev) => prev.filter((c) => Number(c.authorId) !== Number(userId)));
       },
       onError: (err) => {
-        if (err?.code === "forbidden" || err?.code === "view_only") {
+        if (err?.code === "forbidden" || err?.code === "view_only" || err?.code === "nav_locked") {
           showMaterialsToast(err.message || "Действие запрещено");
         }
         setMaterialSyncStatus("error");
@@ -1189,7 +1281,11 @@ export default function VideoMeetingPage() {
     return () => {
       collab.close();
       materialCollabRef.current = null;
-      if (remotePointerTimerRef.current) window.clearTimeout(remotePointerTimerRef.current);
+      for (const t of remoteCursorTimersRef.current.values()) window.clearTimeout(t);
+      remoteCursorTimersRef.current.clear();
+      setRemoteCursors([]);
+      setRemotePreviews({});
+      setMaterialPresence([]);
     };
   }, [applyMaterialSession, meetingUuid, pageState, showMaterialNotice, showMaterialsToast]);
 
@@ -1648,12 +1744,15 @@ export default function VideoMeetingPage() {
                 ? "reconnecting"
                 : materialSyncStatus
             }
-            remotePointer={remotePointer}
+            remoteCursors={remoteCursors}
+            remotePreviews={remotePreviews}
+            presence={materialPresence}
             notice={materialNotice}
             canEditContent={
               canManage
               || materialSession.interactionMode === "collaborative"
             }
+            remoteApplyGuard={remoteApplyGuardRef.current}
             onCloseLocal={() => {
               applyMaterialSession(null);
               setMobilePane("call");
@@ -1662,18 +1761,28 @@ export default function VideoMeetingPage() {
             onToggleCollaborative={(enabled) => void onToggleCollaborative(enabled)}
             onStatePatch={({ action, payload }) => {
               if (!canManage && materialSession.interactionMode !== "collaborative") return;
-              if (!canManage && ["page_changed", "zoom_changed", "scrolled", "tab_changed", "viewport_changed"].includes(action)) {
-                return;
-              }
+              if (remoteApplyGuardRef.current.isRemote()) return;
               materialCollabRef.current?.sendOperation({ action, payload });
-              // Оптимистично обновляем локально для учителя.
               setMaterialSession((prev) => {
                 if (!prev) return prev;
-                return { ...prev, state: { ...(prev.state || {}), ...payload, ...(action === "page_changed" ? { page: payload.page } : {}), ...(action === "zoom_changed" ? { zoom: payload.zoom } : {}), ...(action === "scrolled" ? { scroll: payload.scroll } : {}) } };
+                return {
+                  ...prev,
+                  state: {
+                    ...(prev.state || {}),
+                    ...payload,
+                    ...(action === "page_changed" ? { page: payload.page } : {}),
+                    ...(action === "zoom_changed" ? { zoom: payload.zoom } : {}),
+                    ...(action === "scrolled" ? { scroll: payload.scroll } : {}),
+                  },
+                };
               });
             }}
             onSendCursor={(x, y) => materialCollabRef.current?.sendCursor(x, y)}
             onSendPointer={(x, y) => materialCollabRef.current?.sendPointer(x, y)}
+            onDrawPreview={(stroke) => {
+              if (!canManage && materialSession.interactionMode !== "collaborative") return;
+              materialCollabRef.current?.sendAnnotationPreview(stroke);
+            }}
             onDrawComplete={(stroke) => {
               if (!canManage && materialSession.interactionMode !== "collaborative") return;
               materialCollabRef.current?.sendOperation({
@@ -1685,6 +1794,66 @@ export default function VideoMeetingPage() {
                 const list = Array.isArray(prev.state?.annotations) ? [...prev.state.annotations] : [];
                 if (!list.some((a) => a.id === stroke.id)) list.push(stroke);
                 return { ...prev, state: { ...(prev.state || {}), annotations: list } };
+              });
+            }}
+            onEraseAnnotation={(ann) => {
+              if (!ann?.id) return;
+              if (!canManage && materialSession.interactionMode !== "collaborative") return;
+              materialCollabRef.current?.sendOperation({
+                action: "annotation_deleted",
+                payload: { id: ann.id },
+              });
+              setMaterialSession((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  state: {
+                    ...(prev.state || {}),
+                    annotations: (prev.state?.annotations || []).filter((a) => a.id !== ann.id),
+                  },
+                };
+              });
+            }}
+            onClearOwnAnnotations={() => {
+              if (!canManage && materialSession.interactionMode !== "collaborative") return;
+              const anns = materialSession.state?.annotations || [];
+              const mine = canManage
+                ? anns.filter((a) => a.author_role === "teacher" || a.author_role === "staff" || !a.author_role)
+                : anns;
+              for (const ann of mine) {
+                materialCollabRef.current?.sendOperation({
+                  action: "annotation_deleted",
+                  payload: { id: ann.id },
+                });
+              }
+              setMaterialSession((prev) => {
+                if (!prev) return prev;
+                const kept = canManage
+                  ? (prev.state?.annotations || []).filter((a) => a.author_role === "student")
+                  : (prev.state?.annotations || []).filter((a) => a.author_role === "teacher" || a.author_role === "staff");
+                return { ...prev, state: { ...(prev.state || {}), annotations: kept } };
+              });
+            }}
+            onInteractiveOp={({ action, payload }) => {
+              if (!canManage && materialSession.interactionMode !== "collaborative") return;
+              if (remoteApplyGuardRef.current.isRemote()) return;
+              materialCollabRef.current?.sendOperation({ action, payload });
+              setMaterialSession((prev) => {
+                if (!prev) return prev;
+                const nextState = { ...(prev.state || {}) };
+                if (action === "field_changed") {
+                  nextState.fields = {
+                    ...(nextState.fields || {}),
+                    [payload.fieldId]: { value: payload.value },
+                  };
+                }
+                if (action === "answer_selected") {
+                  nextState.answers = {
+                    ...(nextState.answers || {}),
+                    [payload.fieldId || payload.questionId]: { value: payload.value },
+                  };
+                }
+                return { ...prev, state: nextState };
               });
             }}
           />
