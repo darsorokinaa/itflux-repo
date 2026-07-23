@@ -78,6 +78,7 @@ function isOgeInformaticsTask(level, subject, taskNumber, n) {
 
 /** Условие задания — тот же рендер, что на вкладке «Все задачи». */
 function ExamTaskCondition({ html, subject, level, taskNumber }) {
+  const useProgTaskSheet = level === "school" && subject === "prog";
   return (
     <MathContent
       html={html}
@@ -85,6 +86,8 @@ function ExamTaskCondition({ html, subject, level, taskNumber }) {
       plainHtml
       ogeMathChoiceEnhance={subject === "math"}
       ogeRus13Enhance={isOgeRusTask13(level, subject, taskNumber)}
+      progTaskSheet={useProgTaskSheet}
+      taskNumber={taskNumber}
     />
   );
 }
@@ -1850,6 +1853,8 @@ function ExamPage() {
       title: `Вариант ${variant.id} — ${subjectLabel} — ${levelLabel}`,
       sheetTitle: `Вариант №${variant.id}`,
       subtitle,
+      subject,
+      level,
       mode: "variant",
       examDuration: examDurationLabel(level, subject),
       options: VARIANT_PDF_OPTIONS,

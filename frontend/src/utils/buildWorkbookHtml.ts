@@ -43,6 +43,8 @@ export type WorkbookMeta = {
   title: string;
   subtitle?: string;
   subject?: string;
+  /** Уровень экзамена (oge/ege/vpr/school) — для табличного листа programming. */
+  level?: string;
   /** Заголовок на листе; по умолчанию «Рабочий лист». */
   sheetTitle?: string;
   /** workbook — тетрадь из банка; variant — PDF экзаменационного варианта */
@@ -255,10 +257,14 @@ function renderTaskFileHtml(fileUrl: string | null | undefined): string {
       </div>`;
 }
 
-function prepareTaskHtml(raw: string, subject?: string): string {
+function prepareTaskHtml(raw: string, subject?: string, level?: string): string {
   if (!raw) return "";
   try {
-    return prepareBankTaskDisplayHtml(raw, { ogeMathChoiceEnhance: subject === "math" || !subject });
+    const progTaskSheet = level === "school" && subject === "prog";
+    return prepareBankTaskDisplayHtml(raw, {
+      ogeMathChoiceEnhance: subject === "math" || !subject,
+      progTaskSheet,
+    });
   } catch {
     return raw;
   }
@@ -269,7 +275,8 @@ function renderTask(
   index: number,
   options: Required<WorkbookOptions>,
   variantMode = false,
-  subject?: string
+  subject?: string,
+  level?: string
 ): string {
   const num = displayTaskNumber(task, index);
   const idHtml = `<span class="wb-task__id"${options.showTaskIds ? "" : ' style="display:none"'}">${escapeHtml(String(task.id))}</span>`;
@@ -299,7 +306,7 @@ function renderTask(
           ${idHtml}
         </div>
         <div class="wb-task__content">
-          <div class="workbook-task__body">${prepareTaskHtml(task.text, subject)}</div>
+          <div class="workbook-task__body">${prepareTaskHtml(task.text, subject, level)}</div>
         </div>
         ${scoreHtml}
       </div>
@@ -313,7 +320,8 @@ function renderTask(
 function renderVariantTasksHtml(
   tasks: WorkbookTask[],
   options: Required<WorkbookOptions>,
-  subject?: string
+  subject?: string,
+  level?: string
 ): string {
   const chunks: string[] = [];
   let lastPart: 1 | 2 | null = null;
@@ -324,7 +332,7 @@ function renderVariantTasksHtml(
       chunks.push(`<h2 class="wb-part-title">Часть ${part}</h2>`);
       lastPart = part;
     }
-    chunks.push(renderTask(task, index, options, true, subject));
+    chunks.push(renderTask(task, index, options, true, subject, level));
   });
 
   return chunks.join("\n");
@@ -334,13 +342,14 @@ function renderTasksHtml(
   tasks: WorkbookTask[],
   options: Required<WorkbookOptions>,
   mode?: WorkbookMeta["mode"],
-  subject?: string
+  subject?: string,
+  level?: string
 ): string {
   if (mode === "variant") {
-    return renderVariantTasksHtml(tasks, options, subject);
+    return renderVariantTasksHtml(tasks, options, subject, level);
   }
   return tasks
-    .map((task, index) => renderTask(task, index, options, false, subject))
+    .map((task, index) => renderTask(task, index, options, false, subject, level))
     .join("\n");
 }
 
@@ -351,8 +360,9 @@ function buildAnswerKeySectionHtml(
   const rows = tasks
     .map((task, index) => {
       const num = displayTaskNumber(task, index);
+      // Ответы всегда обычным текстом — без табличного task sheet.
       const body = task.answer?.trim()
-        ? prepareTaskHtml(task.answer, subject)
+        ? prepareTaskHtml(task.answer, subject, undefined)
         : '<span class="wb-answer-key-empty">—</span>';
       return `<tr>
         <td class="wb-answer-key-table__num">${num}</td>
@@ -1475,7 +1485,7 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
   const subtitle = meta.subtitle?.trim() ?? "";
   const { center: headerCenter, right: headerRight } = parseWorkbookHeader(subtitle);
   const options = normalizeOptions(meta.options);
-  const tasksHtml = renderTasksHtml(tasks, options, meta.mode, meta.subject);
+  const tasksHtml = renderTasksHtml(tasks, options, meta.mode, meta.subject, meta.level);
   const sheetInfoHtml = buildSheetInfoHtml(tasks, meta.mode);
   const answerKeyHtml = buildAnswerKeySectionHtml(tasks, meta.subject);
 

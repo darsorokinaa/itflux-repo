@@ -39,6 +39,8 @@ def parse_local_event_id(event_id):
 
 
 def _material_to_json(material):
+    from .files_services import material_file_url, material_view_url
+
     return {
         "id": material.id,
         "title": material.title,
@@ -48,7 +50,9 @@ def _material_to_json(material):
         "topic": material.topic or "",
         "subtopic": material.subtopic or "",
         "externalUrl": material.external_url or "",
-        "fileUrl": material.file.url if material.file else "",
+        "fileUrl": material_file_url(material),
+        "previewUrl": material_view_url(material),
+        "cabinetFileId": str(material.cabinet_file_id) if material.cabinet_file_id else None,
     }
 
 

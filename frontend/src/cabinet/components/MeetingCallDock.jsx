@@ -9,7 +9,9 @@ import {
 import {
   createJitsiMeetSession,
   getMeetingCameraEnabled,
+  getMeetingMicEnabled,
   resolveJitsiDisplayName,
+  setMeetingMicEnabled,
 } from "../jitsiMeet";
 import {
   claimMeetingCall,
@@ -43,6 +45,8 @@ function newOwnerId() {
 /**
  * Свёрнутый звонок на вкладке с материалом (?meeting=<uuid>).
  * На странице самой встречи не монтируется — там свой Jitsi.
+ * В iframe рабочей области встречи тоже не поднимаем — иначе крадём звонок
+ * у родителя и глушим микрофон при каждом открытии доски/материала.
  * Если звонок уже живёт в другой вкладке — здесь не поднимаем второй раз.
  */
 export default function MeetingCallDock() {
@@ -50,6 +54,7 @@ export default function MeetingCallDock() {
   const navigate = useNavigate();
   const meetingUuid = readMeetingParam(location.search);
   const onMeetingPage = isMeetingPagePath(location.pathname, meetingUuid);
+  const inIframe = typeof window !== "undefined" && window.self !== window.top;
 
   const containerRef = useRef(null);
   const apiRef = useRef(null);
@@ -66,13 +71,14 @@ export default function MeetingCallDock() {
     dragging: dockDragging,
     onPointerDown: onDockPointerDown,
   } = useFloatingDrag({
-    enabled: visible || callElsewhere,
+    enabled: !inIframe && (visible || callElsewhere),
     storageKey: meetingUuid ? `meeting-call-dock:${meetingUuid}` : null,
     handleSelector: ".meeting-call-dock__bar",
   });
 
   useEffect(() => {
-    if (!meetingUuid || onMeetingPage) {
+    // Встроенный просмотр на странице звонка: док не нужен и ломает микрофон.
+    if (inIframe || !meetingUuid || onMeetingPage) {
       initRef.current = false;
       holdingCallRef.current = false;
       if (apiRef.current) {
@@ -84,7 +90,7 @@ export default function MeetingCallDock() {
         apiRef.current = null;
       }
       if (containerRef.current) containerRef.current.innerHTML = "";
-      releaseMeetingCall(meetingUuid, ownerIdRef.current);
+      if (!inIframe) releaseMeetingCall(meetingUuid, ownerIdRef.current);
       setVisible(false);
       setCallElsewhere(false);
       setError("");
@@ -218,9 +224,11 @@ export default function MeetingCallDock() {
           config.meeting?.title || config.meeting?.subject || "Онлайн-урок",
         ).trim();
         const cameraEnabled = getMeetingCameraEnabled(meetingUuid);
+        const micEnabled = getMeetingMicEnabled(meetingUuid);
         const joinConfig = {
           ...config,
           startWithVideoMuted: cameraEnabled !== true,
+          startWithAudioMuted: micEnabled !== true,
           meeting: {
             ...(config.meeting || {}),
             subject,
@@ -232,7 +240,11 @@ export default function MeetingCallDock() {
           },
         };
         resolveJitsiDisplayName(joinConfig);
-        const wrapped = await createJitsiMeetSession(joinConfig, containerRef.current, {});
+        const wrapped = await createJitsiMeetSession(joinConfig, containerRef.current, {
+          onAudioMuteStatusChanged: (payload) => {
+            setMeetingMicEnabled(meetingUuid, !payload?.muted);
+          },
+        });
         if (cancelled) {
           try {
             wrapped.dispose();
@@ -268,9 +280,9 @@ export default function MeetingCallDock() {
       dispose();
       releaseMeetingCall(meetingUuid, ownerIdRef.current);
     };
-  }, [location.pathname, location.search, meetingUuid, navigate, onMeetingPage]);
+  }, [inIframe, location.pathname, location.search, meetingUuid, navigate, onMeetingPage]);
 
-  if (!meetingUuid || onMeetingPage) return null;
+  if (inIframe || !meetingUuid || onMeetingPage) return null;
 
   if (callElsewhere && !visible) {
     return (

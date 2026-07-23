@@ -28,8 +28,10 @@ import {
   buildJitsiEmbedUrl,
   createJitsiMeetSession,
   getMeetingCameraEnabled,
+  getMeetingMicEnabled,
   resolveJitsiDisplayName,
   setMeetingCameraEnabled,
+  setMeetingMicEnabled,
 } from "../jitsiMeet";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import { openLessonSummaryTab } from "../journal/openLessonSummary";
@@ -182,21 +184,24 @@ function isEmbeddableMaterialUrl(url) {
   return false;
 }
 
-function resolveMaterialOpenUrl(row, meetingUuid, presented) {
+function resolveMaterialOpenUrl(row, meetingUuid, presented, { forEmbed = false } = {}) {
   if (row?.kind === "board" && row.boardId) {
-    return appendMeetingParam(`/cabinet/boards/${row.boardId}`, meetingUuid);
+    const boardUrl = `/cabinet/boards/${row.boardId}`;
+    // В iframe на странице звонка не ставим ?meeting= — иначе MeetingCallDock
+    // поднимает второй Jitsi и глушит микрофон.
+    return forEmbed ? boardUrl : appendMeetingParam(boardUrl, meetingUuid);
   }
   if (row?.kind === "variant") {
     const base = (presented?.kind === "variant" && presented.openUrl) || row.url;
     return appendLiveVariantParams(base, {
-      meetingUuid,
+      meetingUuid: forEmbed ? null : meetingUuid,
       homeworkId: presented?.kind === "variant" ? presented.homeworkId : null,
     });
   }
   if (!row?.url) return "";
   // API preview/download не нужно помечать meeting= — query ломает PDF viewer.
   if (String(row.url).startsWith("/api/cabinet/")) return row.url;
-  return appendMeetingParam(row.url, meetingUuid);
+  return forEmbed ? row.url : appendMeetingParam(row.url, meetingUuid);
 }
 
 export default function VideoMeetingPage() {
@@ -343,6 +348,9 @@ export default function VideoMeetingPage() {
     const cameraEnabled = cameraPrefRef.current === true
       || (cameraPrefRef.current == null && getMeetingCameraEnabled(meetingUuid) === true);
     const startWithVideoMuted = !cameraEnabled;
+    // Первый вход — с muted mic; если пользователь уже включал микрофон в этом звонке — не глушим снова.
+    const micWasEnabled = getMeetingMicEnabled(meetingUuid) === true;
+    const startWithAudioMuted = !micWasEnabled;
     jitsiInitRef.current = true;
     setError("");
     setMediaWarning("");
@@ -391,6 +399,7 @@ export default function VideoMeetingPage() {
       const joinConfig = {
         ...config,
         startWithVideoMuted,
+        startWithAudioMuted,
         meeting: {
           ...(config.meeting || {}),
           subject,
@@ -437,6 +446,9 @@ export default function VideoMeetingPage() {
         },
         onBecameModerator: showModeratorToast,
         onMediaWarning: (msg) => setMediaWarning(msg || ""),
+        onAudioMuteStatusChanged: (payload) => {
+          setMeetingMicEnabled(meetingUuid, !payload?.muted);
+        },
       });
       apiRef.current = wrapped;
       claimMeetingCall(meetingUuid, callOwnerIdRef.current);
@@ -643,7 +655,8 @@ export default function VideoMeetingPage() {
       const key = presentedOpenKey(next);
       if (openedPresentKeyRef.current === key) return;
       openedPresentKeyRef.current = key;
-      const url = appendMeetingParam(next.openUrl, meetingUuid);
+      // Без ?meeting= в iframe: звонок остаётся в родительской вкладке.
+      const url = String(next.openUrl || "").trim();
       setWorkspaceMaterial({
         title: next.title || "Материал",
         url,
@@ -683,7 +696,8 @@ export default function VideoMeetingPage() {
 
       if (!baselineReady) {
         baselineReady = true;
-        openedPresentKeyRef.current = key;
+        // Ученик зашёл, когда материал уже показан — сразу открываем workspace.
+        openPresentedInWorkspace(next);
         return;
       }
 
@@ -1068,7 +1082,8 @@ export default function VideoMeetingPage() {
   const applyMaterialSession = useCallback((session) => {
     setMaterialSession(session || null);
     if (!session?.material) {
-      setRemotePointer(null);
+      setRemoteCursors([]);
+      setRemotePreviews({});
       return;
     }
     setPresented(null);
@@ -1299,24 +1314,17 @@ export default function VideoMeetingPage() {
         kind: row.kind,
         resourceKind,
         title: row.label || "",
-        url: resolveMaterialOpenUrl(row, meetingUuid, presented) || row.url || "",
+        url: resolveMaterialOpenUrl(row, meetingUuid, presented, { forEmbed: true }) || row.url || "",
         text: row.text || "",
         materialId: row.materialId || null,
         cabinetFileId: row.cabinetFileId || null,
         interactiveId: row.interactiveId || null,
         interactiveType: row.interactiveType || "",
       };
-      // REST гарантирует сессию и ответ ученику; WS дублирует событие, если уже открыт.
+      // REST уже создаёт сессию и рассылает material.opened — повторный WS open
+      // деактивирует сессию и ломает персонализированный openUrl у ученика.
       const data = await openMeetingMaterialSession(meetingUuid, payload);
       applyMaterialSession(data?.materialSession || null);
-      const collab = materialCollabRef.current;
-      if (collab?.isOpen() && data?.materialSession) {
-        try {
-          collab.openMaterial(payload);
-        } catch {
-          /* ignore — сессия уже создана через REST */
-        }
-      }
       showMaterialsToast("Материал показан ученику");
     } catch (err) {
       setError(err?.message || "Не удалось открыть материал для ученика");
@@ -1375,11 +1383,11 @@ export default function VideoMeetingPage() {
       });
       return;
     }
-    const url = resolveMaterialOpenUrl(row, meetingUuid, presented);
+    const url = resolveMaterialOpenUrl(row, meetingUuid, presented, { forEmbed: true });
     if (!url && row?.kind === "board" && boardInfo?.board?.id) {
       openWorkspaceMaterial({
         title: boardInfo.board.title || "Доска",
-        url: appendMeetingParam(`/cabinet/boards/${boardInfo.board.id}`, meetingUuid),
+        url: `/cabinet/boards/${boardInfo.board.id}`,
         kind: "board",
         forceEmbed: true,
       });
@@ -1395,7 +1403,7 @@ export default function VideoMeetingPage() {
   }, [boardInfo?.board, meetingUuid, openSyncedMaterialForRow, openWorkspaceMaterial, pageState, presented]);
 
   const onOpenInNewTab = useCallback((row) => {
-    const url = resolveMaterialOpenUrl(row, meetingUuid, presented);
+    const url = resolveMaterialOpenUrl(row, meetingUuid, presented, { forEmbed: false });
     if (url) window.open(url, "_blank", "noopener,noreferrer");
   }, [meetingUuid, presented]);
 
@@ -1403,11 +1411,11 @@ export default function VideoMeetingPage() {
     if (!board?.id) return;
     openWorkspaceMaterial({
       title: board.title || "Доска",
-      url: appendMeetingParam(`/cabinet/boards/${board.id}`, meetingUuid),
+      url: `/cabinet/boards/${board.id}`,
       kind: "board",
       forceEmbed: true,
     });
-  }, [meetingUuid, openWorkspaceMaterial]);
+  }, [openWorkspaceMaterial]);
 
   const onShowBoard = useCallback(async (board) => {
     if (!meetingUuid || !board?.id) return;
@@ -1557,8 +1565,10 @@ export default function VideoMeetingPage() {
   const liveVariantAnswers = Boolean(canManage && presented?.kind === "variant");
   // Материал открыт — звонок сворачивается в плавающее окно, а не пропадает под оверлеем.
   const compactCall = Boolean(workspaceOpen && showJitsi);
-  // Панель материалов/ответов можно держать рядом с вариантом.
-  const showAside = showJitsi && asideOpen && (!workspaceOpen || liveVariantAnswers);
+  // Панель материалов рядом со звонком; у учителя — и при открытом workspace.
+  const showAside = showJitsi && asideOpen && (
+    !workspaceOpen || liveVariantAnswers || canManage
+  );
 
   const {
     nodeRef: compactCallRef,
@@ -1869,7 +1879,7 @@ export default function VideoMeetingPage() {
                   title={workspaceMaterial.title}
                   src={workspaceMaterial.url}
                   className="video-lesson-workspace__frame"
-                  allow="clipboard-read; clipboard-write; fullscreen"
+                  allow="camera; microphone; display-capture; autoplay; clipboard-read; clipboard-write; fullscreen"
                 />
               ) : (
                 <div className="vl-empty">

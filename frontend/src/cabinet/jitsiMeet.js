@@ -75,19 +75,48 @@ export function setMeetingCameraEnabled(meetingUuid, enabled) {
   }
 }
 
+/** sessionStorage: был ли микрофон включён в этом звонке (чтобы не глушить после remount). */
+export function getMeetingMicEnabled(meetingUuid) {
+  if (!meetingUuid || typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(`itflux.meeting.mic.${meetingUuid}`);
+    if (raw === "1") return true;
+    if (raw === "0") return false;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+export function setMeetingMicEnabled(meetingUuid, enabled) {
+  if (!meetingUuid || typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(
+      `itflux.meeting.mic.${meetingUuid}`,
+      enabled ? "1" : "0",
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Минимальный configOverwrite для стабильного входа.
  * Без lobby/prejoin/deeplink — чтобы не зависеть от кнопки предэкрана.
  * subject — человекочитаемое название урока (не UUID комнаты).
  */
-export function buildJitsiConfigOverwrite({ subject, startWithVideoMuted = false } = {}) {
+export function buildJitsiConfigOverwrite({
+  subject,
+  startWithVideoMuted = false,
+  startWithAudioMuted = true,
+} = {}) {
   const title = String(subject || "").trim() || "Урок";
   return {
     prejoinConfig: { enabled: false },
     prejoinPageEnabled: false,
     requireDisplayName: false,
     disableDeepLinking: true,
-    startWithAudioMuted: true,
+    startWithAudioMuted: Boolean(startWithAudioMuted),
     startWithVideoMuted: Boolean(startWithVideoMuted),
     disableLobbyMode: true,
     lobby: { enabled: false },
@@ -214,6 +243,7 @@ export function buildJitsiEmbedUrl(config) {
   const displayName = resolveJitsiDisplayName(config);
   const subject = resolveJitsiSubject(config);
   const startWithVideoMuted = Boolean(config.startWithVideoMuted);
+  const startWithAudioMuted = config.startWithAudioMuted !== false;
   const params = new URLSearchParams();
   if (config.jwt) params.set("jwt", config.jwt);
 
@@ -226,7 +256,7 @@ export function buildJitsiEmbedUrl(config) {
     "config.disableLobbyMode=true",
     "config.lobby.enabled=false",
     "config.autoKnockLobby=false",
-    "config.startWithAudioMuted=true",
+    `config.startWithAudioMuted=${startWithAudioMuted ? "true" : "false"}`,
     `config.startWithVideoMuted=${startWithVideoMuted ? "true" : "false"}`,
     "config.hideLoginButton=true",
     "config.hideConferenceSubject=false",
@@ -248,6 +278,7 @@ function wireParticipantListeners(api, {
   onJoined,
   onMediaWarning,
   onBecameModerator,
+  onAudioMuteStatusChanged,
   subject,
 }) {
   const bump = () => {
@@ -308,6 +339,11 @@ function wireParticipantListeners(api, {
       onBecameModerator?.();
     }
   });
+  if (typeof onAudioMuteStatusChanged === "function") {
+    api.addListener("audioMuteStatusChanged", (event) => {
+      onAudioMuteStatusChanged(event);
+    });
+  }
 
   registerJoinDiagnostics(api, { onMediaWarning });
 }
@@ -413,13 +449,18 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
 
   const subject = resolveJitsiSubject(config);
   const startWithVideoMuted = Boolean(config.startWithVideoMuted);
+  const startWithAudioMuted = config.startWithAudioMuted !== false;
   const options = {
     roomName,
     parentNode: container,
     width: "100%",
     height: "100%",
     lang: "ru",
-    configOverwrite: buildJitsiConfigOverwrite({ subject, startWithVideoMuted }),
+    configOverwrite: buildJitsiConfigOverwrite({
+      subject,
+      startWithVideoMuted,
+      startWithAudioMuted,
+    }),
     interfaceConfigOverwrite: buildJitsiInterfaceConfigOverwrite(),
     userInfo: {
       displayName,
@@ -534,6 +575,7 @@ export async function createJitsiMeetSession(config, container, hooks = {}) {
     onJoined,
     onMediaWarning,
     onBecameModerator,
+    onAudioMuteStatusChanged,
     preferIframe = false,
   } = hooks;
 
@@ -560,6 +602,7 @@ export async function createJitsiMeetSession(config, container, hooks = {}) {
           onJoined,
           onMediaWarning,
           onBecameModerator,
+          onAudioMuteStatusChanged,
         });
       } catch (err) {
         if (err?.code !== "jitsi_join_timeout" && err?.message !== "Не удалось загрузить Jitsi Meet") {

@@ -581,7 +581,7 @@ export default function SyncedMaterialWorkspace({
               title={material?.title || "Материал"}
               src={frameSrc}
               className="video-lesson-workspace__frame"
-              allow="clipboard-read; clipboard-write; fullscreen"
+              allow="camera; microphone; display-capture; autoplay; clipboard-read; clipboard-write; fullscreen"
             />
           ) : (
             <div className="vl-empty">

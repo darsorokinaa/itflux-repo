@@ -400,7 +400,8 @@ export default function AllTasksPage() {
   const levelTitle = levelOptions.find((row) => row.id === level)?.label
     || levelDef?.title
     || level.toUpperCase();
-  const useProgTaskSheet = subject === "prog" || level === "school";
+  /** Таблица «Раздел / Содержание» — только школьная программа → программирование. */
+  const useProgTaskSheet = level === "school" && subject === "prog";
 
   const subtopicsForTask = useMemo(() => {
     if (!filterOptions) return [];
@@ -671,6 +672,7 @@ export default function AllTasksPage() {
       title: "Рабочая тетрадь",
       subtitle: subtitleParts.join(" · "),
       subject: subject,
+      level: level,
     };
   }, [
     filterOptions?.task_numbers,

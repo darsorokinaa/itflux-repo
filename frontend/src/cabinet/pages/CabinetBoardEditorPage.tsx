@@ -210,6 +210,7 @@ export default function CabinetBoardEditorPage() {
   const applyingRemoteRef = useRef(false);
   const collabRef = useRef<ReturnType<typeof createBoardCollabSession> | null>(null);
   const remoteCursorsRef = useRef(new Map<string, RemoteCursor>());
+  const boardNamesRef = useRef({ owner: "", student: "" });
   const uploadingFileIdsRef = useRef(new Set<string>());
   const lastActiveToolRef = useRef("");
   const imageUploadStatusRef = useRef<"idle" | "uploading" | "error">("idle");
@@ -218,11 +219,18 @@ export default function CabinetBoardEditorPage() {
   bgColorRef.current = bgColor;
   boardThemeRef.current = boardTheme;
   burgerOpenRef.current = burgerOpen;
+  if (board) {
+    boardNamesRef.current = {
+      owner: board.owner_name || "",
+      student: board.student_name || "",
+    };
+  }
 
   const canEdit = Boolean(board?.can_edit);
   const canManage = Boolean(board?.can_manage);
   const viewModeEnabled = !canEdit;
   const collaborative = Boolean(board?.collaborative_edit);
+  const boardReady = Boolean(board);
 
   const showNotice = useCallback((text: string) => {
     setNotice(text);
@@ -532,12 +540,13 @@ export default function CabinetBoardEditorPage() {
   );
 
   // Совместное редактирование с привязанным учеником (WebSocket live + REST persist).
+  // Не зависеть от объекта board целиком — иначе каждое обновление version рвёт WS.
   useEffect(() => {
-    if (!boardId || !board || loading || !excalidrawReady) return undefined;
+    if (!boardId || !boardReady || loading || !excalidrawReady) return undefined;
     if (!collaborative && !canEdit) return undefined;
 
     const displayName =
-      (canManage ? board.owner_name : board.student_name)
+      (canManage ? boardNamesRef.current.owner : boardNamesRef.current.student)
       || (canManage ? "Учитель" : "Ученик");
     const role = canManage ? "teacher" : "student";
 
@@ -637,7 +646,7 @@ export default function CabinetBoardEditorPage() {
       setCollabPeers([]);
       setCollabStatus("off");
     };
-  }, [board, boardId, canEdit, canManage, collaborative, excalidrawReady, loading]);
+      }, [boardId, boardReady, canEdit, canManage, collaborative, excalidrawReady, loading]);
 
   const handlePointerSceneMove = useCallback((x: number, y: number, tool: string) => {
     if (!collaborative && !canEdit) return;
