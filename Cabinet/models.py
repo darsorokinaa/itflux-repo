@@ -2793,7 +2793,7 @@ class InteractiveBoardAsset(models.Model):
 
 
 class TeacherApplication(models.Model):
-    """Заявка со страницы «Для учителей»."""
+    """Заявка со страницы «Для учителей» (legacy-форма авторского участия)."""
 
     class Status(models.TextChoices):
         NEW = "new", "Новая"
@@ -2826,6 +2826,69 @@ class TeacherApplication(models.Model):
 
     def __str__(self):
         return f"{self.name} — {self.contact}"
+
+
+class TeacherCommunityFeedback(models.Model):
+    """Обращение со страницы сообщества учителей."""
+
+    class FeedbackType(models.TextChoices):
+        REVIEW = "review", "Отзыв о платформе"
+        FEATURE = "feature", "Предложение новой функции"
+        BUG = "bug", "Сообщение об ошибке"
+        TESTING = "testing", "Участие в тестировании"
+        DEVELOPMENT = "development", "Хочу помочь с разработкой"
+        METHODOLOGY = "methodology", "Методическое сотрудничество"
+        OTHER = "other", "Другое"
+
+    class Status(models.TextChoices):
+        NEW = "new", "Новое"
+        REVIEWED = "reviewed", "Просмотрено"
+        PLANNED = "planned", "В планах"
+        COMPLETED = "completed", "Выполнено"
+        DECLINED = "declined", "Отклонено"
+
+    feedback_type = models.CharField(
+        "Тип обращения",
+        max_length=32,
+        choices=FeedbackType.choices,
+    )
+    name = models.CharField("Имя", max_length=200, blank=True)
+    contact = models.CharField("Контакт", max_length=255, blank=True)
+    subject_area = models.CharField("Предмет / направление", max_length=200, blank=True)
+    message = models.TextField("Сообщение")
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="teacher_community_feedback",
+        verbose_name="Пользователь",
+    )
+    consent_given = models.BooleanField("Согласие на обработку данных", default=False)
+    status = models.CharField(
+        "Статус",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.NEW,
+    )
+    ip_address = models.GenericIPAddressField("IP", null=True, blank=True)
+    user_agent = models.CharField("User-Agent", max_length=512, blank=True)
+    created_at = models.DateTimeField("Создано", auto_now_add=True)
+    updated_at = models.DateTimeField("Обновлено", auto_now=True)
+
+    class Meta:
+        verbose_name = "Обращение сообщества учителей"
+        verbose_name_plural = "Обращения сообщества учителей"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["feedback_type", "status"]),
+            models.Index(fields=["-created_at"]),
+        ]
+
+    def __str__(self):
+        label = self.get_feedback_type_display()
+        who = self.name or self.contact or "аноним"
+        return f"{label} — {who}"
 
 
 # ── Учёт оплат репетитора (см. billing_models.py; не SaaS Payment) ────────────

@@ -6,7 +6,7 @@ from django.views.static import serve
 
 from . import views
 from Cabinet import homework_api
-from Cabinet.views import api_teacher_application
+from Cabinet.views import api_teacher_application, api_teacher_community_feedback
 
 
 def media_serve(request, path):
@@ -30,6 +30,11 @@ urlpatterns = [
 
     path("api/csrf/", views.api_csrf, name="api_csrf"),
     path("api/teacher-applications/", api_teacher_application, name="api_teacher_applications"),
+    path(
+        "api/teacher-community-feedback/",
+        api_teacher_community_feedback,
+        name="api_teacher_community_feedback",
+    ),
     path("api/catalog/", views.api_catalog, name="api_catalog"),
     path("api/generator/overview/", views.api_generator_overview, name="api_generator_overview"),
     path("api/platform-stats/", views.api_platform_stats, name="api_platform_stats"),

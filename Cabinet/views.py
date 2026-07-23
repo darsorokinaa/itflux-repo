@@ -12,7 +12,7 @@ from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
-from .models import Profile, ScheduleEvent, TeacherApplication
+from .models import Profile, ScheduleEvent, TeacherApplication, TeacherCommunityFeedback
 from .invitations import invite_accept_api_payload, try_accept_invite_token
 from .plan_catalog import can_publish_catalog_lesson_plan
 from .rate_limit import client_ip, rate_limit_check, rate_limit_json_response
@@ -975,5 +975,90 @@ def api_teacher_application(request):
         "ok": True,
         "id": application.id,
         "message": "Заявка отправлена. Мы свяжемся с вами в ближайшее время.",
+    })
+
+
+FEEDBACK_TYPE_ALIASES = {
+    "review": TeacherCommunityFeedback.FeedbackType.REVIEW,
+    "feature": TeacherCommunityFeedback.FeedbackType.FEATURE,
+    "bug": TeacherCommunityFeedback.FeedbackType.BUG,
+    "testing": TeacherCommunityFeedback.FeedbackType.TESTING,
+    "development": TeacherCommunityFeedback.FeedbackType.DEVELOPMENT,
+    "methodology": TeacherCommunityFeedback.FeedbackType.METHODOLOGY,
+    "other": TeacherCommunityFeedback.FeedbackType.OTHER,
+    # human-readable aliases from the form
+    "отзыв о платформе": TeacherCommunityFeedback.FeedbackType.REVIEW,
+    "предложение новой функции": TeacherCommunityFeedback.FeedbackType.FEATURE,
+    "сообщение об ошибке": TeacherCommunityFeedback.FeedbackType.BUG,
+    "участие в тестировании": TeacherCommunityFeedback.FeedbackType.TESTING,
+    "хочу помочь с разработкой": TeacherCommunityFeedback.FeedbackType.DEVELOPMENT,
+    "методическое сотрудничество": TeacherCommunityFeedback.FeedbackType.METHODOLOGY,
+    "другое": TeacherCommunityFeedback.FeedbackType.OTHER,
+}
+
+
+@require_http_methods(["POST"])
+def api_teacher_community_feedback(request):
+    """Публичная форма обратной связи сообщества учителей."""
+    if not rate_limit_check(request, "teacher_community_feedback", 10, 3600):
+        return rate_limit_json_response("teacher_community_feedback")
+
+    try:
+        data = json.loads(request.body.decode("utf-8") or "{}")
+    except (TypeError, ValueError, UnicodeDecodeError):
+        return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
+
+    if not isinstance(data, dict):
+        return JsonResponse({"ok": False, "error": "Некорректные данные"}, status=400)
+
+    # Honeypot: bots fill hidden fields; humans leave them empty.
+    if str(data.get("website") or data.get("hp") or "").strip():
+        return JsonResponse({"ok": True, "id": 0, "message": "Спасибо! Ваше сообщение отправлено."})
+
+    raw_type = str(data.get("feedbackType") or data.get("feedback_type") or "").strip()
+    feedback_type = FEEDBACK_TYPE_ALIASES.get(raw_type.lower())
+    if not feedback_type:
+        return JsonResponse({"ok": False, "error": "Выберите тип обращения"}, status=400)
+
+    message = str(data.get("message") or "").strip()
+    if not message:
+        return JsonResponse({"ok": False, "error": "Напишите сообщение"}, status=400)
+    if len(message) > 5000:
+        return JsonResponse({"ok": False, "error": "Сообщение слишком длинное"}, status=400)
+
+    name = str(data.get("name") or "").strip()[:200]
+    contact = str(data.get("contact") or "").strip()[:255]
+    subject_area = str(
+        data.get("subjectArea") or data.get("subject_area") or ""
+    ).strip()[:200]
+    consent = bool(data.get("consent") or data.get("consent_given"))
+
+    if contact and not consent:
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "Чтобы оставить контакт, отметьте согласие на обработку данных",
+            },
+            status=400,
+        )
+
+    user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
+    ua = (request.META.get("HTTP_USER_AGENT") or "")[:512]
+    feedback = TeacherCommunityFeedback.objects.create(
+        feedback_type=feedback_type,
+        name=name,
+        contact=contact,
+        subject_area=subject_area,
+        message=message,
+        user=user,
+        consent_given=consent,
+        ip_address=client_ip(request) or None,
+        user_agent=ua,
+    )
+
+    return JsonResponse({
+        "ok": True,
+        "id": feedback.id,
+        "message": "Спасибо! Ваше сообщение отправлено. Именно такие отзывы помогают развивать платформу.",
     })
 

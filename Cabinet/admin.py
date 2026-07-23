@@ -56,6 +56,7 @@ from .models import (
     StudentSubject,
     TariffPlan,
     TeacherApplication,
+    TeacherCommunityFeedback,
     TeacherSavedMaterial,
     TeacherSubscription,
     TelegramConnectToken,
@@ -77,6 +78,25 @@ class TeacherApplicationAdmin(admin.ModelAdmin):
     search_fields = ("name", "contact", "teaches", "comment", "materials_url")
     readonly_fields = ("created_at", "updated_at", "ip_address", "user_agent")
     ordering = ("-created_at",)
+
+
+@admin.register(TeacherCommunityFeedback)
+class TeacherCommunityFeedbackAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "feedback_type",
+        "name",
+        "contact",
+        "subject_area",
+        "status",
+        "user",
+        "created_at",
+    )
+    list_filter = ("feedback_type", "status", "created_at", "consent_given")
+    search_fields = ("name", "contact", "subject_area", "message")
+    readonly_fields = ("created_at", "updated_at", "ip_address", "user_agent", "user")
+    ordering = ("-created_at",)
+    date_hierarchy = "created_at"
 
 
 @admin.register(Student)

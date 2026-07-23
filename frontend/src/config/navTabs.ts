@@ -13,7 +13,7 @@ export const NAV_TABS: ReadonlyArray<NavTabDef> = [
   { key: "tasks", label: "Все задачи", to: "/tasks" },
   { key: "generator", label: "Генератор вариантов", to: "/generator" },
   { key: "lessons", label: "Готовые уроки", to: "/lessons" },
-  { key: "teachers", label: "Для учителей", to: "/teachers" },
+  { key: "teachers", label: "Сообщество учителей", to: "/teachers" },
 ];
 
 /** Какая вкладка подсвечена на текущем пути. */
