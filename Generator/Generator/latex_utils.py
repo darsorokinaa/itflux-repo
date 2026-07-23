@@ -146,13 +146,15 @@ _RE_MATH_TEX_BODY = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 # Naked LaTeX in text (no $, no span): e.g. "уравнения 5^{x-4}=\frac{1}{125}."
-# Negative lookbehind: skip if inside our output (&#92;( = \( in entities)
+# Negative lookbehind: skip if inside our output (&#92;( = \( in entities).
+# Не захватываем `$…$` (их обрабатывает _RE_INLINE_DOLLAR): иначе «голый» матч
+# начинается с `$` и обрывается на `)` у `\right)`, ломая формулу.
 _RE_NAKED_INLINE = re.compile(
-    r'(?<!&#92;\()([^\s<>]*(?:\\frac\{[^}]*\}\{[^}]*\}|\^\{[^}]*\}|_\{[^}]*\}|\\sqrt(?:\[[^\]]*\])?\{[^}]*\})[^\s<>]*?)(?=[.,;:\s<>)]|$|&#41;)',
+    r'(?<!&#92;\()(?<!\$)([^\s<>$]*(?:\\(?:d)?frac\{[^}]*\}\{[^}]*\}|\^\{[^}]*\}|_\{[^}]*\}|\\sqrt(?:\[[^\]]*\])?\{[^}]*\})[^\s<>$]*?)(?=[.,;:\s<>)]|$|&#41;)',
 )
 # LaTeX с \infty, \cup, \cap и др. (интервалы, множества): (−∞;4)∪(4;5]
 _RE_NAKED_LATEX_SYMBOLS = re.compile(
-    r'(?<!&#92;\()([^\s<>]*(?:\\infty|\\cup|\\cap|\\leq|\\geq|\\wedge|\\vee|\\neg|\\exists|\\forall|\\in|\\notin)[^\s<>]*)(?=[.,;:\s<>)]|$|&#41;)',
+    r'(?<!&#92;\()(?<!\$)([^\s<>$]*(?:\\infty|\\cup|\\cap|\\leq|\\geq|\\wedge|\\vee|\\neg|\\exists|\\forall|\\in|\\notin)[^\s<>$]*)(?=[.,;:\s<>)]|$|&#41;)',
 )
 
 
@@ -842,8 +844,15 @@ def process_latex(
         display = _is_display_math(latex, m.group(0))
         return _render_math_block(latex, display, for_pdf=for_pdf, for_browser=for_browser)
 
-    # 6. Inline $...$
-    html_text = _RE_INLINE_DOLLAR.sub(replace_inline_dollar, html_text)
+    # 6. Inline $...$ — сначала уводим в плейсхолдеры, чтобы шаг 6b (naked)
+    # не рвал формулу на `\right)` / `\sqrt`. Рендер — после naked.
+    dollar_stash: list[str] = []
+
+    def stash_dollar_math(m: re.Match[str]) -> str:
+        dollar_stash.append(m.group(0))
+        return f"\x00DOLLARMATH{len(dollar_stash) - 1}\x00"
+
+    html_text = _RE_INLINE_DOLLAR.sub(stash_dollar_math, html_text)
     # 6a. Голые блочные LaTeX-окружения без $...$, \(...\), \[...\]
     # Например: \begin{array}...\end{array} в тексте задачи.
     html_text = _RE_NAKED_ENV_BLOCK.sub(
@@ -853,7 +862,7 @@ def process_latex(
     # 6b. Naked LaTeX in text (no delimiters) — e.g. "5^{x-4}=\frac{1}{125}"
     def replace_naked(m):
         latex = _normalize_latex(m.group(1))
-        if not latex or len(latex) < 3:
+        if not latex or len(latex) < 3 or "$" in latex:
             return m.group(0)
         return _render_math_block(latex, False, for_pdf=for_pdf, for_browser=for_browser)
 
@@ -861,11 +870,27 @@ def process_latex(
 
     def replace_naked_symbols(m):
         latex = _normalize_latex(m.group(1))
-        if not latex or len(latex) < 3:
+        if not latex or len(latex) < 3 or "$" in latex:
             return m.group(0)
         return _render_math_block(latex, False, for_pdf=for_pdf, for_browser=for_browser)
 
     html_text = _RE_NAKED_LATEX_SYMBOLS.sub(replace_naked_symbols, html_text)
+
+    for i, chunk in enumerate(dollar_stash):
+        # replace_inline_dollar ожидает match с group(1) = содержимое без $
+        class _DollarMatch:
+            def __init__(self, full: str):
+                self._full = full
+
+            def group(self, n=0):
+                if n == 0:
+                    return self._full
+                return self._full[1:-1] if len(self._full) >= 2 else self._full
+
+        html_text = html_text.replace(
+            f"\x00DOLLARMATH{i}\x00",
+            replace_inline_dollar(_DollarMatch(chunk)),
+        )
     # 7. Текстовые LaTeX-команды в оставшемся plain HTML (после math, чтобы не трогать data-latex)
     html_text = _RE_TEXTTT.sub(r'<code>\1</code>', html_text)
     html_text = _RE_TEXTBF.sub(r'<strong>\1</strong>', html_text)

@@ -221,6 +221,14 @@ class Task(models.Model):
         help_text="Если включено, на странице варианта для этого задания показывается виджет таблицы истинности; ответ по-прежнему вводится строкой из 0 и 1 без подстановки правильных значений.",
     )
 
+    tag_options = models.ManyToManyField(
+        "TagOption",
+        blank=True,
+        related_name="tasks",
+        verbose_name="Теги",
+        help_text="Теги задания из справочника (сложность и др.).",
+    )
+
     objects = models.Manager()
     active_objects = ActiveTaskManager()
 

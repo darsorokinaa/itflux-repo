@@ -137,10 +137,10 @@ export default function BoardLessonBlock({
   }
 
   const btnPrimary = embedded
-    ? "video-lesson-btn video-lesson-btn--secondary"
+    ? "video-lesson-btn video-lesson-btn--primary"
     : "cb-lesson-card__meeting-btn cb-lesson-card__meeting-btn--primary";
   const btnSecondary = embedded
-    ? "vl-mat-item__toggle"
+    ? "video-lesson-btn video-lesson-btn--primary"
     : "cb-lesson-card__meeting-btn";
 
   const body = (

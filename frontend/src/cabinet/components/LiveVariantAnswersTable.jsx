@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-function stripAnswerHtml(html) {
+export function stripAnswerHtml(html) {
   return String(html || "")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
@@ -8,7 +8,16 @@ function stripAnswerHtml(html) {
     .trim();
 }
 
-function liveStudentAnswer(result, task, tasks) {
+export function numberCollisionCount(tasks, numKey) {
+  if (!numKey || !Array.isArray(tasks)) return 0;
+  return tasks.reduce((n, t) => (String(t?.number) === numKey ? n + 1 : n), 0);
+}
+
+/**
+ * Ответ ученика по задаче. Сначала по task id — иначе при одинаковых
+ * bank-номерах (тетрадь из одного типа заданий) один ответ попадает во все строки.
+ */
+export function liveStudentAnswer(result, task, tasks) {
   const byNum = result?.by_number || result?.byNumber || {};
   const byId = result?.by_task_id || result?.byTaskId || {};
   const numKey = task.number != null ? String(task.number) : "";
@@ -17,10 +26,15 @@ function liveStudentAnswer(result, task, tasks) {
   if (idKey && byId[idKey] != null && String(byId[idKey]).trim() !== "") {
     return String(byId[idKey]);
   }
-  if (numKey && byNum[numKey] != null && String(byNum[numKey]).trim() !== "") {
-    return String(byNum[numKey]);
+
+  // by_number безопасен только если номер уникален среди задач варианта.
+  if (numKey && numberCollisionCount(tasks, numKey) <= 1) {
+    if (byNum[numKey] != null && String(byNum[numKey]).trim() !== "") {
+      return String(byNum[numKey]);
+    }
   }
-  if (idKey && numKey && idKey !== numKey) {
+
+  if (idKey && numKey && idKey !== numKey && numberCollisionCount(tasks, numKey) <= 1) {
     const knownIds = Array.isArray(tasks) ? new Set(tasks.map((t) => String(t.id))) : null;
     if (!knownIds || !knownIds.has(numKey)) {
       const legacy = byId[numKey];
@@ -30,16 +44,17 @@ function liveStudentAnswer(result, task, tasks) {
   return "";
 }
 
-function liveStudentChecked(result, task) {
+export function liveStudentChecked(result, task, tasks) {
   const checked = result?.checked || {};
   if (task.id == null && task.number == null) return null;
   if (task.id != null) {
     if (checked[task.id] !== undefined) return checked[task.id];
     if (checked[String(task.id)] !== undefined) return checked[String(task.id)];
   }
-  if (task.number != null) {
-    const n = String(task.number);
-    if (checked[n] !== undefined) return checked[n];
+  const numKey = task.number != null ? String(task.number) : "";
+  // Нельзя брать checked по номеру, если в варианте несколько задач с одним №.
+  if (numKey && numberCollisionCount(tasks, numKey) <= 1) {
+    if (checked[numKey] !== undefined) return checked[numKey];
   }
   return null;
 }
@@ -49,30 +64,30 @@ function buildTasks(answers) {
   const rows = Array.isArray(answers?.tasks) ? answers.tasks : [];
   if (rows.length) {
     return [...rows]
-      .map((t) => ({
+      .map((t, index) => ({
         id: t.id,
-        number: t.number,
+        number: t.number != null ? t.number : index + 1,
         answer: t.answer || "",
       }))
       .sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0));
+  }
+  const byIdKeys = new Set();
+  students.forEach((row) => {
+    const byId = row.result?.by_task_id || row.result?.byTaskId || {};
+    Object.keys(byId).forEach((id) => {
+      if (String(byId[id] ?? "").trim()) byIdKeys.add(id);
+    });
+  });
+  if (byIdKeys.size) {
+    return [...byIdKeys].map((id, index) => ({ id, number: index + 1, answer: "" }));
   }
   const nums = new Set();
   students.forEach((row) => {
     Object.keys(row.result?.by_number || row.result?.byNumber || {}).forEach((n) => nums.add(n));
   });
-  if (nums.size) {
-    return [...nums]
-      .sort((a, b) => Number(a) - Number(b))
-      .map((n) => ({ id: null, number: n, answer: "" }));
-  }
-  const ids = new Set();
-  students.forEach((row) => {
-    const byId = row.result?.by_task_id || row.result?.byTaskId || {};
-    Object.keys(byId).forEach((id) => {
-      if (String(byId[id] ?? "").trim()) ids.add(id);
-    });
-  });
-  return [...ids].map((id) => ({ id, number: id, answer: "" }));
+  return [...nums]
+    .sort((a, b) => Number(a) - Number(b))
+    .map((n) => ({ id: null, number: n, answer: "" }));
 }
 
 /**
@@ -122,7 +137,7 @@ export default function LiveVariantAnswersTable({ answers, loading = false, comp
                   <tbody>
                     {tasks.map((task) => {
                       const value = liveStudentAnswer(result, task, tasks);
-                      const ok = liveStudentChecked(result, task);
+                      const ok = liveStudentChecked(result, task, tasks);
                       const correct = stripAnswerHtml(task.answer);
                       return (
                         <tr key={`${row.studentId}-${task.id || task.number}`}>

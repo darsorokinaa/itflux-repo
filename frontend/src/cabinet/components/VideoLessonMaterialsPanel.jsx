@@ -87,7 +87,7 @@ function MaterialRow({
         {(row.url || row.kind === "board" || row.text) ? (
           <button
             type="button"
-            className="video-lesson-btn video-lesson-btn--secondary"
+            className="video-lesson-btn video-lesson-btn--primary"
             onClick={() => onOpen(row)}
           >
             Открыть
@@ -96,7 +96,7 @@ function MaterialRow({
         {canManage && presentable ? (
           <button
             type="button"
-            className="vl-mat-item__toggle"
+            className="video-lesson-btn video-lesson-btn--primary"
             disabled={presentBusy}
             aria-pressed={showing}
             title={showing ? "Скрыть от ученика" : "Показать ученику"}

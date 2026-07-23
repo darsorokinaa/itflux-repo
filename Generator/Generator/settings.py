@@ -94,6 +94,15 @@ LESSON_PLAN_CATALOG_PUBLISHER_EMAILS = tuple(
     ).split(",")
     if email.strip()
 )
+# Usernames that can edit task tags on «Все задачи».
+TASK_TAG_EDITOR_USERNAMES = tuple(
+    name.strip().lower()
+    for name in os.environ.get(
+        "TASK_TAG_EDITOR_USERNAMES",
+        "darsorokinaa,admin_dasha",
+    ).split(",")
+    if name.strip()
+)
 # Полный URL страницы после входа (дашборд). Если пусто — кнопка «Личный кабинет» ведёт на LK_PUBLIC_URL.
 # Пример: http://lk.example.com/dashboard или http://lk.example.com/app/
 LK_DASHBOARD_URL = os.environ.get("LK_DASHBOARD_URL", "").strip().rstrip("/")

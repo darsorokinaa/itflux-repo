@@ -184,13 +184,14 @@
 }
 
 .video-lesson-btn--secondary {
-  border-color: rgba(15, 23, 42, 0.12);
-  background: #fff;
-  color: var(--vl-text);
+  border-color: transparent;
+  background: var(--vl-blue);
+  color: #fff;
 }
 
 .video-lesson-btn--secondary:hover {
-  background: rgba(15, 23, 42, 0.04);
+  background: #1d4ed8;
+  color: #fff;
 }
 
 .video-lesson-body {
@@ -474,46 +475,41 @@
 }
 
 .video-lesson-aside .cb-board-lesson--embedded .vl-mat-item__vis.is-on {
-  color: #86efac;
+  color: #15803d;
 }
 
 .video-lesson-aside .cb-board-lesson--embedded .vl-mat-item__vis.is-off {
-  color: #94a3b8;
+  color: #64748b;
 }
 
-.video-lesson-aside .cb-board-lesson--embedded .vl-mat-item__toggle {
-  border-color: rgba(148, 163, 184, 0.3);
-  background: transparent;
-  color: #cbd5e1;
+.video-lesson-aside .cb-board-lesson--embedded .vl-mat-item__toggle,
+.video-lesson-aside .cb-board-lesson--embedded .video-lesson-btn,
+.video-lesson-aside .cb-board-lesson--embedded .video-lesson-btn--secondary,
+.video-lesson-aside .cb-board-lesson--embedded .video-lesson-btn--primary {
+  border: 1px solid transparent;
+  background: var(--vl-blue);
+  color: #fff;
+  opacity: 1;
+  cursor: pointer;
+}
+
+.video-lesson-aside .cb-board-lesson--embedded .vl-mat-item__toggle:hover,
+.video-lesson-aside .cb-board-lesson--embedded .video-lesson-btn:hover,
+.video-lesson-aside .cb-board-lesson--embedded .video-lesson-btn--secondary:hover,
+.video-lesson-aside .cb-board-lesson--embedded .video-lesson-btn--primary:hover {
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.video-lesson-aside .cb-board-lesson--embedded .vl-mat-item__toggle:disabled,
+.video-lesson-aside .cb-board-lesson--embedded .video-lesson-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .video-lesson-aside .cb-board-lesson--embedded .vl-mat-item__toggle[aria-pressed="true"] {
-  border-color: rgba(52, 211, 153, 0.45);
-  color: #a7f3d0;
-  background: rgba(6, 78, 59, 0.35);
-}
-
-.video-lesson-aside .cb-board-lesson--embedded .video-lesson-btn {
-  color: var(--vl-text);
-}
-
-.video-lesson-aside .cb-board-lesson--embedded .video-lesson-btn:hover {
-  background: rgba(51, 65, 85, 0.55);
-}
-
-.video-lesson-aside .cb-board-lesson--embedded .video-lesson-btn--secondary {
-  border-color: rgba(148, 163, 184, 0.35);
-  background: rgba(30, 41, 59, 0.9);
-  color: #e2e8f0;
-}
-
-.video-lesson-aside .cb-board-lesson--embedded .video-lesson-btn--secondary:hover {
-  background: rgba(51, 65, 85, 0.95);
-}
-
-.video-lesson-aside .cb-board-lesson--embedded .video-lesson-btn--primary {
-  border-color: rgba(37, 99, 235, 0.55);
-  background: var(--vl-blue);
+  border-color: transparent;
+  background: #1d4ed8;
   color: #fff;
 }
 
@@ -527,39 +523,49 @@
   color: var(--vl-muted);
 }
 
+/* Таблица live-ответов в панели — светлая, как на странице варианта */
 .video-lesson-aside .live-variant-answers {
   margin: 0;
   padding: 12px;
   border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(30, 41, 59, 0.9);
-  box-shadow: none;
+  border: 1px solid rgba(43, 82, 245, 0.18);
+  background: linear-gradient(180deg, #f8faff 0%, #ffffff 100%);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
   position: static;
-  color: var(--vl-text);
+  color: #0f172a;
 }
 
 .video-lesson-aside .live-variant-answers__title,
 .video-lesson-aside .live-variant-answers__head strong {
-  color: var(--vl-text);
+  color: #0f172a;
 }
 
 .video-lesson-aside .live-variant-answers__empty,
-.video-lesson-aside .live-variant-answers__meta {
-  color: var(--vl-muted);
+.video-lesson-aside .live-variant-answers__meta,
+.video-lesson-aside .live-variant-answers__head span {
+  color: #64748b;
 }
 
 .video-lesson-aside .live-variant-answers__table th,
 .video-lesson-aside .live-variant-answers__table td {
-  border-bottom-color: rgba(148, 163, 184, 0.2);
-  color: #e2e8f0;
+  border-bottom-color: rgba(226, 232, 240, 0.95);
+  color: #0f172a;
 }
 
 .video-lesson-aside .live-variant-answers__table th {
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .video-lesson-aside .live-variant-answers__table-wrap {
   overflow-x: visible;
+}
+
+.video-lesson-aside .live-variant-answers__ok {
+  color: #15803d;
+}
+
+.video-lesson-aside .live-variant-answers__bad {
+  color: #b91c1c;
 }
 
 .video-lesson-page--live-answers .video-lesson-aside {
@@ -1228,15 +1234,16 @@
 /* —— Redesign: buttons, panel, workspace, mobile —— */
 
 .video-lesson-btn--secondary {
-  border-color: rgba(148, 163, 184, 0.35);
-  background: rgba(30, 41, 59, 0.9);
-  color: #e2e8f0;
+  border-color: transparent;
+  background: var(--vl-blue, #2563eb);
+  color: #fff;
   height: 36px;
   padding: 0 12px;
 }
 
 .video-lesson-btn--secondary:hover {
-  background: rgba(51, 65, 85, 0.95);
+  background: #1d4ed8;
+  color: #fff;
 }
 
 .video-lesson-btn--text {
@@ -1485,6 +1492,32 @@
   color: #94a3b8;
 }
 
+/* Кнопки материалов в сайдбаре — синие, активные */
+.video-lesson-aside .vl-mat-item__toggle,
+.video-lesson-aside .vl-mat-item .video-lesson-btn,
+.video-lesson-aside .vl-mat-item .video-lesson-btn--secondary,
+.video-lesson-aside .vl-mat-item .video-lesson-btn--primary {
+  border: 1px solid transparent;
+  background: var(--vl-blue);
+  color: #fff;
+  opacity: 1;
+  cursor: pointer;
+}
+
+.video-lesson-aside .vl-mat-item__toggle:hover,
+.video-lesson-aside .vl-mat-item .video-lesson-btn:hover,
+.video-lesson-aside .vl-mat-item .video-lesson-btn--secondary:hover,
+.video-lesson-aside .vl-mat-item .video-lesson-btn--primary:hover {
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.video-lesson-aside .vl-mat-item__toggle:disabled,
+.video-lesson-aside .vl-mat-item .video-lesson-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .vl-mat-item__actions {
   display: flex;
   align-items: center;
@@ -1494,9 +1527,9 @@
 
 .vl-mat-item__toggle {
   appearance: none;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: #fff;
-  color: var(--vl-text);
+  border: 1px solid transparent;
+  background: var(--vl-blue, #2563eb);
+  color: #fff;
   border-radius: 8px;
   height: 36px;
   padding: 0 10px;
@@ -1505,10 +1538,14 @@
   cursor: pointer;
 }
 
+.vl-mat-item__toggle:hover {
+  background: #1d4ed8;
+}
+
 .vl-mat-item__toggle[aria-pressed="true"] {
-  border-color: rgba(22, 163, 74, 0.4);
-  color: #15803d;
-  background: rgba(22, 163, 74, 0.08);
+  border-color: transparent;
+  color: #fff;
+  background: #1d4ed8;
 }
 
 .vl-board-slot {

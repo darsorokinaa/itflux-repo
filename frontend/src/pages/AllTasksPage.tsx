@@ -33,6 +33,13 @@ import TaskFileAttachment from "../components/TaskFileAttachment";
 import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
 // @ts-ignore JSX module without d.ts
 import ImageLightbox from "../components/ImageLightbox";
+import {
+  AllTasksTagsCatalogSidebar,
+  AllTasksTaskTagsEditor,
+  fetchTaskTagsCatalog,
+  useCanEditTaskTags,
+  type TaskTag,
+} from "../components/AllTasksTagEditor";
 
 const InformaticsCodeEditorEntry = lazy(
   () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
@@ -50,6 +57,7 @@ type BankTask = {
   part_id?: number | null;
   part_title?: string | null;
   author?: string | null;
+  tags?: TaskTag[];
 };
 
 type BankResponse = {
@@ -143,6 +151,7 @@ type SubtopicOption = {
 type FiltersResponse = {
   task_numbers: TaskNumberOption[];
   subtopics: SubtopicOption[];
+  authors?: string[];
 };
 
 const PER_PAGE = 5000;
@@ -226,6 +235,8 @@ function buildQuery(
   return s ? `?${s}` : "";
 }
 
+const FIPI_FILTER_LEVELS = new Set(["oge", "ege"]);
+
 type AllTasksFilters = {
   level: string;
   subject: SubjectId;
@@ -233,6 +244,7 @@ type AllTasksFilters = {
   taskListId: string;
   subtopicId: string;
   onlyFipi: boolean;
+  author: string;
   page: number;
 };
 
@@ -266,10 +278,12 @@ function readFiltersFromSearchParams(
   const taskListId = sp.get("task")?.trim() ?? "";
   const subtopicRaw = sp.get("subtopic")?.trim() ?? "";
   const subtopicId = subtopicRaw;
-  const onlyFipi = sp.get("fipi") === "1";
+  const usesFipiFilter = FIPI_FILTER_LEVELS.has(level);
+  const onlyFipi = usesFipiFilter && sp.get("fipi") === "1";
+  const author = usesFipiFilter ? "" : (sp.get("author")?.trim() ?? "");
   const page = Math.max(1, Number(sp.get("page")) || 1);
 
-  return { level, subject, vprGrade, taskListId, subtopicId, onlyFipi, page };
+  return { level, subject, vprGrade, taskListId, subtopicId, onlyFipi, author, page };
 }
 
 function writeFiltersToSearchParams(f: AllTasksFilters): URLSearchParams {
@@ -279,7 +293,11 @@ function writeFiltersToSearchParams(f: AllTasksFilters): URLSearchParams {
   if (f.level === "vpr") p.set("grade", String(f.vprGrade));
   if (f.taskListId) p.set("task", f.taskListId);
   if (f.subtopicId) p.set("subtopic", f.subtopicId);
-  if (f.onlyFipi) p.set("fipi", "1");
+  if (FIPI_FILTER_LEVELS.has(f.level)) {
+    if (f.onlyFipi) p.set("fipi", "1");
+  } else if (f.author) {
+    p.set("author", f.author);
+  }
   if (f.page > 1) p.set("page", String(f.page));
   return p;
 }
@@ -315,10 +333,13 @@ export default function AllTasksPage() {
   const [level, setLevel] = useState<string>(initialFilters.level);
   const [subject, setSubject] = useState<SubjectId>(initialFilters.subject);
   const [onlyFipi, setOnlyFipi] = useState(initialFilters.onlyFipi);
+  const [author, setAuthor] = useState(initialFilters.author);
   const [vprGrade, setVprGrade] = useState<number>(initialFilters.vprGrade);
   const [taskListId, setTaskListId] = useState(initialFilters.taskListId);
   const [subtopicId, setSubtopicId] = useState(initialFilters.subtopicId);
   const [page, setPage] = useState(initialFilters.page);
+
+  const usesFipiFilter = FIPI_FILTER_LEVELS.has(level);
 
   const levelSubjectRef = useRef<{ level: string; subject: SubjectId } | null>(
     null
@@ -357,6 +378,74 @@ export default function AllTasksPage() {
   const [openAnswers, setOpenAnswers] = useState<Record<number, boolean>>({});
   const [pickDraft, setPickDraft] = useState<WorkbookTask[]>([]);
   const [pickMode, setPickMode] = useState<"workbook" | "variant" | null>(null);
+  const canEditTaskTags = useCanEditTaskTags();
+  const [tagCatalog, setTagCatalog] = useState<TaskTag[]>([]);
+
+  useEffect(() => {
+    if (!canEditTaskTags) {
+      setTagCatalog([]);
+      return;
+    }
+    let cancelled = false;
+    fetchTaskTagsCatalog()
+      .then((tags) => {
+        if (!cancelled) setTagCatalog(tags);
+      })
+      .catch(() => {
+        if (!cancelled) setTagCatalog([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canEditTaskTags]);
+
+  const handleTaskTagsChange = useCallback((taskId: number, tags: TaskTag[]) => {
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            tasks: prev.tasks.map((t) => (t.id === taskId ? { ...t, tags } : t)),
+          }
+        : prev
+    );
+    setGroupData((prev) =>
+      prev
+        ? {
+            ...prev,
+            instances: prev.instances.map((inst) => ({
+              ...inst,
+              tasks: inst.tasks.map((t) => (t.id === taskId ? { ...t, tags } : t)),
+            })),
+          }
+        : prev
+    );
+  }, []);
+
+  const handleTagCatalogChange = useCallback((tags: TaskTag[]) => {
+    setTagCatalog(tags);
+    const alive = new Set(tags.map((t) => t.id));
+    const prune = (rowTags?: TaskTag[]) =>
+      (rowTags || []).filter((t) => alive.has(t.id));
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            tasks: prev.tasks.map((t) => ({ ...t, tags: prune(t.tags) })),
+          }
+        : prev
+    );
+    setGroupData((prev) =>
+      prev
+        ? {
+            ...prev,
+            instances: prev.instances.map((inst) => ({
+              ...inst,
+              tasks: inst.tasks.map((t) => ({ ...t, tags: prune(t.tags) })),
+            })),
+          }
+        : prev
+    );
+  }, []);
 
   const toggleAnswer = useCallback((taskId: number) => {
     setOpenAnswers((prev) => ({ ...prev, [taskId]: !prev[taskId] }));
@@ -423,13 +512,14 @@ export default function AllTasksPage() {
       vprGrade,
       taskListId,
       subtopicId,
-      onlyFipi,
+      onlyFipi: usesFipiFilter ? onlyFipi : false,
+      author: usesFipiFilter ? "" : author,
       page,
     });
     setSearchParams((prev) => (prev.toString() === next.toString() ? prev : next), {
       replace: true,
     });
-  }, [level, subject, vprGrade, taskListId, subtopicId, onlyFipi, page, setSearchParams]);
+  }, [level, subject, vprGrade, taskListId, subtopicId, onlyFipi, author, page, usesFipiFilter, setSearchParams]);
 
   useEffect(() => {
     if (!catalogReady || !catalog.length) return;
@@ -455,6 +545,11 @@ export default function AllTasksPage() {
       setTaskListId("");
       setSubtopicId("");
       setPage(1);
+      if (FIPI_FILTER_LEVELS.has(level)) {
+        setAuthor("");
+      } else {
+        setOnlyFipi(false);
+      }
     }
     levelSubjectRef.current = { level, subject };
   }, [catalog, catalogReady, level, subject, vprGrade, searchParams]);
@@ -518,6 +613,14 @@ export default function AllTasksPage() {
     if (!ok) setSubtopicId("");
   }, [subtopicsForTask, subtopicId]);
 
+  useEffect(() => {
+    if (!author || usesFipiFilter) return;
+    const authors = filterOptions?.authors ?? [];
+    if (authors.length && !authors.includes(author)) {
+      setAuthor("");
+    }
+  }, [filterOptions, author, usesFipiFilter]);
+
   const fetchTasks = useCallback(async () => {
     if (!taskListId && !subtopicId) {
       setData(null);
@@ -532,13 +635,16 @@ export default function AllTasksPage() {
     setError(null);
 
     const groupDescriptor = taskListId ? groupByTaskListId.get(taskListId) ?? null : null;
+    const onlyFipiParam = usesFipiFilter && onlyFipi ? "1" : undefined;
+    const authorParam = !usesFipiFilter && author ? author : undefined;
 
     try {
       if (groupDescriptor) {
         const qs = buildQuery(level, vprGrade, {
           page: String(page),
           per_page: String(PER_PAGE),
-          only_fipi: onlyFipi ? "1" : undefined,
+          only_fipi: onlyFipiParam,
+          author: authorParam,
           linked_key: groupDescriptor.linkedKey,
           subtopic_id: subtopicId || undefined,
         });
@@ -559,7 +665,8 @@ export default function AllTasksPage() {
           page: String(page),
           per_page: String(PER_PAGE),
           raw_html: undefined,
-          only_fipi: onlyFipi ? "1" : undefined,
+          only_fipi: onlyFipiParam,
+          author: authorParam,
           task_list_id: taskListId || undefined,
           subtopic_id: subtopicId || undefined,
         });
@@ -589,6 +696,8 @@ export default function AllTasksPage() {
     level,
     subject,
     onlyFipi,
+    author,
+    usesFipiFilter,
     page,
     vprGrade,
     taskListId,
@@ -602,7 +711,7 @@ export default function AllTasksPage() {
 
   useEffect(() => {
     setOpenAnswers({});
-  }, [level, subject, vprGrade, taskListId, subtopicId, onlyFipi, page]);
+  }, [level, subject, vprGrade, taskListId, subtopicId, onlyFipi, author, page]);
 
   useEffect(() => {
     setPickMode(null);
@@ -786,6 +895,7 @@ export default function AllTasksPage() {
   const resetPage = () => setPage(1);
 
   const showCodeSidebar = isInformaticsCodeEditorContext(level, subject);
+  const showTagsSidebar = canEditTaskTags;
 
   const getCodeEditorTaskSources = useCallback((): TaskFileSource[] => {
     return (data?.tasks ?? [])
@@ -801,7 +911,13 @@ export default function AllTasksPage() {
   return (
     <div className="digital-flow-page">
       <div
-        className={`digital-flow-page__wrap${showCodeSidebar ? " digital-flow-page__wrap--with-code-sidebar" : ""}`}
+        className={[
+          "digital-flow-page__wrap",
+          showCodeSidebar ? "digital-flow-page__wrap--with-code-sidebar" : "",
+          showTagsSidebar ? "digital-flow-page__wrap--with-tags-sidebar" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
       >
         <main
           className={`all-tasks-page${pickMode ? " all-tasks-page--workbook-mode" : ""}`}
@@ -818,7 +934,8 @@ export default function AllTasksPage() {
             <span>Фильтры</span>
             <span className="all-tasks-filters-toggle__meta">
               {levelTitle}
-              {onlyFipi ? " · ФИПИ" : ""}
+              {usesFipiFilter && onlyFipi ? " · ФИПИ" : ""}
+              {!usesFipiFilter && author ? ` · ${author}` : ""}
             </span>
           </button>
 
@@ -932,27 +1049,49 @@ export default function AllTasksPage() {
               </select>
             </label>
 
-            <label className="all-tasks-filter all-tasks-filter--check">
-              <span className="all-tasks-filter__label all-tasks-filter__label--spacer" aria-hidden>
-                &nbsp;
-              </span>
-              <span className="all-tasks-filter--check__row">
-                <input
-                  type="checkbox"
-                  className="tasks-page-subtopic-checkbox-input"
-                  checked={onlyFipi}
+            {usesFipiFilter ? (
+              <label className="all-tasks-filter all-tasks-filter--check">
+                <span className="all-tasks-filter__label all-tasks-filter__label--spacer" aria-hidden>
+                  &nbsp;
+                </span>
+                <span className="all-tasks-filter--check__row">
+                  <input
+                    type="checkbox"
+                    className="tasks-page-subtopic-checkbox-input"
+                    checked={onlyFipi}
+                    onChange={(e) => {
+                      setOnlyFipi(e.target.checked);
+                      resetPage();
+                    }}
+                  />
+                  <span
+                    className={`tasks-page-subtopic-checkbox-visual${onlyFipi ? " selected" : ""}`}
+                    aria-hidden
+                  />
+                  <span>Только ФИПИ</span>
+                </span>
+              </label>
+            ) : (
+              <label className="all-tasks-filter">
+                <span className="all-tasks-filter__label">Автор</span>
+                <select
+                  className="all-tasks-filter__control"
+                  value={author}
+                  disabled={filtersLoading}
                   onChange={(e) => {
-                    setOnlyFipi(e.target.checked);
+                    setAuthor(e.target.value);
                     resetPage();
                   }}
-                />
-                <span
-                  className={`tasks-page-subtopic-checkbox-visual${onlyFipi ? " selected" : ""}`}
-                  aria-hidden
-                />
-                <span>Только ФИПИ</span>
-              </span>
-            </label>
+                >
+                  <option value="">Все</option>
+                  {(filterOptions?.authors ?? []).map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
 
           <div className="all-tasks-meta" aria-live="polite">
@@ -977,7 +1116,8 @@ export default function AllTasksPage() {
                   <div className="all-tasks-meta__inner">
                     <span className="all-tasks-meta__count">
                       {bankUsesGroups ? formatGroupsCount(visibleTotal) : formatTasksCount(visibleTotal)}
-                      {onlyFipi ? " · только ФИПИ" : ""}
+                      {usesFipiFilter && onlyFipi ? " · только ФИПИ" : ""}
+                      {!usesFipiFilter && author ? ` · ${author}` : ""}
                     </span>
                     {bankUsesGroups && activeGroupDescriptor ? (
                       <span className="all-tasks-meta__badge">
@@ -1044,7 +1184,12 @@ export default function AllTasksPage() {
 
           {taskListId && !loading && !error && displayEntries.length === 0 ? (
             <p className="all-tasks-empty" role="status">
-              По выбранным фильтрам заданий нет. Смените задание, подтему или снимите «Только ФИПИ».
+              По выбранным фильтрам заданий нет. Смените задание, подтему
+              {usesFipiFilter
+                ? " или снимите «Только ФИПИ»."
+                : author
+                  ? " или сбросьте фильтр «Автор»."
+                  : "."}
             </p>
           ) : null}
 
@@ -1181,6 +1326,14 @@ export default function AllTasksPage() {
                                       />
                                     </div>
                                   </div>
+                                  {canEditTaskTags ? (
+                                    <AllTasksTaskTagsEditor
+                                      taskId={t.id}
+                                      selected={t.tags || []}
+                                      catalog={tagCatalog}
+                                      onChange={handleTaskTagsChange}
+                                    />
+                                  ) : null}
                                   <div className="all-tasks-item__content">
                                     <ExamTaskDrawingShell
                                       enabled
@@ -1340,6 +1493,14 @@ export default function AllTasksPage() {
                           />
                         </div>
                       </header>
+                      {canEditTaskTags ? (
+                        <AllTasksTaskTagsEditor
+                          taskId={t.id}
+                          selected={t.tags || []}
+                          catalog={tagCatalog}
+                          onChange={handleTaskTagsChange}
+                        />
+                      ) : null}
                       <div className="all-tasks-item__content">
                         <ExamTaskDrawingShell
                           enabled
@@ -1408,6 +1569,13 @@ export default function AllTasksPage() {
           </ul>
 
         </main>
+
+        {showTagsSidebar ? (
+          <AllTasksTagsCatalogSidebar
+            tags={tagCatalog}
+            onTagsChange={handleTagCatalogChange}
+          />
+        ) : null}
 
         {showCodeSidebar ? (
           <Suspense fallback={null}>

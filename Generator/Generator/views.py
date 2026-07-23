@@ -47,6 +47,7 @@ except Exception:
     _WEASYPRINT_OK = False
 
 from .error_report_utils import notify_error_report_email
+from .task_tag_access import can_edit_task_tags
 from .models import (
     Announcement,
     Criteria,
@@ -58,6 +59,8 @@ from .models import (
     Subject,
     SubTopic,
     SupportInfo,
+    TagOption,
+    TagType,
     Task,
     TaskGroup,
     TaskGroupMember,
@@ -2498,9 +2501,29 @@ def api_task_bank_filters(request, level, subject):
                 "task_count": st_qs.count(),
             })
 
+    authors_qs = Task.active_objects.filter(
+        task__subject=subject_instance,
+        task__level=level_instance,
+    )
+    if vpr_vf:
+        authors_qs = authors_qs.filter(**vpr_vf)
+    if tl_id_filter is not None:
+        authors_qs = authors_qs.filter(task_id=tl_id_filter)
+    authors = sorted(
+        {
+            (a or "").strip()
+            for a in authors_qs.exclude(author__isnull=True)
+            .exclude(author__exact="")
+            .values_list("author", flat=True)
+            if (a or "").strip()
+        },
+        key=lambda s: s.casefold(),
+    )
+
     return JsonResponse({
         "task_numbers": task_numbers,
         "subtopics": subtopics,
+        "authors": authors,
     })
 
 
@@ -2508,7 +2531,7 @@ def api_task_bank_filters(request, level, subject):
 def api_task_bank(request, level, subject):
     """GET /api/<level>/<subject>/task-bank/
     Individual tasks from the bank for the LK manual variant builder.
-    Query params: task_list_id, subtopic_id, only_fipi (1), raw_html (1), grade/advanced (ВПР),
+    Query params: task_list_id, subtopic_id, only_fipi (1), author, raw_html (1), grade/advanced (ВПР),
     page (default 1), per_page (default 12, max 50).
     """
     subject_instance = get_subject_for_api(subject)
@@ -2517,7 +2540,12 @@ def api_task_bank(request, level, subject):
     qs = Task.active_objects.filter(
         task__subject=subject_instance,
         task__level=level_instance,
-    ).select_related('task', 'task__part', 'subtopic')
+    ).select_related('task', 'task__part', 'subtopic').prefetch_related(
+        Prefetch(
+            'tag_options',
+            queryset=TagOption.objects.filter(is_active=True).select_related('tag_type'),
+        )
+    )
 
     vpr_vf = _vpr_task_filters_from_request(request, level)
     if vpr_vf:
@@ -2525,6 +2553,10 @@ def api_task_bank(request, level, subject):
 
     if (request.GET.get("only_fipi") or "").strip() in ("1", "true", "yes"):
         qs = qs.filter(_get_fipi_task_filter_q())
+
+    author_filter = (request.GET.get("author") or "").strip()
+    if author_filter:
+        qs = qs.filter(author__iexact=author_filter)
 
     task_list_id = request.GET.get('task_list_id')
     if task_list_id:
@@ -2620,6 +2652,7 @@ def api_task_bank(request, level, subject):
             'file_url': file_url,
             'author': (task.author or '').strip() or None,
             'added_at': task.added_at.strftime('%d.%m.%Y') if task.added_at else None,
+            'tags': _serialize_task_tags(task),
         })
 
     return JsonResponse({
@@ -2777,7 +2810,7 @@ def _bank_task_file_url(request, task):
     return None
 
 
-def _task_matches_bank_filters(task, vpr_vf=None, only_fipi=False):
+def _task_matches_bank_filters(task, vpr_vf=None, only_fipi=False, author=None):
     if not task or not getattr(task, 'is_active', True):
         return False
     if vpr_vf:
@@ -2786,7 +2819,32 @@ def _task_matches_bank_filters(task, vpr_vf=None, only_fipi=False):
                 return False
     if only_fipi and not Task.objects.filter(pk=task.pk).filter(_get_fipi_task_filter_q()).exists():
         return False
+    author_filter = (author or "").strip()
+    if author_filter and (task.author or "").strip().casefold() != author_filter.casefold():
+        return False
     return True
+
+
+def _serialize_tag_option(opt: TagOption) -> dict:
+    name = (opt.title or "").strip()
+    if opt.emoji:
+        name = f"{opt.emoji} {name}".strip()
+    return {
+        "id": opt.id,
+        "name": name,
+        "title": opt.title,
+        "emoji": opt.emoji or "",
+        "badge_style": opt.badge_style,
+        "type": getattr(opt.tag_type, "slug", None),
+    }
+
+
+def _serialize_task_tags(task):
+    if not task:
+        return []
+    opts = list(task.tag_options.all())
+    opts.sort(key=lambda o: (getattr(o.tag_type, "order", 0), o.order, o.id))
+    return [_serialize_tag_option(opt) for opt in opts if opt.is_active]
 
 
 def _serialize_bank_group_member(request, member, *, raw_html=False):
@@ -2833,6 +2891,7 @@ def _serialize_bank_group_member(request, member, *, raw_html=False):
         'file_url': _bank_task_file_url(request, t) if t else None,
         'author': (t.author or '').strip() or None if t else None,
         'added_at': t.added_at.strftime('%d.%m.%Y') if t and t.added_at else None,
+        'tags': _serialize_task_tags(t),
     }
 
 
@@ -2846,6 +2905,7 @@ def api_group_instances(request, level, subject):
                     (строка вида "19_20_21"; type=linked_group)
       subtopic_id — опциональная фильтрация по подтеме TaskGroup.subtopic (none — без подтемы)
       only_fipi   — 1: только группы, где все задания из ФИПИ
+      author      — фильтр по автору задания (точное совпадение без учёта регистра)
       page        — страница (default 1)
       per_page    — размер (default 20, max 10000)
     """
@@ -2853,11 +2913,18 @@ def api_group_instances(request, level, subject):
     level_instance   = get_object_or_404(Level, level=level)
     vpr_vf = _vpr_task_filters_from_request(request, level)
     only_fipi = (request.GET.get("only_fipi") or "").strip() in ("1", "true", "yes")
+    author_filter = (request.GET.get("author") or "").strip() or None
     raw_html = (request.GET.get("raw_html") or "").strip().lower() in ("1", "true", "yes")
 
     member_qs = (
         TaskGroupMember.objects
         .select_related('task', 'task__task', 'task__task__part', 'task__subtopic')
+        .prefetch_related(
+            Prefetch(
+                'task__tag_options',
+                queryset=TagOption.objects.filter(is_active=True).select_related('tag_type'),
+            )
+        )
         .filter(task__is_active=True)
         .order_by('task_number')
     )
@@ -2927,17 +2994,30 @@ def api_group_instances(request, level, subject):
             member_nums = {m.task_number for m in members}
             if not all(n in member_nums for n in expected_task_numbers):
                 continue
-        if only_fipi:
+        if only_fipi or author_filter:
             raw_members = TaskGroupMember.objects.filter(
                 task_group_id=grp.id,
                 task__is_active=True,
             ).select_related('task')
-            if any(not _task_matches_bank_filters(m.task, vpr_vf=vpr_vf, only_fipi=True) for m in raw_members):
+            if any(
+                not _task_matches_bank_filters(
+                    m.task,
+                    vpr_vf=vpr_vf,
+                    only_fipi=only_fipi,
+                    author=author_filter,
+                )
+                for m in raw_members
+            ):
                 continue
         task_items = [
             _serialize_bank_group_member(request, m, raw_html=raw_html)
             for m in members
-            if _task_matches_bank_filters(m.task, vpr_vf=vpr_vf, only_fipi=False)
+            if _task_matches_bank_filters(
+                m.task,
+                vpr_vf=vpr_vf,
+                only_fipi=False,
+                author=author_filter,
+            )
         ]
         if expected_task_numbers is not None and len(task_items) != len(expected_task_numbers):
             continue
@@ -2966,6 +3046,155 @@ def api_variant_lookup(request, variant_id):
         "level": variant.level.level,
         "subject": variant.var_subject.subject_short,
     })
+
+
+def _task_tags_forbidden():
+    return JsonResponse({"error": "Недостаточно прав"}, status=403)
+
+
+def _require_task_tag_editor(request):
+    if can_edit_task_tags(getattr(request, "user", None)):
+        return None
+    return _task_tags_forbidden()
+
+
+def _normalize_tag_name(raw) -> str:
+    return (str(raw or "")).strip()
+
+
+def _custom_tag_type() -> TagType:
+    row, _ = TagType.objects.get_or_create(
+        slug="custom",
+        defaults={
+            "name": "Свои теги",
+            "description": "Теги, созданные вручную во «Все задачи»",
+            "order": 100,
+        },
+    )
+    return row
+
+
+def _unique_tag_option_slug(tag_type: TagType, base: str) -> str:
+    from django.utils.text import slugify
+
+    root = (slugify(base, allow_unicode=True) or "tag")[:40]
+    candidate = root
+    n = 2
+    while TagOption.objects.filter(tag_type=tag_type, slug=candidate).exists():
+        suffix = f"-{n}"
+        candidate = f"{root[: max(1, 50 - len(suffix))]}{suffix}"
+        n += 1
+    return candidate
+
+
+@require_http_methods(["GET", "POST"])
+def api_task_tags_catalog(request):
+    """GET/POST /api/task-tags/ — справочник TagOption."""
+    if request.method == "GET":
+        rows = [
+            _serialize_tag_option(opt)
+            for opt in (
+                TagOption.objects.filter(is_active=True)
+                .select_related("tag_type")
+                .order_by("tag_type__order", "order", "id")
+            )
+        ]
+        return JsonResponse({"tags": rows})
+
+    forbidden = _require_task_tag_editor(request)
+    if forbidden:
+        return forbidden
+
+    try:
+        data = json.loads(request.body or b"{}")
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"error": "Неверный формат данных"}, status=400)
+
+    name = _normalize_tag_name((data or {}).get("name"))
+    if not name:
+        return JsonResponse({"error": "Укажите название тега"}, status=400)
+    if len(name) > 120:
+        return JsonResponse({"error": "Название тега не длиннее 120 символов"}, status=400)
+
+    existing = (
+        TagOption.objects.filter(is_active=True, title__iexact=name)
+        .select_related("tag_type")
+        .first()
+    )
+    if existing:
+        return JsonResponse(_serialize_tag_option(existing), status=200)
+
+    tag_type = _custom_tag_type()
+    row = TagOption.objects.create(
+        tag_type=tag_type,
+        slug=_unique_tag_option_slug(tag_type, name),
+        title=name,
+        badge_style=TagOption.BadgeStyle.NEUTRAL,
+        order=TagOption.objects.filter(tag_type=tag_type).count() + 1,
+        is_active=True,
+    )
+    row = TagOption.objects.select_related("tag_type").get(id=row.id)
+    return JsonResponse(_serialize_tag_option(row), status=201)
+
+
+@require_http_methods(["DELETE"])
+def api_task_tags_catalog_delete(request, tag_id):
+    """DELETE /api/task-tags/<id>/ — деактивировать тег в справочнике."""
+    forbidden = _require_task_tag_editor(request)
+    if forbidden:
+        return forbidden
+
+    row = get_object_or_404(TagOption, id=tag_id)
+    row.is_active = False
+    row.save(update_fields=["is_active"])
+    return JsonResponse({"ok": True})
+
+
+@require_http_methods(["PUT"])
+def api_task_tags_set(request, task_id):
+    """PUT /api/tasks/<task_id>/tags/ — заменить набор тегов задачи."""
+    forbidden = _require_task_tag_editor(request)
+    if forbidden:
+        return forbidden
+
+    task = get_object_or_404(Task, id=task_id)
+    try:
+        data = json.loads(request.body or b"{}")
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"error": "Неверный формат данных"}, status=400)
+
+    raw_ids = (data or {}).get("tag_ids")
+    if raw_ids is None:
+        return JsonResponse({"error": "tag_ids обязателен"}, status=400)
+    if not isinstance(raw_ids, list):
+        return JsonResponse({"error": "tag_ids должен быть списком"}, status=400)
+
+    tag_ids = []
+    for item in raw_ids:
+        try:
+            tag_ids.append(int(item))
+        except (TypeError, ValueError):
+            return JsonResponse({"error": "Некорректный tag_id"}, status=400)
+    tag_ids = list(dict.fromkeys(tag_ids))
+
+    catalog = {
+        row.id: row
+        for row in TagOption.objects.filter(id__in=tag_ids, is_active=True)
+    }
+    missing = [tid for tid in tag_ids if tid not in catalog]
+    if missing:
+        return JsonResponse({"error": "Теги не найдены", "missing": missing}, status=400)
+
+    task.tag_options.set(list(catalog.values()))
+    task = (
+        Task.objects.prefetch_related(
+            Prefetch(
+                "tag_options",
+                queryset=TagOption.objects.filter(is_active=True).select_related("tag_type"),
+            )
+        ).get(id=task.id)
+    )
+    return JsonResponse({"id": task.id, "tags": _serialize_task_tags(task)})
 
 
 @require_http_methods(["GET"])

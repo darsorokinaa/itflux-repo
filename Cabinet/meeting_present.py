@@ -377,23 +377,43 @@ def _variant_tasks_answer_key(variant_id) -> list[dict]:
             from Generator.Generator.models import VariantContent
         except Exception:
             return []
-    rows = []
-    qs = (
+    qs = list(
         VariantContent.objects.filter(variant_id=variant_id)
         .select_related("task", "task__task")
-        .order_by("order")
+        .order_by("order", "id")
     )
+    bank_numbers = []
     for vc in qs:
         task = vc.task
         if not task:
+            bank_numbers.append(None)
             continue
         number = None
         if getattr(task, "task", None) is not None:
             number = getattr(task.task, "task_number", None)
+        bank_numbers.append(number)
+
+    # Если в варианте несколько задач с одним task_number (рабочая тетрадь /
+    # банк одного типа), номер из банка нельзя использовать как ключ ответа —
+    # иначе один ответ «размазывается» по всем строкам. Берём порядок в варианте.
+    unique_bank = {n for n in bank_numbers if n is not None}
+    use_order = len(unique_bank) < sum(1 for n in bank_numbers if n is not None)
+
+    rows = []
+    ordinal = 0
+    for vc, bank_number in zip(qs, bank_numbers):
+        task = vc.task
+        if not task:
+            continue
+        ordinal += 1
+        display_number = ordinal if use_order else bank_number
+        if display_number is None:
+            display_number = ordinal
         rows.append(
             {
                 "id": task.pk,
-                "number": number,
+                "number": display_number,
+                "bankNumber": bank_number,
                 "answer": (task.answer or "").strip(),
             }
         )

@@ -119,6 +119,17 @@ urlpatterns = [
         name="api_task_bank_filters",
     ),
     path("api/<str:level>/<str:subject>/task-bank/", views.api_task_bank, name="api_task_bank"),
+    path("api/task-tags/", views.api_task_tags_catalog, name="api_task_tags_catalog"),
+    path(
+        "api/task-tags/<int:tag_id>/",
+        views.api_task_tags_catalog_delete,
+        name="api_task_tags_catalog_delete",
+    ),
+    path(
+        "api/tasks/<int:task_id>/tags/",
+        views.api_task_tags_set,
+        name="api_task_tags_set",
+    ),
     path("api/<str:level>/<str:subject>/variant-from-ids/", views.api_variant_from_ids, name="api_variant_from_ids"),
     path("api/<str:level>/<str:subject>/variant/", views.api_generate_variant),
     path("api/<str:level>/<str:subject>/variant/<int:variant_id>/", views.api_variant_detail),

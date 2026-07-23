@@ -338,6 +338,16 @@ LESSON_PLAN_CATALOG_PUBLISHER_EMAILS = tuple(
     if email.strip()
 )
 
+# Usernames that can edit task tags on «Все задачи».
+TASK_TAG_EDITOR_USERNAMES = tuple(
+    name.strip().lower()
+    for name in os.environ.get(
+        "TASK_TAG_EDITOR_USERNAMES",
+        "darsorokinaa,admin_dasha",
+    ).split(",")
+    if name.strip()
+)
+
 # Cache for rate limiting (LocMem — один процесс; в prod лучше Redis)
 CACHES = {
     "default": {

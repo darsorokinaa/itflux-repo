@@ -15,6 +15,7 @@ from django.views.decorators.http import require_http_methods
 from .models import Profile, ScheduleEvent, TeacherApplication, TeacherCommunityFeedback
 from .invitations import invite_accept_api_payload, try_accept_invite_token
 from .plan_catalog import can_publish_catalog_lesson_plan
+from .task_tags import can_edit_task_tags
 from .rate_limit import client_ip, rate_limit_check, rate_limit_json_response
 from .schedule_events import (
     list_schedule_events,
@@ -52,6 +53,7 @@ def _profile_payload(user):
         "account_active": profile.account_active,
         "email_confirmed": profile.email_confirmed,
         "can_publish_catalog_plans": can_publish_catalog_lesson_plan(user),
+        "can_edit_task_tags": can_edit_task_tags(user),
     }
 
 
