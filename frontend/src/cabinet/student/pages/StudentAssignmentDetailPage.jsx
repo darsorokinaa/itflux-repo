@@ -201,7 +201,8 @@ export default function StudentAssignmentDetailPage() {
 
   const loadAssignment = useCallback((opts = {}) => {
     const preserveLocal = opts.preserveLocal ?? isDirtyRef.current;
-    setLoading(true);
+    const silent = Boolean(opts.silent ?? preserveLocal);
+    if (!silent) setLoading(true);
     return fetchStudentAssignment(id)
       .then((d) => {
         setItem(d);
@@ -214,19 +215,28 @@ export default function StudentAssignmentDetailPage() {
       .catch(() => {
         if (!preserveLocal) setItem(null);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!silent) setLoading(false);
+      });
   }, [id]);
 
   useEffect(() => {
     setIsDirty(false);
     isDirtyRef.current = false;
-    loadAssignment({ preserveLocal: false });
+    setAttachedFile(null);
+    loadAssignment({ preserveLocal: false, silent: false });
   }, [id, loadAssignment]);
 
   useEffect(() => {
-    const onFocus = () => { loadAssignment({ preserveLocal: true }); };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    // Не перезагружаем при focus после диалога выбора файла:
+    // иначе input размонтируется до onChange и файл «теряется».
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      if (isDirtyRef.current) return;
+      loadAssignment({ preserveLocal: true, silent: true });
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [loadAssignment]);
 
   useEffect(() => {
@@ -472,11 +482,11 @@ export default function StudentAssignmentDetailPage() {
                         ref={fileInputRef}
                         type="file"
                         className="st-hw-file-input"
-                        accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.rtf,.csv,.png,.jpg,.jpeg,.gif,.webp,.zip,.rar,.7z,.py,.js,.html,.css,.heic,.heif"
                         onChange={(e) => {
                           const file = e.target.files?.[0] || null;
                           setAttachedFile(file);
-                          setIsDirty(Boolean(file) || isDirtyRef.current);
+                          setIsDirty(true);
+                          isDirtyRef.current = true;
                           if (validationMsg) setValidationMsg("");
                           if (file) setMsg("");
                         }}

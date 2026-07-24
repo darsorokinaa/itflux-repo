@@ -4151,24 +4151,12 @@
 }
 
 .st-hw-file-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   margin-top: 10px;
-}
-
-.st-hw-file-input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-  opacity: 0;
 }
 
 .st-hw-file-btn {
@@ -4185,6 +4173,20 @@
   font-size: 0.8rem;
   font-weight: 700;
   cursor: pointer;
+  overflow: hidden;
+}
+
+.st-hw-file-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+  border: 0;
+  font-size: 0;
 }
 
 .st-hw-file-btn svg {
