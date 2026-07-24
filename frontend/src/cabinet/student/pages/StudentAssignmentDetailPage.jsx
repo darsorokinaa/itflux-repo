@@ -187,6 +187,7 @@ export default function StudentAssignmentDetailPage() {
   const [item, setItem] = useState(null);
   const [answer, setAnswer] = useState("");
   const [attachedFile, setAttachedFile] = useState(null);
+  const [fileUploadFailed, setFileUploadFailed] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -210,6 +211,7 @@ export default function StudentAssignmentDetailPage() {
           setAnswer(d.answer_text || "");
           setAttachedFile(null);
           setIsDirty(false);
+          setFileUploadFailed(false);
         }
       })
       .catch(() => {
@@ -224,6 +226,7 @@ export default function StudentAssignmentDetailPage() {
     setIsDirty(false);
     isDirtyRef.current = false;
     setAttachedFile(null);
+    setFileUploadFailed(false);
     loadAssignment({ preserveLocal: false, silent: false });
   }, [id, loadAssignment]);
 
@@ -269,10 +272,7 @@ export default function StudentAssignmentDetailPage() {
     [item, variantSubmitted],
   );
 
-  const missingAttachment =
-    item?.status === "submitted"
-    && !item?.attached_file_url
-    && !item?.attached_file_name;
+  const missingAttachment = fileUploadFailed && item?.status === "submitted";
   const canEditAnswer =
     item
     && !variantOnly
@@ -335,7 +335,9 @@ export default function StudentAssignmentDetailPage() {
       setAttachedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       await loadAssignment({ preserveLocal: false });
-      if (hadFile && result && !result.attached_file_url && !result.attached_file_name) {
+      const fileFailed = hadFile && result && !result.attached_file_url && !result.attached_file_name;
+      setFileUploadFailed(fileFailed);
+      if (fileFailed) {
         setMsg("Ответ отправлен, но файл мог не сохраниться. Проверьте вложение или отправьте ещё раз.");
       }
     } catch (e) {
