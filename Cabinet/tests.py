@@ -1386,6 +1386,15 @@ class StudentReleaseTests(TestCase):
         ids = [row["id"] for row in rows]
         self.assertIn(review.pk, ids)
 
+        # У ученика пустая submission не должна выглядеть как «сдано / на проверке».
+        student_client = APIClient()
+        student_client.force_login(self.student_user)
+        student_detail = student_client.get(
+            f"/api/cabinet/student/assignments/{homework.pk}/"
+        )
+        self.assertEqual(student_detail.status_code, 200)
+        self.assertEqual(student_detail.json()["status"], "new")
+
 
 class HomeworkSubmissionApiTests(TestCase):
     def setUp(self):

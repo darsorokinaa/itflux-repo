@@ -376,7 +376,7 @@ def _serialize_lesson_card(assignment, students):
 def _homework_student_status(homework, student):
     submission = (
         HomeworkSubmission.objects.filter(homework=homework, student=student)
-        .order_by("-submitted_at")
+        .order_by("-submitted_at", "-id")
         .first()
     )
     now = timezone.now()
@@ -387,12 +387,15 @@ def _homework_student_status(homework, student):
             return "needs_fix", "Нужно исправить", submission
         if submission.status == SubmissionStatus.RETURNED:
             return "needs_fix", "Нужно исправить", submission
-        return "submitted", "Сдано", submission
+        # При выдаче ДЗ создаётся пустая HomeworkSubmission для очереди «Проверка».
+        # Считаем работу сданной только после реальной отправки учеником.
+        if submission.submitted_at:
+            return "submitted", "Сдано", submission
     if homework.due_at and homework.due_at < now:
-        return "overdue", "Просрочено", None
+        return "overdue", "Просрочено", submission
     if homework.status == HomeworkStatus.ASSIGNED:
-        return "new", "Новый", None
-    return "in_progress", "В работе", None
+        return "new", "Новый", submission
+    return "in_progress", "В работе", submission
 
 
 def _serialize_assignment_card(homework, students):
