@@ -1798,6 +1798,34 @@ class HomeworkDeleteView(TeacherScopedMixin, APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class HomeworkSubmissionAttachedFileView(TeacherScopedMixin, APIView):
+    """Скачивание файла ответа ученика учителем (без публичного /media/)."""
+
+    def get(self, request, submission_id):
+        import mimetypes
+
+        from django.http import FileResponse
+
+        from .files_storage import content_disposition
+
+        submission = get_object_or_404(
+            HomeworkSubmission.objects.select_related("homework"),
+            pk=submission_id,
+            homework__teacher=request.user,
+        )
+        if not submission.attached_file:
+            return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            fh = submission.attached_file.open("rb")
+        except Exception:
+            return Response({"error": "Файл недоступен."}, status=status.HTTP_404_NOT_FOUND)
+        name = submission.attached_file.name.split("/")[-1] or "file"
+        content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        response = FileResponse(fh, content_type=content_type)
+        response["Content-Disposition"] = content_disposition(name, inline=False)
+        return response
+
+
 class DirectMaterialAssignView(TeacherScopedMixin, APIView):
     """Teacher assigns a material directly to a group or student."""
 

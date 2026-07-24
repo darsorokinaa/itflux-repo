@@ -1653,6 +1653,83 @@ class HomeworkSubmissionApiTests(TestCase):
         submission = HomeworkSubmission.objects.get(homework=hw, student=self.student)
         self.assertEqual(submission.answer_text, "Готово")
         self.assertTrue(submission.attached_file.name.endswith(".pdf"))
+        self.assertTrue(response.data.get("attached_file_url") or response.data.get("attached_file_name"))
+        self.assertIn("/attached-file/", response.data.get("attached_file_url") or "")
+
+        download = client.get(f"/api/cabinet/student/assignments/{hw.pk}/attached-file/")
+        self.assertEqual(download.status_code, 200, getattr(download, "content", b"")[:200])
+        self.assertEqual(b"".join(download.streaming_content), b"pdf-content")
+
+    def test_student_submit_file_survives_zero_quota(self):
+        """Сдача файла не должна зависеть от квоты «Мои файлы»."""
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from rest_framework.test import APIClient
+        from Cabinet.files_models import UserStorageQuota
+        from Cabinet.models import HomeworkSubmission
+
+        UserStorageQuota.objects.update_or_create(
+            user=self.student_user,
+            defaults={"quota_bytes": 0},
+        )
+        hw = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="ДЗ: Квота 0",
+            status="assigned",
+        )
+        client = APIClient()
+        client.force_login(self.student_user)
+        upload = SimpleUploadedFile("answer.pdf", b"pdf-content", content_type="application/pdf")
+        response = client.post(
+            f"/api/cabinet/student/assignments/{hw.pk}/",
+            {"answer_text": "Готово", "attached_file": upload},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        submission = HomeworkSubmission.objects.get(homework=hw, student=self.student)
+        self.assertTrue(bool(submission.attached_file))
+        self.assertIn("cabinet/homework/", submission.attached_file.name)
+        self.assertIn("/attached-file/", response.data.get("attached_file_url") or "")
+
+        teacher_client = APIClient()
+        teacher_client.force_login(self.teacher)
+        teacher_dl = teacher_client.get(
+            f"/api/cabinet/homework/submissions/{submission.pk}/attached-file/"
+        )
+        self.assertEqual(teacher_dl.status_code, 200)
+        self.assertEqual(b"".join(teacher_dl.streaming_content), b"pdf-content")
+
+    def test_student_can_append_missing_file_after_submit(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.utils import timezone
+        from rest_framework.test import APIClient
+        from Cabinet.models import HomeworkSubmission
+
+        hw = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="ДЗ: Дослать файл",
+            status="assigned",
+        )
+        HomeworkSubmission.objects.create(
+            homework=hw,
+            student=self.student,
+            status="submitted",
+            answer_text="Только текст",
+            submitted_at=timezone.now(),
+        )
+        client = APIClient()
+        client.force_login(self.student_user)
+        upload = SimpleUploadedFile("late.pdf", b"pdf-content", content_type="application/pdf")
+        response = client.post(
+            f"/api/cabinet/student/assignments/{hw.pk}/",
+            {"answer_text": "", "attached_file": upload},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        submission = HomeworkSubmission.objects.get(homework=hw, student=self.student)
+        self.assertEqual(submission.answer_text, "Только текст")
+        self.assertTrue(submission.attached_file.name.endswith(".pdf"))
 
 
 class ReviewApiTests(TestCase):

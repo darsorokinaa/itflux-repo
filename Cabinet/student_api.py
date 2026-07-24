@@ -1015,52 +1015,123 @@ class StudentAssignmentDetailView(StudentScopedView):
         if not hw:
             return Response({"error": "Задание не найдено."}, status=status.HTTP_404_NOT_FOUND)
         roster = _pick_student(students, hw.teacher)
+        if roster is None:
+            return Response({"error": "Ученик не найден."}, status=status.HTTP_403_FORBIDDEN)
+
         answer_text = (request.data.get("answer_text") or "").strip()
-        attached_file = request.FILES.get("attached_file")
+        attached_file = (
+            request.FILES.get("attached_file")
+            or request.FILES.get("file")
+            or next(iter(request.FILES.values()), None)
+        )
         if not answer_text and not attached_file:
             return Response(
                 {"error": "Добавьте ответ или файл."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        existing = HomeworkSubmission.objects.filter(homework=hw, student=roster).first()
+
+        if attached_file:
+            from .upload_validation import UploadValidationError, validate_uploaded_file
+
+            try:
+                validate_uploaded_file(attached_file)
+            except UploadValidationError as exc:
+                return Response(
+                    {"error": exc.message, "code": exc.code},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        existing = (
+            HomeworkSubmission.objects.filter(homework=hw, student=roster)
+            .order_by("-submitted_at", "-id")
+            .first()
+        )
         if existing and existing.status == SubmissionStatus.CHECKED:
             return Response(
                 {"error": "Работа уже проверена."},
                 status=status.HTTP_403_FORBIDDEN,
             )
         if existing and existing.submitted_at and existing.status == SubmissionStatus.SUBMITTED:
-            return Response(
-                {"error": "Работа уже отправлена на проверку."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        submission, created = HomeworkSubmission.objects.get_or_create(
-            homework=hw,
-            student=roster,
-            defaults={"answer_text": answer_text, "status": SubmissionStatus.SUBMITTED},
-        )
-        if not created:
-            submission.answer_text = answer_text
-            submission.status = SubmissionStatus.SUBMITTED
-        submission.submitted_at = timezone.now()
-        if attached_file:
-            # Сохраняем в «Мои файлы» ученика и связываем со сдачей без лишней копии
-            from .files_services import FileServiceError, attach_file_for_student, upload_file
-
-            try:
-                cabinet_file = upload_file(request.user, attached_file)
-                submission.save()
-                attach_file_for_student(request.user, cabinet_file.id, submission)
-            except FileServiceError as exc:
+            # Уже сдали: можно только дослать файл, если его ещё не было.
+            if not attached_file or existing.attached_file:
                 return Response(
-                    {"error": exc.message, "code": exc.code},
-                    status=exc.status,
+                    {"error": "Работа уже отправлена на проверку."},
+                    status=status.HTTP_403_FORBIDDEN,
                 )
-        else:
-            submission.save()
+
+        submission = existing
+        if submission is None:
+            submission = HomeworkSubmission(
+                homework=hw,
+                student=roster,
+                status=SubmissionStatus.SUBMITTED,
+            )
+        # При досылке только файла не затираем уже сохранённый текст ответа.
+        if answer_text or not (existing and existing.submitted_at):
+            submission.answer_text = answer_text
+        submission.status = SubmissionStatus.SUBMITTED
+        submission.submitted_at = timezone.now()
+
+        # Надёжный путь для прода: сразу в FileField (cabinet/homework/),
+        # без зависимости от квоты «Мои файлы».
+        if attached_file:
+            try:
+                if hasattr(attached_file, "seek"):
+                    attached_file.seek(0)
+            except Exception:
+                pass
+            submission.attached_file = attached_file
+
+        submission.save()
+
         from .homework_api import _ensure_review_item
+        from .files_services import submission_file_url
 
         _ensure_review_item(submission)
-        return Response({"ok": True, "status": "submitted"})
+        attached_name = ""
+        if submission.attached_file:
+            attached_name = submission.attached_file.name.split("/")[-1]
+        return Response({
+            "ok": True,
+            "status": "submitted",
+            "attached_file_url": submission_file_url(submission, for_student=True),
+            "attached_file_name": attached_name,
+        })
+
+
+class StudentAssignmentAttachedFileView(StudentScopedView):
+    """Скачивание файла ответа ученика (без публичного /media/)."""
+
+    def get(self, request, homework_id):
+        import mimetypes
+
+        from django.http import FileResponse
+
+        from .files_storage import content_disposition
+
+        students, err = self.student_response_or_error()
+        if err:
+            return err
+        hw = _homework_qs(students).filter(pk=homework_id).first()
+        if not hw:
+            return Response({"error": "Задание не найдено."}, status=status.HTTP_404_NOT_FOUND)
+        roster = _pick_student(students, hw.teacher)
+        submission = (
+            HomeworkSubmission.objects.filter(homework=hw, student=roster)
+            .order_by("-submitted_at", "-id")
+            .first()
+        )
+        if not submission or not submission.attached_file:
+            return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            fh = submission.attached_file.open("rb")
+        except Exception:
+            return Response({"error": "Файл недоступен."}, status=status.HTTP_404_NOT_FOUND)
+        name = submission.attached_file.name.split("/")[-1] or "file"
+        content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        response = FileResponse(fh, content_type=content_type)
+        response["Content-Disposition"] = content_disposition(name, inline=False)
+        return response
 
 
 class StudentInteractivesView(StudentScopedView):

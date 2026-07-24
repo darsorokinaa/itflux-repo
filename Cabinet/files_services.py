@@ -1193,7 +1193,18 @@ def detach_relation(user, relation_id) -> dict:
     return {"ok": True}
 
 
+def submission_attached_file_api_url(submission: HomeworkSubmission, *, for_student: bool = True) -> str:
+    """Авторизованный URL скачивания ответа — без публичного /media/."""
+    if not submission or not submission.pk:
+        return ""
+    if for_student and submission.homework_id:
+        return f"/api/cabinet/student/assignments/{submission.homework_id}/attached-file/"
+    return f"/api/cabinet/homework/submissions/{submission.pk}/attached-file/"
+
+
 def submission_file_url(submission: HomeworkSubmission, *, for_student: bool = True) -> str:
+    if not submission:
+        return ""
     rel = (
         CabinetFileRelation.objects.filter(
             submission=submission,
@@ -1210,10 +1221,19 @@ def submission_file_url(submission: HomeworkSubmission, *, for_student: bool = T
             return f"/api/cabinet/student/files/shared/{rel.file_id}/download/"
         return f"/api/cabinet/files/{rel.file_id}/download/"
     if submission.attached_file:
-        name = submission.attached_file.name or ""
+        name = (submission.attached_file.name or "").lstrip("/")
         if name.startswith("cabinet/my-files/"):
+            # Закрытое хранилище: ищем CabinetFile и отдаём API-ссылку
+            file_obj = CabinetFile.objects.filter(storage_key=name).first()
+            if file_obj is None:
+                file_obj = CabinetFile.objects.filter(storage_key=name.lstrip("/")).first()
+            if file_obj is not None:
+                if for_student:
+                    return f"/api/cabinet/student/files/{file_obj.id}/download/"
+                return f"/api/cabinet/files/{file_obj.id}/download/"
             return ""
-        return submission.attached_file.url
+        # cabinet/homework/ и прочие FileField — только через авторизованный API
+        return submission_attached_file_api_url(submission, for_student=for_student)
     return ""
 
 

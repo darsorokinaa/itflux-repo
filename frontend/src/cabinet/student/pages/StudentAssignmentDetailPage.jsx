@@ -259,7 +259,15 @@ export default function StudentAssignmentDetailPage() {
     [item, variantSubmitted],
   );
 
-  const canEditAnswer = item && !["submitted", "checked"].includes(item.status) && !variantOnly;
+  const missingAttachment =
+    item?.status === "submitted"
+    && !item?.attached_file_url
+    && !item?.attached_file_name;
+  const canEditAnswer =
+    item
+    && !variantOnly
+    && item.status !== "checked"
+    && (item.status !== "submitted" || missingAttachment);
   const isChecked = item?.status === "checked";
   const dueLabel = item?.due_at ? formatDueDate(item.due_at) : "";
   const taskCount = item?.tasks?.length || 0;
@@ -292,6 +300,10 @@ export default function StudentAssignmentDetailPage() {
   }, [item, variantSubmitted]);
 
   const handleSubmit = async () => {
+    if (missingAttachment && !attachedFile) {
+      setValidationMsg("Прикрепите файл.");
+      return;
+    }
     if (!answer.trim() && !attachedFile) {
       setValidationMsg("Добавьте ответ или файл.");
       return;
@@ -300,16 +312,22 @@ export default function StudentAssignmentDetailPage() {
     setMsg("");
     setValidationMsg("");
     try {
+      const hadFile = Boolean(attachedFile);
       const formData = new FormData();
-      formData.append("answer_text", answer);
+      formData.append("answer_text", answer || "");
       if (attachedFile) {
-        formData.append("attached_file", attachedFile);
+        formData.append("attached_file", attachedFile, attachedFile.name || "file");
       }
-      await submitStudentAssignment(id, formData);
+      const result = await submitStudentAssignment(id, formData);
       setMsg("Ответ отправлен");
       setIsDirty(false);
       isDirtyRef.current = false;
+      setAttachedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       await loadAssignment({ preserveLocal: false });
+      if (hadFile && result && !result.attached_file_url && !result.attached_file_name) {
+        setMsg("Ответ отправлен, но файл мог не сохраниться. Проверьте вложение или отправьте ещё раз.");
+      }
     } catch (e) {
       setMsg(e.message || "Ошибка");
     } finally {
@@ -432,21 +450,28 @@ export default function StudentAssignmentDetailPage() {
               <h2 className="st-hw-card__title">Ваш ответ</h2>
               {canEditAnswer ? (
                 <>
-                  <textarea
-                    className="st-hw-textarea"
-                    value={answer}
-                    onChange={(e) => {
-                      setAnswer(e.target.value);
-                      setIsDirty(true);
-                      if (validationMsg) setValidationMsg("");
-                    }}
-                    placeholder="Напишите ответ или комментарий к выполненному заданию"
-                  />
+                  {missingAttachment ? (
+                    <div className="st-hw-answer-readonly">
+                      {answer?.trim() || item.answer_text?.trim() || "Ответ без файла"}
+                    </div>
+                  ) : (
+                    <textarea
+                      className="st-hw-textarea"
+                      value={answer}
+                      onChange={(e) => {
+                        setAnswer(e.target.value);
+                        setIsDirty(true);
+                        if (validationMsg) setValidationMsg("");
+                      }}
+                      placeholder="Напишите ответ или комментарий к выполненному заданию"
+                    />
+                  )}
                   <div className="st-hw-file-row">
                     <input
                       ref={fileInputRef}
                       type="file"
                       className="st-hw-file-input"
+                      accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.rtf,.csv,.png,.jpg,.jpeg,.gif,.webp,.zip,.rar,.7z,.py,.js,.html,.css"
                       onChange={(e) => {
                         setAttachedFile(e.target.files?.[0] || null);
                         setIsDirty(true);
@@ -464,7 +489,9 @@ export default function StudentAssignmentDetailPage() {
                     <span className="st-hw-file-name">
                       {attachedFile?.name
                         || item.attached_file_name
-                        || "Можно добавить текст или файл"}
+                        || (missingAttachment
+                          ? "Файл ещё не прикреплён — добавьте его"
+                          : "Можно добавить текст или файл")}
                     </span>
                     {attachedFile ? (
                       <button
@@ -519,7 +546,11 @@ export default function StudentAssignmentDetailPage() {
                   onClick={handleSubmit}
                   disabled={submitting}
                 >
-                  {submitting ? "Отправка…" : "Сдать задание"}
+                  {submitting
+                    ? "Отправка…"
+                    : missingAttachment
+                      ? "Дослать файл"
+                      : "Сдать задание"}
                 </button>
               ) : (
                 <button type="button" className="st-hw-submit__btn st-hw-submit__btn--sent" disabled>
@@ -565,7 +596,11 @@ export default function StudentAssignmentDetailPage() {
               onClick={handleSubmit}
               disabled={submitting}
             >
-              {submitting ? "Отправка…" : "Сдать задание"}
+              {submitting
+                ? "Отправка…"
+                : missingAttachment
+                  ? "Дослать файл"
+                  : "Сдать задание"}
             </button>
           ) : (
             <button type="button" className="st-hw-submit__btn st-hw-submit__btn--sent" disabled>

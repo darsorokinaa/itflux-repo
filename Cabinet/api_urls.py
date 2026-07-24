@@ -82,6 +82,11 @@ urlpatterns = [
     path("student/lessons/<int:assignment_id>/", student_api.StudentLessonDetailView.as_view(), name="student_lesson_detail"),
     path("student/assignments/", student_api.StudentAssignmentsView.as_view(), name="student_assignments"),
     path("student/assignments/<int:homework_id>/", student_api.StudentAssignmentDetailView.as_view(), name="student_assignment_detail"),
+    path(
+        "student/assignments/<int:homework_id>/attached-file/",
+        student_api.StudentAssignmentAttachedFileView.as_view(),
+        name="student_assignment_attached_file",
+    ),
     path("student/interactives/", student_api.StudentInteractivesView.as_view(), name="student_interactives"),
     path("student/interactives/<int:assignment_id>/", student_api.StudentInteractiveDetailView.as_view(), name="student_interactive_detail"),
     path("student/schedule/", student_api.StudentScheduleView.as_view(), name="student_schedule"),
@@ -130,6 +135,11 @@ urlpatterns = [
     path("reports/topics/", api_views.ReportsTopicsView.as_view(), name="cabinet_reports_topics"),
     path("reports/parent-summary/", api_views.ReportsParentSummaryView.as_view(), name="cabinet_reports_parent_summary"),
     path("homework/<int:homework_id>/", api_views.HomeworkDeleteView.as_view(), name="cabinet_homework_delete"),
+    path(
+        "homework/submissions/<int:submission_id>/attached-file/",
+        api_views.HomeworkSubmissionAttachedFileView.as_view(),
+        name="cabinet_homework_submission_attached_file",
+    ),
     path("direct-materials/", api_views.DirectMaterialAssignView.as_view(), name="direct_materials"),
     path("direct-materials/<int:pk>/", api_views.DirectMaterialAssignView.as_view(), name="direct_materials_delete"),
     path("lesson-plans/subjects/", api_views.LessonPlanSubjectOptionsView.as_view(), name="cabinet_lesson_plan_subjects"),
