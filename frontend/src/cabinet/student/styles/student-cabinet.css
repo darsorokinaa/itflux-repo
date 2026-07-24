@@ -4159,10 +4159,20 @@
 }
 
 .st-hw-file-input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
 }
 
 .st-hw-file-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -4180,6 +4190,7 @@
 .st-hw-file-btn svg {
   width: 14px;
   height: 14px;
+  flex-shrink: 0;
 }
 
 .st-hw-file-btn:hover {
@@ -4187,9 +4198,24 @@
   color: #2563EB;
 }
 
+.st-hw-file-btn--selected {
+  border-color: #2563EB;
+  color: #1D4ED8;
+  background: #EFF6FF;
+}
+
 .st-hw-file-name {
   font-size: 0.78rem;
   color: #64748B;
+  max-width: min(100%, 280px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.st-hw-file-name--selected {
+  color: #1E293B;
+  font-weight: 600;
 }
 
 .st-hw-file-link {

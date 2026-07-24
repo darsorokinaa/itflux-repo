@@ -10,7 +10,7 @@ ALLOWED_UPLOAD_EXTENSIONS = frozenset({
     # documents
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".rtf", ".csv",
     # images
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".heic", ".heif",
     # audio / video
     ".mp3", ".wav", ".ogg", ".m4a", ".mp4", ".webm", ".mov",
     # archives
@@ -23,6 +23,7 @@ ALLOWED_UPLOAD_EXTENSIONS = frozenset({
 ALLOWED_UPLOAD_CONTENT_TYPES = frozenset({
     "application/pdf",
     "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml", "image/bmp",
+    "image/heic", "image/heif",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.ms-excel",

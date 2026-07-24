@@ -301,11 +301,11 @@ export default function StudentAssignmentDetailPage() {
 
   const handleSubmit = async () => {
     if (missingAttachment && !attachedFile) {
-      setValidationMsg("Прикрепите файл.");
+      setValidationMsg("Прикрепите файл ответа, затем нажмите «Дослать файл».");
       return;
     }
     if (!answer.trim() && !attachedFile) {
-      setValidationMsg("Добавьте ответ или файл.");
+      setValidationMsg("Сначала напишите ответ или нажмите «Прикрепить файл» и выберите файл.");
       return;
     }
     setSubmitting(true);
@@ -467,26 +467,27 @@ export default function StudentAssignmentDetailPage() {
                     />
                   )}
                   <div className="st-hw-file-row">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      className="st-hw-file-input"
-                      accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.rtf,.csv,.png,.jpg,.jpeg,.gif,.webp,.zip,.rar,.7z,.py,.js,.html,.css"
-                      onChange={(e) => {
-                        setAttachedFile(e.target.files?.[0] || null);
-                        setIsDirty(true);
-                        if (validationMsg) setValidationMsg("");
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="st-hw-file-btn"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
+                    <label className={`st-hw-file-btn${attachedFile ? " st-hw-file-btn--selected" : ""}`}>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        className="st-hw-file-input"
+                        accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.rtf,.csv,.png,.jpg,.jpeg,.gif,.webp,.zip,.rar,.7z,.py,.js,.html,.css,.heic,.heif"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          setAttachedFile(file);
+                          setIsDirty(Boolean(file) || isDirtyRef.current);
+                          if (validationMsg) setValidationMsg("");
+                          if (file) setMsg("");
+                        }}
+                      />
                       <CabinetIcon name="folder" />
-                      Прикрепить файл
-                    </button>
-                    <span className="st-hw-file-name">
+                      {attachedFile ? "Файл выбран" : "Прикрепить файл"}
+                    </label>
+                    <span
+                      className={`st-hw-file-name${attachedFile ? " st-hw-file-name--selected" : ""}`}
+                      title={attachedFile?.name || undefined}
+                    >
                       {attachedFile?.name
                         || item.attached_file_name
                         || (missingAttachment
