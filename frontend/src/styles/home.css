@@ -1184,6 +1184,16 @@
   color: inherit !important;
 }
 
+/* Школьная алгебра: длинные формулы с корнями/дробями — крупнее */
+.all-tasks-page[data-level="school"][data-subject="algebra"] .all-tasks-item__html {
+  font-size: 1.1rem;
+  line-height: 1.8;
+}
+
+.all-tasks-page[data-level="school"][data-subject="algebra"] .all-tasks-item__html mjx-container {
+  font-size: 1.5em !important;
+}
+
 .all-tasks-item__html mjx-container[display="true"] {
   display: block;
   margin: 0.5em 0;

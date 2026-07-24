@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 import { displayName } from "../pages/CabinetAuthPage";
-import { fetchCabinetSession, logoutCabinet } from "../utils/cabinetAuth";
+import { fetchCabinetSession, fetchNavCounts, logoutCabinet } from "../utils/cabinetAuth";
 import CabinetIcon from "./CabinetIcons";
 import {
   CABINET_MOBILE_NAV,
@@ -24,11 +24,16 @@ const PAGE_TITLE = "Кабинет учителя — Цифровой пото�
 const GUIDE_SEEN_KEY = "cabinet-guide-seen-v1";
 const GUIDE_OPEN_ON_REGISTER_KEY = "cabinet-guide-open-on-register";
 
+function formatNavCount(count) {
+  if (!count || count <= 0) return null;
+  return count > 99 ? "99+" : String(count);
+}
+
 function SoonBadge() {
   return <span className="cabinet-soon-badge">скоро</span>;
 }
 
-function NavSidebarItem({ item, active }) {
+function NavSidebarItem({ item, active, badgeCount = 0 }) {
   const className = [
     "cabinet-nav-item",
     item.accent ? "cabinet-nav-item--accent" : "",
@@ -38,16 +43,35 @@ function NavSidebarItem({ item, active }) {
     item.disabled ? "cabinet-nav-item--disabled" : "",
   ].filter(Boolean).join(" ");
 
+  const countLabel = formatNavCount(badgeCount);
+  const ariaLabel = countLabel ? `${item.label}, ${countLabel}` : item.label;
+  const badgeAccent = item.id === "review";
+
   const content = (
     <>
       <span className="cabinet-nav-item__icon">
         <CabinetIcon name={item.icon} />
         {item.soon ? <span className="cabinet-nav-soon-dot" aria-hidden="true" /> : null}
+        {countLabel ? (
+          <span
+            className={`cabinet-nav-item__badge cabinet-nav-item__badge--icon${badgeAccent ? " cabinet-nav-item__badge--accent" : ""}`}
+            aria-hidden="true"
+          >
+            {countLabel}
+          </span>
+        ) : null}
       </span>
       <span className="cabinet-nav-item__label">{item.label}</span>
       {item.soon ? (
         <span className="cabinet-nav-item__soon">
           <SoonBadge />
+        </span>
+      ) : countLabel ? (
+        <span
+          className={`cabinet-nav-item__badge cabinet-nav-item__badge--label${badgeAccent ? " cabinet-nav-item__badge--accent" : ""}`}
+          aria-hidden="true"
+        >
+          {countLabel}
         </span>
       ) : null}
     </>
@@ -55,7 +79,7 @@ function NavSidebarItem({ item, active }) {
 
   if (item.disabled) {
     return (
-      <span className={className} aria-label={item.label} aria-disabled="true" title="Скоро">
+      <span className={className} aria-label={ariaLabel} aria-disabled="true" title="Скоро">
         {content}
       </span>
     );
@@ -65,7 +89,7 @@ function NavSidebarItem({ item, active }) {
     <Link
       to={item.path}
       className={className}
-      aria-label={item.label}
+      aria-label={ariaLabel}
       target={item.newTab ? "_blank" : undefined}
       rel={item.newTab ? "noopener noreferrer" : undefined}
     >
@@ -82,6 +106,7 @@ export default function CabinetLayout() {
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [navCounts, setNavCounts] = useState({ students: 0, reviews: 0 });
   const searchInputRef = useRef(null);
   const subscription = useSubscription();
   const planName = subscription.currentPlan?.name || "";
@@ -96,6 +121,32 @@ export default function CabinetLayout() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  const loadNavCounts = useCallback(async () => {
+    try {
+      const data = await fetchNavCounts();
+      setNavCounts({
+        students: Number(data?.students_count) || 0,
+        reviews: Number(data?.reviews_count) || 0,
+      });
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (loading || !user || user.role === "student") return undefined;
+    loadNavCounts();
+    const id = setInterval(loadNavCounts, 60000);
+    const onRefresh = () => loadNavCounts();
+    window.addEventListener("cabinet:nav-counts-refresh", onRefresh);
+    window.addEventListener("focus", onRefresh);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("cabinet:nav-counts-refresh", onRefresh);
+      window.removeEventListener("focus", onRefresh);
+    };
+  }, [loading, user, loadNavCounts, location.pathname]);
 
   useEffect(() => {
     setSearchOpen(false);
@@ -171,6 +222,12 @@ export default function CabinetLayout() {
     ? "cabinet-content"
     : "cabinet-content cabinet-content--page";
   const sectionTitle = getCabinetSectionTitle(location.pathname);
+  const navBadgeForItem = (itemId) => {
+    if (itemId === "students") return navCounts.students;
+    if (itemId === "review") return navCounts.reviews;
+    return 0;
+  };
+
   const outletContext = {
     user,
     handleLogout,
@@ -178,6 +235,7 @@ export default function CabinetLayout() {
     openGuide,
     currentPlan: subscription.currentPlan,
     subscriptionLoading: subscription.loading,
+    navCounts,
   };
 
   return (
@@ -194,6 +252,7 @@ export default function CabinetLayout() {
                     key={item.id}
                     item={item}
                     active={isCabinetNavActive(location.pathname, item)}
+                    badgeCount={navBadgeForItem(item.id)}
                   />
                 ))}
               </div>
@@ -298,16 +357,36 @@ export default function CabinetLayout() {
       </main>
 
       <nav className="cb-mobile-nav cb-teacher-mobile-nav" aria-label="Мобильная навигация">
-        {CABINET_MOBILE_NAV.map((item) => (
-          <Link
-            key={item.id}
-            to={item.path}
-            className={`cb-mobile-nav__item cb-teacher-mobile-nav__item${isCabinetMobileNavActive(location.pathname, item) ? " is-active" : ""}`}
-          >
-            <CabinetIcon name={item.icon} />
-            <span>{item.label}</span>
-          </Link>
-        ))}
+        {CABINET_MOBILE_NAV.map((item) => {
+          const mobileBadge = item.id === "students"
+            ? navCounts.students
+            : item.id === "more"
+              ? navCounts.reviews
+              : 0;
+          const mobileCount = formatNavCount(mobileBadge);
+          const ariaLabel = mobileCount ? `${item.label}, ${mobileCount}` : item.label;
+          return (
+            <Link
+              key={item.id}
+              to={item.path}
+              aria-label={ariaLabel}
+              className={`cb-mobile-nav__item cb-teacher-mobile-nav__item${isCabinetMobileNavActive(location.pathname, item) ? " is-active" : ""}`}
+            >
+              <span className="cb-mobile-nav__icon-wrap">
+                <CabinetIcon name={item.icon} />
+                {mobileCount ? (
+                  <span
+                    className={`cb-mobile-nav__badge${item.id === "more" ? " cb-mobile-nav__badge--accent" : ""}`}
+                    aria-hidden="true"
+                  >
+                    {mobileCount}
+                  </span>
+                ) : null}
+              </span>
+              <span>{item.label}</span>
+            </Link>
+          );
+        })}
       </nav>
       <CabinetGuideModal open={guideOpen} onClose={closeGuide} onComplete={completeGuide} />
       <ConfirmActionModal

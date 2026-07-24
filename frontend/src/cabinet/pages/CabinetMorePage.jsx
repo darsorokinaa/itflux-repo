@@ -4,7 +4,14 @@ import CabinetIcon from "../CabinetIcons";
 import { CABINET_MORE_GROUPS } from "../cabinetNav";
 import { CabinetPageShell, CabinetPageHeader, CabinetSoonBadge } from "../CabinetSectionUi";
 
-function MoreCard({ item, onSettings, onGuide, onNotifications }) {
+function formatNavCount(count) {
+  if (!count || count <= 0) return null;
+  return count > 99 ? "99+" : String(count);
+}
+
+function MoreCard({ item, onSettings, onGuide, onNotifications, badgeCount = 0 }) {
+  const countLabel = formatNavCount(badgeCount);
+
   if (item.action === "settings") {
     return (
       <button type="button" className="cb-more-card" onClick={onSettings}>
@@ -46,8 +53,18 @@ function MoreCard({ item, onSettings, onGuide, onNotifications }) {
 
   const content = (
     <>
-      <span className="cb-more-card__icon">
-        <CabinetIcon name={item.icon} />
+      <span className="cb-more-card__top">
+        <span className="cb-more-card__icon">
+          <CabinetIcon name={item.icon} />
+        </span>
+        {countLabel ? (
+          <span
+            className={`cb-more-card__badge${item.id === "review" ? " cb-more-card__badge--accent" : ""}`}
+            aria-hidden="true"
+          >
+            {countLabel}
+          </span>
+        ) : null}
       </span>
       <span className="cb-more-card__label">{item.label}</span>
       {item.soon ? <CabinetSoonBadge /> : null}
@@ -63,7 +80,11 @@ function MoreCard({ item, onSettings, onGuide, onNotifications }) {
   }
 
   return (
-    <Link to={item.path} className={className}>
+    <Link
+      to={item.path}
+      className={className}
+      aria-label={countLabel ? `${item.label}, ${countLabel}` : item.label}
+    >
       {content}
     </Link>
   );
@@ -71,7 +92,15 @@ function MoreCard({ item, onSettings, onGuide, onNotifications }) {
 
 export default function CabinetMorePage() {
   const navigate = useNavigate();
-  const { user, handleLogout, loggingOut, openGuide, currentPlan, subscriptionLoading } = useOutletContext();
+  const {
+    user,
+    handleLogout,
+    loggingOut,
+    openGuide,
+    currentPlan,
+    subscriptionLoading,
+    navCounts,
+  } = useOutletContext();
   const name = user ? displayName(user) : "";
   const planName = currentPlan?.name || "";
 
@@ -86,6 +115,12 @@ export default function CabinetMorePage() {
   const openNotifications = () => window.dispatchEvent(new Event("cabinet:open-notifications"));
   const openSettings = () => navigate("/cabinet/settings/notifications/");
 
+  const badgeForItem = (itemId) => {
+    if (itemId === "review") return navCounts?.reviews || 0;
+    if (itemId === "students") return navCounts?.students || 0;
+    return 0;
+  };
+
   return (
     <CabinetPageShell>
       <CabinetPageHeader title="Ещё" />
@@ -98,6 +133,7 @@ export default function CabinetMorePage() {
                 <MoreCard
                   key={item.id}
                   item={item}
+                  badgeCount={badgeForItem(item.id)}
                   onSettings={openSettings}
                   onGuide={openGuide}
                   onNotifications={openNotifications}

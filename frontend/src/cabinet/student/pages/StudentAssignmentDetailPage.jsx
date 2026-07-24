@@ -9,7 +9,6 @@ import { parseVariantApiUrl } from "../../cabinetReviewUtils";
 import CabinetIcon from "../../CabinetIcons";
 import {
   StudentPageShell,
-  StudentStatusBadge,
   formatDueDate,
 } from "../StudentSectionUi";
 
@@ -110,46 +109,48 @@ function AssignmentResourceCard({ task, isChecked, hasResultsBlock, onScrollToRe
     && task.task_type === "text";
 
   return (
-    <article className={`st-hw-resource${task.is_variant ? " st-hw-resource--variant" : ""}`}>
-      <div className="st-hw-resource__left">
-        <span className="st-hw-resource__icon" aria-hidden="true">
-          <CabinetIcon name={meta.icon} />
-        </span>
-        <div className="st-hw-resource__body">
-          <strong className="st-hw-resource__title">{task.title}</strong>
-          <span className="st-hw-resource__type">{meta.typeLabel}</span>
-          {hint ? <span className="st-hw-resource__hint">{hint}</span> : null}
-          {showDescription ? (
-            <p className="st-hw-resource__desc">{task.description}</p>
-          ) : null}
+    <article className={`st-hw-material${task.is_variant ? " st-hw-material--variant" : ""}`}>
+      <div className="st-hw-material__icon" aria-hidden="true">
+        <CabinetIcon name={meta.icon} />
+      </div>
+      <div className="st-hw-material__main">
+        <div className="st-hw-material__name" title={task.title}>{task.title}</div>
+        <div className="st-hw-material__meta">
+          <span>{meta.typeLabel}</span>
+          {hint ? <span>{hint}</span> : null}
         </div>
+        {showDescription ? (
+          <p className="st-hw-material__desc">{task.description}</p>
+        ) : null}
       </div>
       {action ? (
-        action.scrollToResults ? (
-          <button
-            type="button"
-            className={`st-hw-resource__btn${action.variant ? " st-hw-resource__btn--primary" : ""}`}
-            onClick={onScrollToResults}
-          >
-            {action.label}
-          </button>
-        ) : action.external ? (
-          <a
-            href={action.href}
-            className={`st-hw-resource__btn${action.variant ? " st-hw-resource__btn--primary" : ""}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {action.label}
-          </a>
-        ) : (
-          <Link
-            to={action.href}
-            className={`st-hw-resource__btn${action.variant ? " st-hw-resource__btn--primary" : ""}`}
-          >
-            {action.label}
-          </Link>
-        )
+        <div className="st-hw-material__action">
+          {action.scrollToResults ? (
+            <button
+              type="button"
+              className={`st-hw-btn st-hw-btn--small${action.variant ? " st-hw-btn--primary" : ""}`}
+              onClick={onScrollToResults}
+            >
+              {action.label}
+            </button>
+          ) : action.external ? (
+            <a
+              href={action.href}
+              className={`st-hw-btn st-hw-btn--small${action.variant ? " st-hw-btn--primary" : ""}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {action.label}
+            </a>
+          ) : (
+            <Link
+              to={action.href}
+              className={`st-hw-btn st-hw-btn--small${action.variant ? " st-hw-btn--primary" : ""}`}
+            >
+              {action.label}
+            </Link>
+          )}
+        </div>
       ) : null}
     </article>
   );
@@ -168,12 +169,12 @@ function parseVariantMeta(openUrl) {
   }
 }
 
-function SummaryRow({ label, value }) {
-  if (!value) return null;
+function SummaryRow({ label, value, emphasize }) {
+  if (value == null || value === "") return null;
   return (
     <div className="st-hw-summary__row">
       <dt>{label}</dt>
-      <dd>{value}</dd>
+      <dd className={emphasize ? "st-hw-summary__status" : undefined}>{value}</dd>
     </div>
   );
 }
@@ -374,46 +375,118 @@ export default function StudentAssignmentDetailPage() {
     ? "Откройте вариант, решите задания и отправьте работу на проверку."
     : "Откройте материалы, выполните задание и отправьте ответ.";
   const briefText = item.description?.trim() || defaultBrief;
+  const materialTasks = (item.tasks || []).filter((task) => {
+    if (task.is_variant || task.task_type === "generated_task" || task.task_type === "interactive") {
+      return true;
+    }
+    if (resolveTaskHref(task) || task.task_type === "file") return true;
+    if (task.task_type === "text") {
+      const desc = (task.description || "").trim();
+      return desc && desc !== briefText;
+    }
+    return Boolean(task.title);
+  });
+  const materialsCount = materialTasks.length || taskCount;
+  const manualStats = item?.result?.manual_stats || null;
+  const draftHint = isDirty
+    ? "Есть несохранённые изменения"
+    : canEditAnswer
+      ? "Черновик не сохранён"
+      : isChecked
+        ? "Работа проверена"
+        : "Ответ отправлен";
+  const summaryNote = isChecked
+    ? (item.teacher_comment?.trim()
+      ? item.teacher_comment
+      : "Учитель проверил работу. Результаты — в блоке ниже.")
+    : canEditAnswer
+      ? "Добавьте текст или файл, затем отправьте работу преподавателю."
+      : "Ответ отправлен преподавателю. Результаты появятся после проверки.";
 
   return (
-    <StudentPageShell className="st-hw-page">
-      <header className="st-hw-header">
-        <button
-          type="button"
-          className="st-hw-back"
-          onClick={() => navigate("/cabinet/student/assignments")}
-        >
-          <CabinetIcon name="arrowLeft" />
-          Назад
-        </button>
+    <StudentPageShell className="st-hw-page st-hw-page--redesign">
+      <button
+        type="button"
+        className="st-hw-back"
+        onClick={() => navigate("/cabinet/student/assignments")}
+      >
+        <CabinetIcon name="arrowLeft" />
+        Назад
+      </button>
 
-        <div className="st-hw-header__main">
-          <div className="st-hw-header__title-row">
-            <h1 className="st-hw-header__title">{item.title}</h1>
-            {badge ? <StudentStatusBadge status={badge.status} label={badge.label} /> : null}
+      <header className="st-hw-topbar">
+        <div className="st-hw-topbar__title">
+          <h1>{item.title || "Домашнее задание"}</h1>
+          <p className="st-hw-topbar__subtitle">{item.type_label || "Домашнее задание"}</p>
+          <div className="st-hw-meta-row" aria-label="Сведения о задании">
+            {badge ? (
+              <span className="st-hw-status-pill">
+                <span aria-hidden="true">●</span>
+                {badge.label}
+              </span>
+            ) : null}
+            {dueLabel ? (
+              <span className="st-hw-meta-pill">
+                <CabinetIcon name="clock" />
+                Срок: {dueLabel}
+              </span>
+            ) : null}
+            <span className="st-hw-meta-pill">
+              <CabinetIcon name="folder" />
+              {materialsCount} {materialsCount === 1 ? "материал" : "материалов"}
+            </span>
           </div>
-          <p className="st-hw-header__type">{item.type_label || "Домашнее задание"}</p>
-          {dueLabel ? (
-            <p className="st-hw-header__due">
-              <CabinetIcon name="clock" />
-              Срок: {dueLabel}
-            </p>
-          ) : null}
         </div>
+        {!variantOnly ? (
+          <div className="st-hw-top-actions">
+            {canEditAnswer ? (
+              <button
+                type="button"
+                className="st-hw-btn st-hw-btn--primary"
+                onClick={handleSubmit}
+                disabled={submitting}
+              >
+                {submitting
+                  ? "Отправка…"
+                  : missingAttachment
+                    ? "Дослать файл"
+                    : "Отправить ответ"}
+              </button>
+            ) : (
+              <button type="button" className="st-hw-btn st-hw-btn--primary" disabled>
+                {isChecked ? "Проверено" : "Отправлено"}
+              </button>
+            )}
+          </div>
+        ) : null}
       </header>
 
       <div className="st-hw-layout">
         <div className="st-hw-main">
-          <section className="st-hw-card">
-            <h2 className="st-hw-card__title">Что нужно сделать</h2>
-            <p className="st-hw-card__text">{briefText}</p>
+          <section className="st-hw-card st-hw-card--task">
+            <div className="st-hw-section-head">
+              <div>
+                <h2 className="st-hw-card__title">Что нужно сделать</h2>
+                <p className="st-hw-section-desc">Инструкция преподавателя</p>
+              </div>
+            </div>
+            <div className="st-hw-task-text-wrap">
+              <p className="st-hw-task-text">{briefText}</p>
+            </div>
           </section>
 
           <section className="st-hw-card">
-            <h2 className="st-hw-card__title">Задания и материалы</h2>
-            {taskCount > 0 ? (
-              <div className="st-hw-resources">
-                {item.tasks.map((task) => (
+            <div className="st-hw-section-head">
+              <div>
+                <h2 className="st-hw-card__title">Материалы</h2>
+                <p className="st-hw-section-desc">
+                  Откройте материалы, необходимые для выполнения задания
+                </p>
+              </div>
+            </div>
+            {materialTasks.length > 0 ? (
+              <div className="st-hw-materials">
+                {materialTasks.map((task) => (
                   <AssignmentResourceCard
                     key={task.id}
                     task={task}
@@ -441,84 +514,142 @@ export default function StudentAssignmentDetailPage() {
             </section>
           ) : null}
 
-          {isChecked && item.result ? (
+          {isChecked && hasVariant && item.result && !homeworkReview ? (
+            <section className="st-hw-card">
+              <p className="st-hw-card__text">Загрузка результатов…</p>
+            </section>
+          ) : null}
+
+          {isChecked && homeworkReview ? (
             <div id={STUDENT_HW_RESULTS_ID} className="st-hw-results-anchor">
-              {homeworkReview ? (
-                <HomeworkReviewResults
-                  review={homeworkReview}
-                  teacherComment={item.teacher_comment}
-                  className="st-hw-review"
-                />
-              ) : (
-                <section className="st-hw-card">
-                  <p className="st-hw-card__text">Загрузка результатов…</p>
-                </section>
-              )}
+              <HomeworkReviewResults
+                review={homeworkReview}
+                teacherComment={item.teacher_comment}
+                className="st-hw-review"
+              />
             </div>
           ) : null}
 
+          {isChecked && !hasVariant ? (
+            <section id={STUDENT_HW_RESULTS_ID} className="st-hw-card st-hw-card--result">
+              <div className="st-hw-section-head">
+                <div>
+                  <h2 className="st-hw-card__title">Результаты</h2>
+                  <p className="st-hw-section-desc">Оценка и комментарий преподавателя</p>
+                </div>
+              </div>
+              {item.result_percent != null ? (
+                <p className="st-hw-result-score">{Math.round(item.result_percent)}%</p>
+              ) : null}
+              {manualStats ? (
+                <div className="st-hw-manual-stats">
+                  <div><span>Всего</span><strong>{manualStats.total ?? "—"}</strong></div>
+                  <div><span>Правильно</span><strong>{manualStats.correct ?? "—"}</strong></div>
+                  <div><span>Неправильно</span><strong>{manualStats.incorrect ?? "—"}</strong></div>
+                  <div><span>Не решено</span><strong>{manualStats.unsolved ?? "—"}</strong></div>
+                </div>
+              ) : null}
+              {item.teacher_comment?.trim() ? (
+                <div className="st-hw-teacher-comment">
+                  <span className="st-hw-teacher-comment__label">Комментарий учителя</span>
+                  <p>{item.teacher_comment}</p>
+                </div>
+              ) : (
+                <p className="st-hw-empty">Комментарий пока не добавлен</p>
+              )}
+            </section>
+          ) : null}
+
           {!variantOnly ? (
-            <section className="st-hw-card st-hw-card--answer">
-              <h2 className="st-hw-card__title">Ваш ответ</h2>
+            <section className="st-hw-card st-hw-card--answer" id="answerSection">
+              <div className="st-hw-section-head">
+                <div>
+                  <h2 className="st-hw-card__title">Ваш ответ</h2>
+                  <p className="st-hw-section-desc">
+                    Напишите комментарий или прикрепите выполненное задание
+                  </p>
+                </div>
+              </div>
+
               {canEditAnswer ? (
                 <>
-                  {missingAttachment ? (
-                    <div className="st-hw-answer-readonly">
-                      {answer?.trim() || item.answer_text?.trim() || "Ответ без файла"}
-                    </div>
-                  ) : (
-                    <textarea
-                      className="st-hw-textarea"
-                      value={answer}
-                      onChange={(e) => {
-                        setAnswer(e.target.value);
-                        setIsDirty(true);
-                        if (validationMsg) setValidationMsg("");
-                      }}
-                      placeholder="Напишите ответ или комментарий к выполненному заданию"
-                    />
-                  )}
-                  <div className="st-hw-file-row">
-                    <label className={`st-hw-file-btn${attachedFile ? " st-hw-file-btn--selected" : ""}`}>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        className="st-hw-file-input"
+                  <div className="st-hw-answer-box">
+                    {missingAttachment ? (
+                      <div className="st-hw-answer-readonly st-hw-answer-readonly--in-box">
+                        {answer?.trim() || item.answer_text?.trim() || "Ответ без файла"}
+                      </div>
+                    ) : (
+                      <textarea
+                        className="st-hw-textarea"
+                        value={answer}
                         onChange={(e) => {
-                          const file = e.target.files?.[0] || null;
-                          setAttachedFile(file);
+                          setAnswer(e.target.value);
                           setIsDirty(true);
                           isDirtyRef.current = true;
                           if (validationMsg) setValidationMsg("");
-                          if (file) setMsg("");
+                          if (msg) setMsg("");
                         }}
+                        placeholder="Напишите ответ или комментарий к выполненному заданию"
+                        aria-label="Текст ответа"
                       />
-                      <CabinetIcon name="folder" />
-                      {attachedFile ? "Файл выбран" : "Прикрепить файл"}
-                    </label>
-                    <span
-                      className={`st-hw-file-name${attachedFile ? " st-hw-file-name--selected" : ""}`}
-                      title={attachedFile?.name || undefined}
-                    >
-                      {attachedFile?.name
-                        || item.attached_file_name
-                        || (missingAttachment
-                          ? "Файл ещё не прикреплён — добавьте его"
-                          : "Можно добавить текст или файл")}
-                    </span>
-                    {attachedFile ? (
-                      <button
-                        type="button"
-                        className="st-hw-file-btn st-hw-file-btn--remove"
-                        onClick={clearAttachedFile}
-                      >
-                        Убрать файл
-                      </button>
-                    ) : null}
+                    )}
+                    <div className="st-hw-attachment-area">
+                      <div className="st-hw-attach-left">
+                        <label className={`st-hw-btn st-hw-btn--small${attachedFile ? " is-selected" : ""}`}>
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            className="st-hw-file-input"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0] || null;
+                              setAttachedFile(file);
+                              setIsDirty(true);
+                              isDirtyRef.current = true;
+                              if (validationMsg) setValidationMsg("");
+                              if (file) setMsg("");
+                            }}
+                          />
+                          {attachedFile ? "Файл выбран" : "Прикрепить файл"}
+                        </label>
+                        <span className="st-hw-attach-hint">
+                          Можно добавить текст, фотографию или документ
+                        </span>
+                      </div>
+                      <span className="st-hw-attach-hint">{draftHint}</span>
+                    </div>
                   </div>
-                  {validationMsg ? (
-                    <p className="st-hw-validation" role="alert">{validationMsg}</p>
+                  {attachedFile || item.attached_file_name ? (
+                    <div className="st-hw-attached-files is-visible">
+                      <div className="st-hw-attached-file">
+                        <span>{attachedFile?.name || item.attached_file_name}</span>
+                        {attachedFile ? (
+                          <button type="button" className="st-hw-remove-file" onClick={clearAttachedFile}>
+                            Удалить
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
                   ) : null}
+                  {validationMsg ? (
+                    <p className="st-hw-validation is-visible" role="alert">{validationMsg}</p>
+                  ) : null}
+                  {msg ? (
+                    <div className="st-hw-success is-visible" role="status">{msg}</div>
+                  ) : null}
+                  <div className="st-hw-answer-actions">
+                    <button
+                      type="button"
+                      className="st-hw-btn st-hw-btn--primary st-hw-btn--mobile-send"
+                      onClick={handleSubmit}
+                      disabled={submitting}
+                    >
+                      {submitting
+                        ? "Отправка…"
+                        : missingAttachment
+                          ? "Дослать файл"
+                          : "Отправить ответ"}
+                    </button>
+                  </div>
                 </>
               ) : (
                 <div className="st-hw-answer-readonly">
@@ -534,96 +665,22 @@ export default function StudentAssignmentDetailPage() {
               )}
             </section>
           ) : null}
-
-          {(isChecked || item.result_percent != null) ? (
-            <section className="st-hw-card st-hw-card--result">
-              <h2 className="st-hw-card__title">Результат</h2>
-              {item.result_percent != null ? (
-                <p className="st-hw-result-score">{Math.round(item.result_percent)}%</p>
-              ) : null}
-              {item.teacher_comment && !homeworkReview ? (
-                <div className="st-hw-teacher-comment">
-                  <span className="st-hw-teacher-comment__label">Комментарий учителя</span>
-                  <p>{item.teacher_comment}</p>
-                </div>
-              ) : null}
-            </section>
-          ) : null}
-
-          {!variantOnly ? (
-            <div className="st-hw-submit st-hw-submit--desktop">
-              {canEditAnswer ? (
-                <button
-                  type="button"
-                  className="st-hw-submit__btn"
-                  onClick={handleSubmit}
-                  disabled={submitting}
-                >
-                  {submitting
-                    ? "Отправка…"
-                    : missingAttachment
-                      ? "Дослать файл"
-                      : "Сдать задание"}
-                </button>
-              ) : (
-                <button type="button" className="st-hw-submit__btn st-hw-submit__btn--sent" disabled>
-                  {isChecked ? "Задание проверено" : "Ответ отправлен"}
-                </button>
-              )}
-            </div>
-          ) : null}
         </div>
 
-        <aside className="st-hw-summary">
-          <div className="st-hw-summary__card">
-            <h2 className="st-hw-summary__title">Сводка</h2>
-            <dl className="st-hw-summary__list">
-              <SummaryRow label="Статус" value={badge?.label} />
-              <SummaryRow label="Срок" value={dueLabel || null} />
-              <SummaryRow label="Урок" value={item.topic || null} />
-              <SummaryRow label="Материалы" value={taskCount ? String(taskCount) : "0"} />
-              <SummaryRow label="Ответ" value={answerSummary} />
-              {isChecked && item.result_percent != null ? (
-                <SummaryRow
-                  label="Результат"
-                  value={`${Math.round(item.result_percent)}%`}
-                />
-              ) : null}
-            </dl>
-            {isChecked && item.teacher_comment ? (
-              <div className="st-hw-summary__comment">
-                <span>Комментарий учителя</span>
-                <p>{item.teacher_comment}</p>
-              </div>
+        <aside className="st-hw-summary" aria-label="Сводка по домашнему заданию">
+          <h2 className="st-hw-summary__title">Сводка</h2>
+          <dl className="st-hw-summary__list">
+            <SummaryRow label="Статус" value={badge?.label} emphasize />
+            <SummaryRow label="Срок" value={dueLabel || null} />
+            <SummaryRow label="Материалы" value={String(materialsCount)} />
+            <SummaryRow label="Ответ" value={answerSummary} />
+            {isChecked && item.result_percent != null ? (
+              <SummaryRow label="Результат" value={`${Math.round(item.result_percent)}%`} />
             ) : null}
-          </div>
+          </dl>
+          <p className="st-hw-summary-note">{summaryNote}</p>
         </aside>
       </div>
-
-      {!variantOnly ? (
-        <div className="st-hw-submit st-hw-submit--mobile">
-          {canEditAnswer ? (
-            <button
-              type="button"
-              className="st-hw-submit__btn"
-              onClick={handleSubmit}
-              disabled={submitting}
-            >
-              {submitting
-                ? "Отправка…"
-                : missingAttachment
-                  ? "Дослать файл"
-                  : "Сдать задание"}
-            </button>
-          ) : (
-            <button type="button" className="st-hw-submit__btn st-hw-submit__btn--sent" disabled>
-              {isChecked ? "Задание проверено" : "Ответ отправлен"}
-            </button>
-          )}
-        </div>
-      ) : null}
-
-      {msg ? <p className="st-toast" role="status">{msg}</p> : null}
     </StudentPageShell>
   );
 }

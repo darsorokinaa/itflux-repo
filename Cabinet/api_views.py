@@ -1337,6 +1337,7 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             scores=request.data.get("scores"),
             checked_tasks=request.data.get("checked"),
             comments_by_task_id=request.data.get("comments_by_task_id"),
+            manual_stats=request.data.get("manual_stats"),
         )
         item.refresh_from_db()
         return Response(ReviewItemSerializer(item).data)
@@ -1353,6 +1354,7 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             checked=False,
             comment=item.teacher_comment,
             comments_by_task_id=request.data.get("comments_by_task_id"),
+            manual_stats=request.data.get("manual_stats"),
         )
         item.refresh_from_db()
         return Response(ReviewItemSerializer(item).data)
@@ -1496,50 +1498,81 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         scores=None,
         checked_tasks=None,
         comments_by_task_id=None,
+        manual_stats=None,
     ):
-        if item.source_type == "homework":
-            submission = HomeworkSubmission.objects.filter(pk=item.source_id).first()
-            if submission:
-                submission.status = SubmissionStatus.CHECKED if checked else SubmissionStatus.RETURNED
-                submission.teacher_comment = comment or ""
-                update_fields = ["status", "teacher_comment", "updated_at"]
-                payload = dict(submission.result_payload or {})
-                changed_payload = False
-                if isinstance(scores, dict) and scores:
-                    merged = dict(payload.get("scores") or {})
-                    for key, value in scores.items():
-                        try:
-                            merged[str(key)] = float(value)
-                        except (TypeError, ValueError):
-                            continue
-                    payload["scores"] = merged
-                    changed_payload = True
-                if isinstance(checked_tasks, dict) and checked_tasks:
-                    merged = dict(payload.get("checked") or {})
-                    for key, value in checked_tasks.items():
-                        merged[str(key)] = bool(value)
-                    payload["checked"] = merged
-                    changed_payload = True
-                if isinstance(comments_by_task_id, dict) and comments_by_task_id:
-                    payload["comments_by_task_id"] = {
-                        str(key): str(value).strip()
-                        for key, value in comments_by_task_id.items()
-                        if str(value).strip()
-                    }
-                    changed_payload = True
-                if comment:
-                    payload["teacher_comment"] = comment
-                    payload["review_comment"] = comment
-                    changed_payload = True
-                if changed_payload:
-                    from .homework_api import compute_score_percent
+        if item.source_type != "homework":
+            return
+        submission = HomeworkSubmission.objects.filter(pk=item.source_id).first()
+        if not submission:
+            return
 
-                    submission.result_payload = payload
-                    computed = compute_score_percent(payload)
-                    if computed is not None:
-                        submission.score = computed
-                    update_fields.extend(["result_payload", "score"])
-                submission.save(update_fields=update_fields)
+        submission.status = SubmissionStatus.CHECKED if checked else SubmissionStatus.RETURNED
+        submission.teacher_comment = comment or ""
+        update_fields = ["status", "teacher_comment", "updated_at"]
+        payload = dict(submission.result_payload or {})
+        changed_payload = False
+
+        if isinstance(scores, dict) and scores:
+            merged = dict(payload.get("scores") or {})
+            for key, value in scores.items():
+                try:
+                    merged[str(key)] = float(value)
+                except (TypeError, ValueError):
+                    continue
+            payload["scores"] = merged
+            changed_payload = True
+        if isinstance(checked_tasks, dict) and checked_tasks:
+            merged = dict(payload.get("checked") or {})
+            for key, value in checked_tasks.items():
+                merged[str(key)] = bool(value)
+            payload["checked"] = merged
+            changed_payload = True
+        if isinstance(comments_by_task_id, dict) and comments_by_task_id:
+            payload["comments_by_task_id"] = {
+                str(key): str(value).strip()
+                for key, value in comments_by_task_id.items()
+                if str(value).strip()
+            }
+            changed_payload = True
+        if comment:
+            payload["teacher_comment"] = comment
+            payload["review_comment"] = comment
+            changed_payload = True
+
+        if isinstance(manual_stats, dict):
+            cleaned = {}
+            for key in ("correct", "incorrect", "total", "unsolved"):
+                raw = manual_stats.get(key)
+                if raw is None or raw == "":
+                    continue
+                try:
+                    cleaned[key] = max(0, int(raw))
+                except (TypeError, ValueError):
+                    continue
+            if cleaned:
+                payload["manual_stats"] = cleaned
+                changed_payload = True
+                total = cleaned.get("total") or 0
+                correct = cleaned.get("correct") or 0
+                if total > 0:
+                    submission.score = round(correct * 100 / total, 2)
+                    update_fields.append("score")
+
+        if changed_payload:
+            from .homework_api import compute_score_percent
+
+            submission.result_payload = payload
+            if "score" not in update_fields:
+                computed = compute_score_percent(payload)
+                if computed is not None:
+                    submission.score = computed
+                    update_fields.append("score")
+            update_fields.append("result_payload")
+
+        # unique update_fields
+        seen = set()
+        update_fields = [f for f in update_fields if not (f in seen or seen.add(f))]
+        submission.save(update_fields=update_fields)
 
 
 class ScheduleViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
@@ -1688,6 +1721,31 @@ class DashboardView(TeacherScopedMixin, APIView):
         payload = build_dashboard_payload(request.user)
         serializer = DashboardSerializer(payload)
         return Response(serializer.data)
+
+
+class NavCountsView(TeacherScopedMixin, APIView):
+    """Лёгкие счётчики для пунктов меню кабинета учителя."""
+
+    def get(self, request):
+        from .homework_api import exclude_live_meeting_review_items, review_items_ready_to_check
+
+        teacher = self.get_teacher()
+        students_count = Student.objects.filter(
+            teacher=teacher,
+            status=StudentStatus.ACTIVE,
+        ).count()
+        reviews_count = review_items_ready_to_check(
+            exclude_live_meeting_review_items(
+                ReviewItem.objects.filter(
+                    teacher=teacher,
+                    status=ReviewStatus.PENDING,
+                )
+            )
+        ).count()
+        return Response({
+            "students_count": students_count,
+            "reviews_count": reviews_count,
+        })
 
 
 class ReportsOverviewView(TeacherScopedMixin, APIView):

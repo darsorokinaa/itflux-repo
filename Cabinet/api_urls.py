@@ -77,6 +77,7 @@ urlpatterns = [
     path("student/files/<uuid:file_id>/restore/", files_api.StudentFilesRestoreView.as_view(), name="student_files_restore"),
 
     path("dashboard/", api_views.DashboardView.as_view(), name="cabinet_dashboard"),
+    path("nav-counts/", api_views.NavCountsView.as_view(), name="cabinet_nav_counts"),
     path("student/dashboard/", student_api.StudentDashboardView.as_view(), name="student_dashboard"),
     path("student/lessons/", student_api.StudentLessonsView.as_view(), name="student_lessons"),
     path("student/lessons/<int:assignment_id>/", student_api.StudentLessonDetailView.as_view(), name="student_lesson_detail"),

@@ -1786,6 +1786,26 @@ class ReviewApiTests(TestCase):
             status="pending",
         )
 
+    def test_nav_counts_returns_students_and_ready_reviews(self):
+        from rest_framework.test import APIClient
+
+        self.submission.submitted_at = timezone.now()
+        self.submission.save(update_fields=["submitted_at"])
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        response = client.get("/api/cabinet/nav-counts/")
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(data["students_count"], 1)
+        self.assertEqual(data["reviews_count"], 1)
+
+        self.review_item.status = "checked"
+        self.review_item.save(update_fields=["status"])
+        response = client.get("/api/cabinet/nav-counts/")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["reviews_count"], 0)
+
     def test_teacher_can_fetch_review_detail_with_homework_context(self):
         from rest_framework.test import APIClient
 
@@ -1822,6 +1842,53 @@ class ReviewApiTests(TestCase):
         self.assertEqual(submission.teacher_comment, "Хорошо")
         self.assertEqual(submission.result_payload["scores"]["20"], 3.0)
         self.assertEqual(submission.result_payload["comments_by_task_id"]["20"], "Добавьте пояснение")
+
+    def test_teacher_can_check_simple_homework_with_manual_stats(self):
+        from rest_framework.test import APIClient
+        from Cabinet.models import Homework, HomeworkSubmission, ReviewItem
+
+        hw = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="ДЗ: файл",
+            status="assigned",
+        )
+        submission = HomeworkSubmission.objects.create(
+            homework=hw,
+            student=self.student,
+            status="submitted",
+            answer_text="Готово",
+            submitted_at=timezone.now(),
+        )
+        review = ReviewItem.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            source_type="homework",
+            source_id=submission.pk,
+            title=f"{hw.title} — {self.student.full_name}",
+            status="pending",
+        )
+        client = APIClient()
+        client.force_login(self.teacher)
+        response = client.post(
+            f"/api/cabinet/review/{review.pk}/check/",
+            {
+                "teacher_comment": "Молодец, разбери ошибки в №3",
+                "manual_stats": {
+                    "total": 10,
+                    "correct": 7,
+                    "incorrect": 2,
+                    "unsolved": 1,
+                },
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        submission.refresh_from_db()
+        self.assertEqual(submission.status, "checked")
+        self.assertEqual(submission.teacher_comment, "Молодец, разбери ошибки в №3")
+        self.assertEqual(submission.result_payload["manual_stats"]["correct"], 7)
+        self.assertEqual(float(submission.score), 70.0)
 
     def test_student_cannot_edit_checked_homework(self):
         from rest_framework.test import APIClient

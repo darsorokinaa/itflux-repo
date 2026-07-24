@@ -576,6 +576,10 @@ export function fetchDashboard() {
   return cabinetFetch("/dashboard/", { method: "GET" });
 }
 
+export function fetchNavCounts() {
+  return cabinetFetch("/nav-counts/", { method: "GET" });
+}
+
 // --- Lessons ---
 
 export function fetchLessons(params = {}) {

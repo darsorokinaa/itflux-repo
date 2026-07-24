@@ -57,10 +57,19 @@ function hydrateReviewForm(review) {
       if (String(value).trim()) taskComments[id] = String(value);
     }
   }
+  const stats = result.manual_stats && typeof result.manual_stats === "object"
+    ? result.manual_stats
+    : {};
   return {
     teacherComment: review?.teacher_comment || submission?.teacher_comment || "",
     scores,
     taskComments,
+    manualStats: {
+      correct: stats.correct ?? "",
+      incorrect: stats.incorrect ?? "",
+      total: stats.total ?? "",
+      unsolved: stats.unsolved ?? "",
+    },
   };
 }
 
@@ -237,6 +246,12 @@ export default function CabinetReviewDetailPage() {
   const [teacherComment, setTeacherComment] = useState("");
   const [scores, setScores] = useState({});
   const [taskComments, setTaskComments] = useState({});
+  const [manualStats, setManualStats] = useState({
+    correct: "",
+    incorrect: "",
+    total: "",
+    unsolved: "",
+  });
   const [confirmAction, setConfirmAction] = useState(null);
 
   const load = useCallback(async () => {
@@ -249,6 +264,7 @@ export default function CabinetReviewDetailPage() {
       setTeacherComment(form.teacherComment);
       setScores(form.scores);
       setTaskComments(form.taskComments);
+      setManualStats(form.manualStats);
     } catch {
       setNotFound(true);
     } finally {
@@ -322,12 +338,45 @@ export default function CabinetReviewDetailPage() {
     return autoChecked;
   }, [part1Tasks, result, subject, variant?.tasks]);
 
-  const buildPayload = () => ({
-    teacher_comment: teacherComment.trim(),
-    scores,
-    checked: buildAutoChecked(),
-    comments_by_task_id: taskComments,
-  });
+  const buildPayload = () => {
+    const payload = {
+      teacher_comment: teacherComment.trim(),
+      scores,
+      checked: buildAutoChecked(),
+      comments_by_task_id: taskComments,
+    };
+    if (!reviewCtx?.has_variant) {
+      const cleaned = {};
+      for (const key of ["correct", "incorrect", "total", "unsolved"]) {
+        const raw = manualStats[key];
+        if (raw === "" || raw == null) continue;
+        const n = Number(raw);
+        if (!Number.isNaN(n) && n >= 0) cleaned[key] = n;
+      }
+      if (Object.keys(cleaned).length) payload.manual_stats = cleaned;
+    }
+    return payload;
+  };
+
+  const setManualStatField = (key, value) => {
+    setManualStats((prev) => {
+      const next = { ...prev, [key]: value };
+      const total = Number(next.total);
+      const correct = Number(next.correct);
+      const incorrect = Number(next.incorrect);
+      if (
+        next.total !== ""
+        && next.correct !== ""
+        && next.incorrect !== ""
+        && !Number.isNaN(total)
+        && !Number.isNaN(correct)
+        && !Number.isNaN(incorrect)
+      ) {
+        next.unsolved = String(Math.max(0, total - correct - incorrect));
+      }
+      return next;
+    });
+  };
 
   const runCheck = async () => {
     setBusy(true);
@@ -335,6 +384,7 @@ export default function CabinetReviewDetailPage() {
     try {
       const updated = await checkReviewItem(reviewId, buildPayload());
       setReview(updated);
+      window.dispatchEvent(new Event("cabinet:nav-counts-refresh"));
       navigate("/cabinet/review");
     } catch (err) {
       setError(err.message || "Не удалось сохранить проверку");
@@ -350,6 +400,7 @@ export default function CabinetReviewDetailPage() {
     try {
       const updated = await returnReviewItem(reviewId, buildPayload());
       setReview(updated);
+      window.dispatchEvent(new Event("cabinet:nav-counts-refresh"));
       navigate("/cabinet/review");
     } catch (err) {
       setError(err.message || "Не удалось вернуть работу");
@@ -491,23 +542,72 @@ export default function CabinetReviewDetailPage() {
       ) : null}
 
       {!awaitingSubmission && !reviewCtx?.has_variant ? (
-        <section className="cb-review-detail__panel">
-          <h2 className="cb-review-detail__panel-title">Ответ ученика</h2>
-          <div className="cb-review-detail__simple-answer">
-            {submission?.answer_text?.trim() ? (
-              <p>{submission.answer_text}</p>
-            ) : (
-              <p className="cb-review-detail__empty-answer">Текстовый ответ не указан</p>
-            )}
-            {submission?.attached_file_url ? (
-              <p>
-                <a href={submission.attached_file_url} target="_blank" rel="noreferrer">
-                  {submission.attached_file_name || "Прикреплённый файл"}
-                </a>
+        <>
+          <section className="cb-review-detail__panel">
+            <h2 className="cb-review-detail__panel-title">Ответ ученика</h2>
+            <div className="cb-review-detail__simple-answer">
+              {submission?.answer_text?.trim() ? (
+                <p>{submission.answer_text}</p>
+              ) : (
+                <p className="cb-review-detail__empty-answer">Текстовый ответ не указан</p>
+              )}
+              {submission?.attached_file_url ? (
+                <p>
+                  <a href={submission.attached_file_url} target="_blank" rel="noreferrer">
+                    {submission.attached_file_name || "Прикреплённый файл"}
+                  </a>
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="cb-review-detail__panel">
+            <h2 className="cb-review-detail__panel-title">Результаты проверки</h2>
+            <p className="cb-review-detail__panel-hint">
+              Заполните, сколько заданий решено верно, неверно и сколько не решено.
+            </p>
+            <div className="cb-review-detail__manual-stats">
+              {[
+                { key: "total", label: "Всего заданий" },
+                { key: "correct", label: "Правильно" },
+                { key: "incorrect", label: "Неправильно" },
+                { key: "unsolved", label: "Не решено" },
+              ].map(({ key, label }) => (
+                <label key={key} className="cb-review-detail__manual-stat">
+                  <span>{label}</span>
+                  {isReadOnly ? (
+                    <strong>
+                      {manualStats[key] === "" || manualStats[key] == null
+                        ? "—"
+                        : manualStats[key]}
+                    </strong>
+                  ) : (
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={manualStats[key]}
+                      onChange={(e) => setManualStatField(key, e.target.value)}
+                    />
+                  )}
+                </label>
+              ))}
+            </div>
+            {(manualStats.total !== "" && manualStats.correct !== "") ? (
+              <p className="cb-review-detail__manual-percent">
+                Итог:{" "}
+                <strong>
+                  {Number(manualStats.total) > 0
+                    ? Math.round(
+                      (Number(manualStats.correct) * 100) / Number(manualStats.total),
+                    )
+                    : 0}
+                  %
+                </strong>
               </p>
             ) : null}
-          </div>
-        </section>
+          </section>
+        </>
       ) : !awaitingSubmission ? (
         <>
           <section className="cb-review-detail__panel">

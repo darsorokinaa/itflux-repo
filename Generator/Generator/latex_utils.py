@@ -158,6 +158,91 @@ _RE_NAKED_LATEX_SYMBOLS = re.compile(
 )
 
 
+_RE_LATEX_CMD_IN_DOLLAR = re.compile(
+    r"\\(?:d?frac|sqrt|left|right|cdot|times|quad|qquad|leqslant|geqslant|"
+    r"overline|underline|begin|end|pm|mp|neq|approx|infty)"
+)
+
+
+def _looks_like_unclosed_latex_math(body: str) -> bool:
+    """Тело после одиночного $ похоже на LaTeX (а не Excel $A$1 / символ «$»)."""
+    if not body or len(body) < 3:
+        return False
+    if "«" in body or "»" in body:
+        return False
+    if _RE_LATEX_CMD_IN_DOLLAR.search(body):
+        return True
+    return bool(re.search(r"\\[a-zA-Z]+|[\^_]", body))
+
+
+def _repair_unclosed_dollar_math(html_text: str) -> str:
+    """Закрыть orphan `$…` без хвостового `$` (часто в задачах Сканави).
+
+    Не трогаем Excel-адресацию (`=$D1`, `B$1`) и упоминания символа «$».
+    Без закрытия naked-матч рвёт формулу на `\\right)` / `\\sqrt`.
+    """
+    if not html_text or "$" not in html_text:
+        return html_text
+
+    out: list[str] = []
+    i = 0
+    n = len(html_text)
+    while i < n:
+        if html_text.startswith("$$", i):
+            end = html_text.find("$$", i + 2)
+            if end == -1:
+                out.append(html_text[i:])
+                break
+            out.append(html_text[i : end + 2])
+            i = end + 2
+            continue
+
+        if html_text[i] != "$":
+            out.append(html_text[i])
+            i += 1
+            continue
+
+        prev = html_text[i - 1] if i > 0 else ""
+        # Excel: =$D1 / B$1 — не математический делимитер
+        if prev.isalnum() or prev == "=":
+            out.append("$")
+            i += 1
+            continue
+
+        j = i + 1
+        while j < n:
+            if html_text.startswith("$$", j):
+                j += 2
+                continue
+            if html_text[j] == "$":
+                break
+            # Граница HTML-тега — формула дальше не идёт
+            if html_text[j] == "<" and j + 1 < n and (
+                html_text[j + 1].isalpha() or html_text[j + 1] == "/"
+            ):
+                break
+            j += 1
+
+        if j < n and html_text[j] == "$":
+            out.append(html_text[i : j + 1])
+            i = j + 1
+            continue
+
+        body = html_text[i + 1 : j]
+        body_core = body.rstrip()
+        trailing = body[len(body_core) :]
+        if _looks_like_unclosed_latex_math(body_core):
+            out.append("$")
+            out.append(body_core)
+            out.append("$")
+            out.append(trailing)
+        else:
+            out.append(html_text[i:j])
+        i = j
+
+    return "".join(out)
+
+
 def _repair_malformed_inline_math_paren(html_text: str) -> str:
     """\\(N), \\(3 \\le N \\le 10\\,000) — пропущенный \\ перед закрывающей скобкой.
 
@@ -778,6 +863,7 @@ def process_latex(
         )
 
     html_text = _decode_html_entity_layers_if_stored_escaped(html_text)
+    html_text = _repair_unclosed_dollar_math(html_text)
     html_text = _repair_malformed_inline_math_paren(html_text)
 
     # 0. Verbatim — до обработки math (MathJax не поддерживает verbatim)
