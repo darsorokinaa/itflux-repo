@@ -169,13 +169,29 @@ def user_can_read_file(user, file_obj: CabinetFile) -> bool:
     ).exists():
         return True
     if LessonPlanItem.objects.filter(
-        materials__id__in=material_ids,
+        Q(materials__id__in=material_ids) | Q(homework_materials__id__in=material_ids),
     ).filter(
         Q(plan__enrollments__student_id__in=students)
         | Q(plan__enrollments__group__students__in=students)
         | Q(homeworks__student_id__in=students)
         | Q(homeworks__group__students__in=students)
     ).exists():
+        return True
+    # ДЗ с файлом из «Мои файлы» (в т.ч. старые URL /media/cabinet/my-files/…)
+    from .models import Homework
+
+    storage_key = (file_obj.storage_key or "").strip()
+    file_tail = storage_key.rstrip("/").split("/")[-1] if storage_key else ""
+    hw_file_q = Q(cabinet_file_relations__file=file_obj) | Q(
+        tasks__description__icontains=str(file_obj.id)
+    )
+    if storage_key:
+        hw_file_q |= Q(tasks__description__icontains=storage_key)
+    if file_tail and len(file_tail) >= 8:
+        hw_file_q |= Q(tasks__description__icontains=file_tail)
+    if Homework.objects.filter(
+        Q(student_id__in=students) | Q(group__students__in=students),
+    ).filter(hw_file_q).exists():
         return True
     return False
 
@@ -1121,7 +1137,7 @@ def attach_file_for_student(user, file_id, submission: HomeworkSubmission) -> di
     )
     # Связываем submission.attached_file с тем же storage_key без второй копии на диске
     if not submission.attached_file or submission.attached_file.name != file_obj.storage_key:
-        submission.attached_file.name = file_obj.storage_key
+        submission.attached_file = file_obj.storage_key
         submission.save(update_fields=["attached_file", "updated_at"])
     log_action(
         user,

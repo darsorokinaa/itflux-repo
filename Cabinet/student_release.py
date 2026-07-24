@@ -284,11 +284,51 @@ def _material_homework_task_type(material):
 
 
 def _material_resource_url(material):
-    if material.file:
-        return material.file.url
+    """URL ресурса для HomeworkTask — доступный ученику (не сырой /media/my-files/)."""
+    from .files_services import is_blocked_media_url, material_file_url
+
+    url = material_file_url(material, for_student=True)
+    if url and not is_blocked_media_url(url):
+        return url
     if material.external_url:
         return material.external_url.strip()
+    # Fallback: публичный media только если это не закрытое хранилище
+    if material.file:
+        raw = material.file.url
+        if raw and not is_blocked_media_url(raw):
+            return raw
     return (material.topic or "").strip()
+
+
+def _link_material_file_to_homework(homework, material):
+    """Дать ученику доступ на скачивание файла материала через shared API."""
+    from .files_models import CabinetFile, CabinetFileRelation, CabinetFileRelationType
+
+    file_obj = getattr(material, "cabinet_file", None)
+    if file_obj is None and material.file:
+        key = (material.file.name or "").lstrip("/")
+        if key:
+            file_obj = CabinetFile.objects.filter(storage_key=key).first()
+            if file_obj is None and key.startswith("media/"):
+                file_obj = CabinetFile.objects.filter(storage_key=key[len("media/"):]).first()
+    if file_obj is None:
+        return
+
+    defaults = {
+        "material": material,
+        "created_by": homework.teacher,
+    }
+    if homework.student_id:
+        defaults["student"] = homework.student
+    if homework.group_id:
+        defaults["group"] = homework.group
+
+    CabinetFileRelation.objects.get_or_create(
+        file=file_obj,
+        relation_type=CabinetFileRelationType.HOMEWORK,
+        homework=homework,
+        defaults=defaults,
+    )
 
 
 def _add_material_homework_task(homework, material, order, *, sync_existing=False):
@@ -325,6 +365,7 @@ def _add_material_homework_task(homework, material, order, *, sync_existing=Fals
             description=resource_url,
             order=order,
         )
+    _link_material_file_to_homework(homework, material)
     return order + 1
 
 
@@ -574,9 +615,10 @@ def _record_variant_tasks_for_homework(homework, student, teacher):
             vid = _extract_variant_id_from_url(hw_task.description)
             if vid:
                 variant_ids.append(vid)
-            # Проверяем также ссылку у прикреплённого материала
-            if hw_task.material:
-                vid = _extract_variant_id_from_url(hw_task.material.external_url)
+            # Проверяем также ссылку у прикреплённого материала (если поле есть)
+            material = getattr(hw_task, "material", None)
+            if material is not None:
+                vid = _extract_variant_id_from_url(getattr(material, "external_url", "") or "")
                 if vid:
                     variant_ids.append(vid)
 

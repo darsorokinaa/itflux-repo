@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 import jwt
 from django.conf import settings
 from django.core.files.storage import default_storage
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -926,8 +927,10 @@ def looks_like_resource_path(value: str) -> bool:
 
 
 def _task_resource_url(task: HomeworkTask, homework: Homework) -> str:
+    from .files_services import is_blocked_media_url, material_file_url
+
     description = (task.description or "").strip()
-    if looks_like_resource_path(description):
+    if looks_like_resource_path(description) and not is_blocked_media_url(description):
         return description
 
     plan_item = getattr(homework, "lesson_plan_item", None)
@@ -941,13 +944,41 @@ def _task_resource_url(task: HomeworkTask, homework: Homework) -> str:
             for material in plan_item.homework_materials.all():
                 if material.title != task.title:
                     continue
-                if material.file:
-                    return material.file.url
+                url = material_file_url(material, for_student=True)
+                if url and not is_blocked_media_url(url):
+                    return url
                 if material.external_url:
                     return material.external_url.strip()
                 break
 
-    return description
+    # Старые задания: в description лежит /media/cabinet/my-files/... — ищем Material по имени файла
+    if description and is_blocked_media_url(description):
+        from .models import Material
+        from .student_release import _link_material_file_to_homework
+
+        file_name = description.rstrip("/").split("/")[-1].split("?")[0]
+        materials = Material.objects.filter(
+            Q(teacher_id=homework.teacher_id) | Q(is_public=True)
+        ).filter(
+            Q(cabinet_file__storage_key__endswith=file_name)
+            | Q(file=description)
+            | Q(file__endswith=file_name)
+        )[:5]
+        for material in materials:
+            url = material_file_url(material, for_student=True)
+            if url and not is_blocked_media_url(url):
+                try:
+                    _link_material_file_to_homework(homework, material)
+                except Exception:
+                    logger.debug(
+                        "link material file to homework failed hw=%s material=%s",
+                        homework.pk,
+                        material.pk,
+                        exc_info=True,
+                    )
+                return url
+
+    return "" if is_blocked_media_url(description) else description
 
 
 def serialize_student_task(

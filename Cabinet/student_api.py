@@ -4,6 +4,7 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -942,6 +943,8 @@ class StudentAssignmentsView(StudentScopedView):
 
 
 class StudentAssignmentDetailView(StudentScopedView):
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
     def get(self, request, homework_id):
         students, err = self.student_response_or_error()
         if err:
