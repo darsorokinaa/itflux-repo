@@ -558,6 +558,53 @@ export function homeworkIsReadonly(statusNorm, isTeacherView) {
 }
 
 /**
+ * Скрывать кнопку завершения в сайдбаре варианта.
+ * lesson_token у ДЗ из кабинета НЕ должен скрывать «Отправить на проверку».
+ * @param {{ embed?: boolean, lessonToken?: string, isHomework?: boolean, homeworkReadonly?: boolean }} opts
+ */
+export function shouldHideHomeworkFinishButton({
+  embed = false,
+  lessonToken = "",
+  isHomework = false,
+  homeworkReadonly = false,
+} = {}) {
+  if (embed) return true;
+  if (lessonToken && !isHomework) return true;
+  if (homeworkReadonly) return true;
+  return false;
+}
+
+/**
+ * Показывать блок «Сохранить черновик / Отправить на проверку» под заданиями.
+ * @param {{
+ *   isEmbeddedHomework?: boolean,
+ *   isCabinetHomework?: boolean,
+ *   homeworkStudentMode?: boolean,
+ *   isLiveVariant?: boolean,
+ *   isTeacherView?: boolean,
+ *   homeworkReadonly?: boolean,
+ *   statusNorm?: string,
+ * }} opts
+ */
+export function shouldShowHomeworkBottomActions({
+  isEmbeddedHomework = false,
+  isCabinetHomework = false,
+  homeworkStudentMode = false,
+  isLiveVariant = false,
+  isTeacherView = false,
+  homeworkReadonly = false,
+  statusNorm = "unknown",
+} = {}) {
+  if (homeworkReadonly) return false;
+  if (isTeacherView) return false;
+  const editable = statusNorm === "sent" || statusNorm === "revision" || statusNorm === "unknown";
+  if (!editable) return false;
+  if (isEmbeddedHomework) return true;
+  if (isCabinetHomework && homeworkStudentMode && !isLiveVariant) return true;
+  return false;
+}
+
+/**
  * @param {string} statusNorm
  */
 export function homeworkIsReviewed(statusNorm) {

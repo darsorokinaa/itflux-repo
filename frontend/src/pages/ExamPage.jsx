@@ -34,6 +34,8 @@ import {
   buildHomeworkResultPayload,
   buildLiveCheckedHomeworkResult,
   saveHomeworkDraft,
+  shouldHideHomeworkFinishButton,
+  shouldShowHomeworkBottomActions,
   submitHomework,
   homeworkApiUserMessage,
   homeworkTaskNumberEditable,
@@ -1622,11 +1624,21 @@ function ExamPage() {
   /** Блок «Правильный ответ» (пунктир): только в ДЗ при показе решений. В варианте после «Проверить» ответ уже в exam-result — не дублировать. */
   const p1CorrectVisible = () => isHomework && hSol;
   const lkBase = getLkPublicBase();
-  const showHomeworkBottomActions =
-    isEmbeddedHomework &&
-    !isTeacherHomeworkView &&
-    !hRead &&
-    (hwSt === "sent" || hwSt === "revision" || hwSt === "unknown");
+  const showHomeworkBottomActions = shouldShowHomeworkBottomActions({
+    isEmbeddedHomework,
+    isCabinetHomework,
+    homeworkStudentMode,
+    isLiveVariant,
+    isTeacherView: isTeacherHomeworkView,
+    homeworkReadonly: hRead,
+    statusNorm: hwSt,
+  });
+  const hideHomeworkFinishButton = shouldHideHomeworkFinishButton({
+    embed: lessonEmbedParams.embed,
+    lessonToken: lessonEmbedParams.token,
+    isHomework,
+    homeworkReadonly: homeworkStudentMode && hRead,
+  });
 
   const getTaskMaxScore = (task) => task.max_score ?? 3;
   const part2ScoreSum = part2Tasks.reduce((sum, t) => sum + (scores[t.id] || 0), 0);
@@ -3196,11 +3208,7 @@ function ExamPage() {
                     goToExamTask={goToExamTask}
                     supportItems={supportInfo.items}
                     onOpenSupport={() => setSupportInfo((s) => ({ ...s, open: true }))}
-                    hideFinish={
-                      lessonEmbedParams.embed
-                      || lessonEmbedParams.token
-                      || (homeworkStudentMode && hRead)
-                    }
+                    hideFinish={hideHomeworkFinishButton}
                     progressPart1Only={hwScorePart1Only}
                     finishLabel={homeworkSidebarFinishLabel}
                     finishDisabled={homeworkStudentMode && (hwActionBusy || hwLoading)}
@@ -3252,11 +3260,7 @@ function ExamPage() {
                       onAfterNavTask={() => setMobileVariantNavOpen(false)}
                       supportItems={supportInfo.items}
                       onOpenSupport={() => setSupportInfo((s) => ({ ...s, open: true }))}
-                      hideFinish={
-                        lessonEmbedParams.embed
-                        || lessonEmbedParams.token
-                        || (homeworkStudentMode && hRead)
-                      }
+                      hideFinish={hideHomeworkFinishButton}
                       progressPart1Only={hwScorePart1Only}
                       finishLabel={homeworkSidebarFinishLabel}
                       finishDisabled={homeworkStudentMode && (hwActionBusy || hwLoading)}

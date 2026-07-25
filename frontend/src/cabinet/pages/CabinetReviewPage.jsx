@@ -119,17 +119,32 @@ export default function CabinetReviewPage() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const load = async ({ soft = false } = {}) => {
+      if (!soft) setLoading(true);
       try {
         const data = await fetchReviewItems();
-        if (!cancelled) setWorks(normalizeCabinetList(data).map(mapReviewItem));
+        if (!cancelled) {
+          setWorks(normalizeCabinetList(data).map(mapReviewItem));
+          setError(null);
+        }
       } catch (err) {
         if (!cancelled) setError(err.message);
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
-    return () => { cancelled = true; };
+    };
+    load();
+    const onFocus = () => load({ soft: true });
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") load({ soft: true });
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
 
   const confirmDelete = useCallback(async () => {

@@ -46,6 +46,7 @@ function getBadgeProps(status, statusLabel, variantSubmitted) {
   if (status === "checked") {
     return { status: "checked", label: statusLabel || "Проверено" };
   }
+  // variantSubmitted = реальная сдача (submitted_at), не черновик ответов.
   if (status === "submitted" || variantSubmitted) {
     return { status: "reviewing", label: "На проверке" };
   }

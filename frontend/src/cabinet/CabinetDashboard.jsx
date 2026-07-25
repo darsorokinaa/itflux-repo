@@ -187,16 +187,21 @@ export default function CabinetDashboard() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const loadDashboard = async ({ soft = false } = {}) => {
+      if (!soft) setLoading(true);
       try {
         const payload = await fetchDashboard();
-        if (!cancelled) setData(payload);
+        if (!cancelled) {
+          setData(payload);
+          setError(null);
+        }
       } catch (err) {
         if (!cancelled) setError(err.message || "Не удалось загрузить данные");
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    };
+    loadDashboard();
     if (PAYMENTS_ENABLED) {
       fetchBillingDashboard()
         .then((payload) => { if (!cancelled) setBillingDash(payload); })
@@ -207,7 +212,17 @@ export default function CabinetDashboard() {
         if (!cancelled) setJournalDash(payload);
       })
       .catch(() => {});
-    return () => { cancelled = true; };
+    const onFocus = () => loadDashboard({ soft: true });
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") loadDashboard({ soft: true });
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
 
   const today = useMemo(() => new Date(), []);

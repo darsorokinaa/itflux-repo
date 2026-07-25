@@ -2265,3 +2265,336 @@ class SecurityHardeningTests(TestCase):
         self.assertEqual(response.status_code, 204, response.content)
         self.assertFalse(StudentInvitation.objects.filter(pk=invitation.pk).exists())
         self.assertFalse(Student.objects.filter(pk=pre_id).exists())
+
+
+class PlatformVariantHomeworkSubmitChainTests(TestCase):
+    """
+    Цепочка: учитель выдаёт вариант платформы → ученик сохраняет/отправляет →
+    работа появляется у выдавшего учителя.
+    """
+
+    def setUp(self):
+        from django.conf import settings
+
+        self._prev_secret = getattr(settings, "LESSON_SECRET", "")
+        settings.LESSON_SECRET = "test-lesson-secret"
+
+        self.teacher = User.objects.create_user(username="pv_teacher", password="pass")
+        self.teacher.profile.role = Profile.Role.TEACHER
+        self.teacher.profile.save()
+
+        self.other_teacher = User.objects.create_user(username="pv_other", password="pass")
+        self.other_teacher.profile.role = Profile.Role.TEACHER
+        self.other_teacher.profile.save()
+
+        self.platform_admin = User.objects.create_user(username="pv_admin", password="pass")
+        self.platform_admin.profile.role = Profile.Role.TEACHER
+        self.platform_admin.profile.save()
+
+        self.student_user = User.objects.create_user(username="pv_student", password="pass")
+        self.student_user.profile.role = Profile.Role.STUDENT
+        self.student_user.profile.save()
+
+        self.student = Student.objects.create(
+            teacher=self.teacher,
+            user=self.student_user,
+            first_name="Аня",
+            last_name="Ученица",
+            status="active",
+        )
+        # У второго учителя тот же аккаунт ученика — другой предмет/ростер.
+        self.student_other_teacher = Student.objects.create(
+            teacher=self.other_teacher,
+            user=self.student_user,
+            first_name="Аня",
+            last_name="Ученица",
+            status="active",
+        )
+
+        from Cabinet.models import StudentSubject
+
+        self.subject_inf = StudentSubject.objects.create(
+            student=self.student,
+            subject="inf",
+            title="ЕГЭ информатика",
+            direction="ege",
+        )
+        self.subject_math = StudentSubject.objects.create(
+            student=self.student,
+            subject="math",
+            title="ЕГЭ математика",
+            direction="ege",
+        )
+
+        self.platform_variant = Material.objects.create(
+            owner=self.platform_admin,
+            title="Вариант №500 платформы",
+            material_type="task_set",
+            external_url="https://itflux-academy.ru/ege/inf/variant/500",
+            is_public=True,
+            direction="ege",
+        )
+
+    def tearDown(self):
+        from django.conf import settings
+
+        settings.LESSON_SECRET = self._prev_secret
+
+    def _assign_platform_variant(self, *, teacher=None, student=None, student_subject=None):
+        from rest_framework.test import APIClient
+
+        teacher = teacher or self.teacher
+        student = student or self.student
+        client = APIClient()
+        client.force_login(teacher)
+        payload = {
+            "title": "ДЗ: вариант платформы",
+            "description": "Решите вариант",
+            "material_ids": [self.platform_variant.pk],
+        }
+        if student_subject is not None:
+            payload["student_subject_id"] = student_subject.pk
+        response = client.post(
+            f"/api/cabinet/students/{student.pk}/assign-homework/",
+            payload,
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        homework = Homework.objects.filter(
+            teacher=teacher,
+            student=student,
+            title="ДЗ: вариант платформы",
+        ).order_by("-id").first()
+        self.assertIsNotNone(homework)
+        return homework
+
+    def _teacher_reviews_count(self, teacher):
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_login(teacher)
+        response = client.get("/api/cabinet/nav-counts/")
+        self.assertEqual(response.status_code, 200, response.content)
+        return int(response.json().get("reviews_count") or 0)
+
+    def _submit_variant(self, homework, *, result=None, student_user=None):
+        from rest_framework.test import APIClient
+        from Cabinet.homework_api import issue_homework_token
+
+        student_user = student_user or self.student_user
+        token = issue_homework_token(
+            homework_id=homework.pk,
+            student_user_id=student_user.pk,
+        )
+        client = APIClient()
+        body = {
+            "result": result
+            or {
+                "by_task_id": {"1": "42", "2": "развёрнутый"},
+                "checked": {"1": True},
+                "scores": {},
+            }
+        }
+        response = client.post(
+            f"/api/homework/assignment/{homework.pk}/submit/?token={token}",
+            body,
+            format="json",
+        )
+        return response
+
+    def test_assign_platform_variant_creates_generated_task(self):
+        from Cabinet.models import HomeworkTask
+
+        homework = self._assign_platform_variant()
+        task = HomeworkTask.objects.filter(homework=homework).order_by("order").last()
+        self.assertEqual(task.task_type, "generated_task")
+        self.assertIn("/variant/500", task.description)
+        self.assertEqual(homework.teacher_id, self.teacher.pk)
+
+    def test_draft_does_not_count_as_submitted_for_teacher(self):
+        from rest_framework.test import APIClient
+        from Cabinet.models import HomeworkSubmission
+
+        homework = self._assign_platform_variant()
+        before = self._teacher_reviews_count(self.teacher)
+
+        client = APIClient()
+        client.force_login(self.student_user)
+        draft = client.post(
+            f"/api/homework/assignment/{homework.pk}/save-draft/",
+            {"result": {"by_task_id": {"1": "7"}, "checked": {"1": True}}},
+            format="json",
+        )
+        self.assertEqual(draft.status_code, 200, draft.content)
+        self.assertEqual(draft.json().get("status"), "sent")
+
+        submission = HomeworkSubmission.objects.get(homework=homework, student=self.student)
+        self.assertIsNone(submission.submitted_at)
+        self.assertTrue(submission.result_payload)
+
+        detail = client.get(f"/api/cabinet/student/assignments/{homework.pk}/")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["status"], "new")
+        self.assertFalse(detail.json()["variant_submitted"])
+
+        self.assertEqual(self._teacher_reviews_count(self.teacher), before)
+
+    def test_submit_sets_submitted_at_and_appears_in_teacher_queue(self):
+        from Cabinet.models import HomeworkSubmission, ReviewItem
+
+        homework = self._assign_platform_variant()
+        before = self._teacher_reviews_count(self.teacher)
+
+        response = self._submit_variant(homework)
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertTrue(data.get("ok"))
+        self.assertEqual(data.get("status"), "submitted")
+        self.assertTrue(data.get("submitted_at"))
+
+        submission = HomeworkSubmission.objects.get(homework=homework, student=self.student)
+        self.assertIsNotNone(submission.submitted_at)
+        self.assertEqual(submission.status, "submitted")
+        self.assertEqual(submission.result_payload["by_task_id"]["1"], "42")
+
+        review = ReviewItem.objects.filter(
+            teacher=self.teacher,
+            source_type="homework",
+            source_id=submission.pk,
+            status="pending",
+        ).first()
+        self.assertIsNotNone(review)
+        self.assertEqual(self._teacher_reviews_count(self.teacher), before + 1)
+
+        from rest_framework.test import APIClient
+
+        teacher_client = APIClient()
+        teacher_client.force_login(self.teacher)
+        dash = teacher_client.get("/api/cabinet/dashboard/")
+        self.assertEqual(dash.status_code, 200)
+        pending_ids = [row["id"] for row in dash.json().get("pending_reviews", [])]
+        self.assertIn(review.pk, pending_ids)
+
+        review_list = teacher_client.get("/api/cabinet/review/")
+        self.assertEqual(review_list.status_code, 200)
+        rows = review_list.json()
+        if isinstance(rows, dict):
+            rows = rows.get("results", [])
+        self.assertIn(review.pk, [row["id"] for row in rows])
+        row = next(r for r in rows if r["id"] == review.pk)
+        self.assertTrue(row["homework_submission"]["submitted_at"])
+        self.assertTrue(row["homework_review"]["has_variant"])
+
+    def test_auto_checked_variant_stays_in_history_after_teacher_check(self):
+        from rest_framework.test import APIClient
+        from Cabinet.models import HomeworkSubmission, ReviewItem
+
+        homework = self._assign_platform_variant()
+        self._submit_variant(homework)
+        submission = HomeworkSubmission.objects.get(homework=homework, student=self.student)
+        review = ReviewItem.objects.get(source_type="homework", source_id=submission.pk)
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        checked = client.post(
+            f"/api/cabinet/review/{review.pk}/check/",
+            {"teacher_comment": "Автопроверка ок", "checked": {"1": True}, "scores": {}},
+            format="json",
+        )
+        self.assertEqual(checked.status_code, 200, checked.content)
+        review.refresh_from_db()
+        submission.refresh_from_db()
+        self.assertEqual(review.status, "checked")
+        self.assertEqual(submission.status, "checked")
+
+        review_list = client.get("/api/cabinet/review/?status=checked")
+        rows = review_list.json()
+        if isinstance(rows, dict):
+            rows = rows.get("results", [])
+        self.assertIn(review.pk, [row["id"] for row in rows])
+        self.assertEqual(self._teacher_reviews_count(self.teacher), 0)
+
+    def test_other_teacher_cannot_see_submission(self):
+        from rest_framework.test import APIClient
+        from Cabinet.models import HomeworkSubmission, ReviewItem
+
+        homework = self._assign_platform_variant()
+        self._submit_variant(homework)
+        submission = HomeworkSubmission.objects.get(homework=homework, student=self.student)
+        review = ReviewItem.objects.get(source_type="homework", source_id=submission.pk)
+
+        other = APIClient()
+        other.force_login(self.other_teacher)
+        self.assertEqual(self._teacher_reviews_count(self.other_teacher), 0)
+        detail = other.get(f"/api/cabinet/review/{review.pk}/")
+        self.assertIn(detail.status_code, (403, 404))
+
+    def test_resubmit_is_idempotent(self):
+        from Cabinet.models import HomeworkSubmission, ReviewItem
+
+        homework = self._assign_platform_variant()
+        first = self._submit_variant(homework)
+        self.assertEqual(first.status_code, 200, first.content)
+        second = self._submit_variant(
+            homework,
+            result={"by_task_id": {"1": "99"}, "checked": {"1": False}},
+        )
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertTrue(second.json().get("already_submitted"))
+
+        self.assertEqual(
+            HomeworkSubmission.objects.filter(homework=homework, student=self.student).count(),
+            1,
+        )
+        self.assertEqual(
+            ReviewItem.objects.filter(
+                teacher=self.teacher,
+                source_type="homework",
+                source_id=HomeworkSubmission.objects.get(
+                    homework=homework, student=self.student
+                ).pk,
+            ).count(),
+            1,
+        )
+        submission = HomeworkSubmission.objects.get(homework=homework, student=self.student)
+        self.assertEqual(submission.result_payload["by_task_id"]["1"], "42")
+
+    def test_submit_binds_correct_subject_among_several(self):
+        homework = self._assign_platform_variant(student_subject=self.subject_math)
+        self.assertEqual(homework.student_subject_id, self.subject_math.pk)
+        response = self._submit_variant(homework)
+        self.assertEqual(response.status_code, 200, response.content)
+        homework.refresh_from_db()
+        self.assertEqual(homework.student_subject_id, self.subject_math.pk)
+        self.assertEqual(homework.teacher_id, self.teacher.pk)
+
+    def test_platform_author_is_not_used_as_teacher(self):
+        from Cabinet.models import ReviewItem, HomeworkSubmission
+
+        homework = self._assign_platform_variant()
+        self.assertNotEqual(homework.teacher_id, self.platform_admin.pk)
+        self._submit_variant(homework)
+        submission = HomeworkSubmission.objects.get(homework=homework, student=self.student)
+        review = ReviewItem.objects.get(source_type="homework", source_id=submission.pk)
+        self.assertEqual(review.teacher_id, self.teacher.pk)
+        self.assertNotEqual(review.teacher_id, self.platform_admin.pk)
+
+    def test_student_detail_requires_real_submit_for_variant_submitted_flag(self):
+        from rest_framework.test import APIClient
+
+        homework = self._assign_platform_variant()
+        client = APIClient()
+        client.force_login(self.student_user)
+        client.post(
+            f"/api/homework/assignment/{homework.pk}/save-draft/",
+            {"result": {"by_task_id": {"1": "1"}, "checked": {"1": True}}},
+            format="json",
+        )
+        before = client.get(f"/api/cabinet/student/assignments/{homework.pk}/").json()
+        self.assertFalse(before["variant_submitted"])
+        self.assertEqual(before["status"], "new")
+
+        self._submit_variant(homework)
+        after = client.get(f"/api/cabinet/student/assignments/{homework.pk}/").json()
+        self.assertTrue(after["variant_submitted"])
+        self.assertEqual(after["status"], "submitted")

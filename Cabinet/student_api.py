@@ -1002,7 +1002,8 @@ class StudentAssignmentDetailView(StudentScopedView):
             "attached_file_name": attached_name,
             "teacher_comment": submission.teacher_comment if submission else "",
             "mistakes": [],
-            "variant_submitted": bool(submission and submission.result_payload),
+            # Черновик (есть result_payload) ≠ сдача. Учитель видит работу только после submitted_at.
+            "variant_submitted": bool(submission and submission.submitted_at),
             "result": submission.result_payload if submission and submission.status == SubmissionStatus.CHECKED else None,
         })
         return Response(card)

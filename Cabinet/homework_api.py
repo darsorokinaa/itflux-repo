@@ -163,7 +163,34 @@ def review_items_ready_to_check(qs):
     from .models import HomeworkSubmission
 
     submitted_ids = HomeworkSubmission.objects.filter(submitted_at__isnull=False).values("pk")
-    return qs.filter(Q(source_type="homework", source_id__in=submitted_ids) | ~Q(source_type="homework"))
+    filtered = qs.filter(
+        Q(source_type="homework", source_id__in=submitted_ids) | ~Q(source_type="homework")
+    )
+    return filtered
+
+
+def explain_homework_missing_from_teacher_queue(submission: HomeworkSubmission) -> str:
+    """Диагностика: почему сдача не попадает в счётчик/очередь учителя."""
+    if submission is None:
+        return "no_submission"
+    if not submission.submitted_at:
+        return "submitted_at_missing"
+    homework = submission.homework
+    if homework is None:
+        return "homework_missing"
+    if is_live_meeting_homework(homework):
+        return "live_meeting_excluded"
+    if homework.teacher_id is None:
+        return "teacher_missing"
+    from .models import ReviewItem
+
+    if not ReviewItem.objects.filter(
+        teacher_id=homework.teacher_id,
+        source_type="homework",
+        source_id=submission.pk,
+    ).exists():
+        return "review_item_missing"
+    return "ok"
 
 
 def ensure_homework_in_review_queue(homework: Homework, student: Student):
@@ -745,6 +772,16 @@ class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
         if computed is not None:
             submission.score = computed
         submission.save(update_fields=["result_payload", "score", "updated_at"])
+        logger.info(
+            "homework.save_draft ok student_id=%s homework_id=%s submission_id=%s "
+            "teacher_id=%s submitted_at=%s api_status=%s",
+            getattr(student, "pk", None),
+            homework_id,
+            submission.pk,
+            getattr(homework.teacher, "pk", None),
+            submission.submitted_at.isoformat() if submission.submitted_at else None,
+            submission_api_status(submission),
+        )
         return Response({"ok": True, "status": submission_api_status(submission)})
 
 
@@ -856,34 +893,126 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
 
 class HomeworkAssignmentSubmitView(HomeworkAssignmentBaseView):
     def post(self, request, homework_id: int):
+        from django.db import transaction
+
         homework, student, err = self.resolve(request, homework_id)
         if err:
             return err
         result = _parse_result_body(request)
 
         submission = _get_or_create_submission(homework, student)
+        old_status = submission.status
+        old_submitted_at = submission.submitted_at
+        teacher = homework.teacher
+        variant_id = None
+        for task in homework.tasks.all():
+            variant_id = extract_variant_id(task.description)
+            if variant_id:
+                break
+
         if submission.status == SubmissionStatus.CHECKED:
+            logger.info(
+                "homework.submit rejected checked student_id=%s homework_id=%s "
+                "submission_id=%s teacher_id=%s variant_id=%s",
+                getattr(student, "pk", None),
+                homework_id,
+                submission.pk,
+                getattr(teacher, "pk", None),
+                variant_id,
+            )
             return Response(
                 {"error": "Работа уже проверена."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        # Идемпотентность: повторная отправка возвращает уже сданную работу.
         if submission.submitted_at and submission.status == SubmissionStatus.SUBMITTED:
-            return Response(
-                {"error": "Работа уже отправлена на проверку."},
-                status=status.HTTP_403_FORBIDDEN,
+            review_item = _ensure_review_item(submission)
+            logger.info(
+                "homework.submit idempotent student_id=%s homework_id=%s "
+                "submission_id=%s teacher_id=%s variant_id=%s review_id=%s",
+                getattr(student, "pk", None),
+                homework_id,
+                submission.pk,
+                getattr(teacher, "pk", None),
+                variant_id,
+                getattr(review_item, "pk", None),
             )
-        if result is not None:
-            merged = _merge_result_payload(submission.result_payload, result)
-            submission.result_payload = merged
-            computed = compute_score_percent(merged)
-            if computed is not None:
-                submission.score = computed
-        submission.status = SubmissionStatus.SUBMITTED
-        submission.submitted_at = timezone.now()
-        submission.save()
-        review_item = _ensure_review_item(submission)
+            return Response({
+                "ok": True,
+                "status": "submitted",
+                "already_submitted": True,
+                "submitted_at": submission.submitted_at.isoformat(),
+                "submission_id": submission.pk,
+                "review_id": getattr(review_item, "pk", None),
+            })
+
+        try:
+            with transaction.atomic():
+                if result is not None:
+                    merged = _merge_result_payload(submission.result_payload, result)
+                    submission.result_payload = merged
+                    computed = compute_score_percent(merged)
+                    if computed is not None:
+                        submission.score = computed
+                submission.status = SubmissionStatus.SUBMITTED
+                submission.submitted_at = timezone.now()
+                submission.save()
+                review_item = _ensure_review_item(submission)
+        except Exception:
+            logger.exception(
+                "homework.submit failed student_id=%s homework_id=%s "
+                "submission_id=%s teacher_id=%s variant_id=%s old_status=%s",
+                getattr(student, "pk", None),
+                homework_id,
+                submission.pk,
+                getattr(teacher, "pk", None),
+                variant_id,
+                old_status,
+            )
+            return Response(
+                {"error": "Не удалось сохранить отправку. Попробуйте ещё раз."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        queue_reason = explain_homework_missing_from_teacher_queue(submission)
+        if queue_reason != "ok":
+            logger.warning(
+                "homework.submit not_in_teacher_queue student_id=%s homework_id=%s "
+                "submission_id=%s teacher_id=%s variant_id=%s reason=%s",
+                getattr(student, "pk", None),
+                homework_id,
+                submission.pk,
+                getattr(teacher, "pk", None),
+                variant_id,
+                queue_reason,
+            )
+
         _notify_homework_submitted(submission, review_item)
-        return Response({"ok": True, "status": "submitted"})
+        logger.info(
+            "homework.submit ok student_id=%s homework_id=%s submission_id=%s "
+            "attempt_id=%s teacher_id=%s variant_id=%s old_status=%s new_status=%s "
+            "old_submitted_at=%s new_submitted_at=%s review_id=%s score=%s",
+            getattr(student, "pk", None),
+            homework_id,
+            submission.pk,
+            submission.pk,
+            getattr(teacher, "pk", None),
+            variant_id,
+            old_status,
+            submission.status,
+            old_submitted_at.isoformat() if old_submitted_at else None,
+            submission.submitted_at.isoformat() if submission.submitted_at else None,
+            getattr(review_item, "pk", None),
+            submission.score,
+        )
+        return Response({
+            "ok": True,
+            "status": "submitted",
+            "submitted_at": submission.submitted_at.isoformat() if submission.submitted_at else None,
+            "submission_id": submission.pk,
+            "review_id": getattr(review_item, "pk", None),
+            "score": float(submission.score) if submission.score is not None else None,
+        })
 
 
 class HomeworkAssignmentFetchByTokenView(APIView):
