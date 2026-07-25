@@ -147,13 +147,17 @@ def is_live_meeting_homework(homework) -> bool:
 
 
 def exclude_live_meeting_review_items(qs):
-    """Убрать ReviewItem по сдаче live-варианта с урока."""
+    """
+    Убрать из очереди live-варианты урока, которые ещё не сданы окончательно.
+    После реальной сдачи (есть submitted_at) работа должна быть видна учителю.
+    """
     from .models import HomeworkSubmission
 
-    live_submission_ids = HomeworkSubmission.objects.filter(
+    live_unsubmitted_ids = HomeworkSubmission.objects.filter(
         homework__description__contains=LIVE_MEETING_HOMEWORK_MARKER,
+        submitted_at__isnull=True,
     ).values("pk")
-    return qs.exclude(source_type="homework", source_id__in=live_submission_ids)
+    return qs.exclude(source_type="homework", source_id__in=live_unsubmitted_ids)
 
 
 def review_items_ready_to_check(qs):
@@ -174,12 +178,12 @@ def explain_homework_missing_from_teacher_queue(submission: HomeworkSubmission) 
     if submission is None:
         return "no_submission"
     if not submission.submitted_at:
+        if is_live_meeting_homework(getattr(submission, "homework", None)):
+            return "live_draft_not_submitted"
         return "submitted_at_missing"
     homework = submission.homework
     if homework is None:
         return "homework_missing"
-    if is_live_meeting_homework(homework):
-        return "live_meeting_excluded"
     if homework.teacher_id is None:
         return "teacher_missing"
     from .models import ReviewItem
@@ -679,8 +683,9 @@ def _ensure_review_item(submission: HomeworkSubmission):
         return None
     if not submission.submitted_at:
         return None
-    if is_live_meeting_homework(submission.homework):
-        return None
+    # Live-вариант после окончательной сдачи тоже попадает в «Проверка».
+    # До сдачи (только черновик на уроке) ReviewItem не создаём здесь —
+    # ensure_homework_in_review_queue по-прежнему пропускает live при выдаче.
     item, _ = ReviewItem.objects.get_or_create(
         teacher=submission.homework.teacher,
         source_type="homework",

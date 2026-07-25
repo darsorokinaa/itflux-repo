@@ -1868,8 +1868,6 @@ def build_dashboard_payload(teacher):
         homework__teacher=teacher,
         status=SubmissionStatus.SUBMITTED,
         submitted_at__isnull=False,
-    ).exclude(
-        homework__description__contains="live-meeting:",
     ).select_related("student", "homework").order_by("-submitted_at", "-id")[:5]
 
     pending_reviews_list = pending_reviews.select_related("student", "group").order_by("-created_at")[:8]

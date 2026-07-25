@@ -2598,3 +2598,108 @@ class PlatformVariantHomeworkSubmitChainTests(TestCase):
         after = client.get(f"/api/cabinet/student/assignments/{homework.pk}/").json()
         self.assertTrue(after["variant_submitted"])
         self.assertEqual(after["status"], "submitted")
+
+
+class HomeworkSubmissionBackfillTests(TestCase):
+    def setUp(self):
+        self.teacher = User.objects.create_user(username="bf_teacher", password="pass")
+        self.teacher.profile.role = Profile.Role.TEACHER
+        self.teacher.profile.save()
+        self.student = Student.objects.create(
+            teacher=self.teacher,
+            first_name="Бэкап",
+            last_name="Ученик",
+            status="active",
+        )
+
+    def test_backfill_marks_draft_with_answers_as_submitted(self):
+        from Cabinet.homework_backfill import backfill_unsubmitted_homework_with_answers
+        from Cabinet.models import HomeworkSubmission, HomeworkTask, ReviewItem
+
+        homework = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="ДЗ вариант",
+            status="assigned",
+        )
+        HomeworkTask.objects.create(
+            homework=homework,
+            task_type="generated_task",
+            title="Вариант",
+            description="/ege/inf/variant/900",
+            order=0,
+        )
+        submission = HomeworkSubmission.objects.create(
+            homework=homework,
+            student=self.student,
+            status="submitted",
+            result_payload={"by_task_id": {"1": "42"}, "checked": {"1": True}},
+        )
+        self.assertIsNone(submission.submitted_at)
+
+        stats = backfill_unsubmitted_homework_with_answers(dry_run=False)
+        self.assertGreaterEqual(stats["submitted_at_set"], 1)
+        submission.refresh_from_db()
+        self.assertIsNotNone(submission.submitted_at)
+        self.assertTrue(
+            ReviewItem.objects.filter(
+                teacher=self.teacher,
+                source_type="homework",
+                source_id=submission.pk,
+            ).exists()
+        )
+
+    def test_backfill_skips_empty_placeholder(self):
+        from Cabinet.homework_backfill import backfill_unsubmitted_homework_with_answers
+        from Cabinet.models import HomeworkSubmission
+
+        homework = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="Пустое ДЗ",
+            status="assigned",
+        )
+        submission = HomeworkSubmission.objects.create(
+            homework=homework,
+            student=self.student,
+            status="submitted",
+            result_payload={},
+        )
+        stats = backfill_unsubmitted_homework_with_answers(dry_run=False)
+        submission.refresh_from_db()
+        self.assertIsNone(submission.submitted_at)
+        self.assertNotIn(submission.pk, stats["ids"])
+
+    def test_live_with_answers_appears_in_teacher_counts_after_backfill(self):
+        from rest_framework.test import APIClient
+        from Cabinet.homework_backfill import backfill_unsubmitted_homework_with_answers
+        from Cabinet.models import HomeworkSubmission, HomeworkTask
+
+        homework = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="Вариант на уроке",
+            description="live-meeting:1:variant:901\nПоказан на уроке",
+            status="assigned",
+        )
+        HomeworkTask.objects.create(
+            homework=homework,
+            task_type="generated_task",
+            title="Вариант",
+            description="/ege/inf/variant/901",
+            order=0,
+        )
+        HomeworkSubmission.objects.create(
+            homework=homework,
+            student=self.student,
+            status="submitted",
+            result_payload={"by_task_id": {"1": "1"}, "checked": {"1": True}},
+            score=50,
+        )
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        before = client.get("/api/cabinet/nav-counts/").json()["reviews_count"]
+        backfill_unsubmitted_homework_with_answers(dry_run=False)
+        after = client.get("/api/cabinet/nav-counts/").json()["reviews_count"]
+        self.assertEqual(after, before + 1)

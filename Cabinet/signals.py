@@ -48,15 +48,12 @@ def sync_billing_account_on_student_status(sender, instance, created, **kwargs):
 @receiver(post_save, sender=HomeworkSubmission)
 def ensure_review_item_for_submission(sender, instance, created, **kwargs):
     # Только после реальной сдачи. Выдача через «Задать ДЗ» ставит в очередь отдельно.
+    # Live-вариант после submitted_at тоже попадает в очередь учителя.
     if instance.status != SubmissionStatus.SUBMITTED:
         return
     if not instance.submitted_at:
         return
     homework = instance.homework
-    from .homework_api import is_live_meeting_homework
-
-    if is_live_meeting_homework(homework):
-        return
     ReviewItem.objects.get_or_create(
         teacher=homework.teacher,
         source_type="homework",
