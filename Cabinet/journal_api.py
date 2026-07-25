@@ -35,6 +35,7 @@ from .journal_service import (
     analytics_for_student,
     attendance_report,
     build_gradebook,
+    build_homework_result_payload,
     performance_summary,
     bulk_apply_comment,
     bulk_apply_criterion,
@@ -50,6 +51,7 @@ from .journal_service import (
     get_or_create_journal,
     get_or_create_journal_settings,
     publish_record,
+    resolve_homework_for_journal_record,
     serialize_criterion,
     serialize_journal,
     serialize_record,
@@ -195,7 +197,12 @@ class JournalLessonDetailView(APIView):
             return _err(e)
         journal = (
             LessonJournal.objects.select_related(
-                "schedule_event", "group", "student", "homework", "assessment_template"
+                "schedule_event",
+                "group",
+                "student",
+                "homework",
+                "previous_homework",
+                "assessment_template",
             )
             .prefetch_related(
                 Prefetch(
@@ -246,7 +253,9 @@ class JournalLessonCompleteView(APIView):
             "student_records__criterion_scores__criterion",
             "student_records__tags",
             "student_records__student",
-        ).select_related("schedule_event", "homework", "group", "student").get(pk=journal.pk)
+        ).select_related(
+            "schedule_event", "homework", "previous_homework", "group", "student"
+        ).get(pk=journal.pk)
         return Response(serialize_journal(journal))
 
 
@@ -909,6 +918,33 @@ class JournalStudentsSummaryView(APIView):
         return Response({"results": results})
 
 
+def _student_result_lesson_fields(record: StudentLessonRecord) -> dict:
+    journal = record.journal
+    event = journal.schedule_event if journal.schedule_event_id else None
+    return {
+        "lesson_date": journal.lesson_date.isoformat(),
+        "starts_at": (
+            event.starts_at.isoformat()
+            if event
+            else (journal.started_at.isoformat() if journal.started_at else None)
+        ),
+        "ends_at": (
+            event.ends_at.isoformat()
+            if event
+            else (journal.finished_at.isoformat() if journal.finished_at else None)
+        ),
+        "topic": journal.actual_topic or journal.planned_topic,
+        "planned_topic": journal.planned_topic,
+        "actual_topic": journal.actual_topic,
+        "lesson_summary": journal.lesson_summary,
+        "material_covered": journal.material_covered,
+        "material_to_repeat": journal.material_to_repeat,
+        "next_lesson_plan": journal.next_lesson_plan,
+        "recommendations": record.recommendation or journal.recommendations,
+        "previous_homework_status": journal.previous_homework_status or "",
+    }
+
+
 class StudentResultsListView(APIView):
     permission_classes = [IsAuthenticated, IsCabinetStudent]
 
@@ -920,7 +956,13 @@ class StudentResultsListView(APIView):
                 publish_status=RecordPublishStatus.PUBLISHED,
                 visible_to_student=True,
             )
-            .select_related("journal", "journal__schedule_event")
+            .select_related(
+                "journal",
+                "journal__schedule_event",
+                "journal__previous_homework",
+                "journal__teacher",
+                "student",
+            )
             .prefetch_related("criterion_scores__criterion", "tags")
             .order_by(
                 "-journal__lesson_date",
@@ -929,30 +971,25 @@ class StudentResultsListView(APIView):
                 "-id",
             )
         )
-        return Response(
-            {
-                "results": [
-                    {
-                        **serialize_record(r, for_student=True),
-                        "lesson_date": r.journal.lesson_date.isoformat(),
-                        "starts_at": (
-                            r.journal.schedule_event.starts_at.isoformat()
-                            if r.journal.schedule_event_id and r.journal.schedule_event
-                            else (r.journal.started_at.isoformat() if r.journal.started_at else None)
-                        ),
-                        "ends_at": (
-                            r.journal.schedule_event.ends_at.isoformat()
-                            if r.journal.schedule_event_id and r.journal.schedule_event
-                            else (r.journal.finished_at.isoformat() if r.journal.finished_at else None)
-                        ),
-                        "topic": r.journal.actual_topic or r.journal.planned_topic,
-                        "material_to_repeat": r.journal.material_to_repeat,
-                        "recommendations": r.recommendation or r.journal.recommendations,
-                    }
-                    for r in records[:100]
-                ]
-            }
-        )
+        results = []
+        for r in records[:100]:
+            hw = resolve_homework_for_journal_record(r.journal, r.student)
+            homework_result = build_homework_result_payload(
+                homework=hw,
+                student=r.student,
+                for_student=True,
+            )
+            results.append(
+                {
+                    **serialize_record(
+                        r,
+                        for_student=True,
+                        homework_result=homework_result,
+                    ),
+                    **_student_result_lesson_fields(r),
+                }
+            )
+        return Response({"results": results})
 
 
 class StudentResultDetailView(APIView):
@@ -962,7 +999,11 @@ class StudentResultDetailView(APIView):
         roster_ids = Student.objects.filter(user=request.user).values_list("id", flat=True)
         record = get_object_or_404(
             StudentLessonRecord.objects.select_related(
-                "journal", "journal__schedule_event"
+                "journal",
+                "journal__schedule_event",
+                "journal__previous_homework",
+                "journal__teacher",
+                "student",
             ).prefetch_related(
                 "criterion_scores__criterion", "tags"
             ),
@@ -971,30 +1012,18 @@ class StudentResultDetailView(APIView):
             publish_status=RecordPublishStatus.PUBLISHED,
             visible_to_student=True,
         )
-        journal = record.journal
-        event = journal.schedule_event if journal.schedule_event_id else None
-        data = serialize_record(record, for_student=True)
-        data.update(
-            {
-                "lesson_date": journal.lesson_date.isoformat(),
-                "starts_at": (
-                    event.starts_at.isoformat()
-                    if event
-                    else (journal.started_at.isoformat() if journal.started_at else None)
-                ),
-                "ends_at": (
-                    event.ends_at.isoformat()
-                    if event
-                    else (journal.finished_at.isoformat() if journal.finished_at else None)
-                ),
-                "topic": journal.actual_topic or journal.planned_topic,
-                "material_covered": journal.material_covered,
-                "material_to_repeat": journal.material_to_repeat,
-                "next_lesson_plan": journal.next_lesson_plan,
-                "lesson_summary": journal.lesson_summary,
-                "recommendations": record.recommendation or journal.recommendations,
-            }
+        hw = resolve_homework_for_journal_record(record.journal, record.student)
+        homework_result = build_homework_result_payload(
+            homework=hw,
+            student=record.student,
+            for_student=True,
         )
+        data = serialize_record(
+            record,
+            for_student=True,
+            homework_result=homework_result,
+        )
+        data.update(_student_result_lesson_fields(record))
         # Guard: never leak private_note
         data.pop("private_note", None)
         return Response(data)

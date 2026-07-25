@@ -1643,6 +1643,23 @@
   font-weight: 650;
 }
 
+.jl-hw-student-result {
+  margin-top: 14px;
+}
+
+.jl-hw-student-result__name {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.jl-hw-result-note {
+  margin: 8px 0 0;
+  font-size: 0.86rem;
+  color: #3d4a63;
+  white-space: pre-wrap;
+}
+
 /* ── Сводка успеваемости над таблицей журнала ───────────────────── */
 
 .jg-summary {

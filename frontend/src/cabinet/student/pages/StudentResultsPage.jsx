@@ -16,6 +16,14 @@ const ATTENDANCE_RU = {
   not_marked: "—",
 };
 
+const PREV_HW_STATUS_RU = {
+  full: "Выполнено полностью",
+  partial: "Выполнено частично",
+  not_done: "Не выполнено",
+  not_assigned: "Не было задано",
+  not_reviewed: "Не проверено",
+};
+
 function formatLessonDate(iso) {
   if (!iso) return "—";
   const d = new Date(`${iso}T00:00:00`);
@@ -55,6 +63,130 @@ function DetailBlock({ label, value }) {
     <p>
       <strong>{label}:</strong> {text}
     </p>
+  );
+}
+
+function VariantResultBlock({ result, titleFallback = "Вариант на уроке" }) {
+  const tasks = Array.isArray(result?.tasks) ? result.tasks : [];
+  if (!result || (!tasks.length && result.score_percent == null)) return null;
+  return (
+    <div className="jl-variant-result">
+      <div className="jl-variant-result__head">
+        <strong>{result.title || titleFallback}</strong>
+        {result.score_percent != null ? (
+          <span>
+            {result.correct_count ?? 0}/
+            {result.checked_count ?? tasks.length}
+            {" · "}
+            {formatScore(result.score_percent)}
+          </span>
+        ) : null}
+      </div>
+      {tasks.length ? (
+        <div className="jl-variant-result__table-wrap">
+          <table className="jl-variant-result__table">
+            <thead>
+              <tr>
+                <th>№</th>
+                <th>Ваш ответ</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((task) => (
+                <tr key={`${result.title || "v"}-${task.id || task.number}`}>
+                  <td>{task.number ?? "—"}</td>
+                  <td>{String(task.student_answer || "").trim() || "—"}</td>
+                  <td>
+                    {task.ok === true ? (
+                      <span className="jl-variant-result__ok">верно</span>
+                    ) : task.ok === false ? (
+                      <span className="jl-variant-result__bad">ошибка</span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function HomeworkResultBlock({ result }) {
+  if (!result) return null;
+  const tasks = Array.isArray(result.tasks) ? result.tasks : [];
+  const scoreLabel = formatScore(result.score_percent);
+  const hasBody =
+    tasks.length > 0
+    || Boolean(String(result.answer_text || "").trim())
+    || Boolean(result.has_attached_file)
+    || Boolean(String(result.teacher_comment || "").trim())
+    || result.score_percent != null
+    || Boolean(result.status_label);
+  if (!hasBody) return null;
+  return (
+    <div className="jl-variant-result">
+      <div className="jl-variant-result__head">
+        <strong>{result.title || "Домашнее задание"}</strong>
+        <span>
+          {result.status_label || ""}
+          {scoreLabel
+            ? `${result.status_label ? " · " : ""}${
+              result.correct_count != null && result.checked_count != null
+                ? `${result.correct_count}/${result.checked_count} · `
+                : ""
+            }${scoreLabel}`
+            : ""}
+        </span>
+      </div>
+      {tasks.length ? (
+        <div className="jl-variant-result__table-wrap">
+          <table className="jl-variant-result__table">
+            <thead>
+              <tr>
+                <th>№</th>
+                <th>Ваш ответ</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((task) => (
+                <tr key={`hw-${result.homework_id}-${task.id || task.number}`}>
+                  <td>{task.number ?? "—"}</td>
+                  <td>{String(task.student_answer || "").trim() || "—"}</td>
+                  <td>
+                    {task.ok === true ? (
+                      <span className="jl-variant-result__ok">верно</span>
+                    ) : task.ok === false ? (
+                      <span className="jl-variant-result__bad">ошибка</span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {String(result.answer_text || "").trim() ? (
+        <p className="jl-hw-result-note">
+          <strong>Ваш ответ:</strong> {result.answer_text}
+        </p>
+      ) : null}
+      {result.has_attached_file ? (
+        <p className="jl-hw-result-note">Вы прикрепили файл</p>
+      ) : null}
+      {String(result.teacher_comment || "").trim() ? (
+        <p className="jl-hw-result-note">
+          <strong>Комментарий к ДЗ:</strong> {result.teacher_comment}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -106,6 +238,7 @@ export default function StudentResultsPage() {
 
   if (detail) {
     const timeRange = formatLessonTimeRange(detail);
+    const prevHwLabel = PREV_HW_STATUS_RU[detail.previous_homework_status] || "";
     return (
       <div className="jl-page">
         <Link className="jl-btn jl-btn--ghost" to="/cabinet/student/results">
@@ -125,7 +258,7 @@ export default function StudentResultsPage() {
           </p>
           {detail.overall_score != null ? (
             <p>
-              <strong>Результат:</strong> {formatScore(detail.overall_score)}
+              <strong>Результат урока:</strong> {formatScore(detail.overall_score)}
             </p>
           ) : null}
           {(detail.criterion_scores || []).length ? (
@@ -148,49 +281,13 @@ export default function StudentResultsPage() {
           <DetailBlock label="Пройденный материал" value={detail.material_covered} />
           <DetailBlock label="Повторить" value={detail.material_to_repeat} />
           <DetailBlock label="План на следующий урок" value={detail.next_lesson_plan} />
-          {(detail.variant_result?.tasks || []).length ? (
-            <div className="jl-variant-result">
-              <div className="jl-variant-result__head">
-                <strong>{detail.variant_result.title || "Вариант на уроке"}</strong>
-                {detail.variant_result.score_percent != null ? (
-                  <span>
-                    {detail.variant_result.correct_count ?? 0}/
-                    {detail.variant_result.checked_count ?? detail.variant_result.tasks.length}
-                    {" · "}
-                    {formatScore(detail.variant_result.score_percent)}
-                  </span>
-                ) : null}
-              </div>
-              <div className="jl-variant-result__table-wrap">
-                <table className="jl-variant-result__table">
-                  <thead>
-                    <tr>
-                      <th>№</th>
-                      <th>Ваш ответ</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.variant_result.tasks.map((task) => (
-                      <tr key={`${detail.id}-${task.id || task.number}`}>
-                        <td>{task.number ?? "—"}</td>
-                        <td>{String(task.student_answer || "").trim() || "—"}</td>
-                        <td>
-                          {task.ok === true ? (
-                            <span className="jl-variant-result__ok">верно</span>
-                          ) : task.ok === false ? (
-                            <span className="jl-variant-result__bad">ошибка</span>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+          {prevHwLabel ? (
+            <p>
+              <strong>Домашнее задание (статус):</strong> {prevHwLabel}
+            </p>
           ) : null}
+          <VariantResultBlock result={detail.variant_result} />
+          <HomeworkResultBlock result={detail.homework_result} />
           {(detail.tags || []).length ? (
             <p>
               {(detail.tags || []).map((t) => t.title).join(" · ")}
@@ -204,13 +301,15 @@ export default function StudentResultsPage() {
   return (
     <div className="jl-page">
       <h1 className="jl-page__title">Мои результаты</h1>
-      <p className="jl-page__sub">Опубликованные итоги уроков и комментарии учителя</p>
+      <p className="jl-page__sub">Опубликованные итоги уроков, вариант и домашние задания</p>
       {!items.length ? (
         <p className="jl-state">Пока нет опубликованных результатов</p>
       ) : (
         <div className="jl-results-list">
           {items.map((item) => {
             const timeRange = formatLessonTimeRange(item);
+            const hw = item.homework_result;
+            const hwScore = formatScore(hw?.score_percent);
             return (
               <article key={item.id} className="jl-result-card">
                 <h3>
@@ -221,9 +320,16 @@ export default function StudentResultsPage() {
                 </h3>
                 <p>
                   {ATTENDANCE_RU[item.attendance_status] || item.attendance_status}
-                  {item.overall_score != null ? ` · ${formatScore(item.overall_score)}` : ""}
+                  {item.overall_score != null ? ` · урок ${formatScore(item.overall_score)}` : ""}
+                  {hwScore ? ` · ДЗ ${hwScore}` : hw?.status_label ? ` · ДЗ: ${hw.status_label}` : ""}
                 </p>
                 {item.teacher_comment ? <p>{item.teacher_comment}</p> : null}
+                {hw?.title ? (
+                  <p className="jl-hw-result-note">
+                    ДЗ: {hw.title}
+                    {hw.status_label ? ` · ${hw.status_label}` : ""}
+                  </p>
+                ) : null}
                 <a
                   className="jl-btn jl-btn--secondary"
                   href={`/cabinet/student/results/${item.id}`}

@@ -51,6 +51,91 @@ function formatLessonDate(iso) {
   });
 }
 
+function formatPercentScore(score) {
+  if (score == null || score === "") return null;
+  const n = Number(score);
+  if (Number.isNaN(n)) return null;
+  return Number.isInteger(n) ? `${n}%` : `${n.toFixed(1)}%`;
+}
+
+function HomeworkResultBlock({ result, showCorrectAnswer = true }) {
+  if (!result) return null;
+  const tasks = Array.isArray(result.tasks) ? result.tasks : [];
+  const scoreLabel = formatPercentScore(result.score_percent);
+  const hasBody =
+    tasks.length > 0
+    || Boolean(String(result.answer_text || "").trim())
+    || Boolean(result.has_attached_file)
+    || Boolean(String(result.teacher_comment || "").trim())
+    || result.score_percent != null
+    || Boolean(result.status_label);
+  if (!hasBody) return null;
+  return (
+    <div className="jl-variant-result">
+      <div className="jl-variant-result__head">
+        <strong>{result.title || "Домашнее задание"}</strong>
+        <span>
+          {result.status_label || ""}
+          {scoreLabel
+            ? `${result.status_label ? " · " : ""}${
+              result.correct_count != null && result.checked_count != null
+                ? `${result.correct_count}/${result.checked_count} · `
+                : ""
+            }${scoreLabel}`
+            : ""}
+        </span>
+      </div>
+      {tasks.length ? (
+        <div className="jl-variant-result__table-wrap">
+          <table className="jl-variant-result__table">
+            <thead>
+              <tr>
+                <th>№</th>
+                <th>Ответ ученика</th>
+                {showCorrectAnswer ? <th>Правильный</th> : null}
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((task) => (
+                <tr key={`hw-${result.homework_id}-${task.id || task.number}`}>
+                  <td>{task.number ?? "—"}</td>
+                  <td>{String(task.student_answer || "").trim() || "—"}</td>
+                  {showCorrectAnswer ? (
+                    <td>{String(task.correct_answer || "").trim() || "—"}</td>
+                  ) : null}
+                  <td>
+                    {task.ok === true ? (
+                      <span className="jl-variant-result__ok">верно</span>
+                    ) : task.ok === false ? (
+                      <span className="jl-variant-result__bad">ошибка</span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {String(result.answer_text || "").trim() ? (
+        <p className="jl-hw-result-note">
+          <strong>Ответ:</strong> {result.answer_text}
+        </p>
+      ) : null}
+      {result.has_attached_file ? (
+        <p className="jl-hw-result-note">Прикреплён файл</p>
+      ) : null}
+      {String(result.teacher_comment || "").trim() ? (
+        <p className="jl-hw-result-note">
+          <strong>Комментарий к ДЗ:</strong> {result.teacher_comment}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function formatClock(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -992,7 +1077,12 @@ export default function LessonSummaryDrawer({
                     <p>
                       {journal.homework.title}
                       {journal.homework.due_at
-                        ? ` · срок ${new Date(journal.homework.due_at).toLocaleDateString("ru-RU")}`
+                        ? ` · срок ${new Date(journal.homework.due_at).toLocaleString("ru-RU", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}`
                         : ""}
                       {` · задач: ${journal.homework.tasks_count ?? "—"}`}
                     </p>
@@ -1013,6 +1103,19 @@ export default function LessonSummaryDrawer({
                 </div>
                 <div className="jl-hw-card">
                   <h3>Предыдущее домашнее задание</h3>
+                  {journal.previous_homework ? (
+                    <p>
+                      {journal.previous_homework.title}
+                      {journal.previous_homework.due_at
+                        ? ` · срок ${new Date(journal.previous_homework.due_at).toLocaleString("ru-RU", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}`
+                        : ""}
+                    </p>
+                  ) : null}
                   <select
                     value={journal.previous_homework_status || ""}
                     onChange={(e) =>
@@ -1026,6 +1129,16 @@ export default function LessonSummaryDrawer({
                     <option value="not_assigned">Не было задано</option>
                     <option value="not_reviewed">Не проверено</option>
                   </select>
+                  {(records || []).map((r) => (
+                    r.homework_result ? (
+                      <div key={`prev-hw-${r.id}`} className="jl-hw-student-result">
+                        {journal.is_group ? (
+                          <h4 className="jl-hw-student-result__name">{r.student_name}</h4>
+                        ) : null}
+                        <HomeworkResultBlock result={r.homework_result} />
+                      </div>
+                    ) : null
+                  ))}
                 </div>
               </section>
             ) : null}
@@ -1116,9 +1229,7 @@ function RecordExpanded({
               <span>
                 {variantResult.correct_count ?? 0}/{variantResult.checked_count ?? variantTasks.length}
                 {" · "}
-                {Number(variantResult.score_percent) === Number.parseInt(variantResult.score_percent, 10)
-                  ? `${Number.parseInt(variantResult.score_percent, 10)}%`
-                  : `${Number(variantResult.score_percent).toFixed(1)}%`}
+                {formatPercentScore(variantResult.score_percent)}
               </span>
             ) : null}
           </div>
@@ -1154,6 +1265,7 @@ function RecordExpanded({
           </div>
         </div>
       ) : null}
+      <HomeworkResultBlock result={record.homework_result} />
       <div className="jl-criteria">
         {(record.criterion_scores || []).map((s) => (
           <CriterionRow

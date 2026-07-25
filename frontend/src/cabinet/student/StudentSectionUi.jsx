@@ -168,7 +168,11 @@ export function formatLessonWhen(iso) {
 export function formatDueDate(iso) {
   if (!iso) return "";
   try {
-    return `до ${new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}`;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const date = d.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+    const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    return `до ${date}, ${time}`;
   } catch {
     return "";
   }

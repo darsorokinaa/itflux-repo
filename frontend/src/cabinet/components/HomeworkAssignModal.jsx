@@ -91,7 +91,7 @@ export default function HomeworkAssignModal({
   const [resourcePickerOpen, setResourcePickerOpen] = useState(false);
   const [duplicateTaskIds, setDuplicateTaskIds] = useState([]);
 
-  const toDateInputValue = (iso) => {
+  const toDateTimeLocalValue = (iso) => {
     if (!iso) return "";
     try {
       const d = new Date(iso);
@@ -99,10 +99,19 @@ export default function HomeworkAssignModal({
       const y = d.getFullYear();
       const m = String(d.getMonth() + 1).padStart(2, "0");
       const day = String(d.getDate()).padStart(2, "0");
-      return `${y}-${m}-${day}`;
+      const h = String(d.getHours()).padStart(2, "0");
+      const min = String(d.getMinutes()).padStart(2, "0");
+      return `${y}-${m}-${day}T${h}:${min}`;
     } catch {
       return "";
     }
+  };
+
+  const datetimeLocalToIso = (localValue) => {
+    if (!localValue) return undefined;
+    const d = new Date(localValue);
+    if (Number.isNaN(d.getTime())) return localValue;
+    return d.toISOString();
   };
 
   const formatSuggestedHint = (iso) => {
@@ -121,11 +130,11 @@ export default function HomeworkAssignModal({
 
   const resolveDueAtPayload = () => {
     if (!deadline) return undefined;
-    const suggestedDate = toDateInputValue(suggestedDueAt);
-    if (suggestedDueAt && (!deadlineTouched || deadline === suggestedDate)) {
+    const suggestedLocal = toDateTimeLocalValue(suggestedDueAt);
+    if (suggestedDueAt && (!deadlineTouched || deadline === suggestedLocal)) {
       return suggestedDueAt;
     }
-    return deadline;
+    return datetimeLocalToIso(deadline);
   };
 
   const loadOptions = useCallback(async () => {
@@ -155,7 +164,7 @@ export default function HomeworkAssignModal({
       const suggested = data?.suggested_due_at || "";
       setSuggestedDueAt(suggested);
       setDeadlineTouched(false);
-      setDeadline(toDateInputValue(suggested));
+      setDeadline(toDateTimeLocalValue(suggested));
     } catch (err) {
       setError(err.message || "Не удалось загрузить занятия");
       setOptions(null);
@@ -406,7 +415,7 @@ export default function HomeworkAssignModal({
                       <label className="cb-field">
                         <span>Срок выполнения</span>
                         <input
-                          type="date"
+                          type="datetime-local"
                           value={deadline}
                           onChange={(e) => {
                             setDeadlineTouched(true);
@@ -420,7 +429,7 @@ export default function HomeworkAssignModal({
                           </span>
                         ) : (
                           <span className="cabinet-auth-muted">
-                            Если следующего урока нет, срок можно указать вручную
+                            Если следующего урока нет, срок можно указать вручную (дата и время)
                           </span>
                         )}
                       </label>
@@ -522,7 +531,7 @@ export default function HomeworkAssignModal({
               <label className="cb-field">
                 <span>Срок выполнения</span>
                 <input
-                  type="date"
+                  type="datetime-local"
                   value={deadline}
                   onChange={(e) => {
                     setDeadlineTouched(true);
@@ -534,7 +543,9 @@ export default function HomeworkAssignModal({
                   <span className="cabinet-auth-muted">
                     До следующего урока{options?.plan_subject ? " по предмету" : ""}: {formatSuggestedHint(suggestedDueAt)}
                   </span>
-                ) : null}
+                ) : (
+                  <span className="cabinet-auth-muted">Укажите дату и время сдачи</span>
+                )}
               </label>
 
               {duplicateTaskIds.length > 0 ? (

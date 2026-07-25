@@ -1,6 +1,7 @@
 import {
   assignmentActionLabel,
   formatStudentDate,
+  formatStudentTime,
   interactiveActionLabel,
 } from "./StudentSectionUi";
 
@@ -44,7 +45,10 @@ export function mapStudentAssignmentToHwCard(item) {
   let deadlineTone = STATUS_TONE[item.status] || "default";
 
   if (item.due_at && !["checked", "completed", "submitted", "reviewing"].includes(item.status)) {
-    deadlineLabel = isDueToday(item.due_at) ? "Сегодня" : `До ${formatStudentDate(item.due_at)}`;
+    const dueTime = formatStudentTime(item.due_at);
+    deadlineLabel = isDueToday(item.due_at)
+      ? (dueTime ? `Сегодня, ${dueTime}` : "Сегодня")
+      : `До ${formatStudentDate(item.due_at)}${dueTime ? `, ${dueTime}` : ""}`;
     if (item.status === "overdue") {
       deadlineTone = "overdue";
     } else if (isDueToday(item.due_at)) {

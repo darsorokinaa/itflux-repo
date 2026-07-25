@@ -423,6 +423,190 @@ def build_variant_result_payload(
     }
 
 
+HOMEWORK_STATUS_LABELS = {
+    "submitted": "Сдано",
+    "checked": "Проверено",
+    "returned": "Возвращено",
+    "needs_revision": "Нужна доработка",
+    "not_submitted": "Не сдано",
+    "not_assigned": "Не задавалось",
+}
+
+
+def _homework_variant_meta(homework: Homework) -> tuple[int | None, list[dict]]:
+    from .homework_api import extract_variant_id, homework_has_variant_task
+    from .meeting_present import _variant_tasks_answer_key
+
+    if not homework_has_variant_task(homework):
+        return None, []
+    variant_id = None
+    for task in homework.tasks.all():
+        variant_id = extract_variant_id(task.description)
+        if variant_id:
+            break
+    return variant_id, _variant_tasks_answer_key(variant_id)
+
+
+def _answer_rows_from_submission(
+    *,
+    submission: HomeworkSubmission | None,
+    tasks: list[dict],
+    for_student: bool,
+) -> list[dict]:
+    """Строки ответов по ДЗ-варианту. by_number только если номер уникален."""
+    raw = (submission.result_payload if submission else None) or {}
+    if not isinstance(raw, dict):
+        raw = {}
+    by_id = raw.get("by_task_id") or raw.get("byTaskId") or {}
+    by_num = raw.get("by_number") or raw.get("byNumber") or {}
+    checked = raw.get("checked") or {}
+    number_counts: dict[str, int] = {}
+    for task in tasks:
+        nk = str(task.get("number")) if task.get("number") is not None else ""
+        if nk:
+            number_counts[nk] = number_counts.get(nk, 0) + 1
+
+    rows = []
+    for task in tasks:
+        tid = task.get("id")
+        num = task.get("number")
+        tid_key = str(tid) if tid is not None else ""
+        num_key = str(num) if num is not None else ""
+        student_answer = ""
+        if tid_key and by_id.get(tid_key) is not None:
+            student_answer = str(by_id.get(tid_key))
+        elif num_key and number_counts.get(num_key, 0) <= 1 and by_num.get(num_key) is not None:
+            student_answer = str(by_num.get(num_key))
+        ok = None
+        if tid_key and tid_key in checked:
+            ok = bool(checked[tid_key])
+        elif num_key and number_counts.get(num_key, 0) <= 1 and num_key in checked:
+            ok = bool(checked[num_key])
+        row = {
+            "id": tid,
+            "number": num,
+            "student_answer": student_answer,
+            "ok": ok,
+        }
+        if not for_student:
+            row["correct_answer"] = _strip_answer_html(task.get("answer") or "")
+        rows.append(row)
+    return rows
+
+
+def resolve_homework_for_journal_record(
+    journal: LessonJournal,
+    student: Student,
+) -> Homework | None:
+    """Предыдущее ДЗ к уроку: из журнала или последнее выданное ученику до урока."""
+    if journal.previous_homework_id:
+        return journal.previous_homework
+    event = journal.schedule_event
+    if event is None:
+        return None
+    return previous_homework_for_student(journal.teacher, student, event)
+
+
+def build_homework_result_payload(
+    *,
+    homework: Homework | None,
+    student: Student,
+    submission: HomeworkSubmission | None = None,
+    for_student: bool = False,
+) -> dict | None:
+    """
+    Результат домашнего задания для журнала / «Мои результаты».
+    Live-вариант с урока сюда не попадает — он в variant_result записи.
+    """
+    from .homework_api import compute_score_percent, is_live_meeting_homework
+
+    if homework is None:
+        return None
+    if is_live_meeting_homework(homework):
+        return None
+
+    if submission is None:
+        submission = (
+            HomeworkSubmission.objects.filter(homework=homework, student=student)
+            .order_by("-submitted_at", "-id")
+            .first()
+        )
+
+    status_key = "not_submitted"
+    if submission:
+        raw_status = (submission.status or "").strip().lower()
+        if raw_status in HOMEWORK_STATUS_LABELS and raw_status != "not_submitted":
+            status_key = raw_status
+        elif submission.submitted_at:
+            status_key = "submitted"
+        elif submission.result_payload or (submission.answer_text or "").strip() or submission.attached_file:
+            status_key = "not_submitted"
+
+    score = None
+    if submission and submission.score is not None:
+        try:
+            score = float(submission.score)
+        except (TypeError, ValueError):
+            score = None
+    if score is None and submission and submission.result_payload:
+        score = compute_score_percent(submission.result_payload)
+
+    variant_id, tasks = _homework_variant_meta(homework)
+    task_rows = (
+        _answer_rows_from_submission(
+            submission=submission,
+            tasks=tasks,
+            for_student=for_student,
+        )
+        if tasks
+        else []
+    )
+
+    checked_count = sum(1 for r in task_rows if r.get("ok") is not None)
+    correct_count = sum(1 for r in task_rows if r.get("ok") is True)
+    if score is None and checked_count:
+        score = round(correct_count * 100 / checked_count, 2)
+
+    return {
+        "homework_id": homework.id,
+        "title": homework.title or "Домашнее задание",
+        "due_at": homework.due_at.isoformat() if homework.due_at else None,
+        "status": status_key,
+        "status_label": HOMEWORK_STATUS_LABELS.get(status_key, status_key),
+        "submitted_at": (
+            submission.submitted_at.isoformat()
+            if submission and submission.submitted_at
+            else None
+        ),
+        "score_percent": score,
+        "teacher_comment": (submission.teacher_comment if submission else "") or "",
+        "answer_text": (submission.answer_text if submission else "") or "",
+        "has_attached_file": bool(submission and submission.attached_file),
+        "has_variant": bool(tasks),
+        "variant_id": variant_id,
+        "checked_count": checked_count or None,
+        "correct_count": correct_count if checked_count else None,
+        "tasks": task_rows,
+    }
+
+
+def _submissions_by_student(
+    homework: Homework | None,
+    student_ids: list[int],
+) -> dict[int, HomeworkSubmission]:
+    if homework is None or not student_ids:
+        return {}
+    out: dict[int, HomeworkSubmission] = {}
+    qs = (
+        HomeworkSubmission.objects.filter(homework=homework, student_id__in=student_ids)
+        .order_by("student_id", "-submitted_at", "-id")
+    )
+    for sub in qs:
+        if sub.student_id not in out:
+            out[sub.student_id] = sub
+    return out
+
+
 def apply_live_variant_results_to_journal(
     *,
     event: ScheduleEvent,
@@ -1725,7 +1909,13 @@ def serialize_criterion(c: AssessmentCriterion) -> dict:
     }
 
 
-def serialize_record(record: StudentLessonRecord, *, for_student: bool = False) -> dict:
+def serialize_record(
+    record: StudentLessonRecord,
+    *,
+    for_student: bool = False,
+    homework_result: dict | None = None,
+    include_homework_result: bool = True,
+) -> dict:
     scores = []
     for sc in record.criterion_scores.all():
         if for_student and not sc.criterion.visible_to_student:
@@ -1798,12 +1988,52 @@ def serialize_record(record: StudentLessonRecord, *, for_student: bool = False) 
         }
     else:
         data["variant_result"] = variant_result
+
+    if include_homework_result:
+        if homework_result is None:
+            hw = resolve_homework_for_journal_record(record.journal, record.student)
+            homework_result = build_homework_result_payload(
+                homework=hw,
+                student=record.student,
+                for_student=for_student,
+            )
+        data["homework_result"] = homework_result
     return data
 
 
 def serialize_journal(journal: LessonJournal, *, for_student: bool = False) -> dict:
     event = journal.schedule_event
     hw = journal.homework
+    records = list(journal.student_records.all())
+    prev_hw = journal.previous_homework
+    if prev_hw is None and event is not None:
+        # Если в журнале ещё не зафиксировано предыдущее ДЗ — берём по первому ученику
+        # и кэшируем разбор сдач по id ДЗ (у группы ДЗ может отличаться — тогда per-record).
+        pass
+    shared_prev = prev_hw
+    shared_subs = _submissions_by_student(shared_prev, [r.student_id for r in records]) if shared_prev else {}
+
+    student_records_data = []
+    for r in records:
+        hw_for_record = shared_prev
+        sub = shared_subs.get(r.student_id) if shared_prev else None
+        if hw_for_record is None:
+            hw_for_record = resolve_homework_for_journal_record(journal, r.student)
+            sub = None
+        homework_result = build_homework_result_payload(
+            homework=hw_for_record,
+            student=r.student,
+            submission=sub,
+            for_student=for_student,
+        )
+        student_records_data.append(
+            serialize_record(
+                r,
+                for_student=for_student,
+                homework_result=homework_result,
+            )
+        )
+
     data = {
         "id": journal.id,
         "schedule_event_id": journal.schedule_event_id,
@@ -1835,18 +2065,17 @@ def serialize_journal(journal: LessonJournal, *, for_student: bool = False) -> d
         "homework": None,
         "previous_homework_id": journal.previous_homework_id,
         "previous_homework_status": journal.previous_homework_status,
+        "previous_homework": None,
         "assessment_template_id": journal.assessment_template_id,
         "completed_at": journal.completed_at.isoformat() if journal.completed_at else None,
         "updated_at": journal.updated_at.isoformat() if journal.updated_at else None,
         "is_group": bool(journal.group_id),
-        "student_records": [
-            serialize_record(r, for_student=for_student) for r in journal.student_records.all()
-        ],
+        "student_records": student_records_data,
         "billing_hint": {
             "note": "Посещаемость из журнала используется модулем оплат. Не выбирайте её повторно.",
             "attendance_to_delivery": {
                 r.student_id: attendance_to_delivery_status(r.attendance_status)
-                for r in journal.student_records.all()
+                for r in records
             },
         },
     }
@@ -1857,6 +2086,12 @@ def serialize_journal(journal: LessonJournal, *, for_student: bool = False) -> d
             "due_at": hw.due_at.isoformat() if hw.due_at else None,
             "tasks_count": hw.tasks.count(),
             "status": hw.status,
+        }
+    if prev_hw:
+        data["previous_homework"] = {
+            "id": prev_hw.id,
+            "title": prev_hw.title,
+            "due_at": prev_hw.due_at.isoformat() if prev_hw.due_at else None,
         }
     if for_student:
         data.pop("billing_hint", None)

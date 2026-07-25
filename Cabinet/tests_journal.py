@@ -30,7 +30,8 @@ from Cabinet.journal_service import (
     publish_record,
     update_journal,
 )
-from Cabinet.models import Homework, Profile, ScheduleEvent, Student, StudentGroup
+from Cabinet.choices import SubmissionStatus
+from Cabinet.models import Homework, HomeworkSubmission, Profile, ScheduleEvent, Student, StudentGroup
 
 
 class JournalTestBase(TestCase):
@@ -578,3 +579,69 @@ class JournalModelTests(JournalTestBase):
         col = resp.data["columns"][0]
         self.assertEqual(col["cells"][str(self.student.id)]["display"], "85%")
         self.assertEqual(col["cells"][str(self.student2.id)]["display"], "н")
+
+
+class JournalHomeworkResultTests(JournalTestBase):
+    def test_journal_and_student_results_include_homework_result(self):
+        prev_hw = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="ДЗ к прошлому уроку",
+            description="Решите задачи",
+        )
+        HomeworkSubmission.objects.create(
+            homework=prev_hw,
+            student=self.student,
+            submitted_at=timezone.now() - timedelta(days=1),
+            status=SubmissionStatus.CHECKED,
+            score=88,
+            teacher_comment="Хорошо",
+            answer_text="Ответ ученика",
+            result_payload={
+                "checked": {"101": True, "102": False},
+                "by_task_id": {"101": "1", "102": "0"},
+            },
+        )
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        journal.previous_homework = prev_hw
+        journal.previous_homework_status = "full"
+        journal.lesson_summary = "Разобрали системы счисления"
+        journal.save(
+            update_fields=[
+                "previous_homework",
+                "previous_homework_status",
+                "lesson_summary",
+                "updated_at",
+            ]
+        )
+        record = journal.student_records.get(student=self.student)
+        publish_record(record, self.teacher)
+
+        resp = self.client.get(f"/api/cabinet/journal/lessons/{event.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["previous_homework"]["id"], prev_hw.id)
+        hw_result = resp.data["student_records"][0]["homework_result"]
+        self.assertIsNotNone(hw_result)
+        self.assertEqual(hw_result["homework_id"], prev_hw.id)
+        self.assertEqual(hw_result["status"], "checked")
+        self.assertEqual(float(hw_result["score_percent"]), 88.0)
+        self.assertEqual(hw_result["teacher_comment"], "Хорошо")
+        self.assertEqual(hw_result["answer_text"], "Ответ ученика")
+
+        self.client.force_login(self.student_user)
+        list_resp = self.client.get("/api/cabinet/student/results/")
+        self.assertEqual(list_resp.status_code, 200)
+        items = list_resp.data["results"]
+        self.assertTrue(items)
+        item = next(i for i in items if i["id"] == record.id)
+        self.assertEqual(item["homework_result"]["homework_id"], prev_hw.id)
+        self.assertEqual(float(item["homework_result"]["score_percent"]), 88.0)
+        for task in item["homework_result"].get("tasks") or []:
+            self.assertNotIn("correct_answer", task)
+
+        detail_resp = self.client.get(f"/api/cabinet/student/results/{record.id}/")
+        self.assertEqual(detail_resp.status_code, 200)
+        self.assertEqual(detail_resp.data["lesson_summary"], "Разобрали системы счисления")
+        self.assertEqual(detail_resp.data["homework_result"]["title"], "ДЗ к прошлому уроку")
+        self.assertEqual(detail_resp.data["previous_homework_status"], "full")

@@ -60,7 +60,12 @@ export default function MyFileAssignModal({ file, open, onClose, onAssigned }) {
         mode,
         message: message.trim() || undefined,
         title: mode === "homework" ? (title.trim() || undefined) : undefined,
-        due_at: mode === "homework" && dueAt ? dueAt : undefined,
+        due_at: mode === "homework" && dueAt
+          ? (() => {
+            const d = new Date(dueAt);
+            return Number.isNaN(d.getTime()) ? dueAt : d.toISOString();
+          })()
+          : undefined,
         ...(targetType === "student" ? { student_id: Number(studentId) } : { group_id: Number(groupId) }),
       };
       const result = await assignMyFile(file.id, payload);
@@ -187,7 +192,7 @@ export default function MyFileAssignModal({ file, open, onClose, onAssigned }) {
             <label className="cb-field">
               <span>Срок сдачи</span>
               <input
-                type="date"
+                type="datetime-local"
                 value={dueAt}
                 onChange={(e) => setDueAt(e.target.value)}
               />
