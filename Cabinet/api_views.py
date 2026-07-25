@@ -1842,11 +1842,29 @@ class HomeworkDeleteView(TeacherScopedMixin, APIView):
     """Удалить домашнее задание учителя вместе со всеми работами ученика."""
 
     def delete(self, request, homework_id):
+        from .choices import SubmissionStatus
+
         homework = get_object_or_404(Homework, pk=homework_id, teacher=request.user)
+
+        # Проверенное и принятое ДЗ удалять нельзя.
+        submission_ids = list(homework.submissions.values_list("id", flat=True))
+        if homework.submissions.filter(status=SubmissionStatus.CHECKED).exists():
+            return Response(
+                {"detail": "Нельзя удалить проверенное и принятое домашнее задание."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if submission_ids and ReviewItem.objects.filter(
+            source_type="homework",
+            source_id__in=submission_ids,
+            status="checked",
+        ).exists():
+            return Response(
+                {"detail": "Нельзя удалить проверенное и принятое домашнее задание."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # ReviewItem ссылается на HomeworkSubmission через целочисленное поле source_id (не FK),
         # поэтому каскад БД не срабатывает — удаляем связанные ReviewItem вручную.
-        submission_ids = list(homework.submissions.values_list("id", flat=True))
         if submission_ids:
             ReviewItem.objects.filter(
                 source_type="homework", source_id__in=submission_ids

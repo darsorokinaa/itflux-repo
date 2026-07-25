@@ -93,6 +93,8 @@ function mapReviewItem(item) {
   return {
     id: String(item.id),
     homeworkId: item.homework_submission?.homework ?? item.homework_review?.homework_id ?? null,
+    status: item.status || "",
+    canDeleteHomework: item.status !== "checked",
     filter,
     coverType: item.source_type === "homework" ? "exam" : "general",
     deadlineLabel,
@@ -149,7 +151,7 @@ export default function CabinetReviewPage() {
 
   const confirmDelete = useCallback(async () => {
     const item = deleteTarget;
-    if (!item?.homeworkId) return;
+    if (!item?.homeworkId || !item.canDeleteHomework) return;
     setDeletingId(item.id);
     try {
       await deleteHomework(item.homeworkId);
@@ -213,7 +215,13 @@ export default function CabinetReviewPage() {
               actionLabel={deletingId === item.id ? "Удаление…" : item.actionLabel}
               onAction={() => navigate(`/cabinet/review/${item.id}`)}
               dangerActionLabel={item.homeworkId ? "Удалить ДЗ" : undefined}
-              onDangerAction={item.homeworkId ? () => setDeleteTarget(item) : undefined}
+              onDangerAction={
+                item.homeworkId && item.canDeleteHomework
+                  ? () => setDeleteTarget(item)
+                  : undefined
+              }
+              dangerActionDisabled={Boolean(item.homeworkId) && !item.canDeleteHomework}
+              dangerActionDisabledHint="Проверенное и принятое ДЗ удалить нельзя"
             />
           ))}
         </div>

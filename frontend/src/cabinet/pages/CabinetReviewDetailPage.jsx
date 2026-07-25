@@ -253,6 +253,8 @@ export default function CabinetReviewDetailPage() {
     unsolved: "",
   });
   const [confirmAction, setConfirmAction] = useState(null);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -280,8 +282,29 @@ export default function CabinetReviewDetailPage() {
   const reviewCtx = review?.homework_review;
   const result = submission?.result_payload || {};
   const isPending = review?.status === "pending";
+  const isChecked = review?.status === "checked";
   const awaitingSubmission = isPending && !submission?.submitted_at;
   const isReadOnly = !isPending || awaitingSubmission;
+  const canDeleteHomework = Boolean(submission?.homework) && !isChecked;
+
+  useEffect(() => {
+    if (!moreMenuOpen) return undefined;
+    const onPointerDown = (event) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target)) {
+        setMoreMenuOpen(false);
+      }
+    };
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setMoreMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [moreMenuOpen]);
+
   const variantUrl = buildTeacherVariantUrl(reviewCtx);
   const level = reviewCtx?.level;
   const subject = reviewCtx?.subject;
@@ -808,15 +831,41 @@ export default function CabinetReviewDetailPage() {
           Итоги урока
         </Link>
         {submission?.homework ? (
-          <button
-            type="button"
-            className="cb-review-detail__btn cb-review-detail__btn--danger"
-            disabled={busy}
-            onClick={handleDeleteHomework}
-            title="Удалить домашнее задание вместе с работой ученика"
-          >
-            Удалить ДЗ
-          </button>
+          <div className="cb-review-detail__more" ref={moreMenuRef}>
+            <button
+              type="button"
+              className="cb-review-detail__more-btn"
+              aria-label="Ещё действия"
+              aria-haspopup="menu"
+              aria-expanded={moreMenuOpen}
+              disabled={busy}
+              onClick={() => setMoreMenuOpen((open) => !open)}
+            >
+              ⋯
+            </button>
+            {moreMenuOpen ? (
+              <div className="cb-review-detail__menu" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="cb-review-detail__menu-item cb-review-detail__menu-item--danger"
+                  disabled={busy || !canDeleteHomework}
+                  title={
+                    canDeleteHomework
+                      ? "Удалить домашнее задание вместе с работой ученика"
+                      : "Проверенное и принятое ДЗ удалить нельзя"
+                  }
+                  onClick={() => {
+                    if (!canDeleteHomework) return;
+                    setMoreMenuOpen(false);
+                    handleDeleteHomework();
+                  }}
+                >
+                  Удалить ДЗ
+                </button>
+              </div>
+            ) : null}
+          </div>
         ) : null}
         {isPending && !awaitingSubmission ? (
           <>

@@ -1,3 +1,4 @@
+import { useEffect, useId, useRef, useState } from "react";
 import "../styles/cabinet-homework-card.css";
 
 const DEADLINE_TONES = ["default", "today", "overdue", "review", "completed", "draft", "info"];
@@ -96,8 +97,10 @@ function HomeworkCoverWaves() {
  * @param {() => void} [props.onAction]
  * @param {string} [props.secondaryActionLabel]
  * @param {() => void} [props.onSecondaryAction]
- * @param {string} [props.dangerActionLabel]
+ * @param {string} [props.dangerActionLabel] — действие в меню «…»
  * @param {() => void} [props.onDangerAction]
+ * @param {boolean} [props.dangerActionDisabled]
+ * @param {string} [props.dangerActionDisabledHint]
  */
 export default function CabinetHomeworkCard({
   coverVariant,
@@ -122,11 +125,34 @@ export default function CabinetHomeworkCard({
   onSecondaryAction,
   dangerActionLabel,
   onDangerAction,
+  dangerActionDisabled = false,
+  dangerActionDisabledHint = "Нельзя удалить проверенное задание",
 }) {
   const safeDeadline = DEADLINE_TONES.includes(deadlineTone) ? deadlineTone : "default";
   const safeProgress = PROGRESS_TONES.includes(progressTone) ? progressTone : "default";
   const pct = Math.max(0, Math.min(100, progressPercent));
   const resolvedCoverVariant = coverVariant || pickCoverVariant(title);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+  const menuId = useId();
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onPointerDown = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setMenuOpen(false);
+      }
+    };
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpen]);
 
   return (
     <article className="cb-hw-card">
@@ -189,13 +215,37 @@ export default function CabinetHomeworkCard({
 
             <div className="cb-hw-card__footer-actions">
               {dangerActionLabel ? (
-                <button
-                  type="button"
-                  className="cb-hw-card__btn cb-hw-card__btn--danger"
-                  onClick={onDangerAction}
-                >
-                  {dangerActionLabel}
-                </button>
+                <div className="cb-hw-card__more" ref={menuRef}>
+                  <button
+                    type="button"
+                    className="cb-hw-card__more-btn"
+                    aria-label="Ещё действия"
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
+                    aria-controls={menuId}
+                    onClick={() => setMenuOpen((open) => !open)}
+                  >
+                    ⋯
+                  </button>
+                  {menuOpen ? (
+                    <div className="cb-hw-card__menu" id={menuId} role="menu">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="cb-hw-card__menu-item cb-hw-card__menu-item--danger"
+                        disabled={dangerActionDisabled}
+                        title={dangerActionDisabled ? dangerActionDisabledHint : undefined}
+                        onClick={() => {
+                          if (dangerActionDisabled) return;
+                          setMenuOpen(false);
+                          onDangerAction?.();
+                        }}
+                      >
+                        {dangerActionLabel}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
               {secondaryActionLabel ? (
                 <button

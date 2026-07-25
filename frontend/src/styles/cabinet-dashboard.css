@@ -15383,6 +15383,84 @@ button.cb-sch-event {
   border-color: #F87171;
 }
 
+.cb-review-detail__more {
+  position: relative;
+  margin-right: auto;
+}
+
+.cb-review-detail__more-btn {
+  box-sizing: border-box;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 12px;
+  border: 1px solid #CBD5E1;
+  background: #fff;
+  color: #64748B;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.cb-review-detail__more-btn:hover:not(:disabled),
+.cb-review-detail__more-btn[aria-expanded="true"] {
+  border-color: #94A3B8;
+  color: #0F172A;
+  background: #F8FAFC;
+}
+
+.cb-review-detail__more-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.cb-review-detail__menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  min-width: 180px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid #E2E8F0;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+}
+
+.cb-review-detail__menu-item {
+  width: 100%;
+  display: block;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: #0F172A;
+}
+
+.cb-review-detail__menu-item:hover:not(:disabled) {
+  background: #F1F5F9;
+}
+
+.cb-review-detail__menu-item--danger {
+  color: #DC2626;
+}
+
+.cb-review-detail__menu-item--danger:hover:not(:disabled) {
+  background: #FEF2F2;
+}
+
+.cb-review-detail__menu-item:disabled {
+  color: #94A3B8;
+  cursor: not-allowed;
+}
+
 .cb-review-detail__btn--compact {
   padding: 8px 14px;
   font-size: 0.85rem;
