@@ -2670,10 +2670,10 @@ class HomeworkSubmissionBackfillTests(TestCase):
         self.assertIsNone(submission.submitted_at)
         self.assertNotIn(submission.pk, stats["ids"])
 
-    def test_live_with_answers_appears_in_teacher_counts_after_backfill(self):
+    def test_live_with_answers_skipped_by_backfill_and_teacher_queue(self):
         from rest_framework.test import APIClient
         from Cabinet.homework_backfill import backfill_unsubmitted_homework_with_answers
-        from Cabinet.models import HomeworkSubmission, HomeworkTask
+        from Cabinet.models import HomeworkSubmission, HomeworkTask, ReviewItem
 
         homework = Homework.objects.create(
             teacher=self.teacher,
@@ -2689,7 +2689,7 @@ class HomeworkSubmissionBackfillTests(TestCase):
             description="/ege/inf/variant/901",
             order=0,
         )
-        HomeworkSubmission.objects.create(
+        submission = HomeworkSubmission.objects.create(
             homework=homework,
             student=self.student,
             status="submitted",
@@ -2700,6 +2700,12 @@ class HomeworkSubmissionBackfillTests(TestCase):
         client = APIClient()
         client.force_login(self.teacher)
         before = client.get("/api/cabinet/nav-counts/").json()["reviews_count"]
-        backfill_unsubmitted_homework_with_answers(dry_run=False)
+        stats = backfill_unsubmitted_homework_with_answers(dry_run=False)
+        self.assertGreaterEqual(stats["skipped_live"], 1)
+        submission.refresh_from_db()
+        self.assertIsNone(submission.submitted_at)
+        self.assertFalse(
+            ReviewItem.objects.filter(source_type="homework", source_id=submission.pk).exists()
+        )
         after = client.get("/api/cabinet/nav-counts/").json()["reviews_count"]
-        self.assertEqual(after, before + 1)
+        self.assertEqual(after, before)

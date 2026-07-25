@@ -65,6 +65,7 @@ describe("homeworkResultToUiState + payload", () => {
     const ui = homeworkResultToUiState(
       { by_task_id: { "1": "26", "6": "732" }, by_number: {} },
       map,
+      tasks,
     );
     expect(ui.userAnswers["101"]).toBe("26");
     expect(ui.userAnswers["106"]).toBe("732");
@@ -73,5 +74,46 @@ describe("homeworkResultToUiState + payload", () => {
     const payload = buildHomeworkResultPayload(tasks, ui.userAnswers, {}, {});
     expect(payload.by_task_id).toEqual({ "101": "26", "106": "732" });
     expect(payload.by_number).toEqual({ "1": "26", "6": "732" });
+  });
+});
+
+describe("duplicate bank numbers (тетрадь из одного типа заданий)", () => {
+  const tasks = [
+    { id: 201, number: 8, answer: "65", part: 1 },
+    { id: 202, number: 8, answer: "126", part: 1 },
+    { id: 203, number: 8, answer: "109", part: 1 },
+    { id: 204, number: 8, answer: "251", part: 1 },
+    { id: 205, number: 8, answer: "109", part: 1 },
+    { id: 206, number: 8, answer: "2313", part: 1 },
+    { id: 207, number: 8, answer: "131", part: 1 },
+  ];
+
+  it("does not copy by_number onto every row with the same №", () => {
+    const result = {
+      by_task_id: { "204": "13123" },
+      by_number: { "8": "23" },
+      checked: { "204": false },
+    };
+    expect(homeworkTaskAnswer(result, 201, 8, tasks)).toBe("");
+    expect(homeworkTaskAnswer(result, 204, 8, tasks)).toBe("13123");
+    expect(homeworkTaskAnswer(result, 207, 8, tasks)).toBe("");
+
+    const review = buildStudentHomeworkReviewRows(tasks, result, "ege", "inf");
+    expect(review.part1).toHaveLength(7);
+    const answers = review.part1.map((r) => r.answer);
+    expect(answers.filter((a) => a === "13123")).toHaveLength(1);
+    expect(answers.filter((a) => a === "23")).toHaveLength(0);
+    expect(answers.filter((a) => a === "")).toHaveLength(6);
+  });
+
+  it("payload keeps answers only on task ids when numbers collide", () => {
+    const payload = buildHomeworkResultPayload(
+      tasks,
+      { "204": "13123" },
+      {},
+      { "204": false },
+    );
+    expect(payload.by_task_id).toEqual({ "204": "13123" });
+    expect(payload.by_number).toEqual({});
   });
 });

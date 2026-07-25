@@ -752,26 +752,9 @@ class VideoMeetingApiTests(TestCase):
         meeting.refresh_from_db()
         self.assertEqual(meeting.presented_kind, "")
 
-        # Live-черновик (без сдачи) не в очереди; после submit — попадает в «Проверка».
+        # Live-вариант с урока не должен попадать в очередь «Проверка».
         from Cabinet.models import Homework, HomeworkSubmission, ReviewItem
         from Cabinet.homework_api import exclude_live_meeting_review_items
-
-        homework = Homework.objects.get(pk=homework_id)
-        self.assertIn("live-meeting:", homework.description or "")
-        draft_submission = HomeworkSubmission.objects.get(homework=homework, student=self.student)
-        self.assertIsNone(draft_submission.submitted_at)
-        draft_item = ReviewItem.objects.create(
-            teacher=self.teacher,
-            student=self.student,
-            source_type="homework",
-            source_id=draft_submission.pk,
-            title=f"{homework.title} — {self.student.full_name}",
-            status="pending",
-        )
-        filtered_draft = exclude_live_meeting_review_items(
-            ReviewItem.objects.filter(teacher=self.teacher)
-        )
-        self.assertFalse(filtered_draft.filter(pk=draft_item.pk).exists())
 
         self.client.force_login(self.student_user)
         submit = self.client.post(
@@ -780,12 +763,22 @@ class VideoMeetingApiTests(TestCase):
             format="json",
         )
         self.assertEqual(submit.status_code, 200, submit.content)
-        draft_submission.refresh_from_db()
-        self.assertIsNotNone(draft_submission.submitted_at)
-        self.assertTrue(
-            ReviewItem.objects.filter(source_type="homework", source_id=draft_submission.pk).exists()
+        homework = Homework.objects.get(pk=homework_id)
+        self.assertIn("live-meeting:", homework.description or "")
+        submission = HomeworkSubmission.objects.get(homework=homework, student=self.student)
+        self.assertFalse(
+            ReviewItem.objects.filter(source_type="homework", source_id=submission.pk).exists()
         )
-        filtered_submitted = exclude_live_meeting_review_items(
+        # Даже если ReviewItem создали вручную — список проверки его скрывает.
+        orphan = ReviewItem.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            source_type="homework",
+            source_id=submission.pk,
+            title=f"{homework.title} — {self.student.full_name}",
+            status="pending",
+        )
+        filtered = exclude_live_meeting_review_items(
             ReviewItem.objects.filter(teacher=self.teacher)
         )
-        self.assertTrue(filtered_submitted.filter(source_id=draft_submission.pk).exists())
+        self.assertFalse(filtered.filter(pk=orphan.pk).exists())

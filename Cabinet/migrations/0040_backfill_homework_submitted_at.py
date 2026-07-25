@@ -12,7 +12,7 @@ def forwards(apps, schema_editor):
         f"submitted_at_set={stats['submitted_at_set']} "
         f"review_created={stats['review_created']} "
         f"review_exists={stats['review_exists']} "
-        f"live_recovered={stats['live_recovered']}"
+        f"skipped_live={stats.get('skipped_live', 0)}"
     )
 
 

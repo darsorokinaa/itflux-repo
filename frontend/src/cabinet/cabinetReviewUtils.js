@@ -28,9 +28,17 @@ function answerValue(raw) {
   return String(raw);
 }
 
+/** Сколько задач в варианте с этим bank-номером (№8, №8, …). */
+export function numberCollisionCount(tasks, numKey) {
+  if (!numKey || !Array.isArray(tasks)) return 0;
+  return tasks.reduce((n, t) => (String(t?.number) === String(numKey) ? n + 1 : n), 0);
+}
+
 /**
  * Ответ ученика по заданию.
  * Учитывает legacy, когда by_task_id заполняли ключами-номерами заданий.
+ * by_number безопасен только если номер уникален — иначе один ответ
+ * размножается на все строки тетради из одного типа заданий.
  * @param {object} result
  * @param {string|number} taskId
  * @param {string|number} taskNumber
@@ -42,15 +50,18 @@ export function homeworkTaskAnswer(result, taskId, taskNumber, tasks) {
   const byNum = result.by_number || result.byNumber || {};
   const id = String(taskId);
   const num = String(taskNumber);
+  const numberUnique = numberCollisionCount(tasks, num) <= 1;
 
   const fromId = answerValue(byId[id]);
   if (fromId.trim() !== "") return fromId;
 
-  const fromNum = answerValue(byNum[num] ?? byNum[String(Number(num))]);
-  if (fromNum.trim() !== "") return fromNum;
+  if (numberUnique) {
+    const fromNum = answerValue(byNum[num] ?? byNum[String(Number(num))]);
+    if (fromNum.trim() !== "") return fromNum;
+  }
 
   // Legacy: by_task_id["6"] = ответ на задание №6 (ключ — номер, не TaskList.id)
-  if (id !== num) {
+  if (id !== num && numberUnique) {
     const knownIds = Array.isArray(tasks)
       ? new Set(tasks.map((t) => String(t.id)))
       : null;
@@ -77,13 +88,16 @@ export function homeworkTaskChecked(result, taskId) {
   return typeof v === "boolean" ? v : null;
 }
 
-export function homeworkTaskComment(result, taskId, taskNumber) {
+export function homeworkTaskComment(result, taskId, taskNumber, tasks) {
   if (!result || typeof result !== "object") return "";
   const byId = result.comments_by_task_id || result.commentsByTaskId || {};
   const byNum = result.comments_by_number || result.commentsByNumber || {};
   const id = String(taskId);
   const num = String(taskNumber);
-  return String(byId[id] || byNum[num] || byNum[String(Number(num))] || "").trim();
+  const fromId = String(byId[id] || "").trim();
+  if (fromId) return fromId;
+  if (numberCollisionCount(tasks, num) > 1) return "";
+  return String(byNum[num] || byNum[String(Number(num))] || "").trim();
 }
 
 export function taskMaxScore(task) {
@@ -111,13 +125,17 @@ export function buildTeacherVariantUrl(reviewCtx) {
   return String(reviewCtx?.variant_path || "").trim();
 }
 
-export function homeworkTeacherAttachments(result, taskId, taskNumber) {
+export function homeworkTeacherAttachments(result, taskId, taskNumber, tasks) {
   if (!result || typeof result !== "object") return [];
   const byId = result.teacher_attachments_by_task_id || result.teacherAttachmentsByTaskId || {};
   const byNum = result.teacher_attachments_by_number || result.teacherAttachmentsByNumber || {};
   const id = String(taskId);
   const num = String(taskNumber);
-  const list = byId[id] || byNum[num] || byNum[String(Number(num))] || [];
+  if (byId[id]) {
+    return Array.isArray(byId[id]) ? byId[id] : [];
+  }
+  if (numberCollisionCount(tasks, num) > 1) return [];
+  const list = byNum[num] || byNum[String(Number(num))] || [];
   return Array.isArray(list) ? list : [];
 }
 
@@ -146,9 +164,9 @@ export function buildStudentHomeworkReviewRows(tasks, result, level, subject) {
   for (const task of list) {
     const part = inferExamTaskPart(task, level, subject);
     const answer = homeworkTaskAnswer(result, task.id, task.number, list);
-    const comment = homeworkTaskComment(result, task.id, task.number);
-    const teacherFiles = homeworkTeacherAttachments(result, task.id, task.number);
-    const studentFiles = homeworkTaskAttachments(result, task.id, task.number);
+    const comment = homeworkTaskComment(result, task.id, task.number, list);
+    const teacherFiles = homeworkTeacherAttachments(result, task.id, task.number, list);
+    const studentFiles = homeworkTaskAttachments(result, task.id, task.number, list);
     const correctAnswer = formatCorrectAnswerPlain(task.answer);
     if (part === 1) {
       part1.push({

@@ -55,7 +55,7 @@ def backfill_unsubmitted_homework_with_answers(*, dry_run: bool = False) -> dict
     Проставить submitted_at и ReviewItem для сдач с ответами без submitted_at.
 
     - teacher берётся только из Homework.teacher (не из автора варианта);
-    - live-meeting: только submitted_at (в очередь «Проверка» не ставим);
+    - live-meeting с урока пропускаем полностью (в «Проверка» не попадают);
     - пустые placeholder-сдачи после выдачи не трогаем.
     """
     from .choices import SubmissionStatus
@@ -73,7 +73,7 @@ def backfill_unsubmitted_homework_with_answers(*, dry_run: bool = False) -> dict
         "submitted_at_set": 0,
         "review_created": 0,
         "review_exists": 0,
-        "live_recovered": 0,
+        "skipped_live": 0,
         "skipped_no_teacher": 0,
         "skipped_no_work": 0,
         "ids": [],
@@ -96,7 +96,15 @@ def backfill_unsubmitted_homework_with_answers(*, dry_run: bool = False) -> dict
             )
             continue
 
-        live = is_live_meeting_homework_desc(getattr(homework, "description", None))
+        if is_live_meeting_homework_desc(getattr(homework, "description", None)):
+            stats["skipped_live"] += 1
+            logger.info(
+                "homework.backfill skip_live submission_id=%s homework_id=%s",
+                submission.pk,
+                homework.pk,
+            )
+            continue
+
         submitted_at = submission.updated_at or timezone.now()
         new_status = submission.status
         if new_status not in (
@@ -154,20 +162,37 @@ def backfill_unsubmitted_homework_with_answers(*, dry_run: bool = False) -> dict
                 else:
                     stats["review_exists"] += 1
 
-        if live:
-            stats["live_recovered"] += 1
-
         stats["ids"].append(submission.pk)
         logger.info(
             "homework.backfill %s submission_id=%s homework_id=%s teacher_id=%s "
-            "student_id=%s live=%s review_created=%s",
+            "student_id=%s review_created=%s",
             "dry_run" if dry_run else "ok",
             submission.pk,
             homework.pk,
             homework.teacher_id,
             submission.student_id,
-            live,
             review_created,
         )
 
     return stats
+
+
+def cleanup_live_meeting_review_items(*, dry_run: bool = False) -> dict[str, Any]:
+    """Удалить ReviewItem по live-вариантам с урока (они не должны быть в «Проверка»)."""
+    from .models import HomeworkSubmission, ReviewItem
+
+    live_ids = list(
+        HomeworkSubmission.objects.filter(
+            homework__description__contains=LIVE_MEETING_MARKER,
+        ).values_list("pk", flat=True)
+    )
+    qs = ReviewItem.objects.filter(source_type="homework", source_id__in=live_ids)
+    ids = list(qs.values_list("pk", flat=True))
+    deleted = 0 if dry_run else qs.delete()[0]
+    logger.info(
+        "homework.cleanup_live_review %s count=%s ids=%s",
+        "dry_run" if dry_run else "ok",
+        len(ids),
+        ids,
+    )
+    return {"live_submission_ids": live_ids, "review_ids": ids, "deleted": deleted}

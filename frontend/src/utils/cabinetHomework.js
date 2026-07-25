@@ -158,7 +158,13 @@ export function pickHomeworkFields(data, fallbackId) {
   };
 }
 
-export function homeworkResultToUiState(result, taskByNumber) {
+/**
+ * @param {unknown} result
+ * @param {Map<string, {id?: unknown, number?: unknown}>} [taskByNumber]
+ * @param {Array<{id?: unknown, number?: unknown}>} [allTasks] полный список задач
+ *   (нужен при одинаковых bank-номерах — Map по номеру их схлопывает)
+ */
+export function homeworkResultToUiState(result, taskByNumber, allTasks) {
   // result: произвольный JSON от ЛК
   if (result == null) return { userAnswers: {}, scores: {}, checkedTasks: {} };
   const o = typeof result === "string" ? safeJson(result) : result;
@@ -169,8 +175,11 @@ export function homeworkResultToUiState(result, taskByNumber) {
   const outCh = {};
 
   const numberMap = taskByNumber instanceof Map ? taskByNumber : new Map();
+  const tasksList = Array.isArray(allTasks) && allTasks.length
+    ? allTasks
+    : [...numberMap.values()];
   const knownIds = new Set();
-  for (const t of numberMap.values()) {
+  for (const t of tasksList) {
     if (t?.id != null) knownIds.add(String(t.id));
   }
 
@@ -183,10 +192,20 @@ export function homeworkResultToUiState(result, taskByNumber) {
     return String(val);
   };
 
+  // Сколько задач с каждым bank-номером — by_number нельзя размазывать при коллизиях.
+  const numberCounts = new Map();
+  for (const t of tasksList) {
+    if (t?.number == null) continue;
+    const nk = String(t.number);
+    numberCounts.set(nk, (numberCounts.get(nk) || 0) + 1);
+  }
+
   const byNum = r.by_number || r.byNumber || r.answersByNumber;
   if (byNum && typeof byNum === "object") {
     for (const [num, val] of Object.entries(/** @type {Record<string, unknown>} */ (byNum))) {
-      const t = numberMap.get(String(num)) || numberMap.get(String(Number(num)));
+      const numKey = String(num);
+      if ((numberCounts.get(numKey) || 0) > 1) continue;
+      const t = numberMap.get(numKey) || numberMap.get(String(Number(num)));
       if (!t?.id) continue;
       const text = stringifyAnswer(val);
       if (text.trim() !== "") outUa[String(t.id)] = text;
@@ -203,7 +222,8 @@ export function homeworkResultToUiState(result, taskByNumber) {
         outUa[keyStr] = text;
         continue;
       }
-      // Legacy: ключ — номер задания, а не TaskList.id
+      // Legacy: ключ — номер задания, а не TaskList.id (только если номер уникален)
+      if ((numberCounts.get(keyStr) || 0) > 1) continue;
       const t = numberMap.get(keyStr) || numberMap.get(String(Number(keyStr)));
       if (t?.id != null) {
         const idKey = String(t.id);
@@ -252,7 +272,7 @@ const HOMEWORK_ATTACHMENT_IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp|heic|heif)$/i;
  * @param {number|string} taskNumber
  * @returns {Array<{ url: string, filename: string, isImage: boolean }>}
  */
-export function homeworkTaskAttachments(result, taskId, taskNumber) {
+export function homeworkTaskAttachments(result, taskId, taskNumber, tasks) {
   const o = typeof result === "string" ? safeJson(result) : result;
   if (!o || typeof o !== "object") return [];
   const r = /** @type {Record<string, unknown>} */ (o);
@@ -264,8 +284,29 @@ export function homeworkTaskAttachments(result, taskId, taskNumber) {
     /** @type {Record<string, unknown[]>|undefined} */ (
       r.attachments_by_number || r.attachmentsByNumber
     );
+  const idKey = String(taskId);
+  if (byId && Array.isArray(byId[idKey]) && byId[idKey].length) {
+    return byId[idKey]
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const row = /** @type {{ url?: string, filename?: string }} */ (item);
+        const url = String(row.url || "").trim();
+        if (!url) return null;
+        const filename = String(row.filename || url.split("/").pop() || "Файл");
+        return { url, filename, isImage: HOMEWORK_ATTACHMENT_IMAGE_RE.test(filename) };
+      })
+      .filter(Boolean);
+  }
+  // by_number при одинаковых № заданий неоднозначен
+  if (Array.isArray(tasks) && tasks.length > 1) {
+    const numKey = String(taskNumber);
+    const collisions = tasks.reduce(
+      (n, t) => (String(t?.number) === numKey ? n + 1 : n),
+      0,
+    );
+    if (collisions > 1) return [];
+  }
   const list =
-    (byId && byId[String(taskId)]) ||
     (byNum && byNum[String(taskNumber)]) ||
     (byNum && byNum[String(Number(taskNumber))]) ||
     [];
@@ -385,19 +426,28 @@ export function buildHomeworkResultPayload(tasks, userAnswers, scores, checkedTa
   const list = Array.isArray(tasks) ? tasks : [];
   const knownIds = new Set(list.map((t) => String(t.id)));
 
+  const numberCounts = new Map();
+  for (const t of list) {
+    const nk = String(t.number);
+    numberCounts.set(nk, (numberCounts.get(nk) || 0) + 1);
+  }
+
   for (const t of list) {
     const id = String(t.id);
     const num = String(t.number);
     let val = userAnswers?.[id];
     if (val == null || String(val).trim() === "") {
-      // Legacy-ключи-номера в userAnswers
-      if (!knownIds.has(num)) {
+      // Legacy-ключи-номера в userAnswers — только если номер уникален
+      if (!knownIds.has(num) && (numberCounts.get(num) || 0) <= 1) {
         val = userAnswers?.[num] ?? userAnswers?.[String(Number(num))];
       }
     }
     if (val != null && String(val).trim() !== "") {
       byTaskId[id] = val;
-      byNumber[num] = val;
+      // При одинаковых № (тетрадь №8×N) by_number неоднозначен — не пишем.
+      if ((numberCounts.get(num) || 0) <= 1) {
+        byNumber[num] = val;
+      }
     }
   }
 

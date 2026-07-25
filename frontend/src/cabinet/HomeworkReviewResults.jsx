@@ -262,12 +262,12 @@ export default function HomeworkReviewResults({
   );
 }
 
-export function HomeworkTaskReviewNote({ task, result, level, subject, part }) {
+export function HomeworkTaskReviewNote({ task, result, level, subject, part, tasks }) {
   if (!result || typeof result !== "object" || !task) return null;
 
-  const answer = homeworkTaskAnswer(result, task.id, task.number);
-  const comment = homeworkTaskComment(result, task.id, task.number);
-  const teacherFiles = homeworkTeacherAttachments(result, task.id, task.number);
+  const answer = homeworkTaskAnswer(result, task.id, task.number, tasks);
+  const comment = homeworkTaskComment(result, task.id, task.number, tasks);
+  const teacherFiles = homeworkTeacherAttachments(result, task.id, task.number, tasks);
 
   let verdict = null;
   let score = "";

@@ -936,7 +936,8 @@ function ExamPage() {
     for (const t of variant.tasks) m.set(String(t.number), t);
     const { userAnswers: ua, scores: sc, checkedTasks: ch } = homeworkResultToUiState(
       picked.result,
-      m
+      m,
+      variant.tasks,
     );
     setUserAnswers((p) => ({ ...p, ...ua }));
     setScores((p) => ({ ...p, ...sc }));
@@ -2839,6 +2840,7 @@ function ExamPage() {
                         level={level}
                         subject={subject}
                         part={1}
+                        tasks={variant?.tasks}
                       />
                     ) : null}
                   </div>
@@ -2955,7 +2957,7 @@ function ExamPage() {
                             homeworkMode={isHomework}
                             cabinetMode={showCabinetPart2SolutionUpload}
                             allowDelete
-                            initialAttachments={homeworkTaskAttachments(hwPicked?.result, task.id, task.number)}
+                            initialAttachments={homeworkTaskAttachments(hwPicked?.result, task.id, task.number, variant?.tasks)}
                             enabled={
                               (showLessonSolutionUpload || showCabinetPart2SolutionUpload)
                               && (!isHomework || (!hRead && !numLocked(task.number)))
@@ -2968,6 +2970,7 @@ function ExamPage() {
                               level={level}
                               subject={subject}
                               part={2}
+                              tasks={variant?.tasks}
                             />
                           ) : null}
                           {!isHomework && (
@@ -3069,7 +3072,7 @@ function ExamPage() {
                         homeworkMode={isHomework}
                         cabinetMode={showCabinetPart2SolutionUpload}
                         allowDelete
-                        initialAttachments={homeworkTaskAttachments(hwPicked?.result, task.id, task.number)}
+                        initialAttachments={homeworkTaskAttachments(hwPicked?.result, task.id, task.number, variant?.tasks)}
                         enabled={
                           (showLessonSolutionUpload || showCabinetPart2SolutionUpload)
                           && (!isHomework || (!hRead && !numLocked(task.number)))
@@ -3082,6 +3085,7 @@ function ExamPage() {
                           level={level}
                           subject={subject}
                           part={2}
+                          tasks={variant?.tasks}
                         />
                       ) : null}
                       {!isHomework && (
