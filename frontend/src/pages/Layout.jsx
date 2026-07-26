@@ -28,6 +28,7 @@ function Layout() {
     pathname === "/tasks" ||
     pathname === "/generator" ||
     pathname === "/lessons" ||
+    pathname === "/interesting" ||
     pathname === "/teachers" ||
     pathname === "/cabinet" ||
     pathname === "/cabinet/login" ||

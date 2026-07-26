@@ -52,6 +52,7 @@ from .models import (
     Announcement,
     Criteria,
     ErrorReport,
+    InterestingItem,
     Lesson,
     Level,
     LinkedTaskGroup,
@@ -71,6 +72,7 @@ from .models import (
     username_for_created_by,
 )
 from .serializers import (
+    InterestingCatalogSerializer,
     LessonAdminSerializer,
     LessonCatalogSerializer,
 )
@@ -94,6 +96,7 @@ _SPA_KNOWN_PATH_PATTERNS = (
     re.compile(r"^/generator/?$"),
     re.compile(r"^/lessons/?$"),
     re.compile(r"^/lessons/[^/]+/view/?$"),
+    re.compile(r"^/interesting/?$"),
     re.compile(r"^/teachers/?$"),
     re.compile(r"^/for-teachers/?$"),
     re.compile(r"^/cabinet/login/?$"),
@@ -117,6 +120,7 @@ _SITEMAP_STATIC_PATHS = (
     "/tasks",
     "/generator",
     "/lessons",
+    "/interesting",
     "/teachers",
     "/privacy",
     "/subject/oge",
@@ -3804,6 +3808,109 @@ def api_lesson_archive_asset(request, slug, asset_path):
     )
 
     with open_lesson_archive(lesson.archive.path) as zf:
+        namelist = zf.namelist()
+        html_entry = find_html_entry(namelist)
+        if not html_entry:
+            raise Http404("HTML в архиве не найден")
+        entry = resolve_archive_asset(namelist, asset_path, html_entry)
+        if not entry:
+            raise Http404("Файл не найден")
+        return archive_asset_response(zf, entry)
+
+
+def _visible_interesting_queryset(request):
+    qs = InterestingItem.objects.all()
+    if _lesson_viewer_is_teacher_or_admin(request):
+        return qs
+    return qs.filter(status=InterestingItem.Status.PUBLISHED)
+
+
+@require_http_methods(["GET"])
+def api_interesting(request):
+    qs = _visible_interesting_queryset(request)
+    if _lesson_viewer_is_teacher_or_admin(request):
+        status = (request.GET.get("status") or "").strip()
+        if status:
+            qs = qs.filter(status=status)
+
+    q = (request.GET.get("q") or "").strip()
+    if q:
+        qs = qs.filter(
+            Q(title__icontains=q)
+            | Q(short_description__icontains=q)
+            | Q(tag__icontains=q)
+        )
+
+    items = list(qs.order_by("sort_order", "-updated_at", "-created_at"))
+    serializer = InterestingCatalogSerializer(items, many=True, context={"request": request})
+    return JsonResponse({"items": serializer.data, "total": len(serializer.data)})
+
+
+@require_http_methods(["GET"])
+def api_interesting_detail(request, slug):
+    item = get_object_or_404(_visible_interesting_queryset(request), slug=slug)
+    data = InterestingCatalogSerializer(item, context={"request": request}).data
+    return JsonResponse({"item": data})
+
+
+@require_http_methods(["GET"])
+def api_interesting_view(request, slug):
+    item = get_object_or_404(_visible_interesting_queryset(request), slug=slug)
+
+    from .lesson_archive import (
+        archive_base_dir,
+        find_html_entry,
+        open_lesson_archive,
+        read_plain_archive_html,
+        read_plain_file_html,
+    )
+
+    if item.archive:
+        with open_lesson_archive(item.archive.path) as zf:
+            html_entry = find_html_entry(zf.namelist())
+            if not html_entry:
+                raise Http404("HTML в архиве не найден")
+            base_dir = archive_base_dir(html_entry)
+            base_href = request.build_absolute_uri(f"/api/interesting/{slug}/archive/{base_dir}")
+            if not base_href.endswith("/"):
+                base_href += "/"
+            html = read_plain_archive_html(zf, html_entry, base_href)
+        return HttpResponse(html, content_type="text/html; charset=utf-8")
+
+    if item.file:
+        file_path = item.file.path
+        if not file_path.lower().endswith(".html"):
+            from django.http import FileResponse
+            import mimetypes
+
+            content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+            return FileResponse(open(file_path, "rb"), content_type=content_type)
+
+        file_dir = (item.file.name or "").replace("\\", "/").rsplit("/", 1)[0]
+        path = f"/media/{file_dir}/" if file_dir else "/media/"
+        base_href = request.build_absolute_uri(path)
+        if not base_href.endswith("/"):
+            base_href += "/"
+        html = read_plain_file_html(file_path, base_href)
+        return HttpResponse(html, content_type="text/html; charset=utf-8")
+
+    raise Http404("Материал не найден")
+
+
+@require_http_methods(["GET"])
+def api_interesting_archive_asset(request, slug, asset_path):
+    item = get_object_or_404(_visible_interesting_queryset(request), slug=slug)
+    if not item.archive:
+        raise Http404("Архив не найден")
+
+    from .lesson_archive import (
+        archive_asset_response,
+        find_html_entry,
+        open_lesson_archive,
+        resolve_archive_asset,
+    )
+
+    with open_lesson_archive(item.archive.path) as zf:
         namelist = zf.namelist()
         html_entry = find_html_entry(namelist)
         if not html_entry:

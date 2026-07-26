@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import (
+    InterestingItem,
     Lesson,
     Task,
 )
@@ -129,4 +130,51 @@ class LessonAdminSerializer(serializers.ModelSerializer):
 
     def get_archive_url(self, obj):
         return LessonCatalogSerializer(context=self.context).get_archive_url(obj)
+
+
+class InterestingCatalogSerializer(serializers.ModelSerializer):
+    cover_image_url = serializers.SerializerMethodField()
+    file_url = serializers.SerializerMethodField()
+    archive_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = InterestingItem
+        fields = [
+            "id",
+            "title",
+            "slug",
+            "short_description",
+            "tag",
+            "accent_color",
+            "status",
+            "sort_order",
+            "cover_image_url",
+            "file_url",
+            "archive_url",
+        ]
+
+    def _absolute_file_url(self, obj, field_name: str):
+        request = self.context.get("request")
+        file_field = getattr(obj, field_name, None)
+        if not file_field:
+            return None
+        try:
+            url = file_field.url
+        except Exception:
+            return None
+        if request:
+            try:
+                return request.build_absolute_uri(url)
+            except Exception:
+                return url
+        return url
+
+    def get_cover_image_url(self, obj):
+        return self._absolute_file_url(obj, "cover_image")
+
+    def get_file_url(self, obj):
+        return self._absolute_file_url(obj, "file")
+
+    def get_archive_url(self, obj):
+        return self._absolute_file_url(obj, "archive")
 

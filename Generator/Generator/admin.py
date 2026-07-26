@@ -8,6 +8,7 @@ from .models import (
     Announcement,
     Criteria,
     ErrorReport,
+    InterestingItem,
     Level,
     Lesson,
     LinkedTaskGroup,
@@ -468,6 +469,42 @@ class LessonAdmin(admin.ModelAdmin):
             "Служебное",
             {"fields": ("created_at", "updated_at")},
         ),
+    )
+
+
+@admin.register(InterestingItem)
+class InterestingItemAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "title",
+        "tag",
+        "status",
+        "sort_order",
+        "updated_at",
+    )
+    list_filter = ("status", "tag")
+    search_fields = ("title", "slug", "short_description", "tag")
+    prepopulated_fields = {"slug": ("title",)}
+    list_editable = ("status", "sort_order")
+    ordering = ("sort_order", "-updated_at")
+    readonly_fields = ("created_at", "updated_at")
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "title",
+                    "slug",
+                    "tag",
+                    "accent_color",
+                    "status",
+                    "sort_order",
+                )
+            },
+        ),
+        ("Описание", {"fields": ("short_description",)}),
+        ("Файлы", {"fields": ("cover_image", "file", "archive")}),
+        ("Служебное", {"fields": ("created_at", "updated_at")}),
     )
 
 

@@ -7296,3 +7296,138 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   width: 16px;
   height: 16px;
 }
+
+/* ——— Интересное ——— */
+.interesting-page {
+  padding: 14px 0 56px;
+  max-width: 1240px;
+}
+
+.interesting-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.interesting-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px;
+  border: 1.5px solid var(--border-card);
+  background: #fff;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.interesting-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(24, 39, 75, 0.12);
+}
+
+.interesting-card__banner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 140px;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.interesting-card__tag {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.interesting-card__icon {
+  opacity: 0.9;
+}
+
+.interesting-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 18px 20px;
+  flex: 1;
+}
+
+.interesting-card__title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.interesting-card__desc {
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 14px;
+  line-height: 1.55;
+  flex: 1;
+}
+
+.interesting-card__btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  border-radius: 10px;
+  border: none;
+  padding: 0 18px;
+  background: var(--blue-hero, #2b52f5);
+  color: #fff !important;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+
+.interesting-card__btn:hover {
+  background: var(--blue-dark, #1e3ebd);
+}
+
+@media (max-width: 980px) {
+  .interesting-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .interesting-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.interesting-card__banner--cover::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(2, 6, 23, 0.15), rgba(2, 6, 23, 0.35));
+  pointer-events: none;
+}
+
+.interesting-card__banner--cover .interesting-card__tag {
+  z-index: 1;
+}
+
+.interesting-card__btn--disabled {
+  background: #eef1f8;
+  color: var(--text-hint) !important;
+  cursor: not-allowed;
+}
+
+.interesting-card__btn--disabled:hover {
+  background: #eef1f8;
+}
+

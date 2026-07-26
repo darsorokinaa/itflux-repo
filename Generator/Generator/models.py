@@ -53,6 +53,18 @@ def lesson_archive_upload_to(instance, filename):
     return os.path.join("lessons", "archives", f"{uuid4().hex}{_safe_ext(filename, '.zip')}")
 
 
+def interesting_cover_upload_to(instance, filename):
+    return os.path.join("interesting", "covers", f"{uuid4().hex}{_safe_ext(filename, '.jpg')}")
+
+
+def interesting_file_upload_to(instance, filename):
+    return os.path.join("interesting", "files", f"{uuid4().hex}{_safe_ext(filename)}")
+
+
+def interesting_archive_upload_to(instance, filename):
+    return os.path.join("interesting", "archives", f"{uuid4().hex}{_safe_ext(filename, '.zip')}")
+
+
 def presentation_public_pdf_upload_to(instance, filename):
     return os.path.join("lessons", "presentations", "pdf", f"{uuid4().hex}{_safe_ext(filename, '.pdf')}")
 
@@ -663,6 +675,85 @@ class Lesson(models.Model):
             candidate = base_slug
             index = 2
             while Lesson.objects.exclude(pk=self.pk).filter(slug=candidate).exists():
+                candidate = f"{base_slug}-{index}"
+                index += 1
+            self.slug = candidate
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.title
+
+
+class InterestingItem(models.Model):
+    """Публичный материал раздела «Интересное»: факты и HTML-интерактивы."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Черновик"
+        PUBLISHED = "published", "Опубликован"
+        ARCHIVED = "archived", "Архив"
+
+    title = models.CharField("Название", max_length=255, db_index=True)
+    slug = models.SlugField("Slug", max_length=255, unique=True, db_index=True)
+    short_description = models.TextField("Краткое описание", blank=True, default="")
+    tag = models.CharField(
+        "Метка",
+        max_length=80,
+        blank=True,
+        default="Интерактив",
+        help_text="Например: Интерактив, Факт",
+    )
+    accent_color = models.CharField(
+        "Цвет карточки",
+        max_length=7,
+        blank=True,
+        default="#1F3A8A",
+        help_text="HEX, если нет обложки. Например #1F3A8A",
+    )
+    status = models.CharField(
+        "Статус",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        db_index=True,
+    )
+    cover_image = models.ImageField(
+        "Обложка",
+        upload_to=interesting_cover_upload_to,
+        blank=True,
+        null=True,
+    )
+    file = models.FileField(
+        "Файл",
+        upload_to=interesting_file_upload_to,
+        blank=True,
+        null=True,
+        help_text="Одиночный HTML или другой файл интерактива",
+    )
+    archive = models.FileField(
+        "Архив",
+        upload_to=interesting_archive_upload_to,
+        blank=True,
+        null=True,
+        help_text="ZIP с index.html и ресурсами интерактива",
+    )
+    sort_order = models.PositiveIntegerField("Порядок", default=0, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("sort_order", "-updated_at", "id")
+        verbose_name = "Интересное"
+        verbose_name_plural = "Интересное"
+        indexes = [
+            models.Index(fields=["status", "sort_order"], name="interesting_status_order_idx"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base_slug = slugify(self.title) or f"interesting-{uuid4().hex[:8]}"
+            candidate = base_slug
+            index = 2
+            while InterestingItem.objects.exclude(pk=self.pk).filter(slug=candidate).exists():
                 candidate = f"{base_slug}-{index}"
                 index += 1
             self.slug = candidate

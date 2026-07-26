@@ -135,6 +135,15 @@ def lesson_file_base_href(request, lesson) -> str:
     return base_href
 
 
+def _decode_html_bytes(raw: bytes) -> str:
+    for encoding in ("utf-8", "utf-8-sig", "cp1251"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 def read_archive_html(
     zf: zipfile.ZipFile,
     html_entry: str,
@@ -142,22 +151,26 @@ def read_archive_html(
     request=None,
     slug: str = "",
 ) -> str:
-    raw = zf.read(html_entry)
-    html = None
-    for encoding in ("utf-8", "utf-8-sig", "cp1251"):
-        try:
-            html = raw.decode(encoding)
-            break
-        except UnicodeDecodeError:
-            continue
-    if html is None:
-        html = raw.decode("utf-8", errors="replace")
-    html = inject_base_href(html, base_href)
+    html = inject_base_href(_decode_html_bytes(zf.read(html_entry)), base_href)
     if request:
         html = inject_lesson_content_styles(html, request)
     if request and slug:
         html = inject_lesson_drawing_assets(html, request, slug)
     return html
+
+
+def read_plain_archive_html(zf: zipfile.ZipFile, html_entry: str, base_href: str) -> str:
+    """HTML из ZIP без уроковых CSS/JS (для раздела «Интересное»)."""
+    return inject_base_href(_decode_html_bytes(zf.read(html_entry)), base_href)
+
+
+def read_plain_file_html(file_path: str, base_href: str) -> str:
+    try:
+        with open(file_path, "rb") as f:
+            raw = f.read()
+    except FileNotFoundError as exc:
+        raise Http404("Файл не найден") from exc
+    return inject_base_href(_decode_html_bytes(raw), base_href)
 
 
 def archive_asset_response(zf: zipfile.ZipFile, entry: str) -> HttpResponse:

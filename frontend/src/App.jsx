@@ -15,6 +15,7 @@ import NotFoundPage from "./pages/NotFoundPage";
 import LessonJoinBridge from "./pages/LessonJoinBridge";
 import ReadyLessonsPage from "./pages/ReadyLessonsPage";
 import LessonViewerPage from "./pages/LessonViewerPage";
+import InterestingPage from "./pages/InterestingPage";
 import ForTeachersPage from "./pages/ForTeachersPage";
 import CabinetAuthPage from "./pages/CabinetAuthPage";
 import CabinetJoinPage from "./cabinet/pages/CabinetJoinPage";
@@ -90,6 +91,9 @@ function getMetaDescriptionForPath(pathname) {
   }
   if (path === "/lessons" || /^\/lessons\/[^/]+\/view\/?$/.test(path)) {
     return "Готовые уроки и материалы: откройте занятие, просмотрите файл и используйте контент в учебном процессе.";
+  }
+  if (path === "/interesting" || path.startsWith("/interesting/")) {
+    return "Интересное: интерактивные материалы и факты об информатике на платформе «Цифровой поток».";
   }
   if (path === "/teachers" || path === "/for-teachers") {
     return "Решения для учителей: управление классами, планами, домашними заданиями и интерактивными материалами.";
@@ -244,6 +248,7 @@ function App() {
           <Route path="/generator" element={<Navigate to="/subject" replace />} />
           <Route path="/lessons" element={<ReadyLessonsPage />} />
           <Route path="/lessons/:slug/view" element={<LessonViewerPage />} />
+          <Route path="/interesting" element={<InterestingPage />} />
           <Route path="/teachers" element={<ForTeachersPage />} />
           <Route path="/for-teachers" element={<Navigate to="/teachers" replace />} />
           <Route path="/cabinet/login" element={<CabinetAuthPage />} />

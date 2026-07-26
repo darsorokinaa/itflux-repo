@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Интерактивная историческая карта «История развития информатики»." />
+  <title>История развития информатики</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="header">
+      <div class="brand">
+        <h1>История развития информатики</h1>
+        <p class="brand__subtitle">От первых вычислительных идей до цифровой эпохи</p>
+        <div class="brand__rule" aria-hidden="true"></div>
+      </div>
+      <div class="header__actions">
+        <button type="button" class="icon-btn icon-btn--sound" id="btn-sound" aria-label="Выключить звук" aria-pressed="false" title="Звук">
+          <svg class="icon-sound-on" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 10v4h3.2L12 18.5V5.5L7.2 10H4z"/>
+            <path d="M15.2 9.2a3.6 3.6 0 0 1 0 5.6"/>
+            <path d="M17.4 6.8a6.4 6.4 0 0 1 0 10.4"/>
+          </svg>
+          <svg class="icon-sound-off" viewBox="0 0 24 24" aria-hidden="true" hidden>
+            <path d="M4 10v4h3.2L12 18.5V5.5L7.2 10H4z"/>
+            <path d="M16.5 9.5l4 4M20.5 9.5l-4 4"/>
+          </svg>
+        </button>
+        <button type="button" class="icon-btn" id="btn-menu" aria-label="Открыть меню">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14M5 12h14M5 16h14"/></svg>
+        </button>
+        <button type="button" class="icon-btn" id="btn-info" aria-label="О проекте">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 10v6M12 7.5v.5"/></svg>
+        </button>
+      </div>
+
+      <audio
+        id="bg-music"
+        src="assets/audio/bg-music.mp3"
+        loop
+        preload="auto"
+        playsinline
+      ></audio>
+    </header>
+
+    <nav class="stages-strip" aria-label="Этапы развития">
+      <div class="stages-strip__track" id="stages-track"></div>
+    </nav>
+
+    <main class="main" id="panel">
+      <div class="panel-column" id="panel-column">
+        <section class="panel panel--intro" aria-labelledby="stage-title">
+          <p class="panel__label" id="stage-label">Этап 01</p>
+          <p class="panel__year" id="stage-year">XXXX год</p>
+
+          <div class="panel__portrait-wrap">
+            <div class="panel__rings" aria-hidden="true"></div>
+            <img
+              class="panel__portrait"
+              id="stage-image"
+              src="assets/placeholders/person-01.svg"
+              alt="Иллюстрация этапа"
+              width="210"
+              height="210"
+            />
+          </div>
+
+          <div class="panel__content panel__content--brief" id="panel-content">
+            <h2 class="panel__title" id="stage-title">Имя человека</h2>
+            <p class="panel__subtitle" id="stage-subtitle">Описание роли или открытия</p>
+            <p class="panel__location" id="stage-location">
+              <strong>Город 01</strong> · Страна 01
+            </p>
+          </div>
+        </section>
+
+        <section class="panel panel--details" aria-label="Описание этапа">
+          <div class="panel__content panel__content--full">
+            <p class="panel__description" id="stage-description">
+              Здесь будет основной текст о выбранном событии.
+            </p>
+            <aside class="fact">
+              <span class="fact__label">Интересный факт</span>
+              <p id="stage-fact">Здесь будет размещён интересный факт.</p>
+            </aside>
+            <button type="button" class="btn-text" id="btn-details">Подробнее</button>
+          </div>
+        </section>
+      </div>
+
+      <section class="map-pane" aria-label="Интерактивная карта">
+        <svg id="map" role="img" aria-label="Карта мира с местом события"></svg>
+
+        <div class="century-rail" aria-hidden="true">
+          <span data-century="xix">XIX</span>
+          <span data-century="xx" class="is-active">XX</span>
+          <span data-century="xxi">XXI</span>
+        </div>
+
+        <div class="map-controls">
+          <button type="button" class="icon-btn" id="btn-zoom-in" aria-label="Увеличить карту">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+          <button type="button" class="icon-btn" id="btn-zoom-out" aria-label="Уменьшить карту">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>
+          </button>
+          <button type="button" class="icon-btn" id="btn-zoom-reset" aria-label="Сбросить масштаб карты">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v5h5"/></svg>
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer__left">
+        <button type="button" class="nav-btn" id="btn-prev" aria-label="Предыдущий этап">
+          <span aria-hidden="true">←</span>
+          <span class="label">Назад</span>
+        </button>
+      </div>
+      <div class="progress-dots" id="progress-dots" role="tablist" aria-label="Прогресс по этапам"></div>
+      <div class="footer__right">
+        <button type="button" class="nav-btn" id="btn-next" aria-label="Следующий этап">
+          <span class="label">Далее</span>
+          <span aria-hidden="true">→</span>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Modals -->
+  <div class="modal" id="modal-details" role="dialog" aria-modal="true" aria-labelledby="modal-details-title" hidden>
+    <div class="modal__card modal__card--stage">
+      <button type="button" class="icon-btn modal__close" data-close aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>
+      </button>
+      <div class="modal__gallery" id="modal-gallery">
+        <div class="modal__gallery-frame">
+          <img id="modal-details-image" src="assets/placeholders/person-01.svg" alt="" />
+        </div>
+        <p class="modal__gallery-caption" id="modal-gallery-caption"></p>
+        <div class="modal__gallery-nav">
+          <button type="button" class="icon-btn" id="modal-gallery-prev" aria-label="Предыдущее изображение">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 6l-6 6 6 6"/></svg>
+          </button>
+          <div class="modal__gallery-dots" id="modal-gallery-dots" role="tablist" aria-label="Слайды галереи"></div>
+          <button type="button" class="icon-btn" id="modal-gallery-next" aria-label="Следующее изображение">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+      </div>
+      <p class="modal__meta" id="modal-details-meta">Этап 01 · XXXX год</p>
+      <h2 id="modal-details-title">Подробная информация</h2>
+      <p class="modal__subtitle" id="modal-details-subtitle"></p>
+      <p class="modal__place" id="modal-details-place"></p>
+      <div class="modal__body" id="modal-details-body"></div>
+      <aside class="modal__fact" id="modal-details-fact-wrap" hidden>
+        <span class="fact__label">Интересный факт</span>
+        <p id="modal-details-fact"></p>
+      </aside>
+      <p class="modal__ai-note">
+        Все изображения сгенерированы искусственным интеллектом и поэтому могут отличаться от реальности.
+      </p>
+    </div>
+  </div>
+
+  <div class="modal" id="modal-menu" role="dialog" aria-modal="true" aria-labelledby="modal-menu-title" hidden>
+    <div class="modal__card modal__card--wide">
+      <button type="button" class="icon-btn modal__close" data-close aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>
+      </button>
+      <p class="modal__eyebrow">Меню</p>
+      <h2 id="modal-menu-title">История развития информатики</h2>
+
+      <section class="menu-block">
+        <h3>Навигация</h3>
+        <p class="menu-block__label">Все этапы</p>
+        <nav class="menu-stages" id="menu-stages" aria-label="Все этапы"></nav>
+      </section>
+
+      <section class="menu-block">
+        <h3>Дополнительно</h3>
+        <div class="menu-links">
+          <button type="button" class="menu-link" data-open-modal="howto">Как пользоваться картой</button>
+          <button type="button" class="menu-link" data-open-modal="info">О проекте</button>
+          <button type="button" class="menu-link" data-open-modal="sources">Источники и материалы</button>
+          <button type="button" class="menu-link" id="menu-restart">Вернуться к началу</button>
+        </div>
+      </section>
+
+      <p class="modal__footnote">
+        Интерактивная карта показывает, как идеи, открытия и технологии постепенно формировали современную информатику.
+      </p>
+      <p class="modal__ai-note">
+        Все изображения сгенерированы искусственным интеллектом и поэтому могут отличаться от реальности.
+      </p>
+      <div class="modal__actions">
+        <button type="button" class="nav-btn" id="menu-continue">Продолжить изучение</button>
+        <button type="button" class="nav-btn" data-close>Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="modal-howto" role="dialog" aria-modal="true" aria-labelledby="modal-howto-title" hidden>
+    <div class="modal__card modal__card--wide">
+      <button type="button" class="icon-btn modal__close" data-close aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>
+      </button>
+      <h2 id="modal-howto-title">Как пользоваться картой</h2>
+      <div class="modal__body">
+        <p>Выберите этап на верхней временной шкале, чтобы открыть связанную с ним историю.</p>
+        <p>В левой части экрана отображается человек, устройство или событие, повлиявшее на развитие информатики. Справа на карте отмечено место, где происходили исследования, создавались вычислительные машины или появлялись новые технологии.</p>
+        <p>Нажмите на точку карты или кнопку «Подробнее», чтобы увидеть изображение исторического места и дополнительную информацию.</p>
+        <p>Переключаться между этапами можно с помощью верхней шкалы, стрелок навигации или клавиш ← и →.</p>
+      </div>
+      <p class="modal__ai-note">
+        Все изображения сгенерированы искусственным интеллектом и поэтому могут отличаться от реальности.
+      </p>
+      <div class="modal__actions">
+        <button type="button" class="nav-btn" data-open-modal="menu">Назад в меню</button>
+        <button type="button" class="nav-btn" data-close>Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="modal-info" role="dialog" aria-modal="true" aria-labelledby="modal-info-title" hidden>
+    <div class="modal__card modal__card--wide">
+      <button type="button" class="icon-btn modal__close" data-close aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>
+      </button>
+      <h2 id="modal-info-title">О проекте</h2>
+      <p class="modal__subtitle">Интерактивное путешествие по истории развития информатики</p>
+      <div class="modal__body">
+        <p>Этот проект посвящён людям, открытиям и технологиям, которые постепенно сформировали современную информатику.</p>
+        <p>История вычислений началась задолго до появления электронных компьютеров. Математики описывали последовательности действий, инженеры создавали механические машины, учёные исследовали возможности алгоритмов, а разработчики первых сетей учились передавать данные между удалёнными устройствами.</p>
+        <p>Каждый этап представлен через человека, событие или устройство и связан с определённой точкой на карте. Такой формат помогает увидеть историю информатики не как набор отдельных дат, а как последовательное развитие идей, происходившее в разных научных центрах мира.</p>
+        <p>Карта будет дополняться новыми этапами, архивными изображениями, описаниями устройств, биографиями исследователей и дополнительными материалами.</p>
+      </div>
+
+      <aside class="modal__callout">
+        <h3>Задача проекта</h3>
+        <p>Показать историю информатики через взаимосвязь времени, людей, технологий и мест, в которых происходили важные открытия.</p>
+      </aside>
+
+      <aside class="modal__callout">
+        <h3>Что представлено на карте</h3>
+        <ul class="modal__list">
+          <li>ключевые этапы развития вычислительной техники;</li>
+          <li>люди, повлиявшие на формирование информатики;</li>
+          <li>научные центры, университеты и лаборатории;</li>
+          <li>вычислительные устройства и программные идеи;</li>
+          <li>события, связанные с появлением компьютеров, сетей и Всемирной паутины.</li>
+        </ul>
+      </aside>
+
+      <div class="modal__compact">
+        <p>Интерактивная карта знакомит с людьми, открытиями и технологиями, сформировавшими современную информатику.</p>
+        <p>Каждый этап объединяет историческое событие, человека или устройство с местом, где происходили исследования и создавались новые технологии.</p>
+        <p>Проект будет дополняться архивными изображениями, биографиями, описаниями вычислительных машин и источниками.</p>
+      </div>
+
+      <p class="modal__ai-note">
+        Все изображения сгенерированы искусственным интеллектом и поэтому могут отличаться от реальности.
+      </p>
+      <p class="modal__footnote">Проект создан для образовательной платформы «Цифровой поток».</p>
+      <div class="modal__actions">
+        <button type="button" class="nav-btn" id="info-start">Начать путешествие</button>
+        <button type="button" class="nav-btn" id="info-first-stage">Открыть первый этап</button>
+        <button type="button" class="nav-btn" id="info-continue">Продолжить изучение</button>
+        <button type="button" class="nav-btn" data-close>Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="modal-sources" role="dialog" aria-modal="true" aria-labelledby="modal-sources-title" hidden>
+    <div class="modal__card modal__card--wide">
+      <button type="button" class="icon-btn modal__close" data-close aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>
+      </button>
+      <h2 id="modal-sources-title">Источники и материалы</h2>
+      <div class="modal__body">
+        <p>Исторические сведения о людях, устройствах и событиях опираются на общепринятые научные и музейные описания истории вычислительной техники.</p>
+        <p>Карта, тексты этапов и структура экспозиции подготовлены для образовательной платформы «Цифровой поток».</p>
+      </div>
+      <p class="modal__ai-note">
+        Все изображения в проекте сгенерированы искусственным интеллектом и поэтому могут отличаться от реальности. Они используются как иллюстрации и не являются документальными фотографиями.
+      </p>
+      <div class="modal__actions">
+        <button type="button" class="nav-btn" data-open-modal="menu">Назад в меню</button>
+        <button type="button" class="nav-btn" data-close>Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="vendor/d3.min.js"></script>
+  <script src="assets/map/world-geo.js"></script>
+  <script src="data/stages.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
