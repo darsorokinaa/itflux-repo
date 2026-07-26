@@ -15064,10 +15064,91 @@ button.cb-sch-event {
   color: #0F172A;
 }
 
+.cb-review-detail__panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.cb-review-detail__panel-head .cb-review-detail__panel-title {
+  margin: 0;
+}
+
 .cb-review-detail__panel-hint {
   margin: -6px 0 14px;
   font-size: 0.88rem;
   color: #64748B;
+}
+
+.cb-review-detail__panel .cb-review-detail__panel-hint:last-child {
+  margin: 12px 0 0;
+}
+
+.cb-review-detail__hw-desc {
+  margin: 0 0 12px;
+  font-size: 0.92rem;
+  color: #475569;
+  white-space: pre-wrap;
+}
+
+.cb-review-detail__hw-tasks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cb-review-detail__hw-task {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  background: #F8FAFC;
+}
+
+.cb-review-detail__hw-task-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cb-review-detail__hw-task-main strong {
+  font-size: 0.92rem;
+  color: #0F172A;
+}
+
+.cb-review-detail__hw-task-main span {
+  font-size: 0.78rem;
+  color: #64748B;
+}
+
+.cb-review-detail__hw-task-link {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #2563EB;
+  text-decoration: none;
+}
+
+.cb-review-detail__hw-task-link:hover {
+  text-decoration: underline;
+}
+
+.cb-inline-success {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #ECFDF5;
+  color: #047857;
+  font-size: 0.9rem;
 }
 
 .cb-review-detail__section-label {

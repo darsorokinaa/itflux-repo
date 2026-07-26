@@ -28,6 +28,7 @@ import {
 } from "../../utils/isOgeInformaticsTask";
 import { isTableAnswerTask } from "../../utils/examAnswerCheck";
 import {
+  addHomeworkTasks,
   checkReviewItem,
   deleteHomework,
   deleteReviewFeedback,
@@ -36,9 +37,24 @@ import {
   uploadReviewFeedback,
 } from "../../utils/cabinetAuth";
 import ConfirmActionModal from "../components/ConfirmActionModal";
+import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import HomeworkReviewSummary, {
   buildHomeworkReviewFromVariant,
 } from "../HomeworkReviewResults";
+
+const HW_TASK_TYPE_RU = {
+  text: "Текст",
+  file: "Файл",
+  interactive: "Интерактив",
+  generated_task: "Вариант",
+  external_link: "Ссылка",
+};
+
+function homeworkTaskMeta(task) {
+  if (!task) return "Задание";
+  if (task.is_variant) return "Вариант";
+  return HW_TASK_TYPE_RU[task.task_type] || "Задание";
+}
 
 function hydrateReviewForm(review) {
   const submission = review?.homework_submission;
@@ -255,6 +271,9 @@ export default function CabinetReviewDetailPage() {
   const [confirmAction, setConfirmAction] = useState(null);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const moreMenuRef = useRef(null);
+  const [resourcePickerOpen, setResourcePickerOpen] = useState(false);
+  const [addingTask, setAddingTask] = useState(false);
+  const [notice, setNotice] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -286,6 +305,14 @@ export default function CabinetReviewDetailPage() {
   const awaitingSubmission = isPending && !submission?.submitted_at;
   const isReadOnly = !isPending || awaitingSubmission;
   const canDeleteHomework = Boolean(submission?.homework) && !isChecked;
+  const canAddHomeworkTask = Boolean(submission?.homework) && !isChecked;
+  const homeworkTasks = Array.isArray(reviewCtx?.tasks) ? reviewCtx.tasks : [];
+  const attachedMaterialIds = homeworkTasks
+    .map((task) => Number(task.material_id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  const attachedInteractiveIds = homeworkTasks
+    .map((task) => Number(task.interactive_id))
+    .filter((id) => Number.isFinite(id) && id > 0);
 
   useEffect(() => {
     if (!moreMenuOpen) return undefined;
@@ -486,6 +513,55 @@ export default function CabinetReviewDetailPage() {
     });
   };
 
+  const applyHomeworkTasksUpdate = async (payload) => {
+    const homeworkId = submission?.homework || reviewCtx?.homework_id;
+    if (!homeworkId || !canAddHomeworkTask) return;
+    setAddingTask(true);
+    setError(null);
+    setNotice("");
+    try {
+      const updated = await addHomeworkTasks(homeworkId, payload);
+      setReview((prev) => (
+        prev
+          ? {
+            ...prev,
+            homework_review: {
+              ...(prev.homework_review || {}),
+              ...updated,
+            },
+          }
+          : prev
+      ));
+      setResourcePickerOpen(false);
+      const notified = Number(updated?.notified_students || 0);
+      setNotice(
+        notified > 0
+          ? "Задание добавлено. Ученик получил оповещение."
+          : "Задание добавлено.",
+      );
+      try {
+        const fresh = await fetchReviewItem(reviewId);
+        setReview(fresh);
+      } catch {
+        /* локально уже обновили homework_review */
+      }
+    } catch (err) {
+      setError(err?.message || "Не удалось добавить задание");
+    } finally {
+      setAddingTask(false);
+    }
+  };
+
+  const handleAttachMaterialToHomework = async (material) => {
+    if (!material?.id) return;
+    await applyHomeworkTasksUpdate({ material_ids: [material.id] });
+  };
+
+  const handleAttachInteractiveToHomework = async (interactive) => {
+    if (!interactive?.id) return;
+    await applyHomeworkTasksUpdate({ interactive_ids: [interactive.id] });
+  };
+
   const getPart1Verdict = (task, answer) => resolvePart1Verdict(task, answer, result, subject);
 
   if (loading) {
@@ -545,6 +621,57 @@ export default function CabinetReviewDetailPage() {
       </section>
 
       {error ? <p className="cb-inline-error" role="alert">{error}</p> : null}
+      {notice ? <p className="cb-inline-success" role="status">{notice}</p> : null}
+
+      <section className="cb-review-detail__panel">
+        <div className="cb-review-detail__panel-head">
+          <h2 className="cb-review-detail__panel-title">Состав задания</h2>
+          {canAddHomeworkTask ? (
+            <button
+              type="button"
+              className="cb-review-detail__btn cb-review-detail__btn--ghost cb-review-detail__btn--compact"
+              disabled={addingTask}
+              onClick={() => setResourcePickerOpen(true)}
+            >
+              {addingTask ? "Добавление…" : "Добавить задание"}
+            </button>
+          ) : null}
+        </div>
+        {reviewCtx?.description ? (
+          <p className="cb-review-detail__hw-desc">{reviewCtx.description}</p>
+        ) : null}
+        {homeworkTasks.length ? (
+          <ul className="cb-review-detail__hw-tasks">
+            {homeworkTasks.map((task) => (
+              <li key={task.id || `${task.title}-${task.variant_id || ""}`} className="cb-review-detail__hw-task">
+                <div className="cb-review-detail__hw-task-main">
+                  <strong>{task.title || "Задание"}</strong>
+                  <span>{homeworkTaskMeta(task)}</span>
+                </div>
+                {task.open_url || task.file_url ? (
+                  <a
+                    href={task.open_url || task.file_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="cb-review-detail__hw-task-link"
+                  >
+                    Открыть
+                  </a>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="cb-review-detail__empty-answer">
+            В этом домашнем задании пока нет отдельных материалов.
+          </p>
+        )}
+        {canAddHomeworkTask ? (
+          <p className="cb-review-detail__panel-hint">
+            При добавлении задания ученик сразу получит оповещение.
+          </p>
+        ) : null}
+      </section>
 
       {awaitingSubmission ? (
         <section className="cb-review-detail__panel">
@@ -898,6 +1025,18 @@ export default function CabinetReviewDetailPage() {
         loading={busy}
         onClose={() => { if (!busy) setConfirmAction(null); }}
         onConfirm={() => confirmAction?.onConfirm?.()}
+      />
+
+      <PlanItemResourcesPicker
+        scope="homework"
+        open={resourcePickerOpen}
+        attachedMaterialIds={attachedMaterialIds}
+        attachedInteractiveIds={attachedInteractiveIds}
+        onClose={() => {
+          if (!addingTask) setResourcePickerOpen(false);
+        }}
+        onAttachMaterial={handleAttachMaterialToHomework}
+        onAttachInteractive={handleAttachInteractiveToHomework}
       />
     </CabinetPageShell>
   );

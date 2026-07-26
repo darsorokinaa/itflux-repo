@@ -137,6 +137,11 @@ urlpatterns = [
     path("reports/parent-summary/", api_views.ReportsParentSummaryView.as_view(), name="cabinet_reports_parent_summary"),
     path("homework/<int:homework_id>/", api_views.HomeworkDeleteView.as_view(), name="cabinet_homework_delete"),
     path(
+        "homework/<int:homework_id>/tasks/",
+        api_views.HomeworkTasksAddView.as_view(),
+        name="cabinet_homework_tasks_add",
+    ),
+    path(
         "homework/submissions/<int:submission_id>/attached-file/",
         api_views.HomeworkSubmissionAttachedFileView.as_view(),
         name="cabinet_homework_submission_attached_file",

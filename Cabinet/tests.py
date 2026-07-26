@@ -1817,6 +1817,62 @@ class ReviewApiTests(TestCase):
         self.assertTrue(data["homework_review"]["has_variant"])
         self.assertEqual(data["homework_review"]["variant_id"], 1)
         self.assertEqual(data["homework_submission"]["result_payload"]["by_task_id"]["10"], "42")
+        self.assertGreaterEqual(data["homework_review"]["tasks_count"], 1)
+        self.assertTrue(
+            any(t.get("title") == "Вариант №1" for t in data["homework_review"]["tasks"])
+        )
+
+    def test_teacher_can_add_homework_task_and_student_is_notified(self):
+        from rest_framework.test import APIClient
+        from Cabinet.models import HomeworkTask, Notification
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        before = Notification.objects.filter(
+            recipient_user=self.student_user,
+            payload__type="homework_updated",
+        ).count()
+        response = client.post(
+            f"/api/cabinet/homework/{self.homework.pk}/tasks/",
+            {
+                "text": "Решите ещё №12",
+                "text_title": "Дополнительная задача",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertIn("Дополнительная задача", data.get("added_titles") or [])
+        self.assertGreaterEqual(data.get("notified_students") or 0, 1)
+        self.assertTrue(
+            HomeworkTask.objects.filter(
+                homework=self.homework, title="Дополнительная задача"
+            ).exists()
+        )
+        after = Notification.objects.filter(
+            recipient_user=self.student_user,
+            channel="in_app",
+            payload__type="homework_updated",
+        ).count()
+        self.assertEqual(after, before + 1)
+
+    def test_cannot_add_homework_task_when_checked(self):
+        from rest_framework.test import APIClient
+        from Cabinet.choices import SubmissionStatus
+
+        self.submission.status = SubmissionStatus.CHECKED
+        self.submission.save(update_fields=["status"])
+        self.review_item.status = "checked"
+        self.review_item.save(update_fields=["status"])
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        response = client.post(
+            f"/api/cabinet/homework/{self.homework.pk}/tasks/",
+            {"text": "Поздно", "text_title": "Нельзя"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.content)
 
     def test_teacher_can_check_homework_review(self):
         from rest_framework.test import APIClient

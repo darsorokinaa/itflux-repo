@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
@@ -1217,6 +1218,7 @@ def build_homework_review_context(homework: Homework) -> dict:
             level = match.group("level")
             subject = match.group("subject")
         break
+    tasks = serialize_homework_tasks(homework, homework_id=homework.id, token=None)
     return {
         "homework_id": homework.id,
         "homework_title": homework.title,
@@ -1226,4 +1228,221 @@ def build_homework_review_context(homework: Homework) -> dict:
         "variant_path": variant_path,
         "level": level,
         "subject": subject,
+        "tasks": tasks,
+        "tasks_count": len(tasks),
+        "description": (homework.description or "").strip(),
     }
+
+
+def _homework_recipient_students(homework: Homework) -> list:
+    from .models import Student
+
+    if homework.student_id:
+        return [homework.student]
+    if homework.group_id:
+        return list(homework.group.students.exclude(status="archived").order_by("id"))
+    student_ids = (
+        HomeworkSubmission.objects.filter(homework=homework)
+        .values_list("student_id", flat=True)
+        .distinct()
+    )
+    return list(Student.objects.filter(id__in=student_ids).order_by("id"))
+
+
+def notify_students_homework_tasks_added(
+    homework: Homework,
+    *,
+    added_titles: list[str] | None = None,
+) -> int:
+    """
+    Обязательное оповещение ученикам о новых заданиях в ДЗ.
+    In-app всегда; Telegram — если подключён.
+    """
+    from django.utils import timezone as dj_tz
+
+    from .choices import NotificationChannel, NotificationStatus
+    from .models import Notification
+    from .telegram_connect import platform_path_url, send_telegram_to_user
+    from Generator.telegram_utils import escape_telegram_html
+
+    titles = [str(t).strip() for t in (added_titles or []) if str(t).strip()]
+    if titles:
+        if len(titles) == 1:
+            detail = f"Добавлено задание: «{titles[0]}»."
+        else:
+            detail = f"Добавлены задания ({len(titles)}): " + ", ".join(f"«{t}»" for t in titles[:5])
+            if len(titles) > 5:
+                detail += "…"
+    else:
+        detail = "В домашнее задание добавлены новые материалы."
+
+    title = "Обновлено домашнее задание"
+    message = f"«{homework.title}». {detail}"
+    assignment_path = f"/cabinet/student/assignments/{homework.id}"
+    sent = 0
+
+    for student in _homework_recipient_students(homework):
+        user = student.user if student and student.user_id else None
+        if user is None:
+            continue
+        Notification.objects.create(
+            recipient_user=user,
+            recipient_student=student,
+            channel=NotificationChannel.IN_APP,
+            title=title,
+            message=message,
+            payload={
+                "type": "homework_updated",
+                "homework_id": homework.id,
+                "url": assignment_path,
+                "added_titles": titles,
+            },
+            status=NotificationStatus.SENT,
+            sent_at=dj_tz.now(),
+        )
+        sent += 1
+
+        from .notifications import get_or_create_preferences
+
+        prefs = get_or_create_preferences(user)
+        if getattr(prefs, "telegram_connected", False):
+            cabinet_url = platform_path_url(assignment_path)
+            tg_text = (
+                f"{escape_telegram_html(title)}\n\n"
+                f"{escape_telegram_html(message)}\n\n"
+                f'<a href="{html.escape(cabinet_url, quote=True)}">Открыть задание</a>'
+            )
+            try:
+                ok = send_telegram_to_user(user, tg_text)
+            except Exception:
+                logger.exception(
+                    "Failed to send homework-updated Telegram to user %s", user.pk
+                )
+                ok = False
+            Notification.objects.create(
+                recipient_user=user,
+                recipient_student=student,
+                channel=NotificationChannel.TELEGRAM,
+                title=title,
+                message=message,
+                payload={
+                    "type": "homework_updated",
+                    "homework_id": homework.id,
+                    "url": assignment_path,
+                    "cabinet_url": cabinet_url,
+                },
+                status=NotificationStatus.SENT if ok else NotificationStatus.FAILED,
+                sent_at=dj_tz.now() if ok else None,
+            )
+    return sent
+
+
+def add_tasks_to_homework(
+    *,
+    homework: Homework,
+    teacher,
+    material_ids: list[int] | None = None,
+    interactive_ids: list[int] | None = None,
+    text: str = "",
+    text_title: str = "",
+) -> dict:
+    """
+    Добавить задания в уже выданное ДЗ и оповестить учеников.
+    """
+    from django.db.models import Q
+
+    from .choices import HomeworkStatus, HomeworkTaskType, InteractiveStatus
+    from .models import HomeworkTask, Interactive, Material
+    from .student_release import (
+        _add_interactive_homework_task,
+        _add_material_homework_task,
+        _ensure_interactive_assignment,
+        _record_variant_tasks_for_homework,
+    )
+
+    if homework.teacher_id != teacher.id:
+        raise PermissionError("Нет доступа к этому домашнему заданию")
+    if homework.status == HomeworkStatus.ARCHIVED:
+        raise ValueError("Нельзя изменить архивное домашнее задание")
+    if homework.status == HomeworkStatus.CHECKED:
+        raise ValueError("Нельзя добавить задание в проверенное домашнее задание")
+    if HomeworkSubmission.objects.filter(
+        homework=homework, status=SubmissionStatus.CHECKED
+    ).exists():
+        raise ValueError("Нельзя добавить задание: работа уже проверена и принята")
+
+    material_ids = [int(pk) for pk in (material_ids or []) if pk]
+    interactive_ids = [int(pk) for pk in (interactive_ids or []) if pk]
+    text = (text or "").strip()
+    text_title = (text_title or "").strip() or "Дополнительное задание"
+
+    if not text and not material_ids and not interactive_ids:
+        raise ValueError("Добавьте текст, материал или интерактив")
+
+    materials = []
+    if material_ids:
+        materials = list(
+            Material.objects.filter(pk__in=material_ids).filter(
+                Q(is_public=True) | Q(teacher=teacher) | Q(teacher__isnull=True, is_public=True)
+            )
+        )
+        if len(materials) != len(set(material_ids)):
+            raise ValueError("Некоторые материалы недоступны")
+
+    interactives = []
+    if interactive_ids:
+        interactives = list(
+            Interactive.objects.filter(pk__in=interactive_ids, teacher=teacher).exclude(
+                status=InteractiveStatus.ARCHIVED
+            )
+        )
+        if len(interactives) != len(set(interactive_ids)):
+            raise ValueError("Некоторые интерактивы недоступны")
+
+    order = (
+        HomeworkTask.objects.filter(homework=homework)
+        .order_by("-order", "-id")
+        .values_list("order", flat=True)
+        .first()
+    )
+    order = (order or 0) + 1
+    added_titles: list[str] = []
+
+    if text:
+        HomeworkTask.objects.create(
+            homework=homework,
+            task_type=HomeworkTaskType.TEXT,
+            title=text_title,
+            description=text,
+            order=order,
+        )
+        added_titles.append(text_title)
+        order += 1
+
+    for material in materials:
+        _add_material_homework_task(homework, material, order)
+        added_titles.append(material.title or "Материал")
+        order += 1
+
+    for interactive in interactives:
+        _add_interactive_homework_task(homework, interactive, order)
+        for student in _homework_recipient_students(homework):
+            _ensure_interactive_assignment(
+                teacher=teacher,
+                interactive=interactive,
+                student=student,
+                lesson=None,
+                plan_item=None,
+            )
+        added_titles.append(interactive.title or "Интерактив")
+        order += 1
+
+    for student in _homework_recipient_students(homework):
+        _record_variant_tasks_for_homework(homework, student, teacher)
+        ensure_homework_in_review_queue(homework, student)
+
+    notified = notify_students_homework_tasks_added(homework, added_titles=added_titles)
+    context = build_homework_review_context(homework)
+    context["notified_students"] = notified
+    context["added_titles"] = added_titles
+    return context

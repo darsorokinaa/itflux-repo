@@ -1874,6 +1874,30 @@ class HomeworkDeleteView(TeacherScopedMixin, APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class HomeworkTasksAddView(TeacherScopedMixin, APIView):
+    """Добавить задание в уже выданное ДЗ и оповестить учеников."""
+
+    def post(self, request, homework_id):
+        from .homework_api import add_tasks_to_homework
+
+        homework = get_object_or_404(Homework, pk=homework_id, teacher=request.user)
+        data = request.data if isinstance(request.data, dict) else {}
+        try:
+            result = add_tasks_to_homework(
+                homework=homework,
+                teacher=request.user,
+                material_ids=data.get("material_ids") or [],
+                interactive_ids=data.get("interactive_ids") or [],
+                text=data.get("text") or data.get("description") or "",
+                text_title=data.get("text_title") or data.get("title") or "",
+            )
+        except PermissionError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result, status=status.HTTP_200_OK)
+
+
 class HomeworkSubmissionAttachedFileView(TeacherScopedMixin, APIView):
     """Скачивание файла ответа ученика учителем (без публичного /media/)."""
 

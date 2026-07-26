@@ -104,8 +104,23 @@ export default function ExamTaskDrawingShell({
     const container = hostRef.current;
     if (!canvas || !container) return;
     const dpr = window.devicePixelRatio || 1;
-    const w = Math.max(1, Math.floor(container.clientWidth * dpr));
-    const h = Math.max(1, Math.floor(container.clientHeight * dpr));
+    // Bitmap должен совпадать с CSS-боксом холста. В all-tasks холст шире
+    // контейнера (±120px) — если брать только clientWidth, края не рисуются.
+    const rect = canvas.getBoundingClientRect();
+    const cssW = Math.max(
+      1,
+      canvas.offsetWidth || 0,
+      Math.round(rect.width) || 0,
+      container.clientWidth || 0,
+    );
+    const cssH = Math.max(
+      1,
+      canvas.offsetHeight || 0,
+      Math.round(rect.height) || 0,
+      container.clientHeight || 0,
+    );
+    const w = Math.max(1, Math.floor(cssW * dpr));
+    const h = Math.max(1, Math.floor(cssH * dpr));
     if (canvas.width !== w || canvas.height !== h) {
       canvas.width = w;
       canvas.height = h;
@@ -124,9 +139,12 @@ export default function ExamTaskDrawingShell({
     if (!container) return undefined;
     const ro = new ResizeObserver(() => fitCanvas());
     ro.observe(container);
+    // Следим и за самим canvas: CSS может делать его шире/выше контейнера.
+    const canvas = canvasRef.current;
+    if (canvas) ro.observe(canvas);
     fitCanvas();
     return () => ro.disconnect();
-  }, [fitCanvas]);
+  }, [fitCanvas, showCanvasLayer]);
 
   useEffect(() => {
     draftRef.current = draftStroke;
@@ -191,9 +209,17 @@ export default function ExamTaskDrawingShell({
 
   useEffect(() => {
     if (!showCanvasLayer) return undefined;
-    const id = requestAnimationFrame(() => fitCanvas());
-    return () => cancelAnimationFrame(id);
-  }, [showCanvasLayer, fitCanvas]);
+    let id2 = 0;
+    const id = requestAnimationFrame(() => {
+      fitCanvas();
+      // Второй кадр — после layout CSS (±120px) и доп. клетки.
+      id2 = requestAnimationFrame(() => fitCanvas());
+    });
+    return () => {
+      cancelAnimationFrame(id);
+      if (id2) cancelAnimationFrame(id2);
+    };
+  }, [showCanvasLayer, extraDrawingPad, fitCanvas]);
 
   const eraseAtPoint = useCallback(
     (x, y) => {

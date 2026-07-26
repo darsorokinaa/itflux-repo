@@ -716,6 +716,14 @@ export function deleteHomework(homeworkId) {
   return cabinetFetch(`/homework/${encodeURIComponent(String(homeworkId))}/`, { method: "DELETE" });
 }
 
+/** Добавить задание в уже выданное ДЗ (ученик получает оповещение). */
+export function addHomeworkTasks(homeworkId, payload = {}) {
+  return cabinetFetch(`/homework/${encodeURIComponent(String(homeworkId))}/tasks/`, {
+    method: "POST",
+    body: JSON.stringify(payload && typeof payload === "object" ? payload : {}),
+  });
+}
+
 export function copyLessonPlan(id) {
   return cabinetFetch(`/lesson-plans/${id}/copy/`, { method: "POST" });
 }
