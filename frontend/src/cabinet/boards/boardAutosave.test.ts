@@ -60,6 +60,11 @@ describe("boardAutosave", () => {
     expect(saveFn).toHaveBeenCalledTimes(1);
   });
 
+  it("debounce roughly 500–1000ms", () => {
+    expect(AUTOSAVE_DEBOUNCE_MS).toBeGreaterThanOrEqual(500);
+    expect(AUTOSAVE_DEBOUNCE_MS).toBeLessThanOrEqual(1000);
+  });
+
   it("не запускает второй save пока первый in-flight", async () => {
     let resolveSave: (() => void) | undefined;
     const saveFn = vi.fn(

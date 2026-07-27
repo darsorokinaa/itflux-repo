@@ -59,9 +59,22 @@ export function isNewerBoardElement(a: BoardElement, b: BoardElement): boolean {
 }
 
 /**
+ * Выбирает победившую версию элемента.
+ * При равных маркерах версии предпочитаем isDeleted — иначе soft-delete может «воскреснуть».
+ */
+export function preferBoardElement(a: BoardElement, b: BoardElement): BoardElement {
+  if (isNewerBoardElement(a, b)) return a;
+  if (isNewerBoardElement(b, a)) return b;
+  if (a.isDeleted && !b.isDeleted) return a;
+  if (b.isDeleted && !a.isDeleted) return b;
+  return a;
+}
+
+/**
  * Объединяет элементы локальной и удалённой сцены.
  * Оба участника могут рисовать одновременно: у каждого id побеждает более новая версия,
  * локальные ещё не ушедшие штрихи не затираются.
+ * Важно: в local должны попадать soft-deleted (isDeleted) элементы.
  */
 export function mergeBoardElements(local: unknown[], remote: unknown[]): unknown[] {
   const localMap = new Map<string, BoardElement>();
@@ -80,7 +93,11 @@ export function mergeBoardElements(local: unknown[], remote: unknown[]): unknown
   for (const [id, el] of localMap) merged.set(id, el);
   for (const [id, el] of remoteMap) {
     const cur = merged.get(id);
-    if (!cur || isNewerBoardElement(el, cur)) merged.set(id, el);
+    if (!cur) {
+      merged.set(id, el);
+      continue;
+    }
+    merged.set(id, preferBoardElement(cur, el));
   }
 
   const ordered: BoardElement[] = [];

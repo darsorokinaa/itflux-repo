@@ -101,11 +101,22 @@ type BoardDetail = {
 
 type ExcalidrawAPI = {
   getSceneElements: () => unknown[];
+  getSceneElementsIncludingDeleted?: () => unknown[];
   getAppState: () => Record<string, unknown>;
   getFiles: () => Record<string, unknown>;
   updateScene: (payload: Record<string, unknown>) => void;
   resetScene?: () => void;
 };
+
+/** Локальные элементы для merge: включая soft-deleted, иначе удаление «откатывается». */
+function getLocalElementsForMerge(api: ExcalidrawAPI | null, fallback: unknown[] | null | undefined): unknown[] {
+  // latestSceneRef предпочтительнее: onChange уже кладёт туда isDeleted.
+  if (fallback && Array.isArray(fallback)) return fallback;
+  if (api?.getSceneElementsIncludingDeleted) {
+    return (api.getSceneElementsIncludingDeleted() || []) as unknown[];
+  }
+  return (api?.getSceneElements?.() || []) as unknown[];
+}
 
 function applyRemoteSceneToApi(
   api: ExcalidrawAPI,
@@ -176,8 +187,19 @@ export default function CabinetBoardEditorPage() {
   const versionRef = useRef(1);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
+  const saveRequestedRef = useRef(false);
   const latestSceneRef = useRef<BoardScenePayload | null>(null);
+  /** Монотонный счётчик локальных правок содержимого (не путать с server version). */
+  const localRevisionRef = useRef(0);
+  const lastSavedRevisionRef = useRef(0);
+  /** Server version последнего успешного PATCH этой вкладки — чтобы игнорировать свой scene_saved. */
+  const lastSaveServerVersionRef = useRef(0);
+  const hasLocalChangesRef = useRef(false);
+  const mountedRef = useRef(true);
+  const boardIdRef = useRef(boardId);
   const titleSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const thumbnailTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  boardIdRef.current = boardId;
 
   const [board, setBoard] = useState<BoardDetail | null>(null);
   const [title, setTitle] = useState("");
@@ -208,6 +230,9 @@ export default function CabinetBoardEditorPage() {
   const burgerOpenRef = useRef(true);
   const hadSelectionRef = useRef(false);
   const applyingRemoteRef = useRef(false);
+  const lastElementsRef = useRef<readonly unknown[] | null>(null);
+  const lastFilesRef = useRef<Record<string, unknown> | null>(null);
+  const saverRef = useRef<{ schedule: () => void; flush: () => Promise<void>; cancel: () => void } | null>(null);
   const collabRef = useRef<ReturnType<typeof createBoardCollabSession> | null>(null);
   const remoteCursorsRef = useRef(new Map<string, RemoteCursor>());
   const boardNamesRef = useRef({ owner: "", student: "" });
@@ -237,85 +262,235 @@ export default function CabinetBoardEditorPage() {
     window.setTimeout(() => setNotice(""), 2800);
   }, []);
 
+  const safeSetSaveStatus = useCallback((status: SaveStatus | ((prev: SaveStatus) => SaveStatus)) => {
+    if (!mountedRef.current) return;
+    setSaveStatus(status);
+  }, []);
+
+  /** Thumbnail в фоне — не блокирует рисование и не входит в критический путь PATCH. */
+  const scheduleThumbnailRefresh = useCallback((targetBoardId: string) => {
+    if (thumbnailTimerRef.current) clearTimeout(thumbnailTimerRef.current);
+    thumbnailTimerRef.current = setTimeout(() => {
+      thumbnailTimerRef.current = null;
+      if (!mountedRef.current || boardIdRef.current !== targetBoardId) return;
+      const scene = latestSceneRef.current;
+      void (async () => {
+        try {
+          const thumbnail = await captureBoardThumbnail(
+            apiRef.current ?? (scene as { elements?: Array<{ isDeleted?: boolean } & Record<string, unknown>>; appState?: Record<string, unknown>; files?: Record<string, unknown> }),
+          );
+          if (!mountedRef.current || boardIdRef.current !== targetBoardId) return;
+          if (thumbnail === null) return;
+          await updateInteractiveBoard(targetBoardId, { thumbnail });
+          if (!mountedRef.current || boardIdRef.current !== targetBoardId) return;
+          setBoard((prev) => (prev ? { ...prev, thumbnail } : prev));
+        } catch {
+          /* preview is best-effort */
+        }
+      })();
+    }, 1500);
+  }, []);
+
+  const markLocalSceneChange = useCallback(() => {
+    localRevisionRef.current += 1;
+    hasLocalChangesRef.current = true;
+    dirtyRef.current = true;
+  }, []);
+
   const persistScene = useCallback(async () => {
     if (!boardId || !canEdit || conflict) return;
+    if (savingRef.current) {
+      saveRequestedRef.current = true;
+      return;
+    }
     const scene = latestSceneRef.current;
     if (!scene) return;
-    if (savingRef.current) return;
+    if (!dirtyRef.current && localRevisionRef.current <= lastSavedRevisionRef.current) return;
 
     savingRef.current = true;
-    setSaveStatus("saving");
+    saveRequestedRef.current = false;
+    const boardIdAtSave = boardId;
+    const revisionAtSave = localRevisionRef.current;
+    const versionAtSave = versionRef.current;
+    // Снимок на момент старта: правки во время запроса остаются в latestSceneRef.
+    const snapshot: BoardScenePayload = {
+      elements: Array.isArray(scene.elements) ? [...scene.elements] : [],
+      appState: { ...(scene.appState || {}) },
+      files: { ...(scene.files || {}) },
+    };
+
+    safeSetSaveStatus("saving");
     try {
       const files = await externalizeSceneFiles(
-        scene.files as Record<string, Record<string, unknown>>,
-        (form) => uploadInteractiveBoardImage(boardId, form),
+        snapshot.files as Record<string, Record<string, unknown>>,
+        (form) => uploadInteractiveBoardImage(boardIdAtSave, form),
       );
-      const payload = { ...scene, files };
-      latestSceneRef.current = payload;
-      const thumbnail = await captureBoardThumbnail(apiRef.current ?? payload);
-      const data = await updateInteractiveBoard(boardId, {
+      // Смена доски — бросаем. Размонтирование — всё равно сохраняем снимок.
+      if (boardIdRef.current !== boardIdAtSave) return;
+
+      // Подмешиваем только стабильные URL файлов — не затираем более новые elements.
+      if (latestSceneRef.current && boardIdRef.current === boardIdAtSave) {
+        latestSceneRef.current = {
+          ...latestSceneRef.current,
+          files: { ...latestSceneRef.current.files, ...files },
+        };
+      }
+
+      const payload: BoardScenePayload = { ...snapshot, files };
+      const data = await updateInteractiveBoard(boardIdAtSave, {
         scene_data: payload,
-        version: versionRef.current,
-        ...(thumbnail !== null ? { thumbnail } : {}),
+        version: versionAtSave,
       });
+
+      if (boardIdRef.current !== boardIdAtSave) return;
+
+      // Не применяем scene из ответа — локальное состояние уже актуально.
       versionRef.current = data.version;
-      dirtyRef.current = false;
-      setBoard((prev) => (prev ? { ...prev, version: data.version } : prev));
-      setSaveStatus("saved");
-      setConflict(false);
+      lastSaveServerVersionRef.current = data.version;
+      if (revisionAtSave > lastSavedRevisionRef.current) {
+        lastSavedRevisionRef.current = revisionAtSave;
+      }
+
+      const hasNewerLocal = localRevisionRef.current > revisionAtSave;
+      if (hasNewerLocal) {
+        dirtyRef.current = true;
+        saveRequestedRef.current = true;
+        if (mountedRef.current) safeSetSaveStatus("dirty");
+      } else {
+        dirtyRef.current = false;
+        if (mountedRef.current) safeSetSaveStatus("saved");
+      }
+
+      if (mountedRef.current) {
+        setBoard((prev) => (prev ? { ...prev, version: data.version } : prev));
+        setConflict(false);
+        scheduleThumbnailRefresh(boardIdAtSave);
+      }
     } catch (err: unknown) {
+      if (boardIdRef.current !== boardIdAtSave) return;
       const error = err as { code?: string; status?: number; message?: string };
       if (error?.code === "VERSION_CONFLICT" || error?.status === 409) {
-        // При совместном редактировании подтягиваем серверную сцену вместо блокировки.
+        // При совместном редактировании сливаем серверную сцену, не заменяя локальные правки.
         if (collaborative) {
           try {
-            const fresh = await fetchInteractiveBoard(boardId);
+            const fresh = await fetchInteractiveBoard(boardIdAtSave);
+            if (boardIdRef.current !== boardIdAtSave) return;
             versionRef.current = fresh.version || versionRef.current;
-            const scene = buildScenePayload(
+            const remoteScene = buildScenePayload(
               fresh.scene_data?.elements || [],
               fresh.scene_data?.appState || {},
               fresh.scene_data?.files || {},
             );
-            latestSceneRef.current = scene;
-            applyingRemoteRef.current = true;
-            if (apiRef.current) applyRemoteSceneToApi(apiRef.current, scene);
-            window.setTimeout(() => { applyingRemoteRef.current = false; }, 120);
-            dirtyRef.current = false;
-            setConflict(false);
-            setSaveStatus("saved");
-            setBoard((prev) => (prev ? { ...prev, version: fresh.version } : prev));
+            const localElements = getLocalElementsForMerge(
+              apiRef.current,
+              latestSceneRef.current?.elements,
+            );
+            const localApp = (apiRef.current?.getAppState?.() || latestSceneRef.current?.appState || {}) as Record<string, unknown>;
+            const localFiles = (apiRef.current?.getFiles?.() || latestSceneRef.current?.files || {}) as Record<string, unknown>;
+            const merged = mergeCollabScenes(
+              { elements: localElements, appState: localApp, files: localFiles },
+              remoteScene,
+            );
+            if (mountedRef.current && apiRef.current) {
+              applyingRemoteRef.current = true;
+              applyRemoteSceneToApi(apiRef.current, merged);
+              window.setTimeout(() => { applyingRemoteRef.current = false; }, 120);
+            }
+            latestSceneRef.current = buildScenePayload(merged.elements, merged.appState, merged.files);
+            lastElementsRef.current = merged.elements;
+            lastFilesRef.current = merged.files;
+            // После merge нужно пересохранить нашу актуальную версию поверх серверной.
+            markLocalSceneChange();
+            saveRequestedRef.current = true;
+            if (mountedRef.current) {
+              setConflict(false);
+              safeSetSaveStatus("dirty");
+              setBoard((prev) => (prev ? { ...prev, version: fresh.version } : prev));
+            }
           } catch {
-            setConflict(true);
-            setSaveStatus("conflict");
+            if (mountedRef.current) {
+              setConflict(true);
+              safeSetSaveStatus("conflict");
+            }
           }
-        } else {
+        } else if (mountedRef.current) {
           setConflict(true);
-          setSaveStatus("conflict");
+          safeSetSaveStatus("conflict");
         }
       } else {
-        setSaveStatus("error");
-        showNotice(error?.message || "Ошибка сохранения");
+        // Сеть/сервер: локальные правки сохраняем, пометим dirty для повтора.
+        dirtyRef.current = true;
+        saveRequestedRef.current = true;
+        if (mountedRef.current) {
+          safeSetSaveStatus("error");
+          showNotice(error?.message || "Ошибка сохранения");
+        }
       }
     } finally {
       savingRef.current = false;
+      if (
+        mountedRef.current
+        && boardIdRef.current === boardIdAtSave
+        && (saveRequestedRef.current || localRevisionRef.current > revisionAtSave)
+        && canEdit
+        && !conflictRef.current
+      ) {
+        saveRequestedRef.current = false;
+        // Следующее сохранение — после короткого debounce, не параллельно.
+        saverRef.current?.schedule();
+      }
     }
-  }, [boardId, canEdit, collaborative, conflict, showNotice]);
+  }, [boardId, canEdit, collaborative, conflict, markLocalSceneChange, safeSetSaveStatus, scheduleThumbnailRefresh, showNotice]);
 
   const debouncedSaver = useMemo(
     () => createDebouncedSaver(() => persistScene(), AUTOSAVE_DEBOUNCE_MS),
     [persistScene],
   );
+  saverRef.current = debouncedSaver;
 
   // При пересоздании saver — flush, не cancel (иначе теряются отложенные сохранения)
-  useEffect(() => () => { void debouncedSaver.flush(); }, [debouncedSaver]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      void debouncedSaver.flush();
+    };
+  }, [debouncedSaver]);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (thumbnailTimerRef.current) {
+        clearTimeout(thumbnailTimerRef.current);
+        thumbnailTimerRef.current = null;
+      }
+      saverRef.current?.cancel();
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
+    // Сброс при смене доски — ответ предыдущей доски не должен применяться.
+    hasLocalChangesRef.current = false;
+    localRevisionRef.current = 0;
+    lastSavedRevisionRef.current = 0;
+    lastSaveServerVersionRef.current = 0;
+    dirtyRef.current = false;
+    savingRef.current = false;
+    saveRequestedRef.current = false;
+    latestSceneRef.current = null;
+    lastElementsRef.current = null;
+    lastFilesRef.current = null;
     setLoading(true);
     setLoadError("");
+    setConflict(false);
+    setExcalidrawReady(false);
+    setSaveStatus("idle");
+    saverRef.current?.cancel();
     fetchInteractiveBoard(boardId)
       .then((data: BoardDetail) => {
-        if (cancelled) return;
+        if (cancelled || boardIdRef.current !== boardId) return;
+        // Если пользователь уже успел править (редко при быстрой навигации) — не затираем.
+        if (hasLocalChangesRef.current) return;
         setBoard(data);
         setTitle(data.title || "Новая доска");
         versionRef.current = data.version || 1;
@@ -336,7 +511,7 @@ export default function CabinetBoardEditorPage() {
         setLoading(false);
       })
       .catch((err: { message?: string }) => {
-        if (cancelled) return;
+        if (cancelled || boardIdRef.current !== boardId) return;
         setLoadError(err?.message || "Не удалось открыть доску");
         setLoading(false);
       });
@@ -400,8 +575,6 @@ export default function CabinetBoardEditorPage() {
   // Стабильный onChange. Не ставим React-state на openMenu/zoom/selection —
   // иначе родитель ререндерится; ExcalidrawHost от этого защищён memo, но
   // лишние сохранения тоже не нужны.
-  const lastElementsRef = useRef<readonly unknown[] | null>(null);
-  const lastFilesRef = useRef<Record<string, unknown> | null>(null);
   const syncPaperOverlay = useCallback((appState: Record<string, unknown>) => {
     const el = paperOverlayRef.current;
     const style = gridStyleRef.current;
@@ -462,9 +635,18 @@ export default function CabinetBoardEditorPage() {
         uploadInteractiveBoardImage(boardId, form),
       );
       pendingIds.forEach((id) => uploadingFileIdsRef.current.delete(id));
-      const nextScene = { ...scene, files: nextFiles };
-      latestSceneRef.current = nextScene;
-      lastFilesRef.current = nextFiles;
+      if (!mountedRef.current || boardIdRef.current !== boardId) return scene;
+      // Не затираем elements, которые пользователь успел изменить во время upload.
+      if (latestSceneRef.current) {
+        latestSceneRef.current = {
+          ...latestSceneRef.current,
+          files: { ...latestSceneRef.current.files, ...nextFiles },
+        };
+      }
+      lastFilesRef.current = {
+        ...(lastFilesRef.current || {}),
+        ...nextFiles,
+      };
       applyingRemoteRef.current = true;
       apiRef.current.updateScene?.({
         files: nextFiles,
@@ -475,11 +657,12 @@ export default function CabinetBoardEditorPage() {
       }, 60);
       imageUploadStatusRef.current = "idle";
       setImageUploadStatus("idle");
-      publishLiveScene(nextScene);
-      dirtyRef.current = true;
-      setSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));
+      const publishScene = latestSceneRef.current || { ...scene, files: nextFiles };
+      publishLiveScene(publishScene);
+      markLocalSceneChange();
+      safeSetSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));
       debouncedSaver.schedule();
-      return nextScene;
+      return publishScene;
     } catch (err: unknown) {
       pendingIds.forEach((id) => uploadingFileIdsRef.current.delete(id));
       imageUploadStatusRef.current = "error";
@@ -489,7 +672,7 @@ export default function CabinetBoardEditorPage() {
       // Не публикуем blob:/data: пирам — только локальный предпросмотр.
       return scene;
     }
-  }, [boardId, debouncedSaver, publishLiveScene, showNotice]);
+  }, [boardId, debouncedSaver, markLocalSceneChange, publishLiveScene, safeSetSaveStatus, showNotice]);
 
   const handleChange = useCallback(
     (elements: readonly unknown[], appState: Record<string, unknown>, files: Record<string, unknown>) => {
@@ -521,8 +704,8 @@ export default function CabinetBoardEditorPage() {
       if (!elementsChanged && !filesChanged && !bgChanged && !gridChanged && !themeChanged) return;
       lastElementsRef.current = elements;
       lastFilesRef.current = files;
-      dirtyRef.current = true;
-      setSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));
+      markLocalSceneChange();
+      safeSetSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));
       debouncedSaver.schedule();
       const hasTransient = Object.values(files).some((meta) => {
         if (!meta || typeof meta !== "object") return false;
@@ -536,7 +719,7 @@ export default function CabinetBoardEditorPage() {
         publishLiveScene(scene);
       }
     },
-    [debouncedSaver, externalizeAndSyncFiles, publishLiveScene, syncPaperOverlay, syncLeftPanels],
+    [debouncedSaver, externalizeAndSyncFiles, markLocalSceneChange, publishLiveScene, safeSetSaveStatus, syncPaperOverlay, syncLeftPanels],
   );
 
   // Совместное редактирование с привязанным учеником (WebSocket live + REST persist).
@@ -581,15 +764,36 @@ export default function CabinetBoardEditorPage() {
         },
         onRemoteScene: (scene, meta) => {
           if (!apiRef.current) return;
+          if (boardIdRef.current !== boardId) return;
+
+          // Свой scene_saved после PATCH: не трогаем холст (иначе откат/воскрешение удалений).
+          if (
+            meta.fromSaved
+            && typeof meta.version === "number"
+            && meta.version === lastSaveServerVersionRef.current
+          ) {
+            versionRef.current = meta.version;
+            if (!dirtyRef.current && localRevisionRef.current <= lastSavedRevisionRef.current) {
+              safeSetSaveStatus("saved");
+              setConflict(false);
+            }
+            setBoard((prev) => (prev ? { ...prev, version: meta.version! } : prev));
+            return;
+          }
+
           if (meta.fromSaved && typeof meta.version === "number") {
             if (meta.version < versionRef.current) return;
             versionRef.current = meta.version;
             setBoard((prev) => (prev ? { ...prev, version: meta.version! } : prev));
           }
 
-          const localElements = (apiRef.current.getSceneElements?.() || []) as unknown[];
+          // Prefer latestSceneRef + IncludingDeleted — getSceneElements() без deleted воскрешает элементы.
+          const localElements = getLocalElementsForMerge(
+            apiRef.current,
+            latestSceneRef.current?.elements,
+          );
           const localApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
-          const localFiles = (apiRef.current.getFiles?.() || {}) as Record<string, unknown>;
+          const localFiles = (apiRef.current.getFiles?.() || latestSceneRef.current?.files || {}) as Record<string, unknown>;
           const merged = mergeCollabScenes(
             { elements: localElements, appState: localApp, files: localFiles },
             scene,
@@ -625,7 +829,7 @@ export default function CabinetBoardEditorPage() {
           lastFilesRef.current = merged.files;
           if (meta.fromSaved) {
             if (!dirtyRef.current) {
-              setSaveStatus("saved");
+              safeSetSaveStatus("saved");
               setConflict(false);
             }
           }
@@ -721,8 +925,8 @@ export default function CabinetBoardEditorPage() {
         ...latestSceneRef.current,
         appState: { ...latestSceneRef.current.appState, ...patch },
       };
-      dirtyRef.current = true;
-      setSaveStatus("dirty");
+      markLocalSceneChange();
+      safeSetSaveStatus("dirty");
       debouncedSaver.schedule();
     }
   };
@@ -738,8 +942,8 @@ export default function CabinetBoardEditorPage() {
         appState: { ...latestSceneRef.current.appState, ...patch },
       };
       if (canEdit && !conflict) {
-        dirtyRef.current = true;
-        setSaveStatus("dirty");
+        markLocalSceneChange();
+        safeSetSaveStatus("dirty");
         debouncedSaver.schedule();
       }
     }
@@ -761,8 +965,8 @@ export default function CabinetBoardEditorPage() {
         appState: { ...latestSceneRef.current.appState, theme },
       };
       if (canEdit && !conflict) {
-        dirtyRef.current = true;
-        setSaveStatus("dirty");
+        markLocalSceneChange();
+        safeSetSaveStatus("dirty");
         debouncedSaver.schedule();
       }
     }

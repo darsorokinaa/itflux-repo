@@ -36,6 +36,22 @@ describe("boardSceneMerge", () => {
     expect(merged.some((e) => e.id === "peer")).toBe(true);
   });
 
+  it("keeps newer soft-deleted element instead of resurrecting from older remote", () => {
+    const local = [{ id: "gone", version: 4, isDeleted: true, type: "rectangle" }];
+    const remote = [{ id: "gone", version: 2, isDeleted: false, type: "rectangle", x: 1 }];
+    const merged = mergeBoardElements(local, remote) as { id: string; isDeleted?: boolean; version: number }[];
+    const gone = merged.find((e) => e.id === "gone");
+    expect(gone?.isDeleted).toBe(true);
+    expect(gone?.version).toBe(4);
+  });
+
+  it("prefers isDeleted when version markers are equal", () => {
+    const local = [{ id: "x", version: 3, versionNonce: 1, isDeleted: true }];
+    const remote = [{ id: "x", version: 3, versionNonce: 1, isDeleted: false }];
+    const merged = mergeBoardElements(local, remote) as { isDeleted?: boolean }[];
+    expect(merged[0]?.isDeleted).toBe(true);
+  });
+
   it("mergeCollabScenes preserves local scroll/selection", () => {
     const out = mergeCollabScenes(
       {

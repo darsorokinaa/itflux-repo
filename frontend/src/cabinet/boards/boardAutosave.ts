@@ -2,7 +2,8 @@
 
 export type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error" | "conflict";
 
-export const AUTOSAVE_DEBOUNCE_MS = 1200;
+/** Пауза после последнего изменения перед автосохранением (500–1000 мс). */
+export const AUTOSAVE_DEBOUNCE_MS = 800;
 
 export type BoardScenePayload = {
   elements: unknown[];
