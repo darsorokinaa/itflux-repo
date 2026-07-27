@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import {
+  planItemHomeworkPopoverRows,
   planItemLessonPopoverRows,
   planItemTaskPopoverRows,
 } from "../planItemAttachments";
@@ -887,7 +888,15 @@ export default function VideoMeetingPage() {
         text: event.materials.trim(),
       });
     }
-    return materials;
+    return materials.map((row) => ({ ...row, attachmentScope: "lesson" }));
+  }, [event]);
+
+  const homeworkRows = useMemo(() => {
+    const planItem = event?.planItem || null;
+    return planItemHomeworkPopoverRows(planItem).map((row) => ({
+      ...row,
+      attachmentScope: "homework",
+    }));
   }, [event]);
 
   const refreshMeetingDetail = useCallback(async () => {
@@ -1066,6 +1075,67 @@ export default function VideoMeetingPage() {
       setAttachBusy(false);
     }
   }, [ensurePlanItem, event, refreshMeetingDetail]);
+
+  const onRemovePlanResource = useCallback(async (row) => {
+    if (!canManage || !row) return;
+    if (!row.materialId && !row.interactiveId) return;
+    setAttachError("");
+    setAttachBusy(true);
+    try {
+      const ensured = await ensurePlanItem();
+      const planItemId = ensured?.id;
+      if (!planItemId) throw new Error("Не удалось обновить материалы урока");
+
+      const scope = row.attachmentScope === "homework" ? "homework" : "lesson";
+      const planItem = {
+        ...(event?.planItem || {}),
+        ...ensured,
+      };
+      let payload = null;
+
+      if (row.materialId) {
+        if (scope === "homework") {
+          const current = (planItem.homeworkMaterials || planItem.homework_materials || [])
+            .map((m) => m.id)
+            .filter((id) => id && id !== row.materialId);
+          payload = { homework_material_ids: current };
+        } else {
+          const current = (planItem.materials || [])
+            .map((m) => m.id)
+            .filter((id) => id && id !== row.materialId);
+          payload = { material_ids: current };
+        }
+      } else if (row.interactiveId) {
+        if (scope === "homework") {
+          const current = (planItem.homeworkInteractives || planItem.homework_interactives || [])
+            .map((i) => i.id)
+            .filter((id) => id && id !== row.interactiveId);
+          payload = { homework_interactive_ids: current };
+        } else {
+          const current = (planItem.attachedInteractives || planItem.attached_interactives || [])
+            .map((i) => i.id)
+            .filter((id) => id && id !== row.interactiveId);
+          payload = { interactive_ids: current };
+        }
+      }
+
+      if (!payload) return;
+      const data = await updateLessonPlanItem(planItemId, payload);
+      const mapped = mapApiPlanItem(data);
+      setDetail((prev) => (
+        prev
+          ? { ...prev, event: { ...prev.event, planItem: { ...prev.event?.planItem, ...mapped } } }
+          : prev
+      ));
+      setMaterialsToast("Материал убран с урока");
+      window.setTimeout(() => setMaterialsToast(""), 2200);
+      await refreshMeetingDetail();
+    } catch (err) {
+      setAttachError(err?.message || "Не удалось убрать материал");
+    } finally {
+      setAttachBusy(false);
+    }
+  }, [canManage, ensurePlanItem, event, refreshMeetingDetail]);
 
   const showJitsi = pageState === "live" && attendance == null;
 
@@ -1543,7 +1613,7 @@ export default function VideoMeetingPage() {
   }, [openAddHomework, openAddMaterials]);
 
   const materialsCount = canManage
-    ? (materialRows.length + (boardInfo?.board ? 1 : 0))
+    ? (materialRows.length + homeworkRows.length + (boardInfo?.board ? 1 : 0))
     : ((materialSession?.material || presented?.openUrl) ? 1 : 0);
   const whenLabel = formatWhen(event?.startsAt, event?.endsAt);
   const studentLabel = String(event?.audience || "").trim();
@@ -2139,10 +2209,11 @@ export default function VideoMeetingPage() {
           <VideoLessonMaterialsPanel
             canManage={canManage}
             materialRows={canManage ? materialRows : studentMaterialRowsResolved}
-            homeworkRows={[]}
+            homeworkRows={canManage ? homeworkRows : []}
             presented={presented}
             materialSession={materialSession}
             presentBusy={presentBusy}
+            removeBusy={attachBusy}
             event={event}
             liveAnswers={liveAnswers}
             liveAnswersLoading={liveAnswersLoading}
@@ -2156,6 +2227,7 @@ export default function VideoMeetingPage() {
             onOpenRow={onOpenRow}
             onToggleVisibility={onToggleVisibility}
             onOpenInNewTab={onOpenInNewTab}
+            onRemoveRow={canManage ? onRemovePlanResource : null}
             onShowBoard={onShowBoard}
             onOpenBoardLocally={onOpenBoardLocally}
             onHidePresented={onClearPresented}

@@ -55,14 +55,17 @@ function MaterialRow({
   presented,
   materialSession = null,
   presentBusy,
+  removeBusy = false,
   menuKey,
   setMenuKey,
   onOpen,
   onToggleVisibility,
   onOpenInNewTab,
+  onRemove = null,
 }) {
   const showing = isRowShowing(row, presented, materialSession);
   const presentable = canPresentRow(row);
+  const removable = Boolean(canManage && onRemove && (row.materialId || row.interactiveId));
   const menuOpen = menuKey === row.key;
 
   return (
@@ -143,6 +146,20 @@ function MaterialRow({
                   {showing ? "Скрыть от ученика" : "Показать ученику"}
                 </button>
               ) : null}
+              {removable ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="is-danger"
+                  disabled={removeBusy || presentBusy}
+                  onClick={() => {
+                    setMenuKey("");
+                    onRemove(row);
+                  }}
+                >
+                  Убрать с урока
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -162,6 +179,7 @@ export default function VideoLessonMaterialsPanel({
   presented,
   materialSession = null,
   presentBusy,
+  removeBusy = false,
   event,
   liveAnswers,
   liveAnswersLoading,
@@ -172,6 +190,7 @@ export default function VideoLessonMaterialsPanel({
   onOpenRow,
   onToggleVisibility,
   onOpenInNewTab,
+  onRemoveRow = null,
   onShowBoard,
   onOpenBoardLocally,
   onHidePresented,
@@ -298,11 +317,13 @@ export default function VideoLessonMaterialsPanel({
                 presented={presented}
                 materialSession={materialSession}
                 presentBusy={presentBusy}
+                removeBusy={removeBusy}
                 menuKey={menuKey}
                 setMenuKey={setMenuKey}
                 onOpen={onOpenRow}
                 onToggleVisibility={onToggleVisibility}
                 onOpenInNewTab={onOpenInNewTab}
+                onRemove={onRemoveRow}
               />
             ))}
           </ul>

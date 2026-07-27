@@ -341,7 +341,7 @@ function CompactSummary({ summary, detailsHref, loading }) {
           </div>
           <div className="jg-summary-compact__metric" role="listitem">
             <span>ДЗ</span>
-            <strong>{fmtPct(homework.completion_percent)}</strong>
+            <strong>{fmtPct(homework.avg_score ?? homework.completion_percent)}</strong>
           </div>
           <div className="jg-summary-compact__metric" role="listitem">
             <span>Посещ.</span>
@@ -381,7 +381,9 @@ function CompactSummary({ summary, detailsHref, loading }) {
             <div className="jg-summary-compact__spark-head">
               <span>ДЗ</span>
               <em className="jg-summary-compact__trend">
-                {homework.completion_percent != null ? fmtPct(homework.completion_percent) : "—"}
+                {(homework.avg_score ?? homework.completion_percent) != null
+                  ? fmtPct(homework.avg_score ?? homework.completion_percent)
+                  : "—"}
               </em>
             </div>
             <MiniHwBars byStatus={homework.by_status} />
@@ -492,10 +494,14 @@ function FullSummary({ summary, scopeType, loading }) {
         </article>
         <article className="jg-kpi">
           <span>Домашние задания</span>
-          <strong>{fmtPct(homework.completion_percent)}</strong>
+          <strong>{fmtPct(homework.avg_score ?? homework.completion_percent)}</strong>
           <small>
             выдано {homework.assigned_count || 0}
-            {homework.checked_count ? ` · проверено ${homework.checked_count}` : ""}
+            {homework.avg_score != null
+              ? ` · средний балл ${fmtPct(homework.avg_score)}`
+              : homework.checked_count
+                ? ` · проверено ${homework.checked_count}`
+                : ""}
           </small>
         </article>
         <article className="jg-kpi">

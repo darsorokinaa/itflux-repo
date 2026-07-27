@@ -1,7 +1,7 @@
 import CabinetIcon from "../CabinetIcons";
 
 function rowIcon(kind) {
-  if (kind === "interactive") return "interactive";
+  if (kind === "interactive") return "interactives";
   if (kind === "variant") return "tasks";
   if (kind === "file") return "note";
   if (kind === "library_lesson") return "lessons";

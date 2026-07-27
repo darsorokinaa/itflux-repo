@@ -858,7 +858,12 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                 queryset=LessonPlanItem.objects.select_related(
                     "linked_lesson",
                     "scheduled_event",
-                ).prefetch_related("materials").order_by("order", "id"),
+                ).prefetch_related(
+                    "materials",
+                    "attached_interactives",
+                    "homework_materials",
+                    "homework_interactives",
+                ).order_by("order", "id"),
             )
         )
         status_param = self.request.query_params.get("status")
@@ -1040,6 +1045,9 @@ class LessonPlanItemViewSet(
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
         response = super().update(request, *args, **kwargs)
         item.refresh_from_db()
+        # После M2M-обновления не полагаемся на устаревший prefetch.
+        if hasattr(item, "_prefetched_objects_cache"):
+            item._prefetched_objects_cache.clear()
         return Response(LessonPlanItemSerializer(item).data)
 
     def destroy(self, request, *args, **kwargs):
@@ -1573,6 +1581,13 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         seen = set()
         update_fields = [f for f in update_fields if not (f in seen or seen.add(f))]
         submission.save(update_fields=update_fields)
+        try:
+            from .journal_service import sync_previous_homework_status_from_submission
+
+            sync_previous_homework_status_from_submission(submission)
+        except Exception:
+            # Сводка успеваемости подтянет актуальный статус и без записи в журнал.
+            pass
 
 
 class ScheduleViewSet(TeacherScopedMixin, viewsets.ModelViewSet):

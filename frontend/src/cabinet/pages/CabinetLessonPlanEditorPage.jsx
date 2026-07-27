@@ -340,7 +340,7 @@ export default function CabinetLessonPlanEditorPage() {
   const [goal, setGoal] = useState("");
   const [description, setDescription] = useState("");
   const [grade, setGrade] = useState("");
-  const [sessions, setSessions] = useState(() => (isNew ? [{ ...EMPTY_PLAN_SESSION }] : []));
+  const [sessions, setSessions] = useState(() => (isNew ? [clonePlanSession(EMPTY_PLAN_SESSION)] : []));
   const [expandedIndex, setExpandedIndex] = useState(isNew ? 0 : null);
   const [extraOpen, setExtraOpen] = useState(false);
   const [dragIndex, setDragIndex] = useState(null);
@@ -518,7 +518,7 @@ export default function CabinetLessonPlanEditorPage() {
           setSessions(data.items.map((item) => mapApiItemResponseToSession(item)));
           setExpandedIndex(0);
         } else {
-          setSessions([{ ...EMPTY_PLAN_SESSION }]);
+          setSessions([clonePlanSession(EMPTY_PLAN_SESSION)]);
           setExpandedIndex(0);
         }
       })
@@ -591,17 +591,27 @@ export default function CabinetLessonPlanEditorPage() {
     if (!resourcesPicker) return;
     const { sessionIndex, scope } = resourcesPicker;
     const mapped = mapApiMaterial(material);
+    const isVariant = mapped.materialType === "task_set";
     await applySessionUpdate(sessionIndex, (session) => {
-      if (scope === "tasks") {
+      if (scope === "tasks" || (scope === "lesson" && isVariant)) {
         if (session.taskMaterials.some((m) => m.id === mapped.id)) return session;
-        return { ...session, taskMaterials: [...session.taskMaterials, mapped] };
+        // Убрать из обычных материалов, если раньше лежал там.
+        return {
+          ...session,
+          lessonMaterials: session.lessonMaterials.filter((m) => m.id !== mapped.id),
+          taskMaterials: [...session.taskMaterials, mapped],
+        };
       }
       if (scope === "homework") {
         if (session.homeworkMaterials.some((m) => m.id === mapped.id)) return session;
         return { ...session, homeworkMaterials: [...session.homeworkMaterials, mapped] };
       }
       if (session.lessonMaterials.some((m) => m.id === mapped.id)) return session;
-      return { ...session, lessonMaterials: [...session.lessonMaterials, mapped] };
+      return {
+        ...session,
+        taskMaterials: session.taskMaterials.filter((m) => m.id !== mapped.id),
+        lessonMaterials: [...session.lessonMaterials, mapped],
+      };
     });
     setResourcesPicker(null);
   }, [applySessionUpdate, resourcesPicker]);
@@ -623,12 +633,6 @@ export default function CabinetLessonPlanEditorPage() {
 
   const handleRemoveAttachment = useCallback(async (sessionIndex, scope, row) => {
     await applySessionUpdate(sessionIndex, (session) => {
-      if (scope === "tasks" && row.materialId) {
-        return {
-          ...session,
-          taskMaterials: session.taskMaterials.filter((m) => m.id !== row.materialId),
-        };
-      }
       if (scope === "homework") {
         if (row.materialId) {
           return {
@@ -647,6 +651,7 @@ export default function CabinetLessonPlanEditorPage() {
         return {
           ...session,
           lessonMaterials: session.lessonMaterials.filter((m) => m.id !== row.materialId),
+          taskMaterials: session.taskMaterials.filter((m) => m.id !== row.materialId),
         };
       }
       if (row.interactiveId) {
@@ -845,7 +850,7 @@ export default function CabinetLessonPlanEditorPage() {
 
   const addSession = useCallback(() => {
     setSessions((prev) => {
-      const next = [...prev, { ...EMPTY_PLAN_SESSION }];
+      const next = [...prev, clonePlanSession(EMPTY_PLAN_SESSION)];
       setExpandedIndex(next.length - 1);
       return next;
     });
@@ -1255,7 +1260,10 @@ export default function CabinetLessonPlanEditorPage() {
               ? pickerSession.taskMaterials.map((m) => m.id)
               : resourcesPicker.scope === "homework"
                 ? pickerSession.homeworkMaterials.map((m) => m.id)
-                : pickerSession.lessonMaterials.map((m) => m.id)
+                : [
+                    ...pickerSession.lessonMaterials.map((m) => m.id),
+                    ...pickerSession.taskMaterials.map((m) => m.id),
+                  ]
           }
           attachedInteractiveIds={
             resourcesPicker.scope === "homework"

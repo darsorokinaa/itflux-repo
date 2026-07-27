@@ -36,7 +36,7 @@ export function mapPlanItemToEditorSession(item) {
     lessonInteractives: (item.attached_interactives || item.attachedInteractives || [])
       .map(mapApiInteractiveAttachment),
     taskMaterials: materials.filter((m) => m.materialType === "task_set"),
-    homeworkDescription: item.homework_description || "",
+    homeworkDescription: item.homework_description || item.homeworkDescription || "",
     homeworkMaterials: (item.homework_materials || item.homeworkMaterials || []).map(mapApiMaterial),
     homeworkInteractives: (item.homework_interactives || item.homeworkInteractives || [])
       .map(mapApiInteractiveAttachment),
@@ -86,6 +86,17 @@ export function sessionLessonAttachmentRows(session) {
       kind,
       label: material.title,
       typeLabel: material.materialTypeLabel || "Материал",
+      url: materialOpenUrl(material),
+      materialId: material.id,
+    }));
+  });
+  // Варианты (task_set) хранятся отдельно, но в UI показываем в блоке «Материалы».
+  (session.taskMaterials || []).forEach((material) => {
+    rows.push(attachmentRow({
+      key: `task-${material.id}`,
+      kind: "variant",
+      label: material.title,
+      typeLabel: material.materialTypeLabel || "Вариант",
       url: materialOpenUrl(material),
       materialId: material.id,
     }));

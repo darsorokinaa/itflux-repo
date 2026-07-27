@@ -12,6 +12,7 @@ import {
   planSubjectLabel,
 } from "../lessonPlansData";
 import { canPublishCatalogPlans } from "../planCatalogPublish";
+import { homeworkResourceRows, lessonResourceRows } from "../planItemAttachments";
 import {
   copyLessonPlan,
   deleteLessonPlan,
@@ -24,8 +25,15 @@ function LessonPlanItemCard({ item, plan, onOpen }) {
   const subject = planSubjectLabel(plan);
   const exam = planExamLabel(plan);
   const meta = [exam, subject].filter(Boolean).join(" · ");
-  const materialsCount = item.materials?.length || 0;
-  const hasHomework = Boolean(item.homeworkDescription?.trim());
+  const materialsCount = lessonResourceRows(item).length
+    + (item.materialsNotes?.trim() ? 1 : 0);
+  const homeworkCount = homeworkResourceRows(item).length;
+  const hasHomework = Boolean(item.homeworkDescription?.trim()) || homeworkCount > 0;
+  const topicLine = [
+    item.topic ? `Тема: ${item.topic}` : "",
+    item.subtopic ? `Подтема: ${item.subtopic}` : "",
+    item.taskNumber ? `№ задания: ${item.taskNumber}` : "",
+  ].filter(Boolean).join(" · ");
   const coverTone = plan.direction || "other";
 
   const handleKeyDown = (e) => {
@@ -49,15 +57,23 @@ function LessonPlanItemCard({ item, plan, onOpen }) {
       </div>
       <div className="cb-lesson-list-card__body">
         <div className="cb-lesson-list-card__head">
-          <h4 className="cb-lesson-list-card__title">{item.title}</h4>
+          <h4 className="cb-lesson-list-card__title">{item.title || `Занятие ${item.order}`}</h4>
         </div>
-        {item.topic ? (
-          <p className="cb-lesson-list-card__topic">Тема: {item.topic}</p>
+        {topicLine ? (
+          <p className="cb-lesson-list-card__topic">{topicLine}</p>
         ) : null}
         {meta ? <p className="cb-lesson-list-card__meta">{meta}</p> : null}
         <div className="cb-lesson-list-card__stats">
           {materialsCount > 0 ? <span>Материалы: {materialsCount}</span> : null}
-          <span>ДЗ: {hasHomework ? "есть" : "нет"}</span>
+          <span>
+            ДЗ:
+            {" "}
+            {hasHomework
+              ? (homeworkCount > 0
+                ? `есть · ${homeworkCount}`
+                : "есть")
+              : "нет"}
+          </span>
         </div>
       </div>
       <span className="cb-lesson-list-card__action">Открыть</span>
@@ -166,6 +182,14 @@ export default function CabinetLessonPlanDetailPage() {
 
   const tone = planStatusTone(plan.status);
   const totalItems = plan.items.length;
+  const materialsTotal = plan.items.reduce(
+    (sum, item) => sum + lessonResourceRows(item).length + (item.materialsNotes?.trim() ? 1 : 0),
+    0,
+  );
+  const homeworkTotal = plan.items.filter((item) => (
+    Boolean(item.homeworkDescription?.trim())
+    || homeworkResourceRows(item).length > 0
+  )).length;
 
   return (
     <CabinetPageShell className="cb-section--plan-detail">
@@ -298,6 +322,8 @@ export default function CabinetLessonPlanDetailPage() {
               {plan.directionLabel && <div><dt>Направление</dt><dd>{plan.directionLabel}</dd></div>}
               {plan.grade && <div><dt>Класс</dt><dd>{plan.grade}</dd></div>}
               <div><dt>Занятий</dt><dd>{plan.lessonsCount || totalItems}</dd></div>
+              <div><dt>Материалов</dt><dd>{materialsTotal}</dd></div>
+              <div><dt>С ДЗ</dt><dd>{homeworkTotal}</dd></div>
               {plan.goal && <div><dt>Цель</dt><dd>{plan.goal}</dd></div>}
             </dl>
             {totalItems > 0 && (

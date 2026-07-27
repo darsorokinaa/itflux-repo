@@ -16,6 +16,7 @@ from Cabinet.journal_models import (
     JournalAuditLog,
     JournalStatus,
     LessonJournal,
+    PreviousHomeworkStatus,
     RecordPublishStatus,
     StudentCriterionScore,
     StudentLessonRecord,
@@ -545,6 +546,48 @@ class JournalModelTests(JournalTestBase):
         criteria = summary.get("criteria") or []
         self.assertTrue(criteria)
         self.assertTrue(any((c.get("description") or "").strip() for c in criteria))
+
+    def test_performance_summary_counts_homework_score_and_variant(self):
+        prev_hw = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="ДЗ для сводки",
+            description="Задачи",
+        )
+        HomeworkSubmission.objects.create(
+            homework=prev_hw,
+            student=self.student,
+            submitted_at=timezone.now() - timedelta(days=1),
+            status=SubmissionStatus.CHECKED,
+            score=75,
+            result_payload={"checked": {"1": True}},
+        )
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        journal.previous_homework = prev_hw
+        # Устаревший статус в журнале — сводка должна взять актуальный из сдачи.
+        journal.previous_homework_status = PreviousHomeworkStatus.NOT_REVIEWED
+        journal.save(
+            update_fields=["previous_homework", "previous_homework_status", "updated_at"]
+        )
+        record = journal.student_records.get(student=self.student)
+        record.attendance_status = AttendanceStatus.PRESENT
+        record.variant_result = {
+            "score_percent": 90,
+            "tasks": [{"ok": True}, {"ok": True}],
+        }
+        record.save(update_fields=["attendance_status", "variant_result", "updated_at"])
+
+        resp = self.client.get(f"/api/cabinet/journal/students/{self.student.id}/")
+        self.assertEqual(resp.status_code, 200)
+        summary = resp.data.get("summary") or {}
+        lesson = summary.get("lesson_work") or {}
+        homework = summary.get("homework") or {}
+        self.assertEqual(lesson.get("avg_variant_score"), 90.0)
+        self.assertEqual(lesson.get("avg_score"), 90.0)
+        self.assertEqual(homework.get("avg_score"), 75.0)
+        self.assertIsNotNone(summary.get("composite_index"))
+        self.assertGreater(summary["composite_index"], 0)
 
     def test_gradebook_matrix_group(self):
         event = self._group_event()

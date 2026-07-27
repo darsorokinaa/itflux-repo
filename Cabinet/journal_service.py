@@ -1424,6 +1424,20 @@ def _variant_score_percent(variant_result) -> float | None:
     return round(100.0 * correct / len(checked), 1)
 
 
+def sync_previous_homework_status_from_submission(submission) -> None:
+    """После проверки ДЗ обновляет previous_homework_status в связанных журналах."""
+    if submission is None:
+        return
+    homework = getattr(submission, "homework", None)
+    student = getattr(submission, "student", None)
+    if homework is None or student is None:
+        return
+    status = infer_previous_homework_status(homework, student)
+    LessonJournal.objects.filter(previous_homework_id=homework.id).filter(
+        Q(student_id=student.id) | Q(group__students=student)
+    ).update(previous_homework_status=status, updated_at=timezone.now())
+
+
 def performance_summary(
     teacher: User,
     *,
@@ -1473,11 +1487,13 @@ def performance_summary(
 
     lesson_scores: list[float] = []
     variant_scores: list[float] = []
+    homework_scores: list[float] = []
     score_series: list[dict] = []
     # title -> {values, description, scale_type, min_value, max_value, sort_order, id}
     criteria_meta: dict[str, dict] = {}
     attention_count = 0
     comments_count = 0
+    hw_by_status: dict[str, int] = {}
 
     # Все активные критерии учителя — чтобы пояснения были даже без оценок
     for c in AssessmentCriterion.objects.filter(teacher=teacher, is_active=True).order_by(
@@ -1497,14 +1513,33 @@ def performance_summary(
     for r in chronology:
         overall = _safe_float(r.overall_score)
         variant_pct = _variant_score_percent(r.variant_result)
-        if overall is not None:
-            lesson_scores.append(overall)
+        # Вариант на уроке учитываем в работе на уроке, если overall ещё не выставлен.
+        lesson_point = overall if overall is not None else variant_pct
+        if lesson_point is not None:
+            lesson_scores.append(lesson_point)
         if variant_pct is not None:
             variant_scores.append(variant_pct)
         if r.requires_attention:
             attention_count += 1
         if (r.teacher_comment or "").strip():
             comments_count += 1
+
+        # ДЗ: актуальный статус и % из сдачи (не устаревший previous_homework_status).
+        hw = resolve_homework_for_journal_record(r.journal, r.student)
+        hw_payload = build_homework_result_payload(
+            homework=hw,
+            student=r.student,
+            for_student=False,
+        )
+        hw_score = _safe_float((hw_payload or {}).get("score_percent")) if hw_payload else None
+        if hw_score is not None:
+            homework_scores.append(hw_score)
+        if hw is not None:
+            st = infer_previous_homework_status(hw, r.student)
+        else:
+            st = (r.journal.previous_homework_status or "").strip()
+        if st:
+            hw_by_status[st] = hw_by_status.get(st, 0) + 1
 
         for sc in r.criterion_scores.all():
             if sc.is_not_applicable or sc.value is None:
@@ -1540,15 +1575,15 @@ def performance_summary(
                 ),
                 "topic": r.journal.actual_topic or r.journal.planned_topic or "Урок",
                 "student_name": r.student.full_name if group_id else None,
-                "overall_score": overall,
+                "overall_score": lesson_point,
                 "variant_score": variant_pct,
+                "homework_score": hw_score,
                 "attendance": r.attendance_status,
-                "homework_status": r.journal.previous_homework_status or "",
+                "homework_status": st or "",
             }
         )
 
-    # ДЗ по журналам (статус проверки предыдущего ДЗ + факт выдачи)
-    hw_by_status: dict[str, int] = {}
+    # Факт выдачи ДЗ по журналам
     hw_assigned = 0
     hw_skipped = 0
     for j in journals_qs.only(
@@ -1558,9 +1593,6 @@ def performance_summary(
             hw_assigned += 1
         if j.homework_skipped:
             hw_skipped += 1
-        st = (j.previous_homework_status or "").strip()
-        if st:
-            hw_by_status[st] = hw_by_status.get(st, 0) + 1
 
     hw_done = hw_by_status.get(PreviousHomeworkStatus.FULL, 0) + hw_by_status.get(
         PreviousHomeworkStatus.PARTIAL, 0
@@ -1574,18 +1606,26 @@ def performance_summary(
         )
     )
     hw_completion = round(100.0 * hw_done / hw_checked, 1) if hw_checked else None
+    avg_homework = (
+        round(sum(homework_scores) / len(homework_scores), 1) if homework_scores else None
+    )
+    # Для индекса: средний % ДЗ, иначе доля выполненных из проверенных.
+    hw_metric = avg_homework if avg_homework is not None else hw_completion
 
     avg_lesson = round(sum(lesson_scores) / len(lesson_scores), 1) if lesson_scores else None
     avg_variant = (
         round(sum(variant_scores) / len(variant_scores), 1) if variant_scores else None
     )
 
-    # Комбинированный индекс: урок 50% + ДЗ 25% + посещаемость 25%
+    # Комбинированный индекс: урок(+вариант) 50% + ДЗ 25% + посещаемость 25%
     composite_parts = []
     if avg_lesson is not None:
         composite_parts.append(("lesson", avg_lesson, 0.5))
-    if hw_completion is not None:
-        composite_parts.append(("homework", hw_completion, 0.25))
+    elif avg_variant is not None:
+        # Если overall нигде нет, но есть результаты вариантов — они идут в индекс.
+        composite_parts.append(("lesson", avg_variant, 0.5))
+    if hw_metric is not None:
+        composite_parts.append(("homework", hw_metric, 0.25))
     if attendance.get("total_lessons"):
         composite_parts.append(
             ("attendance", float(attendance["attendance_rate_percent"]), 0.25)
@@ -1657,7 +1697,9 @@ def performance_summary(
         insights.append(f"Средний результат на уроке: {avg_lesson:g}%")
     if avg_variant is not None:
         insights.append(f"Средний результат по варианту на уроке: {avg_variant:g}%")
-    if hw_completion is not None:
+    if avg_homework is not None:
+        insights.append(f"Средний результат по ДЗ: {avg_homework:g}%")
+    elif hw_completion is not None:
         insights.append(f"Выполнение ДЗ (из проверенных): {hw_completion:g}%")
     if attendance.get("total_lessons"):
         insights.append(
@@ -1683,6 +1725,7 @@ def performance_summary(
                     "student_name": r.student.full_name,
                     "scores": [],
                     "variant_scores": [],
+                    "homework_scores": [],
                     "present": 0,
                     "total": 0,
                     "hw_done": 0,
@@ -1691,11 +1734,21 @@ def performance_summary(
             )
             bucket["total"] += 1
             ov = _safe_float(r.overall_score)
-            if ov is not None:
-                bucket["scores"].append(ov)
             vp = _variant_score_percent(r.variant_result)
+            lesson_point = ov if ov is not None else vp
+            if lesson_point is not None:
+                bucket["scores"].append(lesson_point)
             if vp is not None:
                 bucket["variant_scores"].append(vp)
+            hw = resolve_homework_for_journal_record(r.journal, r.student)
+            hw_payload = build_homework_result_payload(
+                homework=hw,
+                student=r.student,
+                for_student=False,
+            )
+            hw_score = _safe_float((hw_payload or {}).get("score_percent")) if hw_payload else None
+            if hw_score is not None:
+                bucket["homework_scores"].append(hw_score)
             if r.attendance_status in {
                 AttendanceStatus.PRESENT,
                 AttendanceStatus.LATE,
@@ -1703,7 +1756,11 @@ def performance_summary(
                 AttendanceStatus.PARTIAL,
             }:
                 bucket["present"] += 1
-            st = r.journal.previous_homework_status or ""
+            st = (
+                infer_previous_homework_status(hw, r.student)
+                if hw is not None
+                else (r.journal.previous_homework_status or "")
+            )
             if st in {
                 PreviousHomeworkStatus.FULL,
                 PreviousHomeworkStatus.PARTIAL,
@@ -1724,19 +1781,30 @@ def performance_summary(
                 if bucket["variant_scores"]
                 else None
             )
+            avg_hw = (
+                round(sum(bucket["homework_scores"]) / len(bucket["homework_scores"]), 1)
+                if bucket["homework_scores"]
+                else None
+            )
             att_rate = (
                 round(100.0 * bucket["present"] / bucket["total"], 1)
                 if bucket["total"]
                 else None
             )
             hw_rate = (
-                round(100.0 * bucket["hw_done"] / bucket["hw_checked"], 1)
-                if bucket["hw_checked"]
-                else None
+                avg_hw
+                if avg_hw is not None
+                else (
+                    round(100.0 * bucket["hw_done"] / bucket["hw_checked"], 1)
+                    if bucket["hw_checked"]
+                    else None
+                )
             )
             parts = []
             if avg_s is not None:
                 parts.append((avg_s, 0.5))
+            elif avg_v is not None:
+                parts.append((avg_v, 0.5))
             if hw_rate is not None:
                 parts.append((hw_rate, 0.25))
             if att_rate is not None:
@@ -1752,6 +1820,7 @@ def performance_summary(
                     "student_name": bucket["student_name"],
                     "avg_lesson_score": avg_s,
                     "avg_variant_score": avg_v,
+                    "avg_homework_score": avg_hw,
                     "attendance_rate": att_rate,
                     "homework_rate": hw_rate,
                     "lessons_count": bucket["total"],
@@ -1828,6 +1897,8 @@ def performance_summary(
             "assigned_count": hw_assigned,
             "skipped_count": hw_skipped,
             "completion_percent": hw_completion,
+            "avg_score": avg_homework,
+            "scored_count": len(homework_scores),
             "checked_count": hw_checked,
             "by_status": [
                 {
