@@ -123,17 +123,37 @@ export function logoutCabinet() {
 export async function logoutCabinetAndDetachPush() {
   try {
     const { unsubscribeCurrentPush } = await import("../cabinet/pwa/pwaHelpers");
-    const endpoint = await unsubscribeCurrentPush();
+    const endpoint = await Promise.race([
+      unsubscribeCurrentPush(),
+      new Promise((resolve) => {
+        window.setTimeout(() => resolve(""), 2500);
+      }),
+    ]);
     if (endpoint) {
-      await cabinetFetch("/push/unsubscribe/", {
-        method: "POST",
-        body: JSON.stringify({ endpoint }),
-      }).catch(() => null);
+      await Promise.race([
+        cabinetFetch("/push/unsubscribe/", {
+          method: "POST",
+          body: JSON.stringify({ endpoint }),
+        }).catch(() => null),
+        new Promise((resolve) => {
+          window.setTimeout(() => resolve(null), 2000);
+        }),
+      ]);
     }
   } catch {
-    /* best-effort */
+    /* best-effort — never block logout on push cleanup */
   }
-  return logoutCabinet();
+  try {
+    return await Promise.race([
+      logoutCabinet(),
+      new Promise((_, reject) => {
+        window.setTimeout(() => reject(new Error("logout timeout")), 5000);
+      }),
+    ]);
+  } catch (err) {
+    // Session may already be gone / network flaky — caller still redirects away.
+    return { ok: false, error: err?.message || "logout failed" };
+  }
 }
 
 export function fetchPushVapidKey() {

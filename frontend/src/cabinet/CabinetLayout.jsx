@@ -205,9 +205,14 @@ export default function CabinetLayout() {
 
   const handleLogout = async () => {
     setLoggingOut(true);
-    try { await logoutCabinetAndDetachPush(); window.location.href = "/"; }
-    catch { /* ignore */ }
-    finally { setLoggingOut(false); setLogoutConfirm(false); }
+    try {
+      await logoutCabinetAndDetachPush();
+    } catch {
+      /* ignore — still leave the cabinet UI */
+    } finally {
+      setLogoutConfirm(false);
+      window.location.href = "/";
+    }
   };
 
   if (loading) {

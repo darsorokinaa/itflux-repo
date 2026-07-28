@@ -113,10 +113,46 @@ export async function subscribeWebPush({ publicKey, deviceLabel = "" } = {}) {
   };
 }
 
-export async function getCurrentPushEndpoint() {
-  if (!("serviceWorker" in navigator)) return "";
+function withTimeout(promise, ms, fallback) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(fallback);
+    }, ms);
+    Promise.resolve(promise)
+      .then((value) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch(() => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(fallback);
+      });
+  });
+}
+
+/** Prefer existing registration — `ready` can hang forever if SW never activates. */
+async function getPushRegistration() {
+  if (!("serviceWorker" in navigator)) return null;
   try {
-    const reg = await navigator.serviceWorker.ready;
+    const existing = await navigator.serviceWorker.getRegistration();
+    if (existing) return existing;
+    return await withTimeout(navigator.serviceWorker.ready, 1500, null);
+  } catch {
+    return null;
+  }
+}
+
+export async function getCurrentPushEndpoint() {
+  try {
+    const reg = await getPushRegistration();
+    if (!reg?.pushManager) return "";
     const sub = await reg.pushManager.getSubscription();
     return sub?.endpoint || "";
   } catch {
@@ -125,13 +161,13 @@ export async function getCurrentPushEndpoint() {
 }
 
 export async function unsubscribeCurrentPush() {
-  if (!("serviceWorker" in navigator)) return "";
   try {
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await getPushRegistration();
+    if (!reg?.pushManager) return "";
     const sub = await reg.pushManager.getSubscription();
     if (!sub) return "";
     const endpoint = sub.endpoint;
-    await sub.unsubscribe();
+    await withTimeout(sub.unsubscribe(), 2000, false);
     return endpoint;
   } catch {
     return "";
