@@ -49,10 +49,13 @@ def resolve_notification_url(notification, request=None) -> str:
         return "/cabinet/student/results"
     if ntype == "overdue_homework_digest":
         return "/cabinet/review?filter=overdue"
-    if ntype in ("homework_submitted", "homework_resubmitted", "homework_review_digest", "auto_check_attention", "student_message"):
+    if ntype in ("homework_submitted", "homework_resubmitted", "homework_review_digest", "auto_check_attention", "student_message", "homework_updated"):
         review_id = payload.get("review_id")
         if review_id:
             return f"/cabinet/review/{review_id}"
+        hw_id = payload.get("homework_id")
+        if ntype == "homework_updated" and hw_id:
+            return f"/cabinet/student/assignments/{hw_id}"
         return "/cabinet/review"
     if ntype == "new_student":
         sid = payload.get("student_id")

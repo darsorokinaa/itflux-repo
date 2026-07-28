@@ -6,13 +6,16 @@ import {
   sendPushTestNotification,
 } from "../../utils/cabinetAuth";
 import {
-  clearPushPromptDismiss,
   dismissPushPrompt,
   notificationPermission,
   wasPushPromptDismissed,
 } from "./pwaHelpers";
 import "./pwa-prompts.css";
 
+/**
+ * Show enable prompt when push is configured but this browser has no active subscription.
+ * Also show when permission is already "granted" but the server has 0 devices (re-bind needed).
+ */
 export default function PwaEnableNotificationsPrompt({ role = "teacher", onEnabled }) {
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -30,7 +33,7 @@ export default function PwaEnableNotificationsPrompt({ role = "teacher", onEnabl
   useEffect(() => {
     let cancelled = false;
     const perm = notificationPermission();
-    if (perm === "granted" || perm === "unsupported" || wasPushPromptDismissed()) {
+    if (perm === "unsupported" || perm === "denied" || wasPushPromptDismissed()) {
       setVisible(false);
       return undefined;
     }
@@ -40,10 +43,10 @@ export default function PwaEnableNotificationsPrompt({ role = "teacher", onEnabl
       fetchPushDevices().catch(() => ({ active_count: 0 })),
     ]).then(([vapid, devices]) => {
       if (cancelled) return;
-      setConfigured(Boolean(vapid?.configured));
-      if (vapid?.configured && (devices?.active_count || 0) === 0) {
-        setVisible(true);
-      }
+      const ok = Boolean(vapid?.configured);
+      setConfigured(ok);
+      const needsSubscribe = ok && (devices?.active_count || 0) === 0;
+      setVisible(needsSubscribe);
     });
 
     return () => {
@@ -63,7 +66,6 @@ export default function PwaEnableNotificationsPrompt({ role = "teacher", onEnabl
       } catch {
         /* test is best-effort */
       }
-      clearPushPromptDismiss();
       setVisible(false);
       onEnabled?.();
     } catch (err) {

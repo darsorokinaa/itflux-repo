@@ -174,6 +174,8 @@ def notify_user_channels(
     urgent: bool = False,
     tag: str = "",
     skip_push_log: bool = False,
+    recipient_student=None,
+    recipient_teacher=None,
 ) -> list[Notification]:
     """Create in-app notification and optionally send web push for any role."""
     prefs = _prefs(user)
@@ -197,6 +199,8 @@ def notify_user_channels(
     if in_app and prefs.in_app_enabled:
         n = Notification.objects.create(
             recipient_user=user,
+            recipient_student=recipient_student,
+            recipient_teacher=recipient_teacher,
             channel=NotificationChannel.IN_APP,
             title=title,
             message=message,
@@ -207,6 +211,7 @@ def notify_user_channels(
         notes.append(n)
 
     if push and getattr(prefs, "push_enabled", True):
+        # Browser notification should mirror the cabinet (in-app) text.
         send_web_push_to_user(
             user,
             title=title,

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 import { displayName } from "../../pages/CabinetAuthPage";
 import {
+  ensureCabinetPushSubscription,
   fetchCabinetSession,
   isTeacherRole,
   logoutCabinetAndDetachPush,
@@ -57,6 +58,12 @@ export default function StudentCabinetLayout() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    ensureCabinetPushSubscription().catch(() => null);
+    return undefined;
+  }, [user]);
 
   const handleLogout = async () => {
     setLoggingOut(true);

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 import { displayName } from "../pages/CabinetAuthPage";
-import { fetchCabinetSession, fetchNavCounts, logoutCabinetAndDetachPush } from "../utils/cabinetAuth";
+import { fetchCabinetSession, fetchNavCounts, logoutCabinetAndDetachPush, ensureCabinetPushSubscription } from "../utils/cabinetAuth";
 import CabinetIcon from "./CabinetIcons";
 import {
   CABINET_MOBILE_NAV,
@@ -124,6 +124,12 @@ export default function CabinetLayout() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    ensureCabinetPushSubscription().catch(() => null);
+    return undefined;
+  }, [user]);
 
   const loadNavCounts = useCallback(async () => {
     try {

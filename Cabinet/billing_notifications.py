@@ -94,14 +94,21 @@ def send_billing_message_to_student(account: BillingAccount, text: str) -> bool:
         )
         return False
 
-    Notification.objects.create(
-        recipient_user=student_user,
-        recipient_student=account.student,
-        channel=NotificationChannel.IN_APP,
+    from .webpush import notify_user_channels
+
+    notify_user_channels(
+        student_user,
         title="Напоминание об оплате",
         message=text,
-        payload={"type": "billing_reminder", "url": "/cabinet/student"},
-        status=NotificationStatus.SENT,
+        payload={
+            "type": "billing_reminder",
+            "event_type": "billing_reminder",
+            "url": "/cabinet/student",
+        },
+        recipient_student=account.student,
+        push_priority="important",
+        tag=f"billing-reminder-{account.student_id}",
+        skip_push_log=True,
     )
     return _send_telegram(student_user, text)
 
@@ -127,14 +134,21 @@ def send_teacher_billing_digest(teacher: User, summary: dict, *, weekly: bool = 
     text = build_daily_digest_text(summary)
     if weekly:
         text = text.replace("за сегодня", "за неделю")
-    Notification.objects.create(
-        recipient_user=teacher,
-        recipient_teacher=teacher,
-        channel=NotificationChannel.IN_APP,
+    from .webpush import notify_user_channels
+
+    notify_user_channels(
+        teacher,
         title=title,
         message=text,
-        payload={"type": "billing_digest", "url": "/cabinet/payments"},
-        status=NotificationStatus.SENT,
+        payload={
+            "type": "billing_digest",
+            "event_type": "billing_digest",
+            "url": "/cabinet/payments",
+        },
+        recipient_teacher=teacher,
+        push_priority="normal",
+        tag="billing-digest",
+        skip_push_log=True,
     )
     if prefs.telegram_enabled:
         return _send_telegram(teacher, f"{text}\n\nОткрыть: /cabinet/payments")

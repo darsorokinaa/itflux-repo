@@ -11,21 +11,19 @@
   - скачивание нескольких картинок и добавление их в task_template;
   - импорт аудио из audio_url в поле files с игнорированием .gif и других картинок;
   - теги из справочника TagOption (несколько штук на задачу);
-  - автора задачи (колонка author / автор или AUTHOR_DEFAULT).
+  - автора задачи (колонка author / автор или AUTHOR_DEFAULT);
+  - тему программы (колонка theme / тема): ищет или создаёт TaskList
+    для SUBJECT+LEVEL, затем к нему привязывает subtopic.
 
-Теги (Generator_tagoption → M2M Generator_task_tag_options):
-  1) Для всех строк импорта — список TAGS в конфиге:
-       TAGS = ["novice", "есть-в-егэ"]
-     Можно slug, подпись («Новичок») или type:slug («difficulty:novice»).
-  2) Построчно — колонка COL_TAGS в Excel (например tags / теги):
-       novice; expert
-       Новичок, Есть в ЕГЭ
-     Разделители: ; , | перенос строки.
-  Теги из TAGS и из ячейки объединяются (дубликаты убираются).
+Тема программы (Generator_tasklist):
+  В Excel колонка theme / тема / Theme с названием, например:
+      Дроби и проценты
+  Скрипт ищет TaskList с таким task_title у SUBJECT/LEVEL.
+  Если нет — создаёт новый номер (task_number = max+1) и запись.
+  Дальше по этому task_list_id создаётся/ищется subtopic (COL_SUBTOPIC).
 
-Автор (поле Generator_task.author):
-  - колонка Excel: author / автор / Author
-  - или для всех строк: AUTHOR_DEFAULT = "ФИПИ"
+  Старый способ через номер задания тоже работает (COL_TASK_NUMBER),
+  если theme пустой.
 """
 
 import json
@@ -82,12 +80,16 @@ COL_IMAGES = None
 # Колонка с ответом.
 COL_ANSWER = None
 
-# Колонка с номером задания ЕГЭ/ОГЭ.
-# В твоих файлах она обычно называется tasklist_id, но по смыслу там номер задания: 26, 27 и т.д.
-COL_TASK_NUMBER = "tasklist_id"
+# Тема программы → Generator_tasklist.task_title (предмет/уровень из SUBJECT/LEVEL).
+# Пример ячейки: «Дроби и проценты». Если темы нет в БД — создаётся автоматически.
+COL_THEME = "theme"
 
-# Колонка с подтемой.
-COL_SUBTOPIC = None
+# Номер задания ЕГЭ/ОГЭ (запасной способ, если theme пустой).
+# В старых файлах колонка часто называется tasklist_id.
+COL_TASK_NUMBER = None  # например "tasklist_id"
+
+# Колонка с подтемой (создаётся под найденным/созданным TaskList).
+COL_SUBTOPIC = "subtopic"
 
 # Колонка с created_by, если есть. Если None или пусто — используется CREATED_BY_DEFAULT.
 COL_CREATED_BY = "created_by"
@@ -108,9 +110,12 @@ COL_TAGS = None  # например "tags" / "теги"
 # Пример: TAGS = ["novice"]  или  TAGS = ["difficulty:expert", "есть-в-егэ"]
 TAGS = []
 
-# Предмет и уровень для поиска TaskList.
-SUBJECT = "rus"
-LEVEL = "oge"
+# Предмет и уровень для поиска/создания TaskList.
+SUBJECT = "algebra"
+LEVEL = "school"
+
+# Если темы (TaskList) нет в БД — создать автоматически.
+CREATE_TASKLIST_IF_MISSING = True
 
 # Если подтемы нет в БД — создать автоматически.
 CREATE_SUBTOPIC_IF_MISSING = True
@@ -126,6 +131,10 @@ USE_ALL_JSON_FOR_ORPHAN_CHOICES = True
 CREATED_BY_DEFAULT = "admin_dasha"
 MAX_SCORE = 1
 IS_ACTIVE = True
+# part_id для новых TaskList (1 = часть 1).
+TASKLIST_PART_ID = 1
+# subdivision для новых TaskList: "" / "alg" / "geom"
+TASKLIST_SUBDIVISION = ""
 
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -404,7 +413,34 @@ def _parse_task_number(raw: str) -> int | None:
 
 
 _task_list_cache: dict[tuple[str, str, int], int | None] = {}
+_task_list_theme_cache: dict[tuple[str, str, str], int | None] = {}
 _subtopic_cache: dict[tuple[int, str], int] = {}
+_subject_level_cache: dict[tuple[str, str], tuple[int, int] | None] = {}
+
+
+def resolve_subject_level_ids(cur, subject_short: str, level_slug: str) -> tuple[int, int] | None:
+    key = (subject_short, level_slug)
+    if key in _subject_level_cache:
+        return _subject_level_cache[key]
+
+    cur.execute(
+        """
+        SELECT s.id, l.id
+        FROM "Generator_subject" s
+        CROSS JOIN "Generator_level" l
+        WHERE s.subject_short = %s
+          AND l.level = %s
+        LIMIT 1
+        """,
+        (subject_short, level_slug),
+    )
+    row = cur.fetchone()
+    if not row:
+        _subject_level_cache[key] = None
+        return None
+    ids = (int(row[0]), int(row[1]))
+    _subject_level_cache[key] = ids
+    return ids
 
 
 def resolve_task_list_id(
@@ -434,6 +470,101 @@ def resolve_task_list_id(
     row = cur.fetchone()
     task_list_id = row[0] if row else None
     _task_list_cache[key] = task_list_id
+    return task_list_id
+
+
+def resolve_or_create_task_list_by_theme(
+    cur,
+    subject_short: str,
+    level_slug: str,
+    theme_title: str,
+) -> int | None:
+    """
+    Находит TaskList по названию темы (task_title) для SUBJECT/LEVEL
+    или создаёт новый (task_number = max+1), если CREATE_TASKLIST_IF_MISSING.
+    """
+    title = " ".join((theme_title or "").split()).strip()
+    if not title:
+        return None
+    # CharField(max_length=100)
+    title = title[:100]
+
+    cache_key = (subject_short, level_slug, title.casefold())
+    if cache_key in _task_list_theme_cache:
+        return _task_list_theme_cache[cache_key]
+
+    cur.execute(
+        """
+        SELECT tl.id
+        FROM "Generator_tasklist" tl
+        JOIN "Generator_subject" s ON tl.subject_id = s.id
+        JOIN "Generator_level" l ON tl.level_id = l.id
+        WHERE s.subject_short = %s
+          AND l.level = %s
+          AND lower(btrim(tl.task_title)) = lower(%s)
+        ORDER BY tl.task_number, tl.id
+        LIMIT 1
+        """,
+        (subject_short, level_slug, title),
+    )
+    row = cur.fetchone()
+    if row:
+        task_list_id = int(row[0])
+        _task_list_theme_cache[cache_key] = task_list_id
+        return task_list_id
+
+    if not CREATE_TASKLIST_IF_MISSING:
+        _task_list_theme_cache[cache_key] = None
+        return None
+
+    ids = resolve_subject_level_ids(cur, subject_short, level_slug)
+    if not ids:
+        print(
+            f"    [theme] предмет/уровень не найдены: "
+            f"{subject_short} / {level_slug}"
+        )
+        _task_list_theme_cache[cache_key] = None
+        return None
+
+    subject_id, level_id = ids
+    cur.execute(
+        """
+        SELECT COALESCE(MAX(task_number), 0) + 1
+        FROM "Generator_tasklist"
+        WHERE subject_id = %s
+          AND level_id = %s
+        """,
+        (subject_id, level_id),
+    )
+    next_number = int(cur.fetchone()[0])
+
+    subdivision = (TASKLIST_SUBDIVISION or "").strip()
+    part_id = TASKLIST_PART_ID if TASKLIST_PART_ID else None
+
+    cur.execute(
+        """
+        INSERT INTO "Generator_tasklist"
+            (subject_id, level_id, part_id, task_number, task_title, max_score, subdivision)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+        """,
+        (
+            subject_id,
+            level_id,
+            part_id,
+            next_number,
+            title,
+            MAX_SCORE,
+            subdivision,
+        ),
+    )
+    task_list_id = int(cur.fetchone()[0])
+    _task_list_theme_cache[cache_key] = task_list_id
+    _task_list_cache[(subject_short, level_slug, next_number)] = task_list_id
+    print(
+        f"    [theme] создана тема «{title}» "
+        f"({subject_short}/{level_slug} №{next_number}, id={task_list_id})"
+    )
     return task_list_id
 
 
@@ -654,9 +785,15 @@ def main():
     else:
         print("Аудио/файлы: колонка не найдена, импорт аудио пропущен")
 
+    if COL_THEME:
+        print(
+            f"Тема программы: колонка «{COL_THEME}» "
+            f"(или aliases), предмет={SUBJECT}, уровень={LEVEL}, "
+            f"автосоздание={'да' if CREATE_TASKLIST_IF_MISSING else 'нет'}"
+        )
     if COL_TASK_NUMBER:
         print(
-            f"Номер задания: колонка «{COL_TASK_NUMBER}», "
+            f"Номер задания (fallback): колонка «{COL_TASK_NUMBER}», "
             f"предмет={SUBJECT}, уровень={LEVEL}"
         )
     if COL_SUBTOPIC:
@@ -671,6 +808,20 @@ def main():
         COL_AUTHOR,
         aliases=["author", "автор", "Author", "AUTHOR"],
     )
+    theme_col = resolve_optional_column(
+        df,
+        COL_THEME,
+        aliases=["theme", "тема", "Theme", "task_title", "тема_программы"],
+    )
+    subtopic_col = resolve_optional_column(
+        df,
+        COL_SUBTOPIC,
+        aliases=["subtopic", "подтема", "Subtopic", "sub_topic", "подтемы"],
+    )
+    if theme_col and theme_col != COL_THEME:
+        print(f"Тема из Excel: колонка «{theme_col}»")
+    if subtopic_col and COL_SUBTOPIC and subtopic_col != COL_SUBTOPIC:
+        print(f"Подтема из Excel: колонка «{subtopic_col}»")
     if TAGS:
         print(f"Теги по умолчанию (TAGS): {TAGS}")
     if tags_col:
@@ -683,12 +834,25 @@ def main():
 
     # COL_AUDIO намеренно не требуем: старые Excel без аудиоколонки должны импортироваться как раньше.
     required_columns = [
-        col for col in [COL_TASK, COL_FILES, COL_IMAGES, COL_ANSWER, COL_TASK_NUMBER, COL_SUBTOPIC]
+        col for col in [COL_TASK, COL_FILES, COL_IMAGES, COL_ANSWER, COL_TASK_NUMBER]
         if col
     ]
+    # theme / subtopic могут подхватиться по alias
+    if COL_THEME and not theme_col:
+        required_columns.append(COL_THEME)
+    # подтема опциональна: если колонки нет — задачи без subtopic_id
     for col in required_columns:
         if col not in df.columns:
             raise SystemExit(f"В Excel нет колонки «{col}».")
+    if not theme_col and not COL_TASK_NUMBER:
+        raise SystemExit(
+            "Нужна колонка темы (theme/тема) или номер задания (COL_TASK_NUMBER)."
+        )
+    if COL_SUBTOPIC and not subtopic_col:
+        print(
+            f"Подтема: колонка «{COL_SUBTOPIC}» не найдена — "
+            "задачи будут без subtopic_id"
+        )
 
     conn = psycopg2.connect(**DB)
     cur = conn.cursor()
@@ -755,14 +919,27 @@ def main():
         task_list_id = None
         subtopic_id = None
 
-        if COL_TASK_NUMBER:
+        theme_title = _cell_str(row, theme_col) if theme_col else ""
+        if theme_title:
+            task_list_id = resolve_or_create_task_list_by_theme(
+                cur, SUBJECT, LEVEL, theme_title,
+            )
+            if task_list_id is None:
+                print(
+                    f"  [skip] строка {row_number}: тема «{theme_title}» не найдена "
+                    f"({SUBJECT} / {LEVEL}"
+                    f"{'' if CREATE_TASKLIST_IF_MISSING else ', CREATE_TASKLIST_IF_MISSING=False'})"
+                )
+                skip += 1
+                continue
+        elif COL_TASK_NUMBER:
             num_raw = _cell_str(row, COL_TASK_NUMBER)
             task_num = _parse_task_number(num_raw)
 
             if task_num is None:
                 print(
-                    f"  [skip] строка {row_number}: нет номера задания "
-                    f"(колонка «{COL_TASK_NUMBER}»)"
+                    f"  [skip] строка {row_number}: нет темы и нет номера задания "
+                    f"(колонки theme / «{COL_TASK_NUMBER}»)"
                 )
                 skip += 1
                 continue
@@ -775,18 +952,25 @@ def main():
                 )
                 skip += 1
                 continue
+        else:
+            print(
+                f"  [skip] строка {row_number}: пустая тема "
+                f"и COL_TASK_NUMBER не задан"
+            )
+            skip += 1
+            continue
 
-            if COL_SUBTOPIC:
-                sub_title = _cell_str(row, COL_SUBTOPIC)
-                if sub_title:
-                    subtopic_id = resolve_subtopic_id(cur, task_list_id, sub_title)
-                    if subtopic_id is None:
-                        print(
-                            f"  [skip] строка {row_number}: подтема «{sub_title}» не найдена "
-                            f"(CREATE_SUBTOPIC_IF_MISSING=False)"
-                        )
-                        skip += 1
-                        continue
+        if subtopic_col:
+            sub_title = _cell_str(row, subtopic_col)
+            if sub_title:
+                subtopic_id = resolve_subtopic_id(cur, task_list_id, sub_title)
+                if subtopic_id is None:
+                    print(
+                        f"  [skip] строка {row_number}: подтема «{sub_title}» не найдена "
+                        f"(CREATE_SUBTOPIC_IF_MISSING=False)"
+                    )
+                    skip += 1
+                    continue
 
         # --- files + audio: один или несколько файлов ---
         # В БД поле files одно. Поэтому обычные files_urls и audio_url объединяем,

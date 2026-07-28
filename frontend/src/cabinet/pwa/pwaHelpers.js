@@ -99,7 +99,10 @@ export async function subscribeWebPush({ publicKey, deviceLabel = "" } = {}) {
   if (permission !== "granted") {
     throw new Error("Разрешение на уведомления не выдано");
   }
-  const reg = await navigator.serviceWorker.ready;
+  const reg = await getPushRegistration();
+  if (!reg?.pushManager) {
+    throw new Error("Service Worker ещё не готов — обновите страницу и попробуйте снова");
+  }
   let subscription = await reg.pushManager.getSubscription();
   if (!subscription) {
     subscription = await reg.pushManager.subscribe({

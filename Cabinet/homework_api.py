@@ -1312,24 +1312,27 @@ def notify_students_homework_tasks_added(
     assignment_path = f"/cabinet/student/assignments/{homework.id}"
     sent = 0
 
+    from .webpush import notify_user_channels
+
     for student in _homework_recipient_students(homework):
         user = student.user if student and student.user_id else None
         if user is None:
             continue
-        Notification.objects.create(
-            recipient_user=user,
-            recipient_student=student,
-            channel=NotificationChannel.IN_APP,
+        notify_user_channels(
+            user,
             title=title,
             message=message,
             payload={
                 "type": "homework_updated",
+                "event_type": "homework_updated",
                 "homework_id": homework.id,
                 "url": assignment_path,
                 "added_titles": titles,
             },
-            status=NotificationStatus.SENT,
-            sent_at=dj_tz.now(),
+            recipient_student=student,
+            push_priority="important",
+            tag=f"hw-updated-{homework.id}",
+            skip_push_log=True,
         )
         sent += 1
 

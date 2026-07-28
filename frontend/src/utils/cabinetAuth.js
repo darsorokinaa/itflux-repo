@@ -184,6 +184,26 @@ export async function subscribeCabinetPush(deviceLabel = "") {
   });
 }
 
+/**
+ * If the browser already allowed notifications but the server has no active
+ * subscription for this user, re-subscribe silently (no permission prompt).
+ */
+export async function ensureCabinetPushSubscription() {
+  try {
+    const { notificationPermission } = await import("../cabinet/pwa/pwaHelpers");
+    if (notificationPermission() !== "granted") return null;
+    const [vapid, devices] = await Promise.all([
+      fetchPushVapidKey().catch(() => null),
+      fetchPushDevices().catch(() => null),
+    ]);
+    if (!vapid?.configured) return null;
+    if ((devices?.active_count || 0) > 0) return devices;
+    return await subscribeCabinetPush();
+  } catch {
+    return null;
+  }
+}
+
 export function unsubscribeCabinetPushDevice(deviceIdOrEndpoint) {
   const body = typeof deviceIdOrEndpoint === "number" || /^\d+$/.test(String(deviceIdOrEndpoint))
     ? { device_id: Number(deviceIdOrEndpoint) }

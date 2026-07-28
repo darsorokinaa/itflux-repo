@@ -1,5 +1,5 @@
 /* Service worker «Цифровой поток» — одно PWA для учителя и ученика */
-const SW_VERSION = "itflux-pwa-v1";
+const SW_VERSION = "itflux-pwa-v2";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

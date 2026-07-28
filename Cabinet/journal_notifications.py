@@ -53,21 +53,26 @@ def notify_lesson_results_published(record: StudentLessonRecord) -> bool:
     results_path = f"/cabinet/student/results/{record.id}"
     results_url = platform_path_url(results_path)
     message = "\n".join(lines)
+    title = "Итоги урока опубликованы"
+    payload = {
+        "record_id": record.id,
+        "journal_id": journal.id,
+        "url": results_path,
+        "type": "journal_results",
+        "event_type": "journal_results",
+    }
 
-    Notification.objects.create(
-        recipient_user=user,
-        recipient_student=student,
-        title="Итоги урока опубликованы",
+    from .webpush import notify_user_channels
+
+    notify_user_channels(
+        user,
+        title=title,
         message=message,
-        payload={
-            "record_id": record.id,
-            "journal_id": journal.id,
-            "url": results_path,
-            "type": "journal_results",
-        },
-        channel=NotificationChannel.IN_APP,
-        status=NotificationStatus.SENT,
-        sent_at=timezone.now(),
+        payload=payload,
+        recipient_student=student,
+        push_priority="important",
+        tag=f"journal-{record.id}",
+        skip_push_log=True,
     )
 
     if prefs.telegram_connected:
@@ -81,7 +86,7 @@ def notify_lesson_results_published(record: StudentLessonRecord) -> bool:
                 Notification.objects.create(
                     recipient_user=user,
                     recipient_student=student,
-                    title="Итоги урока опубликованы",
+                    title=title,
                     message=message,
                     payload={"record_id": record.id, "url": results_path, "type": "journal_results"},
                     channel=NotificationChannel.TELEGRAM,
