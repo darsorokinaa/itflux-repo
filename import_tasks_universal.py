@@ -9,7 +9,23 @@
   - разделители: ; , пробелы, переносы строк, %20;
   - скачивание нескольких файлов одной задачи с упаковкой в ZIP;
   - скачивание нескольких картинок и добавление их в task_template;
-  - импорт аудио из audio_url в поле files с игнорированием .gif и других картинок.
+  - импорт аудио из audio_url в поле files с игнорированием .gif и других картинок;
+  - теги из справочника TagOption (несколько штук на задачу);
+  - автора задачи (колонка author / автор или AUTHOR_DEFAULT).
+
+Теги (Generator_tagoption → M2M Generator_task_tag_options):
+  1) Для всех строк импорта — список TAGS в конфиге:
+       TAGS = ["novice", "есть-в-егэ"]
+     Можно slug, подпись («Новичок») или type:slug («difficulty:novice»).
+  2) Построчно — колонка COL_TAGS в Excel (например tags / теги):
+       novice; expert
+       Новичок, Есть в ЕГЭ
+     Разделители: ; , | перенос строки.
+  Теги из TAGS и из ячейки объединяются (дубликаты убираются).
+
+Автор (поле Generator_task.author):
+  - колонка Excel: author / автор / Author
+  - или для всех строк: AUTHOR_DEFAULT = "ФИПИ"
 """
 
 import json
@@ -75,6 +91,22 @@ COL_SUBTOPIC = None
 
 # Колонка с created_by, если есть. Если None или пусто — используется CREATED_BY_DEFAULT.
 COL_CREATED_BY = "created_by"
+
+# Колонка с автором задачи (поле author в БД).
+# Если None — ищем сами: author / автор / Author.
+# Если ячейка пустая — берётся AUTHOR_DEFAULT.
+COL_AUTHOR = None  # например "author"
+
+# Автор по умолчанию для всех задач этого импорта (если в Excel пусто).
+AUTHOR_DEFAULT = ""
+
+# Колонка с тегами задачи (опционально). Несколько тегов в ячейке через ; , | или перевод строки.
+# Примеры значения ячейки: "novice; expert"  или  "Новичок, Есть в ЕГЭ"
+COL_TAGS = None  # например "tags" / "теги"
+
+# Теги по умолчанию для ВСЕХ задач этого импорта (slug или подпись из справочника).
+# Пример: TAGS = ["novice"]  или  TAGS = ["difficulty:expert", "есть-в-егэ"]
+TAGS = []
 
 # Предмет и уровень для поиска TaskList.
 SUBJECT = "rus"
@@ -458,19 +490,137 @@ def resolve_subtopic_id(cur, task_list_id: int, title: str) -> int | None:
     return subtopic_id
 
 
-def insert_task(cur, payload: dict, now: datetime) -> None:
+def split_tags(value) -> list[str]:
+    """Достаёт список тегов из ячейки Excel или строки конфига."""
+    if value is None:
+        return []
+    try:
+        if pd.isna(value):
+            return []
+    except TypeError:
+        pass
+
+    if isinstance(value, (list, tuple, set)):
+        raw_parts = [str(v) for v in value]
+    else:
+        text = str(value).strip()
+        if not text or text.lower() in {"nan", "none", "null"}:
+            return []
+        raw_parts = re.split(r"[;,\|\n\r]+", text)
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in raw_parts:
+        tag = part.strip()
+        if not tag:
+            continue
+        key = tag.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(tag)
+    return out
+
+
+def resolve_tag_option_ids(cur, tags: list[str]) -> list[int]:
+    """
+    Резолвит теги справочника Generator_tagoption по:
+      - slug (novice)
+      - type:slug (difficulty:novice)
+      - title / подпись (Новичок), без учёта регистра
+    Не найденные теги печатает предупреждением и пропускает.
+    """
+    if not tags:
+        return []
+
+    ids: list[int] = []
+    seen_ids: set[int] = set()
+
+    for raw in tags:
+        token = (raw or "").strip()
+        if not token:
+            continue
+
+        row = None
+        if ":" in token and not token.startswith("http"):
+            type_slug, opt_slug = token.split(":", 1)
+            type_slug = type_slug.strip()
+            opt_slug = opt_slug.strip()
+            if type_slug and opt_slug:
+                cur.execute(
+                    """
+                    SELECT o.id
+                    FROM "Generator_tagoption" o
+                    JOIN "Generator_tagtype" t ON t.id = o.tag_type_id
+                    WHERE o.is_active = TRUE
+                      AND lower(t.slug) = lower(%s)
+                      AND lower(o.slug) = lower(%s)
+                    LIMIT 1
+                    """,
+                    (type_slug, opt_slug),
+                )
+                row = cur.fetchone()
+
+        if row is None:
+            cur.execute(
+                """
+                SELECT o.id
+                FROM "Generator_tagoption" o
+                WHERE o.is_active = TRUE
+                  AND (
+                    lower(o.slug) = lower(%s)
+                    OR lower(o.title) = lower(%s)
+                  )
+                ORDER BY o.id
+                LIMIT 1
+                """,
+                (token, token),
+            )
+            row = cur.fetchone()
+
+        if not row:
+            print(f"    [tag] не найден в справочнике: «{token}» — пропуск")
+            continue
+
+        tag_id = int(row[0])
+        if tag_id in seen_ids:
+            continue
+        seen_ids.add(tag_id)
+        ids.append(tag_id)
+
+    return ids
+
+
+def attach_task_tags(cur, task_id: int, tag_option_ids: list[int]) -> None:
+    """Пишет M2M Generator_task_tag_options."""
+    if not task_id or not tag_option_ids:
+        return
+    for tag_option_id in tag_option_ids:
+        cur.execute(
+            """
+            INSERT INTO "Generator_task_tag_options" (task_id, tagoption_id)
+            VALUES (%s, %s)
+            ON CONFLICT (task_id, tagoption_id) DO NOTHING
+            """,
+            (task_id, tag_option_id),
+        )
+
+
+def insert_task(cur, payload: dict, now: datetime) -> int:
     cur.execute(
         """
         INSERT INTO "Generator_task"
-            (task_template, files, answer, added_at, created_by,
+            (task_template, files, answer, author, added_at, created_by,
              max_score, is_active, vpr_advanced, vpr_basic, truth_table_enabled,
              task_id, subtopic_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
         """,
         (
             payload["task_template"],
             payload.get("local_file"),
             payload.get("answer", ""),
+            payload.get("author") or None,
             now,
             payload.get("created_by") or CREATED_BY_DEFAULT,
             MAX_SCORE,
@@ -482,6 +632,9 @@ def insert_task(cur, payload: dict, now: datetime) -> None:
             payload["subtopic_id"],
         ),
     )
+    task_id = cur.fetchone()[0]
+    attach_task_tags(cur, task_id, payload.get("tag_option_ids") or [])
+    return task_id
 
 
 def main():
@@ -508,6 +661,24 @@ def main():
         )
     if COL_SUBTOPIC:
         print(f"Подтема: колонка «{COL_SUBTOPIC}»")
+    tags_col = resolve_optional_column(
+        df,
+        COL_TAGS,
+        aliases=["tags", "tag", "теги", "тег", "tag_options"],
+    )
+    author_col = resolve_optional_column(
+        df,
+        COL_AUTHOR,
+        aliases=["author", "автор", "Author", "AUTHOR"],
+    )
+    if TAGS:
+        print(f"Теги по умолчанию (TAGS): {TAGS}")
+    if tags_col:
+        print(f"Теги из Excel: колонка «{tags_col}»")
+    if author_col:
+        print(f"Автор: колонка «{author_col}»")
+    elif AUTHOR_DEFAULT:
+        print(f"Автор по умолчанию: «{AUTHOR_DEFAULT}»")
     print()
 
     # COL_AUDIO намеренно не требуем: старые Excel без аудиоколонки должны импортироваться как раньше.
@@ -522,6 +693,12 @@ def main():
     conn = psycopg2.connect(**DB)
     cur = conn.cursor()
     now = datetime.now(timezone.utc)
+
+    default_tag_tokens = split_tags(TAGS)
+    default_tag_ids = resolve_tag_option_ids(cur, default_tag_tokens)
+    if default_tag_tokens:
+        print(f"Теги по умолчанию резолвнуты: {len(default_tag_ids)} из {len(default_tag_tokens)}")
+        print()
 
     ok = 0
     err = 0
@@ -558,6 +735,22 @@ def main():
 
         answer = _cell_str(row, COL_ANSWER)
         created_by = _cell_str(row, COL_CREATED_BY) or CREATED_BY_DEFAULT
+        author = (_cell_str(row, author_col) if author_col else "") or AUTHOR_DEFAULT
+
+        row_tag_tokens = split_tags(row.get(tags_col)) if tags_col else []
+        merged_tag_tokens: list[str] = []
+        seen_tag_keys: set[str] = set()
+        for token in [*default_tag_tokens, *row_tag_tokens]:
+            key = token.casefold()
+            if key in seen_tag_keys:
+                continue
+            seen_tag_keys.add(key)
+            merged_tag_tokens.append(token)
+        # Если только дефолтные — берём уже резолвнутые id; иначе резолвим смесь.
+        if row_tag_tokens:
+            tag_option_ids = resolve_tag_option_ids(cur, merged_tag_tokens)
+        else:
+            tag_option_ids = list(default_tag_ids)
 
         task_list_id = None
         subtopic_id = None
@@ -698,9 +891,11 @@ def main():
                     "task_template": task_template,
                     "local_file": local_file,
                     "answer": answer,
+                    "author": author,
                     "created_by": created_by,
                     "task_list_id": task_list_id,
                     "subtopic_id": subtopic_id,
+                    "tag_option_ids": tag_option_ids,
                 }
                 continue
 
@@ -723,9 +918,11 @@ def main():
                     "task_template": task_template,
                     "local_file": local_file,
                     "answer": answer,
+                    "author": author,
                     "created_by": created_by,
                     "task_list_id": task_list_id,
                     "subtopic_id": subtopic_id,
+                    "tag_option_ids": tag_option_ids,
                 },
                 now,
             )
