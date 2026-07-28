@@ -8701,6 +8701,53 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     cursor: pointer;
 }
 
+/* Физика: компактные иллюстрации, как в алгебре/геометрии */
+.exam-page[data-subject="phys"] .task .task-text figure,
+.exam-page[data-subject="phys"] .task .task-text figure.image,
+.exam-page[data-subject="phys"] .exam-task-card .exam-task-card__text figure,
+.exam-page[data-subject="phys"] .exam-task-card .exam-task-card__text figure.image,
+.all-tasks-page[data-subject="phys"] .all-tasks-item .all-tasks-item__html figure,
+.all-tasks-page[data-subject="phys"] .all-tasks-item .all-tasks-item__html figure.image {
+    width: auto !important;
+    max-width: 100% !important;
+    margin-top: 0.85rem !important;
+    margin-bottom: 0.55rem !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}
+.exam-page[data-subject="phys"] .task .task-img-zoomable,
+.exam-page[data-subject="phys"] .exam-task-card .task-img-zoomable,
+.all-tasks-page[data-subject="phys"] .all-tasks-item .all-tasks-item__html .task-img-zoomable {
+    width: auto !important;
+    max-width: 100% !important;
+    display: block !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}
+.exam-page[data-subject="phys"] .task .task-text img,
+.exam-page[data-subject="phys"] .task .correct-answer-content img,
+.exam-page[data-subject="phys"] .task .part2-answer-content img,
+.exam-page[data-subject="phys"] .exam-task-card .exam-task-card__text img,
+.exam-page[data-subject="phys"] .exam-task-card .task-text img,
+.exam-page[data-subject="phys"] .exam-task-card .correct-answer-content img,
+.exam-page[data-subject="phys"] .exam-task-card .part2-answer-content img,
+.all-tasks-page[data-subject="phys"] .all-tasks-item .all-tasks-item__html img {
+    display: block !important;
+    margin: 0.85rem auto 0.55rem !important;
+    width: min(300px, 70vw) !important;
+    max-width: 100% !important;
+    height: min(300px, 70vw) !important;
+    max-height: min(300px, 70vw) !important;
+    object-fit: contain !important;
+    object-position: center !important;
+    cursor: pointer;
+}
+.exam-page[data-subject="phys"] .task .task-text figure img,
+.exam-page[data-subject="phys"] .exam-task-card .exam-task-card__text figure img,
+.all-tasks-page[data-subject="phys"] .all-tasks-item .all-tasks-item__html figure img {
+    margin: 0 auto !important;
+}
+
 /*
  * Математика (не геом/алг): формулы-картинки не растягивать на ⅔ ширины.
  * Иначе мелкие PNG/GIF формул (тригонометрия и т.п.) становятся огромными и «мыльными».
