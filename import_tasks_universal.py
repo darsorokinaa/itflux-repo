@@ -625,15 +625,18 @@ def split_tags(value) -> list[str]:
     """Достаёт список тегов из ячейки Excel или строки конфига."""
     if value is None:
         return []
-    try:
-        if pd.isna(value):
-            return []
-    except TypeError:
-        pass
 
+    # list/tuple/set (в т.ч. TAGS=[] из конфига) — до pd.isna:
+    # pd.isna([]) даёт пустой ndarray и падает на if.
     if isinstance(value, (list, tuple, set)):
         raw_parts = [str(v) for v in value]
     else:
+        try:
+            if pd.isna(value):
+                return []
+        except (TypeError, ValueError):
+            pass
+
         text = str(value).strip()
         if not text or text.lower() in {"nan", "none", "null"}:
             return []
