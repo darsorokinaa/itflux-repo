@@ -507,11 +507,81 @@
   border: 2px solid var(--cb-border);
   flex-shrink: 0;
   transition: var(--cb-ease);
+  overflow: hidden;
+  padding: 0;
 }
 .cabinet-sidebar .cabinet-user-avatar:hover {
   background: var(--cb-primary);
   color: #FFFFFF;
   border-color: var(--cb-primary);
+}
+.cabinet-user-avatar--photo {
+  background: transparent !important;
+  color: transparent;
+}
+.cabinet-user-avatar__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cb-avatar-editor {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.cb-avatar-editor__face {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid var(--cb-border, #E2E8F0);
+  background: #2563EB;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 1.05rem;
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;
+}
+.cb-avatar-editor--lg .cb-avatar-editor__face {
+  width: 72px;
+  height: 72px;
+  font-size: 1.6rem;
+}
+.cb-avatar-editor--sm .cb-avatar-editor__face {
+  width: 44px;
+  height: 44px;
+}
+.cb-avatar-editor__face--photo {
+  background: transparent;
+}
+.cb-avatar-editor__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.cb-avatar-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cb-avatar-editor__input {
+  display: none;
+}
+.cb-avatar-editor__error {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #DC2626;
+}
+.cb-avatar-editor__remove {
+  color: #DC2626;
 }
 
 .cabinet-logout-btn {
@@ -841,6 +911,8 @@
   border: none;
   flex-shrink: 0;
   transition: var(--cb-ease);
+  overflow: hidden;
+  padding: 0;
 }
 .cabinet-header .cabinet-user-avatar:hover { background: var(--cb-primary-hover); }
 
@@ -13151,6 +13223,17 @@ button.cb-sch-event {
   justify-content: center;
   font-weight: 800;
   flex-shrink: 0;
+  overflow: hidden;
+}
+.cb-more-profile .cb-avatar-editor {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+}
+.cb-more-profile .cb-avatar-editor__actions {
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .cb-more-profile__body {

@@ -229,6 +229,7 @@ class NotificationChannel(models.TextChoices):
     EMAIL = "email", "Email"
     VK = "vk", "ВКонтакте"
     TELEGRAM = "telegram", "Telegram"
+    PUSH = "push", "Web Push"
     SMS = "sms", "SMS"
 
 

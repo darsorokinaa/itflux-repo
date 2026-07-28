@@ -37,18 +37,33 @@ def resolve_notification_url(notification, request=None) -> str:
     student = _is_student_user(user)
 
     # TEMP: раздел оплат временно недоступен — не ведём туда из уведомлений
-    if ntype in ("billing_payment", "billing_digest", "billing_reminder"):
+    if ntype in ("billing_payment", "billing_digest", "billing_reminder", "billing_package_low", "billing_unpaid_lesson"):
+        student_id = payload.get("student_id")
+        if student_id and not student:
+            return f"/cabinet/payments?student={student_id}"
         return "/cabinet/schedule" if not student else "/cabinet/student/lessons"
     if ntype == "journal_results":
         record_id = payload.get("record_id")
         if record_id:
             return f"/cabinet/student/results/{record_id}"
         return "/cabinet/student/results"
-    if ntype == "homework_submitted":
+    if ntype == "overdue_homework_digest":
+        return "/cabinet/review?filter=overdue"
+    if ntype in ("homework_submitted", "homework_resubmitted", "homework_review_digest", "auto_check_attention", "student_message"):
         review_id = payload.get("review_id")
         if review_id:
             return f"/cabinet/review/{review_id}"
         return "/cabinet/review"
+    if ntype == "new_student":
+        sid = payload.get("student_id")
+        return f"/cabinet/students?student={sid}" if sid else "/cabinet/students"
+    if ntype in ("student_entered_room", "student_absent"):
+        meeting_uuid = payload.get("meeting_uuid")
+        if meeting_uuid:
+            return f"/cabinet/meetings/{meeting_uuid}"
+        return "/cabinet/schedule"
+    if ntype == "daily_schedule":
+        return "/cabinet/schedule"
     if ntype in ("schedule_event", "lesson", "event") or payload.get("event_id"):
         event_id = payload.get("event_id")
         if event_id:

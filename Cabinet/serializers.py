@@ -1533,6 +1533,7 @@ class ReviewItemSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     priority_label = serializers.CharField(source="get_priority_display", read_only=True)
     student_name = serializers.CharField(source="student.full_name", read_only=True)
+    group_title = serializers.CharField(source="group.title", read_only=True, allow_null=True)
     homework_submission = serializers.SerializerMethodField()
     homework_review = serializers.SerializerMethodField()
 
@@ -1543,6 +1544,7 @@ class ReviewItemSerializer(serializers.ModelSerializer):
             "student",
             "student_name",
             "group",
+            "group_title",
             "source_type",
             "source_type_label",
             "source_id",

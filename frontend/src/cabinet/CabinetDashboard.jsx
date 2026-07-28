@@ -445,9 +445,10 @@ export default function CabinetDashboard() {
                         <div className="td-lesson-time">{lesson.time}</div>
                         <div>
                           <h4>
-                            {lesson.audience
+                            {lesson.audience && lesson.title
+                              && lesson.audience.trim().toLowerCase() !== lesson.title.trim().toLowerCase()
                               ? `${lesson.audience} · ${lesson.title}`
-                              : lesson.title}
+                              : (lesson.audience || lesson.title)}
                           </h4>
                           <p>
                             {lesson.topic
@@ -514,6 +515,7 @@ export default function CabinetDashboard() {
                 <h3>Требует внимания</h3>
                 <p>Только действия, которые действительно нужно выполнить сегодня.</p>
               </div>
+              <Link to="/cabinet/settings/notifications" className="td-link">Все уведомления →</Link>
             </div>
             <div className="td-attention-grid">
               {attentionItems.map((item) => (

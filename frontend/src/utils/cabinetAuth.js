@@ -119,6 +119,61 @@ export function logoutCabinet() {
   return cabinetFetch("/logout/", { method: "POST" });
 }
 
+/** Logout and detach Web Push from this device so the next user does not get previous pushes. */
+export async function logoutCabinetAndDetachPush() {
+  try {
+    const { unsubscribeCurrentPush } = await import("../cabinet/pwa/pwaHelpers");
+    const endpoint = await unsubscribeCurrentPush();
+    if (endpoint) {
+      await cabinetFetch("/push/unsubscribe/", {
+        method: "POST",
+        body: JSON.stringify({ endpoint }),
+      }).catch(() => null);
+    }
+  } catch {
+    /* best-effort */
+  }
+  return logoutCabinet();
+}
+
+export function fetchPushVapidKey() {
+  return cabinetFetch("/push/vapid-public-key/", { method: "GET" });
+}
+
+export function fetchPushDevices() {
+  return cabinetFetch("/push/devices/", { method: "GET" });
+}
+
+export function sendPushTestNotification() {
+  return cabinetFetch("/push/test/", { method: "POST", body: "{}" });
+}
+
+export async function subscribeCabinetPush(deviceLabel = "") {
+  const vapid = await fetchPushVapidKey();
+  if (!vapid?.configured || !vapid.public_key) {
+    throw new Error("Web Push не настроен на сервере");
+  }
+  const { subscribeWebPush } = await import("../cabinet/pwa/pwaHelpers");
+  const payload = await subscribeWebPush({
+    publicKey: vapid.public_key,
+    deviceLabel,
+  });
+  return cabinetFetch("/push/subscribe/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function unsubscribeCabinetPushDevice(deviceIdOrEndpoint) {
+  const body = typeof deviceIdOrEndpoint === "number" || /^\d+$/.test(String(deviceIdOrEndpoint))
+    ? { device_id: Number(deviceIdOrEndpoint) }
+    : { endpoint: String(deviceIdOrEndpoint || "") };
+  return cabinetFetch("/push/unsubscribe/", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export function startTelemostLesson(payload = {}) {
   return cabinetFetch("/telemost/start/", {
     method: "POST",
@@ -463,6 +518,17 @@ export function archiveStudent(id) {
 
 export function restoreStudent(id) {
   return cabinetFetch(`/students/${id}/restore/`, { method: "PATCH" });
+}
+
+export function fetchStudentNotifySettings(studentId) {
+  return cabinetFetch(`/students/${studentId}/notify-settings/`);
+}
+
+export function updateStudentNotifySettings(studentId, payload) {
+  return cabinetFetch(`/students/${studentId}/notify-settings/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload || {}),
+  });
 }
 
 /** Безвозвратное удаление ученика. */
@@ -1127,6 +1193,16 @@ export function updateStudentProfile(payload) {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+}
+
+export function uploadProfileAvatar(file) {
+  const formData = new FormData();
+  formData.append("avatar", file);
+  return cabinetFetchMultipart("/profile/avatar/", formData);
+}
+
+export function deleteProfileAvatar() {
+  return cabinetFetch("/profile/avatar/", { method: "DELETE" });
 }
 
 /* ── Учёт оплат репетитора ─────────────────────────────────────────── */

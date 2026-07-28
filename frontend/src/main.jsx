@@ -9,8 +9,11 @@ import './styles/teachers.css'
 import './styles/cabinet.css'
 import App from './App.jsx'
 import { ensureSiteFavicon } from './utils/ensureSiteFavicon'
+import { bindPushNavigation, registerServiceWorker } from './cabinet/pwa/pwaHelpers'
 
 ensureSiteFavicon()
+registerServiceWorker()
+bindPushNavigation()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

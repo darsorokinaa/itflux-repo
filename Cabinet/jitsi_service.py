@@ -66,17 +66,9 @@ def get_display_name(user: User) -> str:
 
 
 def get_avatar_url(user: User, request=None) -> str:
-    profile = getattr(user, "profile", None)
-    avatar = getattr(profile, "avatar", None) if profile is not None else None
-    if not avatar:
-        return ""
-    try:
-        url = avatar.url
-    except ValueError:
-        return ""
-    if request is not None:
-        return request.build_absolute_uri(url)
-    return url
+    from .avatar_api import build_avatar_url
+
+    return build_avatar_url(user, request, absolute=True)
 
 
 def build_user_info(user: User, request=None) -> dict[str, str]:

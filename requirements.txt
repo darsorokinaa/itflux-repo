@@ -15,4 +15,6 @@ psycopg2-binary==2.9.11
 weasyprint==68.1
 whitenoise==6.11.0
 PyJWT==2.12.1
+pywebpush>=2.0.1
+Pillow>=10.0.0
 channels_redis

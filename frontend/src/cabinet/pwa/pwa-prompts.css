@@ -1,0 +1,66 @@
+.pwa-prompt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 16px;
+  padding: 14px 16px;
+  margin: 0 0 16px;
+  border-radius: 16px;
+  border: 1px solid #E2E8F0;
+  background: #FFFFFF;
+}
+
+.pwa-prompt--install {
+  border-color: #BFDBFE;
+  background: #F8FBFF;
+}
+
+.pwa-prompt--push {
+  border-color: #C7D2FE;
+  background: #F8FAFF;
+}
+
+.pwa-prompt__title {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #0F172A;
+}
+
+.pwa-prompt__text,
+.pwa-prompt__hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #64748B;
+  line-height: 1.45;
+  max-width: 42rem;
+}
+
+.pwa-prompt__hint {
+  margin-top: 6px;
+}
+
+.pwa-prompt__error {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  color: #DC2626;
+}
+
+.pwa-prompt__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .pwa-prompt__actions {
+    width: 100%;
+  }
+
+  .pwa-prompt__actions .cb-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}

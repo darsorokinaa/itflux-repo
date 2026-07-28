@@ -1617,13 +1617,14 @@ export default function VideoMeetingPage() {
     : ((materialSession?.material || presented?.openUrl) ? 1 : 0);
   const whenLabel = formatWhen(event?.startsAt, event?.endsAt);
   const studentLabel = String(event?.audience || "").trim();
-  const subjectLabel = String(
-    event?.topic
-    || event?.eventTitle
-    || "",
-  ).trim();
+  const subjectRaw = String(event?.topic || event?.eventTitle || "").trim();
+  // Не дублируем имя ученика: topic/title часто совпадают с audience после auto plan-item.
+  const subjectLabel = subjectRaw
+    && subjectRaw.toLowerCase() !== studentLabel.toLowerCase()
+    ? subjectRaw
+    : "";
   const headerTitle = [studentLabel, subjectLabel].filter(Boolean).join(" · ")
-    || subjectLabel
+    || subjectRaw
     || studentLabel
     || "Урок";
   const headerSub = whenLabel || "";

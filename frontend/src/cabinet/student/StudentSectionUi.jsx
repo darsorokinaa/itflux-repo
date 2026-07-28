@@ -9,6 +9,10 @@ export const ASSIGNMENT_STATUS_COLORS = {
   reviewing: "#F59E0B",
   needs_fix: "#E53935",
   overdue: "#E53935",
+  live: "#059669",
+  ready: "#2563EB",
+  planned: "#64748B",
+  done: "#10B981",
 };
 
 const COVER_GRADIENTS = {

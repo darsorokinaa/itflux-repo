@@ -17,6 +17,7 @@ from .invitations import invite_accept_api_payload, try_accept_invite_token
 from .plan_catalog import can_publish_catalog_lesson_plan
 from .task_tags import can_edit_task_tags
 from .rate_limit import client_ip, rate_limit_check, rate_limit_json_response
+from .avatar_api import build_avatar_url
 from .schedule_events import (
     list_schedule_events,
     parse_local_event_id,
@@ -49,7 +50,7 @@ def _profile_payload(user):
         "surname": profile.surname,
         "role": profile.role,
         "role_label": profile.get_role_display(),
-        "avatar": profile.avatar.url if profile.avatar else None,
+        "avatar": build_avatar_url(user) or None,
         "account_active": profile.account_active,
         "email_confirmed": profile.email_confirmed,
         "can_publish_catalog_plans": can_publish_catalog_lesson_plan(user),

@@ -315,6 +315,13 @@ def accept_student_invitation(token: str, user: User):
         # Приветствие в Telegram не должно ломать принятие приглашения.
         pass
 
+    try:
+        from .teacher_notifications import notify_teacher_new_student
+
+        notify_teacher_new_student(teacher=invitation.teacher, student=student)
+    except Exception:
+        pass
+
     return student, invitation
 
 

@@ -1,14 +1,17 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 import { displayName } from "../../pages/CabinetAuthPage";
 import {
   fetchCabinetSession,
   isTeacherRole,
-  logoutCabinet,
+  logoutCabinetAndDetachPush,
 } from "../../utils/cabinetAuth";
 import CabinetIcon from "../CabinetIcons";
 import CabinetNotificationsBell from "../components/CabinetNotificationsBell";
 import ConfirmActionModal from "../components/ConfirmActionModal";
+import { UserAvatarMark } from "../components/ProfileAvatarEditor";
+import PwaEnableNotificationsPrompt from "../pwa/PwaEnableNotificationsPrompt";
+import PwaInstallPrompt from "../pwa/PwaInstallPrompt";
 import {
   STUDENT_MOBILE_NAV,
   STUDENT_NAV,
@@ -57,10 +60,19 @@ export default function StudentCabinetLayout() {
 
   const handleLogout = async () => {
     setLoggingOut(true);
-    try { await logoutCabinet(); window.location.href = "/"; }
+    try { await logoutCabinetAndDetachPush(); window.location.href = "/"; }
     catch { /* ignore */ }
     finally { setLoggingOut(false); setLogoutConfirm(false); }
   };
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const d = await fetchCabinetSession();
+      setUser(d?.authenticated ? d.user : null);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   if (loading) {
     return <div className="st-loading-screen">Загрузка…</div>;
@@ -86,7 +98,7 @@ export default function StudentCabinetLayout() {
 
   if (isPlayPage) return <Outlet />;
 
-  const outletContext = { user, handleLogout, loggingOut };
+  const outletContext = { user, handleLogout, loggingOut, refreshUser };
 
   return (
     <div className="cabinet-layout st-layout">
@@ -104,11 +116,11 @@ export default function StudentCabinetLayout() {
         <div className="cabinet-sidebar-bottom">
           <Link
             to="/cabinet/student/profile"
-            className="cabinet-user-avatar"
+            className={`cabinet-user-avatar${user?.avatar ? " cabinet-user-avatar--photo" : ""}`}
             title={displayName(user)}
             aria-label="Профиль"
           >
-            {displayName(user).charAt(0).toUpperCase()}
+            <UserAvatarMark user={user} fallbackName={displayName(user)} />
           </Link>
           <button
             type="button"
@@ -131,16 +143,22 @@ export default function StudentCabinetLayout() {
             <CabinetNotificationsBell studentMode />
             <Link
               to="/cabinet/student/profile"
-              className="cabinet-user-avatar cabinet-header-avatar"
+              className={`cabinet-user-avatar cabinet-header-avatar${user?.avatar ? " cabinet-user-avatar--photo" : ""}`}
               title={displayName(user)}
               aria-label="Профиль"
             >
-              {displayName(user).charAt(0).toUpperCase()}
+              <UserAvatarMark user={user} fallbackName={displayName(user)} />
             </Link>
           </div>
         </header>
 
         <div className={contentClass}>
+          {isDashboard ? (
+            <>
+              <PwaInstallPrompt role="student" />
+              <PwaEnableNotificationsPrompt role="student" />
+            </>
+          ) : null}
           <Outlet context={outletContext} />
         </div>
       </main>

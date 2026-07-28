@@ -208,7 +208,7 @@ def _plan_item_has_homework(plan_item):
     return False
 
 
-def _sync_lesson_content(lesson, plan_item):
+def _sync_lesson_content(lesson, plan_item, *, keep_status=False):
     lesson.title = plan_item.title or lesson.title
     lesson.topic = plan_item.topic or lesson.topic
     lesson.subtopic = plan_item.subtopic or lesson.subtopic
@@ -216,7 +216,8 @@ def _sync_lesson_content(lesson, plan_item):
     lesson.theory_content = plan_item.goal or plan_item.planned_results or lesson.theory_content
     lesson.practice_content = plan_item.description or lesson.practice_content
     lesson.homework_description = plan_item.homework_description or lesson.homework_description
-    lesson.status = LessonStatus.PUBLISHED
+    if not keep_status:
+        lesson.status = LessonStatus.PUBLISHED
     lesson.save(
         update_fields=[
             "title",
@@ -236,6 +237,16 @@ def _sync_lesson_content(lesson, plan_item):
     return lesson
 
 
+def _is_auto_materials_plan_item(plan_item):
+    """Пункт из автоплана «Материалы занятия» — не должен попадать в библиотеку уроков."""
+    from .plan_schedule import AUTO_MATERIALS_PLAN_DESCRIPTION
+
+    plan = getattr(plan_item, "plan", None)
+    if not plan:
+        return False
+    return (plan.description or "").strip() == AUTO_MATERIALS_PLAN_DESCRIPTION
+
+
 def ensure_lesson_from_plan_item(plan_item, teacher):
     plan_item = (
         LessonPlanItem.objects.select_related("linked_lesson", "plan")
@@ -248,8 +259,17 @@ def ensure_lesson_from_plan_item(plan_item, teacher):
         .get(pk=plan_item.pk)
     )
 
+    is_auto = _is_auto_materials_plan_item(plan_item)
+
     if plan_item.linked_lesson_id:
         lesson = plan_item.linked_lesson
+        if is_auto:
+            # Старые автоматериалы ошибочно линковались в библиотеку — убираем.
+            if lesson.status != LessonStatus.ARCHIVED:
+                lesson.status = LessonStatus.ARCHIVED
+                lesson.save(update_fields=["status", "updated_at"])
+            plan_item.linked_lesson = None
+            plan_item.save(update_fields=["linked_lesson", "updated_at"])
     else:
         exam_type = getattr(plan_item.plan, "exam_type", "") or "none"
         direction = getattr(plan_item.plan, "direction", "") or "other"
@@ -264,13 +284,17 @@ def ensure_lesson_from_plan_item(plan_item, teacher):
             homework_description=plan_item.homework_description or "",
             direction=direction,
             exam_type=exam_type,
-            status=LessonStatus.PUBLISHED,
+            # Автоматериалы занятия: служебный урок, не в библиотеке учителя.
+            status=LessonStatus.ARCHIVED if is_auto else LessonStatus.PUBLISHED,
             lesson_type=LessonType.INDIVIDUAL,
         )
-        plan_item.linked_lesson = lesson
-        plan_item.save(update_fields=["linked_lesson", "updated_at"])
+        if not is_auto:
+            # Для автоплана не ставим linked_lesson — иначе в материалах комнаты
+            # появляется лишняя строка «Урок из библиотеки».
+            plan_item.linked_lesson = lesson
+            plan_item.save(update_fields=["linked_lesson", "updated_at"])
 
-    return _sync_lesson_content(lesson, plan_item)
+    return _sync_lesson_content(lesson, plan_item, keep_status=is_auto)
 
 
 def _material_homework_task_type(material):

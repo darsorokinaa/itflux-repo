@@ -340,6 +340,55 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         BillingAccount.objects.filter(student=student, teacher=self.get_teacher()).update(is_active=True)
         return Response(StudentDetailSerializer(student).data)
 
+    @action(detail=True, methods=["get", "patch"], url_path="notify-settings")
+    def notify_settings(self, request, pk=None):
+        """Per-student notification overrides for the teacher."""
+        from .models import StudentNotifyOverride
+
+        student = self.get_object()
+        override, _ = StudentNotifyOverride.objects.get_or_create(student=student)
+
+        if request.method == "GET":
+            return Response({
+                "mode": override.mode,
+                "notify_homework": override.notify_homework,
+                "notify_messages": override.notify_messages,
+                "notify_overdue": override.notify_overdue,
+                "notify_billing": override.notify_billing,
+                "notify_attendance": override.notify_attendance,
+            })
+
+        data = request.data or {}
+        if "mode" in data:
+            mode = str(data.get("mode") or "").strip()
+            if mode not in StudentNotifyOverride.Mode.values:
+                return Response({"error": "Некорректный режим"}, status=status.HTTP_400_BAD_REQUEST)
+            override.mode = mode
+        for field in (
+            "notify_homework",
+            "notify_messages",
+            "notify_overdue",
+            "notify_billing",
+            "notify_attendance",
+        ):
+            if field not in data:
+                continue
+            raw = data.get(field)
+            if raw is None or raw == "" or raw == "inherit":
+                setattr(override, field, None)
+            else:
+                setattr(override, field, bool(raw))
+        override.save()
+        return Response({
+            "ok": True,
+            "mode": override.mode,
+            "notify_homework": override.notify_homework,
+            "notify_messages": override.notify_messages,
+            "notify_overdue": override.notify_overdue,
+            "notify_billing": override.notify_billing,
+            "notify_attendance": override.notify_attendance,
+        })
+
     @action(detail=True, methods=["get"], url_path="check-variant-tasks")
     def check_variant_tasks(self, request, pk=None):
         """GET /api/cabinet/students/{id}/check-variant-tasks/?variant_id=X
@@ -760,9 +809,18 @@ class StudentGroupViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
 
 class LessonViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
     def get_queryset(self):
+        from .choices import LessonStatus
+
         qs = Lesson.objects.filter(teacher=self.get_teacher())
         params = self.request.query_params
-        for field in ("direction", "exam_type", "status", "lesson_type"):
+        status_value = params.get("status")
+        if status_value:
+            qs = qs.filter(status=status_value)
+        else:
+            # Служебные уроки автоматериалов занятия создаются как archived —
+            # не показываем их в списке/библиотеке по умолчанию.
+            qs = qs.exclude(status=LessonStatus.ARCHIVED)
+        for field in ("direction", "exam_type", "lesson_type"):
             value = params.get(field)
             if value:
                 qs = qs.filter(**{field: value})

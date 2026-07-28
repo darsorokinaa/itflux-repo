@@ -263,7 +263,17 @@ def schedule_event_to_json(event):
 
     topic = event.topic or ""
     if plan_item_json:
-        topic = plan_item_json.get("topic") or plan_item_json.get("title") or topic
+        plan_topic = (plan_item_json.get("topic") or "").strip()
+        plan_title = (plan_item_json.get("title") or "").strip()
+        # Не подставляем title пункта плана (часто имя ученика) как «тему» —
+        # иначе в шапке комнаты получается «Имя · Имя».
+        if plan_topic:
+            topic = plan_topic
+        elif plan_title and plan_title.lower() not in {
+            (event.title or "").strip().lower(),
+            (audience or "").strip().lower(),
+        }:
+            topic = plan_title
 
     has_plan = plan_item_json is not None or get_active_enrollment(event) is not None
     assigned_homework = _assigned_homework_to_json(

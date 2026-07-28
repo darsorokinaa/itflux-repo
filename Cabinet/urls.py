@@ -1,6 +1,6 @@
 from django.urls import path, include
 
-from . import views
+from . import avatar_api, views
 
 urlpatterns = [
     path("me/", views.api_me, name="cabinet_api_me"),
@@ -8,6 +8,12 @@ urlpatterns = [
     path("register/", views.api_register, name="cabinet_api_register"),
     path("referral/<str:code>/preview/", views.api_referral_preview, name="cabinet_api_referral_preview"),
     path("logout/", views.api_logout, name="cabinet_api_logout"),
+    path("profile/avatar/", avatar_api.ProfileAvatarView.as_view(), name="cabinet_profile_avatar"),
+    path(
+        "profile/avatar/<int:user_id>/",
+        avatar_api.api_profile_avatar_user,
+        name="cabinet_profile_avatar_user",
+    ),
     path("telemost/status/", views.api_telemost_status, name="cabinet_api_telemost_status"),
     path("telemost/start/", views.api_telemost_start, name="cabinet_api_telemost_start"),
     path("calendar/status/", views.api_calendar_status, name="cabinet_api_calendar_status"),

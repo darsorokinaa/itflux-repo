@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 import { displayName } from "../pages/CabinetAuthPage";
-import { fetchCabinetSession, fetchNavCounts, logoutCabinet } from "../utils/cabinetAuth";
+import { fetchCabinetSession, fetchNavCounts, logoutCabinetAndDetachPush } from "../utils/cabinetAuth";
 import CabinetIcon from "./CabinetIcons";
 import {
   CABINET_MOBILE_NAV,
@@ -15,7 +15,10 @@ import CabinetGlobalSearch from "./components/CabinetGlobalSearch";
 import CabinetNotificationsBell from "./components/CabinetNotificationsBell";
 import CabinetGuideModal from "./components/CabinetGuideModal";
 import ConfirmActionModal from "./components/ConfirmActionModal";
+import { UserAvatarMark } from "./components/ProfileAvatarEditor";
 import { useSubscription } from "./hooks/useSubscription";
+import PwaEnableNotificationsPrompt from "./pwa/PwaEnableNotificationsPrompt";
+import PwaInstallPrompt from "./pwa/PwaInstallPrompt";
 import "../styles/cabinet-dashboard.css";
 import "../styles/cabinet-mobile-system.css";
 import "./styles/teacher-cabinet.css";
@@ -175,6 +178,14 @@ export default function CabinetLayout() {
   }, [loading, user]);
 
   const openGuide = () => setGuideOpen(true);
+  const refreshUser = useCallback(async () => {
+    try {
+      const d = await fetchCabinetSession();
+      setUser(d?.authenticated ? d.user : null);
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const closeGuide = () => {
     try {
       window.localStorage.setItem(GUIDE_SEEN_KEY, "1");
@@ -194,7 +205,7 @@ export default function CabinetLayout() {
 
   const handleLogout = async () => {
     setLoggingOut(true);
-    try { await logoutCabinet(); window.location.href = "/"; }
+    try { await logoutCabinetAndDetachPush(); window.location.href = "/"; }
     catch { /* ignore */ }
     finally { setLoggingOut(false); setLogoutConfirm(false); }
   };
@@ -233,6 +244,7 @@ export default function CabinetLayout() {
     handleLogout,
     loggingOut,
     openGuide,
+    refreshUser,
     currentPlan: subscription.currentPlan,
     subscriptionLoading: subscription.loading,
     navCounts,
@@ -288,11 +300,11 @@ export default function CabinetLayout() {
           </Link>
           <Link
             to="/cabinet/more"
-            className="cabinet-user-avatar"
+            className={`cabinet-user-avatar${user?.avatar ? " cabinet-user-avatar--photo" : ""}`}
             title={displayName(user)}
             aria-label="Профиль"
           >
-            {displayName(user).charAt(0).toUpperCase()}
+            <UserAvatarMark user={user} fallbackName={displayName(user)} />
           </Link>
           <button
             type="button"
@@ -334,11 +346,11 @@ export default function CabinetLayout() {
             </button>
             <Link
               to="/cabinet/more"
-              className="cabinet-user-avatar cabinet-header-avatar"
+              className={`cabinet-user-avatar cabinet-header-avatar${user?.avatar ? " cabinet-user-avatar--photo" : ""}`}
               title={displayName(user)}
               aria-label="Профиль и настройки"
             >
-              {displayName(user).charAt(0).toUpperCase()}
+              <UserAvatarMark user={user} fallbackName={displayName(user)} />
             </Link>
           </div>
           {searchOpen ? (
@@ -352,6 +364,12 @@ export default function CabinetLayout() {
         </header>
 
         <div className={contentClass}>
+          {isDashboard ? (
+            <>
+              <PwaInstallPrompt role="teacher" />
+              <PwaEnableNotificationsPrompt role="teacher" />
+            </>
+          ) : null}
           <Outlet context={outletContext} />
         </div>
       </main>

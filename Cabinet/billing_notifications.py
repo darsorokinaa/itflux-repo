@@ -32,31 +32,48 @@ def _send_telegram(user: User, text: str) -> bool:
 
 
 def notify_payment_received(teacher: User, payment: StudentPayment) -> None:
-    from Generator.telegram_utils import escape_telegram_html
+    from .teacher_notifications import _override_allows
+    from .webpush import notify_user_channels
 
     prefs = _prefs(teacher)
     if not prefs.notify_payment_received:
         return
-    text = (
-        f"Ученик: {escape_telegram_html(payment.student.full_name)}\n"
-        f"Сумма: {payment.amount} {payment.currency}"
-    )
-    Notification.objects.create(
-        recipient_user=teacher,
-        recipient_teacher=teacher,
-        channel=NotificationChannel.IN_APP,
-        title="Поступила оплата",
-        message=text,
+    if not _override_allows(payment.student, "billing", True):
+        return
+
+    privacy = prefs.push_privacy_mode
+    student_name = payment.student.full_name
+    if privacy:
+        title = "Поступила оплата"
+        message = f"Ученик: {student_name}"
+        tg_text = f"Поступила оплата\n\nУченик: {student_name}\n\nОткрыть: /cabinet/payments"
+    else:
+        from Generator.telegram_utils import escape_telegram_html
+        title = "Поступила оплата"
+        message = f"Ученик: {student_name}\nСумма: {payment.amount} {payment.currency}"
+        tg_text = (
+            f"Поступила оплата\n\n"
+            f"Ученик: {escape_telegram_html(student_name)}\n"
+            f"Сумма: {payment.amount} {payment.currency}\n\n"
+            f"Открыть: /cabinet/payments"
+        )
+
+    notify_user_channels(
+        teacher,
+        title=title,
+        message=message,
         payload={
             "type": "billing_payment",
+            "event_type": "billing_payment",
             "payment_id": str(payment.id),
-            "url": "/cabinet/payments",
+            "student_id": payment.student_id,
+            "url": f"/cabinet/payments?student={payment.student_id}",
         },
-        status=NotificationStatus.SENT,
+        push_priority="important",
+        tag=f"payment-{payment.id}",
     )
     if prefs.telegram_enabled:
-        _send_telegram(teacher, f"Поступила оплата\n\n{text}\n\nОткрыть: /cabinet/payments")
-
+        _send_telegram(teacher, tg_text)
 
 def send_billing_message_to_student(account: BillingAccount, text: str) -> bool:
     """Отправка ученику только если явно разрешено на аккаунте и в prefs учителя."""

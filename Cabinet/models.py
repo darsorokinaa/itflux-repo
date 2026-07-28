@@ -52,7 +52,26 @@ class Profile(models.Model):
     name = models.CharField("Имя", max_length=100, blank=True)
     surname = models.CharField("Фамилия", max_length=100, blank=True)
     display_name = models.CharField("Отображаемое имя", max_length=200, blank=True)
-    avatar = models.ImageField("Аватар", upload_to="cabinet/avatars/", blank=True, null=True)
+    avatar = models.ImageField(
+        "Аватар (legacy)",
+        upload_to="cabinet/avatars/",
+        blank=True,
+        null=True,
+        help_text="Устаревшее файловое поле; новые аватары хранятся зашифрованно в avatar_encrypted",
+    )
+    avatar_encrypted = models.BinaryField(
+        "Аватар (зашифрованный)",
+        blank=True,
+        null=True,
+        help_text="JPEG в Fernet-шифре; ключ из SECRET_KEY",
+    )
+    avatar_content_type = models.CharField(
+        "MIME аватара",
+        max_length=64,
+        blank=True,
+        default="",
+    )
+    avatar_updated_at = models.DateTimeField("Аватар обновлён", null=True, blank=True)
     bio = models.TextField("О себе", blank=True)
     timezone = models.CharField("Часовой пояс", max_length=64, default="Europe/Moscow")
     role = models.CharField(
@@ -88,6 +107,45 @@ class Profile(models.Model):
             return self.display_name
         full = f"{self.name} {self.surname}".strip()
         return full or self.user.get_full_name() or self.user.username
+
+    def has_avatar(self) -> bool:
+        if self.avatar_encrypted:
+            return True
+        return bool(self.avatar)
+
+    def set_encrypted_avatar(self, raw_bytes: bytes, content_type: str = "") -> None:
+        from .avatar_crypto import encrypt_avatar_bytes, normalize_avatar_image
+
+        normalized, mime = normalize_avatar_image(raw_bytes, content_type)
+        self.avatar_encrypted = encrypt_avatar_bytes(normalized)
+        self.avatar_content_type = mime
+        self.avatar_updated_at = timezone.now()
+        if self.avatar:
+            self.avatar.delete(save=False)
+            self.avatar = None
+
+    def clear_avatar(self) -> None:
+        self.avatar_encrypted = None
+        self.avatar_content_type = ""
+        self.avatar_updated_at = None
+        if self.avatar:
+            self.avatar.delete(save=False)
+            self.avatar = None
+
+    def get_decrypted_avatar(self) -> tuple[bytes, str] | None:
+        from .avatar_crypto import decrypt_avatar_bytes
+
+        if self.avatar_encrypted:
+            raw = decrypt_avatar_bytes(bytes(self.avatar_encrypted))
+            mime = (self.avatar_content_type or "image/jpeg").strip() or "image/jpeg"
+            return raw, mime
+        if self.avatar:
+            try:
+                with self.avatar.open("rb") as fh:
+                    return fh.read(), "image/jpeg"
+            except (OSError, ValueError, FileNotFoundError):
+                return None
+        return None
 
     @property
     def yandex_calendar_connected(self):
@@ -2023,6 +2081,58 @@ class NotificationPreference(models.Model):
     notify_journal_comment = models.BooleanField("Комментарий учителя (в итогах)", default=True)
     notify_journal_recommendation = models.BooleanField("Новая рекомендация", default=True)
     notify_journal_daily_digest = models.BooleanField("Учителю: ежедневная сводка журнала", default=False)
+
+    # Web Push (общее для учителя и ученика)
+    push_enabled = models.BooleanField("Web Push", default=True)
+    push_privacy_mode = models.BooleanField(
+        "Приватный режим push",
+        default=False,
+        help_text="Не показывать суммы и чувствительные детали на экране блокировки",
+    )
+    # Напоминания об уроках: список минут до начала, напр. [1440, 60, 10]
+    lesson_reminder_minutes = models.JSONField(
+        "Интервалы напоминаний (мин)",
+        default=list,
+        blank=True,
+        help_text="Пустой список — стандарт 24ч / 1ч / 10мин",
+    )
+    notify_daily_schedule = models.BooleanField("Расписание на день", default=True)
+    daily_schedule_hour = models.PositiveSmallIntegerField(
+        "Час утреннего расписания",
+        null=True,
+        blank=True,
+        default=8,
+        help_text="None / пусто — не отправлять; 0–23 — час локального времени",
+    )
+    notify_daily_schedule_empty = models.BooleanField(
+        "Сообщать, что сегодня уроков нет",
+        default=False,
+    )
+    notify_new_student = models.BooleanField("Новые ученики", default=True)
+    notify_homework_resubmitted = models.BooleanField("Исправленные работы", default=True)
+    notify_overdue_homework = models.BooleanField("Просроченные задания", default=True)
+    notify_student_message = models.BooleanField("Сообщения учеников", default=True)
+    notify_student_entered_room = models.BooleanField("Ученик вошёл в комнату", default=False)
+    notify_student_absent = models.BooleanField("Ученик не подключился", default=False)
+    notify_auto_check_attention = models.BooleanField("Автопроверка требует внимания", default=True)
+    notify_system = models.BooleanField("Системные события", default=True)
+    homework_review_push_mode = models.CharField(
+        "Режим push по работам на проверку",
+        max_length=16,
+        default="each",
+        help_text="each | digest_15 | digest_60 | in_app_only",
+    )
+    overdue_homework_mode = models.CharField(
+        "Режим просроченных ДЗ",
+        max_length=16,
+        default="daily",
+        help_text="immediate | daily | in_app_only | off",
+    )
+    dnd_enabled = models.BooleanField("Не беспокоить", default=False)
+    dnd_start = models.TimeField("Не беспокоить с", null=True, blank=True)
+    dnd_end = models.TimeField("Не беспокоить до", null=True, blank=True)
+    dnd_allow_urgent = models.BooleanField("Срочные во время тишины", default=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -2043,6 +2153,90 @@ class NotificationPreference(models.Model):
     @property
     def telegram_connected(self) -> bool:
         return bool(self.telegram_enabled and self.telegram_chat_id)
+
+    def effective_lesson_reminder_minutes(self) -> list[int]:
+        raw = self.lesson_reminder_minutes
+        if isinstance(raw, list) and raw:
+            out = []
+            for item in raw:
+                try:
+                    minutes = int(item)
+                except (TypeError, ValueError):
+                    continue
+                if 0 < minutes <= 24 * 60 and minutes not in out:
+                    out.append(minutes)
+            if out:
+                return sorted(out, reverse=True)
+        # Стандарт: 24ч, 1ч, 10мин
+        return [1440, 60, 10]
+
+
+class PushSubscription(models.Model):
+    """Web Push subscription bound to a user and device/browser."""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="push_subscriptions",
+        verbose_name="Пользователь",
+    )
+    endpoint = models.URLField("Endpoint", max_length=512, unique=True)
+    p256dh = models.CharField("p256dh", max_length=255)
+    auth = models.CharField("auth", max_length=255)
+    user_agent = models.CharField("User-Agent", max_length=500, blank=True)
+    device_label = models.CharField("Устройство", max_length=120, blank=True)
+    is_active = models.BooleanField("Активна", default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Push-подписка"
+        verbose_name_plural = "Push-подписки"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["user", "is_active"]),
+        ]
+
+    def __str__(self):
+        return f"Push {self.user_id} · {self.endpoint[:48]}"
+
+
+class StudentNotifyOverride(models.Model):
+    """Per-student notification refinements on top of teacher global prefs."""
+
+    class Mode(models.TextChoices):
+        ALL = "all", "Все события"
+        IMPORTANT = "important_only", "Только важные"
+        MUTE_OPTIONAL = "mute_optional", "Отключить необязательные"
+
+    student = models.OneToOneField(
+        Student,
+        on_delete=models.CASCADE,
+        related_name="notify_override",
+        verbose_name="Ученик",
+    )
+    mode = models.CharField(
+        "Режим",
+        max_length=20,
+        choices=Mode.choices,
+        default=Mode.ALL,
+    )
+    # null = inherit from teacher NotificationPreference
+    notify_homework = models.BooleanField("Работы на проверку", null=True, blank=True)
+    notify_messages = models.BooleanField("Сообщения", null=True, blank=True)
+    notify_overdue = models.BooleanField("Просроченные задания", null=True, blank=True)
+    notify_billing = models.BooleanField("Оплаты", null=True, blank=True)
+    notify_attendance = models.BooleanField("Посещаемость", null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Уведомления об ученике"
+        verbose_name_plural = "Уведомления об учениках"
+
+    def __str__(self):
+        return f"Notify override · student {self.student_id}"
 
 
 class TelegramConnectToken(models.Model):

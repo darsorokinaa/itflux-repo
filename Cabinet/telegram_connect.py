@@ -57,6 +57,8 @@ def telegram_connected(user: User) -> bool:
 
 def telegram_status_payload(user: User) -> dict:
     prefs = get_or_create_preferences(user)
+    from .webpush import webpush_configured
+
     return {
         "connected": prefs.telegram_connected,
         "telegram_enabled": prefs.telegram_enabled,
@@ -66,6 +68,10 @@ def telegram_status_payload(user: User) -> dict:
         "connected_at": (
             prefs.telegram_connected_at.isoformat() if prefs.telegram_connected_at else None
         ),
+        "push_configured": webpush_configured(),
+        "push_enabled": prefs.push_enabled,
+        "push_privacy_mode": prefs.push_privacy_mode,
+        "in_app_enabled": prefs.in_app_enabled,
         "notify_lesson_created": prefs.notify_lesson_created,
         "notify_lesson_moved": prefs.notify_lesson_moved,
         "notify_lesson_cancelled": prefs.notify_lesson_cancelled,
@@ -73,7 +79,25 @@ def telegram_status_payload(user: User) -> dict:
         "notify_homework": prefs.notify_homework,
         "notify_review": prefs.notify_review,
         "notify_before_lesson_minutes": prefs.notify_before_lesson_minutes,
+        "lesson_reminder_minutes": prefs.effective_lesson_reminder_minutes(),
         "digest_hour": prefs.digest_hour,
+        "notify_daily_schedule": prefs.notify_daily_schedule,
+        "daily_schedule_hour": prefs.daily_schedule_hour,
+        "notify_daily_schedule_empty": prefs.notify_daily_schedule_empty,
+        "notify_new_student": prefs.notify_new_student,
+        "notify_homework_resubmitted": prefs.notify_homework_resubmitted,
+        "notify_overdue_homework": prefs.notify_overdue_homework,
+        "notify_student_message": prefs.notify_student_message,
+        "notify_student_entered_room": prefs.notify_student_entered_room,
+        "notify_student_absent": prefs.notify_student_absent,
+        "notify_auto_check_attention": prefs.notify_auto_check_attention,
+        "notify_system": prefs.notify_system,
+        "homework_review_push_mode": prefs.homework_review_push_mode,
+        "overdue_homework_mode": prefs.overdue_homework_mode,
+        "dnd_enabled": prefs.dnd_enabled,
+        "dnd_start": prefs.dnd_start.strftime("%H:%M") if prefs.dnd_start else None,
+        "dnd_end": prefs.dnd_end.strftime("%H:%M") if prefs.dnd_end else None,
+        "dnd_allow_urgent": prefs.dnd_allow_urgent,
         "notify_payment_received": prefs.notify_payment_received,
         "notify_package_low": prefs.notify_package_low,
         "notify_debt_created": prefs.notify_debt_created,
@@ -215,6 +239,21 @@ def update_notification_preferences(user: User, data: dict) -> dict:
         "notify_homework",
         "notify_review",
         "telegram_enabled",
+        "push_enabled",
+        "push_privacy_mode",
+        "in_app_enabled",
+        "notify_daily_schedule",
+        "notify_daily_schedule_empty",
+        "notify_new_student",
+        "notify_homework_resubmitted",
+        "notify_overdue_homework",
+        "notify_student_message",
+        "notify_student_entered_room",
+        "notify_student_absent",
+        "notify_auto_check_attention",
+        "notify_system",
+        "dnd_enabled",
+        "dnd_allow_urgent",
         "notify_payment_received",
         "notify_package_low",
         "notify_debt_created",
@@ -250,12 +289,63 @@ def update_notification_preferences(user: User, data: dict) -> dict:
             prefs.notify_before_lesson_minutes = minutes
         update_fields.append("notify_before_lesson_minutes")
 
+    if "lesson_reminder_minutes" in data:
+        raw = data.get("lesson_reminder_minutes")
+        if raw is None or raw == "":
+            prefs.lesson_reminder_minutes = []
+        elif isinstance(raw, list):
+            cleaned = []
+            for item in raw:
+                minutes = int(item)
+                if 0 < minutes <= 24 * 60 and minutes not in cleaned:
+                    cleaned.append(minutes)
+            prefs.lesson_reminder_minutes = cleaned
+        else:
+            raise ValueError("lesson_reminder_minutes должен быть списком минут")
+        update_fields.append("lesson_reminder_minutes")
+
     if "digest_hour" in data:
         hour = int(data["digest_hour"])
         if hour < 0 or hour > 23:
             raise ValueError("Час сводки должен быть от 0 до 23")
         prefs.digest_hour = hour
         update_fields.append("digest_hour")
+
+    if "daily_schedule_hour" in data:
+        raw = data.get("daily_schedule_hour")
+        if raw is None or raw == "" or raw == "off":
+            prefs.daily_schedule_hour = None
+        else:
+            hour = int(raw)
+            if hour < 0 or hour > 23:
+                raise ValueError("Час расписания должен быть от 0 до 23")
+            prefs.daily_schedule_hour = hour
+        update_fields.append("daily_schedule_hour")
+
+    if "homework_review_push_mode" in data:
+        mode = str(data.get("homework_review_push_mode") or "").strip()
+        if mode not in ("each", "digest_15", "digest_60", "in_app_only"):
+            raise ValueError("Некорректный режим уведомлений о проверке")
+        prefs.homework_review_push_mode = mode
+        update_fields.append("homework_review_push_mode")
+
+    if "overdue_homework_mode" in data:
+        mode = str(data.get("overdue_homework_mode") or "").strip()
+        if mode not in ("immediate", "daily", "in_app_only", "off"):
+            raise ValueError("Некорректный режим просроченных заданий")
+        prefs.overdue_homework_mode = mode
+        update_fields.append("overdue_homework_mode")
+
+    for time_field in ("dnd_start", "dnd_end"):
+        if time_field in data:
+            raw = data.get(time_field)
+            if raw is None or raw == "":
+                setattr(prefs, time_field, None)
+            else:
+                from datetime import datetime
+                parsed = datetime.strptime(str(raw).strip(), "%H:%M").time()
+                setattr(prefs, time_field, parsed)
+            update_fields.append(time_field)
 
     if update_fields:
         prefs.save(update_fields=list(dict.fromkeys(update_fields)) + ["updated_at"])

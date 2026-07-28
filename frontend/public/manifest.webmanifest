@@ -1,0 +1,26 @@
+{
+  "name": "Цифровой поток",
+  "short_name": "Цифровой поток",
+  "description": "Личный кабинет учителя и ученика платформы «Цифровой поток»",
+  "start_url": "/cabinet",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F8FAFC",
+  "theme_color": "#2563EB",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

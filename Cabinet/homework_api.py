@@ -697,37 +697,64 @@ def _ensure_review_item(submission: HomeworkSubmission):
     return item
 
 
-def _notify_homework_submitted(submission: HomeworkSubmission, review_item=None):
-    from django.utils import timezone as dj_tz
-
-    from .choices import NotificationChannel, NotificationStatus
-    from .models import Notification
-    from .notifications import get_or_create_preferences
+def _notify_homework_submitted(submission: HomeworkSubmission, review_item=None, *, is_resubmit=False):
+    from .teacher_notifications import (
+        notify_teacher_auto_check_attention,
+        notify_teacher_homework_submitted,
+        notify_teacher_student_message,
+        result_needs_manual_review,
+    )
 
     teacher = submission.homework.teacher
     if teacher is None:
         return
-    prefs = get_or_create_preferences(teacher)
-    if not getattr(prefs, "notify_homework", True):
-        return
+
     review_id = getattr(review_item, "pk", None)
     url = f"/cabinet/review/{review_id}" if review_id else "/cabinet/review"
-    Notification.objects.create(
-        recipient_user=teacher,
-        recipient_teacher=teacher,
-        channel=NotificationChannel.IN_APP,
-        title="Сдано домашнее задание",
-        message=f"{submission.student.full_name} сдал(а) «{submission.homework.title}».",
-        payload={
-            "type": "homework_submitted",
-            "homework_id": submission.homework_id,
-            "submission_id": submission.pk,
-            "review_id": review_id,
-            "url": url,
-        },
-        status=NotificationStatus.SENT,
-        sent_at=dj_tz.now(),
+    event_type = "homework_resubmitted" if is_resubmit else "homework_submitted"
+    title = "Работа исправлена" if is_resubmit else "Домашняя работа отправлена"
+    message = (
+        f"{submission.student.full_name} повторно отправил(а) задание"
+        if is_resubmit
+        else f"{submission.student.full_name} · {submission.homework.title}"
     )
+    payload = {
+        "type": event_type,
+        "event_type": event_type,
+        "homework_id": submission.homework_id,
+        "submission_id": submission.pk,
+        "review_id": review_id,
+        "url": url,
+        "is_resubmit": bool(is_resubmit),
+    }
+    notify_teacher_homework_submitted(
+        teacher=teacher,
+        student=submission.student,
+        title=title,
+        message=message,
+        payload=payload,
+        is_resubmit=is_resubmit,
+    )
+
+    needs, reason = result_needs_manual_review(submission.result_payload)
+    if needs:
+        notify_teacher_auto_check_attention(
+            teacher=teacher,
+            student=submission.student,
+            homework_title=submission.homework.title,
+            review_url=url,
+            reason=reason or "manual",
+        )
+
+    # Текстовый ответ без интерактива — короткое «сообщение» учителю
+    answer = (submission.answer_text or "").strip()
+    if answer and not (isinstance(submission.result_payload, dict) and submission.result_payload.get("checked")):
+        notify_teacher_student_message(
+            teacher=teacher,
+            student=submission.student,
+            preview=answer,
+            url=url,
+        )
 
 
 class HomeworkAssignmentBaseView(APIView):
@@ -988,7 +1015,11 @@ class HomeworkAssignmentSubmitView(HomeworkAssignmentBaseView):
                 queue_reason,
             )
 
-        _notify_homework_submitted(submission, review_item)
+        _notify_homework_submitted(
+            submission,
+            review_item,
+            is_resubmit=old_status in (SubmissionStatus.RETURNED, SubmissionStatus.NEEDS_REVISION),
+        )
         logger.info(
             "homework.submit ok student_id=%s homework_id=%s submission_id=%s "
             "attempt_id=%s teacher_id=%s variant_id=%s old_status=%s new_status=%s "

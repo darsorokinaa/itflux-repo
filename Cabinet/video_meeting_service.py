@@ -416,6 +416,27 @@ def cancel_meeting_for_event(event: ScheduleEvent) -> VideoMeeting | None:
         return locked
 
 
+def _notify_student_entered_after_join(meeting, user, *, is_new_session: bool):
+    try:
+        from .models import Profile
+        from .teacher_notifications import notify_teacher_student_entered_room
+
+        profile = getattr(user, "profile", None)
+        if profile is None or profile.role != Profile.Role.STUDENT:
+            return
+        teacher = meeting.schedule_event.owner
+        if not teacher or teacher.pk == user.pk:
+            return
+        notify_teacher_student_entered_room(
+            teacher=teacher,
+            student_user=user,
+            meeting=meeting,
+            is_new_session=is_new_session,
+        )
+    except Exception:
+        logger.exception("Failed to notify teacher about student room enter")
+
+
 def record_attendance_join(
     *,
     meeting: VideoMeeting,
@@ -429,6 +450,7 @@ def record_attendance_join(
     assert_can_join_meeting(user, meeting, for_config=False)
     now = timezone.now()
     participant_id = (jitsi_participant_id or "").strip()[:255]
+    is_new_session = False
 
     with transaction.atomic():
         open_session = (
@@ -465,12 +487,17 @@ def record_attendance_join(
                 recent.save(update_fields=["left_at", "duration_seconds"])
             return recent
 
-        return MeetingAttendance.objects.create(
+        session = MeetingAttendance.objects.create(
             meeting=meeting,
             user=user,
             joined_at=now,
             jitsi_participant_id=participant_id,
         )
+        is_new_session = True
+
+    if is_new_session:
+        _notify_student_entered_after_join(meeting, user, is_new_session=True)
+    return session
 
 
 def record_attendance_leave(

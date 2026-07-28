@@ -1,11 +1,12 @@
 import { Link, useOutletContext } from "react-router-dom";
 import { displayName } from "../../../pages/CabinetAuthPage";
 import CabinetIcon from "../../CabinetIcons";
+import ProfileAvatarEditor from "../../components/ProfileAvatarEditor";
 import { STUDENT_MORE_GROUPS } from "../studentNav";
 import { StudentPageShell } from "../StudentSectionUi";
 
 export default function StudentMorePage() {
-  const { user, handleLogout, loggingOut } = useOutletContext() || {};
+  const { user, handleLogout, loggingOut, refreshUser } = useOutletContext() || {};
   const name = user ? displayName(user) : "";
 
   return (
@@ -30,9 +31,12 @@ export default function StudentMorePage() {
 
       {user ? (
         <div className="st-more-profile">
-          <div className="st-more-profile__avatar" aria-hidden="true">
-            {name.charAt(0).toUpperCase()}
-          </div>
+          <ProfileAvatarEditor
+            avatarUrl={user.avatar || ""}
+            displayName={name}
+            onChanged={refreshUser}
+            size="sm"
+          />
           <div className="st-more-profile__body">
             <strong>{name}</strong>
             <span>Ученик</span>

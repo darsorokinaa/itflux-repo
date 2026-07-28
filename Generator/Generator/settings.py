@@ -463,3 +463,9 @@ if not DEBUG:
         "yes",
         "on",
     )
+
+# Web Push (VAPID). Generate with: python -c "from py_vapid import Vapid01; ..."
+# or leave empty — push UI will show that the channel is not configured yet.
+VAPID_PUBLIC_KEY = (os.environ.get("VAPID_PUBLIC_KEY") or "").strip()
+VAPID_PRIVATE_KEY = (os.environ.get("VAPID_PRIVATE_KEY") or "").strip()
+VAPID_ADMIN_EMAIL = (os.environ.get("VAPID_ADMIN_EMAIL") or "mailto:admin@itflux.ru").strip()

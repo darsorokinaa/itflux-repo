@@ -39,6 +39,7 @@ from .models import (
     Material,
     Notification,
     NotificationPreference,
+    PushSubscription,
     OrderingItem,
     QuizQuestion,
     WheelSegment,
@@ -53,6 +54,7 @@ from .models import (
     Student,
     StudentGroup,
     StudentInvitation,
+    StudentNotifyOverride,
     StudentSubject,
     TariffPlan,
     TeacherApplication,
@@ -65,10 +67,16 @@ from .models import (
 
 @admin.register(Profile)
 class ProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "role", "display_name", "account_active", "account_blocked", "reg_date")
+    list_display = ("user", "role", "display_name", "has_avatar_display", "account_active", "account_blocked", "reg_date")
     list_filter = ("role", "account_active", "account_blocked", "email_confirmed")
     search_fields = ("user__username", "user__email", "name", "surname", "display_name")
     ordering = ("-reg_date",)
+    readonly_fields = ("avatar_updated_at",)
+    exclude = ("avatar_encrypted",)
+
+    @admin.display(boolean=True, description="Аватар")
+    def has_avatar_display(self, obj):
+        return obj.has_avatar()
 
 
 @admin.register(TeacherApplication)
@@ -609,13 +617,39 @@ class NotificationPreferenceAdmin(admin.ModelAdmin):
     list_display = (
         "user",
         "in_app_enabled",
+        "push_enabled",
         "vk_enabled",
         "telegram_enabled",
         "telegram_chat_id",
         "notify_before_lesson_minutes",
     )
-    list_filter = ("in_app_enabled", "vk_enabled", "telegram_enabled")
+    list_filter = ("in_app_enabled", "push_enabled", "vk_enabled", "telegram_enabled")
     search_fields = ("user__username", "user__email", "telegram_chat_id", "telegram_username")
+
+
+@admin.register(PushSubscription)
+class PushSubscriptionAdmin(admin.ModelAdmin):
+    list_display = ("user", "device_label", "is_active", "last_seen_at", "created_at")
+    list_filter = ("is_active",)
+    search_fields = ("user__username", "user__email", "endpoint", "device_label")
+    readonly_fields = ("created_at", "updated_at", "last_seen_at")
+
+
+@admin.register(StudentNotifyOverride)
+class StudentNotifyOverrideAdmin(admin.ModelAdmin):
+    list_display = (
+        "student",
+        "mode",
+        "notify_homework",
+        "notify_messages",
+        "notify_overdue",
+        "notify_billing",
+        "notify_attendance",
+        "updated_at",
+    )
+    list_filter = ("mode",)
+    search_fields = ("student__first_name", "student__last_name", "student__email")
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(TariffPlan)

@@ -826,6 +826,38 @@ def consume_package(
         package=locked,
         comment=comment or "Списание абонемента",
     )
+    try:
+        teacher_settings = get_or_create_teacher_settings(account.teacher)
+        threshold = (
+            getattr(account.settings, "low_balance_threshold_lessons", None)
+            or teacher_settings.low_balance_threshold_lessons
+            or 2
+        )
+        if locked.unit_type == "lesson" and locked.remaining_units <= threshold:
+            from .teacher_notifications import notify_teacher_package_low
+
+            notify_teacher_package_low(
+                teacher=account.teacher,
+                student=student,
+                remaining=locked.remaining_units,
+                unit_label="занятий",
+            )
+        min_threshold = (
+            getattr(account.settings, "low_balance_threshold_minutes", None)
+            or teacher_settings.low_balance_threshold_minutes
+            or 120
+        )
+        if locked.unit_type == "minute" and locked.remaining_units <= min_threshold:
+            from .teacher_notifications import notify_teacher_package_low
+
+            notify_teacher_package_low(
+                teacher=account.teacher,
+                student=student,
+                remaining=locked.remaining_units,
+                unit_label="минут",
+            )
+    except Exception:
+        pass
     return tx
 
 
@@ -1270,6 +1302,20 @@ def finalize_event_billing(
             record.financial_status = FinancialStatus.AWAITING_PAYMENT
             record.save()
             allocate_available_payments_to_record(record)
+
+        if record.financial_status == FinancialStatus.AWAITING_PAYMENT and calc_amount > 0:
+            try:
+                from .teacher_notifications import notify_teacher_unpaid_lesson
+                when_label = ""
+                if event.starts_at:
+                    when_label = timezone.localtime(event.starts_at).strftime("%d.%m, %H:%M")
+                notify_teacher_unpaid_lesson(
+                    teacher=teacher,
+                    student=record.student,
+                    when_label=when_label,
+                )
+            except Exception:
+                pass
 
         results.append(record)
 

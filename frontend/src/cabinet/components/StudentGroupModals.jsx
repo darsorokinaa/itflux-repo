@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import CabinetModal from "./CabinetModal";
 import ConfirmActionModal from "./ConfirmActionModal";
 import StudentBillingPanel from "./StudentBillingPanel";
+import StudentNotifySettingsPanel from "./StudentNotifySettingsPanel";
 import StudentSubjectsBlock from "./StudentSubjectsBlock";
 import BillingPaymentModal from "./BillingPaymentModal";
 import BillingPackageModal from "./BillingPackageModal";
@@ -230,6 +231,7 @@ export function StudentFormModal({ student, onClose, onSave, onArchive, onDelete
             onEditTerms={() => setTermsOpen(true)}
           />
         ) : null}
+        {isEdit ? <StudentNotifySettingsPanel studentId={student.id} /> : null}
         <FormActions
           formId="student-edit-form"
           onCancel={onClose}

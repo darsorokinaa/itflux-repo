@@ -12,15 +12,14 @@ import {
 import { deleteHomework, fetchReviewItems, normalizeCabinetList } from "../../utils/cabinetAuth";
 
 const FILTERS = [
-  { id: "all", label: "Все" },
+  { id: "inbox", label: "К проверке" },
+  { id: "done", label: "Проверенные" },
+  { id: "overdue", label: "Просроченные" },
   { id: "oge", label: "ОГЭ" },
   { id: "ege", label: "ЕГЭ" },
   { id: "students", label: "По ученикам" },
   { id: "groups", label: "По группам" },
-  { id: "overdue", label: "Просроченные" },
-  { id: "assigned", label: "Выданные" },
-  { id: "new", label: "Новые" },
-  { id: "done", label: "Проверенные" },
+  { id: "all", label: "Все" },
 ];
 
 function resolveDueAt(item) {
@@ -44,7 +43,8 @@ function isReviewOverdue(item) {
 }
 
 function mapReviewItem(item) {
-  const initials = (item.student_name || "?")
+  const studentName = (item.student_name || "").trim();
+  const initials = (studentName || "?")
     .split(/\s+/)
     .map((p) => p[0])
     .join("")
@@ -52,10 +52,16 @@ function mapReviewItem(item) {
     .toUpperCase();
   const overdue = isReviewOverdue(item);
   const awaitingSubmission = item.status === "pending" && !item.homework_submission?.submitted_at;
+  const submittedForReview = item.status === "pending" && !awaitingSubmission;
+  const studentId = item.student ?? item.homework_submission?.student ?? null;
+  const groupId = item.group ?? null;
+  const groupTitle = (item.group_title || "").trim();
+
   const filter = ["all"];
   if (item.status === "pending") {
     if (awaitingSubmission) filter.push("assigned");
     else filter.push("new");
+    filter.push("inbox");
   } else {
     filter.push("done");
   }
@@ -63,8 +69,8 @@ function mapReviewItem(item) {
   const level = (item.homework_review?.level || "").toLowerCase();
   if (level.includes("oge") || level === "огэ") filter.push("oge");
   if (level.includes("ege") || level === "егэ") filter.push("ege");
-  if (item.student || item.student_name) filter.push("students");
-  if (item.group) filter.push("groups");
+  if (studentId || studentName) filter.push("students");
+  if (groupId || groupTitle) filter.push("groups");
 
   let deadlineLabel = item.status_label || item.status;
   let deadlineTone = item.status === "pending" ? "review" : "completed";
@@ -95,13 +101,19 @@ function mapReviewItem(item) {
     homeworkId: item.homework_submission?.homework ?? item.homework_review?.homework_id ?? null,
     status: item.status || "",
     canDeleteHomework: item.status !== "checked",
+    awaitingSubmission,
+    submittedForReview,
+    studentId: studentId != null ? String(studentId) : "",
+    studentName: studentName || "Без ученика",
+    groupId: groupId != null ? String(groupId) : "",
+    groupTitle: groupTitle || "Без группы",
     filter,
     coverType: item.source_type === "homework" ? "exam" : "general",
     deadlineLabel,
     deadlineTone,
     subject: item.source_type_label || item.source_type,
     title: item.title,
-    description: item.student_name || "",
+    description: studentName || "",
     progressLabel,
     progressPercent,
     progressTone,
@@ -110,9 +122,112 @@ function mapReviewItem(item) {
   };
 }
 
+function groupWorksBy(items, keyFn, titleFn, sortTitles = true) {
+  const map = new Map();
+  items.forEach((item) => {
+    const key = keyFn(item);
+    if (!map.has(key)) {
+      map.set(key, { key, title: titleFn(item), items: [] });
+    }
+    map.get(key).items.push(item);
+  });
+  const groups = Array.from(map.values());
+  if (sortTitles) {
+    groups.sort((a, b) => a.title.localeCompare(b.title, "ru"));
+  }
+  groups.forEach((g) => {
+    g.items.sort((a, b) => {
+      const aNew = a.filter.includes("new") ? 0 : 1;
+      const bNew = b.filter.includes("new") ? 0 : 1;
+      if (aNew !== bNew) return aNew - bNew;
+      return String(a.title || "").localeCompare(String(b.title || ""), "ru");
+    });
+  });
+  return groups;
+}
+
+function ReviewWorksGrid({ items, deletingId, onOpen, onDeleteRequest }) {
+  if (!items.length) return null;
+  return (
+    <div className="cb-hw-grid">
+      {items.map((item) => (
+        <CabinetHomeworkCard
+          key={item.id}
+          coverType={item.coverType}
+          deadlineLabel={item.deadlineLabel}
+          deadlineTone={item.deadlineTone}
+          subject={item.subject}
+          title={item.title}
+          description={item.description}
+          progressLabel={item.progressLabel}
+          progressPercent={item.progressPercent}
+          progressTone={item.progressTone}
+          students={item.students}
+          overflowCount={item.overflowCount}
+          actionLabel={deletingId === item.id ? "Удаление…" : item.actionLabel}
+          onAction={() => onOpen(item)}
+          dangerActionLabel={item.homeworkId ? "Удалить ДЗ" : undefined}
+          onDangerAction={
+            item.homeworkId && item.canDeleteHomework
+              ? () => onDeleteRequest(item)
+              : undefined
+          }
+          dangerActionDisabled={Boolean(item.homeworkId) && !item.canDeleteHomework}
+          dangerActionDisabledHint="Проверенное и принятое ДЗ удалить нельзя"
+        />
+      ))}
+    </div>
+  );
+}
+
+function ReviewGroupedSections({
+  groups,
+  deletingId,
+  onOpen,
+  onDeleteRequest,
+  emptyTitle,
+  emptyText,
+}) {
+  if (!groups.length) {
+    return (
+      <CabinetEmptyState
+        icon="check"
+        title={emptyTitle}
+        text={emptyText}
+      />
+    );
+  }
+  return (
+    <div className="cb-review-inbox">
+      {groups.map((group) => (
+        <section
+          key={group.key}
+          className="cb-review-inbox__section"
+          aria-labelledby={`review-group-${group.key}`}
+        >
+          <div className="cb-review-inbox__head">
+            <h2 id={`review-group-${group.key}`} className="cb-review-inbox__title">
+              {group.title}
+            </h2>
+            <span className="cb-review-inbox__count">{group.items.length}</span>
+          </div>
+          <ReviewWorksGrid
+            items={group.items}
+            deletingId={deletingId}
+            onOpen={onOpen}
+            onDeleteRequest={onDeleteRequest}
+          />
+        </section>
+      ))}
+    </div>
+  );
+}
+
 export default function CabinetReviewPage() {
   const navigate = useNavigate();
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState("inbox");
+  const [studentScope, setStudentScope] = useState("all");
+  const [groupScope, setGroupScope] = useState("all");
   const [works, setWorks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -149,6 +264,11 @@ export default function CabinetReviewPage() {
     };
   }, []);
 
+  useEffect(() => {
+    setStudentScope("all");
+    setGroupScope("all");
+  }, [filter]);
+
   const confirmDelete = useCallback(async () => {
     const item = deleteTarget;
     if (!item?.homeworkId || !item.canDeleteHomework) return;
@@ -166,15 +286,72 @@ export default function CabinetReviewPage() {
 
   const metrics = useMemo(() => [
     { label: "На проверке", value: works.filter((w) => w.filter.includes("new")).length, icon: "pencil", tone: "review", accent: "review" },
-    { label: "Выдано", value: works.filter((w) => w.filter.includes("assigned")).length, icon: "tasks", tone: "info", accent: "info" },
+    { label: "Ожидают сдачи", value: works.filter((w) => w.filter.includes("assigned")).length, icon: "tasks", tone: "info", accent: "info" },
     { label: "Просрочено", value: works.filter((w) => w.filter.includes("overdue")).length, icon: "alert", tone: "danger", accent: "danger" },
     { label: "Проверено", value: works.filter((w) => w.filter.includes("done")).length, icon: "check", tone: "success", accent: "success" },
   ], [works]);
 
-  const items = useMemo(
-    () => works.filter((w) => w.filter.includes(filter) || filter === "all"),
-    [works, filter],
+  const submittedWorks = useMemo(
+    () => works.filter((w) => w.filter.includes("new")),
+    [works],
   );
+  const awaitingWorks = useMemo(
+    () => works.filter((w) => w.filter.includes("assigned")),
+    [works],
+  );
+
+  const studentOptions = useMemo(() => {
+    const map = new Map();
+    works.forEach((w) => {
+      if (!w.filter.includes("students")) return;
+      const key = w.studentId || `name:${w.studentName}`;
+      if (!map.has(key)) map.set(key, { id: key, label: w.studentName });
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "ru"));
+  }, [works]);
+
+  const groupOptions = useMemo(() => {
+    const map = new Map();
+    works.forEach((w) => {
+      if (!w.filter.includes("groups")) return;
+      const key = w.groupId || `title:${w.groupTitle}`;
+      if (!map.has(key)) map.set(key, { id: key, label: w.groupTitle });
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "ru"));
+  }, [works]);
+
+  const studentGrouped = useMemo(() => {
+    let list = works.filter((w) => w.filter.includes("students"));
+    if (studentScope !== "all") {
+      list = list.filter((w) => (w.studentId || `name:${w.studentName}`) === studentScope);
+    }
+    return groupWorksBy(
+      list,
+      (w) => w.studentId || `name:${w.studentName}`,
+      (w) => w.studentName,
+    );
+  }, [works, studentScope]);
+
+  const groupGrouped = useMemo(() => {
+    let list = works.filter((w) => w.filter.includes("groups"));
+    if (groupScope !== "all") {
+      list = list.filter((w) => (w.groupId || `title:${w.groupTitle}`) === groupScope);
+    }
+    return groupWorksBy(
+      list,
+      (w) => w.groupId || `title:${w.groupTitle}`,
+      (w) => w.groupTitle,
+    );
+  }, [works, groupScope]);
+
+  const tabItems = useMemo(() => {
+    if (filter === "inbox" || filter === "students" || filter === "groups") return [];
+    return works.filter((w) => w.filter.includes(filter) || filter === "all");
+  }, [works, filter]);
+
+  const openItem = useCallback((item) => {
+    navigate(`/cabinet/review/${item.id}`);
+  }, [navigate]);
 
   if (loading) {
     return (
@@ -184,47 +361,129 @@ export default function CabinetReviewPage() {
     );
   }
 
+  const inboxEmpty = submittedWorks.length === 0 && awaitingWorks.length === 0;
+
   return (
     <CabinetPageShell className="cb-section--review">
       <CabinetPageHeader title="Проверка" />
       <CabinetMetricsRow metrics={metrics} />
       <CabinetFilterBar filters={FILTERS} active={filter} onChange={setFilter} />
+
+      {filter === "students" ? (
+        <div className="cb-review-scope">
+          <label className="cb-review-scope__label" htmlFor="review-student-scope">
+            Ученик
+          </label>
+          <select
+            id="review-student-scope"
+            className="cb-review-scope__select"
+            value={studentScope}
+            onChange={(e) => setStudentScope(e.target.value)}
+          >
+            <option value="all">Все ученики</option>
+            {studentOptions.map((opt) => (
+              <option key={opt.id} value={opt.id}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+
+      {filter === "groups" ? (
+        <div className="cb-review-scope">
+          <label className="cb-review-scope__label" htmlFor="review-group-scope">
+            Группа
+          </label>
+          <select
+            id="review-group-scope"
+            className="cb-review-scope__select"
+            value={groupScope}
+            onChange={(e) => setGroupScope(e.target.value)}
+          >
+            <option value="all">Все группы</option>
+            {groupOptions.map((opt) => (
+              <option key={opt.id} value={opt.id}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+
       {error ? <p className="cb-inline-error" role="alert">{error}</p> : null}
-      {items.length === 0 ? (
+
+      {filter === "inbox" ? (
+        inboxEmpty ? (
+          <CabinetEmptyState
+            icon="check"
+            title="Нет работ к проверке"
+            text="Сданные и ожидающие сдачи домашние задания появятся здесь."
+          />
+        ) : (
+          <div className="cb-review-inbox">
+            <section className="cb-review-inbox__section" aria-labelledby="review-submitted-heading">
+              <div className="cb-review-inbox__head">
+                <h2 id="review-submitted-heading" className="cb-review-inbox__title">Сданные</h2>
+                <span className="cb-review-inbox__count">{submittedWorks.length}</span>
+              </div>
+              {submittedWorks.length ? (
+                <ReviewWorksGrid
+                  items={submittedWorks}
+                  deletingId={deletingId}
+                  onOpen={openItem}
+                  onDeleteRequest={setDeleteTarget}
+                />
+              ) : (
+                <p className="cb-review-inbox__empty">Пока нет сданных работ</p>
+              )}
+            </section>
+
+            <section className="cb-review-inbox__section" aria-labelledby="review-awaiting-heading">
+              <div className="cb-review-inbox__head">
+                <h2 id="review-awaiting-heading" className="cb-review-inbox__title">Ожидают сдачи</h2>
+                <span className="cb-review-inbox__count">{awaitingWorks.length}</span>
+              </div>
+              {awaitingWorks.length ? (
+                <ReviewWorksGrid
+                  items={awaitingWorks}
+                  deletingId={deletingId}
+                  onOpen={openItem}
+                  onDeleteRequest={setDeleteTarget}
+                />
+              ) : (
+                <p className="cb-review-inbox__empty">Нет выданных заданий без ответа</p>
+              )}
+            </section>
+          </div>
+        )
+      ) : filter === "students" ? (
+        <ReviewGroupedSections
+          groups={studentGrouped}
+          deletingId={deletingId}
+          onOpen={openItem}
+          onDeleteRequest={setDeleteTarget}
+          emptyTitle="Нет работ по ученикам"
+          emptyText="Когда появятся работы с указанным учеником, они сгруппируются здесь."
+        />
+      ) : filter === "groups" ? (
+        <ReviewGroupedSections
+          groups={groupGrouped}
+          deletingId={deletingId}
+          onOpen={openItem}
+          onDeleteRequest={setDeleteTarget}
+          emptyTitle="Нет работ по группам"
+          emptyText="Работы, привязанные к группе, появятся здесь."
+        />
+      ) : tabItems.length === 0 ? (
         <CabinetEmptyState
           icon="check"
           title="Нет работ"
-          text="Выданные и сданные домашние задания появятся здесь."
+          text="В этой вкладке пока ничего нет."
         />
       ) : (
-        <div className="cb-hw-grid">
-          {items.map((item) => (
-            <CabinetHomeworkCard
-              key={item.id}
-              coverType={item.coverType}
-              deadlineLabel={item.deadlineLabel}
-              deadlineTone={item.deadlineTone}
-              subject={item.subject}
-              title={item.title}
-              description={item.description}
-              progressLabel={item.progressLabel}
-              progressPercent={item.progressPercent}
-              progressTone={item.progressTone}
-              students={item.students}
-              overflowCount={item.overflowCount}
-              actionLabel={deletingId === item.id ? "Удаление…" : item.actionLabel}
-              onAction={() => navigate(`/cabinet/review/${item.id}`)}
-              dangerActionLabel={item.homeworkId ? "Удалить ДЗ" : undefined}
-              onDangerAction={
-                item.homeworkId && item.canDeleteHomework
-                  ? () => setDeleteTarget(item)
-                  : undefined
-              }
-              dangerActionDisabled={Boolean(item.homeworkId) && !item.canDeleteHomework}
-              dangerActionDisabledHint="Проверенное и принятое ДЗ удалить нельзя"
-            />
-          ))}
-        </div>
+        <ReviewWorksGrid
+          items={tabItems}
+          deletingId={deletingId}
+          onOpen={openItem}
+          onDeleteRequest={setDeleteTarget}
+        />
       )}
 
       <ConfirmActionModal

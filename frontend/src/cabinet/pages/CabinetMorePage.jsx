@@ -3,6 +3,7 @@ import { displayName } from "../../pages/CabinetAuthPage";
 import CabinetIcon from "../CabinetIcons";
 import { CABINET_MORE_GROUPS } from "../cabinetNav";
 import { CabinetPageShell, CabinetPageHeader, CabinetSoonBadge } from "../CabinetSectionUi";
+import ProfileAvatarEditor from "../components/ProfileAvatarEditor";
 
 function formatNavCount(count) {
   if (!count || count <= 0) return null;
@@ -100,6 +101,7 @@ export default function CabinetMorePage() {
     currentPlan,
     subscriptionLoading,
     navCounts,
+    refreshUser,
   } = useOutletContext();
   const name = user ? displayName(user) : "";
   const planName = currentPlan?.name || "";
@@ -145,9 +147,12 @@ export default function CabinetMorePage() {
       </div>
       {user ? (
         <div className="cb-more-profile">
-          <div className="cb-more-profile__avatar" aria-hidden="true">
-            {name.charAt(0).toUpperCase()}
-          </div>
+          <ProfileAvatarEditor
+            avatarUrl={user.avatar || ""}
+            displayName={name}
+            onChanged={refreshUser}
+            size="sm"
+          />
           <div className="cb-more-profile__body">
             <strong>{name}</strong>
             <span>Учитель</span>

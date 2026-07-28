@@ -8,6 +8,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .avatar_api import build_avatar_url
 from .choices import (
     AssignmentStatus,
     HomeworkStatus,
@@ -255,6 +256,9 @@ def _serialize_schedule_lesson_card(event, students):
         if hw:
             homework_title = hw.title
     video_meeting, meeting_url = _video_meeting_payload(event)
+    subject_label = ""
+    if event.student_subject_id and event.student_subject:
+        subject_label = event.student_subject.display_label
 
     return {
         "id": event.id,
@@ -273,6 +277,8 @@ def _serialize_schedule_lesson_card(event, students):
         "assignment_id": assignment.id if assignment else None,
         "materials_count": materials_count,
         "homework_title": homework_title,
+        "student_subject_id": event.student_subject_id,
+        "student_subject_label": subject_label,
     }
 
 
@@ -405,6 +411,17 @@ def _serialize_assignment_card(homework, students):
     subject_label = ""
     if homework.student_subject_id and homework.student_subject:
         subject_label = homework.student_subject.display_label
+    tasks_total = homework.tasks.count() if hasattr(homework, "tasks") else 0
+    # Backend: точный items_done потребует разбора result_payload по типам задач.
+    # Пока оцениваем прогресс по статусу сдачи.
+    tasks_done = 0
+    progress_percent = 0
+    if sid in ("submitted", "reviewing", "checked"):
+        tasks_done = tasks_total
+        progress_percent = 100
+    elif sid in ("in_progress", "needs_fix", "overdue"):
+        progress_percent = 45 if tasks_total else 30
+        tasks_done = round(tasks_total * progress_percent / 100) if tasks_total else 0
     return {
         "id": homework.id,
         "title": homework.title,
@@ -419,6 +436,12 @@ def _serialize_assignment_card(homework, students):
         "lesson_id": homework.lesson_id,
         "student_subject_id": homework.student_subject_id,
         "student_subject_label": subject_label,
+        "teacher_name": _teacher_name(homework.teacher) if homework.teacher_id else "",
+        "items_count": tasks_total,
+        "items_done": tasks_done,
+        "progress_percent": progress_percent,
+        "teacher_comment": (submission.teacher_comment or "") if submission else "",
+        "description": (homework.description or "")[:240],
     }
 
 
@@ -705,6 +728,27 @@ class StudentScopedView(APIView):
         StudentReleaseService.release_due_events_for_students(students)
 
 
+_OPEN_HW_STATUSES = ("new", "in_progress", "overdue", "needs_fix")
+_DONE_HW_STATUSES = ("checked", "submitted", "reviewing")
+
+
+def _student_hw_counts_and_scores(students, homeworks):
+    """Counts and average score from real submissions — no synthetic progress."""
+    open_hw = 0
+    done_hw = 0
+    scores = []
+    for hw in homeworks:
+        sid, _, submission = _homework_student_status(hw, _pick_student(students, hw.teacher))
+        if sid in _OPEN_HW_STATUSES:
+            open_hw += 1
+        elif sid in _DONE_HW_STATUSES:
+            done_hw += 1
+        if submission and submission.score is not None:
+            scores.append(float(submission.score))
+    avg = round(sum(scores) / len(scores)) if scores else None
+    return open_hw, done_hw, avg
+
+
 class StudentDashboardView(StudentScopedView):
     def get(self, request):
         students, err = self.student_response_or_error()
@@ -713,8 +757,9 @@ class StudentDashboardView(StudentScopedView):
         self.sync_student_releases(students)
 
         profile = request.user.profile
-        lessons = list(_lesson_assignments_qs(students)[:20])
-        homeworks = list(_homework_qs(students)[:20])
+        all_lessons = list(_lesson_assignments_qs(students))
+        lessons = all_lessons[:20]
+        all_homeworks = list(_homework_qs(students))
         interactives = list(_interactive_assignments_qs(students)[:20])
         today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
         today_end = today_start.replace(hour=23, minute=59, second=59)
@@ -723,11 +768,13 @@ class StudentDashboardView(StudentScopedView):
         )
 
         todo = []
-        for hw in homeworks[:5]:
+        for hw in all_homeworks:
             roster = _pick_student(students, hw.teacher)
             sid, _, _ = _homework_student_status(hw, roster)
-            if sid in ("new", "in_progress", "overdue", "needs_fix"):
+            if sid in _OPEN_HW_STATUSES:
                 todo.append({"kind": "assignment", **_serialize_assignment_card(hw, students)})
+            if len(todo) >= 3:
+                break
 
         next_lesson = None
         now = timezone.now()
@@ -761,20 +808,9 @@ class StudentDashboardView(StudentScopedView):
             }
 
         completed_lessons = sum(
-            1 for la in lessons if la.status in (AssignmentStatus.COMPLETED, AssignmentStatus.CHECKED)
+            1 for la in all_lessons if la.status in (AssignmentStatus.COMPLETED, AssignmentStatus.CHECKED)
         )
-        open_hw = sum(
-            1
-            for hw in homeworks
-            if _homework_student_status(hw, _pick_student(students, hw.teacher))[0]
-            in ("new", "in_progress", "overdue")
-        )
-        done_hw = sum(
-            1
-            for hw in homeworks
-            if _homework_student_status(hw, _pick_student(students, hw.teacher))[0]
-            in ("checked", "submitted")
-        )
+        open_hw, done_hw, avg_score = _student_hw_counts_and_scores(students, all_homeworks)
 
         recent_lessons = []
         past_events = (
@@ -821,11 +857,13 @@ class StudentDashboardView(StudentScopedView):
                 ),
             },
             "metrics": {
-                "progress_percent": min(100, completed_lessons * 8 + 20) if lessons else 0,
+                # Backend: progress_percent только из реального среднего балла;
+                # синтетические формулы и streak_days не отдаём.
+                "progress_percent": avg_score if avg_score is not None else 0,
+                "average_score": avg_score,
                 "assignments_left": open_hw,
                 "assignments_done": done_hw,
                 "lessons_completed": completed_lessons,
-                "streak_days": 3,
             },
             "next_lesson": next_lesson,
             "todo": todo,
@@ -837,7 +875,7 @@ class StudentDashboardView(StudentScopedView):
                     "score_percent": float(sub.score) if sub.score is not None else None,
                     "completed_at": (sub.updated_at or sub.submitted_at).isoformat() if (sub.updated_at or sub.submitted_at) else None,
                 }
-                for hw in homeworks
+                for hw in all_homeworks
                 for sub in [
                     HomeworkSubmission.objects.filter(
                         homework=hw,
@@ -1047,6 +1085,7 @@ class StudentAssignmentDetailView(StudentScopedView):
             .order_by("-submitted_at", "-id")
             .first()
         )
+        old_status = existing.status if existing else None
         if existing and existing.status == SubmissionStatus.CHECKED:
             return Response(
                 {"error": "Работа уже проверена."},
@@ -1085,10 +1124,15 @@ class StudentAssignmentDetailView(StudentScopedView):
 
         submission.save()
 
-        from .homework_api import _ensure_review_item
+        from .homework_api import _ensure_review_item, _notify_homework_submitted
         from .files_services import submission_file_url
 
-        _ensure_review_item(submission)
+        review_item = _ensure_review_item(submission)
+        _notify_homework_submitted(
+            submission,
+            review_item,
+            is_resubmit=old_status in (SubmissionStatus.RETURNED, SubmissionStatus.NEEDS_REVISION),
+        )
         attached_name = ""
         if submission.attached_file:
             attached_name = submission.attached_file.name.split("/")[-1]
@@ -1249,35 +1293,18 @@ class StudentProgressView(StudentScopedView):
         lessons = list(_lesson_assignments_qs(students))
         homeworks = list(_homework_qs(students))
         completed_lessons = sum(1 for la in lessons if la.status in (AssignmentStatus.COMPLETED, AssignmentStatus.CHECKED))
-        done_hw = sum(
-            1
-            for hw in homeworks
-            if _homework_student_status(hw, _pick_student(students, hw.teacher))[0]
-            in ("checked", "submitted")
-        )
-        scores = [
-            float(s.score)
-            for hw in homeworks
-            for s in [
-                HomeworkSubmission.objects.filter(
-                    homework=hw,
-                    student=_pick_student(students, hw.teacher),
-                    score__isnull=False,
-                ).first()
-            ]
-            if s
-        ]
-        avg = round(sum(scores) / len(scores)) if scores else 0
+        open_hw, done_hw, avg = _student_hw_counts_and_scores(students, homeworks)
+        avg_value = avg if avg is not None else 0
         return Response({
-            "overall_percent": min(100, completed_lessons * 8 + 20) if lessons else 0,
+            "overall_percent": avg_value,
             "lessons_completed": completed_lessons,
             "assignments_done": done_hw,
-            "average_score": avg,
-            "weak_topics": [
-                {"title": "Логика", "percent": 58, "status": "repeat"},
-                {"title": "Системы счисления", "percent": 62, "status": "repeat"},
-            ],
-            "weekly": [40, 52, 48, 60, 64, 70, 76],
+            "assignments_open": open_hw,
+            "average_score": avg_value,
+            "weak_topics": [],
+            # Backend: weekly/weak_topics потребуют реальной аналитики по темам;
+            # заглушки не отдаём в production-интерфейс.
+            "weekly": [],
         })
 
 
@@ -1465,6 +1492,7 @@ class StudentProfileView(StudentScopedView):
             "surname": profile.surname or (primary.last_name if primary else ""),
             "display_name": profile.get_display_name(),
             "email": request.user.email,
+            "avatar": build_avatar_url(request.user) or None,
             "direction": _direction_label(primary) if primary else "",
             "grade": primary.grade if primary else None,
             "groups": list(dict.fromkeys(all_groups)),

@@ -3,12 +3,13 @@ import { Link, useOutletContext } from "react-router-dom";
 import { fetchStudentBilling, fetchStudentProfile, updateStudentProfile } from "../../../utils/cabinetAuth";
 import { billingTypeLabel, formatMoney, formatUnits } from "../../billing/billingFormat";
 import CabinetIcon from "../../CabinetIcons";
+import ProfileAvatarEditor from "../../components/ProfileAvatarEditor";
 import { loadStudentData } from "../studentData";
 import { StudentPageShell } from "../StudentSectionUi";
 import "../../styles/payments.css";
 
 export default function StudentProfilePage() {
-  const { handleLogout, loggingOut } = useOutletContext?.() ?? {};
+  const { handleLogout, loggingOut, refreshUser, user } = useOutletContext() || {};
 
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -39,6 +40,7 @@ export default function StudentProfilePage() {
       });
       setMsg("Сохранено");
       setMsgType("success");
+      if (typeof refreshUser === "function") await refreshUser();
     } catch (e) {
       setMsg(e.message || "Ошибка сохранения");
       setMsgType("error");
@@ -47,26 +49,32 @@ export default function StudentProfilePage() {
     }
   };
 
+  const handleAvatarChanged = async (nextUrl) => {
+    setProfile((prev) => (prev ? { ...prev, avatar: nextUrl || null } : prev));
+    if (typeof refreshUser === "function") await refreshUser();
+  };
+
   if (loading || !profile) {
     return <StudentPageShell><div className="st-loading">Загрузка…</div></StudentPageShell>;
   }
 
+  const display = [profile.name, profile.surname].filter(Boolean).join(" ") || "Ученик";
+
   return (
     <StudentPageShell>
-      {/* Аватар */}
       <div className="st-profile-avatar-block">
-        <div className="st-profile-avatar">
-          {(profile.name || "?").charAt(0).toUpperCase()}
-        </div>
+        <ProfileAvatarEditor
+          avatarUrl={profile.avatar || user?.avatar || ""}
+          displayName={display}
+          onChanged={handleAvatarChanged}
+          size="lg"
+        />
         <div>
-          <p className="st-profile-display-name">
-            {[profile.name, profile.surname].filter(Boolean).join(" ") || "Ученик"}
-          </p>
+          <p className="st-profile-display-name">{display}</p>
           <p className="st-profile-role">Ученик · Цифровой поток</p>
         </div>
       </div>
 
-      {/* Данные */}
       <section className="st-profile-section">
         <h2 className="st-profile-section__title">Данные</h2>
         <label className="st-field">
@@ -129,7 +137,6 @@ export default function StudentProfilePage() {
         </section>
       ) : null}
 
-      {/* Обучение */}
       <section className="st-profile-section">
         <h2 className="st-profile-section__title">Обучение</h2>
         {profile.direction && (
@@ -146,7 +153,6 @@ export default function StudentProfilePage() {
         )}
       </section>
 
-      {/* Уведомления */}
       <section className="st-profile-section">
         <h2 className="st-profile-section__title">Уведомления</h2>
         <p className="cabinet-auth-muted" style={{ marginBottom: "0.75rem" }}>
@@ -157,7 +163,6 @@ export default function StudentProfilePage() {
         </Link>
       </section>
 
-      {/* Кнопки */}
       <div className="st-profile-actions">
         <button
           type="button"

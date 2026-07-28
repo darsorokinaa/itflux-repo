@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { getActiveNavTab, NAV_TABS } from "../config/navTabs";
 import TaskSearchPanel from "./TaskSearchPanel";
-import { fetchCabinetSession } from "../utils/cabinetAuth";
+import { displayName } from "../pages/CabinetAuthPage";
+import { fetchCabinetSession, getCabinetHomePath } from "../utils/cabinetAuth";
 
 function pickFirstNonEmptyString(values: unknown[]) {
   for (const value of values) {
@@ -75,34 +76,71 @@ function LogoMark() {
   );
 }
 
+type SessionUser = {
+  role?: string;
+  name?: string;
+  surname?: string;
+  username?: string;
+  email?: string;
+  avatar?: string | null;
+};
+
 function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
   const [cabinetAuthed, setCabinetAuthed] = useState(false);
+  const [user, setUser] = useState<SessionUser | null>(null);
   const [avatarUrl, setAvatarUrl] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    fetchCabinetSession()
-      .then((data) => {
-        if (cancelled) return;
-        const authed = !!data?.authenticated;
-        setCabinetAuthed(authed);
-        setAvatarUrl(authed ? resolveUserAvatarUrl(data?.user) : "");
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setCabinetAuthed(false);
-        setAvatarUrl("");
-      });
+
+    const load = () => {
+      fetchCabinetSession()
+        .then((data) => {
+          if (cancelled) return;
+          const authed = !!data?.authenticated;
+          const nextUser = (authed && data?.user ? data.user : null) as SessionUser | null;
+          setCabinetAuthed(authed);
+          setUser(nextUser);
+          setAvatarUrl(authed ? resolveUserAvatarUrl(nextUser) : "");
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setCabinetAuthed(false);
+          setUser(null);
+          setAvatarUrl("");
+        });
+    };
+
+    load();
+    const onFocus = () => load();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
+  const name = user ? displayName(user) : "";
+  const initial = name ? name.charAt(0).toUpperCase() : "?";
+  const isTeacher = user?.role === "teacher";
+  const showAvatarMode = cabinetAuthed && (isTeacher || Boolean(avatarUrl) || Boolean(name));
+  const href = cabinetAuthed ? getCabinetHomePath(user) : "/cabinet/login";
+  const label = cabinetAuthed
+    ? (isTeacher ? `Кабинет учителя — ${name}` : `Личный кабинет — ${name}`)
+    : "Личный кабинет";
+
   return (
     <Link
-      to={cabinetAuthed ? "/cabinet" : "/cabinet/login"}
-      className="cabinet-nav-button"
+      to={href}
+      className={`cabinet-nav-button${showAvatarMode ? " cabinet-nav-button--avatar" : ""}`}
       onClick={onNavigate}
+      aria-label={label}
+      title={label}
     >
       <span className="cabinet-nav-button__icon" aria-hidden="true">
         {cabinetAuthed && avatarUrl ? (
@@ -114,8 +152,12 @@ function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
             decoding="async"
             onError={() => setAvatarUrl("")}
           />
+        ) : cabinetAuthed ? (
+          <span className="cabinet-nav-button__avatar-fallback cabinet-nav-button__avatar-fallback--initials">
+            {initial}
+          </span>
         ) : (
-          <span className={`cabinet-nav-button__avatar-fallback${cabinetAuthed ? " is-auth" : ""}`}>
+          <span className="cabinet-nav-button__avatar-fallback">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M20 21a8 8 0 0 0-16 0" />
               <circle cx="12" cy="7" r="4" />
@@ -123,7 +165,11 @@ function CabinetNavButton({ onNavigate }: { onNavigate?: () => void }) {
           </span>
         )}
       </span>
-      Личный кабинет
+      {showAvatarMode ? (
+        <span className="cabinet-nav-button__text cabinet-nav-button__text--mobile">{name || "Кабинет"}</span>
+      ) : (
+        <span className="cabinet-nav-button__text">Личный кабинет</span>
+      )}
     </Link>
   );
 }

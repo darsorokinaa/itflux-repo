@@ -19,6 +19,14 @@ def get_or_create_preferences(user):
 
 
 def _event_payload(event):
+    meeting_uuid = ""
+    try:
+        vm = getattr(event, "video_meeting", None)
+        if vm is not None:
+            meeting_uuid = str(getattr(vm, "uuid", "") or "")
+    except Exception:
+        meeting_uuid = ""
+    url = f"/cabinet/meetings/{meeting_uuid}" if meeting_uuid else f"/cabinet/schedule?event={event.pk}"
     return {
         "type": "schedule_event",
         "event_id": event.pk,
@@ -26,6 +34,8 @@ def _event_payload(event):
         "title": event.title,
         "starts_at": event.starts_at.isoformat() if event.starts_at else None,
         "ends_at": event.ends_at.isoformat() if event.ends_at else None,
+        "url": url,
+        "meeting_uuid": meeting_uuid or None,
     }
 
 
@@ -122,10 +132,42 @@ def _dispatch_to_user(user, participant, title, message, payload, vk_formatter=N
             n.save(update_fields=["sent_at"])
         notifications.append(n)
 
+    if prefs.push_enabled and participant.notification_enabled:
+        from .webpush import send_web_push_to_user
+        from .notification_links import resolve_notification_url
+
+        class _Tmp:
+            pass
+
+        tmp = _Tmp()
+        tmp.payload = payload
+        tmp.title = title
+        push_url = payload.get("url") if isinstance(payload.get("url"), str) else resolve_notification_url(tmp)
+        change = (payload or {}).get("change_type") or ""
+        urgent = change in ("cancelled", "moved")
+        send_web_push_to_user(
+            user,
+            title=title,
+            body=message,
+            url=push_url or cabinet_path_for_user(user),
+            tag=f"schedule-{payload.get('event_id')}-{change or 'event'}",
+            priority="important" if urgent else "normal",
+            urgent=urgent,
+            payload_extra=payload,
+            create_log=False,
+        )
+
     return notifications
 
 
-def _notify_all(event, title, message, vk_formatter=None, change_type=None, skip_user_id=None):
+def cabinet_path_for_user(user):
+    from .models import Profile
+    role = getattr(getattr(user, "profile", None), "role", None)
+    if role == Profile.Role.STUDENT:
+        return "/cabinet/student/lessons"
+    return "/cabinet/schedule"
+
+def _notify_all(event, title, message, vk_formatter=None, change_type=None, skip_user_id=None, extra_payload=None):
     if change_type:
         prefs_check = {
             "created": "notify_lesson_created",
@@ -135,6 +177,10 @@ def _notify_all(event, title, message, vk_formatter=None, change_type=None, skip
             "participants_changed": "notify_participants_changed",
         }
     payload = _event_payload(event)
+    if change_type:
+        payload["change_type"] = change_type
+    if extra_payload:
+        payload.update(extra_payload)
     all_notes = []
     for user, participant in _iter_recipients(event):
         if skip_user_id and user.pk == skip_user_id:
@@ -150,7 +196,6 @@ def _notify_all(event, title, message, vk_formatter=None, change_type=None, skip
         except Exception:
             logger.exception("Failed to notify user %s for event %s", user.pk, event.pk)
     return all_notes
-
 
 class NotificationService:
     @staticmethod
@@ -261,14 +306,50 @@ class NotificationService:
 
     @staticmethod
     def notify_before_lesson(event, minutes):
-        title = "Напоминание о занятии"
-        message = VKNotificationService.format_before_lesson(event, minutes)
+        audience = _event_audience_label(event)
+        topic = (getattr(event, "topic", None) or "").strip()
+        starts = _local_time(event.starts_at)
+        time_only = timezone.localtime(event.starts_at).strftime("%H:%M") if event.starts_at else ""
+
+        if minutes >= 1400:
+            title = "Урок завтра"
+            message = f"{audience} · {time_only}" if audience else f"Занятие в {time_only}"
+        elif minutes >= 50:
+            title = "Урок начнётся через 1 час"
+            message = f"{audience} · {time_only}" if audience else f"Занятие в {time_only}"
+        elif minutes <= 15:
+            title = "До урока осталось 10 минут"
+            message = "Комната занятия уже доступна" if audience else f"Занятие в {time_only}"
+            if audience:
+                message = f"{audience} · {message}"
+        else:
+            title = "Напоминание о занятии"
+            message = VKNotificationService.format_before_lesson(event, minutes)
+
+        if topic:
+            message = f"{message}\nТема: {topic}" if message else f"Тема: {topic}"
+
         return _notify_all(
             event,
             title,
             message,
             vk_formatter=lambda: VKNotificationService.format_before_lesson(event, minutes),
+            extra_payload={"reminder_minutes": minutes, "change_type": "reminder"},
         )
+
+
+def _event_audience_label(event):
+    names = []
+    for p in event.participants.select_related("student", "group").all()[:6]:
+        if p.student_id and p.student:
+            names.append(p.student.full_name)
+        elif getattr(p, "group_id", None) and getattr(p, "group", None):
+            names.append(getattr(p.group, "title", None) or "Группа")
+    if not names:
+        return (event.title or "").strip()
+    if len(names) == 1:
+        return names[0]
+    return f"{names[0]} и ещё {len(names) - 1}"
 
 
 def _local_time(dt):
