@@ -434,11 +434,20 @@ def _live_result_only_checked(result: dict | None, tasks: list[dict]) -> dict | 
         for t in tasks
         if t.get("id") is not None and t.get("number") is not None
     }
-    num_to_id = {
-        str(t["number"]): str(t["id"])
-        for t in tasks
-        if t.get("id") is not None and t.get("number") is not None
-    }
+    # При дублирующихся № не строим num→id (last-wins ломает ответы).
+    number_counts: dict[str, int] = {}
+    for t in tasks:
+        if t.get("number") is None:
+            continue
+        nk = str(t["number"])
+        number_counts[nk] = number_counts.get(nk, 0) + 1
+    num_to_id = {}
+    for t in tasks:
+        if t.get("id") is None or t.get("number") is None:
+            continue
+        nk = str(t["number"])
+        if number_counts.get(nk, 0) == 1:
+            num_to_id[nk] = str(t["id"])
     by_id = result.get("by_task_id") or result.get("byTaskId") or {}
     by_num = result.get("by_number") or result.get("byNumber") or {}
     scores = result.get("scores") or {}
@@ -462,6 +471,8 @@ def _live_result_only_checked(result: dict | None, tasks: list[dict]) -> dict | 
 
     for num, val in by_num.items():
         nkey = str(num)
+        if number_counts.get(nkey, 0) > 1:
+            continue
         tid = num_to_id.get(nkey)
         if not ((tid and tid in checked_ids) or nkey in checked_ids):
             continue
@@ -473,7 +484,7 @@ def _live_result_only_checked(result: dict | None, tasks: list[dict]) -> dict | 
 
     for tid, val in list(out_id.items()):
         num = id_to_num.get(tid)
-        if num and num not in out_num:
+        if num and number_counts.get(num, 0) == 1 and num not in out_num:
             out_num[num] = val
 
     return {

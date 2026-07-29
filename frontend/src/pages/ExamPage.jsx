@@ -932,8 +932,17 @@ function ExamPage() {
     const key = `${cab}|${picked.status}|${JSON.stringify(picked.result)}`;
     if (hwHydrateKeyRef.current === key) return;
     hwHydrateKeyRef.current = key;
+    // Не ключуем только по номеру — при коллизиях Map схлопывает задачи.
     const m = new Map();
-    for (const t of variant.tasks) m.set(String(t.number), t);
+    const numberCounts = new Map();
+    for (const t of variant.tasks) {
+      const nk = String(t.number);
+      numberCounts.set(nk, (numberCounts.get(nk) || 0) + 1);
+    }
+    for (const t of variant.tasks) {
+      const nk = String(t.number);
+      if ((numberCounts.get(nk) || 0) === 1) m.set(nk, t);
+    }
     const { userAnswers: ua, scores: sc, checkedTasks: ch } = homeworkResultToUiState(
       picked.result,
       m,

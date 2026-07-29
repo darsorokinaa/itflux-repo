@@ -622,10 +622,110 @@ def assign_custom_homework(
     return homework
 
 
-def _extract_variant_id_from_url(url):
-    """Извлечь ID варианта из URL вида /ege/math/variant/12345."""
-    m = re.search(r'/variant/(\d+)', str(url or ''))
-    return int(m.group(1)) if m else None
+def copy_homework_to_students(
+    *,
+    teacher,
+    source_homework,
+    students,
+    due_at=None,
+    keep_due_at=False,
+):
+    """
+    Скопировать ДЗ (задачи + описание) и выдать другим ученикам.
+    На каждого ученика — отдельная запись Homework (как при групповой выдаче).
+    """
+    from django.utils.dateparse import parse_datetime
+
+    from .choices import StudentStatus
+    from .homework_api import is_live_meeting_homework
+    from .models import Student
+
+    if source_homework.teacher_id != teacher.id:
+        raise PermissionError("Нет доступа к этому заданию.")
+    if is_live_meeting_homework(source_homework):
+        raise ValueError("Вариант с урока нельзя копировать как домашнее задание.")
+
+    if isinstance(due_at, str) and due_at.strip():
+        parsed = parse_datetime(due_at.strip())
+        if parsed is None:
+            raise ValueError("Некорректный срок сдачи.")
+        due_at = parsed
+
+    if keep_due_at and due_at is None:
+        due_at = source_homework.due_at
+
+    recipient_ids = []
+    for raw in students or []:
+        try:
+            recipient_ids.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+    recipient_ids = list(dict.fromkeys(recipient_ids))
+    if not recipient_ids:
+        raise ValueError("Выберите хотя бы одного ученика.")
+
+    recipients = list(
+        Student.objects.filter(
+            teacher=teacher,
+            pk__in=recipient_ids,
+            status=StudentStatus.ACTIVE,
+        )
+    )
+    if not recipients:
+        raise ValueError("Не найдены активные ученики для назначения.")
+
+    source_tasks = list(source_homework.tasks.all().order_by("order", "id"))
+    if not source_tasks and not (source_homework.description or "").strip():
+        raise ValueError("В исходном задании нет содержимого для копирования.")
+
+    created = []
+    errors = []
+    for student in recipients:
+        try:
+            homework = Homework.objects.create(
+                teacher=teacher,
+                student=student,
+                title=source_homework.title,
+                description=source_homework.description or "",
+                lesson=source_homework.lesson,
+                # Не копируем lesson_plan_item — иначе get_or_create по плану
+                # может конфликтовать с уже выданным пунктом плана.
+                lesson_plan_item=None,
+                student_subject=source_homework.student_subject,
+                group=None,
+                due_at=due_at,
+                status=HomeworkStatus.ASSIGNED,
+            )
+            for src in source_tasks:
+                HomeworkTask.objects.create(
+                    homework=homework,
+                    task_type=src.task_type,
+                    title=src.title,
+                    description=src.description or "",
+                    interactive=src.interactive,
+                    task_id=src.task_id or "",
+                    order=src.order,
+                )
+                if src.interactive_id:
+                    _ensure_interactive_assignment(
+                        teacher=teacher,
+                        interactive=src.interactive,
+                        student=student,
+                        lesson=source_homework.lesson,
+                        plan_item=None,
+                    )
+            _record_variant_tasks_for_homework(homework, student, teacher)
+            from .homework_api import ensure_homework_in_review_queue
+
+            ensure_homework_in_review_queue(homework, student)
+            created.append(homework)
+        except Exception as exc:
+            errors.append({"student_id": student.pk, "error": str(exc)})
+
+    if not created and errors:
+        raise ValueError(errors[0].get("error") or "Не удалось скопировать задание.")
+
+    return {"homeworks": created, "errors": errors}
 
 
 def _record_variant_tasks_for_homework(homework, student, teacher):

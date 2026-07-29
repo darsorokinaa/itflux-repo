@@ -830,6 +830,14 @@ export function addHomeworkTasks(homeworkId, payload = {}) {
   });
 }
 
+/** Скопировать ДЗ и назначить другим ученикам / группе. */
+export function copyHomework(homeworkId, payload = {}) {
+  return cabinetFetch(`/homework/${encodeURIComponent(String(homeworkId))}/copy/`, {
+    method: "POST",
+    body: JSON.stringify(payload && typeof payload === "object" ? payload : {}),
+  });
+}
+
 export function copyLessonPlan(id) {
   return cabinetFetch(`/lesson-plans/${id}/copy/`, { method: "POST" });
 }

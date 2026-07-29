@@ -143,6 +143,11 @@ urlpatterns = [
         name="cabinet_homework_tasks_add",
     ),
     path(
+        "homework/<int:homework_id>/copy/",
+        api_views.HomeworkCopyView.as_view(),
+        name="cabinet_homework_copy",
+    ),
+    path(
         "homework/submissions/<int:submission_id>/attached-file/",
         api_views.HomeworkSubmissionAttachedFileView.as_view(),
         name="cabinet_homework_submission_attached_file",

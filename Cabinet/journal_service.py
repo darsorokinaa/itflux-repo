@@ -396,10 +396,11 @@ def build_variant_result_payload(
         if ok is None:
             continue
         student_answer = ""
-        if num_key and by_num.get(num_key) is not None:
-            student_answer = str(by_num.get(num_key))
-        elif tid_key and by_id.get(tid_key) is not None:
+        # Сначала id задачи — номера в варианте могут дублироваться.
+        if tid_key and by_id.get(tid_key) is not None:
             student_answer = str(by_id.get(tid_key))
+        elif num_key and by_num.get(num_key) is not None:
+            student_answer = str(by_num.get(num_key))
         rows.append(
             {
                 "id": tid,

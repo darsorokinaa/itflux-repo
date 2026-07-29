@@ -1971,6 +1971,70 @@ class HomeworkTasksAddView(TeacherScopedMixin, APIView):
         return Response(result, status=status.HTTP_200_OK)
 
 
+class HomeworkCopyView(TeacherScopedMixin, APIView):
+    """Скопировать ДЗ и назначить другим ученикам."""
+
+    def post(self, request, homework_id):
+        from .choices import StudentStatus
+        from .models import Student, StudentGroup
+        from .serializers import HomeworkListSerializer
+        from .student_release import copy_homework_to_students
+
+        homework = get_object_or_404(
+            Homework.objects.prefetch_related("tasks"),
+            pk=homework_id,
+            teacher=request.user,
+        )
+        data = request.data if isinstance(request.data, dict) else {}
+
+        student_ids = list(data.get("student_ids") or [])
+        if data.get("student_id") is not None:
+            student_ids.append(data.get("student_id"))
+
+        group_id = data.get("group_id")
+        if group_id:
+            group = StudentGroup.objects.filter(pk=group_id, teacher=request.user).first()
+            if not group:
+                return Response({"detail": "Группа не найдена."}, status=status.HTTP_404_NOT_FOUND)
+            student_ids.extend(
+                list(
+                    group.students.filter(status=StudentStatus.ACTIVE).values_list("id", flat=True)
+                )
+            )
+
+        # Не копируем самому себе по умолчанию — можно явно оставить в списке
+        exclude_source = data.get("include_source_student") not in (True, "1", "true", "yes")
+        if exclude_source and homework.student_id:
+            student_ids = [sid for sid in student_ids if int(sid) != int(homework.student_id)]
+
+        keep_due = data.get("keep_due_at") in (True, "1", "true", "yes")
+        due_at = data.get("due_at") if "due_at" in data else None
+
+        try:
+            result = copy_homework_to_students(
+                teacher=request.user,
+                source_homework=homework,
+                students=student_ids,
+                due_at=due_at,
+                keep_due_at=keep_due,
+            )
+        except PermissionError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        created = result.get("homeworks") or []
+        return Response(
+            {
+                "ok": True,
+                "created_count": len(created),
+                "homeworks": HomeworkListSerializer(created, many=True).data,
+                "errors": result.get("errors") or [],
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
 class HomeworkSubmissionAttachedFileView(TeacherScopedMixin, APIView):
     """Скачивание файла ответа ученика учителем (без публичного /media/)."""
 

@@ -481,7 +481,14 @@ export function buildLiveCheckedHomeworkResult(tasks, userAnswers, scores, check
   const byTaskId = {};
   const outScores = {};
   const outChecked = {};
-  for (const t of tasks || []) {
+  const list = Array.isArray(tasks) ? tasks : [];
+  const numberCounts = new Map();
+  for (const t of list) {
+    if (t?.number == null) continue;
+    const nk = String(t.number);
+    numberCounts.set(nk, (numberCounts.get(nk) || 0) + 1);
+  }
+  for (const t of list) {
     const id = t?.id;
     if (id == null) continue;
     const idKey = String(id);
@@ -490,8 +497,12 @@ export function buildLiveCheckedHomeworkResult(tasks, userAnswers, scores, check
     outChecked[idKey] = Boolean(ok);
     if (userAnswers?.[id] != null) byTaskId[idKey] = userAnswers[id];
     else if (userAnswers?.[idKey] != null) byTaskId[idKey] = userAnswers[idKey];
+    // При одинаковых № by_number неоднозначен — пишем только уникальные.
     if (t.number != null && byTaskId[idKey] != null) {
-      byNumber[String(t.number)] = byTaskId[idKey];
+      const numKey = String(t.number);
+      if ((numberCounts.get(numKey) || 0) <= 1) {
+        byNumber[numKey] = byTaskId[idKey];
+      }
     }
     if (scores?.[id] != null) outScores[idKey] = scores[id];
     else if (scores?.[idKey] != null) outScores[idKey] = scores[idKey];

@@ -37,6 +37,7 @@ import {
   uploadReviewFeedback,
 } from "../../utils/cabinetAuth";
 import ConfirmActionModal from "../components/ConfirmActionModal";
+import HomeworkCopyModal from "../components/HomeworkCopyModal";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import HomeworkReviewSummary, {
   buildHomeworkReviewFromVariant,
@@ -274,6 +275,7 @@ export default function CabinetReviewDetailPage() {
   const [resourcePickerOpen, setResourcePickerOpen] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
   const [notice, setNotice] = useState("");
+  const [copyModalOpen, setCopyModalOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -306,6 +308,8 @@ export default function CabinetReviewDetailPage() {
   const isReadOnly = !isPending || awaitingSubmission;
   const canDeleteHomework = Boolean(submission?.homework) && !isChecked;
   const canAddHomeworkTask = Boolean(submission?.homework) && !isChecked;
+  const canCopyHomework = Boolean(submission?.homework || reviewCtx?.homework_id);
+  const homeworkIdForCopy = submission?.homework || reviewCtx?.homework_id || null;
   const homeworkTasks = Array.isArray(reviewCtx?.tasks) ? reviewCtx.tasks : [];
   const attachedMaterialIds = homeworkTasks
     .map((task) => Number(task.material_id))
@@ -957,7 +961,7 @@ export default function CabinetReviewDetailPage() {
         >
           Итоги урока
         </Link>
-        {submission?.homework ? (
+        {canCopyHomework || submission?.homework ? (
           <div className="cb-review-detail__more" ref={moreMenuRef}>
             <button
               type="button"
@@ -972,24 +976,40 @@ export default function CabinetReviewDetailPage() {
             </button>
             {moreMenuOpen ? (
               <div className="cb-review-detail__menu" role="menu">
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="cb-review-detail__menu-item cb-review-detail__menu-item--danger"
-                  disabled={busy || !canDeleteHomework}
-                  title={
-                    canDeleteHomework
-                      ? "Удалить домашнее задание вместе с работой ученика"
-                      : "Проверенное и принятое ДЗ удалить нельзя"
-                  }
-                  onClick={() => {
-                    if (!canDeleteHomework) return;
-                    setMoreMenuOpen(false);
-                    handleDeleteHomework();
-                  }}
-                >
-                  Удалить ДЗ
-                </button>
+                {canCopyHomework ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="cb-review-detail__menu-item"
+                    disabled={busy}
+                    onClick={() => {
+                      setMoreMenuOpen(false);
+                      setCopyModalOpen(true);
+                    }}
+                  >
+                    Скопировать другим
+                  </button>
+                ) : null}
+                {submission?.homework ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="cb-review-detail__menu-item cb-review-detail__menu-item--danger"
+                    disabled={busy || !canDeleteHomework}
+                    title={
+                      canDeleteHomework
+                        ? "Удалить домашнее задание вместе с работой ученика"
+                        : "Проверенное и принятое ДЗ удалить нельзя"
+                    }
+                    onClick={() => {
+                      if (!canDeleteHomework) return;
+                      setMoreMenuOpen(false);
+                      handleDeleteHomework();
+                    }}
+                  >
+                    Удалить ДЗ
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -1038,6 +1058,25 @@ export default function CabinetReviewDetailPage() {
         onAttachMaterial={handleAttachMaterialToHomework}
         onAttachInteractive={handleAttachInteractiveToHomework}
       />
+
+      {copyModalOpen && homeworkIdForCopy ? (
+        <HomeworkCopyModal
+          homeworkId={homeworkIdForCopy}
+          homeworkTitle={reviewCtx?.homework_title || review?.title || ""}
+          sourceStudentId={review?.student || submission?.student || null}
+          sourceDueAt={reviewCtx?.due_at || null}
+          onClose={() => setCopyModalOpen(false)}
+          onCopied={(result) => {
+            const n = result?.created_count || 0;
+            setNotice(
+              n > 0
+                ? `Скопировано ученикам: ${n}`
+                : "Задание скопировано",
+            );
+            window.dispatchEvent(new Event("cabinet:nav-counts-refresh"));
+          }}
+        />
+      ) : null}
     </CabinetPageShell>
   );
 }

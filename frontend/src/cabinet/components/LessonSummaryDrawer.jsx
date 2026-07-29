@@ -420,6 +420,9 @@ export default function LessonSummaryDrawer({
   const debounceRef = useRef(null);
   const journalRef = useRef(null);
   const dirtyRef = useRef(false);
+  const savingRef = useRef(false);
+  const pendingSaveRef = useRef(false);
+  const conflictRetryRef = useRef(0);
 
   useEffect(() => {
     journalRef.current = journal;
@@ -477,6 +480,12 @@ export default function LessonSummaryDrawer({
   const flushSave = useCallback(async () => {
     const current = journalRef.current;
     if (!current || !lessonPk) return;
+    if (savingRef.current) {
+      pendingSaveRef.current = true;
+      return;
+    }
+    savingRef.current = true;
+    pendingSaveRef.current = false;
     setSaveStatus("saving");
     try {
       const payload = {
@@ -516,12 +525,42 @@ export default function LessonSummaryDrawer({
       };
       const saved = await saveJournalLesson(lessonPk, payload);
       setJournal(saved);
+      journalRef.current = saved;
       setSaveStatus("saved");
       dirtyRef.current = false;
+      conflictRetryRef.current = 0;
       onSaved?.(saved);
     } catch (err) {
+      const code = err?.code || err?.data?.code || "";
+      const isConflict =
+        err?.status === 409
+        || code === "version_conflict"
+        || /изменён в другой вкладке|version/i.test(String(err?.message || ""));
+      if (isConflict && conflictRetryRef.current < 1) {
+        conflictRetryRef.current += 1;
+        try {
+          const fresh = await fetchJournalLesson(lessonPk);
+          setJournal(fresh);
+          journalRef.current = fresh;
+          dirtyRef.current = true;
+          setError("");
+          pendingSaveRef.current = true;
+          return;
+        } catch {
+          /* fall through */
+        }
+      }
+      conflictRetryRef.current = 0;
       setSaveStatus("error");
       setError(err?.message || "Ошибка сохранения");
+    } finally {
+      savingRef.current = false;
+      if (pendingSaveRef.current) {
+        pendingSaveRef.current = false;
+        window.setTimeout(() => {
+          void flushSave();
+        }, 80);
+      }
     }
   }, [lessonPk, onSaved]);
 

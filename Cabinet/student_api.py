@@ -90,10 +90,14 @@ def _lesson_assignments_qs(students):
 
 
 def _homework_qs(students):
+    from .homework_api import LIVE_MEETING_HOMEWORK_MARKER
+
     student_ids, groups = _student_ids_and_groups(students)
     return (
         Homework.objects.filter(Q(student_id__in=student_ids) | Q(group__in=groups))
         .exclude(status=HomeworkStatus.DRAFT)
+        # Вариант с видеоурока — не домашнее задание ученика
+        .exclude(description__contains=LIVE_MEETING_HOMEWORK_MARKER)
         .select_related("lesson", "teacher", "teacher__profile", "student_subject")
         .prefetch_related("tasks")
     )

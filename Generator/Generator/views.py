@@ -3247,7 +3247,7 @@ def api_criteria(request, level, subject):
     return JsonResponse({"criteria": criteria_list, "max_score": max_score})
 
 
-def _variant_detail_payload(request, variant):
+def _variant_detail_payload(request, variant, *, include_answers=True):
     """Единая сборка JSON варианта для API (по id)."""
     contents = (
         VariantContent.objects
@@ -3281,13 +3281,12 @@ def _variant_detail_payload(request, variant):
                 max_score = 1
 
         st = getattr(item.task, "subtopic", None)
-        tasks_data.append({
+        row = {
             "id": item.task.id,
             "task_list_id": task_list.id if task_list else None,
             "number": task_list.task_number if task_list else item.order,
             "task_title": task_list.task_title if task_list else "",
             "text": process_latex(str(item.task.task_template or ""), for_browser=True),
-            "answer": process_latex(str(item.task.answer or ""), for_browser=True),
             "part": task_list.part_id if task_list else None,
             "subdivision": (task_list.subdivision or "").strip() or None,
             "subtopic_id": st.id if st else None,
@@ -3298,7 +3297,12 @@ def _variant_detail_payload(request, variant):
             "truth_table_enabled": item.task.truth_table_enabled,
             "vpr_class": item.task.vpr_class,
             "vpr_advanced": bool(item.task.vpr_advanced),
-        })
+        }
+        if include_answers:
+            row["answer"] = process_latex(str(item.task.answer or ""), for_browser=True)
+        else:
+            row["answer"] = ""
+        tasks_data.append(row)
 
     return {
         "id": variant.id,
@@ -3309,6 +3313,27 @@ def _variant_detail_payload(request, variant):
     }
 
 
+def _request_should_see_variant_answers(request) -> bool:
+    """Ученику правильные ответы в JSON варианта не отдаём."""
+    user = getattr(request, "user", None)
+    if user is not None and getattr(user, "is_authenticated", False):
+        try:
+            from Cabinet.models import Profile
+            profile = getattr(user, "profile", None)
+            if profile is not None and profile.role == Profile.Role.STUDENT:
+                return False
+        except Exception:
+            pass
+    # Явный режим ДЗ ученика / роли в query
+    role = (request.GET.get("role") or "").strip().lower()
+    if role in ("student", "pupil"):
+        return False
+    hw_mode = (request.GET.get("homework") or request.GET.get("cabinet_homework") or "").strip().lower()
+    if hw_mode in ("1", "true", "yes", "student"):
+        return False
+    return True
+
+
 def api_variant_detail(request, level, subject, variant_id):
     variant = get_object_or_404(Variant.objects.select_related('level', 'var_subject'), id=variant_id)
     url_level = (level or "").strip().lower()
@@ -3317,14 +3342,26 @@ def api_variant_detail(request, level, subject, variant_id):
         raise Http404()
     if (variant.var_subject.subject_short or "").strip().lower() != url_subject:
         raise Http404()
-    return JsonResponse(_variant_detail_payload(request, variant))
+    return JsonResponse(
+        _variant_detail_payload(
+            request,
+            variant,
+            include_answers=_request_should_see_variant_answers(request),
+        )
+    )
 
 
 @require_http_methods(["GET"])
 def api_lesson_variant_detail(request, variant_id):
     """Вариант для урока: всегда по /api, без зависимости от роутинга SPA."""
     variant = get_object_or_404(Variant.objects.select_related("level", "var_subject"), id=variant_id)
-    return JsonResponse(_variant_detail_payload(request, variant))
+    return JsonResponse(
+        _variant_detail_payload(
+            request,
+            variant,
+            include_answers=_request_should_see_variant_answers(request),
+        )
+    )
 
 
 @require_http_methods(["GET"])
