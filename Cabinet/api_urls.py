@@ -136,7 +136,7 @@ urlpatterns = [
     path("reports/lesson/<int:lesson_id>/", api_views.ReportsLessonView.as_view(), name="cabinet_reports_lesson"),
     path("reports/topics/", api_views.ReportsTopicsView.as_view(), name="cabinet_reports_topics"),
     path("reports/parent-summary/", api_views.ReportsParentSummaryView.as_view(), name="cabinet_reports_parent_summary"),
-    path("homework/<int:homework_id>/", api_views.HomeworkDeleteView.as_view(), name="cabinet_homework_delete"),
+    path("homework/<int:homework_id>/", api_views.HomeworkDetailView.as_view(), name="cabinet_homework_detail"),
     path(
         "homework/<int:homework_id>/tasks/",
         api_views.HomeworkTasksAddView.as_view(),

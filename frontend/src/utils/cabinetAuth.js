@@ -822,6 +822,19 @@ export function deleteHomework(homeworkId) {
   return cabinetFetch(`/homework/${encodeURIComponent(String(homeworkId))}/`, { method: "DELETE" });
 }
 
+/** Данные выданного ДЗ для формы редактирования. */
+export function fetchHomeworkForEdit(homeworkId) {
+  return cabinetFetch(`/homework/${encodeURIComponent(String(homeworkId))}/`, { method: "GET" });
+}
+
+/** Сохранить правки выданного ДЗ. */
+export function updateHomework(homeworkId, payload = {}) {
+  return cabinetFetch(`/homework/${encodeURIComponent(String(homeworkId))}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload && typeof payload === "object" ? payload : {}),
+  });
+}
+
 /** Добавить задание в уже выданное ДЗ (ученик получает оповещение). */
 export function addHomeworkTasks(homeworkId, payload = {}) {
   return cabinetFetch(`/homework/${encodeURIComponent(String(homeworkId))}/tasks/`, {

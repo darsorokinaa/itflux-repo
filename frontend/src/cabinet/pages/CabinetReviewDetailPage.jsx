@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import MathContent from "../../components/MathContent";
 import TaskFileAttachment from "../../components/TaskFileAttachment";
 import {
@@ -254,6 +254,7 @@ function ReviewFeedbackUpload({
 export default function CabinetReviewDetailPage() {
   const { reviewId } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [review, setReview] = useState(null);
   const [variant, setVariant] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -276,6 +277,15 @@ export default function CabinetReviewDetailPage() {
   const [addingTask, setAddingTask] = useState(false);
   const [notice, setNotice] = useState("");
   const [copyModalOpen, setCopyModalOpen] = useState(false);
+
+  useEffect(() => {
+    const fromQuery = searchParams.get("notice");
+    if (!fromQuery) return;
+    setNotice(fromQuery);
+    const next = new URLSearchParams(searchParams);
+    next.delete("notice");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -310,6 +320,7 @@ export default function CabinetReviewDetailPage() {
   const canAddHomeworkTask = Boolean(submission?.homework) && !isChecked;
   const canCopyHomework = Boolean(submission?.homework || reviewCtx?.homework_id);
   const homeworkIdForCopy = submission?.homework || reviewCtx?.homework_id || null;
+  const canEditHomework = Boolean(homeworkIdForCopy);
   const homeworkTasks = Array.isArray(reviewCtx?.tasks) ? reviewCtx.tasks : [];
   const attachedMaterialIds = homeworkTasks
     .map((task) => Number(task.material_id))
@@ -630,16 +641,26 @@ export default function CabinetReviewDetailPage() {
       <section className="cb-review-detail__panel">
         <div className="cb-review-detail__panel-head">
           <h2 className="cb-review-detail__panel-title">Состав задания</h2>
-          {canAddHomeworkTask ? (
-            <button
-              type="button"
-              className="cb-review-detail__btn cb-review-detail__btn--ghost cb-review-detail__btn--compact"
-              disabled={addingTask}
-              onClick={() => setResourcePickerOpen(true)}
-            >
-              {addingTask ? "Добавление…" : "Добавить задание"}
-            </button>
-          ) : null}
+          <div className="cb-review-detail__panel-actions">
+            {canEditHomework ? (
+              <Link
+                to={`/cabinet/homework/${encodeURIComponent(String(homeworkIdForCopy))}/edit?review=${encodeURIComponent(String(reviewId))}`}
+                className="cb-review-detail__btn cb-review-detail__btn--ghost cb-review-detail__btn--compact"
+              >
+                Редактировать ДЗ
+              </Link>
+            ) : null}
+            {canAddHomeworkTask ? (
+              <button
+                type="button"
+                className="cb-review-detail__btn cb-review-detail__btn--ghost cb-review-detail__btn--compact"
+                disabled={addingTask}
+                onClick={() => setResourcePickerOpen(true)}
+              >
+                {addingTask ? "Добавление…" : "Добавить задание"}
+              </button>
+            ) : null}
+          </div>
         </div>
         {reviewCtx?.description ? (
           <p className="cb-review-detail__hw-desc">{reviewCtx.description}</p>
@@ -976,6 +997,22 @@ export default function CabinetReviewDetailPage() {
             </button>
             {moreMenuOpen ? (
               <div className="cb-review-detail__menu" role="menu">
+                {canEditHomework ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="cb-review-detail__menu-item"
+                    disabled={busy}
+                    onClick={() => {
+                      setMoreMenuOpen(false);
+                      navigate(
+                        `/cabinet/homework/${encodeURIComponent(String(homeworkIdForCopy))}/edit?review=${encodeURIComponent(String(reviewId))}`,
+                      );
+                    }}
+                  >
+                    Редактировать
+                  </button>
+                ) : null}
                 {canCopyHomework ? (
                   <button
                     type="button"

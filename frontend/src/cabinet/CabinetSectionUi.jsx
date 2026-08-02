@@ -74,7 +74,14 @@ export function CabinetMetricsRow({ metrics }) {
           </div>
           <div className="cb-metric__text">
             <span className="cb-metric__value">{m.value}</span>
-            <span className="cb-metric__label">{m.label}</span>
+            <span className="cb-metric__label">
+              {m.shortLabel ? (
+                <>
+                  <span className="cb-metric__label-full">{m.label}</span>
+                  <span className="cb-metric__label-short">{m.shortLabel}</span>
+                </>
+              ) : m.label}
+            </span>
           </div>
         </div>
       ))}

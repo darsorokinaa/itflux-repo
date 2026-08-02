@@ -20,6 +20,7 @@ from .models import (
     ReferralLinkRegistration,
     FlashcardItem,
     Homework,
+    HomeworkEditHistory,
     HomeworkSubmission,
     HomeworkTask,
     Interactive,
@@ -465,6 +466,26 @@ class HomeworkSubmissionAdmin(admin.ModelAdmin):
     list_filter = ("status",)
     search_fields = ("student__first_name", "homework__title")
     ordering = ("-submitted_at",)
+
+
+@admin.register(HomeworkEditHistory)
+class HomeworkEditHistoryAdmin(admin.ModelAdmin):
+    list_display = ("homework", "actor", "created_at", "old_due_at", "new_due_at")
+    list_filter = ("created_at",)
+    search_fields = ("homework__title",)
+    ordering = ("-created_at",)
+    readonly_fields = (
+        "homework",
+        "actor",
+        "changed_fields",
+        "tasks_added",
+        "tasks_removed",
+        "old_due_at",
+        "new_due_at",
+        "previous_score",
+        "previous_result_meta",
+        "created_at",
+    )
 
 
 @admin.register(ReviewItem)

@@ -7,7 +7,12 @@ const DISMISS_KEY = "cabinet_telegram_prompt_dismissed";
 /** Временно скрыто везде — вернуть в `true`, когда промпт снова нужен. */
 const TELEGRAM_CONNECT_PROMPT_ENABLED = false;
 
-export default function TelegramConnectPrompt({ settingsPath = "/cabinet/settings/notifications/" }) {
+export default function TelegramConnectPrompt({ settingsPath }) {
+  const resolvedSettingsPath = settingsPath || (
+    typeof window !== "undefined" && window.location.pathname.startsWith("/cabinet/student")
+      ? "/cabinet/student/settings/notifications/"
+      : "/cabinet/settings/notifications/"
+  );
   const [visible, setVisible] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
@@ -81,7 +86,7 @@ export default function TelegramConnectPrompt({ settingsPath = "/cabinet/setting
           >
             {connecting ? "Открываем…" : "Подключить Telegram"}
           </button>
-          <Link to={settingsPath} className="cb-telegram-prompt__link">
+          <Link to={resolvedSettingsPath} className="cb-telegram-prompt__link">
             Настройки уведомлений
           </Link>
           <button type="button" className="cb-telegram-prompt__dismiss" onClick={dismiss}>

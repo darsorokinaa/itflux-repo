@@ -1498,6 +1498,11 @@ class HomeworkTask(models.Model):
     )
     task_id = models.CharField("ID задачи из банка", max_length=64, blank=True)
     order = models.PositiveIntegerField("Порядок", default=0)
+    is_active = models.BooleanField(
+        "Активно в ДЗ",
+        default=True,
+        help_text="False — задание исключено из ДЗ без удаления из БД (ответы сохраняются).",
+    )
 
     class Meta:
         verbose_name = "Задание ДЗ"
@@ -1506,6 +1511,52 @@ class HomeworkTask(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class HomeworkEditHistory(models.Model):
+    """Компактная история правок выданного домашнего задания."""
+
+    homework = models.ForeignKey(
+        Homework,
+        on_delete=models.CASCADE,
+        related_name="edit_history",
+        verbose_name="Домашнее задание",
+    )
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="homework_edits",
+        verbose_name="Кто изменил",
+    )
+    changed_fields = models.JSONField("Изменённые поля", default=list, blank=True)
+    tasks_added = models.JSONField("Добавленные задания", default=list, blank=True)
+    tasks_removed = models.JSONField("Удалённые задания", default=list, blank=True)
+    old_due_at = models.DateTimeField("Прежний срок", null=True, blank=True)
+    new_due_at = models.DateTimeField("Новый срок", null=True, blank=True)
+    previous_score = models.DecimalField(
+        "Прежний балл",
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    previous_result_meta = models.JSONField(
+        "Снимок результата до правки",
+        default=dict,
+        blank=True,
+        help_text="Компактные метаданные (статус, комментарий, score), без полных файлов.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "История правки ДЗ"
+        verbose_name_plural = "История правок ДЗ"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Правка ДЗ #{self.homework_id} @ {self.created_at}"
 
 
 class HomeworkSubmission(models.Model):

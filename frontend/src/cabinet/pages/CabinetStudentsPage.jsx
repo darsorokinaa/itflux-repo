@@ -231,10 +231,22 @@ function StuMenu({ items, align = "right", ariaLabel = "Ещё" }) {
 
 function SummaryMetrics({ students, groups, attentionCount }) {
   const items = [
-    { label: "Учеников", value: students.length, icon: "students", tone: "brand" },
-    { label: "Групп", value: groups.length, icon: "users", tone: "lav" },
-    { label: "Индивидуальных", value: students.filter((s) => !s.groupId).length, icon: "user", tone: "success" },
-    { label: "Требуют внимания", value: attentionCount, icon: "alert", tone: "warn" },
+    { label: "Учеников", shortLabel: "Ученики", value: students.length, icon: "students", tone: "brand" },
+    { label: "Групп", shortLabel: "Группы", value: groups.length, icon: "users", tone: "lav" },
+    {
+      label: "Индивидуальных",
+      shortLabel: "Без группы",
+      value: students.filter((s) => !s.groupId).length,
+      icon: "user",
+      tone: "success",
+    },
+    {
+      label: "Требуют внимания",
+      shortLabel: "Внимание",
+      value: attentionCount,
+      icon: "alert",
+      tone: "warn",
+    },
   ];
 
   return (
@@ -246,7 +258,10 @@ function SummaryMetrics({ students, groups, attentionCount }) {
           </div>
           <div className="cb-students-summary__body">
             <span className="cb-students-summary__value">{item.value}</span>
-            <span className="cb-students-summary__label">{item.label}</span>
+            <span className="cb-students-summary__label">
+              <span className="cb-students-summary__label-full">{item.label}</span>
+              <span className="cb-students-summary__label-short">{item.shortLabel}</span>
+            </span>
           </div>
         </div>
       ))}

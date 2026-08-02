@@ -60,7 +60,7 @@ def task_is_variant(task: HomeworkTask) -> bool:
 
 
 def homework_has_variant_task(homework: Homework) -> bool:
-    return any(task_is_variant(task) for task in homework.tasks.all())
+    return any(task_is_variant(task) for task in homework.tasks.filter(is_active=True))
 
 
 def _lesson_secret() -> str:
@@ -329,7 +329,7 @@ def compute_score_percent(result: dict | None) -> float | None:
 
 def serialize_assignment_payload(*, homework: Homework, submission: HomeworkSubmission | None) -> dict:
     variant_id = None
-    for task in homework.tasks.all():
+    for task in homework.tasks.filter(is_active=True):
         vid = extract_variant_id(task.description)
         if vid:
             variant_id = vid
@@ -933,7 +933,7 @@ class HomeworkAssignmentSubmitView(HomeworkAssignmentBaseView):
         old_submitted_at = submission.submitted_at
         teacher = homework.teacher
         variant_id = None
-        for task in homework.tasks.all():
+        for task in homework.tasks.filter(is_active=True):
             variant_id = extract_variant_id(task.description)
             if variant_id:
                 break
@@ -1202,7 +1202,7 @@ def serialize_homework_tasks(
 ) -> list[dict]:
     seen = set()
     items = []
-    for task in homework.tasks.order_by("order", "id"):
+    for task in homework.tasks.filter(is_active=True).order_by("order", "id"):
         row = serialize_student_task(
             task,
             homework=homework,
@@ -1221,14 +1221,14 @@ def cleanup_duplicate_homework_tasks(homework: Homework) -> int:
     """Удалить дубли задач с одинаковым названием/ссылкой (legacy)."""
     keep_ids = []
     seen = set()
-    for task in homework.tasks.order_by("order", "id"):
+    for task in homework.tasks.filter(is_active=True).order_by("order", "id"):
         row = serialize_student_task(task, homework=homework, homework_id=homework.id)
         key = _task_dedupe_key(row)
         if key in seen:
             continue
         seen.add(key)
         keep_ids.append(task.id)
-    deleted, _ = homework.tasks.exclude(id__in=keep_ids).delete()
+    deleted, _ = homework.tasks.filter(is_active=True).exclude(id__in=keep_ids).delete()
     return deleted
 
 
@@ -1237,7 +1237,7 @@ def build_homework_review_context(homework: Homework) -> dict:
     variant_path = ""
     level = ""
     subject = ""
-    for task in homework.tasks.all():
+    for task in homework.tasks.filter(is_active=True):
         resource = (task.description or "").strip()
         vid = extract_variant_id(resource)
         if not vid:
@@ -1434,7 +1434,7 @@ def add_tasks_to_homework(
             raise ValueError("Некоторые интерактивы недоступны")
 
     order = (
-        HomeworkTask.objects.filter(homework=homework)
+        HomeworkTask.objects.filter(homework=homework, is_active=True)
         .order_by("-order", "-id")
         .values_list("order", flat=True)
         .first()

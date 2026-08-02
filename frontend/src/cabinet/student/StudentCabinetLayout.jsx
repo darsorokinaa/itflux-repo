@@ -4,6 +4,7 @@ import { displayName } from "../../pages/CabinetAuthPage";
 import {
   ensureCabinetPushSubscription,
   fetchCabinetSession,
+  fetchStudentDashboard,
   isTeacherRole,
   logoutCabinetAndDetachPush,
 } from "../../utils/cabinetAuth";
@@ -21,23 +22,40 @@ import {
   isStudentNavActive,
 } from "./studentNav";
 import "../../styles/cabinet-dashboard.css";
-import "../../styles/cabinet-mobile-system.css";
 import "./styles/student-cabinet.css";
+import "../../styles/cabinet-mobile-system.css";
 
 const PAGE_TITLE = "Кабинет ученика — Цифровой поток";
 
-function NavSidebarItem({ item, active }) {
+function formatNavCount(count) {
+  if (!count || count <= 0) return null;
+  return count > 99 ? "99+" : String(count);
+}
+
+function NavSidebarItem({ item, active, badgeCount = 0 }) {
+  const countLabel = formatNavCount(badgeCount);
+  const ariaLabel = countLabel ? `${item.label}, ${countLabel}` : item.label;
   return (
     <Link
       to={item.path}
       className={`cabinet-nav-item${active ? " active" : ""}`}
-      aria-label={item.label}
+      aria-label={ariaLabel}
       aria-current={active ? "page" : undefined}
     >
       <span className="cabinet-nav-item__icon">
         <CabinetIcon name={item.icon} />
+        {countLabel ? (
+          <span className="cabinet-nav-item__badge cabinet-nav-item__badge--icon" aria-hidden="true">
+            {countLabel}
+          </span>
+        ) : null}
       </span>
       <span className="cabinet-nav-item__label">{item.label}</span>
+      {countLabel ? (
+        <span className="cabinet-nav-item__badge cabinet-nav-item__badge--label" aria-hidden="true">
+          {countLabel}
+        </span>
+      ) : null}
     </Link>
   );
 }
@@ -50,6 +68,7 @@ export default function StudentCabinetLayout() {
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [isMobileShell, setIsMobileShell] = useState(false);
+  const [assignmentsDue, setAssignmentsDue] = useState(0);
 
   useEffect(() => { document.title = PAGE_TITLE; }, []);
 
@@ -79,6 +98,29 @@ export default function StudentCabinetLayout() {
     ensureCabinetPushSubscription().catch(() => null);
     return undefined;
   }, [user]);
+
+  const refreshNavCounts = useCallback(() => {
+    fetchStudentDashboard()
+      .then((data) => {
+        const due = Number(data?.summary?.assignments_due);
+        setAssignmentsDue(Number.isFinite(due) && due > 0 ? due : 0);
+      })
+      .catch(() => {
+        setAssignmentsDue(0);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    refreshNavCounts();
+    const onRefresh = () => refreshNavCounts();
+    window.addEventListener("cabinet:nav-counts-refresh", onRefresh);
+    window.addEventListener("focus", onRefresh);
+    return () => {
+      window.removeEventListener("cabinet:nav-counts-refresh", onRefresh);
+      window.removeEventListener("focus", onRefresh);
+    };
+  }, [user, refreshNavCounts]);
 
   useEffect(() => {
     setNavOpen(false);
@@ -179,27 +221,32 @@ export default function StudentCabinetLayout() {
               key={item.id}
               item={item}
               active={isStudentNavActive(location.pathname, item)}
+              badgeCount={item.id === "assignments" ? assignmentsDue : 0}
             />
           ))}
         </nav>
         <div className="cabinet-sidebar-bottom">
-          <Link
-            to="/cabinet/student/profile"
-            className={`cabinet-user-avatar${user?.avatar ? " cabinet-user-avatar--photo" : ""}`}
-            title={displayName(user)}
-            aria-label="Профиль"
-          >
-            <UserAvatarMark user={user} fallbackName={displayName(user)} />
-          </Link>
-          <button
-            type="button"
-            className="cabinet-logout-btn"
-            onClick={() => setLogoutConfirm(true)}
-            disabled={loggingOut}
-            aria-label="Выйти"
-          >
-            <CabinetIcon name="logout" />
-          </button>
+          <div className="cabinet-sidebar-bottom__row">
+            <Link
+              to="/cabinet/student/profile"
+              className={`cabinet-user-avatar${user?.avatar ? " cabinet-user-avatar--photo" : ""}`}
+              title={displayName(user)}
+              aria-label="Профиль"
+            >
+              <UserAvatarMark user={user} fallbackName={displayName(user)} />
+              <span className="cabinet-sidebar-bottom__label">Профиль</span>
+            </Link>
+            <button
+              type="button"
+              className="cabinet-logout-btn"
+              onClick={() => setLogoutConfirm(true)}
+              disabled={loggingOut}
+              aria-label="Выйти"
+            >
+              <CabinetIcon name="logout" />
+              <span className="cabinet-sidebar-bottom__label">Выйти</span>
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -244,16 +291,28 @@ export default function StudentCabinetLayout() {
 
       {/* Mobile bottom navigation — 5 tabs */}
       <nav className="cb-mobile-nav st-mobile-nav" aria-label="Навигация">
-        {STUDENT_MOBILE_NAV.map((item) => (
-          <Link
-            key={item.id}
-            to={item.path}
-            className={`cb-mobile-nav__item st-mobile-nav__item${isStudentMobileNavActive(location.pathname, item) ? " is-active" : ""}`}
-          >
-            <CabinetIcon name={item.icon} />
-            <span>{item.label}</span>
-          </Link>
-        ))}
+        {STUDENT_MOBILE_NAV.map((item) => {
+          const mobileCount = item.id === "assignments" ? formatNavCount(assignmentsDue) : null;
+          const ariaLabel = mobileCount ? `${item.label}, ${mobileCount}` : item.label;
+          return (
+            <Link
+              key={item.id}
+              to={item.path}
+              aria-label={ariaLabel}
+              className={`cb-mobile-nav__item st-mobile-nav__item${isStudentMobileNavActive(location.pathname, item) ? " is-active" : ""}`}
+            >
+              <span className="cb-mobile-nav__icon-wrap">
+                <CabinetIcon name={item.icon} />
+                {mobileCount ? (
+                  <span className="cb-mobile-nav__badge cb-mobile-nav__badge--accent" aria-hidden="true">
+                    {mobileCount}
+                  </span>
+                ) : null}
+              </span>
+              <span>{item.label}</span>
+            </Link>
+          );
+        })}
       </nav>
 
       <ConfirmActionModal

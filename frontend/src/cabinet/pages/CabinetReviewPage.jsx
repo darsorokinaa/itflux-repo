@@ -294,8 +294,8 @@ export default function CabinetReviewPage() {
   }, [deleteTarget]);
 
   const metrics = useMemo(() => [
-    { label: "На проверке", value: works.filter((w) => w.filter.includes("new")).length, icon: "pencil", tone: "review", accent: "review" },
-    { label: "Ожидают сдачи", value: works.filter((w) => w.filter.includes("assigned")).length, icon: "tasks", tone: "info", accent: "info" },
+    { label: "На проверке", shortLabel: "Проверка", value: works.filter((w) => w.filter.includes("new")).length, icon: "pencil", tone: "review", accent: "review" },
+    { label: "Ожидают сдачи", shortLabel: "Ожидают", value: works.filter((w) => w.filter.includes("assigned")).length, icon: "tasks", tone: "info", accent: "info" },
     { label: "Просрочено", value: works.filter((w) => w.filter.includes("overdue")).length, icon: "alert", tone: "danger", accent: "danger" },
     { label: "Проверено", value: works.filter((w) => w.filter.includes("done")).length, icon: "check", tone: "success", accent: "success" },
   ], [works]);

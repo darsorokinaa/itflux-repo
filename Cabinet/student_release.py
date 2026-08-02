@@ -674,7 +674,9 @@ def copy_homework_to_students(
     if not recipients:
         raise ValueError("Не найдены активные ученики для назначения.")
 
-    source_tasks = list(source_homework.tasks.all().order_by("order", "id"))
+    source_tasks = list(
+        source_homework.tasks.filter(is_active=True).order_by("order", "id")
+    )
     if not source_tasks and not (source_homework.description or "").strip():
         raise ValueError("В исходном задании нет содержимого для копирования.")
 
@@ -732,17 +734,19 @@ def _record_variant_tasks_for_homework(homework, student, teacher):
     """Сохранить ID задач из всех вариантов, прикреплённых к ДЗ, в историю ученика."""
     try:
         from Generator.models import VariantContent  # noqa: PLC0415
+
+        from .homework_api import extract_variant_id
         from .models import StudentTaskHistory
 
         variant_ids = []
-        for hw_task in homework.tasks.all():
-            vid = _extract_variant_id_from_url(hw_task.description)
+        for hw_task in homework.tasks.filter(is_active=True):
+            vid = extract_variant_id(hw_task.description)
             if vid:
                 variant_ids.append(vid)
             # Проверяем также ссылку у прикреплённого материала (если поле есть)
             material = getattr(hw_task, "material", None)
             if material is not None:
-                vid = _extract_variant_id_from_url(getattr(material, "external_url", "") or "")
+                vid = extract_variant_id(getattr(material, "external_url", "") or "")
                 if vid:
                     variant_ids.append(vid)
 

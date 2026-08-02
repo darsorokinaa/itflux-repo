@@ -20,8 +20,8 @@ import { useSubscription } from "./hooks/useSubscription";
 import PwaEnableNotificationsPrompt from "./pwa/PwaEnableNotificationsPrompt";
 import PwaInstallPrompt from "./pwa/PwaInstallPrompt";
 import "../styles/cabinet-dashboard.css";
-import "../styles/cabinet-mobile-system.css";
 import "./styles/teacher-cabinet.css";
+import "../styles/cabinet-mobile-system.css";
 
 const PAGE_TITLE = "Кабинет учителя — Цифровой поток";
 const GUIDE_SEEN_KEY = "cabinet-guide-seen-v1";
@@ -290,6 +290,9 @@ export default function CabinetLayout() {
   }
 
   if (user.role === "student") {
+    if (location.pathname.startsWith("/cabinet/settings/notifications")) {
+      return <Navigate to="/cabinet/student/settings/notifications/" replace />;
+    }
     return <Navigate to="/cabinet/student" replace />;
   }
 
@@ -388,23 +391,27 @@ export default function CabinetLayout() {
             </span>
             <span className="cabinet-nav-item__label">Настройки</span>
           </Link>
-          <Link
-            to="/cabinet/more"
-            className={`cabinet-user-avatar${user?.avatar ? " cabinet-user-avatar--photo" : ""}`}
-            title={displayName(user)}
-            aria-label="Профиль"
-          >
-            <UserAvatarMark user={user} fallbackName={displayName(user)} />
-          </Link>
-          <button
-            type="button"
-            className="cabinet-logout-btn"
-            onClick={() => setLogoutConfirm(true)}
-            disabled={loggingOut}
-            aria-label="Выйти"
-          >
-            <CabinetIcon name="logout" />
-          </button>
+          <div className="cabinet-sidebar-bottom__row">
+            <Link
+              to="/cabinet/more"
+              className={`cabinet-user-avatar${user?.avatar ? " cabinet-user-avatar--photo" : ""}`}
+              title={displayName(user)}
+              aria-label="Профиль"
+            >
+              <UserAvatarMark user={user} fallbackName={displayName(user)} />
+              <span className="cabinet-sidebar-bottom__label">Профиль</span>
+            </Link>
+            <button
+              type="button"
+              className="cabinet-logout-btn"
+              onClick={() => setLogoutConfirm(true)}
+              disabled={loggingOut}
+              aria-label="Выйти"
+            >
+              <CabinetIcon name="logout" />
+              <span className="cabinet-sidebar-bottom__label">Выйти</span>
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -526,7 +533,7 @@ export default function CabinetLayout() {
         {CABINET_MOBILE_NAV.map((item) => {
           const mobileBadge = item.id === "students"
             ? navCounts.students
-            : item.id === "more"
+            : item.id === "review"
               ? navCounts.reviews
               : 0;
           const mobileCount = formatNavCount(mobileBadge);
@@ -542,7 +549,7 @@ export default function CabinetLayout() {
                 <CabinetIcon name={item.icon} />
                 {mobileCount ? (
                   <span
-                    className={`cb-mobile-nav__badge${item.id === "more" ? " cb-mobile-nav__badge--accent" : ""}`}
+                    className={`cb-mobile-nav__badge${item.id === "review" ? " cb-mobile-nav__badge--accent" : ""}`}
                     aria-hidden="true"
                   >
                     {mobileCount}

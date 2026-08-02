@@ -1149,13 +1149,24 @@
   font-size: 0.68rem;
   font-weight: 700;
   min-width: 0;
+  overflow: visible;
 }
 
-.st-mobile-nav__item span {
+.st-mobile-nav__item > span:not(.cb-mobile-nav__icon-wrap) {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.st-mobile-nav__item .cb-mobile-nav__icon-wrap {
+  overflow: visible;
+}
+
+.st-mobile-nav__item .cb-mobile-nav__badge {
+  overflow: visible;
+  max-width: none;
+  text-overflow: clip;
 }
 
 .st-mobile-nav__item.is-active {
@@ -1314,10 +1325,8 @@
 
 .st-layout .cabinet-header--student {
   justify-content: space-between;
-  min-height: 56px;
-  padding-top: 12px;
-  padding-bottom: 12px;
-  gap: 8px;
+  background: #FFFFFF;
+  border-bottom: 1px solid #E2E8F0;
 }
 
 .st-layout .cabinet-header--student .cabinet-header-title {
@@ -1328,7 +1337,7 @@
 .st-layout .cabinet-header--student .cabinet-header-section {
   margin: 0;
   font-size: 1.05rem;
-  font-weight: 800;
+  font-weight: 750;
   color: #0F172A;
   letter-spacing: -0.02em;
 }
@@ -1365,10 +1374,7 @@
 }
 
 @media (max-width: 768px) {
-  .st-layout .cabinet-header {
-    padding: 10px 16px;
-    min-height: 56px;
-  }
+  /* Header chrome owned by cabinet-mobile-system.css */
 
   /* --- Dashboard single column --- */
   .st-dashboard-grid {

@@ -1438,6 +1438,7 @@ class HomeworkTaskSerializer(serializers.ModelSerializer):
             "interactive",
             "task_id",
             "order",
+            "is_active",
         ]
 
 

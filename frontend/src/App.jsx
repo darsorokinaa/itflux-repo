@@ -26,6 +26,7 @@ import CabinetStudentsPage from "./cabinet/pages/CabinetStudentsPage";
 import CabinetLessonsPage from "./cabinet/pages/CabinetLessonsPage";
 import CabinetReviewPage from "./cabinet/pages/CabinetReviewPage";
 import CabinetReviewDetailPage from "./cabinet/pages/CabinetReviewDetailPage";
+import CabinetHomeworkEditPage from "./cabinet/pages/CabinetHomeworkEditPage";
 import CabinetLibraryPage from "./cabinet/pages/CabinetLibraryPage";
 import CabinetSchedulePage from "./cabinet/pages/CabinetSchedulePage";
 import CabinetLessonPlansPage from "./cabinet/pages/CabinetLessonPlansPage";
@@ -258,8 +259,6 @@ function App() {
           <Route path="/invite/:token/" element={<CabinetJoinPage />} />
           <Route path="/cabinet/join/:token" element={<LegacyInviteRedirect />} />
           <Route path="/cabinet/join/:token/" element={<LegacyInviteRedirect />} />
-          <Route path="/cabinet/settings/notifications" element={<CabinetNotificationsSettingsPage />} />
-          <Route path="/cabinet/settings/notifications/" element={<CabinetNotificationsSettingsPage />} />
           <Route path="/cabinet/interactives/:id/play" element={<CabinetInteractivePlayPage />} />
           <Route path="/cabinet/boards/:boardId" element={<CabinetBoardEditorPage />} />
           <Route path="/teacher/boards/:boardId" element={<CabinetBoardEditorPage />} />
@@ -285,9 +284,13 @@ function App() {
             <Route path="interactives" element={<Navigate to="/cabinet/student/assignments" replace />} />
             <Route path="schedule"     element={<Navigate to="/cabinet/student/lessons" replace />} />
             <Route path="more"         element={<StudentMorePage />} />
+            <Route path="settings/notifications" element={<CabinetNotificationsSettingsPage />} />
+            <Route path="settings/notifications/" element={<CabinetNotificationsSettingsPage />} />
           </Route>
           <Route path="/cabinet" element={<CabinetPage />}>
             <Route index element={<CabinetDashboard />} />
+            <Route path="settings/notifications" element={<CabinetNotificationsSettingsPage />} />
+            <Route path="settings/notifications/" element={<CabinetNotificationsSettingsPage />} />
             <Route path="students" element={<CabinetStudentsPage />} />
             <Route path="lessons" element={<CabinetLessonsPage />} />
             <Route path="plans" element={<CabinetLessonPlansPage />} />
@@ -303,6 +306,7 @@ function App() {
             <Route path="files" element={<CabinetFilesPage />} />
             <Route path="review/:reviewId" element={<CabinetReviewDetailPage />} />
             <Route path="review" element={<CabinetReviewPage />} />
+            <Route path="homework/:homeworkId/edit" element={<CabinetHomeworkEditPage />} />
             <Route path="journal" element={<CabinetJournalPage />} />
             <Route path="journal/analytics" element={<CabinetJournalAnalyticsPage />} />
             <Route path="journal/lesson/:eventId" element={<CabinetLessonSummaryPage />} />

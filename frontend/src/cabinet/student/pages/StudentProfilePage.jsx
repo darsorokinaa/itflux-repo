@@ -158,7 +158,7 @@ export default function StudentProfilePage() {
         <p className="cabinet-auth-muted" style={{ marginBottom: "0.75rem" }}>
           Напоминания об уроках и заданиях — в Telegram и в кабинете.
         </p>
-        <Link to="/cabinet/settings/notifications/" className="cb-btn cb-btn--outline cb-btn--pill">
+        <Link to="/cabinet/student/settings/notifications/" className="cb-btn cb-btn--outline cb-btn--pill">
           Настройки уведомлений
         </Link>
       </section>

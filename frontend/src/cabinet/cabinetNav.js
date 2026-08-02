@@ -51,8 +51,8 @@ export const CABINET_NAV = CABINET_NAV_GROUPS.flatMap((group) => group.items);
 export const CABINET_MOBILE_NAV = [
   { id: "home", label: "Главная", path: "/cabinet", icon: "home" },
   { id: "students", label: "Ученики", path: "/cabinet/students", icon: "students" },
-  { id: "lessons", label: "Уроки", path: "/cabinet/lessons", icon: "lessons" },
   { id: "schedule", label: "Расписание", path: "/cabinet/schedule", icon: "calendar" },
+  { id: "review", label: "Проверка", path: "/cabinet/review", icon: "check" },
   { id: "more", label: "Ещё", path: "/cabinet/more", icon: "expand" },
 ];
 
@@ -62,9 +62,7 @@ export const CABINET_MORE_GROUPS = [
     id: "work",
     label: "Работа",
     items: [
-      { id: "review", label: "Домашние задания", path: "/cabinet/review", icon: "check" },
       { id: "journal", label: "Журнал", path: "/cabinet/journal", icon: "note" },
-      { id: "reports", label: "Отчёты", path: "/cabinet/reports", icon: "chart" },
     ],
   },
   {
@@ -124,6 +122,7 @@ export function isCabinetMobileNavActive(pathname, item) {
 
 export function getCabinetSectionTitle(pathname) {
   if (pathname === "/cabinet/more") return "Ещё";
+  if (pathname.startsWith("/cabinet/settings/notifications")) return "Уведомления";
 
   const candidates = [
     ...CABINET_MOBILE_NAV.filter((item) => item.id !== "more"),

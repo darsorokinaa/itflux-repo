@@ -67,6 +67,7 @@ export function isStudentMobileNavActive(pathname, item) {
 
 export function getStudentSectionTitle(pathname) {
   if (pathname === "/cabinet/student" || pathname === "/cabinet/student/") return "Главная";
+  if (pathname.startsWith("/cabinet/student/settings/notifications")) return "Уведомления";
   if (pathname === "/cabinet/student/more" || pathname.startsWith("/cabinet/student/more/")) {
     return "Ещё";
   }

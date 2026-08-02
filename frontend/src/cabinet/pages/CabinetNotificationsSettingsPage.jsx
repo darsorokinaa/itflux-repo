@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
-import { Link, Navigate, useLocation } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useOutletContext } from "react-router-dom";
+import CabinetIcon from "../CabinetIcons";
+import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
 import {
   disconnectTelegram,
-  fetchCabinetSession,
   fetchNotificationPreferences,
   fetchPushDevices,
   getCabinetHomePath,
@@ -16,106 +17,288 @@ import {
 } from "../../utils/cabinetAuth";
 import "../styles/notifications-settings.css";
 
-const TOGGLE_FIELDS = [
-  { key: "notify_lesson_created", label: "Новые занятия" },
-  { key: "notify_lesson_moved", label: "Перенос занятий" },
-  { key: "notify_lesson_cancelled", label: "Отмена занятий" },
-  { key: "notify_lesson_updated", label: "Изменения занятий" },
-  { key: "notify_homework", label: "Домашние задания / работы на проверку" },
-  { key: "notify_review", label: "Результаты проверки" },
-  { key: "notify_journal_results", label: "Итоги урока опубликованы" },
-  { key: "notify_journal_comment", label: "Комментарий учителя (в итогах)" },
-  { key: "notify_journal_recommendation", label: "Новая рекомендация" },
-];
-
-const TEACHER_EXTRA_FIELDS = [
-  { key: "notify_new_student", label: "Новые ученики" },
-  { key: "notify_homework_resubmitted", label: "Исправленные работы" },
-  { key: "notify_overdue_homework", label: "Просроченные задания" },
-  { key: "notify_student_message", label: "Сообщения учеников" },
-  { key: "notify_student_entered_room", label: "Ученик вошёл в комнату" },
-  { key: "notify_student_absent", label: "Ученик не подключился" },
-  { key: "notify_auto_check_attention", label: "Автопроверка требует внимания" },
-  { key: "notify_system", label: "Системные события" },
-  { key: "notify_daily_schedule", label: "Расписание на день" },
-  { key: "notify_daily_schedule_empty", label: "Сообщать, что сегодня уроков нет" },
-];
-
 const REMINDER_OPTIONS = [
-  { minutes: 1440, label: "За 24 часа" },
-  { minutes: 60, label: "За 1 час" },
-  { minutes: 10, label: "За 10 минут" },
+  { minutes: 1440, label: "За 24 часа", description: "Напоминание за сутки до урока" },
+  { minutes: 60, label: "За 1 час", description: "Короткое напоминание за час" },
+  { minutes: 10, label: "За 10 минут", description: "Перед самым началом занятия" },
 ];
 
-const JOURNAL_TEACHER_FIELDS = [
-  { key: "notify_journal_daily_digest", label: "Ежедневная сводка журнала" },
+const TYPE_GROUPS = [
+  {
+    id: "schedule",
+    title: "Расписание",
+    fields: [
+      { key: "notify_lesson_created", label: "Новые занятия" },
+      { key: "notify_lesson_moved", label: "Перенос занятия" },
+      { key: "notify_lesson_cancelled", label: "Отмена занятия" },
+      { key: "notify_lesson_updated", label: "Изменение занятия" },
+      { key: "notify_daily_schedule", label: "Расписание на день", teacherOnly: true },
+      { key: "notify_daily_schedule_empty", label: "Сообщать, что сегодня уроков нет", teacherOnly: true },
+    ],
+  },
+  {
+    id: "homework",
+    title: "Домашние задания",
+    fields: [
+      { key: "notify_homework", label: "Выдано новое домашнее задание / работы на проверку" },
+      { key: "notify_homework_resubmitted", label: "Ученик сдал исправленную работу", teacherOnly: true },
+      { key: "notify_overdue_homework", label: "Работа просрочена", teacherOnly: true },
+    ],
+  },
+  {
+    id: "review",
+    title: "Проверка и результаты",
+    fields: [
+      { key: "notify_review", label: "Результат проверки изменён" },
+      { key: "notify_journal_results", label: "Итоги урока опубликованы" },
+      { key: "notify_journal_comment", label: "Добавлен комментарий" },
+      { key: "notify_journal_recommendation", label: "Новая рекомендация" },
+      { key: "notify_auto_check_attention", label: "Автопроверка требует внимания", teacherOnly: true },
+      { key: "notify_journal_daily_digest", label: "Ежедневная сводка журнала", teacherOnly: true, defaultOff: true },
+    ],
+  },
+  {
+    id: "classroom",
+    title: "Ученики и уроки",
+    teacherOnly: true,
+    fields: [
+      { key: "notify_new_student", label: "Новые ученики" },
+      { key: "notify_student_message", label: "Сообщения учеников" },
+      { key: "notify_student_entered_room", label: "Ученик вошёл в комнату" },
+      { key: "notify_student_absent", label: "Ученик не подключился" },
+      { key: "notify_system", label: "Системные события" },
+    ],
+  },
+  {
+    id: "billing-teacher",
+    title: "Оплаты",
+    teacherOnly: true,
+    description: "Через уже подключённые каналы — кабинет, Web Push и Telegram.",
+    fields: [
+      { key: "notify_payment_received", label: "Оплата получена", defaultOff: true },
+      { key: "notify_package_low", label: "Заканчивается абонемент", defaultOff: true },
+      { key: "notify_debt_created", label: "Нет оплаты / возникла задолженность", defaultOff: true },
+      { key: "notify_billing_daily_digest", label: "Ежедневная финансовая сводка", defaultOff: true },
+      { key: "notify_billing_weekly_digest", label: "Еженедельная финансовая сводка", defaultOff: true },
+    ],
+  },
+  {
+    id: "billing-student",
+    title: "Оплаты ученику",
+    teacherOnly: true,
+    description: "Ученику уходят только если уведомления включены для него в разделе «Оплаты».",
+    fields: [
+      { key: "notify_student_payment_recorded", label: "Оплата зафиксирована", defaultOff: true },
+      { key: "notify_student_package_low", label: "Осталось мало занятий или минут", defaultOff: true },
+      { key: "notify_student_package_ended", label: "Абонемент закончился", defaultOff: true },
+      { key: "notify_student_unpaid_lesson", label: "Есть неоплаченный урок", defaultOff: true },
+      { key: "notify_student_payment_due", label: "Приближается срок оплаты", defaultOff: true },
+    ],
+  },
 ];
 
-const BILLING_TEACHER_FIELDS = [
-  { key: "notify_payment_received", label: "Поступила оплата" },
-  { key: "notify_package_low", label: "Заканчивается абонемент" },
-  { key: "notify_debt_created", label: "Возникла задолженность" },
-  { key: "notify_billing_daily_digest", label: "Ежедневная финансовая сводка" },
-  { key: "notify_billing_weekly_digest", label: "Еженедельная финансовая сводка" },
+const SAVE_FIELDS = [
+  "push_enabled",
+  "push_privacy_mode",
+  "in_app_enabled",
+  "notify_lesson_created",
+  "notify_lesson_moved",
+  "notify_lesson_cancelled",
+  "notify_lesson_updated",
+  "notify_homework",
+  "notify_review",
+  "notify_journal_results",
+  "notify_journal_comment",
+  "notify_journal_recommendation",
+  "notify_journal_daily_digest",
+  "notify_new_student",
+  "notify_homework_resubmitted",
+  "notify_overdue_homework",
+  "notify_student_message",
+  "notify_student_entered_room",
+  "notify_student_absent",
+  "notify_auto_check_attention",
+  "notify_system",
+  "notify_daily_schedule",
+  "notify_daily_schedule_empty",
+  "notify_payment_received",
+  "notify_package_low",
+  "notify_debt_created",
+  "notify_billing_daily_digest",
+  "notify_billing_weekly_digest",
+  "notify_student_payment_recorded",
+  "notify_student_package_low",
+  "notify_student_package_ended",
+  "notify_student_unpaid_lesson",
+  "notify_student_payment_due",
+  "dnd_enabled",
+  "dnd_allow_urgent",
+  "dnd_start",
+  "dnd_end",
+  "digest_hour",
+  "daily_schedule_hour",
+  "homework_review_push_mode",
+  "overdue_homework_mode",
+  "lesson_reminder_minutes",
 ];
 
-const BILLING_STUDENT_FIELDS = [
-  { key: "notify_student_payment_recorded", label: "Оплата зафиксирована" },
-  { key: "notify_student_package_low", label: "Осталось мало занятий или минут" },
-  { key: "notify_student_package_ended", label: "Абонемент закончился" },
-  { key: "notify_student_unpaid_lesson", label: "Есть неоплаченный урок" },
-  { key: "notify_student_payment_due", label: "Приближается срок оплаты" },
-];
+function normalizeForCompare(prefs) {
+  if (!prefs) return null;
+  const next = {};
+  for (const key of SAVE_FIELDS) {
+    if (key === "lesson_reminder_minutes") {
+      const list = Array.isArray(prefs.lesson_reminder_minutes)
+        ? [...prefs.lesson_reminder_minutes].map(Number).sort((a, b) => b - a)
+        : [];
+      next[key] = list;
+    } else if (key === "daily_schedule_hour") {
+      next[key] = prefs.daily_schedule_hour == null ? "off" : Number(prefs.daily_schedule_hour);
+    } else {
+      next[key] = prefs[key];
+    }
+  }
+  return next;
+}
+
+function prefsEqual(a, b) {
+  return JSON.stringify(normalizeForCompare(a)) === JSON.stringify(normalizeForCompare(b));
+}
+
+function buildSavePayload(prefs) {
+  const payload = {};
+  for (const key of SAVE_FIELDS) {
+    if (key === "daily_schedule_hour") {
+      payload[key] = prefs.daily_schedule_hour == null || prefs.daily_schedule_hour === "off"
+        ? "off"
+        : Number(prefs.daily_schedule_hour);
+    } else if (key === "lesson_reminder_minutes") {
+      payload[key] = Array.isArray(prefs.lesson_reminder_minutes)
+        ? prefs.lesson_reminder_minutes
+        : [];
+    } else if (key === "digest_hour") {
+      payload[key] = Number(prefs.digest_hour ?? 19);
+    } else {
+      payload[key] = prefs[key];
+    }
+  }
+  return payload;
+}
+
+function SwitchRow({
+  id,
+  label,
+  description,
+  checked,
+  disabled = false,
+  onChange,
+}) {
+  return (
+    <label
+      className={`cb-notify-switch${disabled ? " is-disabled" : ""}`}
+      htmlFor={id}
+    >
+      <span className="cb-notify-switch__copy">
+        <span className="cb-notify-switch__label">{label}</span>
+        {description ? (
+          <span className="cb-notify-switch__desc">{description}</span>
+        ) : null}
+      </span>
+      <span className="cb-notify-switch__control">
+        <input
+          id={id}
+          type="checkbox"
+          role="switch"
+          aria-checked={checked}
+          checked={checked}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+        <span className="cb-notify-switch__track" aria-hidden="true" />
+      </span>
+    </label>
+  );
+}
+
+function ChannelStatusCard({ icon, title, status, tone, description, badge, actions }) {
+  return (
+    <article className={`cb-notify-channel cb-notify-channel--${tone}`}>
+      <div className="cb-notify-channel__icon" aria-hidden="true">
+        <CabinetIcon name={icon} />
+      </div>
+      <div className="cb-notify-channel__body">
+        <div className="cb-notify-channel__top">
+          <h3 className="cb-notify-channel__title">{title}</h3>
+          <span className={`cb-notify-badge cb-notify-badge--${tone}`}>
+            {badge || status}
+          </span>
+        </div>
+        {description ? <p className="cb-notify-channel__desc">{description}</p> : null}
+        {actions ? <div className="cb-notify-channel__actions">{actions}</div> : null}
+      </div>
+    </article>
+  );
+}
+
+function FieldSelect({ id, label, value, onChange, children }) {
+  return (
+    <label className="cb-notify-field" htmlFor={id}>
+      <span className="cb-notify-field__label">{label}</span>
+      <select id={id} className="cb-notify-field__select" value={value} onChange={onChange}>
+        {children}
+      </select>
+    </label>
+  );
+}
+
+function isFieldChecked(prefs, field) {
+  if (field.defaultOff) return Boolean(prefs[field.key]);
+  return prefs[field.key] !== false;
+}
 
 export default function CabinetNotificationsSettingsPage() {
-  const location = useLocation();
-  const [sessionUser, setSessionUser] = useState(null);
-  const [sessionLoading, setSessionLoading] = useState(true);
+  const outlet = useOutletContext() || {};
+  const user = outlet.user;
+  const isTeacher = isTeacherRole(user);
+  const homePath = getCabinetHomePath(user) || (isTeacher ? "/cabinet" : "/cabinet/student");
+  const morePath = isTeacher ? "/cabinet/more" : "/cabinet/student/more";
+
+  const [savedPrefs, setSavedPrefs] = useState(null);
   const [prefs, setPrefs] = useState(null);
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const { toast, showToast } = useSoonToast();
+  const ignoreUnloadRef = useRef(false);
 
-  const isTeacher = isTeacherRole(sessionUser);
+  const dirty = useMemo(
+    () => Boolean(prefs && savedPrefs && !prefsEqual(prefs, savedPrefs)),
+    [prefs, savedPrefs],
+  );
+
+  const reload = useCallback(async () => {
+    const [data, pushDevices] = await Promise.all([
+      fetchNotificationPreferences(),
+      fetchPushDevices().catch(() => ({ devices: [] })),
+    ]);
+    setPrefs(data);
+    setSavedPrefs(data);
+    setDevices(pushDevices?.devices || []);
+    return data;
+  }, []);
 
   useEffect(() => {
     document.title = "Настройки уведомлений — Личный кабинет";
   }, []);
 
   useEffect(() => {
+    if (!user) return undefined;
     let cancelled = false;
-    fetchCabinetSession()
-      .then((data) => {
-        if (!cancelled) setSessionUser(data?.authenticated ? data.user : null);
-      })
-      .catch(() => {
-        if (!cancelled) setSessionUser(null);
-      })
-      .finally(() => {
-        if (!cancelled) setSessionLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const reload = async () => {
-    const [data, pushDevices] = await Promise.all([
-      fetchNotificationPreferences(),
-      fetchPushDevices().catch(() => ({ devices: [] })),
-    ]);
-    setPrefs(data);
-    setDevices(pushDevices?.devices || []);
-  };
-
-  useEffect(() => {
-    if (!sessionUser) return undefined;
-    let cancelled = false;
+    setLoading(true);
     reload()
       .catch((err) => {
-        if (!cancelled) setError(err.message || "Не удалось загрузить настройки");
+        if (!cancelled) setSaveError(err.message || "Не удалось загрузить настройки");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -123,159 +306,213 @@ export default function CabinetNotificationsSettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [sessionUser]);
+  }, [user, reload]);
 
-  if (sessionLoading) {
-    return (
-      <div className="cabinet-auth-page">
-        <div className="cabinet-auth-card">
-          <p className="cabinet-auth-muted">Проверяем сессию…</p>
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    const onBeforeUnload = (event) => {
+      if (!dirty || ignoreUnloadRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
 
-  if (!sessionUser) {
-    return (
-      <Navigate
-        to="/cabinet/login"
-        replace
-        state={{ from: location.pathname + location.search }}
-      />
-    );
-  }
-
-  const homePath = getCabinetHomePath(sessionUser);
-  const backLabel = isTeacher ? "В кабинет учителя" : "В кабинет ученика";
-
-  const runAction = async (key, fn, successText) => {
-    setBusy(key);
-    setError("");
-    setMessage("");
-    try {
-      await fn();
-      await reload();
-      if (successText) setMessage(successText);
-    } catch (err) {
-      setError(err.message || "Ошибка");
-    } finally {
-      setBusy("");
-    }
-  };
-
-  const handleToggle = async (field, checked) => {
-    setPrefs((prev) => (prev ? { ...prev, [field]: checked } : prev));
-    try {
-      const data = await updateNotificationPreferences({ [field]: checked });
-      setPrefs(data);
-    } catch (err) {
-      setError(err.message || "Не удалось сохранить");
-      await reload();
-    }
-  };
-
-  const handleDigestHour = async (value) => {
-    const hour = Number(value);
-    setPrefs((prev) => (prev ? { ...prev, digest_hour: hour } : prev));
-    try {
-      const data = await updateNotificationPreferences({ digest_hour: hour });
-      setPrefs(data);
-      setMessage("Время сводки сохранено");
-    } catch (err) {
-      setError(err.message || "Не удалось сохранить");
-      await reload();
-    }
-  };
-
-  const handleSelect = async (field, value) => {
+  const setField = (field, value) => {
     setPrefs((prev) => (prev ? { ...prev, [field]: value } : prev));
-    try {
-      const data = await updateNotificationPreferences({ [field]: value });
-      setPrefs(data);
-    } catch (err) {
-      setError(err.message || "Не удалось сохранить");
-      await reload();
-    }
+    setSaveError("");
   };
 
   const reminderMinutes = Array.isArray(prefs?.lesson_reminder_minutes)
     ? prefs.lesson_reminder_minutes
     : [1440, 60, 10];
 
-  const toggleReminder = async (minutes, enabled) => {
+  const toggleReminder = (minutes, enabled) => {
     const next = enabled
       ? [...new Set([...reminderMinutes, minutes])].sort((a, b) => b - a)
       : reminderMinutes.filter((m) => m !== minutes);
-    await handleSelect("lesson_reminder_minutes", next);
+    setField("lesson_reminder_minutes", next);
   };
 
+  const visibleGroups = useMemo(
+    () => TYPE_GROUPS
+      .filter((group) => !group.teacherOnly || isTeacher)
+      .map((group) => ({
+        ...group,
+        fields: group.fields.filter((field) => !field.teacherOnly || isTeacher),
+      }))
+      .filter((group) => group.fields.length > 0),
+    [isTeacher],
+  );
+
+  const setGroupEnabled = (group, enabled) => {
+    setPrefs((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev };
+      group.fields.forEach((field) => {
+        next[field.key] = enabled;
+      });
+      return next;
+    });
+    setSaveError("");
+  };
+
+  const runAction = async (key, fn, successText) => {
+    setBusy(key);
+    setSaveError("");
+    try {
+      await fn();
+      await reload();
+      if (successText) showToast(successText);
+    } catch (err) {
+      setSaveError(err.message || "Ошибка");
+      showToast(err.message || "Не удалось выполнить действие");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const handleSave = async () => {
+    if (!prefs || saving) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      const data = await updateNotificationPreferences(buildSavePayload(prefs));
+      // API returns { ok: true, ...payload }
+      const next = { ...prefs, ...data };
+      delete next.ok;
+      delete next.error;
+      setPrefs(next);
+      setSavedPrefs(next);
+      showToast("Настройки уведомлений сохранены");
+    } catch (err) {
+      const msg = err.message || "Не удалось сохранить настройки. Попробуйте ещё раз.";
+      setSaveError(msg);
+      showToast(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    if (dirty && !window.confirm("Есть несохранённые изменения. Отменить их?")) return;
+    setPrefs(savedPrefs);
+    setSaveError("");
+  };
+
+  const handleBack = (event) => {
+    if (dirty && !window.confirm("Есть несохранённые изменения. Уйти со страницы?")) {
+      event.preventDefault();
+      return;
+    }
+    ignoreUnloadRef.current = true;
+  };
+
+  if (!user) {
+    return (
+      <CabinetPageShell className="cb-section--notify">
+        <p className="cb-notify-muted">Загрузка…</p>
+      </CabinetPageShell>
+    );
+  }
+
+  const pushConfigured = Boolean(prefs?.push_configured);
+  const pushOn = prefs?.push_enabled !== false && pushConfigured;
+  const inAppOn = prefs?.in_app_enabled !== false;
+  const telegramConnected = Boolean(prefs?.connected);
+
   return (
-    <div className="cabinet-auth-page">
-      <div className="cabinet-auth-card cb-notify-settings" style={{ maxWidth: 560, textAlign: "left" }}>
-        <p style={{ marginBottom: "0.75rem" }}>
-          <Link to={homePath} className="cabinet-auth-link">{backLabel}</Link>
-        </p>
-        <header className="cb-notify-settings__head">
-          <h1 className="cabinet-auth-title" style={{ fontSize: "1.45rem" }}>Настройки уведомлений</h1>
-          <p className="cabinet-auth-muted">
-            Одно приложение «Цифровой поток» — push, кабинет и Telegram для вашей роли.
+    <CabinetPageShell className="cb-section--notify">
+      {toast}
+
+      <nav className="cb-notify-crumbs" aria-label="Навигация">
+        <Link to={homePath} className="cb-notify-crumbs__link" onClick={handleBack}>
+          Кабинет
+        </Link>
+        <span className="cb-notify-crumbs__sep" aria-hidden="true">/</span>
+        <span className="cb-notify-crumbs__current">Настройки уведомлений</span>
+      </nav>
+
+      <header className="cb-notify-hero">
+        <div className="cb-notify-hero__text">
+          <Link
+            to={morePath}
+            className="cb-notify-back"
+            onClick={handleBack}
+          >
+            <CabinetIcon name="arrowLeft" />
+            <span>Назад</span>
+          </Link>
+          <h1 className="cb-notify-hero__title">Настройки уведомлений</h1>
+          <p className="cb-notify-hero__sub">
+            Выберите, какие уведомления получать в кабинете, через Web Push и Telegram.
           </p>
-        </header>
+        </div>
+        <div className="cb-notify-hero__actions">
+          <button
+            type="button"
+            className="cb-btn cb-btn--outline"
+            disabled={!dirty || saving}
+            onClick={handleCancel}
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            className="cb-btn cb-btn--primary"
+            disabled={!dirty || saving || loading}
+            onClick={handleSave}
+          >
+            {saving ? "Сохранение…" : "Сохранить изменения"}
+          </button>
+        </div>
+      </header>
 
-        {error ? <p className="cabinet-auth-error" role="alert">{error}</p> : null}
-        {message ? <p className="cb-notify-settings__ok" role="status">{message}</p> : null}
+      {saveError ? (
+        <p className="cb-notify-alert cb-notify-alert--error" role="alert">{saveError}</p>
+      ) : null}
+      {dirty ? (
+        <p className="cb-notify-alert cb-notify-alert--warn" role="status">
+          Есть несохранённые изменения
+        </p>
+      ) : null}
 
-        {loading || !prefs ? (
-          <p className="cabinet-auth-muted">Загрузка настроек…</p>
-        ) : (
-          <>
-            <section className="cb-notify-settings__card">
-              <h2>Push-уведомления</h2>
-              <p className="cabinet-auth-muted">
-                Системные уведомления на телефон и компьютер. Разрешение запрашивается только после нажатия кнопки.
-              </p>
-              <ul className="cb-notify-settings__toggles">
-                <li>
-                  <label className="st-toggle-row">
-                    <span>Включить Web Push</span>
-                    <input
-                      type="checkbox"
-                      checked={prefs.push_enabled !== false}
-                      disabled={!prefs.push_configured}
-                      onChange={(e) => handleToggle("push_enabled", e.target.checked)}
-                    />
-                  </label>
-                </li>
-                <li>
-                  <label className="st-toggle-row">
-                    <span>Приватный режим (без сумм на экране блокировки)</span>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(prefs.push_privacy_mode)}
-                      onChange={(e) => handleToggle("push_privacy_mode", e.target.checked)}
-                    />
-                  </label>
-                </li>
-                <li>
-                  <label className="st-toggle-row">
-                    <span>Уведомления в кабинете</span>
-                    <input
-                      type="checkbox"
-                      checked={prefs.in_app_enabled !== false}
-                      onChange={(e) => handleToggle("in_app_enabled", e.target.checked)}
-                    />
-                  </label>
-                </li>
-              </ul>
-              {!prefs.push_configured ? (
-                <p className="cabinet-auth-muted">
-                  Web Push на сервере ещё не настроен (нужны VAPID-ключи). Telegram и кабинет уже работают.
-                </p>
-              ) : (
-                <div className="cb-notify-settings__actions">
+      {loading || !prefs ? (
+        <p className="cb-notify-muted">Загрузка настроек…</p>
+      ) : (
+        <>
+          <section className="cb-notify-channels" aria-label="Каналы уведомлений">
+            <ChannelStatusCard
+              icon="bell"
+              title="Уведомления в кабинете"
+              status={inAppOn ? "Включены" : "Выключены"}
+              tone={inAppOn ? "ok" : "muted"}
+              description="Показываются в колокольчике кабинета."
+            />
+            <ChannelStatusCard
+              icon="spark"
+              title="Web Push"
+              status={
+                !pushConfigured
+                  ? "Не настроен"
+                  : devices.some((d) => d.is_active)
+                    ? "Подключён"
+                    : pushOn
+                      ? "Включён"
+                      : "Выключен"
+              }
+              tone={!pushConfigured ? "warn" : (pushOn ? "ok" : "muted")}
+              badge={!pushConfigured ? "Недоступно" : undefined}
+              description={
+                !pushConfigured
+                  ? "Web Push пока недоступен: на сервере не настроены VAPID-ключи."
+                  : "Системные уведомления в браузере на этом устройстве."
+              }
+              actions={pushConfigured ? (
+                <>
                   <button
                     type="button"
-                    className="cb-btn cb-btn--primary"
+                    className="cb-btn cb-btn--primary cb-btn--sm"
                     disabled={Boolean(busy)}
                     onClick={() => runAction(
                       "push-on",
@@ -290,27 +527,105 @@ export default function CabinetNotificationsSettingsPage() {
                   </button>
                   <button
                     type="button"
-                    className="cb-btn cb-btn--outline"
+                    className="cb-btn cb-btn--outline cb-btn--sm"
                     disabled={Boolean(busy)}
                     onClick={() => runAction(
                       "push-test",
                       async () => {
-                        // Всегда переподписываем: иначе после смены VAPID/SW тест падает на «мертвой» подписке
                         await subscribeCabinetPush();
                         await sendPushTestNotification();
                       },
                       "Тестовое push отправлено",
                     )}
                   >
-                    {busy === "push-test" ? "Отправляем…" : "Тестовое уведомление"}
+                    {busy === "push-test" ? "Отправляем…" : "Тест"}
                   </button>
-                </div>
+                </>
+              ) : null}
+            />
+            <ChannelStatusCard
+              icon="video"
+              title="Telegram"
+              status={telegramConnected ? "Подключён" : "Не подключён"}
+              tone={telegramConnected ? "ok" : "muted"}
+              description={
+                telegramConnected
+                  ? (prefs.telegram_username
+                    ? `Аккаунт @${prefs.telegram_username}`
+                    : "Получайте напоминания в мессенджере")
+                  : "Получайте напоминания и уведомления в Telegram"
+              }
+              actions={telegramConnected ? (
+                <>
+                  <button
+                    type="button"
+                    className="cb-btn cb-btn--outline cb-btn--sm"
+                    disabled={Boolean(busy)}
+                    onClick={() => runAction("test", () => sendTelegramTestNotification(), "Тестовое сообщение отправлено")}
+                  >
+                    {busy === "test" ? "Отправляем…" : "Тест"}
+                  </button>
+                  <button
+                    type="button"
+                    className="cb-btn cb-btn--outline cb-btn--sm"
+                    disabled={Boolean(busy)}
+                    onClick={() => runAction("disconnect", () => disconnectTelegram(), "Telegram отключён")}
+                  >
+                    {busy === "disconnect" ? "Отключаем…" : "Отключить"}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--primary cb-btn--sm"
+                  disabled={Boolean(busy) || prefs.bot_configured === false}
+                  onClick={() => runAction("connect", () => openTelegramConnect())}
+                >
+                  {busy === "connect" ? "Открываем…" : "Подключить Telegram"}
+                </button>
               )}
-              {devices.length > 0 ? (
-                <ul className="cb-notify-settings__toggles" style={{ marginTop: 12 }}>
-                  {devices.map((device) => (
-                    <li key={device.id}>
-                      <label className="st-toggle-row">
+            />
+          </section>
+
+          <div className="cb-notify-layout">
+            <div className="cb-notify-col cb-notify-col--side">
+              <section className="cb-notify-card">
+                <header className="cb-notify-card__head">
+                  <h2 className="cb-notify-card__title">Каналы доставки</h2>
+                  <p className="cb-notify-card__sub">Выберите, куда отправлять уведомления.</p>
+                </header>
+                <div className="cb-notify-switch-list">
+                  <SwitchRow
+                    id="notify-in-app"
+                    label="Уведомления в кабинете"
+                    description="Список уведомлений внутри платформы"
+                    checked={prefs.in_app_enabled !== false}
+                    onChange={(v) => setField("in_app_enabled", v)}
+                  />
+                  <SwitchRow
+                    id="notify-push"
+                    label="Web Push"
+                    description={
+                      pushConfigured
+                        ? "Системные уведомления браузера"
+                        : "Недоступно: на сервере нет VAPID-ключей"
+                    }
+                    checked={prefs.push_enabled !== false}
+                    disabled={!pushConfigured}
+                    onChange={(v) => setField("push_enabled", v)}
+                  />
+                  <SwitchRow
+                    id="notify-privacy"
+                    label="Приватный режим"
+                    description="Не показывать текст и суммы в уведомлениях на экране блокировки."
+                    checked={Boolean(prefs.push_privacy_mode)}
+                    onChange={(v) => setField("push_privacy_mode", v)}
+                  />
+                </div>
+                {devices.length > 0 ? (
+                  <ul className="cb-notify-devices">
+                    {devices.map((device) => (
+                      <li key={device.id} className="cb-notify-devices__item">
                         <span>
                           {device.device_label || `${device.device_type} · ${device.browser}`}
                           {!device.is_active ? " (отключено)" : ""}
@@ -329,296 +644,270 @@ export default function CabinetNotificationsSettingsPage() {
                             Отключить
                           </button>
                         ) : null}
-                      </label>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </section>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </section>
 
-            <section className="cb-notify-settings__card">
-              <h2>Telegram</h2>
-              {prefs.connected ? (
-                <>
-                  <p>
-                    Статус: <strong>подключён</strong>
-                    {prefs.telegram_username ? ` (@${prefs.telegram_username})` : ""}
+              <section className="cb-notify-card">
+                <header className="cb-notify-card__head">
+                  <h2 className="cb-notify-card__title">Telegram</h2>
+                  <p className="cb-notify-card__sub">
+                    {telegramConnected
+                      ? "Аккаунт подключён. Можно отправить тест или отключить."
+                      : "Подключите бота, чтобы получать напоминания в мессенджере."}
                   </p>
-                  <div className="cb-notify-settings__actions">
-                    <button
-                      type="button"
-                      className="cb-btn cb-btn--outline"
-                      disabled={Boolean(busy)}
-                      onClick={() => runAction("test", () => sendTelegramTestNotification(), "Тестовое сообщение отправлено")}
-                    >
-                      {busy === "test" ? "Отправляем…" : "Отправить тестовое уведомление"}
-                    </button>
-                    <button
-                      type="button"
-                      className="cb-btn cb-btn--outline"
-                      disabled={Boolean(busy)}
-                      onClick={() => runAction("reconnect", () => openTelegramConnect(), "Открыт Telegram для повторного подключения")}
-                    >
-                      {busy === "reconnect" ? "Открываем…" : "Подключить заново"}
-                    </button>
-                    <button
-                      type="button"
-                      className="cb-btn cb-btn--outline"
-                      disabled={Boolean(busy)}
-                      onClick={() => runAction("disconnect", () => disconnectTelegram(), "Telegram отключён")}
-                    >
-                      {busy === "disconnect" ? "Отключаем…" : "Отключить Telegram"}
-                    </button>
+                </header>
+                <div className="cb-notify-telegram">
+                  <div className="cb-notify-telegram__status">
+                    <span className={`cb-notify-dot cb-notify-dot--${telegramConnected ? "ok" : "muted"}`} />
+                    <div>
+                      <strong>{telegramConnected ? "Подключён" : "Не подключён"}</strong>
+                      {telegramConnected && prefs.telegram_username ? (
+                        <p>@{prefs.telegram_username}</p>
+                      ) : null}
+                    </div>
                   </div>
-                </>
-              ) : (
-                <>
-                  <p>Telegram не подключён. Напоминания можно получать в мессенджере.</p>
-                  <button
-                    type="button"
-                    className="cb-btn cb-btn--primary"
-                    disabled={Boolean(busy) || prefs.bot_configured === false}
-                    onClick={() => runAction("connect", () => openTelegramConnect())}
-                  >
-                    {busy === "connect" ? "Открываем…" : "Подключить Telegram"}
-                  </button>
-                  {prefs.bot_configured === false ? (
-                    <p className="cabinet-auth-muted">Подключение временно недоступно.</p>
-                  ) : null}
-                </>
-              )}
-            </section>
-
-            <section className="cb-notify-settings__card">
-              <h2>Напоминания об уроках</h2>
-              <ul className="cb-notify-settings__toggles">
-                {REMINDER_OPTIONS.map((opt) => (
-                  <li key={opt.minutes}>
-                    <label className="st-toggle-row">
-                      <span>{opt.label}</span>
-                      <input
-                        type="checkbox"
-                        checked={reminderMinutes.includes(opt.minutes)}
-                        onChange={(e) => toggleReminder(opt.minutes, e.target.checked)}
-                      />
-                    </label>
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            {isTeacher ? (
-              <section className="cb-notify-settings__card">
-                <h2>Расписание на день</h2>
-                <label className="cb-field">
-                  <span>Время утреннего уведомления</span>
-                  <select
-                    value={prefs.daily_schedule_hour ?? "off"}
-                    onChange={(e) => handleSelect(
-                      "daily_schedule_hour",
-                      e.target.value === "off" ? "off" : Number(e.target.value),
+                  <div className="cb-notify-telegram__actions">
+                    {telegramConnected ? (
+                      <>
+                        <button
+                          type="button"
+                          className="cb-btn cb-btn--outline"
+                          disabled={Boolean(busy)}
+                          onClick={() => runAction("reconnect", () => openTelegramConnect(), "Открыт Telegram для повторного подключения")}
+                        >
+                          {busy === "reconnect" ? "Открываем…" : "Подключить заново"}
+                        </button>
+                        <button
+                          type="button"
+                          className="cb-btn cb-btn--outline"
+                          disabled={Boolean(busy)}
+                          onClick={() => runAction("disconnect", () => disconnectTelegram(), "Telegram отключён")}
+                        >
+                          {busy === "disconnect" ? "Отключаем…" : "Отключить"}
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="cb-btn cb-btn--primary"
+                        disabled={Boolean(busy) || prefs.bot_configured === false}
+                        onClick={() => runAction("connect", () => openTelegramConnect())}
+                      >
+                        {busy === "connect" ? "Открываем…" : "Подключить Telegram"}
+                      </button>
                     )}
+                  </div>
+                  {prefs.bot_configured === false ? (
+                    <p className="cb-notify-muted">Подключение временно недоступно.</p>
+                  ) : null}
+                </div>
+              </section>
+
+              <section className="cb-notify-card">
+                <header className="cb-notify-card__head">
+                  <h2 className="cb-notify-card__title">Когда отправлять</h2>
+                  <p className="cb-notify-card__sub">Расписание сводок и режимы доставки.</p>
+                </header>
+                <div className="cb-notify-fields">
+                  {isTeacher ? (
+                    <FieldSelect
+                      id="daily-schedule-hour"
+                      label="Утренняя сводка"
+                      value={prefs.daily_schedule_hour ?? "off"}
+                      onChange={(e) => setField(
+                        "daily_schedule_hour",
+                        e.target.value === "off" ? "off" : Number(e.target.value),
+                      )}
+                    >
+                      <option value="off">Не отправлять</option>
+                      {[7, 8, 9].map((hour) => (
+                        <option key={hour} value={hour}>
+                          {String(hour).padStart(2, "0")}:00
+                        </option>
+                      ))}
+                    </FieldSelect>
+                  ) : null}
+
+                  {isTeacher ? (
+                    <FieldSelect
+                      id="homework-review-mode"
+                      label="Новые работы на проверку"
+                      value={prefs.homework_review_push_mode || "each"}
+                      onChange={(e) => setField("homework_review_push_mode", e.target.value)}
+                    >
+                      <option value="each">Отдельное уведомление о каждой работе</option>
+                      <option value="digest_15">Сводка раз в 15 минут</option>
+                      <option value="digest_60">Сводка раз в час</option>
+                      <option value="in_app_only">Только внутри платформы</option>
+                    </FieldSelect>
+                  ) : null}
+
+                  {isTeacher ? (
+                    <FieldSelect
+                      id="overdue-mode"
+                      label="Просроченные задания"
+                      value={prefs.overdue_homework_mode || "daily"}
+                      onChange={(e) => setField("overdue_homework_mode", e.target.value)}
+                    >
+                      <option value="immediate">Сразу после срока</option>
+                      <option value="daily">Ежедневная сводка</option>
+                      <option value="in_app_only">Только в кабинете</option>
+                      <option value="off">Не уведомлять</option>
+                    </FieldSelect>
+                  ) : null}
+
+                  <FieldSelect
+                    id="digest-hour"
+                    label="Час ежедневной сводки"
+                    value={prefs.digest_hour ?? 19}
+                    onChange={(e) => setField("digest_hour", Number(e.target.value))}
                   >
-                    <option value="off">Не отправлять</option>
-                    {[7, 8, 9].map((hour) => (
+                    {Array.from({ length: 24 }, (_, hour) => (
                       <option key={hour} value={hour}>
                         {String(hour).padStart(2, "0")}:00
                       </option>
                     ))}
-                  </select>
-                </label>
-              </section>
-            ) : null}
+                  </FieldSelect>
+                </div>
 
-            {isTeacher ? (
-              <section className="cb-notify-settings__card">
-                <h2>Работы на проверку</h2>
-                <label className="cb-field">
-                  <span>Режим push</span>
-                  <select
-                    value={prefs.homework_review_push_mode || "each"}
-                    onChange={(e) => handleSelect("homework_review_push_mode", e.target.value)}
-                  >
-                    <option value="each">Отдельное уведомление по каждой работе</option>
-                    <option value="digest_15">Сводка раз в 15 минут</option>
-                    <option value="digest_60">Сводка раз в час</option>
-                    <option value="in_app_only">Только внутри платформы</option>
-                  </select>
-                </label>
-                <label className="cb-field" style={{ marginTop: 12 }}>
-                  <span>Просроченные задания</span>
-                  <select
-                    value={prefs.overdue_homework_mode || "daily"}
-                    onChange={(e) => handleSelect("overdue_homework_mode", e.target.value)}
-                  >
-                    <option value="immediate">Сразу после срока</option>
-                    <option value="daily">Ежедневная сводка</option>
-                    <option value="in_app_only">Только в кабинете</option>
-                    <option value="off">Не уведомлять</option>
-                  </select>
-                </label>
-              </section>
-            ) : null}
-
-            <section className="cb-notify-settings__card">
-              <h2>Типы уведомлений</h2>
-              <ul className="cb-notify-settings__toggles">
-                {TOGGLE_FIELDS.map((field) => (
-                  <li key={field.key}>
-                    <label className="st-toggle-row">
-                      <span>{field.label}</span>
+                <div className="cb-notify-dnd">
+                  <h3 className="cb-notify-card__subtitle">Не беспокоить</h3>
+                  <div className="cb-notify-switch-list">
+                    <SwitchRow
+                      id="dnd-enabled"
+                      label="Включить период тишины"
+                      checked={Boolean(prefs.dnd_enabled)}
+                      onChange={(v) => setField("dnd_enabled", v)}
+                    />
+                    <SwitchRow
+                      id="dnd-urgent"
+                      label="Срочные уведомления во время тишины"
+                      checked={prefs.dnd_allow_urgent !== false}
+                      onChange={(v) => setField("dnd_allow_urgent", v)}
+                    />
+                  </div>
+                  <div className="cb-notify-dnd__times">
+                    <label className="cb-notify-field" htmlFor="dnd-start">
+                      <span className="cb-notify-field__label">С</span>
                       <input
-                        type="checkbox"
-                        checked={prefs[field.key] !== false}
-                        onChange={(e) => handleToggle(field.key, e.target.checked)}
+                        id="dnd-start"
+                        type="time"
+                        className="cb-notify-field__select"
+                        value={prefs.dnd_start || "22:00"}
+                        onChange={(e) => setField("dnd_start", e.target.value)}
                       />
                     </label>
-                  </li>
-                ))}
-                {isTeacher
-                  ? TEACHER_EXTRA_FIELDS.map((field) => (
-                    <li key={field.key}>
-                      <label className="st-toggle-row">
-                        <span>{field.label}</span>
-                        <input
-                          type="checkbox"
-                          checked={prefs[field.key] !== false}
-                          onChange={(e) => handleToggle(field.key, e.target.checked)}
-                        />
-                      </label>
-                    </li>
-                  ))
-                  : null}
-              </ul>
-            </section>
-
-            <section className="cb-notify-settings__card">
-              <h2>Не беспокоить</h2>
-              <ul className="cb-notify-settings__toggles">
-                <li>
-                  <label className="st-toggle-row">
-                    <span>Включить период тишины</span>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(prefs.dnd_enabled)}
-                      onChange={(e) => handleToggle("dnd_enabled", e.target.checked)}
-                    />
-                  </label>
-                </li>
-                <li>
-                  <label className="st-toggle-row">
-                    <span>Срочные уведомления во время тишины</span>
-                    <input
-                      type="checkbox"
-                      checked={prefs.dnd_allow_urgent !== false}
-                      onChange={(e) => handleToggle("dnd_allow_urgent", e.target.checked)}
-                    />
-                  </label>
-                </li>
-              </ul>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 8 }}>
-                <label className="cb-field">
-                  <span>С</span>
-                  <input
-                    type="time"
-                    value={prefs.dnd_start || "22:00"}
-                    onChange={(e) => handleSelect("dnd_start", e.target.value)}
-                  />
-                </label>
-                <label className="cb-field">
-                  <span>До</span>
-                  <input
-                    type="time"
-                    value={prefs.dnd_end || "07:00"}
-                    onChange={(e) => handleSelect("dnd_end", e.target.value)}
-                  />
-                </label>
-              </div>
-            </section>
-
-            <section className="cb-notify-settings__card">
-              <h2>Время сводки</h2>
-              <label className="cb-field">
-                <span>Час ежедневной сводки</span>
-                <select
-                  value={prefs.digest_hour ?? 19}
-                  onChange={(e) => handleDigestHour(e.target.value)}
-                >
-                  {Array.from({ length: 24 }, (_, hour) => (
-                    <option key={hour} value={hour}>
-                      {String(hour).padStart(2, "0")}:00
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </section>
-
-            {isTeacher ? (
-              <section className="cb-notify-settings__card">
-                <h2>Журнал — учителю</h2>
-                <ul className="cb-notify-settings__toggles">
-                  {JOURNAL_TEACHER_FIELDS.map((field) => (
-                    <li key={field.key}>
-                      <label className="st-toggle-row">
-                        <span>{field.label}</span>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(prefs[field.key])}
-                          onChange={(e) => handleToggle(field.key, e.target.checked)}
-                        />
-                      </label>
-                    </li>
-                  ))}
-                </ul>
+                    <label className="cb-notify-field" htmlFor="dnd-end">
+                      <span className="cb-notify-field__label">До</span>
+                      <input
+                        id="dnd-end"
+                        type="time"
+                        className="cb-notify-field__select"
+                        value={prefs.dnd_end || "07:00"}
+                        onChange={(e) => setField("dnd_end", e.target.value)}
+                      />
+                    </label>
+                  </div>
+                </div>
               </section>
-            ) : null}
+            </div>
 
-            {isTeacher ? (
-              <>
-                <section className="cb-notify-settings__card">
-                  <h2>Оплаты — учителю</h2>
-                  <p className="cabinet-auth-muted">Через уже подключённые каналы, без новых ссылок.</p>
-                  <ul className="cb-notify-settings__toggles">
-                    {BILLING_TEACHER_FIELDS.map((field) => (
-                      <li key={field.key}>
-                        <label className="st-toggle-row">
-                          <span>{field.label}</span>
-                          <input
-                            type="checkbox"
-                            checked={Boolean(prefs[field.key])}
-                            onChange={(e) => handleToggle(field.key, e.target.checked)}
-                          />
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-
-                <section className="cb-notify-settings__card">
-                  <h2>Оплаты — ученику</h2>
-                  <p className="cabinet-auth-muted">
-                    Ученику уходят только если вы включили уведомления для конкретного ученика в разделе «Оплаты».
+            <div className="cb-notify-col cb-notify-col--main">
+              <section className="cb-notify-card">
+                <header className="cb-notify-card__head">
+                  <h2 className="cb-notify-card__title">Напоминания об уроках</h2>
+                  <p className="cb-notify-card__sub">
+                    Выберите, за какое время до занятия отправлять напоминание.
                   </p>
-                  <ul className="cb-notify-settings__toggles">
-                    {BILLING_STUDENT_FIELDS.map((field) => (
-                      <li key={field.key}>
-                        <label className="st-toggle-row">
-                          <span>{field.label}</span>
-                          <input
-                            type="checkbox"
-                            checked={Boolean(prefs[field.key])}
-                            onChange={(e) => handleToggle(field.key, e.target.checked)}
-                          />
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              </>
-            ) : null}
-          </>
-        )}
+                </header>
+                <div className="cb-notify-switch-list">
+                  {REMINDER_OPTIONS.map((opt) => (
+                    <SwitchRow
+                      key={opt.minutes}
+                      id={`reminder-${opt.minutes}`}
+                      label={opt.label}
+                      description={opt.description}
+                      checked={reminderMinutes.includes(opt.minutes)}
+                      onChange={(v) => toggleReminder(opt.minutes, v)}
+                    />
+                  ))}
+                </div>
+              </section>
+
+              <section className="cb-notify-card cb-notify-card--types">
+                <header className="cb-notify-card__head cb-notify-card__head--row">
+                  <div>
+                    <h2 className="cb-notify-card__title">Типы уведомлений</h2>
+                    <p className="cb-notify-card__sub">
+                      Включите только те события, о которых хотите получать сообщения.
+                    </p>
+                  </div>
+                </header>
+
+                {visibleGroups.map((group) => (
+                  <div key={group.id} className="cb-notify-group">
+                    <div className="cb-notify-group__head">
+                      <h3 className="cb-notify-group__title">{group.title}</h3>
+                      <div className="cb-notify-group__actions">
+                        <button
+                          type="button"
+                          className="cb-notify-link-btn"
+                          onClick={() => setGroupEnabled(group, true)}
+                        >
+                          Включить все
+                        </button>
+                        <button
+                          type="button"
+                          className="cb-notify-link-btn"
+                          onClick={() => setGroupEnabled(group, false)}
+                        >
+                          Выключить все
+                        </button>
+                      </div>
+                    </div>
+                    {group.description ? (
+                      <p className="cb-notify-card__sub">{group.description}</p>
+                    ) : null}
+                    <div className="cb-notify-switch-list">
+                      {group.fields.map((field) => (
+                        <SwitchRow
+                          key={field.key}
+                          id={`type-${field.key}`}
+                          label={field.label}
+                          checked={isFieldChecked(prefs, field)}
+                          onChange={(v) => setField(field.key, v)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </section>
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className="cb-notify-sticky" aria-label="Сохранение настроек">
+        <button
+          type="button"
+          className="cb-btn cb-btn--outline"
+          disabled={!dirty || saving}
+          onClick={handleCancel}
+        >
+          Отмена
+        </button>
+        <button
+          type="button"
+          className="cb-btn cb-btn--primary"
+          disabled={!dirty || saving || loading}
+          onClick={handleSave}
+        >
+          {saving ? "Сохранение…" : "Сохранить изменения"}
+        </button>
       </div>
-    </div>
+    </CabinetPageShell>
   );
 }

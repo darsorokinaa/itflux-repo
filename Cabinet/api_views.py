@@ -1911,13 +1911,84 @@ class ReportsParentSummaryView(TeacherScopedMixin, APIView):
         })
 
 
-class HomeworkDeleteView(TeacherScopedMixin, APIView):
-    """Удалить домашнее задание учителя вместе со всеми работами ученика."""
+class HomeworkDetailView(TeacherScopedMixin, APIView):
+    """Просмотр для редактирования / сохранение правок / удаление выданного ДЗ."""
+
+    def _get_homework(self, request, homework_id):
+        from .homework_edit import teacher_can_edit_homework
+
+        homework = (
+            Homework.objects.filter(pk=homework_id)
+            .select_related("student", "group", "teacher")
+            .prefetch_related("tasks", "submissions")
+            .first()
+        )
+        if homework is None:
+            return None, Response({"detail": "Не найдено."}, status=status.HTTP_404_NOT_FOUND)
+        if not teacher_can_edit_homework(request.user, homework):
+            return None, Response(
+                {"detail": "Нет доступа к этому домашнему заданию."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return homework, None
+
+    def get(self, request, homework_id):
+        from .homework_edit import serialize_homework_for_edit
+
+        homework, err = self._get_homework(request, homework_id)
+        if err:
+            return err
+        return Response(serialize_homework_for_edit(homework))
+
+    def patch(self, request, homework_id):
+        from .homework_edit import (
+            HomeworkEditConflict,
+            HomeworkEditNeedsConfirm,
+            update_issued_homework,
+        )
+
+        homework, err = self._get_homework(request, homework_id)
+        if err:
+            return err
+        data = request.data if isinstance(request.data, dict) else {}
+        try:
+            result = update_issued_homework(
+                homework=homework,
+                teacher=request.user,
+                data=data,
+            )
+        except HomeworkEditConflict as exc:
+            return Response(
+                {"detail": str(exc), "code": "conflict"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except HomeworkEditNeedsConfirm as exc:
+            return Response(
+                {"detail": exc.message, "code": exc.code},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except PermissionError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result, status=status.HTTP_200_OK)
 
     def delete(self, request, homework_id):
         from .choices import SubmissionStatus
 
-        homework = get_object_or_404(Homework, pk=homework_id, teacher=request.user)
+        homework, err = self._get_homework(request, homework_id)
+        if err:
+            return err
+        # Staff/admin могут удалять чужие только если teacher_can_edit; для обычного
+        # учителя оставляем прежнюю жёсткую привязку к владельцу.
+        if homework.teacher_id != request.user.id and not (
+            getattr(request.user, "is_staff", False)
+            or getattr(request.user, "is_superuser", False)
+        ):
+            return Response(
+                {"detail": "Нет доступа к этому домашнему заданию."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         # Проверенное и принятое ДЗ удалять нельзя.
         submission_ids = list(homework.submissions.values_list("id", flat=True))
@@ -1945,6 +2016,10 @@ class HomeworkDeleteView(TeacherScopedMixin, APIView):
 
         homework.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# Обратная совместимость имени
+HomeworkDeleteView = HomeworkDetailView
 
 
 class HomeworkTasksAddView(TeacherScopedMixin, APIView):
