@@ -49,28 +49,36 @@ export default function JournalEntriesFeed({ studentId, groupId }) {
   return (
     <section className="jg-entries">
       <div className="jg-entries__head">
-        <h2>Все записи</h2>
-        <p className="jg-entries__hint">Уроки и домашние задания в одной ленте. ДЗ берутся из сдач, без дублирования оценок.</p>
+        <h2 className="jg-entries__title">Все записи</h2>
+        <p className="jg-entries__lead">
+          Уроки и домашние задания в одной ленте. ДЗ берутся из сдач, без дублирования оценок.
+        </p>
       </div>
 
       <div className="jg-entries__filters">
         <select
+          className="jg-entries__select"
           value={filters.entry_type}
           onChange={(e) => setFilters((f) => ({ ...f, entry_type: e.target.value, homework_only: false }))}
+          aria-label="Тип записи"
         >
           <option value="">Все типы</option>
           <option value="lesson">Урок</option>
           <option value="homework">ДЗ</option>
         </select>
-        <label>
+        <label className={`jg-entries__check${filters.homework_only ? " is-active" : ""}`}>
           <input
             type="checkbox"
             checked={filters.homework_only}
-            onChange={(e) => setFilters((f) => ({ ...f, homework_only: e.target.checked, entry_type: e.target.checked ? "homework" : f.entry_type }))}
+            onChange={(e) => setFilters((f) => ({
+              ...f,
+              homework_only: e.target.checked,
+              entry_type: e.target.checked ? "homework" : f.entry_type,
+            }))}
           />
           Только ДЗ
         </label>
-        <label>
+        <label className={`jg-entries__check${filters.overdue ? " is-active" : ""}`}>
           <input
             type="checkbox"
             checked={filters.overdue}
@@ -79,8 +87,10 @@ export default function JournalEntriesFeed({ studentId, groupId }) {
           Просрочено
         </label>
         <select
+          className="jg-entries__select"
           value={filters.reviewed}
           onChange={(e) => setFilters((f) => ({ ...f, reviewed: e.target.value }))}
+          aria-label="Статус проверки"
         >
           <option value="">Проверка: все</option>
           <option value="yes">Проверено</option>
@@ -90,18 +100,42 @@ export default function JournalEntriesFeed({ studentId, groupId }) {
 
       {summary ? (
         <div className="jg-entries__summary">
-          <span>Средний % ДЗ: {summary.homework_average_percent ?? "—"}</span>
-          <span>Выдано: {summary.homework_assigned}</span>
-          <span>Сдано: {summary.homework_submitted}</span>
-          <span>Проверено: {summary.homework_checked}</span>
-          <span>На проверке: {summary.homework_pending_review}</span>
-          <span>Просрочено: {summary.homework_overdue}</span>
+          <div className="jg-entries__stats">
+            <span>
+              <em>Средний % ДЗ</em>
+              <strong>{summary.homework_average_percent ?? "—"}</strong>
+            </span>
+            <span>
+              <em>Выдано</em>
+              <strong>{summary.homework_assigned}</strong>
+            </span>
+            <span>
+              <em>Сдано</em>
+              <strong>{summary.homework_submitted}</strong>
+            </span>
+            <span>
+              <em>Проверено</em>
+              <strong>{summary.homework_checked}</strong>
+            </span>
+            <span>
+              <em>На проверке</em>
+              <strong>{summary.homework_pending_review}</strong>
+            </span>
+            <span>
+              <em>Просрочено</em>
+              <strong>{summary.homework_overdue}</strong>
+            </span>
+          </div>
           {hint ? <p className="jg-entries__hint">{hint}</p> : null}
         </div>
       ) : null}
 
-      {loading ? <div className="jg-empty">Загрузка записей…</div> : null}
+      {loading ? <div className="jg-empty jg-empty--compact">Загрузка записей…</div> : null}
       {error ? <div className="jl-error">{error}</div> : null}
+
+      {!loading && !error && !entries.length ? (
+        <div className="jg-empty jg-empty--compact">Записей пока нет</div>
+      ) : null}
 
       <ul className="jg-entries__list">
         {entries.map((entry) => (
@@ -111,7 +145,9 @@ export default function JournalEntriesFeed({ studentId, groupId }) {
               className={`jg-entry-card jg-entry-card--${entry.entry_type}${entry.is_overdue ? " is-overdue" : ""}`}
               onClick={() => setSelected(entry)}
             >
-              <span className="jg-entry-card__badge">{entry.badge || entry.entry_type_label}</span>
+              <span className={`jg-entry-card__badge jg-entry-card__badge--${entry.entry_type}`}>
+                {entry.badge || entry.entry_type_label}
+              </span>
               <div className="jg-entry-card__body">
                 <strong>{entry.title}</strong>
                 <span>
@@ -130,20 +166,34 @@ export default function JournalEntriesFeed({ studentId, groupId }) {
 
       {selected ? (
         <div className="jg-entry-drawer" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="jg-entry-drawer__backdrop"
+            aria-label="Закрыть"
+            onClick={() => setSelected(null)}
+          />
           <div className="jg-entry-drawer__panel">
-            <header>
-              <span className="jg-entry-card__badge">{selected.badge}</span>
-              <h3>{selected.title}</h3>
-              <button type="button" className="cb-btn cb-btn--outline" onClick={() => setSelected(null)}>Закрыть</button>
+            <header className="jg-entry-drawer__header">
+              <div className="jg-entry-drawer__heading">
+                <span className={`jg-entry-card__badge jg-entry-card__badge--${selected.entry_type}`}>
+                  {selected.badge}
+                </span>
+                <h3>{selected.title}</h3>
+              </div>
+              <button type="button" className="cb-btn cb-btn--outline" onClick={() => setSelected(null)}>
+                Закрыть
+              </button>
             </header>
-            <p>{selected.student_name}</p>
-            <p>Статус: {selected.status_label || selected.status}</p>
-            {selected.score_percent != null ? <p>Результат: {selected.score_percent}%</p> : null}
-            {selected.due_at ? <p>Срок: {new Date(selected.due_at).toLocaleString("ru-RU")}</p> : null}
-            {selected.submitted_at ? <p>Сдано: {new Date(selected.submitted_at).toLocaleString("ru-RU")}</p> : null}
-            {selected.comment ? <p>Комментарий: {selected.comment}</p> : null}
+            <div className="jg-entry-drawer__meta">
+              <p>{selected.student_name}</p>
+              <p>Статус: {selected.status_label || selected.status}</p>
+              {selected.score_percent != null ? <p>Результат: {selected.score_percent}%</p> : null}
+              {selected.due_at ? <p>Срок: {new Date(selected.due_at).toLocaleString("ru-RU")}</p> : null}
+              {selected.submitted_at ? <p>Сдано: {new Date(selected.submitted_at).toLocaleString("ru-RU")}</p> : null}
+              {selected.comment ? <p>Комментарий: {selected.comment}</p> : null}
+            </div>
             {(selected.attempts || []).length ? (
-              <div>
+              <div className="jg-entry-drawer__attempts">
                 <h4>История попыток</h4>
                 <ul>
                   {selected.attempts.map((a) => (

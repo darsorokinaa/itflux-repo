@@ -94,6 +94,18 @@ function MaterialRow({ item }) {
       </a>
     );
   }
+  const fallback = item.assignment_id
+    ? `/cabinet/student/lessons/${item.assignment_id}`
+    : item.homework_id
+      ? `/cabinet/student/assignments/${item.homework_id}`
+      : "";
+  if (fallback) {
+    return (
+      <Link to={fallback} className="st-mat-row st-mat-row--link">
+        {inner}
+      </Link>
+    );
+  }
   return <div className="st-mat-row st-mat-row--disabled">{inner}</div>;
 }
 
