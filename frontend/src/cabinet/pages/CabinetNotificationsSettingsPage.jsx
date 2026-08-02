@@ -292,7 +292,15 @@ export default function CabinetNotificationsSettingsPage() {
                     type="button"
                     className="cb-btn cb-btn--outline"
                     disabled={Boolean(busy)}
-                    onClick={() => runAction("push-test", () => sendPushTestNotification(), "Тестовое push отправлено")}
+                    onClick={() => runAction(
+                      "push-test",
+                      async () => {
+                        // Всегда переподписываем: иначе после смены VAPID/SW тест падает на «мертвой» подписке
+                        await subscribeCabinetPush();
+                        await sendPushTestNotification();
+                      },
+                      "Тестовое push отправлено",
+                    )}
                   >
                     {busy === "push-test" ? "Отправляем…" : "Тестовое уведомление"}
                   </button>

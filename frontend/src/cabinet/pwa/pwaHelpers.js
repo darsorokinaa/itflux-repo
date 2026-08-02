@@ -107,13 +107,20 @@ export async function subscribeWebPush({ publicKey, deviceLabel = "" } = {}) {
   if (!reg?.pushManager) {
     throw new Error("Service Worker ещё не готов — обновите страницу и попробуйте снова");
   }
-  let subscription = await reg.pushManager.getSubscription();
-  if (!subscription) {
-    subscription = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(publicKey),
-    });
+  // Старая подписка после смены VAPID-ключей становится невалидной —
+  // всегда пересоздаём при явном «Включить».
+  const existing = await reg.pushManager.getSubscription();
+  if (existing) {
+    try {
+      await existing.unsubscribe();
+    } catch {
+      /* ignore */
+    }
   }
+  const subscription = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(publicKey),
+  });
   return {
     subscription: subscription.toJSON(),
     device_label: deviceLabel,

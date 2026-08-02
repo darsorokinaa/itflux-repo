@@ -75,25 +75,28 @@ def send_web_push_to_user(
     urgent: bool = False,
     payload_extra: dict | None = None,
     create_log: bool = True,
-) -> int:
+    force: bool = False,
+) -> dict[str, Any]:
     """
     Send Web Push to all active subscriptions of the user.
-    Returns number of successful deliveries.
+    Returns {sent, active, reason, errors}.
+    force=True — ignore push_enabled / DND (для тестовой кнопки).
     """
+    empty = {"sent": 0, "active": 0, "reason": "", "errors": []}
     if not webpush_configured():
-        return 0
+        return {**empty, "reason": "not_configured"}
 
     prefs = _prefs(user)
-    if not getattr(prefs, "push_enabled", True):
-        return 0
-    if not _priority_allows_push(priority, urgent, prefs):
-        return 0
+    if not force and not getattr(prefs, "push_enabled", True):
+        return {**empty, "reason": "push_disabled"}
+    if not force and not _priority_allows_push(priority, urgent, prefs):
+        return {**empty, "reason": "dnd"}
 
     try:
         from pywebpush import WebPushException, webpush
     except ImportError:
         logger.warning("pywebpush is not installed — skip web push")
-        return 0
+        return {**empty, "reason": "pywebpush_missing"}
 
     private_key = (getattr(settings, "VAPID_PRIVATE_KEY", "") or "").strip()
     private_key = private_key.replace("\\n", "\n")
@@ -112,7 +115,11 @@ def send_web_push_to_user(
                 data[key] = payload_extra[key]
 
     sent = 0
-    qs = PushSubscription.objects.filter(user=user, is_active=True)
+    errors: list[str] = []
+    qs = list(PushSubscription.objects.filter(user=user, is_active=True))
+    if not qs:
+        return {**empty, "reason": "no_devices"}
+
     for sub in qs:
         try:
             webpush(
@@ -142,6 +149,8 @@ def send_web_push_to_user(
                 )
         except WebPushException as exc:
             status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            err_text = str(exc)[:300]
+            errors.append(err_text)
             logger.info("Web push failed for sub %s: %s", sub.pk, exc)
             if status_code in (404, 410):
                 sub.is_active = False
@@ -154,12 +163,18 @@ def send_web_push_to_user(
                     message=body or "",
                     payload=data,
                     status=NotificationStatus.FAILED,
-                    error_message=str(exc)[:500],
+                    error_message=err_text[:500],
                 )
-        except Exception:
+        except Exception as exc:
+            errors.append(str(exc)[:300])
             logger.exception("Unexpected web push error for user %s", user.pk)
 
-    return sent
+    return {
+        "sent": sent,
+        "active": len(qs),
+        "reason": "" if sent else "send_failed",
+        "errors": errors,
+    }
 
 
 def notify_user_channels(

@@ -113,7 +113,8 @@ class PushTestView(APIView):
         if not webpush_configured():
             return Response({"error": "Web Push не настроен."}, status=503)
         home = _home_path_for(request.user)
-        sent = send_web_push_to_user(
+        # force: тестовая кнопка не должна молчать из‑за DND / push_enabled
+        result = send_web_push_to_user(
             request.user,
             title="Тестовое уведомление",
             body="Если вы видите это сообщение, уведомления подключены правильно.",
@@ -121,10 +122,29 @@ class PushTestView(APIView):
             tag="push-test",
             priority="important",
             create_log=True,
+            force=True,
         )
+        sent = int(result.get("sent") or 0)
         if sent <= 0:
+            reason = result.get("reason") or "send_failed"
+            errors = result.get("errors") or []
+            messages = {
+                "no_devices": (
+                    "Нет активных устройств. Сначала нажмите «Включить на этом устройстве» "
+                    "и разрешите уведомления в браузере."
+                ),
+                "pywebpush_missing": "На сервере не установлен pywebpush (pip install pywebpush).",
+                "not_configured": "Web Push не настроен (VAPID-ключи).",
+                "send_failed": (
+                    "Подписка есть, но отправка не удалась. Часто помогает заново нажать "
+                    "«Включить на этом устройстве» (после смены VAPID-ключей старые подписки не работают)."
+                ),
+            }
+            error = messages.get(reason, messages["send_failed"])
+            if errors:
+                error = f"{error} Детали: {errors[0]}"
             return Response(
-                {"error": "Нет активных устройств или не удалось отправить."},
+                {"error": error, "reason": reason, "errors": errors[:3]},
                 status=400,
             )
         return Response({"ok": True, "sent": sent})
