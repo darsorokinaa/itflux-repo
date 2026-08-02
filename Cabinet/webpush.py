@@ -22,24 +22,6 @@ def _prefs(user):
     return get_or_create_preferences(user)
 
 
-def webpush_configured() -> bool:
-    return bool(
-        (getattr(settings, "VAPID_PUBLIC_KEY", "") or "").strip()
-        and (getattr(settings, "VAPID_PRIVATE_KEY", "") or "").strip()
-    )
-
-
-def vapid_public_key() -> str:
-    return (getattr(settings, "VAPID_PUBLIC_KEY", "") or "").strip()
-
-
-def _vapid_claims() -> dict:
-    mailto = (getattr(settings, "VAPID_ADMIN_EMAIL", "") or "").strip() or "mailto:admin@itflux.ru"
-    if not mailto.startswith("mailto:"):
-        mailto = f"mailto:{mailto}"
-    return {"sub": mailto}
-
-
 def _vapid_private_key() -> str:
     """Normalize private key from .env (PEM with \\n, optional quotes)."""
     raw = (getattr(settings, "VAPID_PRIVATE_KEY", "") or "").strip()
@@ -62,6 +44,47 @@ def _load_vapid():
     if "BEGIN" in key:
         return Vapid.from_pem(key.encode("utf-8"))
     return Vapid.from_string(private_key=key)
+
+
+def _public_key_from_vapid(vapid) -> str:
+    import base64
+    from cryptography.hazmat.primitives import serialization
+
+    raw = vapid.public_key.public_bytes(
+        encoding=serialization.Encoding.X962,
+        format=serialization.PublicFormat.UncompressedPoint,
+    )
+    return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+
+
+def webpush_configured() -> bool:
+    if not _vapid_private_key():
+        return False
+    try:
+        _load_vapid()
+        return True
+    except Exception:
+        logger.warning("VAPID_PRIVATE_KEY present but cannot be loaded", exc_info=True)
+        return False
+
+
+def vapid_public_key() -> str:
+    """
+    Публичный ключ для PushManager.subscribe должен соответствовать private.
+    Всегда выводим из VAPID_PRIVATE_KEY — иначе FCM отвечает ValidPkHashMismatch.
+    """
+    try:
+        return _public_key_from_vapid(_load_vapid())
+    except Exception:
+        # fallback на env (старые деплои), но это как раз источник mismatch
+        return (getattr(settings, "VAPID_PUBLIC_KEY", "") or "").strip()
+
+
+def _vapid_claims() -> dict:
+    mailto = (getattr(settings, "VAPID_ADMIN_EMAIL", "") or "").strip() or "mailto:admin@itflux.ru"
+    if not mailto.startswith("mailto:"):
+        mailto = f"mailto:{mailto}"
+    return {"sub": mailto}
 
 
 def _is_in_dnd(prefs) -> bool:
@@ -180,7 +203,10 @@ def send_web_push_to_user(
             err_text = str(exc)[:300]
             errors.append(err_text)
             logger.info("Web push failed for sub %s: %s", sub.pk, exc)
-            if status_code in (404, 410):
+            # 404/410 — endpoint мёртв; 401/403 + pkhash — подписка от другого VAPID
+            low = err_text.lower()
+            key_mismatch = "pkhash" in low or "mismatch" in low
+            if status_code in (404, 410) or (status_code in (401, 403) and key_mismatch):
                 sub.is_active = False
                 sub.save(update_fields=["is_active", "updated_at"])
             elif create_log:

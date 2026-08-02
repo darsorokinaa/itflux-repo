@@ -136,13 +136,22 @@ class PushTestView(APIView):
                 "pywebpush_missing": "На сервере не установлен pywebpush (pip install pywebpush).",
                 "not_configured": "Web Push не настроен (VAPID-ключи).",
                 "send_failed": (
-                    "Подписка есть, но отправка не удалась. Часто помогает заново нажать "
-                    "«Включить на этом устройстве» (после смены VAPID-ключей старые подписки не работают)."
+                    "Подписка есть, но отправка не удалась. Нажмите «Включить на этом устройстве» "
+                    "ещё раз (после hard refresh), затем повторите тест."
                 ),
             }
             error = messages.get(reason, messages["send_failed"])
-            if errors:
-                error = f"{error} Детали: {errors[0]}"
+            detail = (errors[0] if errors else "") or ""
+            if "pkhash" in detail.lower() or "mismatch" in detail.lower():
+                error = (
+                    "Ключ подписки не совпадает с сервером (ValidPkHashMismatch). "
+                    "Сделайте hard refresh страницы (Ctrl/Cmd+Shift+R), затем снова "
+                    "«Включить на этом устройстве» и тест. "
+                    "Если не поможет — в .env должны быть парные VAPID_PUBLIC_KEY и "
+                    "VAPID_PRIVATE_KEY из одной команды generate_vapid_keys."
+                )
+            elif detail:
+                error = f"{error} Детали: {detail}"
             return Response(
                 {"error": error, "reason": reason, "errors": errors[:3]},
                 status=400,
