@@ -1,0 +1,7 @@
+# Устарело как «ручной пример».
+# Актуальная установка:
+#   sudo bash /opt/itfluxacademy/itflux/deploy/install_cron.sh
+#
+# Шаблон заданий: deploy/crontab.itflux
+# Обёртка с env:   deploy/run_management.sh
+# Подключается автоматически из deploy/update.sh

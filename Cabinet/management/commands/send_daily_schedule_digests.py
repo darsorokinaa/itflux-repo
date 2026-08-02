@@ -81,15 +81,38 @@ class Command(BaseCommand):
                 message=message,
                 payload={
                     "type": "daily_schedule",
+                    "event_type": "daily_schedule",
                     "url": "/cabinet/schedule",
                     "lessons_count": len(events),
                 },
                 push_priority="important",
                 tag=f"daily-schedule-{today_start.date().isoformat()}",
+                dedup_key=f"daily_schedule:{teacher.pk}:{today_start.date().isoformat()}",
             )
             sent += 1
 
-        self.stdout.write(self.style.SUCCESS(f"Daily schedule notifications sent: {sent}"))
+        journal_sent = 0
+        try:
+            from Cabinet.journal_notifications import notify_teacher_journal_digest
+
+            for teacher in teachers:
+                prefs = get_or_create_preferences(teacher)
+                if not prefs.notify_journal_daily_digest:
+                    continue
+                if prefs.daily_schedule_hour is None:
+                    continue
+                if int(prefs.daily_schedule_hour) != hour:
+                    continue
+                if notify_teacher_journal_digest(teacher):
+                    journal_sent += 1
+        except Exception as exc:
+            self.stderr.write(f"Journal digest error: {exc}")
+
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Daily schedule notifications sent: {sent}; journal digests: {journal_sent}"
+            )
+        )
 
 
 def _plural(n, one, few, many):

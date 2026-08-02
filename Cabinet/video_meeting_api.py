@@ -14,7 +14,9 @@ from .meeting_material_session import (
     get_active_material_session,
     open_material_session,
     serialize_material_session,
+    set_follow_policy,
     set_interaction_mode,
+    transfer_material_control,
 )
 from .meeting_present import (
     clear_presented,
@@ -125,7 +127,7 @@ class VideoMeetingDetailView(APIView):
         plan_item_json = (
             _plan_item_to_json(plan_item, lesson_number=lesson_number) if plan_item else None
         )
-        can_manage = access.role in ("teacher", "staff")
+        can_manage = access.role in ("teacher", "coteacher", "staff")
         if not can_manage:
             plan_item_json = redact_plan_item_for_student(plan_item_json)
 
@@ -157,6 +159,9 @@ class VideoMeetingDetailView(APIView):
             "joinState": state,
             "joinStateLabel": ui_state_message(state),
             "canManage": can_manage,
+            "viewerUserId": request.user.pk,
+            "viewerRole": access.role,
+            "canControlMaterial": bool(getattr(access, "can_control_material", can_manage)),
             "presented": serialize_presented(meeting, user=request.user),
             "materialSession": serialize_material_session(
                 get_active_material_session(meeting),
@@ -468,15 +473,29 @@ class VideoMeetingMaterialPermissionView(APIView):
         try:
             meeting = get_meeting_by_uuid(meeting_uuid)
             data = request.data if isinstance(request.data, dict) else {}
+            session_id = data.get("sessionId") or data.get("session_id")
+            follow_policy = data.get("followPolicy") or data.get("follow_policy")
             mode = data.get("mode") or data.get("interactionMode") or data.get("interaction_mode")
-            session = set_interaction_mode(
-                meeting=meeting,
-                user=request.user,
-                mode=str(mode or ""),
-                session_id=data.get("sessionId") or data.get("session_id"),
-                collaborative_scope=data.get("collaborativeScope") or data.get("collaborative_scope"),
-                collaborative_user_ids=data.get("collaborativeUserIds") or data.get("collaborative_user_ids"),
-            )
+
+            if follow_policy:
+                session = set_follow_policy(
+                    meeting=meeting,
+                    user=request.user,
+                    policy=str(follow_policy),
+                    session_id=session_id,
+                    independent_user_ids=data.get("independentUserIds") or data.get("independent_user_ids"),
+                )
+            elif mode:
+                session = set_interaction_mode(
+                    meeting=meeting,
+                    user=request.user,
+                    mode=str(mode or ""),
+                    session_id=session_id,
+                    collaborative_scope=data.get("collaborativeScope") or data.get("collaborative_scope"),
+                    collaborative_user_ids=data.get("collaborativeUserIds") or data.get("collaborative_user_ids"),
+                )
+            else:
+                raise VideoMeetingError("Укажите mode или followPolicy", code="invalid", status=400)
         except VideoMeetingError as exc:
             return _error_response(exc)
         serialized = serialize_material_session(session, user=request.user, include_state=True)
@@ -486,8 +505,11 @@ class VideoMeetingMaterialPermissionView(APIView):
                 "type": "material.permission_changed",
                 "session_id": session.pk,
                 "interaction_mode": session.interaction_mode,
+                "follow_policy": session.follow_policy,
+                "controller_user_id": session.controller_id,
                 "collaborative_scope": session.collaborative_scope,
                 "collaborative_user_ids": list(session.collaborative_user_ids or []),
+                "independent_user_ids": list(session.independent_user_ids or []),
                 "version": session.version,
                 "materialSession": serialized,
             },
@@ -496,6 +518,37 @@ class VideoMeetingMaterialPermissionView(APIView):
             "success": True,
             "materialSession": serialized,
         })
+
+
+class VideoMeetingMaterialControlView(APIView):
+    """Передать управление материалом соучителю."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, meeting_uuid):
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+            data = request.data if isinstance(request.data, dict) else {}
+            to_user_id = data.get("toUserId") or data.get("to_user_id") or request.user.pk
+            session = transfer_material_control(
+                meeting=meeting,
+                user=request.user,
+                to_user_id=int(to_user_id),
+                session_id=data.get("sessionId") or data.get("session_id"),
+            )
+        except VideoMeetingError as exc:
+            return _error_response(exc)
+        serialized = serialize_material_session(session, user=request.user, include_state=True)
+        broadcast_material_event(
+            meeting.uuid,
+            {
+                "type": "control.transferred",
+                "session_id": session.pk,
+                "controller_user_id": session.controller_id,
+                "materialSession": serialized,
+            },
+        )
+        return Response({"success": True, "materialSession": serialized})
 
 
 class VideoMeetingMaterialOperationView(APIView):

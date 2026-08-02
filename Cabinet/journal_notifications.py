@@ -101,6 +101,9 @@ def notify_lesson_results_published(record: StudentLessonRecord) -> bool:
 
 
 def notify_teacher_journal_digest(teacher) -> bool:
+    from .notification_catalog import NotificationEventType
+    from .notification_dispatch import NotificationDispatcher
+
     prefs = get_or_create_preferences(teacher)
     if not getattr(prefs, "notify_journal_daily_digest", False):
         return False
@@ -113,15 +116,31 @@ def notify_teacher_journal_digest(teacher) -> bool:
         ]
     ):
         return False
+    title = "Журнал — требует внимания"
     message = (
-        "Журнал — требует внимания\n\n"
         f"Не заполнены итоги: {data['unfilled_journals']} урока\n"
         f"Не отмечена посещаемость: {data['unmarked_attendance_lessons']} урок\n"
         f"Ученики с маркером внимания: {data['attention_students']}"
     )
-    if prefs.telegram_connected:
-        try:
-            return bool(send_telegram_to_user(teacher, message))
-        except Exception:
-            logger.exception("Failed journal digest for teacher %s", teacher.id)
-    return False
+    from django.utils import timezone
+
+    today = timezone.localdate().isoformat()
+    result = NotificationDispatcher.notify(
+        teacher,
+        NotificationEventType.JOURNAL_DAILY_DIGEST,
+        title=title,
+        message=message,
+        payload={
+            "type": NotificationEventType.JOURNAL_DAILY_DIGEST,
+            "event_type": NotificationEventType.JOURNAL_DAILY_DIGEST,
+            "url": "/cabinet/journal",
+        },
+        url="/cabinet/journal",
+        dedup_key=f"journal_daily_digest:{teacher.pk}:{today}",
+        recipient_teacher=teacher,
+        skip_actor=False,
+        create_telegram=True,
+        telegram_text=f"{title}\n\n{message}",
+        push_tag=f"journal-digest-{teacher.pk}-{today}",
+    )
+    return not result.skipped

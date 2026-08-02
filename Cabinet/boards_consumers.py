@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
@@ -13,6 +14,8 @@ from .boards_api import board_collab_group_name
 logger = logging.getLogger(__name__)
 
 MAX_WS_TEXT_BYTES = 2_000_000
+CURSOR_MIN_INTERVAL_SEC = 0.035  # ~28 Hz
+SCENE_LIVE_MIN_INTERVAL_SEC = 0.05
 
 
 class InteractiveBoardConsumer(AsyncWebsocketConsumer):
@@ -28,6 +31,8 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
         self.display_name = ""
         self.role = ""
         self.user = self.scope.get("user")
+        self._last_cursor_at = 0.0
+        self._last_scene_live_at = 0.0
 
         if not self.user or not self.user.is_authenticated:
             await self.close(code=4401)
@@ -113,24 +118,86 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             )
             return
 
-        if msg_type == "scene_live":
+        if msg_type in ("scene_live", "scene_ops"):
             if not self.can_edit:
                 return
-            scene = data.get("scene")
-            if not isinstance(scene, dict):
+            now = time.monotonic()
+            if now - self._last_scene_live_at < SCENE_LIVE_MIN_INTERVAL_SEC:
                 return
-            # Не ретранслируем blob:/data: как «постоянные» — клиент обязан
-            # externalize перед publishLive; фильтруем на сервере на всякий случай.
-            files = scene.get("files") or {}
-            clean_files = {}
-            if isinstance(files, dict):
+            self._last_scene_live_at = now
+
+            def _clean_files(files):
+                clean = {}
+                if not isinstance(files, dict):
+                    return clean
                 for fid, meta in files.items():
                     if not isinstance(meta, dict):
                         continue
                     url = str(meta.get("dataURL") or meta.get("url") or "")
                     if url.startswith("blob:") or url.startswith("data:"):
                         continue
-                    clean_files[str(fid)[:128]] = meta
+                    clean[str(fid)[:128]] = meta
+                return clean
+
+            if msg_type == "scene_ops":
+                ops_payload = data.get("ops")
+                if not isinstance(ops_payload, dict):
+                    return
+                ops = ops_payload.get("ops") or []
+                if not isinstance(ops, list) or len(ops) > 500:
+                    return
+                # Компактная ретрансляция: только upsert/delete без blob.
+                clean_ops = []
+                for item in ops[:500]:
+                    if not isinstance(item, dict):
+                        continue
+                    kind = item.get("op")
+                    if kind == "delete":
+                        eid = str(item.get("id") or "")[:64]
+                        if eid:
+                            clean_ops.append({
+                                "op": "delete",
+                                "id": eid,
+                                "version": item.get("version"),
+                                "versionNonce": item.get("versionNonce"),
+                                "updated": item.get("updated"),
+                            })
+                    elif kind == "upsert":
+                        el = item.get("element")
+                        if isinstance(el, dict) and el.get("id"):
+                            clean_ops.append({"op": "upsert", "element": el})
+                await self.channel_layer.group_send(
+                    self.group_name,
+                    {
+                        "type": "board.collab",
+                        "payload": {
+                            "type": "scene_ops",
+                            "client_id": str(data.get("client_id") or self.client_id)[:64],
+                            "user_id": self.user.id,
+                            "display_name": self.display_name,
+                            "version": data.get("version"),
+                            "ops": {
+                                "baseVersion": ops_payload.get("baseVersion"),
+                                "ops": clean_ops,
+                                "files": _clean_files(ops_payload.get("files")),
+                                "appStatePatch": ops_payload.get("appStatePatch")
+                                if isinstance(ops_payload.get("appStatePatch"), dict)
+                                else {},
+                            },
+                        },
+                    },
+                )
+                return
+
+            scene = data.get("scene")
+            if not isinstance(scene, dict):
+                return
+            # Не ретранслируем blob:/data: как «постоянные» — клиент обязан
+            # externalize перед publishLive; фильтруем на сервере на всякий случай.
+            clean_files = _clean_files(scene.get("files") or {})
+            elements = scene.get("elements") or []
+            if isinstance(elements, list) and len(elements) > 20_000:
+                return
             await self.channel_layer.group_send(
                 self.group_name,
                 {
@@ -142,7 +209,7 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                         "display_name": self.display_name,
                         "version": data.get("version"),
                         "scene": {
-                            "elements": scene.get("elements") or [],
+                            "elements": elements,
                             "appState": scene.get("appState") or {},
                             "files": clean_files,
                         },
@@ -152,6 +219,10 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             return
 
         if msg_type in ("cursor", "cursor_move"):
+            now = time.monotonic()
+            if now - self._last_cursor_at < CURSOR_MIN_INTERVAL_SEC:
+                return
+            self._last_cursor_at = now
             x = data.get("x")
             y = data.get("y")
             try:
@@ -196,7 +267,8 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
         payload = event.get("payload") or {}
         # Не эхоить собственные live-сообщения обратно отправителю.
         if (
-            payload.get("type") in ("scene_live", "cursor", "cursor_move", "presence_join", "active_tool_change")
+            payload.get("type")
+            in ("scene_live", "scene_ops", "cursor", "cursor_move", "presence_join", "active_tool_change")
             and payload.get("client_id")
             and payload.get("client_id") == self.client_id
         ):

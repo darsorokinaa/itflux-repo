@@ -11,18 +11,26 @@ from .journal_models import (
 from .models import (
     AIRequestLog,
     AIUsage,
+    AnonymousUsage,
     EventReminderLog,
     LessonPlanEnrollment,
     MeetingAttendance,
+    PaymentWebhookEvent,
     PromoCode,
     PromoCodeUsage,
+    Receipt,
     ReferralLink,
     ReferralLinkRegistration,
+    ReferralReward,
     FlashcardItem,
     Homework,
     HomeworkEditHistory,
     HomeworkSubmission,
+    HomeworkSubmissionAttempt,
     HomeworkTask,
+    ParentAccessAuditLog,
+    ParentInvitation,
+    ParentStudentRelationship,
     Interactive,
     InteractiveAssignment,
     InteractiveAttempt,
@@ -60,6 +68,7 @@ from .models import (
     TariffPlan,
     TeacherApplication,
     TeacherCommunityFeedback,
+    TeacherMonthlyUsage,
     TeacherSavedMaterial,
     TeacherSubscription,
     TelegramConnectToken,
@@ -139,6 +148,48 @@ class StudentInvitationAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
 
 
+@admin.register(ParentInvitation)
+class ParentInvitationAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "student",
+        "created_by",
+        "invited_name",
+        "invited_email",
+        "status",
+        "expires_at",
+        "created_at",
+    )
+    list_filter = ("status", "relationship_type")
+    search_fields = ("invited_email", "invited_name", "short_code", "student__first_name", "student__last_name")
+    readonly_fields = ("token_hash", "accepted_at", "created_at", "updated_at")
+    ordering = ("-created_at",)
+
+
+@admin.register(ParentStudentRelationship)
+class ParentStudentRelationshipAdmin(admin.ModelAdmin):
+    list_display = ("id", "parent", "student", "relationship_type", "status", "confirmed_at", "created_at")
+    list_filter = ("status", "relationship_type")
+    search_fields = ("parent__username", "parent__email", "student__first_name", "student__last_name")
+    ordering = ("-created_at",)
+
+
+@admin.register(ParentAccessAuditLog)
+class ParentAccessAuditLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "action", "actor", "student", "created_at")
+    list_filter = ("action",)
+    search_fields = ("action", "actor__username", "student__first_name")
+    readonly_fields = ("created_at",)
+    ordering = ("-created_at",)
+
+
+@admin.register(HomeworkSubmissionAttempt)
+class HomeworkSubmissionAttemptAdmin(admin.ModelAdmin):
+    list_display = ("id", "submission", "attempt_number", "status", "score", "submitted_at", "is_final")
+    list_filter = ("status", "is_final")
+    ordering = ("-created_at",)
+
+
 @admin.register(TelegramConnectToken)
 class TelegramConnectTokenAdmin(admin.ModelAdmin):
     list_display = ("token", "user", "expires_at", "used_at", "created_at")
@@ -159,8 +210,14 @@ class StudentGroupAdmin(admin.ModelAdmin):
 
 @admin.register(Material)
 class MaterialAdmin(admin.ModelAdmin):
-    list_display = ("title", "material_type", "direction", "teacher", "is_public", "status")
-    list_filter = ("material_type", "direction", "exam_type", "is_public", "status")
+    list_display = (
+        "title", "material_type", "access_level", "direction",
+        "teacher", "is_public", "is_new", "status",
+    )
+    list_filter = (
+        "material_type", "access_level", "direction", "exam_type",
+        "is_public", "is_new", "status",
+    )
     search_fields = ("title", "topic", "subtopic")
     ordering = ("-created_at",)
 
@@ -175,8 +232,11 @@ class TeacherSavedMaterialAdmin(admin.ModelAdmin):
 
 @admin.register(Lesson)
 class LessonAdmin(admin.ModelAdmin):
-    list_display = ("title", "teacher", "direction", "lesson_type", "status", "updated_at")
-    list_filter = ("direction", "exam_type", "lesson_type", "status")
+    list_display = (
+        "title", "teacher", "access_level", "direction",
+        "lesson_type", "is_new", "status", "updated_at",
+    )
+    list_filter = ("direction", "exam_type", "lesson_type", "access_level", "is_new", "status")
     search_fields = ("title", "topic", "subtopic")
     filter_horizontal = ("materials",)
     ordering = ("-updated_at",)
@@ -391,8 +451,11 @@ class InteractiveSoundPackAdmin(admin.ModelAdmin):
 
 @admin.register(Interactive)
 class InteractiveAdmin(admin.ModelAdmin):
-    list_display = ("title", "teacher", "interactive_type", "background", "card_style", "direction", "status")
-    list_filter = ("interactive_type", "direction", "status")
+    list_display = (
+        "title", "teacher", "interactive_type", "access_level",
+        "background", "card_style", "direction", "is_new", "status",
+    )
+    list_filter = ("interactive_type", "access_level", "is_new", "direction", "status")
     search_fields = ("title", "topic")
     ordering = ("-updated_at",)
     inlines = [
@@ -675,25 +738,69 @@ class StudentNotifyOverrideAdmin(admin.ModelAdmin):
 
 @admin.register(TariffPlan)
 class TariffPlanAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "price_month", "price_year", "max_students", "max_groups", "max_lessons", "max_interactives", "ai_requests_monthly_limit", "is_active", "is_recommended", "sort_order")
-    list_filter = ("is_active", "is_recommended", "has_multi_teacher", "has_advanced_notifications")
-    search_fields = ("name", "slug", "description")
+    list_display = (
+        "name", "slug", "price_month", "price_year", "max_students",
+        "content_access_rank", "cta_type", "is_public", "is_active",
+        "is_recommended", "sort_order",
+    )
+    list_filter = ("is_active", "is_public", "is_recommended", "cta_type", "has_multi_teacher")
+    search_fields = ("name", "slug", "description", "short_description")
     ordering = ("sort_order", "price_month")
     fieldsets = (
-        (None, {"fields": ("name", "slug", "description", "is_active", "is_recommended", "sort_order")}),
+        (None, {
+            "fields": (
+                "name", "slug", "short_description", "description", "badge_text",
+                "is_active", "is_public", "is_free", "is_recommended", "is_featured",
+                "cta_type", "sort_order",
+            ),
+        }),
         ("Цены", {"fields": ("price_month", "price_year", "currency")}),
-        ("Лимиты", {"fields": ("max_students", "max_groups", "max_lessons", "max_interactives", "ai_requests_monthly_limit", "max_storage_mb")}),
-        ("Функции", {"fields": ("has_homework", "has_review", "has_basic_notifications", "has_advanced_notifications", "has_extended_library", "has_multi_teacher", "has_team_roles")}),
+        ("Лимиты", {
+            "fields": (
+                "max_students", "max_groups", "max_lessons", "max_interactives",
+                "max_variants_monthly", "max_workbooks_monthly",
+                "content_access_rank", "max_storage_mb",
+            ),
+        }),
+        ("Функции", {
+            "fields": (
+                "has_homework", "has_review", "has_basic_notifications",
+                "has_advanced_notifications", "has_extended_library",
+                "has_simulators", "has_analytics", "has_mass_actions",
+                "has_priority_support", "has_multi_teacher", "has_team_roles",
+                "monthly_library_promise",
+            ),
+        }),
+        ("ИИ (скрыто с витрины)", {
+            "classes": ("collapse",),
+            "fields": ("ai_requests_monthly_limit",),
+        }),
     )
 
 
 @admin.register(TeacherSubscription)
 class TeacherSubscriptionAdmin(admin.ModelAdmin):
-    list_display = ("teacher", "plan", "status", "billing_period", "started_at", "expires_at", "auto_renew")
-    list_filter = ("status", "billing_period", "auto_renew", "plan")
+    list_display = (
+        "teacher", "plan", "status", "source", "billing_period",
+        "started_at", "expires_at", "auto_renew",
+    )
+    list_filter = ("status", "source", "billing_period", "auto_renew", "plan", "is_legacy_promo")
     search_fields = ("teacher__username", "teacher__email")
     readonly_fields = ("started_at", "created_at", "updated_at")
     ordering = ("-created_at",)
+    fieldsets = (
+        (None, {"fields": ("teacher", "plan", "status", "source", "billing_period", "auto_renew")}),
+        ("Сроки", {
+            "fields": (
+                "started_at", "expires_at",
+                "current_period_start", "current_period_end",
+                "promo_started_at", "promo_ends_at", "is_legacy_promo",
+                "cancelled_at",
+            ),
+        }),
+        ("Отложенная смена", {"fields": ("scheduled_plan", "scheduled_change_at")}),
+        ("Служебное", {"fields": ("created_at", "updated_at")}),
+    )
 
 
 @admin.register(AIUsage)
@@ -722,14 +829,22 @@ class PromoCodeUsageInline(admin.TabularInline):
 
 @admin.register(PromoCode)
 class PromoCodeAdmin(admin.ModelAdmin):
-    list_display = ("code", "discount_type", "discount_value", "uses_count", "max_uses", "is_active", "valid_from", "valid_until", "created_at")
-    list_filter = ("discount_type", "is_active")
+    list_display = (
+        "code", "discount_type", "discount_value", "bonus_days",
+        "uses_count", "max_uses", "is_active", "valid_from", "valid_until", "created_at",
+    )
+    list_filter = ("discount_type", "is_active", "first_payment_only", "stackable_with_referral")
     search_fields = ("code", "description")
     filter_horizontal = ("applicable_plans",)
     readonly_fields = ("uses_count", "created_at", "updated_at")
     fieldsets = (
         (None, {"fields": ("code", "description", "is_active")}),
-        ("Скидка", {"fields": ("discount_type", "discount_value", "applicable_plans")}),
+        ("Скидка", {
+            "fields": (
+                "discount_type", "discount_value", "bonus_days",
+                "first_payment_only", "stackable_with_referral", "applicable_plans",
+            ),
+        }),
         ("Ограничения", {"fields": ("max_uses", "max_uses_per_user", "valid_from", "valid_until")}),
         ("Статистика", {"fields": ("uses_count", "created_at", "updated_at")}),
     )
@@ -738,8 +853,8 @@ class PromoCodeAdmin(admin.ModelAdmin):
 
 @admin.register(PromoCodeUsage)
 class PromoCodeUsageAdmin(admin.ModelAdmin):
-    list_display = ("promo_code", "teacher", "discount_applied", "applied_at")
-    list_filter = ("applied_at",)
+    list_display = ("promo_code", "teacher", "status", "discount_applied", "applied_at")
+    list_filter = ("status", "applied_at")
     search_fields = ("promo_code__code", "teacher__username", "teacher__email")
     readonly_fields = ("promo_code", "teacher", "payment", "discount_applied", "applied_at")
     ordering = ("-applied_at",)
@@ -747,11 +862,60 @@ class PromoCodeUsageAdmin(admin.ModelAdmin):
 
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
-    list_display = ("teacher", "subscription", "amount", "currency", "status", "provider", "paid_at", "created_at")
-    list_filter = ("status", "provider", "currency")
-    search_fields = ("teacher__username", "teacher__email", "provider_payment_id")
-    readonly_fields = ("created_at", "updated_at")
+    list_display = (
+        "teacher", "plan", "final_amount", "amount", "currency",
+        "status", "provider", "billing_period", "paid_at", "created_at",
+    )
+    list_filter = ("status", "provider", "currency", "billing_period")
+    search_fields = (
+        "teacher__username", "teacher__email",
+        "provider_payment_id", "idempotency_key",
+    )
+    readonly_fields = ("created_at", "updated_at", "idempotency_key")
     ordering = ("-created_at",)
+
+
+@admin.register(Receipt)
+class ReceiptAdmin(admin.ModelAdmin):
+    list_display = ("payment", "status", "fiscal_number", "created_at")
+    search_fields = ("payment__provider_payment_id", "fiscal_number", "provider_receipt_id")
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(PaymentWebhookEvent)
+class PaymentWebhookEventAdmin(admin.ModelAdmin):
+    list_display = ("provider", "event_id", "payment", "processed", "created_at")
+    list_filter = ("provider", "processed")
+    search_fields = ("event_id",)
+    readonly_fields = ("created_at", "processed_at")
+
+
+@admin.register(AnonymousUsage)
+class AnonymousUsageAdmin(admin.ModelAdmin):
+    list_display = (
+        "anonymous_id", "variants_created", "workbooks_created",
+        "registered_user", "last_seen_at",
+    )
+    search_fields = ("anonymous_id", "session_key", "registered_user__username")
+    readonly_fields = ("first_seen_at", "last_seen_at")
+
+
+@admin.register(TeacherMonthlyUsage)
+class TeacherMonthlyUsageAdmin(admin.ModelAdmin):
+    list_display = ("teacher", "period_start", "variants_created", "workbooks_created", "updated_at")
+    list_filter = ("period_start",)
+    search_fields = ("teacher__username", "teacher__email")
+
+
+@admin.register(ReferralReward)
+class ReferralRewardAdmin(admin.ModelAdmin):
+    list_display = (
+        "referrer", "referred_user", "reward_plan", "reward_months",
+        "status", "granted_at", "created_at",
+    )
+    list_filter = ("status",)
+    search_fields = ("referrer__username", "referred_user__username")
+    readonly_fields = ("created_at", "granted_at")
 
 
 class ReferralLinkRegistrationInline(admin.TabularInline):

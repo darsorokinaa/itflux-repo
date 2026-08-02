@@ -21,8 +21,10 @@ import {
   presentVideoMeetingResource,
   recordVideoMeetingJoin,
   recordVideoMeetingLeave,
+  setMeetingMaterialFollowPolicy,
   setMeetingMaterialPermission,
   startVideoMeeting,
+  transferMeetingMaterialControl,
   updateLessonPlanItem,
 } from "../../utils/cabinetAuth";
 import {
@@ -243,6 +245,8 @@ export default function VideoMeetingPage() {
   const seenOpIdsRef = useRef(new Set());
   const [materialsToast, setMaterialsToast] = useState("");
   const [mobilePane, setMobilePane] = useState("call"); // call | materials
+  const [roomFullscreen, setRoomFullscreen] = useState(false);
+  const pageRootRef = useRef(null);
   const [callCollapsed, setCallCollapsed] = useState(false);
   const [focusCall, setFocusCall] = useState(false);
   const [boardInfo, setBoardInfo] = useState({ loading: true, board: null });
@@ -1200,21 +1204,27 @@ export default function VideoMeetingPage() {
       },
       onPermissionChanged: (payload) => {
         const mode = payload?.interaction_mode || payload?.materialSession?.interactionMode;
+        const follow = payload?.follow_policy || payload?.materialSession?.followPolicy;
         remoteGuard.run(() => {
           setMaterialSession((prev) => {
-            if (!prev) return prev;
+            if (!prev && !payload.materialSession) return prev;
             return {
-              ...prev,
+              ...(prev || {}),
               ...(payload.materialSession || {}),
-              interactionMode: mode || prev.interactionMode,
+              interactionMode: mode || prev?.interactionMode,
+              followPolicy: follow || payload.materialSession?.followPolicy || prev?.followPolicy,
             };
           });
         });
         if (!canManageRef.current) {
-          if (mode === "collaborative") {
+          if (follow === "independent") {
+            showMaterialNotice("Разрешён самостоятельный просмотр материала");
+          } else if (follow === "strict") {
+            showMaterialNotice("Учитель вернул вас к своему экрану");
+          } else if (mode === "collaborative") {
             showMaterialNotice("Преподаватель разрешил совместную работу с материалом");
-          } else {
-            showMaterialNotice("Совместное управление завершено. Материал доступен только для просмотра");
+          } else if (mode === "view_only") {
+            showMaterialNotice("Совместное рисование выключено");
           }
         }
       },
@@ -1597,6 +1607,68 @@ export default function VideoMeetingPage() {
     }
   }, [applyMaterialSession, materialSession, meetingUuid]);
 
+  const onAllowIndependent = useCallback(async () => {
+    if (!meetingUuid || !materialSession?.sessionId) return;
+    const prev = materialSession.followPolicy || "strict";
+    setMaterialSession((s) => (s ? { ...s, followPolicy: "independent" } : s));
+    try {
+      const data = await setMeetingMaterialFollowPolicy(meetingUuid, {
+        sessionId: materialSession.sessionId,
+        followPolicy: "independent",
+      });
+      if (data?.materialSession) applyMaterialSession(data.materialSession);
+    } catch (err) {
+      setMaterialSession((s) => (s ? { ...s, followPolicy: prev } : s));
+      setError(err?.message || "Не удалось разрешить самостоятельный просмотр");
+    }
+  }, [applyMaterialSession, materialSession, meetingUuid]);
+
+  const onReturnToLeader = useCallback(async () => {
+    if (!meetingUuid || !materialSession?.sessionId) return;
+    const prev = materialSession.followPolicy || "strict";
+    setMaterialSession((s) => (s ? { ...s, followPolicy: "strict", independentUserIds: [] } : s));
+    try {
+      const data = await setMeetingMaterialFollowPolicy(meetingUuid, {
+        sessionId: materialSession.sessionId,
+        followPolicy: "strict",
+        independentUserIds: [],
+      });
+      if (data?.materialSession) applyMaterialSession(data.materialSession);
+      // Повторно отправим текущую страницу — ученики синхронизируются.
+      const page = materialSession.state?.page || 1;
+      materialCollabRef.current?.sendOperation({
+        action: "page_changed",
+        payload: { page },
+      });
+    } catch (err) {
+      setMaterialSession((s) => (s ? { ...s, followPolicy: prev } : s));
+      setError(err?.message || "Не удалось вернуть учеников к экрану");
+    }
+  }, [applyMaterialSession, materialSession, meetingUuid]);
+
+  const onTransferControl = useCallback(async () => {
+    if (!meetingUuid || !materialSession?.sessionId) return;
+    const peers = (materialPresence || []).filter((p) => {
+      const role = p.role || p.author_role;
+      return role === "teacher" || role === "coteacher" || role === "staff";
+    });
+    const other = peers.find((p) => Number(p.userId) !== Number(detail?.viewerUserId));
+    if (!other) {
+      showMaterialsToast("В комнате нет другого ведущего для передачи управления");
+      return;
+    }
+    try {
+      const data = await transferMeetingMaterialControl(meetingUuid, {
+        sessionId: materialSession.sessionId,
+        toUserId: other.userId,
+      });
+      if (data?.materialSession) applyMaterialSession(data.materialSession);
+      showMaterialsToast(`Управление передано: ${other.displayName || "коллега"}`);
+    } catch (err) {
+      setError(err?.message || "Не удалось передать управление");
+    }
+  }, [applyMaterialSession, detail?.viewerUserId, materialPresence, materialSession, meetingUuid, showMaterialsToast]);
+
   const onAddMenuAction = useCallback((actionId) => {
     if (actionId === "homework") {
       void openAddHomework();
@@ -1686,8 +1758,56 @@ export default function VideoMeetingPage() {
     window.dispatchEvent(new Event("resize"));
   }, [asideOpen, workspaceOpen, mobilePane]);
 
+  const toggleRoomFullscreen = useCallback(async () => {
+    const root = pageRootRef.current;
+    const useCssFallback = () => {
+      setRoomFullscreen((prev) => {
+        const next = !prev;
+        document.body.classList.toggle("vl-room-fullscreen", next);
+        return next;
+      });
+      window.setTimeout(() => window.dispatchEvent(new Event("resize")), 80);
+    };
+    try {
+      if (!document.fullscreenElement && root?.requestFullscreen) {
+        await root.requestFullscreen();
+        setRoomFullscreen(true);
+        document.body.classList.add("vl-room-fullscreen");
+        window.setTimeout(() => window.dispatchEvent(new Event("resize")), 80);
+        return;
+      }
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        setRoomFullscreen(false);
+        document.body.classList.remove("vl-room-fullscreen");
+        window.setTimeout(() => window.dispatchEvent(new Event("resize")), 80);
+        return;
+      }
+    } catch {
+      /* iOS / denied — CSS fallback */
+    }
+    useCssFallback();
+  }, []);
+
+  useEffect(() => {
+    const onFs = () => {
+      const active = Boolean(document.fullscreenElement);
+      setRoomFullscreen(active || document.body.classList.contains("vl-room-fullscreen"));
+      if (!active) {
+        // Не снимаем CSS-fallback класс здесь — им управляет toggle.
+      }
+      window.dispatchEvent(new Event("resize"));
+    };
+    document.addEventListener("fullscreenchange", onFs);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFs);
+      document.body.classList.remove("vl-room-fullscreen");
+    };
+  }, []);
+
   return (
     <div
+      ref={pageRootRef}
       className={[
         "video-lesson-page",
         showAside ? "video-lesson-page--aside" : "",
@@ -1695,6 +1815,7 @@ export default function VideoMeetingPage() {
         compactCall ? "video-lesson-page--compact" : "",
         liveVariantAnswers ? "video-lesson-page--live-answers" : "",
         mobilePane === "materials" && showJitsi ? "video-lesson-page--mobile-materials" : "",
+        roomFullscreen ? "is-css-fullscreen" : "",
       ].filter(Boolean).join(" ")}
     >
       <header className="video-lesson-header">
@@ -1754,6 +1875,16 @@ export default function VideoMeetingPage() {
               Материалы{materialsCount ? ` · ${materialsCount}` : ""}
             </button>
           ) : null}
+
+          <button
+            type="button"
+            className={`video-lesson-btn video-lesson-btn--ghost${roomFullscreen ? " is-active" : ""}`}
+            onClick={() => void toggleRoomFullscreen()}
+            aria-pressed={roomFullscreen}
+            title={roomFullscreen ? "Выйти из полноэкранного режима" : "Полноэкранный режим"}
+          >
+            {roomFullscreen ? "Окно" : "На весь экран"}
+          </button>
 
           {canManage && status === "live" && showJitsi ? (
             <button
@@ -1820,6 +1951,7 @@ export default function VideoMeetingPage() {
             material={materialSession.material}
             state={materialSession.state || {}}
             interactionMode={materialSession.interactionMode || "view_only"}
+            followPolicy={materialSession.followPolicy || "strict"}
             syncStatus={
               materialSyncStatus === "reconnecting" && materialSession
                 ? "reconnecting"
@@ -1829,9 +1961,18 @@ export default function VideoMeetingPage() {
             remotePreviews={remotePreviews}
             presence={materialPresence}
             notice={materialNotice}
-            canEditContent={
-              canManage
-              || materialSession.interactionMode === "collaborative"
+            canEditContent
+            currentUserId={detail?.viewerUserId ?? detail?.userId ?? null}
+            isController={
+              !materialSession.controllerUserId
+              || Number(materialSession.controllerUserId) === Number(detail?.viewerUserId)
+              || detail?.viewerRole === "staff"
+            }
+            controllerLabel={
+              materialSession.controllerUserId
+                ? (materialPresence.find((p) => Number(p.userId) === Number(materialSession.controllerUserId))?.displayName
+                  || (Number(materialSession.controllerUserId) === Number(detail?.viewerUserId) ? "Вы" : "Ведущий"))
+                : ""
             }
             remoteApplyGuard={remoteApplyGuardRef.current}
             onCloseLocal={() => {
@@ -1840,6 +1981,9 @@ export default function VideoMeetingPage() {
             }}
             onCloseForAll={() => void onClearPresented()}
             onToggleCollaborative={(enabled) => void onToggleCollaborative(enabled)}
+            onAllowIndependent={() => void onAllowIndependent()}
+            onReturnToLeader={() => void onReturnToLeader()}
+            onTransferControl={() => void onTransferControl()}
             onStatePatch={({ action, payload }) => {
               if (!canManage && materialSession.interactionMode !== "collaborative") return;
               if (remoteApplyGuardRef.current.isRemote()) return;
@@ -1916,23 +2060,47 @@ export default function VideoMeetingPage() {
               });
             }}
             onInteractiveOp={({ action, payload }) => {
-              if (!canManage && materialSession.interactionMode !== "collaborative") return;
+              // Follow (view_only): ответы/поля разрешены; навигация — нет (сервер тоже режет).
+              const contentActions = new Set([
+                "answer_selected",
+                "field_changed",
+                "item_moved",
+                "item_selected",
+                "pair_connected",
+                "pair_disconnected",
+                "cards_flipped",
+                "state_updated",
+              ]);
+              const isCollab = materialSession.interactionMode === "collaborative";
+              if (!canManage && !isCollab && !contentActions.has(action)) return;
               if (remoteApplyGuardRef.current.isRemote()) return;
               materialCollabRef.current?.sendOperation({ action, payload });
               setMaterialSession((prev) => {
                 if (!prev) return prev;
                 const nextState = { ...(prev.state || {}) };
-                if (action === "field_changed") {
-                  nextState.fields = {
-                    ...(nextState.fields || {}),
-                    [payload.fieldId]: { value: payload.value },
+                const uid = String(detail?.viewerUserId ?? "self");
+                const itemId = payload.fieldId || payload.questionId;
+                if (action === "field_changed" && itemId) {
+                  const root = { ...(nextState.fields || {}) };
+                  const bucket = { ...(root[uid] || {}) };
+                  bucket[itemId] = {
+                    value: payload.value,
+                    status: payload.status || "draft",
+                    author_id: detail?.viewerUserId,
                   };
+                  root[uid] = bucket;
+                  nextState.fields = root;
                 }
-                if (action === "answer_selected") {
-                  nextState.answers = {
-                    ...(nextState.answers || {}),
-                    [payload.fieldId || payload.questionId]: { value: payload.value },
+                if (action === "answer_selected" && itemId) {
+                  const root = { ...(nextState.answers || {}) };
+                  const bucket = { ...(root[uid] || {}) };
+                  bucket[itemId] = {
+                    value: payload.value,
+                    status: payload.status || "draft",
+                    author_id: detail?.viewerUserId,
                   };
+                  root[uid] = bucket;
+                  nextState.answers = root;
                 }
                 return { ...prev, state: nextState };
               });
@@ -2218,6 +2386,7 @@ export default function VideoMeetingPage() {
             event={event}
             liveAnswers={liveAnswers}
             liveAnswersLoading={liveAnswersLoading}
+            materialPresence={materialPresence}
             attachError={attachError}
             toast={materialsToast}
             onClose={() => {

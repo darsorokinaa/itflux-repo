@@ -1693,6 +1693,13 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
         selected_tasks.extend(tasks_for_slot)
 
     if create:
+        if request is not None:
+            from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
+
+            try:
+                SubscriptionAccessService.enforce_variant_creation(request)
+            except AccessDenied as exc:
+                raise ValueError(exc.message) from exc
         new_variant = Variant.objects.create(
             var_subject=subject_instance,
             level=level_instance,
@@ -2316,10 +2323,23 @@ def api_subtopics(request, level, subject):
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_generate_variant(request, level, subject):
+    from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
+
     try:
         new_variant = _create_variant(subject, level, request.body, request=request)
-        return JsonResponse({'variant_id': new_variant.id})
+        response = JsonResponse({'variant_id': new_variant.id})
+        try:
+            anon = SubscriptionAccessService.get_or_create_anonymous_usage(request)
+            SubscriptionAccessService.set_anonymous_cookie(response, anon.anonymous_id)
+        except Exception:
+            pass
+        return response
+    except AccessDenied as exc:
+        return JsonResponse(exc.to_dict(), status=403)
     except Exception as e:
+        cause = getattr(e, "__cause__", None)
+        if isinstance(cause, AccessDenied):
+            return JsonResponse(cause.to_dict(), status=403)
         return JsonResponse({'error': str(e)}, status=400)
 
 
@@ -2729,6 +2749,13 @@ def api_variant_from_ids(request, level, subject):
         logger.warning("api_variant_from_ids: task_ids is required and must be non-empty")
         return JsonResponse({'error': 'task_ids is required and must be non-empty'}, status=400)
 
+    try:
+        from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
+
+        SubscriptionAccessService.enforce_variant_creation(request)
+    except AccessDenied as exc:
+        return JsonResponse(exc.to_dict(), status=403)
+
     subject_instance = get_subject_for_api(subject)
     level_instance = get_object_or_404(Level, level=level)
 
@@ -2760,7 +2787,13 @@ def api_variant_from_ids(request, level, subject):
         return JsonResponse({'error': 'No valid tasks found for this subject/level'}, status=400)
 
     VariantContent.objects.bulk_create(vc_objects)
-    return JsonResponse({'variant_id': variant.id})
+    response = JsonResponse({'variant_id': variant.id})
+    try:
+        anon = SubscriptionAccessService.get_or_create_anonymous_usage(request)
+        SubscriptionAccessService.set_anonymous_cookie(response, anon.anonymous_id)
+    except Exception:
+        pass
+    return response
 
 
 # ── TaskListView (DRF) ────────────────────────────────────────────────────────
@@ -3823,20 +3856,45 @@ def api_lessons(request):
 @require_http_methods(["GET"])
 def api_lesson_detail(request, slug):
     lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
+    from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
+
+    user = request.user if getattr(request.user, "is_authenticated", False) else None
+    access = SubscriptionAccessService.serialize_access_gate(user, lesson)
     lesson_data = LessonCatalogSerializer(lesson, context={"request": request}).data
     lesson_data.update(
         {
             "teacher_goal": lesson.teacher_goal,
             "student_result": lesson.student_result,
             "viewer": {"is_teacher_or_admin": _lesson_viewer_is_teacher_or_admin(request)},
+            "access": access,
         }
     )
+    if not access["allowed"] and not _lesson_viewer_is_teacher_or_admin(request):
+        # Метаданные доступны, полный контент — только при доступе
+        lesson_data["teacher_goal"] = ""
+        lesson_data["student_result"] = ""
+        lesson_data["locked"] = True
+        return JsonResponse({"lesson": lesson_data, "upgrade_required": True, **AccessDenied(
+            "CONTENT_ACCESS_DENIED",
+            "Материал доступен на более высоком тарифе",
+            feature="content",
+            min_plan=access["min_plan"],
+        ).to_dict()}, status=403 if request.GET.get("enforce") == "1" else 200)
     return JsonResponse({"lesson": lesson_data})
 
 
 @require_http_methods(["GET"])
 def api_lesson_archive_view(request, slug):
     lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
+
+    if not _lesson_viewer_is_teacher_or_admin(request):
+        from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
+
+        user = request.user if getattr(request.user, "is_authenticated", False) else None
+        try:
+            SubscriptionAccessService.raise_if_cannot_access_content(user, lesson)
+        except AccessDenied as exc:
+            return JsonResponse({"error": exc.to_dict()}, status=403)
 
     from .lesson_archive import (
         archive_base_dir,
@@ -3879,6 +3937,15 @@ def api_lesson_archive_asset(request, slug, asset_path):
     lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
     if not lesson.archive:
         raise Http404("Архив урока не найден")
+
+    if not _lesson_viewer_is_teacher_or_admin(request):
+        from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
+
+        user = request.user if getattr(request.user, "is_authenticated", False) else None
+        try:
+            SubscriptionAccessService.raise_if_cannot_access_content(user, lesson)
+        except AccessDenied as exc:
+            return JsonResponse({"error": exc.to_dict()}, status=403)
 
     from .lesson_archive import (
         archive_asset_response,

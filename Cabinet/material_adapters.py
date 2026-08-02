@@ -40,6 +40,19 @@ CONTENT_ACTIONS = frozenset({
     "text_note_deleted",
 })
 
+# В режиме следования за учителем ученик может отвечать, но не рисовать
+# и не менять глобальную позицию материала.
+FOLLOW_MODE_CONTENT_ACTIONS = frozenset({
+    "answer_selected",
+    "field_changed",
+    "item_moved",
+    "item_selected",
+    "pair_connected",
+    "pair_disconnected",
+    "cards_flipped",
+    "state_updated",
+})
+
 MAX_ANNOTATIONS = 500
 MAX_POINTS_PER_STROKE = 800
 MAX_PAYLOAD_BYTES = 48_000
@@ -81,15 +94,22 @@ class MaterialCollaborationAdapter:
         role: str,
         interaction_mode: str,
         can_collaborate: bool,
+        can_browse_independently: bool = False,
     ) -> frozenset[str]:
-        if role in ("teacher", "staff"):
+        if role in ("teacher", "staff", "coteacher"):
             return self.supported_actions | EPHEMERAL_ACTIONS
-        if interaction_mode != "collaborative" or not can_collaborate:
-            return frozenset()  # ученик в view_only не шлёт даже курсор
-        allowed = set(self.student_content_actions) | set(EPHEMERAL_ACTIONS)
-        # В режиме совместного управления ученик может переключать страницы/слайды.
-        allowed |= NAVIGATION_ACTIONS & self.supported_actions
-        return frozenset(allowed)
+        # Follow + ответы; навигация — только при independent / collaborative.
+        follow_actions = (FOLLOW_MODE_CONTENT_ACTIONS & self.student_content_actions) | {
+            "cursor",
+            "pointer",
+        }
+        allowed = set(follow_actions)
+        if interaction_mode == "collaborative" and can_collaborate:
+            allowed |= set(self.student_content_actions) | set(EPHEMERAL_ACTIONS)
+            allowed |= NAVIGATION_ACTIONS & self.supported_actions
+        elif can_browse_independently:
+            allowed |= NAVIGATION_ACTIONS & self.supported_actions
+        return frozenset(allowed & (self.supported_actions | EPHEMERAL_ACTIONS))
 
     def validate_payload(self, action: str, payload: dict) -> dict:
         if not isinstance(payload, dict):
@@ -224,32 +244,80 @@ class MaterialCollaborationAdapter:
                 raise MaterialCollaborationError("Нельзя удалить чужую аннотацию", code="forbidden", status=403)
         state["annotations"] = kept
 
+    def _user_answer_bucket(self, state: dict, key: str, author_id: int) -> dict:
+        """
+        Per-user бакет answers/fields: state[key][userId][itemId] = row.
+        Старый плоский формат state[key][itemId] = {value, author_id} мигрирует на лету.
+        """
+        root = self._ensure_dict(state, key)
+        user_key = str(author_id)
+
+        def _is_row(value: Any) -> bool:
+            return isinstance(value, dict) and ("value" in value or "author_id" in value)
+
+        def _is_user_bucket(value: Any) -> bool:
+            if not isinstance(value, dict) or not value:
+                return isinstance(value, dict)
+            # Бакет пользователя: значения — строки ответов; сам бакет не является row.
+            sample = next(iter(value.values()), None)
+            return isinstance(sample, dict) and _is_row(sample) and "value" in sample
+
+        # Плоский legacy: все top-level значения — row с value.
+        if root and all(_is_row(v) for v in root.values()):
+            legacy = dict(root)
+            root.clear()
+            for item_id, row in legacy.items():
+                owner = str(row.get("author_id") or author_id)
+                root.setdefault(owner, {})[str(item_id)[:64]] = row
+
+        bucket = root.get(user_key)
+        if not isinstance(bucket, dict) or _is_row(bucket):
+            bucket = {}
+            root[user_key] = bucket
+        elif not _is_user_bucket(bucket) and bucket and all(_is_row(v) for v in bucket.values()):
+            pass  # уже per-item rows
+        return bucket
+
     def _apply_answer_selected(self, state, *, payload, author_id, author_role):
-        answers = self._ensure_dict(state, "answers")
+        """Ответы хранятся per-user: answers[userId][questionId]."""
         question_id = str(payload.get("questionId") or payload.get("question_id") or "")[:64]
         if not question_id:
             raise MaterialCollaborationError("questionId обязателен", code="invalid_answer")
         value = payload.get("value")
         if isinstance(value, str):
             value = value[:MAX_FIELD_VALUE_LEN]
-        answers[question_id] = {
+        bucket = self._user_answer_bucket(state, "answers", author_id)
+        status = str(payload.get("status") or "draft")[:32]
+        if status not in ("draft", "submitted", "checked", "needs_revision"):
+            status = "draft"
+        prev = bucket.get(question_id) if isinstance(bucket.get(question_id), dict) else {}
+        bucket[question_id] = {
             "value": value,
             "author_id": author_id,
             "author_role": author_role,
+            "status": status,
+            "updated_at": payload.get("updated_at") or payload.get("updatedAt"),
+            "attempt": int(payload.get("attempt") or prev.get("attempt") or 1),
         }
 
     def _apply_field_changed(self, state, *, payload, author_id, author_role):
-        fields = self._ensure_dict(state, "fields")
+        """Поля хранятся per-user: fields[userId][fieldId]."""
         field_id = str(payload.get("fieldId") or payload.get("field_id") or "")[:64]
         if not field_id:
             raise MaterialCollaborationError("fieldId обязателен", code="invalid_field")
         value = payload.get("value")
         if isinstance(value, str):
             value = value[:MAX_FIELD_VALUE_LEN]
-        fields[field_id] = {
+        bucket = self._user_answer_bucket(state, "fields", author_id)
+        status = str(payload.get("status") or "draft")[:32]
+        if status not in ("draft", "submitted", "checked", "needs_revision"):
+            status = "draft"
+        bucket[field_id] = {
             "value": value,
             "author_id": author_id,
             "author_role": author_role,
+            "status": status,
+            "updated_at": payload.get("updated_at") or payload.get("updatedAt"),
         }
 
     def _apply_item_moved(self, state, *, payload, author_id, author_role):

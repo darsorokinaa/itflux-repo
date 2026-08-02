@@ -13,11 +13,19 @@ function MaterialCard({ item }) {
   const href = materialHref(item);
   const lessonFallback = item.assignment_id
     ? `/cabinet/student/lessons/${item.assignment_id}`
-    : "/cabinet/student/materials";
+    : item.homework_id
+      ? `/cabinet/student/assignments/${item.homework_id}`
+      : "/cabinet/student/materials";
   const subject = item.student_subject_label || "";
+  const sourceLabel = item.source === "homework"
+    ? "Из ДЗ"
+    : item.direct
+      ? "Выдано учителем"
+      : "";
   const meta = [
     subject,
     item.type_label,
+    sourceLabel,
     item.updated_at || item.assigned_at
       ? formatStudentDate(item.updated_at || item.assigned_at)
       : "",
@@ -64,7 +72,7 @@ export default function RecentMaterials({ items = [] }) {
   return (
     <div className="st-dash-card-stack">
       {items.slice(0, 3).map((item) => (
-        <MaterialCard key={`${item.id}-${item.direct ? "d" : "l"}`} item={item} />
+        <MaterialCard key={`${item.id}-${item.source || (item.direct ? "d" : "l")}`} item={item} />
       ))}
     </div>
   );

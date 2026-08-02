@@ -14,6 +14,7 @@ import {
   CabinetEmptyState,
   useSoonToast,
 } from "../CabinetSectionUi";
+import { fetchLibraryNewThisMonth } from "../../utils/cabinetAuth";
 
 const SECTIONS = [
   { id: "lessons", label: "Готовые уроки", icon: "lessons", href: "/lessons" },
@@ -34,7 +35,14 @@ export default function CabinetLibraryPage() {
   const [catalogLessons, setCatalogLessons] = useState([]);
   const [lessonsLoading, setLessonsLoading] = useState(false);
   const [lessonsError, setLessonsError] = useState(null);
+  const [newItems, setNewItems] = useState([]);
   const { notifySoon, toast } = useSoonToast();
+
+  useEffect(() => {
+    fetchLibraryNewThisMonth()
+      .then((data) => setNewItems(Array.isArray(data?.items) ? data.items : []))
+      .catch(() => setNewItems([]));
+  }, []);
 
   const loadCatalogLessons = useCallback(() => {
     setLessonsLoading(true);
@@ -80,6 +88,26 @@ export default function CabinetLibraryPage() {
     <CabinetPageShell className="cb-section--library">
       {toast}
       <CabinetPageHeader title="Библиотека" />
+
+      {newItems.length > 0 ? (
+        <section className="cb-library-new" aria-labelledby="library-new-title">
+          <h2 id="library-new-title" className="cb-page-hint" style={{ fontWeight: 700 }}>
+            Новое в этом месяце
+          </h2>
+          <ul className="cb-library-new__list">
+            {newItems.slice(0, 8).map((item) => (
+              <li key={`${item.kind}-${item.id}`}>
+                <span>{item.title}</span>
+                {!item.allowed ? (
+                  <Link to="/pricing" className="cb-btn cb-btn--outline cb-btn--sm">
+                    от {item.min_plan || "тарифа"}
+                  </Link>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <div className="cb-library-sections">
         {SECTIONS.map((s) => (

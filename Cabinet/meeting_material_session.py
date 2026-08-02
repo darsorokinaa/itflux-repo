@@ -14,12 +14,14 @@ from .files_services import is_blocked_media_url, material_file_url, material_vi
 from .material_adapters import (
     EPHEMERAL_ACTIONS,
     EXCLUDED_PRESENT_KINDS,
+    NAVIGATION_ACTIONS,
     MaterialCollaborationError,
     get_adapter,
     infer_resource_kind,
 )
 from .meeting_material_models import (
     MeetingMaterialCollaborativeScope,
+    MeetingMaterialFollowPolicy,
     MeetingMaterialInteractionMode,
     MeetingMaterialSession,
     MeetingMaterialWork,
@@ -186,16 +188,51 @@ def serialize_material_session(
             "contentText": session.content_text or "",
         },
         "interactionMode": session.interaction_mode,
+        "followPolicy": session.follow_policy,
+        "controllerUserId": session.controller_id,
         "collaborativeScope": session.collaborative_scope,
         "collaborativeUserIds": list(session.collaborative_user_ids or []),
+        "independentUserIds": list(session.independent_user_ids or []),
         "version": session.version,
         "openedAt": session.opened_at.isoformat() if session.opened_at else None,
         "updatedAt": session.updated_at.isoformat() if session.updated_at else None,
         "isActive": session.is_active,
     }
     if include_state:
-        payload["state"] = deepcopy(session.current_state or {})
+        state = deepcopy(session.current_state or {})
+        # Ученик не видит ответы других; учитель/staff — полную картину.
+        if user is not None:
+            access = resolve_access(user, session.meeting.schedule_event)
+            if access.role == "student":
+                state = _personalize_student_state(state, user.pk)
+        payload["state"] = state
     return payload
+
+
+def _personalize_student_state(state: dict, user_id: int) -> dict:
+    """Оставляет ученику только свои answers/fields; навигация общая."""
+    out = deepcopy(state) if state else {}
+    user_key = str(user_id)
+    for bucket_name in ("answers", "fields"):
+        bucket = out.get(bucket_name)
+        if not isinstance(bucket, dict):
+            continue
+        # Per-user: {userId: {itemId: row}}
+        if user_key in bucket and isinstance(bucket.get(user_key), dict):
+            sample = next(iter(bucket[user_key].values()), None)
+            if isinstance(sample, dict) and ("value" in sample or "author_id" in sample):
+                out[bucket_name] = {user_key: bucket[user_key]}
+                continue
+        # Legacy flat: {itemId: {value, author_id}}
+        mine = {}
+        for item_id, row in bucket.items():
+            if not isinstance(row, dict):
+                continue
+            if "value" in row or "author_id" in row:
+                if int(row.get("author_id") or 0) == int(user_id):
+                    mine[item_id] = row
+        out[bucket_name] = {user_key: mine} if mine else {user_key: {}}
+    return out
 
 
 def get_active_material_session(meeting: VideoMeeting) -> MeetingMaterialSession | None:
@@ -208,7 +245,7 @@ def get_active_material_session(meeting: VideoMeeting) -> MeetingMaterialSession
 
 
 def user_can_collaborate(session: MeetingMaterialSession, user: User, role: str) -> bool:
-    if role in ("teacher", "staff"):
+    if role in ("teacher", "coteacher", "staff"):
         return True
     if session.interaction_mode != MeetingMaterialInteractionMode.COLLABORATIVE:
         return False
@@ -216,6 +253,22 @@ def user_can_collaborate(session: MeetingMaterialSession, user: User, role: str)
         return role == "student"
     allowed = {int(x) for x in (session.collaborative_user_ids or []) if str(x).isdigit() or isinstance(x, int)}
     return user.pk in allowed
+
+
+def student_can_navigate_independently(session: MeetingMaterialSession, user: User) -> bool:
+    """Самостоятельный просмотр: room-wide independent или персональный whitelist."""
+    if session.follow_policy == MeetingMaterialFollowPolicy.INDEPENDENT:
+        return True
+    ids = session.independent_user_ids or []
+    return user.pk in {int(x) for x in ids if str(x).isdigit() or isinstance(x, int)}
+
+
+def user_is_material_controller(session: MeetingMaterialSession, user: User, role: str) -> bool:
+    if role == "staff":
+        return True
+    if session.controller_id:
+        return session.controller_id == user.pk
+    return role in ("teacher", "coteacher", "staff")
 
 
 def _assert_material_access(*, meeting: VideoMeeting, user: User, material: Material | None) -> None:
@@ -394,9 +447,12 @@ def open_material_session(
             open_url=(open_url or "")[:1024],
             content_text=content_text or "",
             opened_by=user,
+            controller=user,
             interaction_mode=MeetingMaterialInteractionMode.VIEW_ONLY,
+            follow_policy=MeetingMaterialFollowPolicy.STRICT,
             collaborative_scope=MeetingMaterialCollaborativeScope.ALL,
             collaborative_user_ids=[],
+            independent_user_ids=[],
             current_state=state,
             recent_operation_ids=[],
             is_active=True,
@@ -508,6 +564,100 @@ def set_interaction_mode(
     return session
 
 
+def set_follow_policy(
+    *,
+    meeting: VideoMeeting,
+    user: User,
+    policy: str,
+    session_id=None,
+    independent_user_ids: list | None = None,
+) -> MeetingMaterialSession:
+    """strict / independent + опциональный список учеников в самостоятельном режиме."""
+    assert_can_manage_meeting(user, meeting)
+    meeting.refresh_from_db(fields=["status"])
+    if meeting.status != VideoMeeting.Status.LIVE:
+        raise VideoMeetingError("Урок не активен", code="not_live", status=409)
+    policy = (policy or "").strip().lower()
+    if policy not in MeetingMaterialFollowPolicy.values:
+        raise VideoMeetingError("Некорректная политика следования", code="invalid_policy", status=400)
+
+    session = get_active_material_session(meeting)
+    if session is None or (session_id and session.pk != int(session_id)):
+        raise VideoMeetingError("Нет активной сессии материала", code="no_session", status=404)
+    if not user_is_material_controller(session, user, resolve_access(user, meeting.schedule_event).role):
+        raise VideoMeetingError("Управление материалом у другого ведущего", code="not_controller", status=403)
+
+    session.follow_policy = policy
+    update_fields = ["follow_policy", "updated_at"]
+    if independent_user_ids is not None:
+        roster_user_ids = {
+            s.user_id for s in list_event_students(meeting.schedule_event) if s.user_id
+        }
+        cleaned = []
+        for raw in (independent_user_ids or [])[:50]:
+            try:
+                uid = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if uid in roster_user_ids:
+                cleaned.append(uid)
+        session.independent_user_ids = cleaned
+        update_fields.append("independent_user_ids")
+    session.save(update_fields=update_fields)
+    logger.info(
+        "material_follow_policy meeting=%s session=%s policy=%s user=%s",
+        meeting.uuid,
+        session.pk,
+        policy,
+        user.pk,
+    )
+    return session
+
+
+def transfer_material_control(
+    *,
+    meeting: VideoMeeting,
+    user: User,
+    to_user_id: int,
+    session_id=None,
+) -> MeetingMaterialSession:
+    """Передать управление материалом соучителю / вернуть себе."""
+    access = resolve_access(user, meeting.schedule_event)
+    if access.role not in ("teacher", "coteacher", "staff"):
+        raise VideoMeetingError("Нет прав", code="forbidden", status=403)
+    session = get_active_material_session(meeting)
+    if session is None or (session_id and session.pk != int(session_id)):
+        raise VideoMeetingError("Нет активной сессии материала", code="no_session", status=404)
+
+    # Передать может текущий controller или владелец урока / staff.
+    is_owner = meeting.schedule_event.owner_id == user.pk
+    if session.controller_id and session.controller_id != user.pk and not is_owner and access.role != "staff":
+        raise VideoMeetingError("Сейчас управляет другой ведущий", code="not_controller", status=403)
+
+    try:
+        to_uid = int(to_user_id)
+    except (TypeError, ValueError) as exc:
+        raise VideoMeetingError("Некорректный user id", code="invalid", status=400) from exc
+
+    target = User.objects.filter(pk=to_uid).first()
+    if target is None:
+        raise VideoMeetingError("Пользователь не найден", code="not_found", status=404)
+    target_access = resolve_access(target, meeting.schedule_event)
+    if not target_access.allowed or target_access.role not in ("teacher", "coteacher", "staff"):
+        raise VideoMeetingError("Передать управление можно только соучителю", code="invalid_target", status=400)
+
+    session.controller_id = to_uid
+    session.save(update_fields=["controller_id", "updated_at"])
+    logger.info(
+        "material_control_transferred meeting=%s session=%s from=%s to=%s",
+        meeting.uuid,
+        session.pk,
+        user.pk,
+        to_uid,
+    )
+    return session
+
+
 def apply_material_operation(
     *,
     meeting: VideoMeeting,
@@ -556,19 +706,23 @@ def apply_material_operation(
             }
 
         role = access.role
+        # coteacher действует как teacher для адаптера прав.
+        adapter_role = "teacher" if role in ("teacher", "coteacher", "staff") else role
         can_collab = user_can_collaborate(session, user, role)
+        can_browse = student_can_navigate_independently(session, user) if role == "student" else True
         adapter = get_adapter(session.resource_kind)
         allowed = adapter.allowed_actions_for(
-            role=role,
+            role=adapter_role,
             interaction_mode=session.interaction_mode,
             can_collaborate=can_collab,
+            can_browse_independently=can_browse,
         )
 
-        # Курсор ученика — только в collaborative; учителя — всегда.
+        # Курсор: учитель всегда; ученик — в collaborative или follow (лёгкий pointer).
         if action in EPHEMERAL_ACTIONS:
-            if role == "student" and not can_collab:
+            if role == "student" and action not in ("cursor", "pointer") and not can_collab:
                 raise VideoMeetingError("Режим просмотра: действие запрещено", code="view_only", status=403)
-            if role not in ("teacher", "staff", "student"):
+            if role not in ("teacher", "coteacher", "staff", "student"):
                 raise VideoMeetingError("Нет прав", code="forbidden", status=403)
             return {
                 "duplicate": False,
@@ -606,10 +760,19 @@ def apply_material_operation(
             )
             raise VideoMeetingError("Действие запрещено", code="forbidden", status=403)
 
-        # Навигация учеником: разрешена только в collaborative (через allowed_actions_for).
-        if role == "student" and action in ("page_changed", "zoom_changed", "scrolled", "tab_changed", "viewport_changed"):
-            if session.interaction_mode != "collaborative" or not can_collab:
+        # Навигация учеником: independent follow / collaborative / персональный whitelist.
+        if role == "student" and action in NAVIGATION_ACTIONS:
+            if not can_browse and not (session.interaction_mode == "collaborative" and can_collab):
                 raise VideoMeetingError("Навигацией управляет преподаватель", code="nav_locked", status=403)
+
+        # Глобальную позицию меняет только текущий controller (учитель/соучитель).
+        if adapter_role == "teacher" and action in NAVIGATION_ACTIONS:
+            if not user_is_material_controller(session, user, role):
+                raise VideoMeetingError(
+                    "Сейчас материалом управляет другой ведущий. Запросите передачу управления.",
+                    code="not_controller",
+                    status=403,
+                )
 
         if base_version is not None and int(base_version) > int(session.version) + 50:
             raise VideoMeetingError("Некорректная base_version", code="version_conflict", status=409)

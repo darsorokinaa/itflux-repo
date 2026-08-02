@@ -1405,6 +1405,17 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             comments_by_task_id=request.data.get("comments_by_task_id"),
             manual_stats=request.data.get("manual_stats"),
         )
+        try:
+            from .student_notifications import notify_student_homework_reviewed
+
+            notify_student_homework_reviewed(
+                review_item=item,
+                checked=True,
+                actor=request.user,
+            )
+        except Exception:
+            logger = __import__("logging").getLogger("cabinet.notifications")
+            logger.exception("Failed to notify student about checked review %s", item.pk)
         item.refresh_from_db()
         return Response(ReviewItemSerializer(item).data)
 
@@ -1422,8 +1433,104 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             comments_by_task_id=request.data.get("comments_by_task_id"),
             manual_stats=request.data.get("manual_stats"),
         )
+        try:
+            from .student_notifications import notify_student_homework_reviewed
+
+            notify_student_homework_reviewed(
+                review_item=item,
+                checked=False,
+                actor=request.user,
+            )
+        except Exception:
+            logger = __import__("logging").getLogger("cabinet.notifications")
+            logger.exception("Failed to notify student about returned review %s", item.pk)
         item.refresh_from_db()
         return Response(ReviewItemSerializer(item).data)
+
+    @action(detail=True, methods=["get"], url_path="create-homework-preview")
+    def create_homework_preview(self, request, pk=None):
+        """Превью формы «Задать ДЗ» из проверки."""
+        from .homework_from_review import HomeworkFromReviewError, prepare_homework_from_review
+
+        item = self.get_object()
+        try:
+            data = prepare_homework_from_review(teacher=request.user, review_item=item)
+        except HomeworkFromReviewError as exc:
+            return Response(
+                {"detail": exc.message, "code": exc.code},
+                status=exc.status,
+            )
+        return Response(data)
+
+    @action(detail=True, methods=["post"], url_path="create-homework")
+    def create_homework(self, request, pk=None):
+        """Создать ДЗ для ученика из проверяемой работы (черновик или выдача)."""
+        from .homework_from_review import HomeworkFromReviewError, create_homework_from_review
+
+        item = self.get_object()
+        data = request.data if isinstance(request.data, dict) else {}
+        mode = (data.get("mode") or "assign").strip().lower()
+        if mode not in ("assign", "draft"):
+            mode = "assign"
+
+        try:
+            result = create_homework_from_review(
+                teacher=request.user,
+                review_item=item,
+                title=data.get("title") or "",
+                description=data.get("description") or "",
+                due_at=data.get("due_at"),
+                mode=mode,
+                generator_task_ids=data.get("generator_task_ids") or data.get("task_ids"),
+                include_incorrect=bool(data.get("include_incorrect")),
+                include_partial=bool(data.get("include_partial")),
+                source_homework_task_ids=data.get("source_homework_task_ids"),
+                material_ids=data.get("material_ids"),
+                interactive_ids=data.get("interactive_ids"),
+                comment=data.get("comment") or "",
+                idempotency_key=data.get("idempotency_key")
+                or request.headers.get("X-Idempotency-Key", ""),
+            )
+        except HomeworkFromReviewError as exc:
+            return Response(
+                {"detail": exc.message, "code": exc.code},
+                status=exc.status,
+            )
+
+        homework = result["homework"]
+        due_label = ""
+        if homework.due_at:
+            local = timezone.localtime(homework.due_at)
+            months = (
+                "", "января", "февраля", "марта", "апреля", "мая", "июня",
+                "июля", "августа", "сентября", "октября", "ноября", "декабря",
+            )
+            due_label = f"{local.day} {months[local.month]}, {local.strftime('%H:%M')}"
+
+        if mode == "draft":
+            message = "Черновик домашнего задания сохранён"
+        elif due_label:
+            message = f"Домашнее задание выдано ученику. Срок: {due_label}"
+        else:
+            message = "Домашнее задание выдано ученику"
+
+        return Response(
+            {
+                "ok": True,
+                "created": result.get("created", True),
+                "idempotent": result.get("idempotent", False),
+                "homework_id": homework.id,
+                "homework_url": f"/cabinet/homework/{homework.id}/edit",
+                "status": homework.status,
+                "due_at": homework.due_at.isoformat() if homework.due_at else None,
+                "due_label": due_label,
+                "message": message,
+                "tasks_count": result.get("tasks_count", 0),
+                "notified": result.get("notified", 0),
+                "homework": HomeworkListSerializer(homework).data,
+            },
+            status=status.HTTP_201_CREATED if result.get("created") else status.HTTP_200_OK,
+        )
 
     @action(
         detail=True,
@@ -1640,6 +1747,12 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         update_fields = [f for f in update_fields if not (f in seen or seen.add(f))]
         submission.save(update_fields=update_fields)
         try:
+            from .homework_attempts import snapshot_on_review
+
+            snapshot_on_review(submission, checked=checked)
+        except Exception:
+            pass
+        try:
             from .journal_service import sync_previous_homework_status_from_submission
 
             sync_previous_homework_status_from_submission(submission)
@@ -1741,6 +1854,17 @@ class MaterialViewSet(
         ctx["teacher"] = self.get_teacher()
         return ctx
 
+    def retrieve(self, request, *args, **kwargs):
+        from .subscription_access import AccessDenied, SubscriptionAccessService
+
+        material = self.get_object()
+        try:
+            SubscriptionAccessService.raise_if_cannot_access_content(request.user, material)
+        except AccessDenied as exc:
+            return Response(exc.to_dict(), status=status.HTTP_403_FORBIDDEN)
+        serializer = self.get_serializer(material)
+        return Response(serializer.data)
+
     def perform_create(self, serializer):
         serializer.save(teacher=self.get_teacher())
 
@@ -1759,7 +1883,13 @@ class MaterialViewSet(
 
     @action(detail=True, methods=["post"], url_path="save")
     def save_material(self, request, pk=None):
+        from .subscription_access import AccessDenied, SubscriptionAccessService
+
         material = self.get_object()
+        try:
+            SubscriptionAccessService.raise_if_cannot_access_content(request.user, material)
+        except AccessDenied as exc:
+            return Response(exc.to_dict(), status=status.HTTP_403_FORBIDDEN)
         note = request.data.get("note", "")
         saved, _ = TeacherSavedMaterial.objects.get_or_create(
             teacher=self.get_teacher(),
@@ -1773,7 +1903,13 @@ class MaterialViewSet(
 
     @action(detail=True, methods=["post"], url_path="attach")
     def attach(self, request, pk=None):
+        from .subscription_access import AccessDenied, SubscriptionAccessService
+
         material = self.get_object()
+        try:
+            SubscriptionAccessService.raise_if_cannot_access_content(request.user, material)
+        except AccessDenied as exc:
+            return Response(exc.to_dict(), status=status.HTTP_403_FORBIDDEN)
         target_type = request.data.get("target_type")
         target_id = request.data.get("target_id")
         if target_type == "lesson":

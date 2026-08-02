@@ -536,7 +536,10 @@ def build_homework_result_payload(
     status_key = "not_submitted"
     if submission:
         raw_status = (submission.status or "").strip().lower()
-        if raw_status in HOMEWORK_STATUS_LABELS and raw_status != "not_submitted":
+        # Незавершённый черновик (нет submitted_at) не считается итоговой сдачей.
+        if raw_status == "submitted" and not submission.submitted_at:
+            status_key = "not_submitted"
+        elif raw_status in HOMEWORK_STATUS_LABELS and raw_status != "not_submitted":
             status_key = raw_status
         elif submission.submitted_at:
             status_key = "submitted"
@@ -568,18 +571,40 @@ def build_homework_result_payload(
     if score is None and checked_count:
         score = round(correct_count * 100 / checked_count, 2)
 
+    from .homework_attempts import serialize_attempts
+
+    attempts = serialize_attempts(submission) if submission else []
+    overdue = False
+    if homework.due_at and timezone.now() > homework.due_at:
+        if not submission or not submission.submitted_at or submission.submitted_at > homework.due_at:
+            overdue = True
+        if status_key in {"not_submitted"} and homework.due_at < timezone.now():
+            status_key = "overdue"
+
+    HOMEWORK_STATUS_LABELS_EXT = {
+        **HOMEWORK_STATUS_LABELS,
+        "overdue": "Просрочено",
+        "in_progress": "В работе",
+        "new": "Не начато",
+    }
+
     return {
+        "entry_type": "homework",
         "homework_id": homework.id,
         "title": homework.title or "Домашнее задание",
+        "description": (homework.description or "")[:500],
+        "assigned_at": homework.created_at.isoformat() if homework.created_at else None,
         "due_at": homework.due_at.isoformat() if homework.due_at else None,
         "status": status_key,
-        "status_label": HOMEWORK_STATUS_LABELS.get(status_key, status_key),
+        "status_label": HOMEWORK_STATUS_LABELS_EXT.get(status_key, status_key),
         "submitted_at": (
             submission.submitted_at.isoformat()
             if submission and submission.submitted_at
             else None
         ),
         "score_percent": score,
+        "score": score,
+        "max_score": 100,
         "teacher_comment": (submission.teacher_comment if submission else "") or "",
         "answer_text": (submission.answer_text if submission else "") or "",
         "has_attached_file": bool(submission and submission.attached_file),
@@ -588,6 +613,15 @@ def build_homework_result_payload(
         "checked_count": checked_count or None,
         "correct_count": correct_count if checked_count else None,
         "tasks": task_rows,
+        "attempt_count": (
+            submission.attempt_count
+            if submission and submission.attempt_count
+            else len(attempts) or (1 if submission and submission.submitted_at else 0)
+        ),
+        "attempts": attempts,
+        "is_overdue": overdue,
+        "review_type": "manual" if (submission and submission.status in {"submitted", "returned", "needs_revision", "checked"}) else "auto",
+        "submission_id": submission.id if submission else None,
     }
 
 
@@ -2414,4 +2448,231 @@ def build_gradebook(
         "month_spans": month_spans,
         "topic_spans": topic_spans,
         "overall_averages": overall,
+    }
+
+
+def _parse_date(value):
+    if not value:
+        return None
+    if hasattr(value, "year"):
+        return value
+    from datetime import date as date_cls
+
+    try:
+        return date_cls.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def build_journal_entries_feed(
+    teacher: User,
+    *,
+    student_id=None,
+    group_id=None,
+    date_from=None,
+    date_to=None,
+    entry_type: str | None = None,
+    homework_status: str | None = None,
+    overdue_only: bool = False,
+    reviewed: str | None = None,
+    homework_only: bool = False,
+    limit: int = 200,
+) -> dict:
+    """
+    Единая лента записей журнала: уроки + домашние задания.
+    Результаты ДЗ читаются из HomeworkSubmission (без копирования в отдельную таблицу).
+    """
+    from .models import Homework, HomeworkSubmission, Student, StudentGroup
+
+    d_from = _parse_date(date_from)
+    d_to = _parse_date(date_to)
+    entries: list[dict] = []
+
+    student_ids: list[int] = []
+    if student_id:
+        student_ids = [int(student_id)]
+    elif group_id:
+        group = StudentGroup.objects.filter(pk=group_id, teacher=teacher).first()
+        if group:
+            student_ids = list(group.students.values_list("id", flat=True))
+
+    include_lessons = not homework_only and (not entry_type or entry_type == "lesson")
+    include_homework = not entry_type or entry_type == "homework" or homework_only
+
+    if include_lessons:
+        records = (
+            StudentLessonRecord.objects.filter(journal__teacher=teacher, journal__is_archived=False)
+            .select_related("journal", "student", "journal__group", "journal__schedule_event")
+            .order_by("-journal__lesson_date", "-id")
+        )
+        if student_ids:
+            records = records.filter(student_id__in=student_ids)
+        if group_id:
+            records = records.filter(journal__group_id=group_id)
+        if d_from:
+            records = records.filter(journal__lesson_date__gte=d_from)
+        if d_to:
+            records = records.filter(journal__lesson_date__lte=d_to)
+        for r in records[:limit]:
+            score = float(r.overall_score) if r.overall_score is not None else None
+            comment = r.teacher_comment or ""
+            entries.append(
+                {
+                    "id": f"lesson-{r.id}",
+                    "entry_type": "lesson",
+                    "entry_type_label": "Урок",
+                    "date": r.journal.lesson_date.isoformat() if r.journal.lesson_date else None,
+                    "sort_at": (
+                        r.journal.started_at.isoformat()
+                        if r.journal.started_at
+                        else (r.journal.lesson_date.isoformat() if r.journal.lesson_date else None)
+                    ),
+                    "student_id": r.student_id,
+                    "student_name": r.student.full_name,
+                    "group_id": r.journal.group_id,
+                    "group_name": r.journal.group.title if r.journal.group_id else "",
+                    "teacher_id": teacher.id,
+                    "title": r.journal.actual_topic or r.journal.planned_topic or "Урок",
+                    "subject": "",
+                    "status": r.publish_status,
+                    "attendance": r.attendance_status,
+                    "score": score,
+                    "score_percent": score,
+                    "max_score": 100,
+                    "comment": comment,
+                    "comment_visibility": getattr(r, "comment_visibility", "student_only"),
+                    "visible_to_student": bool(getattr(r, "visible_to_student", True)),
+                    "visible_to_parent": bool(getattr(r, "visible_to_parent", False)),
+                    "record_id": r.id,
+                    "journal_id": r.journal_id,
+                    "is_overdue": False,
+                    "review_type": None,
+                    "attempt_count": None,
+                    "badge": "Урок",
+                }
+            )
+
+    if include_homework:
+        hw_qs = (
+            Homework.objects.filter(teacher=teacher)
+            .exclude(status="draft")
+            .select_related("student", "group", "teacher")
+            .prefetch_related(
+                Prefetch(
+                    "submissions",
+                    queryset=HomeworkSubmission.objects.select_related("student").prefetch_related("attempts"),
+                )
+            )
+            .order_by("-created_at")
+        )
+        if student_ids:
+            hw_qs = hw_qs.filter(Q(student_id__in=student_ids) | Q(group__students__id__in=student_ids)).distinct()
+        if group_id:
+            hw_qs = hw_qs.filter(group_id=group_id)
+        if d_from:
+            hw_qs = hw_qs.filter(Q(due_at__date__gte=d_from) | Q(created_at__date__gte=d_from))
+        if d_to:
+            hw_qs = hw_qs.filter(Q(due_at__date__lte=d_to) | Q(created_at__date__lte=d_to))
+
+        target_students = list(
+            Student.objects.filter(teacher=teacher, id__in=student_ids)
+            if student_ids
+            else Student.objects.none()
+        )
+        if not student_ids and group_id:
+            target_students = list(Student.objects.filter(teacher=teacher, groups__id=group_id))
+
+        for hw in hw_qs[: max(limit, 50)]:
+            students_for_hw = target_students
+            if not students_for_hw:
+                if hw.student_id:
+                    students_for_hw = [hw.student]
+                elif hw.group_id:
+                    students_for_hw = list(hw.group.students.all()[:40])
+            for st in students_for_hw:
+                payload = build_homework_result_payload(homework=hw, student=st)
+                if not payload:
+                    continue
+                st_key = payload.get("status") or "not_submitted"
+                if homework_status and st_key != homework_status:
+                    continue
+                if overdue_only and not payload.get("is_overdue"):
+                    continue
+                if reviewed == "yes" and st_key != "checked":
+                    continue
+                if reviewed == "no" and st_key == "checked":
+                    continue
+                date_val = None
+                if payload.get("submitted_at"):
+                    date_val = payload["submitted_at"][:10]
+                elif hw.due_at:
+                    date_val = timezone.localtime(hw.due_at).date().isoformat()
+                else:
+                    date_val = timezone.localtime(hw.created_at).date().isoformat()
+                entries.append(
+                    {
+                        "id": f"homework-{hw.id}-{st.id}",
+                        "entry_type": "homework",
+                        "entry_type_label": "ДЗ",
+                        "date": date_val,
+                        "sort_at": payload.get("submitted_at") or (hw.due_at.isoformat() if hw.due_at else hw.created_at.isoformat()),
+                        "student_id": st.id,
+                        "student_name": st.full_name,
+                        "group_id": hw.group_id,
+                        "group_name": hw.group.title if hw.group_id else "",
+                        "teacher_id": teacher.id,
+                        "title": payload.get("title") or hw.title,
+                        "subject": "",
+                        "status": st_key,
+                        "status_label": payload.get("status_label"),
+                        "attendance": None,
+                        "score": payload.get("score_percent"),
+                        "score_percent": payload.get("score_percent"),
+                        "max_score": 100,
+                        "comment": payload.get("teacher_comment") or "",
+                        "homework_id": hw.id,
+                        "submission_id": payload.get("submission_id"),
+                        "due_at": payload.get("due_at"),
+                        "submitted_at": payload.get("submitted_at"),
+                        "assigned_at": payload.get("assigned_at"),
+                        "is_overdue": bool(payload.get("is_overdue")),
+                        "review_type": payload.get("review_type"),
+                        "attempt_count": payload.get("attempt_count"),
+                        "attempts": payload.get("attempts") or [],
+                        "tasks": payload.get("tasks") or [],
+                        "badge": "ДЗ",
+                        "review_url": f"/cabinet/review?homework={hw.id}&student={st.id}",
+                    }
+                )
+
+    entries.sort(key=lambda e: e.get("sort_at") or "", reverse=True)
+    entries = entries[:limit]
+    summary = homework_journal_summary(entries)
+    return {
+        "entries": entries,
+        "summary": summary,
+        "summary_hint": (
+            "Средний результат ДЗ считается только по работам со статусом «Проверено» "
+            "и ненулевым итоговым процентом. Посещаемость в средний результат не входит."
+        ),
+    }
+
+
+def homework_journal_summary(entries: list[dict]) -> dict:
+    hw = [e for e in entries if e.get("entry_type") == "homework"]
+    checked_scores = [
+        float(e["score_percent"])
+        for e in hw
+        if e.get("status") == "checked" and e.get("score_percent") is not None
+    ]
+    return {
+        "homework_assigned": len(hw),
+        "homework_submitted": sum(1 for e in hw if e.get("status") in {"submitted", "checked", "returned", "needs_revision"}),
+        "homework_checked": sum(1 for e in hw if e.get("status") == "checked"),
+        "homework_not_submitted": sum(1 for e in hw if e.get("status") in {"not_submitted", "overdue", "new", "in_progress"}),
+        "homework_overdue": sum(1 for e in hw if e.get("is_overdue")),
+        "homework_pending_review": sum(1 for e in hw if e.get("status") == "submitted"),
+        "homework_average_percent": (
+            round(sum(checked_scores) / len(checked_scores), 2) if checked_scores else None
+        ),
     }

@@ -58,7 +58,7 @@ export function useLimitModal(currentPlan) {
         type,
         current: data.current ?? 0,
         limit: data.limit ?? 0,
-        recommendedPlan: data.recommended_plan || "repetitor",
+        recommendedPlan: data.recommended_plan || "teacher",
       });
       return true;
     }
@@ -69,7 +69,7 @@ export function useLimitModal(currentPlan) {
     ? {
         ...limitModal,
         currentPlan,
-        onUpgrade: () => openUpgradeModal(limitModal.recommendedPlan || "repetitor"),
+        onUpgrade: () => openUpgradeModal(limitModal.recommendedPlan || "teacher"),
         onClose: closeAll,
       }
     : null;
@@ -78,7 +78,7 @@ export function useLimitModal(currentPlan) {
     ? {
         currentPlan,
         plans,
-        recommendedSlug: upgradeModal.recommendedSlug || "repetitor",
+        recommendedSlug: upgradeModal.recommendedSlug || "teacher",
         onSelectPlan: (slug) => {
           closeAll();
           // Вызывающий компонент подписывается через onUpgrade

@@ -2460,3 +2460,19 @@
     min-height: 44px;
   }
 }
+
+/* Journal unified entries feed */
+.jg-entries{margin-top:20px;display:grid;gap:12px}
+.jg-entries__filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.jg-entries__summary{display:flex;flex-wrap:wrap;gap:10px;font-size:.9rem;color:#566}
+.jg-entries__list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.jg-entry-card{width:100%;text-align:left;border:1px solid rgba(0,0,0,.08);border-radius:14px;padding:12px;background:#fff;display:flex;gap:10px;cursor:pointer}
+.jg-entry-card--homework{border-left:3px solid #2f6f5e}
+.jg-entry-card--lesson{border-left:3px solid #3d5a80}
+.jg-entry-card.is-overdue{border-left-color:#8a5a2b}
+.jg-entry-card__badge{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:999px;background:rgba(47,111,94,.12);font-size:12px;font-weight:700;flex:0 0 auto}
+.jg-entry-card__body{display:grid;gap:4px;min-width:0}
+.jg-entry-card__body strong{overflow-wrap:anywhere}
+.jg-entry-drawer{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:60;display:grid;justify-items:end}
+.jg-entry-drawer__panel{width:min(420px,100%);height:100%;background:#fff;padding:16px;overflow:auto;display:grid;gap:10px;align-content:start}
+.jg-entry-drawer__panel header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}

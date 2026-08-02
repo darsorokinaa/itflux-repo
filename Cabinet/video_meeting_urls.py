@@ -64,6 +64,11 @@ urlpatterns = [
         name="video_meeting_material_permission",
     ),
     path(
+        "<uuid:meeting_uuid>/material-session/control/",
+        video_meeting_api.VideoMeetingMaterialControlView.as_view(),
+        name="video_meeting_material_control",
+    ),
+    path(
         "<uuid:meeting_uuid>/material-session/operation/",
         video_meeting_api.VideoMeetingMaterialOperationView.as_view(),
         name="video_meeting_material_operation",

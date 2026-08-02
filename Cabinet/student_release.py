@@ -533,8 +533,13 @@ def assign_homework_manually(*, teacher, student, plan_item, due_at=None):
 
     _record_variant_tasks_for_homework(homework, student, teacher)
     from .homework_api import ensure_homework_in_review_queue
+    from .homework_from_review import notify_students_homework_assigned
 
     ensure_homework_in_review_queue(homework, student)
+    try:
+        notify_students_homework_assigned(homework)
+    except Exception:
+        logger.exception("Failed to notify students about homework %s", homework.pk)
     return homework
 
 
@@ -718,8 +723,13 @@ def copy_homework_to_students(
                     )
             _record_variant_tasks_for_homework(homework, student, teacher)
             from .homework_api import ensure_homework_in_review_queue
+            from .homework_from_review import notify_students_homework_assigned
 
             ensure_homework_in_review_queue(homework, student)
+            try:
+                notify_students_homework_assigned(homework)
+            except Exception:
+                logger.exception("Failed to notify students about homework %s", homework.pk)
             created.append(homework)
         except Exception as exc:
             errors.append({"student_id": student.pk, "error": str(exc)})
@@ -1057,8 +1067,15 @@ def release_for_student(event, student, plan_item, lesson):
         _sync_homework_tasks(homework, plan_item)
         # Как при ручной выдаче: сразу показать ДЗ в разделе «Проверка».
         from .homework_api import ensure_homework_in_review_queue
+        from .homework_from_review import notify_students_homework_assigned
 
         ensure_homework_in_review_queue(homework, student)
+        # Уведомляем только при первой выдаче (dedup внутри dispatcher тоже есть).
+        if hw_created:
+            try:
+                notify_students_homework_assigned(homework)
+            except Exception:
+                logger.exception("Failed to notify students about homework %s", homework.pk)
         if event.homework_id != homework.id:
             event.homework = homework
             event.save(update_fields=["homework", "updated_at"])

@@ -43,8 +43,43 @@ export default function WorkbookCreateBar({
     return `${n} ${word}`;
   }, [tasks.length]);
 
-  const handleCreate = useCallback(() => {
+  const handleCreate = useCallback(async () => {
     if (!tasks.length) return;
+    try {
+      const readCsrf = () => {
+        const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+        return match ? decodeURIComponent(match[1]) : "";
+      };
+      if (!readCsrf()) {
+        await fetch("/api/csrf/", { credentials: "same-origin" });
+      }
+      const token = readCsrf();
+      const res = await fetch("/api/cabinet/usage/workbook/", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { "X-CSRFToken": token } : {}),
+        },
+        body: "{}",
+      });
+      if (res.status === 403) {
+        const data = await res.json().catch(() => ({}));
+        window.alert(
+          data.message ||
+            "Лимит рабочих тетрадей исчерпан. Зарегистрируйтесь или выберите тариф на /pricing/."
+        );
+        return;
+      }
+      if (!res.ok) {
+        window.alert("Не удалось проверить лимит тетрадей. Повторите попытку.");
+        return;
+      }
+    } catch {
+      // Без подтверждения сервера лимит можно обойти — не создаём офлайн.
+      window.alert("Нет связи с сервером. Создание тетради временно недоступно.");
+      return;
+    }
     openWorkbook(tasks, { ...meta, options });
     onCreated();
   }, [meta, onCreated, options, tasks]);

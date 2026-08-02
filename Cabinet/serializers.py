@@ -405,6 +405,9 @@ class MaterialListSerializer(serializers.ModelSerializer):
     preview_url = serializers.SerializerMethodField()
     cabinet_file_id = serializers.SerializerMethodField()
     is_own = serializers.SerializerMethodField()
+    access_allowed = serializers.SerializerMethodField()
+    min_plan = serializers.SerializerMethodField()
+    external_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Material
@@ -421,6 +424,9 @@ class MaterialListSerializer(serializers.ModelSerializer):
             "subtopic",
             "task_number",
             "difficulty",
+            "access_level",
+            "access_allowed",
+            "min_plan",
             "external_url",
             "file_url",
             "preview_url",
@@ -432,17 +438,43 @@ class MaterialListSerializer(serializers.ModelSerializer):
             "created_at",
         ]
 
+    def _can_access(self, obj) -> bool:
+        from .subscription_access import SubscriptionAccessService
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else self.context.get("teacher")
+        return SubscriptionAccessService.can_access_content(user, obj)
+
+    def get_access_allowed(self, obj):
+        return self._can_access(obj)
+
+    def get_min_plan(self, obj):
+        from .subscription_access import SubscriptionAccessService
+
+        return SubscriptionAccessService.get_minimum_plan_for_content(obj)
+
     def get_file_url(self, obj):
+        if not self._can_access(obj):
+            return ""
         from .files_services import material_file_url
 
         return material_file_url(obj)
 
     def get_preview_url(self, obj):
+        if not self._can_access(obj):
+            return ""
         from .files_services import material_view_url
 
         return material_view_url(obj)
 
+    def get_external_url(self, obj):
+        if not self._can_access(obj):
+            return ""
+        return obj.external_url or ""
+
     def get_cabinet_file_id(self, obj):
+        if not self._can_access(obj):
+            return None
         return str(obj.cabinet_file_id) if obj.cabinet_file_id else None
 
     def get_is_own(self, obj):
@@ -457,8 +489,26 @@ class MaterialListSerializer(serializers.ModelSerializer):
 
 
 class MaterialDetailSerializer(MaterialListSerializer):
+    content = serializers.SerializerMethodField()
+    file = serializers.SerializerMethodField()
+
     class Meta(MaterialListSerializer.Meta):
         fields = MaterialListSerializer.Meta.fields + ["content", "file"]
+
+    def get_content(self, obj):
+        if not self._can_access(obj):
+            return ""
+        return obj.content or ""
+
+    def get_file(self, obj):
+        if not self._can_access(obj):
+            return None
+        if not obj.file:
+            return None
+        try:
+            return obj.file.url
+        except Exception:
+            return None
 
 
 HOMEWORK_MATERIAL_TYPES = {

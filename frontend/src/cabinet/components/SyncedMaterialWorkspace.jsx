@@ -30,6 +30,35 @@ function saveToolPrefs(prefs) {
   }
 }
 
+/** answers/fields: per-user {userId:{itemId:row}} или legacy flat {itemId:row} → плоский для DOM. */
+function flattenUserBucket(bucket, currentUserId, canManage) {
+  if (!bucket || typeof bucket !== "object") return {};
+  const values = Object.values(bucket);
+  const looksPerUser = values.some((v) => {
+    if (!v || typeof v !== "object" || "value" in v) return false;
+    return Object.values(v).some((row) => row && typeof row === "object" && ("value" in row || "author_id" in row));
+  });
+  if (!looksPerUser) {
+    // Legacy flat — отдаём как есть (учитель/ученик видят своё после personalize на сервере).
+    return bucket;
+  }
+  if (canManage) {
+    // Учителю для DOM текущего слайда показываем последний ответ по каждому item
+    // (панель «Ответы» читает полную структуру отдельно).
+    const flat = {};
+    for (const userBucket of values) {
+      if (!userBucket || typeof userBucket !== "object") continue;
+      for (const [itemId, row] of Object.entries(userBucket)) {
+        if (row && typeof row === "object") flat[itemId] = row;
+      }
+    }
+    return flat;
+  }
+  const key = currentUserId != null ? String(currentUserId) : "";
+  const mine = (key && bucket[key]) || {};
+  return mine && typeof mine === "object" ? mine : {};
+}
+
 function resourceTypeLabel(kind) {
   const map = {
     pdf: "PDF",
@@ -101,6 +130,7 @@ export default function SyncedMaterialWorkspace({
   material,
   state,
   interactionMode = "view_only",
+  followPolicy = "strict",
   syncStatus = "synced",
   remoteCursors = [],
   remotePreviews = {},
@@ -108,6 +138,11 @@ export default function SyncedMaterialWorkspace({
   notice = "",
   canEditContent = false,
   currentUserId = null,
+  isController = true,
+  controllerLabel = "",
+  onAllowIndependent,
+  onReturnToLeader,
+  onTransferControl,
   onCloseLocal,
   onCloseForAll,
   onToggleCollaborative,
@@ -139,10 +174,14 @@ export default function SyncedMaterialWorkspace({
   const [interactiveError, setInteractiveError] = useState("");
 
   const isCollaborative = interactionMode === "collaborative";
-  const locked = !canManage && !isCollaborative;
-  const contentLocked = locked || (!canManage && !canEditContent);
+  const independent = followPolicy === "independent";
+  // strict follow: навигация за учителем, ответы доступны.
+  const followMode = !canManage && !independent && !isCollaborative;
+  const locked = followMode;
+  const contentLocked = !canManage && !canEditContent && !followMode && !independent;
+  const canAnswer = canManage || canEditContent || followMode || independent;
   const showTools = canManage || isCollaborative;
-  const canNavigate = canManage || isCollaborative;
+  const canNavigate = (canManage && isController) || independent || isCollaborative;
   const drawToolActive = tool === "pen" || tool === "highlighter" || tool === "pointer" || tool === "eraser";
   const toolsCaptureInput = showTools && drawToolActive && (canManage || !contentLocked || tool === "pointer");
 
@@ -334,11 +373,19 @@ export default function SyncedMaterialWorkspace({
   // Синхронизация интерактивных полей внутри корневого контейнера (input/select/checkbox).
   useEffect(() => {
     const root = interactiveRootRef.current;
-    if (!root || (contentLocked && !canManage)) return undefined;
+    if (!root || !canAnswer) return undefined;
 
     const emitField = (fieldId, value, action = "field_changed") => {
       if (remoteApplyGuard?.isRemote?.()) return;
-      onInteractiveOp?.({ action, payload: { fieldId, value } });
+      onInteractiveOp?.({
+        action,
+        payload: {
+          fieldId,
+          questionId: fieldId,
+          value,
+          status: "draft",
+        },
+      });
     };
 
     const onInput = (e) => {
@@ -372,14 +419,18 @@ export default function SyncedMaterialWorkspace({
       root.removeEventListener("input", onInput, true);
       root.removeEventListener("change", onInput, true);
     };
-  }, [canManage, contentLocked, onInteractiveOp, remoteApplyGuard, interactive, material?.interactiveId]);
+  }, [canAnswer, onInteractiveOp, remoteApplyGuard, interactive, material?.interactiveId]);
+
+  // Плоский вид answers/fields для текущего пользователя (или все — для учителя).
+  const flatFields = useMemo(() => flattenUserBucket(state?.fields, currentUserId, canManage), [state?.fields, currentUserId, canManage]);
+  const flatAnswers = useMemo(() => flattenUserBucket(state?.answers, currentUserId, canManage), [state?.answers, currentUserId, canManage]);
 
   // Применить удалённые fields/answers к DOM.
   useEffect(() => {
     const root = interactiveRootRef.current;
     if (!root) return;
-    const fields = state?.fields || {};
-    const answers = state?.answers || {};
+    const fields = flatFields;
+    const answers = flatAnswers;
     const findField = (id) => {
       try {
         const esc = CSS.escape(String(id));
@@ -411,7 +462,7 @@ export default function SyncedMaterialWorkspace({
         }
       }
     });
-  }, [state?.fields, state?.answers, remoteApplyGuard, interactive]);
+  }, [flatFields, flatAnswers, remoteApplyGuard, interactive]);
 
   const handleUndo = useCallback(() => {
     const entry = undoStackRef.current.pop();
@@ -472,9 +523,15 @@ export default function SyncedMaterialWorkspace({
         title={material?.title}
         typeLabel={resourceTypeLabel(kind)}
         interactionMode={interactionMode}
+        followPolicy={followPolicy}
         syncStatus={syncStatus}
         collaborative={isCollaborative}
+        isController={isController}
+        controllerLabel={controllerLabel}
         onToggleCollaborative={onToggleCollaborative}
+        onAllowIndependent={onAllowIndependent}
+        onReturnToLeader={onReturnToLeader}
+        onTransferControl={onTransferControl}
         onClose={onCloseForAll}
         notice={notice}
         presenceLabel={presenceLabel}

@@ -25,7 +25,14 @@ PROMO_MONTHS = 3
 PROMO_UNTIL_DATE = datetime(2026, 10, 1, 0, 0, 0)
 PROMO_TZ = ZoneInfo("Europe/Moscow")
 
-_PLAN_RANK = {"start": 0, "repetitor": 1, "pro": 2, "school": 3}
+_PLAN_RANK = {
+    "start": 0,
+    "teacher": 1,
+    "repetitor": 1,  # legacy
+    "pro": 2,
+    "premium": 3,
+    "school": 4,
+}
 
 
 def promo_deadline():
@@ -126,6 +133,14 @@ def apply_registration_promo(user: User, *, force: bool = False) -> Optional[dic
         PROMO_MONTHS,
         started_at=started_at,
     )
+    # Переопределяем source: это стартовая акция, не реферал.
+    sub.source = TeacherSubscription.Source.LAUNCH_PROMO
+    sub.is_legacy_promo = True
+    sub.promo_started_at = started_at
+    sub.promo_ends_at = expires_at
+    sub.save(update_fields=[
+        "source", "is_legacy_promo", "promo_started_at", "promo_ends_at", "updated_at",
+    ])
     logger.info(
         "Registration promo: user=%s plan=%s until=%s",
         user.pk,
@@ -138,7 +153,7 @@ def apply_registration_promo(user: User, *, force: bool = False) -> Optional[dic
         "months": PROMO_MONTHS,
         "started_at": started_at.isoformat(),
         "expires_at": expires_at.isoformat(),
-        "source": "registration_promo",
+        "source": "launch_promo",
     }
 
 

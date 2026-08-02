@@ -40,12 +40,9 @@ class LimitExceeded(Exception):
 
 def _get_next_plan_slug(current_slug: str) -> str:
     """Возвращает следующий по уровню тариф."""
-    ladder = ["start", "repetitor", "pro", "school"]
-    try:
-        idx = ladder.index(current_slug)
-        return ladder[idx + 1] if idx + 1 < len(ladder) else "school"
-    except ValueError:
-        return "repetitor"
+    from .subscription_access import next_plan_slug
+
+    return next_plan_slug(current_slug)
 
 
 class SubscriptionLimitService:
@@ -92,9 +89,27 @@ class SubscriptionLimitService:
 
     @staticmethod
     def get_current_plan(teacher: User):
-        """Возвращает текущий тарифный план."""
+        """Эффективный тариф: при истечении/невалидной подписке — «Старт»."""
+        from .models import TeacherSubscription
+        from .subscription_access import SubscriptionAccessService
+
         sub = SubscriptionLimitService.get_or_create_subscription(teacher)
-        return sub.plan
+        if sub.is_valid():
+            return sub.plan
+
+        start_plan = SubscriptionAccessService.get_start_plan()
+        # Истёкший активный/пробный период: демотируем на «Старт», чтобы лимиты и
+        # content_access_rank не оставались от прежнего тарифа.
+        if sub.expires_at and sub.status in (
+            TeacherSubscription.Status.ACTIVE,
+            TeacherSubscription.Status.TRIAL,
+        ):
+            TeacherSubscription.objects.filter(pk=sub.pk).update(
+                status=TeacherSubscription.Status.EXPIRED,
+                plan_id=start_plan.pk,
+                auto_renew=False,
+            )
+        return start_plan
 
     @staticmethod
     def get_current_period() -> tuple[date, date]:
@@ -293,8 +308,24 @@ class PromoCodeService:
         if not promo.is_valid_now():
             raise PromoCodeError("PROMO_EXPIRED", "Промокод недействителен или истёк")
 
-        # Проверка лимита на пользователя
-        user_uses = PromoCodeUsage.objects.filter(promo_code=promo, teacher=teacher).count()
+        # Глобальный лимит с учётом активных резервов (uses_count растёт только после оплаты).
+        if promo.max_uses is not None:
+            reserved = PromoCodeUsage.objects.filter(
+                promo_code=promo,
+                status=PromoCodeUsage.Status.RESERVED,
+            ).count()
+            if int(promo.uses_count or 0) + reserved >= promo.max_uses:
+                raise PromoCodeError("PROMO_EXPIRED", "Промокод недействителен или истёк")
+
+        # Проверка лимита на пользователя (applied + активные reserve)
+        user_uses = PromoCodeUsage.objects.filter(
+            promo_code=promo,
+            teacher=teacher,
+            status__in=[
+                PromoCodeUsage.Status.APPLIED,
+                PromoCodeUsage.Status.RESERVED,
+            ],
+        ).count()
         if user_uses >= promo.max_uses_per_user:
             raise PromoCodeError("PROMO_ALREADY_USED", "Промокод уже был использован")
 
@@ -302,6 +333,15 @@ class PromoCodeService:
         if plan_slug and promo.applicable_plans.exists():
             if not promo.applicable_plans.filter(slug=plan_slug).exists():
                 raise PromoCodeError("PROMO_NOT_APPLICABLE", "Промокод не применим к этому тарифу")
+
+        if getattr(promo, "first_payment_only", False):
+            from .models import Payment
+
+            if Payment.objects.filter(teacher=teacher, status=Payment.Status.PAID).exists():
+                raise PromoCodeError(
+                    "PROMO_FIRST_PAYMENT_ONLY",
+                    "Промокод действует только на первый платёж",
+                )
 
         return promo
 
@@ -323,6 +363,9 @@ class PromoCodeService:
         elif promo.discount_type == PromoCode.DiscountType.FREE_MONTHS:
             discount = amount
             final = Decimal("0")
+        elif promo.discount_type == PromoCode.DiscountType.BONUS_DAYS:
+            discount = Decimal("0")
+            final = amount
         else:
             discount = Decimal("0")
             final = amount
@@ -333,33 +376,77 @@ class PromoCodeService:
             "final_amount": str(final),
             "discount_type": promo.discount_type,
             "discount_value": str(promo.discount_value),
+            "bonus_days": int(getattr(promo, "bonus_days", 0) or 0),
         }
 
     @staticmethod
     @transaction.atomic
     def apply(teacher: User, code_str: str, plan_slug: Optional[str] = None, payment=None):
         """
-        Применяет промокод: записывает использование и увеличивает счётчик.
-        Возвращает (promo, discount_info).
+        Резервирует промокод на время оплаты (status=reserved).
+        Счётчик uses_count увеличивается только после успешной оплаты (confirm).
         """
-        from .models import PromoCodeUsage
+        from .models import PromoCodeUsage, TariffPlan
 
         promo = PromoCodeService.validate(teacher, code_str, plan_slug)
-        plan = SubscriptionLimitService.get_current_plan(teacher)
+        plan = None
+        if plan_slug:
+            plan = TariffPlan.objects.filter(slug=plan_slug, is_active=True).first()
+        if plan is None and payment is not None:
+            plan = getattr(payment, "plan", None)
+        if plan is None:
+            plan = SubscriptionLimitService.get_current_plan(teacher)
 
-        # Считаем скидку на основе тарифа
-        billing_period = "month"
         original_amount = plan.price_month
+        if payment is not None and getattr(payment, "billing_period", "") == "year":
+            original_amount = plan.price_year
         discount_info = PromoCodeService.calculate_discount(promo, original_amount)
+
+        # Не дублируем reserve для того же платежа
+        if payment is not None:
+            existing = PromoCodeUsage.objects.filter(
+                promo_code=promo,
+                teacher=teacher,
+                payment=payment,
+                status=PromoCodeUsage.Status.RESERVED,
+            ).first()
+            if existing:
+                return promo, discount_info
 
         PromoCodeUsage.objects.create(
             promo_code=promo,
             teacher=teacher,
             payment=payment,
+            status=PromoCodeUsage.Status.RESERVED,
             discount_applied=discount_info["discount"],
         )
-
-        promo.uses_count = promo.uses_count + 1
-        promo.save(update_fields=["uses_count", "updated_at"])
-
         return promo, discount_info
+
+    @staticmethod
+    @transaction.atomic
+    def confirm_for_payment(payment) -> None:
+        """Фиксирует reserved→applied после успешной оплаты и увеличивает uses_count."""
+        from .models import PromoCodeUsage
+
+        usages = list(
+            PromoCodeUsage.objects.select_for_update()
+            .select_related("promo_code")
+            .filter(payment=payment, status=PromoCodeUsage.Status.RESERVED)
+        )
+        for usage in usages:
+            promo = usage.promo_code
+            usage.status = PromoCodeUsage.Status.APPLIED
+            usage.save(update_fields=["status"])
+            promo.uses_count = int(promo.uses_count or 0) + 1
+            promo.save(update_fields=["uses_count", "updated_at"])
+
+    @staticmethod
+    @transaction.atomic
+    def release_for_payment(payment) -> None:
+        """Снимает резерв промокода при неуспешной/отменённой оплате."""
+        from .models import PromoCodeUsage
+
+        PromoCodeUsage.objects.filter(
+            payment=payment,
+            status=PromoCodeUsage.Status.RESERVED,
+        ).update(status=PromoCodeUsage.Status.CANCELLED)

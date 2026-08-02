@@ -964,6 +964,71 @@
   color: var(--pay-muted);
 }
 
+.pay-student-block__payer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pay-student-block__payer-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--pay-blue);
+  cursor: pointer;
+}
+
+.pay-student-block__payer-btn:hover {
+  text-decoration: underline;
+}
+
+.pay-payer-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pay-payer-form .pay-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.84rem;
+  color: var(--pay-muted);
+}
+
+.pay-payer-form .pay-field input {
+  border: 1px solid var(--pay-line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 0.92rem;
+  color: var(--pay-ink);
+  background: #fff;
+}
+
+.pay-payer-form .pay-field input:focus {
+  outline: none;
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.pay-payer-form__hint {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.pay-payer-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 .pay-student-block__ops {
   margin-top: 14px;
   padding-top: 12px;
@@ -1591,13 +1656,13 @@
 .pay-drawer-body {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 4px 0 16px;
+  gap: 12px;
+  padding: 0 0 8px;
 }
 
 .pay-drawer-section h3 {
-  margin: 0 0 10px;
-  font-size: 0.92rem;
+  margin: 0 0 6px;
+  font-size: 0.85rem;
 }
 
 .pay-drawer-facts {
@@ -1605,15 +1670,15 @@
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 8px;
+  gap: 0;
 }
 
 .pay-drawer-facts li {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  font-size: 0.9rem;
-  padding: 8px 0;
+  font-size: 0.84rem;
+  padding: 5px 0;
   border-bottom: 1px solid var(--pay-line);
 }
 
@@ -1672,7 +1737,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding-top: 8px;
+  padding-top: 6px;
   border-top: 1px solid var(--pay-line);
 }
 
@@ -1716,10 +1781,23 @@
 }
 
 .pay-overlay__panel--drawer {
-  width: min(420px, 100%);
-  max-height: 100%;
-  margin-left: auto;
+  width: min(560px, calc(100% - 24px));
+  max-height: min(72vh, 560px);
+  padding: 16px 20px 18px;
   overflow: auto;
+}
+
+.pay-overlay__panel--drawer .pay-overlay__head {
+  margin-bottom: 10px;
+}
+
+.pay-overlay__panel--drawer .pay-overlay__head h2 {
+  font-size: 1.05rem;
+}
+
+.pay-overlay__panel--drawer .pay-hint {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
 }
 
 @media (max-width: 720px) {
@@ -1764,4 +1842,63 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.pay-unpaid-list--selectable li {
+  align-items: flex-start;
+}
+
+.pay-unpaid-check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.pay-unpaid-check input {
+  margin-top: 4px;
+}
+
+.pay-confirm-box {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #1e3a5f;
+  border: 1px solid #bfdbfe;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.pay-warn-box {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fffbeb;
+  color: #78350f;
+  border: 1px solid #fde68a;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.pay-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.pay-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--pay-muted);
+}
+
+@media (max-width: 640px) {
+  .pay-form-grid {
+    grid-template-columns: 1fr;
+  }
 }

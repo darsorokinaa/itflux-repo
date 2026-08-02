@@ -88,7 +88,7 @@ export function handleLimitError(error, openModal) {
       type,
       current: data.current ?? 0,
       limit: data.limit ?? 0,
-      recommendedPlan: data.recommended_plan || "repetitor",
+      recommendedPlan: data.recommended_plan || "teacher",
     });
     return true;
   }

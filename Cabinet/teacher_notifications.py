@@ -80,7 +80,10 @@ def notify_teacher_homework_submitted(
     payload: dict,
     is_resubmit: bool = False,
 ) -> None:
-    """In-app always (if prefs); push depends on homework_review_push_mode."""
+    """In-app + push respect prefs; push mode may defer to digest cron."""
+    from .notification_catalog import NotificationEventType
+    from .notification_dispatch import NotificationDispatcher
+
     prefs = get_or_create_preferences(teacher)
     if not getattr(prefs, "notify_homework", True):
         return
@@ -89,31 +92,32 @@ def notify_teacher_homework_submitted(
     if not _override_allows(student, "homework", True):
         return
 
-    from .choices import NotificationChannel, NotificationStatus
+    event_type = (
+        NotificationEventType.HOMEWORK_RESUBMITTED
+        if is_resubmit
+        else NotificationEventType.HOMEWORK_SUBMITTED
+    )
+    payload = dict(payload or {})
+    payload["type"] = event_type
+    payload["event_type"] = event_type
+    submission_id = payload.get("submission_id") or payload.get("homework_id") or "x"
+    dedup_key = f"{event_type}:{submission_id}:{student.pk}:{teacher.pk}"
 
-    Notification.objects.create(
-        recipient_user=teacher,
-        recipient_teacher=teacher,
-        channel=NotificationChannel.IN_APP,
+    mode = getattr(prefs, "homework_review_push_mode", "each") or "each"
+    use_push = mode == "each"
+    NotificationDispatcher.notify(
+        teacher,
+        event_type,
         title=title,
         message=message,
         payload=payload,
-        status=NotificationStatus.SENT,
-        sent_at=timezone.now(),
+        url=payload.get("url") or "/cabinet/review",
+        dedup_key=dedup_key,
+        recipient_teacher=teacher,
+        skip_actor=False,
+        create_push=use_push,
+        push_tag=f"hw-review-{payload.get('homework_id')}-{student.pk}",
     )
-
-    mode = getattr(prefs, "homework_review_push_mode", "each") or "each"
-    if mode == "each":
-        send_web_push_to_user(
-            teacher,
-            title=title,
-            body=message,
-            url=payload.get("url") or "/cabinet/review",
-            tag=f"hw-review-{payload.get('homework_id')}-{student.pk}",
-            priority="important",
-            payload_extra=payload,
-            create_log=False,
-        )
     # digest_15 / digest_60 / in_app_only — push handled by cron
 
 

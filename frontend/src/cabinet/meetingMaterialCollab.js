@@ -150,7 +150,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
         handlers.onClosed?.(data);
         return;
       }
-      if (data.type === "material.permission_changed") {
+      if (data.type === "material.permission_changed" || data.type === "control.transferred") {
         if (data.materialSession?.version) version = data.materialSession.version;
         handlers.onPermissionChanged?.(data);
         return;

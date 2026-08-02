@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import BillingPaymentModal from "../components/BillingPaymentModal";
 import BillingPackageModal from "../components/BillingPackageModal";
+import ChargeFromPackageModal from "../components/ChargeFromPackageModal";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import { CabinetSoonBadge } from "../CabinetSectionUi";
 import { PAYMENTS_ENABLED } from "../featureFlags";
@@ -121,6 +122,7 @@ function StudentDetailDrawer({
   onClose,
   onPayment,
   onPackage,
+  onChargeFromPackage,
   onReverseTx,
   reversingId,
 }) {
@@ -128,8 +130,10 @@ function StudentDetailDrawer({
   const pkg = account.package;
   const unpaid = account.unpaid_lessons || [];
   const transactions = account.recent_transactions || [];
+  const summary = account.summary || {};
   const needPackage = !pkg || Number(pkg.remaining_units || 0) <= 0
     || ["completed", "expired", "exhausted"].includes(pkg.display_status || pkg.status);
+  const canSettle = unpaid.length > 0 && (account.available_packages || []).length > 0;
 
   return (
     <div className="pay-history pay-overlay" role="dialog" aria-modal="true" aria-label="Подробнее">
@@ -147,6 +151,49 @@ function StudentDetailDrawer({
 
         {!loading ? (
           <div className="pay-drawer-body">
+            <section className="pay-drawer-section">
+              <h3>Сводка</h3>
+              <ul className="pay-drawer-facts">
+                <li>
+                  <span>Доступно</span>
+                  <strong>
+                    {formatUnits(
+                      summary.available_units ?? pkg?.remaining_units ?? 0,
+                      pkg?.unit_type || "lesson",
+                    )}
+                  </strong>
+                </li>
+                <li>
+                  <span>Использовано</span>
+                  <strong>
+                    {summary.used_units != null && summary.used_units !== ""
+                      ? formatUnits(summary.used_units, pkg?.unit_type || "lesson")
+                      : "—"}
+                  </strong>
+                </li>
+                <li>
+                  <span>Неоплаченных уроков</span>
+                  <strong>{summary.unpaid_completed_lessons ?? unpaid.length}</strong>
+                </li>
+                <li>
+                  <span>Задолженность</span>
+                  <strong>
+                    {debtLabel(summary.debt_amount || account.unpaid_lessons_amount, currency) || "нет"}
+                  </strong>
+                </li>
+                {summary.last_payment_at ? (
+                  <li>
+                    <span>Последняя оплата</span>
+                    <strong>
+                      {formatMoney(summary.last_payment_amount, currency)}
+                      {" · "}
+                      {formatShortDate(summary.last_payment_at)}
+                    </strong>
+                  </li>
+                ) : null}
+              </ul>
+            </section>
+
             <section className="pay-drawer-section">
               <h3>Активный абонемент</h3>
               {pkg ? (
@@ -181,10 +228,31 @@ function StudentDetailDrawer({
               ) : (
                 <p className="pay-hint">Активного абонемента нет</p>
               )}
+              {canSettle ? (
+                <button
+                  type="button"
+                  className="pay-btn pay-btn--secondary"
+                  style={{ marginTop: 10 }}
+                  onClick={() => onChargeFromPackage?.(account)}
+                >
+                  Погасить неоплаченные уроки
+                </button>
+              ) : null}
             </section>
 
             <section className="pay-drawer-section">
-              <h3>Неоплаченные уроки</h3>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                <h3 style={{ margin: 0 }}>Неоплаченные уроки</h3>
+                {canSettle ? (
+                  <button
+                    type="button"
+                    className="pay-btn pay-btn--ghost"
+                    onClick={() => onChargeFromPackage?.(account)}
+                  >
+                    Списать из абонемента
+                  </button>
+                ) : null}
+              </div>
               {unpaid.length === 0 ? (
                 <p className="pay-hint">Неоплаченных уроков нет</p>
               ) : (
@@ -199,6 +267,9 @@ function StudentDetailDrawer({
                             {lesson.duration_minutes || lesson.actual_duration_minutes || lesson.planned_duration_minutes || 60}
                             {" мин"}
                           </span>
+                          {lesson.unpaid_reason ? (
+                            <span className="pay-hint">{lesson.unpaid_reason}</span>
+                          ) : null}
                         </div>
                         <div className="pay-unpaid-list__right">
                           {lesson.price_missing || due <= 0 ? (
@@ -206,7 +277,16 @@ function StudentDetailDrawer({
                           ) : (
                             <span className="pay-balance pay-balance--debt">{debtLabel(due, currency)}</span>
                           )}
-                          <span className="pay-pill pay-pill--debt">Не оплачен</span>
+                          <span className="pay-pill pay-pill--debt">Ожидает оплаты</span>
+                          {canSettle ? (
+                            <button
+                              type="button"
+                              className="pay-btn pay-btn--ghost"
+                              onClick={() => onChargeFromPackage?.(account, [String(lesson.id)])}
+                            >
+                              Списать
+                            </button>
+                          ) : null}
                         </div>
                       </li>
                     );
@@ -231,10 +311,13 @@ function StudentDetailDrawer({
                           <p className="pay-tx-item__name">
                             {tx.transaction_type_label || tx.transaction_type}
                             {reversed ? " · отменена" : ""}
+                            {tx.is_legacy ? " · архив" : ""}
                           </p>
                           <p className="pay-tx-item__when">
                             {formatShortDate(tx.occurred_at)}
+                            {tx.event_starts_at ? ` · урок ${formatLessonWhen(tx.event_starts_at)}` : ""}
                             {tx.comment ? ` · ${tx.comment}` : ""}
+                            {tx.created_by_name ? ` · ${tx.created_by_name}` : ""}
                           </p>
                         </div>
                         <div className="pay-tx-item__actions">
@@ -313,6 +396,8 @@ function CabinetPaymentsPageInner() {
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [reverseTarget, setReverseTarget] = useState(null);
   const [reversingId, setReversingId] = useState(null);
+  const [chargeOpen, setChargeOpen] = useState(false);
+  const [chargeLessonIds, setChargeLessonIds] = useState(null);
   const deepLinkHandled = useRef("");
 
   const currency = dashboard?.currency || "RUB";
@@ -468,6 +553,24 @@ function CabinetPaymentsPageInner() {
     }
   };
 
+  const onChargeDone = async (result) => {
+    setToast(result?.message || "Уроки списаны из абонемента");
+    setChargeOpen(false);
+    setChargeLessonIds(null);
+    notifyBillingChanged({ studentId: drawerAccount?.student_id });
+    await reload();
+    if (drawerAccount?.id) {
+      const data = await fetchBillingAccount(drawerAccount.id).catch(() => null);
+      if (data) setDrawerAccount(data);
+    }
+  };
+
+  const openChargeFromPackage = (account, lessonIds = null) => {
+    if (account && account !== drawerAccount) setDrawerAccount(account);
+    setChargeLessonIds(lessonIds);
+    setChargeOpen(true);
+  };
+
   return (
     <div className="pay-page">
       <header className="pay-header pay-head">
@@ -600,8 +703,20 @@ function CabinetPaymentsPageInner() {
         onPackage={(studentId) => {
           openPackage(studentId);
         }}
+        onChargeFromPackage={openChargeFromPackage}
         onReverseTx={setReverseTarget}
         reversingId={reversingId}
+      />
+
+      <ChargeFromPackageModal
+        open={chargeOpen && Boolean(drawerAccount)}
+        account={drawerAccount}
+        initialLessonIds={chargeLessonIds}
+        onClose={() => {
+          setChargeOpen(false);
+          setChargeLessonIds(null);
+        }}
+        onDone={onChargeDone}
       />
 
       <ConfirmActionModal

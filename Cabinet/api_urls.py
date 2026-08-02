@@ -8,6 +8,7 @@ from . import (
     boards_api,
     files_api,
     journal_api,
+    parent_api,
     push_api,
     schedule_api,
     student_api,
@@ -106,6 +107,7 @@ urlpatterns = [
     # Журнал успеваемости
     path("journal/", journal_api.JournalOverviewView.as_view(), name="journal_overview"),
     path("journal/gradebook/", journal_api.JournalGradebookView.as_view(), name="journal_gradebook"),
+    path("journal/entries/", journal_api.JournalEntriesView.as_view(), name="journal_entries"),
     path("journal/lessons/", journal_api.JournalLessonsListView.as_view(), name="journal_lessons"),
     path("journal/lessons/<int:lesson_id>/", journal_api.JournalLessonDetailView.as_view(), name="journal_lesson_detail"),
     path("journal/lessons/<int:lesson_id>/complete/", journal_api.JournalLessonCompleteView.as_view(), name="journal_lesson_complete"),
@@ -158,6 +160,45 @@ urlpatterns = [
     path("lesson-plans/levels/", api_views.LessonPlanLevelOptionsView.as_view(), name="cabinet_lesson_plan_levels"),
     path("invitations/join/<str:token>/", api_views.InvitationPreviewView.as_view(), name="cabinet_invitation_preview"),
     path("invitations/join/<str:token>/accept/", api_views.InvitationAcceptView.as_view(), name="cabinet_invitation_accept"),
+
+    # Родители: приглашение из карточки ученика + кабинет
+    path(
+        "students/<int:student_id>/parents/",
+        parent_api.StudentParentsAccessView.as_view(),
+        name="student_parents_access",
+    ),
+    path(
+        "students/<int:student_id>/parents/invite/",
+        parent_api.StudentParentInviteCreateView.as_view(),
+        name="student_parent_invite",
+    ),
+    path(
+        "students/<int:student_id>/parents/invitations/<int:invitation_id>/revoke/",
+        parent_api.StudentParentInviteRevokeView.as_view(),
+        name="student_parent_invite_revoke",
+    ),
+    path(
+        "students/<int:student_id>/parents/relationships/<int:relationship_id>/",
+        parent_api.StudentParentAccessUpdateView.as_view(),
+        name="student_parent_access_update",
+    ),
+    path(
+        "parent/invite/<str:token>/",
+        parent_api.ParentInvitePreviewView.as_view(),
+        name="parent_invite_preview",
+    ),
+    path(
+        "parent/invite/<str:token>/accept/",
+        parent_api.ParentInviteAcceptView.as_view(),
+        name="parent_invite_accept",
+    ),
+    path("parent/children/", parent_api.ParentChildrenView.as_view(), name="parent_children"),
+    path("parent/dashboard/", parent_api.ParentDashboardView.as_view(), name="parent_dashboard"),
+    path("parent/homework/", parent_api.ParentHomeworkView.as_view(), name="parent_homework"),
+    path("parent/journal/", parent_api.ParentJournalView.as_view(), name="parent_journal"),
+    path("parent/schedule/", parent_api.ParentScheduleView.as_view(), name="parent_schedule"),
+    path("parent/billing/", parent_api.ParentBillingView.as_view(), name="parent_billing"),
+    path("parent/billing/claim/", parent_api.ParentPaymentClaimView.as_view(), name="parent_billing_claim"),
     path("telegram/status/", telegram_api.TelegramStatusView.as_view(), name="cabinet_telegram_status"),
     path("telegram/connect-link/", telegram_api.TelegramConnectLinkView.as_view(), name="cabinet_telegram_connect_link"),
     path("telegram/disconnect/", telegram_api.TelegramDisconnectView.as_view(), name="cabinet_telegram_disconnect"),
@@ -218,6 +259,31 @@ urlpatterns = [
         "billing/packages/<uuid:package_id>/adjust/",
         billing_api.BillingPackageAdjustView.as_view(),
         name="billing_package_adjust",
+    ),
+    path(
+        "billing/packages/<uuid:package_id>/settle-unpaid/",
+        billing_api.BillingPackageSettleUnpaidView.as_view(),
+        name="billing_package_settle_unpaid",
+    ),
+    path(
+        "billing/accounts/<int:account_id>/charge-from-package/",
+        billing_api.BillingAccountChargeFromPackageView.as_view(),
+        name="billing_account_charge_from_package",
+    ),
+    path(
+        "billing/event-billing/<uuid:record_id>/charge-from-package/",
+        billing_api.BillingEventBillingChargeFromPackageView.as_view(),
+        name="billing_event_billing_charge_from_package",
+    ),
+    path(
+        "billing/event-billing/<uuid:record_id>/refund-package/",
+        billing_api.BillingEventBillingRefundPackageView.as_view(),
+        name="billing_event_billing_refund_package",
+    ),
+    path(
+        "billing/event-billing/<uuid:record_id>/mark-paid/",
+        billing_api.BillingEventBillingMarkPaidView.as_view(),
+        name="billing_event_billing_mark_paid",
     ),
     path(
         "billing/unresolved-lessons/",
@@ -287,9 +353,17 @@ urlpatterns = [
     path("subscription/current/", subscription_api.SubscriptionCurrentView.as_view(), name="subscription_current"),
     path("subscription/usage/", subscription_api.SubscriptionUsageView.as_view(), name="subscription_usage"),
     path("subscription/plans/", subscription_api.SubscriptionPlansView.as_view(), name="subscription_plans"),
+    path("pricing/plans/", subscription_api.PublicPricingPlansView.as_view(), name="pricing_plans_public"),
+    path("library/new-this-month/", subscription_api.LibraryNewThisMonthView.as_view(), name="library_new_this_month"),
+    path("usage/workbook/", subscription_api.WorkbookUsageTrackView.as_view(), name="usage_workbook_track"),
+    path("usage/variant-check/", subscription_api.VariantUsageCheckView.as_view(), name="usage_variant_check"),
+    path("content/access-check/", subscription_api.ContentAccessCheckView.as_view(), name="content_access_check"),
     path("subscription/change-plan/", subscription_api.SubscriptionChangePlanView.as_view(), name="subscription_change_plan"),
+    path("subscription/manage/", subscription_api.SubscriptionManageView.as_view(), name="subscription_manage"),
     path("subscription/create-payment/", subscription_api.SubscriptionCreatePaymentView.as_view(), name="subscription_create_payment"),
     path("subscription/apply-promo/", subscription_api.PromoCodeValidateView.as_view(), name="subscription_apply_promo"),
+    path("subscription/referral-link/", subscription_api.SubscriptionReferralLinkView.as_view(), name="subscription_referral_link"),
+
     # ИИ-помощник
     path("ai/usage/", ai_api.AIUsageView.as_view(), name="ai_usage"),
     path("ai/request/", ai_api.AIRequestView.as_view(), name="ai_request"),

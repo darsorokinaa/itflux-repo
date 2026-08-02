@@ -25,36 +25,108 @@ const REMINDER_OPTIONS = [
 
 const TYPE_GROUPS = [
   {
-    id: "schedule",
-    title: "Расписание",
-    fields: [
-      { key: "notify_lesson_created", label: "Новые занятия" },
-      { key: "notify_lesson_moved", label: "Перенос занятия" },
-      { key: "notify_lesson_cancelled", label: "Отмена занятия" },
-      { key: "notify_lesson_updated", label: "Изменение занятия" },
-      { key: "notify_daily_schedule", label: "Расписание на день", teacherOnly: true },
-      { key: "notify_daily_schedule_empty", label: "Сообщать, что сегодня уроков нет", teacherOnly: true },
-    ],
-  },
-  {
     id: "homework",
     title: "Домашние задания",
     fields: [
-      { key: "notify_homework", label: "Выдано новое домашнее задание / работы на проверку" },
-      { key: "notify_homework_resubmitted", label: "Ученик сдал исправленную работу", teacherOnly: true },
-      { key: "notify_overdue_homework", label: "Работа просрочена", teacherOnly: true },
+      {
+        key: "notify_homework",
+        label: "Новые домашние задания и работы на проверку",
+        description: "Ученику — о выдаче ДЗ; учителю — о сданных работах.",
+      },
+      {
+        key: "notify_homework_resubmitted",
+        label: "Ученик сдал исправленную работу",
+        description: "Сообщать о повторной сдаче после доработки.",
+        teacherOnly: true,
+      },
+      {
+        key: "notify_overdue_homework",
+        label: "Просроченные задания",
+        description: "Сводка по ученикам, которые не сдали работу вовремя.",
+        teacherOnly: true,
+      },
     ],
   },
   {
     id: "review",
-    title: "Проверка и результаты",
+    title: "Проверка работ",
     fields: [
-      { key: "notify_review", label: "Результат проверки изменён" },
-      { key: "notify_journal_results", label: "Итоги урока опубликованы" },
-      { key: "notify_journal_comment", label: "Добавлен комментарий" },
-      { key: "notify_journal_recommendation", label: "Новая рекомендация" },
-      { key: "notify_auto_check_attention", label: "Автопроверка требует внимания", teacherOnly: true },
-      { key: "notify_journal_daily_digest", label: "Ежедневная сводка журнала", teacherOnly: true, defaultOff: true },
+      {
+        key: "notify_review",
+        label: "Результат проверки",
+        description: "Сообщать, когда работа проверена или возвращена на доработку.",
+      },
+      {
+        key: "notify_journal_results",
+        label: "Итоги урока опубликованы",
+        description: "Уведомление об опубликованных итогах занятия.",
+      },
+      {
+        key: "notify_journal_comment",
+        label: "Комментарий в итогах",
+        description: "Если в итогах есть комментарий учителя.",
+      },
+      {
+        key: "notify_journal_recommendation",
+        label: "Новая рекомендация",
+        description: "Если в итогах появилась рекомендация.",
+      },
+      {
+        key: "notify_auto_check_attention",
+        label: "Автопроверка требует внимания",
+        description: "Когда автоматическая проверка не завершилась полностью.",
+        teacherOnly: true,
+      },
+      {
+        key: "notify_journal_daily_digest",
+        label: "Ежедневная сводка журнала",
+        description: "Сводка по журналу успеваемости за день.",
+        teacherOnly: true,
+        defaultOff: true,
+      },
+    ],
+  },
+  {
+    id: "schedule",
+    title: "Уроки и расписание",
+    fields: [
+      {
+        key: "notify_lesson_created",
+        label: "Новые занятия",
+        description: "Сообщать о создании урока в расписании.",
+      },
+      {
+        key: "notify_lesson_moved",
+        label: "Перенос занятия",
+        description: "Когда урок переносят на другое время.",
+      },
+      {
+        key: "notify_lesson_cancelled",
+        label: "Отмена занятия",
+        description: "Когда занятие отменяют.",
+      },
+      {
+        key: "notify_lesson_updated",
+        label: "Изменение занятия",
+        description: "Изменились тема, ссылка или другие детали.",
+      },
+      {
+        key: "notify_participants_changed",
+        label: "Изменение участников",
+        description: "Вас добавили или убрали с занятия.",
+      },
+      {
+        key: "notify_daily_schedule",
+        label: "Расписание на день",
+        description: "Утренняя сводка занятий на сегодня.",
+        teacherOnly: true,
+      },
+      {
+        key: "notify_daily_schedule_empty",
+        label: "Сообщать, что сегодня уроков нет",
+        description: "Даже если день пустой — прислать короткое сообщение.",
+        teacherOnly: true,
+      },
     ],
   },
   {
@@ -62,37 +134,107 @@ const TYPE_GROUPS = [
     title: "Ученики и уроки",
     teacherOnly: true,
     fields: [
-      { key: "notify_new_student", label: "Новые ученики" },
-      { key: "notify_student_message", label: "Сообщения учеников" },
-      { key: "notify_student_entered_room", label: "Ученик вошёл в комнату" },
-      { key: "notify_student_absent", label: "Ученик не подключился" },
-      { key: "notify_system", label: "Системные события" },
+      {
+        key: "notify_new_student",
+        label: "Новые ученики",
+        description: "Ученик присоединился по приглашению.",
+      },
+      {
+        key: "notify_student_message",
+        label: "Сообщения учеников",
+        description: "Текстовые сообщения к заданиям.",
+      },
+      {
+        key: "notify_student_entered_room",
+        label: "Ученик вошёл в комнату",
+        description: "Ученик зашёл в комнату урока до или во время занятия.",
+      },
+      {
+        key: "notify_student_absent",
+        label: "Ученик не подключился",
+        description: "Ученик не зашёл в комнату после начала урока.",
+      },
+      {
+        key: "notify_system",
+        label: "Системные события",
+        description: "Важные сообщения платформы и технические оповещения.",
+      },
     ],
   },
   {
     id: "billing-teacher",
-    title: "Оплаты",
+    title: "Оплаты и абонементы",
     teacherOnly: true,
-    description: "Через уже подключённые каналы — кабинет, Web Push и Telegram.",
+    description: "Через кабинет, Web Push и Telegram.",
     fields: [
-      { key: "notify_payment_received", label: "Оплата получена", defaultOff: true },
-      { key: "notify_package_low", label: "Заканчивается абонемент", defaultOff: true },
-      { key: "notify_debt_created", label: "Нет оплаты / возникла задолженность", defaultOff: true },
-      { key: "notify_billing_daily_digest", label: "Ежедневная финансовая сводка", defaultOff: true },
-      { key: "notify_billing_weekly_digest", label: "Еженедельная финансовая сводка", defaultOff: true },
+      {
+        key: "notify_payment_received",
+        label: "Оплата получена",
+        description: "Когда вы регистрируете оплату ученика.",
+        defaultOff: true,
+      },
+      {
+        key: "notify_package_low",
+        label: "Заканчивается абонемент",
+        description: "У ученика осталось мало занятий или минут.",
+        defaultOff: true,
+      },
+      {
+        key: "notify_debt_created",
+        label: "Нет оплаты / задолженность",
+        description: "Урок проведён без оплаты.",
+        defaultOff: true,
+      },
+      {
+        key: "notify_billing_daily_digest",
+        label: "Ежедневная финансовая сводка",
+        description: "Краткая сводка по оплатам за день.",
+        defaultOff: true,
+      },
+      {
+        key: "notify_billing_weekly_digest",
+        label: "Еженедельная финансовая сводка",
+        description: "Сводка по оплатам за неделю.",
+        defaultOff: true,
+      },
     ],
   },
   {
     id: "billing-student",
     title: "Оплаты ученику",
     teacherOnly: true,
-    description: "Ученику уходят только если уведомления включены для него в разделе «Оплаты».",
+    description: "Ученику уходят только если для него включены уведомления в разделе «Оплаты».",
     fields: [
-      { key: "notify_student_payment_recorded", label: "Оплата зафиксирована", defaultOff: true },
-      { key: "notify_student_package_low", label: "Осталось мало занятий или минут", defaultOff: true },
-      { key: "notify_student_package_ended", label: "Абонемент закончился", defaultOff: true },
-      { key: "notify_student_unpaid_lesson", label: "Есть неоплаченный урок", defaultOff: true },
-      { key: "notify_student_payment_due", label: "Приближается срок оплаты", defaultOff: true },
+      {
+        key: "notify_student_payment_recorded",
+        label: "Оплата зафиксирована",
+        description: "Сообщать ученику о записанной оплате.",
+        defaultOff: true,
+      },
+      {
+        key: "notify_student_package_low",
+        label: "Осталось мало занятий или минут",
+        description: "Предупреждение ученику о заканчивающемся абонементе.",
+        defaultOff: true,
+      },
+      {
+        key: "notify_student_package_ended",
+        label: "Абонемент закончился",
+        description: "Сообщать, что занятий в абонементе больше нет.",
+        defaultOff: true,
+      },
+      {
+        key: "notify_student_unpaid_lesson",
+        label: "Есть неоплаченный урок",
+        description: "Сообщать ученику о неоплаченном занятии.",
+        defaultOff: true,
+      },
+      {
+        key: "notify_student_payment_due",
+        label: "Приближается срок оплаты",
+        description: "Напоминания и персональные сообщения об оплате.",
+        defaultOff: true,
+      },
     ],
   },
 ];
@@ -105,6 +247,7 @@ const SAVE_FIELDS = [
   "notify_lesson_moved",
   "notify_lesson_cancelled",
   "notify_lesson_updated",
+  "notify_participants_changed",
   "notify_homework",
   "notify_review",
   "notify_journal_results",
@@ -265,12 +408,46 @@ export default function CabinetNotificationsSettingsPage() {
   const [savedPrefs, setSavedPrefs] = useState(null);
   const [prefs, setPrefs] = useState(null);
   const [devices, setDevices] = useState([]);
+  const [devicePushStatus, setDevicePushStatus] = useState("checking");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const { toast, showToast } = useSoonToast();
   const ignoreUnloadRef = useRef(false);
+  const autosaveTimer = useRef(null);
+
+  const refreshDevicePushStatus = useCallback(async () => {
+    try {
+      const {
+        getCurrentPushEndpoint,
+        isIosDevice,
+        isStandaloneDisplay,
+        notificationPermission,
+      } = await import("../pwa/pwaHelpers");
+      if (typeof window === "undefined" || !("PushManager" in window)) {
+        setDevicePushStatus("unsupported");
+        return;
+      }
+      if (isIosDevice() && !isStandaloneDisplay()) {
+        setDevicePushStatus("needs_install");
+        return;
+      }
+      const permission = notificationPermission();
+      if (permission === "denied") {
+        setDevicePushStatus("denied");
+        return;
+      }
+      if (permission === "default" || permission === "unsupported") {
+        setDevicePushStatus(permission === "unsupported" ? "unsupported" : "prompt");
+        return;
+      }
+      const endpoint = await getCurrentPushEndpoint();
+      setDevicePushStatus(endpoint ? "subscribed" : "stale");
+    } catch {
+      setDevicePushStatus("unsupported");
+    }
+  }, []);
 
   const dirty = useMemo(
     () => Boolean(prefs && savedPrefs && !prefsEqual(prefs, savedPrefs)),
@@ -285,8 +462,9 @@ export default function CabinetNotificationsSettingsPage() {
     setPrefs(data);
     setSavedPrefs(data);
     setDevices(pushDevices?.devices || []);
+    await refreshDevicePushStatus();
     return data;
-  }, []);
+  }, [refreshDevicePushStatus]);
 
   useEffect(() => {
     document.title = "Настройки уведомлений — Личный кабинет";
@@ -318,8 +496,39 @@ export default function CabinetNotificationsSettingsPage() {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [dirty]);
 
+  const persistPrefs = useCallback(async (nextPrefs, { silent = false } = {}) => {
+    setSaving(true);
+    setSaveError("");
+    try {
+      const data = await updateNotificationPreferences(buildSavePayload(nextPrefs));
+      const merged = { ...nextPrefs, ...data };
+      delete merged.ok;
+      delete merged.error;
+      setPrefs(merged);
+      setSavedPrefs(merged);
+      if (!silent) showToast("Сохранено");
+      return merged;
+    } catch (err) {
+      const msg = err.message || "Не удалось сохранить настройки. Попробуйте ещё раз.";
+      setSaveError(msg);
+      if (!silent) showToast(msg);
+      setPrefs(savedPrefs);
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  }, [savedPrefs, showToast]);
+
   const setField = (field, value) => {
-    setPrefs((prev) => (prev ? { ...prev, [field]: value } : prev));
+    setPrefs((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, [field]: value };
+      if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = window.setTimeout(() => {
+        persistPrefs(next, { silent: true }).catch(() => {});
+      }, 400);
+      return next;
+    });
     setSaveError("");
   };
 
@@ -420,6 +629,43 @@ export default function CabinetNotificationsSettingsPage() {
   const pushOn = prefs?.push_enabled !== false && pushConfigured;
   const inAppOn = prefs?.in_app_enabled !== false;
   const telegramConnected = Boolean(prefs?.connected);
+  const devicePushCopy = {
+    checking: { status: "Проверяем…", tone: "muted", description: "Проверяем подписку этого устройства." },
+    subscribed: {
+      status: "Уведомления включены на этом устройстве",
+      tone: "ok",
+      description: "Системные уведомления в браузере на этом устройстве.",
+    },
+    prompt: {
+      status: "Разрешение ещё не запрошено",
+      tone: "warn",
+      description: "Нажмите «Включить на этом устройстве», чтобы разрешить уведомления.",
+    },
+    denied: {
+      status: "Уведомления запрещены в браузере",
+      tone: "warn",
+      description: "Разрешите уведомления в настройках браузера, затем включите снова.",
+    },
+    stale: {
+      status: "Подписка устарела — включите повторно",
+      tone: "warn",
+      description: "Разрешение есть, но активной подписки на этом устройстве нет.",
+    },
+    unsupported: {
+      status: "Устройство не поддерживает Web Push",
+      tone: "muted",
+      description: "Этот браузер не умеет принимать push-уведомления.",
+    },
+    needs_install: {
+      status: "Уведомления доступны только после установки приложения",
+      tone: "warn",
+      description: "На iPhone/iPad сначала добавьте сайт на экран «Домой».",
+    },
+  }[devicePushStatus] || {
+    status: pushOn ? "Включён" : "Выключен",
+    tone: pushOn ? "ok" : "muted",
+    description: "Системные уведомления в браузере на этом устройстве.",
+  };
 
   return (
     <CabinetPageShell className="cb-section--notify">
@@ -491,36 +737,28 @@ export default function CabinetNotificationsSettingsPage() {
             />
             <ChannelStatusCard
               icon="spark"
-              title="Web Push"
-              status={
-                !pushConfigured
-                  ? "Не настроен"
-                  : devices.some((d) => d.is_active)
-                    ? "Подключён"
-                    : pushOn
-                      ? "Включён"
-                      : "Выключен"
-              }
-              tone={!pushConfigured ? "warn" : (pushOn ? "ok" : "muted")}
+              title="Web Push на этом устройстве"
+              status={!pushConfigured ? "Не настроен" : devicePushCopy.status}
+              tone={!pushConfigured ? "warn" : devicePushCopy.tone}
               badge={!pushConfigured ? "Недоступно" : undefined}
               description={
                 !pushConfigured
                   ? "Web Push пока недоступен: на сервере не настроены VAPID-ключи."
-                  : "Системные уведомления в браузере на этом устройстве."
+                  : devicePushCopy.description
               }
               actions={pushConfigured ? (
                 <>
                   <button
                     type="button"
                     className="cb-btn cb-btn--primary cb-btn--sm"
-                    disabled={Boolean(busy)}
+                    disabled={Boolean(busy) || devicePushStatus === "unsupported"}
                     onClick={() => runAction(
                       "push-on",
                       async () => {
                         await subscribeCabinetPush();
                         await sendPushTestNotification();
                       },
-                      "Уведомления подключены, тестовое сообщение отправлено",
+                      "Тестовое уведомление отправлено",
                     )}
                   >
                     {busy === "push-on" ? "Подключаем…" : "Включить на этом устройстве"}
@@ -528,17 +766,32 @@ export default function CabinetNotificationsSettingsPage() {
                   <button
                     type="button"
                     className="cb-btn cb-btn--outline cb-btn--sm"
-                    disabled={Boolean(busy)}
+                    disabled={Boolean(busy) || devicePushStatus === "unsupported"}
                     onClick={() => runAction(
                       "push-test",
                       async () => {
-                        await subscribeCabinetPush();
                         await sendPushTestNotification();
                       },
-                      "Тестовое push отправлено",
+                      "Тестовое уведомление отправлено",
                     )}
                   >
-                    {busy === "push-test" ? "Отправляем…" : "Тест"}
+                    {busy === "push-test" ? "Отправляем…" : "Отправить тестовое уведомление"}
+                  </button>
+                  <button
+                    type="button"
+                    className="cb-btn cb-btn--outline cb-btn--sm"
+                    disabled={Boolean(busy) || devicePushStatus !== "subscribed"}
+                    onClick={() => runAction(
+                      "push-off",
+                      async () => {
+                        const { unsubscribeCurrentPush } = await import("../pwa/pwaHelpers");
+                        const endpoint = await unsubscribeCurrentPush();
+                        if (endpoint) await unsubscribeCabinetPushDevice(endpoint);
+                      },
+                      "Уведомления отключены на этом устройстве",
+                    )}
+                  >
+                    {busy === "push-off" ? "Отключаем…" : "Отключить на этом устройстве"}
                   </button>
                 </>
               ) : null}
@@ -877,6 +1130,7 @@ export default function CabinetNotificationsSettingsPage() {
                           key={field.key}
                           id={`type-${field.key}`}
                           label={field.label}
+                          description={field.description}
                           checked={isFieldChecked(prefs, field)}
                           onChange={(v) => setField(field.key, v)}
                         />

@@ -112,19 +112,63 @@ class ReferralService:
     @staticmethod
     @transaction.atomic
     def grant_subscription(teacher: User, plan: TariffPlan, months: int, started_at=None):
+        """
+        Выдаёт/продлевает бонусный доступ.
+        Не понижает уже оплаченный тариф с более высоким content_access_rank —
+        только продлевает expires_at.
+        """
         # Без apply_promo: иначе ensure_registration_promo → grant → рекурсия.
         sub = SubscriptionLimitService.get_or_create_subscription(teacher, apply_promo=False)
+        now = timezone.now()
         base_start = started_at or ReferralService.registration_started_at(teacher)
-        expires_at = add_months(base_start, months)
+        bonus_expires = add_months(max(base_start, now), months)
 
+        current_rank = int(getattr(sub.plan, "content_access_rank", 0) or 0)
+        reward_rank = int(getattr(plan, "content_access_rank", 0) or 0)
+        paid_active = (
+            sub.is_valid()
+            and sub.source == TeacherSubscription.Source.PAYMENT
+            and current_rank > reward_rank
+        )
+
+        if paid_active:
+            # Продлеваем текущий оплаченный период, план не трогаем.
+            base = sub.expires_at if sub.expires_at and sub.expires_at > now else now
+            expires_at = add_months(base, months)
+            sub.expires_at = expires_at
+            sub.current_period_end = expires_at
+            sub.save(update_fields=["expires_at", "current_period_end", "updated_at"])
+            return sub, expires_at
+
+        # Если уже есть валидный план того же/выше ранга — только продлеваем срок.
+        if sub.is_valid() and current_rank >= reward_rank and sub.expires_at:
+            expires_at = add_months(max(sub.expires_at, now), months)
+            sub.expires_at = expires_at
+            sub.current_period_end = expires_at
+            if sub.status not in (TeacherSubscription.Status.ACTIVE, TeacherSubscription.Status.TRIAL):
+                sub.status = TeacherSubscription.Status.TRIAL
+            sub.save(update_fields=[
+                "expires_at", "current_period_end", "status", "updated_at",
+            ])
+            return sub, expires_at
+
+        expires_at = bonus_expires
         sub.plan = plan
         sub.status = TeacherSubscription.Status.TRIAL
+        sub.source = TeacherSubscription.Source.REFERRAL
         sub.started_at = base_start
         sub.expires_at = expires_at
+        sub.promo_started_at = base_start
+        sub.promo_ends_at = expires_at
+        sub.current_period_start = base_start
+        sub.current_period_end = expires_at
         sub.auto_renew = False
         sub.billing_period = TeacherSubscription.BillingPeriod.MONTH
         sub.save(update_fields=[
-            "plan", "status", "started_at", "expires_at", "auto_renew", "billing_period", "updated_at",
+            "plan", "status", "source", "started_at", "expires_at",
+            "promo_started_at", "promo_ends_at",
+            "current_period_start", "current_period_end",
+            "auto_renew", "billing_period", "updated_at",
         ])
         return sub, expires_at
 
@@ -169,6 +213,8 @@ class ReferralService:
             raise ReferralError("REFERRAL_EMAIL_USED", "Бонус по этому email уже был получен")
 
         link = ReferralService.validate(code_str)
+        if link.owner_id == user.pk:
+            raise ReferralError("REFERRAL_SELF", "Нельзя использовать собственную реферальную ссылку")
         plan = ReferralService.resolve_reward_plan(link)
         started_at = ReferralService.registration_started_at(user)
         sub, expires_at = ReferralService.grant_subscription(
@@ -183,4 +229,58 @@ class ReferralService:
             "plan_name": plan.name,
             "expires_at": expires_at.isoformat(),
             "subscription_status": sub.status,
+        }
+
+    @staticmethod
+    @transaction.atomic
+    def grant_payment_reward_if_applicable(payment) -> Optional[dict]:
+        """
+        Награда рефереру после успешной оплаты приглашённого.
+        Launch-награда при регистрации не затрагивается.
+        """
+        from .models import ReferralReward
+
+        teacher = payment.teacher
+        registration = (
+            ReferralLinkRegistration.objects.select_related("referral_link", "referral_link__owner")
+            .filter(user=teacher)
+            .first()
+        )
+        if not registration:
+            return None
+        link = registration.referral_link
+        referrer = link.owner
+        if not referrer or referrer.pk == teacher.pk:
+            return None
+
+        if ReferralReward.objects.filter(referred_user=teacher, payment=payment).exists():
+            return None
+        # Один бонус рефереру за приглашённого (после первой успешной оплаты).
+        if ReferralReward.objects.filter(
+            referred_user=teacher,
+            status__in=[ReferralReward.Status.GRANTED, ReferralReward.Status.PENDING],
+        ).exists():
+            return None
+
+        reward_plan = ReferralService.resolve_reward_plan(link)
+        reward_months = max(1, int(getattr(link, "reward_months", 1) or 1))
+        # For payment reward give 1 month by default unless link specifies otherwise;
+        # keep link.reward_months but cap display as payment bonus.
+        reward = ReferralReward.objects.create(
+            referral_link=link,
+            referrer=referrer,
+            referred_user=teacher,
+            payment=payment,
+            reward_plan=reward_plan,
+            reward_months=1,
+            status=ReferralReward.Status.PENDING,
+        )
+        ReferralService.grant_subscription(referrer, reward_plan, reward.reward_months)
+        reward.status = ReferralReward.Status.GRANTED
+        reward.granted_at = timezone.now()
+        reward.save(update_fields=["status", "granted_at"])
+        return {
+            "referrer_id": referrer.pk,
+            "reward_months": reward.reward_months,
+            "plan_slug": reward_plan.slug,
         }

@@ -1086,7 +1086,7 @@ export default function CabinetStudentsPage() {
         code: "STUDENT_LIMIT_REACHED",
         current: subscription.usage.students,
         limit: subscription.limits.students,
-        recommended_plan: "repetitor",
+        recommended_plan: "teacher",
       });
       return;
     }
@@ -1116,7 +1116,7 @@ export default function CabinetStudentsPage() {
         code: "GROUP_LIMIT_REACHED",
         current: subscription.usage.groups,
         limit: subscription.limits.groups,
-        recommended_plan: "repetitor",
+        recommended_plan: "teacher",
       });
       return;
     }

@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import {
   fetchStudentBillingAccount,
 } from "../../utils/cabinetAuth";
+import ChargeFromPackageModal from "./ChargeFromPackageModal";
+import PayerEditModal from "./PayerEditModal";
 import {
   formatMoney,
   formatPaymentTerms,
@@ -32,6 +34,9 @@ export default function StudentBillingPanel({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [reloadToken, setReloadToken] = useState(0);
+  const [chargeOpen, setChargeOpen] = useState(false);
+  const [payerOpen, setPayerOpen] = useState(false);
+  const [toast, setToast] = useState("");
 
   const reload = useCallback(() => {
     setReloadToken((n) => n + 1);
@@ -63,6 +68,12 @@ export default function StudentBillingPanel({
     return () => window.removeEventListener("cabinet:billing-changed", onBilling);
   }, [studentId, reload]);
 
+  useEffect(() => {
+    if (!toast) return undefined;
+    const t = setTimeout(() => setToast(""), 2800);
+    return () => clearTimeout(t);
+  }, [toast]);
+
   if (!studentId) return null;
   if (loading) return <p className="pay-hint">Загрузка оплат…</p>;
   if (error) return <p className="pay-error">{error}</p>;
@@ -74,9 +85,11 @@ export default function StudentBillingPanel({
   const unpaidAmount = Number(account.unpaid_lessons_amount || 0);
   const currency = account.currency || "RUB";
   const recent = (account.recent_transactions || []).slice(0, 4);
+  const canSettle = unpaid.length > 0 && (account.available_packages || []).length > 0;
 
   return (
     <div className="pay-student-block">
+      {toast ? <div className="pay-toast" role="status">{toast}</div> : null}
       <div className="pay-student-block__head">
         <h4>Оплата занятий</h4>
         <div className={`pay-state pay-state--${state.mod}`}>
@@ -118,7 +131,16 @@ export default function StudentBillingPanel({
         ) : null}
         <div>
           <dt>Плательщик</dt>
-          <dd>{account.payer_name || "не указан"}</dd>
+          <dd className="pay-student-block__payer">
+            <span>{account.payer_name || "не указан"}</span>
+            <button
+              type="button"
+              className="pay-student-block__payer-btn"
+              onClick={() => setPayerOpen(true)}
+            >
+              {account.payer_name ? "Изменить" : "Указать"}
+            </button>
+          </dd>
         </div>
       </dl>
 
@@ -134,7 +156,9 @@ export default function StudentBillingPanel({
                     <span className="pay-student-block__op-when">
                       {formatLessonWhen(lesson.event_starts_at)}
                     </span>
-                    <span className="pay-student-block__op-desc">Не оплачен</span>
+                    <span className="pay-student-block__op-desc">
+                      {lesson.unpaid_reason || "Ожидает оплаты"}
+                    </span>
                   </div>
                   <strong className="pay-student-block__op-amount">
                     {due > 0 ? debtLabel(due, currency) : "—"}
@@ -143,6 +167,16 @@ export default function StudentBillingPanel({
               );
             })}
           </ul>
+          {canSettle ? (
+            <button
+              type="button"
+              className="pay-btn pay-btn--secondary"
+              style={{ marginTop: 8 }}
+              onClick={() => setChargeOpen(true)}
+            >
+              Списать из абонемента
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -188,7 +222,6 @@ export default function StudentBillingPanel({
               onAddPayment?.(studentId);
               return;
             }
-            // Уже настроено — по умолчанию фиксируем поступление, условия меняют отдельно.
             onAddPayment?.(studentId);
           }}
         >
@@ -205,10 +238,31 @@ export default function StudentBillingPanel({
             Условия
           </button>
         ) : null}
-        <Link className="pay-btn" to={`/cabinet/payments?student=${studentId}`}>
+        <Link className="pay-btn pay-btn--ghost" to={`/cabinet/payments?student=${studentId}`}>
           Все оплаты
         </Link>
       </div>
+
+      <ChargeFromPackageModal
+        open={chargeOpen}
+        account={account}
+        onClose={() => setChargeOpen(false)}
+        onDone={(result) => {
+          setToast(result?.message || "Уроки списаны");
+          setChargeOpen(false);
+          reload();
+        }}
+      />
+
+      <PayerEditModal
+        open={payerOpen}
+        account={account}
+        onClose={() => setPayerOpen(false)}
+        onDone={() => {
+          setToast("Плательщик сохранён");
+          reload();
+        }}
+      />
     </div>
   );
 }

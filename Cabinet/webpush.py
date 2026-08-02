@@ -11,14 +11,14 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 
 from .choices import NotificationChannel, NotificationStatus
-from .models import Notification, PushSubscription
+from .models import Notification, PushDeliveryLog, PushSubscription
 from .notification_links import resolve_notification_url
 
 logger = logging.getLogger(__name__)
 
 
 def _prefs(user):
-    from .notifications import get_or_create_preferences
+    from .notification_dispatch import get_or_create_preferences
     return get_or_create_preferences(user)
 
 
@@ -111,6 +111,30 @@ def _priority_allows_push(priority: str, urgent: bool, prefs) -> bool:
     return priority in ("critical", "important", "normal", "")
 
 
+def _record_delivery(
+    *,
+    user: User,
+    subscription: PushSubscription | None,
+    notification: Notification | None,
+    event_type: str,
+    status: str,
+    http_status: int | None = None,
+    error_message: str = "",
+) -> None:
+    try:
+        PushDeliveryLog.objects.create(
+            user=user,
+            subscription=subscription,
+            notification=notification,
+            event_type=(event_type or "")[:64],
+            status=status,
+            http_status=http_status,
+            error_message=(error_message or "")[:500],
+        )
+    except Exception:
+        logger.exception("Failed to write PushDeliveryLog for user %s", user.pk)
+
+
 def send_web_push_to_user(
     user: User,
     *,
@@ -123,11 +147,15 @@ def send_web_push_to_user(
     payload_extra: dict | None = None,
     create_log: bool = True,
     force: bool = False,
+    notification: Notification | None = None,
+    event_type: str = "",
+    only_endpoint: str | None = None,
 ) -> dict[str, Any]:
     """
     Send Web Push to all active subscriptions of the user.
     Returns {sent, active, reason, errors}.
     force=True — ignore push_enabled / DND (для тестовой кнопки).
+    only_endpoint — отправить только на конкретное устройство (тест).
     """
     empty = {"sent": 0, "active": 0, "reason": "", "errors": []}
     if not webpush_configured():
@@ -151,12 +179,18 @@ def send_web_push_to_user(
         logger.exception("Failed to load VAPID private key")
         return {**empty, "reason": "send_failed", "errors": [f"VAPID key error: {exc}"[:300]]}
 
+    resolved_event = event_type or (
+        (payload_extra or {}).get("event_type")
+        or (payload_extra or {}).get("type")
+        or ""
+    )
     data = {
         "title": title[:120],
         "body": (body or "")[:180],
         "url": url or "/cabinet",
         "tag": tag or "",
         "role": getattr(getattr(user, "profile", None), "role", "") or "",
+        "event_type": resolved_event,
     }
     if payload_extra:
         # Never put secrets / PII dumps into push payload
@@ -166,7 +200,10 @@ def send_web_push_to_user(
 
     sent = 0
     errors: list[str] = []
-    qs = list(PushSubscription.objects.filter(user=user, is_active=True))
+    qs = PushSubscription.objects.filter(user=user, is_active=True)
+    if only_endpoint:
+        qs = qs.filter(endpoint=only_endpoint)
+    qs = list(qs)
     if not qs:
         return {**empty, "reason": "no_devices"}
 
@@ -187,10 +224,19 @@ def send_web_push_to_user(
             sub.last_seen_at = timezone.now()
             sub.save(update_fields=["last_seen_at", "updated_at"])
             sent += 1
+            _record_delivery(
+                user=user,
+                subscription=sub,
+                notification=notification,
+                event_type=resolved_event,
+                status=PushDeliveryLog.DeliveryStatus.SENT,
+                http_status=201,
+            )
             if create_log:
                 Notification.objects.create(
                     recipient_user=user,
                     channel=NotificationChannel.PUSH,
+                    event_type=resolved_event,
                     title=title,
                     message=body or "",
                     payload={**data, "subscription_id": sub.pk},
@@ -206,27 +252,59 @@ def send_web_push_to_user(
             # 404/410 — endpoint мёртв; 401/403 + pkhash — подписка от другого VAPID
             low = err_text.lower()
             key_mismatch = "pkhash" in low or "mismatch" in low
-            if status_code in (404, 410) or (status_code in (401, 403) and key_mismatch):
+            gone = status_code in (404, 410) or (status_code in (401, 403) and key_mismatch)
+            # 429 / 5xx — временные ошибки, подписку не трогаем
+            temporary = status_code in (429, 500, 502, 503, 504)
+            if gone:
                 sub.is_active = False
                 sub.save(update_fields=["is_active", "updated_at"])
-            elif create_log:
-                Notification.objects.create(
-                    recipient_user=user,
-                    channel=NotificationChannel.PUSH,
-                    title=title,
-                    message=body or "",
-                    payload=data,
-                    status=NotificationStatus.FAILED,
-                    error_message=err_text[:500],
+                _record_delivery(
+                    user=user,
+                    subscription=sub,
+                    notification=notification,
+                    event_type=resolved_event,
+                    status=PushDeliveryLog.DeliveryStatus.GONE,
+                    http_status=status_code,
+                    error_message=err_text,
                 )
+            else:
+                _record_delivery(
+                    user=user,
+                    subscription=sub,
+                    notification=notification,
+                    event_type=resolved_event,
+                    status=PushDeliveryLog.DeliveryStatus.FAILED,
+                    http_status=status_code,
+                    error_message=err_text,
+                )
+                if create_log and not temporary:
+                    Notification.objects.create(
+                        recipient_user=user,
+                        channel=NotificationChannel.PUSH,
+                        event_type=resolved_event,
+                        title=title,
+                        message=body or "",
+                        payload=data,
+                        status=NotificationStatus.FAILED,
+                        error_message=err_text[:500],
+                        is_read=True,
+                    )
         except Exception as exc:
             errors.append(str(exc)[:300])
             logger.exception("Unexpected web push error for user %s", user.pk)
+            _record_delivery(
+                user=user,
+                subscription=sub,
+                notification=notification,
+                event_type=resolved_event,
+                status=PushDeliveryLog.DeliveryStatus.FAILED,
+                error_message=str(exc)[:300],
+            )
 
     return {
         "sent": sent,
         "active": len(qs),
-        "reason": "" if sent else "send_failed",
+        "reason": "" if sent else (errors and "send_failed" or "no_devices"),
         "errors": errors,
     }
 
@@ -245,17 +323,26 @@ def notify_user_channels(
     skip_push_log: bool = False,
     recipient_student=None,
     recipient_teacher=None,
+    event_type: str = "",
+    dedup_key: str = "",
+    actor: User | None = None,
+    skip_actor: bool = False,
+    force: bool = False,
+    check_preferences: bool = True,
 ) -> list[Notification]:
-    """Create in-app notification and optionally send web push for any role."""
-    prefs = _prefs(user)
+    """
+    Create in-app notification and optionally send web push for any role.
+
+    Prefer NotificationDispatcher.notify for new code. This helper remains for
+    gradual migration and respects catalog preferences when event_type is set.
+    """
     payload = dict(payload or {})
-    notes: list[Notification] = []
+    resolved_type = event_type or payload.get("event_type") or payload.get("type") or ""
 
     url = ""
     if isinstance(payload.get("url"), str) and payload["url"].startswith("/"):
         url = payload["url"]
     else:
-        # Temporary Notification-like object for resolver
         class _Tmp:
             pass
         tmp = _Tmp()
@@ -265,22 +352,57 @@ def notify_user_channels(
         if url:
             payload["url"] = url
 
+    if check_preferences and resolved_type:
+        from .notification_dispatch import NotificationDispatcher
+
+        force_channels = set()
+        if in_app:
+            force_channels.add("in_app")
+        if push:
+            force_channels.add("push")
+        result = NotificationDispatcher.notify(
+            user,
+            resolved_type,
+            title=title,
+            message=message,
+            actor=actor,
+            payload=payload,
+            url=url or None,
+            dedup_key=dedup_key or None,
+            recipient_student=recipient_student,
+            recipient_teacher=recipient_teacher,
+            skip_actor=skip_actor,
+            force=force,
+            force_channels=force_channels or None,
+            push_tag=tag,
+            create_in_app=in_app,
+            create_push=push,
+            create_telegram=False,
+        )
+        return [result.in_app] if result.in_app else []
+
+    # Legacy path without event_type
+    prefs = _prefs(user)
+    notes: list[Notification] = []
+    in_app_note = None
     if in_app and prefs.in_app_enabled:
-        n = Notification.objects.create(
+        in_app_note = Notification.objects.create(
             recipient_user=user,
             recipient_student=recipient_student,
             recipient_teacher=recipient_teacher,
+            actor=actor,
             channel=NotificationChannel.IN_APP,
+            event_type=resolved_type,
+            event_key=dedup_key or "",
             title=title,
             message=message,
             payload=payload,
             status=NotificationStatus.SENT,
             sent_at=timezone.now(),
         )
-        notes.append(n)
+        notes.append(in_app_note)
 
     if push and getattr(prefs, "push_enabled", True):
-        # Browser notification should mirror the cabinet (in-app) text.
         send_web_push_to_user(
             user,
             title=title,
@@ -291,6 +413,9 @@ def notify_user_channels(
             urgent=urgent,
             payload_extra=payload,
             create_log=not skip_push_log,
+            notification=in_app_note,
+            event_type=resolved_type,
+            force=force,
         )
 
     return notes

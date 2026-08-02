@@ -37,7 +37,11 @@ import {
 } from "../boards/boardExport";
 import {
   externalizeSceneFiles,
+  filesForPersist,
+  findMissingImageFileIds,
+  hydrateBoardFiles,
   isTransientFileUrl,
+  revokeBoardBlobUrls,
 } from "../boards/boardFiles";
 import {
   BG_COLOR_KEY,
@@ -55,6 +59,19 @@ import {
   type CollabPeer,
   type RemoteCursor,
 } from "../boards/boardCollab";
+import { applyBoardOps } from "../boards/boardOps";
+import {
+  filterUnauthorizedMutations,
+  stampElementOwnership,
+} from "../boards/boardOwnership";
+import {
+  createBoardLoadMetrics,
+  estimateSceneBytes,
+  logBoardMetrics,
+  phaseLabel,
+  type BoardLoadMetrics,
+  type BoardLoadPhase,
+} from "../boards/boardLifecycle";
 import "../styles/boards.css";
 
 const TEACHER_CURSOR = { background: "#2563eb", stroke: "#1d4ed8" };
@@ -97,6 +114,8 @@ type BoardDetail = {
   student_name?: string | null;
   collaborative_edit?: boolean;
   owner_name?: string | null;
+  viewer_user_id?: number | null;
+  viewer_role?: string | null;
 };
 
 type ExcalidrawAPI = {
@@ -204,9 +223,19 @@ export default function CabinetBoardEditorPage() {
   const [board, setBoard] = useState<BoardDetail | null>(null);
   const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadPhase, setLoadPhase] = useState<BoardLoadPhase>("initializing");
   const [loadError, setLoadError] = useState("");
+  const [loadErrorCode, setLoadErrorCode] = useState("");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [initialData, setInitialData] = useState<BoardScenePayload | null>(null);
+  const [hostReady, setHostReady] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [missingImageCount, setMissingImageCount] = useState(0);
+  const metricsRef = useRef<BoardLoadMetrics>(createBoardLoadMetrics());
+  const hydratedBlobUrlsRef = useRef<string[]>([]);
+  const loadAbortRef = useRef<AbortController | null>(null);
+  const hostReadyRef = useRef(false);
+  hostReadyRef.current = hostReady;
   const [exportOpen, setExportOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [burgerOpen, setBurgerOpen] = useState(true);
@@ -232,6 +261,10 @@ export default function CabinetBoardEditorPage() {
   const applyingRemoteRef = useRef(false);
   const lastElementsRef = useRef<readonly unknown[] | null>(null);
   const lastFilesRef = useRef<Record<string, unknown> | null>(null);
+  const knownElementIdsRef = useRef(new Set<string>());
+  const viewerUserIdRef = useRef<number | null>(null);
+  const viewerRoleRef = useRef<string>("student");
+  const canManageRefLocal = useRef(false);
   const saverRef = useRef<{ schedule: () => void; flush: () => Promise<void>; cancel: () => void } | null>(null);
   const collabRef = useRef<ReturnType<typeof createBoardCollabSession> | null>(null);
   const remoteCursorsRef = useRef(new Map<string, RemoteCursor>());
@@ -322,11 +355,13 @@ export default function CabinetBoardEditorPage() {
     safeSetSaveStatus("saving");
     try {
       const files = await externalizeSceneFiles(
-        snapshot.files as Record<string, Record<string, unknown>>,
+        filesForPersist(snapshot.files as Record<string, Record<string, unknown>>) as Record<string, Record<string, unknown>>,
         (form) => uploadInteractiveBoardImage(boardIdAtSave, form),
       );
       // Смена доски — бросаем. Размонтирование — всё равно сохраняем снимок.
       if (boardIdRef.current !== boardIdAtSave) return;
+
+      const persistFiles = filesForPersist(files) as Record<string, unknown>;
 
       // Подмешиваем только стабильные URL файлов — не затираем более новые elements.
       if (latestSceneRef.current && boardIdRef.current === boardIdAtSave) {
@@ -336,7 +371,7 @@ export default function CabinetBoardEditorPage() {
         };
       }
 
-      const payload: BoardScenePayload = { ...snapshot, files };
+      const payload: BoardScenePayload = { ...snapshot, files: persistFiles };
       const data = await updateInteractiveBoard(boardIdAtSave, {
         scene_data: payload,
         version: versionAtSave,
@@ -469,6 +504,12 @@ export default function CabinetBoardEditorPage() {
 
   useEffect(() => {
     let cancelled = false;
+    loadAbortRef.current?.abort();
+    const abort = new AbortController();
+    loadAbortRef.current = abort;
+    revokeBoardBlobUrls(hydratedBlobUrlsRef.current);
+    hydratedBlobUrlsRef.current = [];
+
     // Сброс при смене доски — ответ предыдущей доски не должен применяться.
     hasLocalChangesRef.current = false;
     localRevisionRef.current = 0;
@@ -480,17 +521,27 @@ export default function CabinetBoardEditorPage() {
     latestSceneRef.current = null;
     lastElementsRef.current = null;
     lastFilesRef.current = null;
+    metricsRef.current = createBoardLoadMetrics();
     setLoading(true);
+    setLoadPhase("loading_scene");
     setLoadError("");
+    setLoadErrorCode("");
     setConflict(false);
     setExcalidrawReady(false);
+    setHostReady(false);
+    setInitialData(null);
+    setMissingImageCount(0);
     setSaveStatus("idle");
     saverRef.current?.cancel();
-    fetchInteractiveBoard(boardId)
-      .then((data: BoardDetail) => {
-        if (cancelled || boardIdRef.current !== boardId) return;
-        // Если пользователь уже успел править (редко при быстрой навигации) — не затираем.
+    logBoardMetrics("loading_scene", metricsRef.current);
+
+    void (async () => {
+      try {
+        const data: BoardDetail = await fetchInteractiveBoard(boardId);
+        if (cancelled || abort.signal.aborted || boardIdRef.current !== boardId) return;
         if (hasLocalChangesRef.current) return;
+
+        metricsRef.current.sceneLoadedAt = performance.now();
         setBoard(data);
         setTitle(data.title || "Новая доска");
         versionRef.current = data.version || 1;
@@ -498,27 +549,64 @@ export default function CabinetBoardEditorPage() {
         const style = normalizeGridStyle(rawApp[GRID_STYLE_KEY], rawApp.gridModeEnabled);
         const solidBg = resolveBoardBgColor(rawApp);
         const theme = rawApp.theme === "dark" ? "dark" : "light";
+        const rawFiles = (data.scene_data?.files || {}) as Record<string, Record<string, unknown>>;
+        const elements = data.scene_data?.elements || [];
+
+        setLoadPhase("loading_files");
+        logBoardMetrics("loading_files", metricsRef.current);
+        const hydrated = await hydrateBoardFiles(rawFiles, { signal: abort.signal });
+        if (cancelled || abort.signal.aborted || boardIdRef.current !== boardId) {
+          revokeBoardBlobUrls(hydrated.blobUrls);
+          return;
+        }
+        hydratedBlobUrlsRef.current = hydrated.blobUrls;
+        const orphanIds = findMissingImageFileIds(elements, hydrated.files);
+        setMissingImageCount(hydrated.failedFileIds.length + orphanIds.length + hydrated.missingFileIds.length);
+
         const scene = buildScenePayload(
-          data.scene_data?.elements || [],
+          elements,
           { ...rawApp, ...gridAppStatePatch(style, solidBg), theme },
-          data.scene_data?.files || {},
+          hydrated.files,
         );
+        metricsRef.current.filesLoadedAt = performance.now();
+        metricsRef.current.elementCount = Array.isArray(elements) ? elements.length : 0;
+        metricsRef.current.fileCount = Object.keys(hydrated.files).length;
+        metricsRef.current.sceneBytesApprox = estimateSceneBytes(scene);
+
+        knownElementIdsRef.current = new Set(
+          (Array.isArray(elements) ? elements : [])
+            .map((el) => (el && typeof el === "object" ? (el as { id?: string }).id : null))
+            .filter((id): id is string => Boolean(id)),
+        );
+
         setInitialData(scene);
         latestSceneRef.current = scene;
         setGridStyle(style);
         setBgColor(solidBg);
         setBoardTheme(theme);
+        setLoadPhase("connecting");
         setLoading(false);
-      })
-      .catch((err: { message?: string }) => {
-        if (cancelled || boardIdRef.current !== boardId) return;
-        setLoadError(err?.message || "Не удалось открыть доску");
+        logBoardMetrics("connecting", metricsRef.current);
+      } catch (err: unknown) {
+        if (cancelled || abort.signal.aborted || boardIdRef.current !== boardId) return;
+        const error = err as { message?: string; code?: string };
+        metricsRef.current.lastError = error?.message || "Не удалось открыть доску";
+        metricsRef.current.lastErrorCode = error?.code || "load_failed";
+        setLoadError(error?.message || "Не удалось открыть доску");
+        setLoadErrorCode(error?.code || "load_failed");
+        setLoadPhase("error");
         setLoading(false);
-      });
+        logBoardMetrics("error", metricsRef.current);
+      }
+    })();
+
     return () => {
       cancelled = true;
+      abort.abort();
+      revokeBoardBlobUrls(hydratedBlobUrlsRef.current);
+      hydratedBlobUrlsRef.current = [];
     };
-  }, [boardId]);
+  }, [boardId, reloadToken]);
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -634,22 +722,28 @@ export default function CabinetBoardEditorPage() {
       const nextFiles = await externalizeSceneFiles(files, (form) =>
         uploadInteractiveBoardImage(boardId, form),
       );
+      // Сразу гидратируем новые API URL → blob, иначе локальный canvas «теряет» картинку.
+      const hydratedUpload = await hydrateBoardFiles(
+        Object.fromEntries(pendingIds.map((id) => [id, nextFiles[id]]).filter(([, m]) => m)),
+      );
+      hydratedBlobUrlsRef.current.push(...hydratedUpload.blobUrls);
+      const displayFiles = { ...nextFiles, ...hydratedUpload.files };
       pendingIds.forEach((id) => uploadingFileIdsRef.current.delete(id));
       if (!mountedRef.current || boardIdRef.current !== boardId) return scene;
       // Не затираем elements, которые пользователь успел изменить во время upload.
       if (latestSceneRef.current) {
         latestSceneRef.current = {
           ...latestSceneRef.current,
-          files: { ...latestSceneRef.current.files, ...nextFiles },
+          files: { ...latestSceneRef.current.files, ...displayFiles },
         };
       }
       lastFilesRef.current = {
         ...(lastFilesRef.current || {}),
-        ...nextFiles,
+        ...displayFiles,
       };
       applyingRemoteRef.current = true;
       apiRef.current.updateScene?.({
-        files: nextFiles,
+        files: displayFiles,
         captureUpdate: CaptureUpdateAction.NEVER,
       });
       window.setTimeout(() => {
@@ -657,7 +751,7 @@ export default function CabinetBoardEditorPage() {
       }, 60);
       imageUploadStatusRef.current = "idle";
       setImageUploadStatus("idle");
-      const publishScene = latestSceneRef.current || { ...scene, files: nextFiles };
+      const publishScene = latestSceneRef.current || { ...scene, files: displayFiles };
       publishLiveScene(publishScene);
       markLocalSceneChange();
       safeSetSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));
@@ -674,13 +768,37 @@ export default function CabinetBoardEditorPage() {
     }
   }, [boardId, debouncedSaver, markLocalSceneChange, publishLiveScene, safeSetSaveStatus, showNotice]);
 
+  viewerUserIdRef.current = board?.viewer_user_id ?? null;
+  viewerRoleRef.current = board?.viewer_role || (canManage ? "teacher" : "student");
+  canManageRefLocal.current = canManage;
+
   const handleChange = useCallback(
     (elements: readonly unknown[], appState: Record<string, unknown>, files: Record<string, unknown>) => {
       syncPaperOverlay(appState);
       syncLeftPanels(appState);
       if (applyingRemoteRef.current) return;
       if (!canEditRef.current || conflictRef.current) return;
-      const scene = buildScenePayload(elements, appState, files);
+
+      const prevElements = (latestSceneRef.current?.elements || lastElementsRef.current || []) as unknown[];
+      let nextElements = elements as unknown[];
+      // Владение: stamp на новые, откат чужих мутаций у ученика.
+      nextElements = stampElementOwnership(
+        nextElements,
+        knownElementIdsRef.current,
+        viewerUserIdRef.current,
+        viewerRoleRef.current,
+      );
+      nextElements = filterUnauthorizedMutations(prevElements, nextElements, {
+        actorUserId: viewerUserIdRef.current,
+        actorRole: viewerRoleRef.current,
+        canManage: canManageRefLocal.current,
+      });
+      for (const raw of nextElements) {
+        const id = raw && typeof raw === "object" ? (raw as { id?: string }).id : null;
+        if (id) knownElementIdsRef.current.add(id);
+      }
+
+      const scene = buildScenePayload(nextElements, appState, files);
       // Сохраняем наш стиль сетки и цвет бумаги (Excalidraw может не вернуть кастомные ключи)
       scene.appState[GRID_STYLE_KEY] = gridStyleRef.current;
       scene.appState[BG_COLOR_KEY] = bgColorRef.current;
@@ -688,7 +806,8 @@ export default function CabinetBoardEditorPage() {
         scene.appState.viewBackgroundColor = "transparent";
       }
       scene.appState.theme = boardThemeRef.current;
-      const elementsChanged = lastElementsRef.current !== elements;
+      const elementsChanged = lastElementsRef.current !== elements
+        || nextElements !== elements;
       const filesChanged = lastFilesRef.current !== files;
       const bgChanged =
         latestSceneRef.current?.appState?.viewBackgroundColor !== scene.appState.viewBackgroundColor;
@@ -702,7 +821,7 @@ export default function CabinetBoardEditorPage() {
         collabRef.current?.publishActiveTool(toolType);
       }
       if (!elementsChanged && !filesChanged && !bgChanged && !gridChanged && !themeChanged) return;
-      lastElementsRef.current = elements;
+      lastElementsRef.current = nextElements;
       lastFilesRef.current = files;
       markLocalSceneChange();
       safeSetSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));
@@ -751,9 +870,96 @@ export default function CabinetBoardEditorPage() {
       displayName,
       {
         onStatus: (status) => {
+          if (status === "open") {
+            metricsRef.current.wsConnectedAt = performance.now();
+            setLoadPhase(hostReadyRef.current ? "ready" : "connecting");
+          } else if (status === "closed") {
+            metricsRef.current.reconnectCount += 1;
+            setLoadPhase("reconnecting");
+          }
           setCollabStatus(status === "connecting" ? "connecting" : status);
         },
         onPeersChange: setCollabPeers,
+        onRemoteOps: (ops, meta) => {
+          if (!apiRef.current || boardIdRef.current !== boardId) return;
+          const localElements = getLocalElementsForMerge(
+            apiRef.current,
+            latestSceneRef.current?.elements,
+          );
+          const localApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
+          const localFiles = (apiRef.current.getFiles?.() || latestSceneRef.current?.files || {}) as Record<string, unknown>;
+          const applied = applyBoardOps(
+            { elements: localElements, appState: localApp, files: localFiles },
+            ops,
+          );
+          void hydrateBoardFiles(applied.files as Record<string, Record<string, unknown>>).then((hydrated) => {
+            if (boardIdRef.current !== boardId || !apiRef.current) {
+              revokeBoardBlobUrls(hydrated.blobUrls);
+              return;
+            }
+            hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
+            applyingRemoteRef.current = true;
+            const collaborators = buildCollaboratorsMap(remoteCursorsRef.current);
+            applyRemoteSceneToApi(apiRef.current, {
+              elements: applied.elements,
+              appState: { ...applied.appState, collaborators },
+              files: hydrated.files,
+            });
+            latestSceneRef.current = buildScenePayload(applied.elements, applied.appState, hydrated.files);
+            lastElementsRef.current = applied.elements;
+            lastFilesRef.current = hydrated.files;
+            if (typeof meta.version === "number" && meta.version > versionRef.current) {
+              versionRef.current = meta.version;
+            }
+            window.setTimeout(() => { applyingRemoteRef.current = false; }, 80);
+          });
+        },
+        onResyncNeeded: () => {
+          // После reconnect подтягиваем серверный snapshot и сливаем с локальным.
+          void (async () => {
+            try {
+              const fresh = await fetchInteractiveBoard(boardId);
+              if (boardIdRef.current !== boardId || !apiRef.current) return;
+              if (typeof fresh.version === "number" && fresh.version >= versionRef.current) {
+                versionRef.current = fresh.version;
+              }
+              const remoteScene = buildScenePayload(
+                fresh.scene_data?.elements || [],
+                fresh.scene_data?.appState || {},
+                fresh.scene_data?.files || {},
+              );
+              const localElements = getLocalElementsForMerge(
+                apiRef.current,
+                latestSceneRef.current?.elements,
+              );
+              const localApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
+              const localFiles = (apiRef.current.getFiles?.() || latestSceneRef.current?.files || {}) as Record<string, unknown>;
+              const merged = mergeCollabScenes(
+                { elements: localElements, appState: localApp, files: localFiles },
+                remoteScene,
+              );
+              const hydrated = await hydrateBoardFiles(merged.files as Record<string, Record<string, unknown>>);
+              hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
+              applyingRemoteRef.current = true;
+              applyRemoteSceneToApi(apiRef.current, {
+                elements: merged.elements,
+                appState: merged.appState,
+                files: hydrated.files,
+              });
+              latestSceneRef.current = buildScenePayload(merged.elements, merged.appState, hydrated.files);
+              lastElementsRef.current = merged.elements;
+              lastFilesRef.current = hydrated.files;
+              collabRef.current?.resetPublishBase(merged.elements);
+              window.setTimeout(() => { applyingRemoteRef.current = false; }, 80);
+              if (dirtyRef.current) {
+                saveRequestedRef.current = true;
+                saverRef.current?.schedule();
+              }
+            } catch {
+              showNotice("Не удалось полностью восстановить сцену после разрыва связи");
+            }
+          })();
+        },
         onRemoteCursor: (cursor, clientId) => {
           if (!cursor) {
             remoteCursorsRef.current.delete(clientId);
@@ -799,43 +1005,66 @@ export default function CabinetBoardEditorPage() {
             scene,
           );
 
-          applyingRemoteRef.current = true;
-          const collaborators = buildCollaboratorsMap(remoteCursorsRef.current);
-          applyRemoteSceneToApi(apiRef.current, {
-            ...merged,
-            appState: {
-              ...merged.appState,
+          const applyMerged = (displayFiles: Record<string, unknown>) => {
+            if (!apiRef.current || boardIdRef.current !== boardId) return;
+            applyingRemoteRef.current = true;
+            const collaborators = buildCollaboratorsMap(remoteCursorsRef.current);
+            applyRemoteSceneToApi(apiRef.current, {
+              elements: merged.elements,
+              appState: {
+                ...merged.appState,
+                collaborators,
+              },
+              files: displayFiles,
+            });
+            apiRef.current.updateScene?.({
               collaborators,
-            },
-          });
-          // Excalidraw expects collaborators on SceneData root as well.
-          apiRef.current.updateScene?.({
-            collaborators,
-            captureUpdate: CaptureUpdateAction.NEVER,
-          });
-          const local = apiRef.current.getAppState?.() || {};
-          const nextApp = {
-            ...merged.appState,
-            scrollX: local.scrollX,
-            scrollY: local.scrollY,
-            zoom: local.zoom,
-            collaborators,
-            selectedElementIds: local.selectedElementIds,
-            theme: boardThemeRef.current,
-          };
-          const payload = buildScenePayload(merged.elements, nextApp, merged.files);
-          latestSceneRef.current = payload;
-          lastElementsRef.current = merged.elements;
-          lastFilesRef.current = merged.files;
-          if (meta.fromSaved) {
-            if (!dirtyRef.current) {
-              safeSetSaveStatus("saved");
-              setConflict(false);
+              captureUpdate: CaptureUpdateAction.NEVER,
+            });
+            const local = apiRef.current.getAppState?.() || {};
+            const nextApp = {
+              ...merged.appState,
+              scrollX: local.scrollX,
+              scrollY: local.scrollY,
+              zoom: local.zoom,
+              collaborators,
+              selectedElementIds: local.selectedElementIds,
+              theme: boardThemeRef.current,
+            };
+            const payload = buildScenePayload(merged.elements, nextApp, displayFiles);
+            latestSceneRef.current = payload;
+            lastElementsRef.current = merged.elements;
+            lastFilesRef.current = displayFiles;
+            if (meta.fromSaved) {
+              if (!dirtyRef.current) {
+                safeSetSaveStatus("saved");
+                setConflict(false);
+              }
             }
+            window.setTimeout(() => {
+              applyingRemoteRef.current = false;
+            }, 80);
+          };
+
+          // Новые стабильные URL с remote — гидратируем до apply, иначе пиры видят «пусто».
+          const needsHydrate = Object.entries(merged.files || {}).some(([, metaFile]) => {
+            if (!metaFile || typeof metaFile !== "object") return false;
+            const url = String((metaFile as { dataURL?: string; url?: string }).dataURL
+              || (metaFile as { url?: string }).url || "");
+            return Boolean(url) && !isTransientFileUrl(url);
+          });
+          if (needsHydrate) {
+            void hydrateBoardFiles(merged.files as Record<string, Record<string, unknown>>).then((hydrated) => {
+              if (boardIdRef.current !== boardId) {
+                revokeBoardBlobUrls(hydrated.blobUrls);
+                return;
+              }
+              hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
+              applyMerged(hydrated.files as Record<string, unknown>);
+            });
+          } else {
+            applyMerged(merged.files);
           }
-          window.setTimeout(() => {
-            applyingRemoteRef.current = false;
-          }, 80);
         },
       },
       { role },
@@ -871,12 +1100,37 @@ export default function CabinetBoardEditorPage() {
         theme: boardThemeRef.current,
       };
       api.updateScene?.({ appState: patch });
+      // Повторно отдаём гидратированные files — Excalidraw иногда теряет их
+      // при первом paint в iframe с нулевым размером.
+      const bootFiles = latestSceneRef.current?.files;
+      if (bootFiles && Object.keys(bootFiles).length) {
+        api.updateScene?.({
+          files: bootFiles,
+          captureUpdate: CaptureUpdateAction.NEVER,
+        });
+      }
       syncPaperOverlay(state);
       syncLeftPanels(state);
     } catch {
       /* ignore */
     }
   }, [syncPaperOverlay, syncLeftPanels]);
+
+  const handleHostReady = useCallback(() => {
+    setHostReady(true);
+    metricsRef.current.readyAt = performance.now();
+    setLoadPhase("ready");
+    logBoardMetrics("ready", metricsRef.current);
+    try {
+      apiRef.current?.refresh?.();
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const retryBoardLoad = useCallback(() => {
+    setReloadToken((n) => n + 1);
+  }, []);
 
   // Если превью ещё нет, но на доске уже есть элементы — сохранить thumbnail для списка
   useEffect(() => {
@@ -1153,15 +1407,18 @@ export default function CabinetBoardEditorPage() {
     }
   };
 
-  if (loading) {
+  if (loading || loadPhase === "loading_scene" || loadPhase === "loading_files") {
     return (
       <div className="cb-board-editor" aria-busy="true">
-        <div className="cb-board-editor__skeleton">Загрузка доски…</div>
+        <div className="cb-board-editor__skeleton">
+          <p>{phaseLabel(loadPhase)}</p>
+          <p className="cb-board-editor__skeleton-hint">Изображения подготавливаются до открытия холста</p>
+        </div>
       </div>
     );
   }
 
-  if (loadError || !board || !initialData) {
+  if (loadError || loadPhase === "error" || !board || !initialData) {
     return (
       <div className="cb-board-editor">
         <div className="cb-board-editor__top">
@@ -1172,7 +1429,15 @@ export default function CabinetBoardEditorPage() {
         <div className="cb-board-editor__skeleton">
           <div>
             <p>{loadError || "Доска не найдена"}</p>
-            <Link to="/cabinet/boards" className="cb-btn cb-btn--primary">К списку досок</Link>
+            {loadErrorCode ? (
+              <p className="cb-board-editor__skeleton-hint">Код: {loadErrorCode}</p>
+            ) : null}
+            <div className="cb-board-editor__banner-actions" style={{ marginTop: 12 }}>
+              <button type="button" className="cb-btn cb-btn--primary" onClick={retryBoardLoad}>
+                Повторить загрузку
+              </button>
+              <Link to="/cabinet/boards" className="cb-btn">К списку досок</Link>
+            </div>
           </div>
         </div>
       </div>
@@ -1502,18 +1767,31 @@ export default function CabinetBoardEditorPage() {
         </div>
 
         <BoardExcalidrawCanvas
-          key={boardId}
+          key={`${boardId}:${reloadToken}`}
           initialElements={initialData.elements}
           initialAppState={initialData.appState}
           initialFiles={initialData.files}
           viewModeEnabled={viewModeEnabled}
           onChange={handleChange}
           onApiReady={handleApiReady}
+          onHostReady={handleHostReady}
           onPointerSceneMove={handlePointerSceneMove}
           generateIdForFile={generateIdForFile}
         />
       </div>
 
+      {loadPhase === "reconnecting" ? (
+        <div className="cb-soon-toast" role="status">Восстанавливаем соединение…</div>
+      ) : null}
+      {missingImageCount > 0 && hostReady ? (
+        <div className="cb-soon-toast" role="status">
+          Часть изображений недоступна ({missingImageCount}).
+          {" "}
+          <button type="button" className="cb-board-editor__linkbtn" onClick={retryBoardLoad}>
+            Повторить загрузку
+          </button>
+        </div>
+      ) : null}
       {imageUploadStatus === "uploading" ? (
         <div className="cb-soon-toast" role="status">Загрузка изображения…</div>
       ) : null}

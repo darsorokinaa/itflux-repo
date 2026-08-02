@@ -296,6 +296,10 @@ export default function CabinetLayout() {
     return <Navigate to="/cabinet/student" replace />;
   }
 
+  if (user.role === "parent") {
+    return <Navigate to="/cabinet/parent" replace />;
+  }
+
   const isDashboard = location.pathname === "/cabinet" || location.pathname === "/cabinet/";
   const contentClass = isDashboard
     ? "cabinet-content"

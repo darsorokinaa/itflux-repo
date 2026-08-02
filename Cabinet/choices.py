@@ -130,6 +130,41 @@ class SubmissionStatus(models.TextChoices):
     NEEDS_REVISION = "needs_revision", "Нужна доработка"
 
 
+class ParentRelationshipStatus(models.TextChoices):
+    PENDING = "pending", "Ожидает подтверждения"
+    ACTIVE = "active", "Доступ активен"
+    REVOKED = "revoked", "Доступ отозван"
+    SUSPENDED = "suspended", "Временно отключён"
+
+
+class ParentRelationshipType(models.TextChoices):
+    MOTHER = "mother", "Мама"
+    FATHER = "father", "Папа"
+    GUARDIAN = "guardian", "Опекун"
+    OTHER = "other", "Другой представитель"
+
+
+class ParentInvitationStatus(models.TextChoices):
+    PENDING = "pending", "Приглашение создано"
+    ACCEPTED = "accepted", "Доступ активен"
+    EXPIRED = "expired", "Ссылка просрочена"
+    REVOKED = "revoked", "Приглашение отозвано"
+
+
+class CommentVisibility(models.TextChoices):
+    PRIVATE_TEACHER = "private_teacher", "Только преподаватель"
+    STUDENT_ONLY = "student_only", "Только ученик"
+    STUDENT_AND_PARENT = "student_and_parent", "Ученик и родитель"
+
+
+class JournalEntryType(models.TextChoices):
+    LESSON = "lesson", "Урок"
+    HOMEWORK = "homework", "Домашнее задание"
+    TEST = "test", "Тест"
+    MANUAL = "manual", "Ручная запись"
+    ATTENDANCE = "attendance", "Посещаемость"
+
+
 class ReviewSourceType(models.TextChoices):
     HOMEWORK = "homework", "Домашнее задание"
     INTERACTIVE = "interactive", "Интерактив"
@@ -165,6 +200,25 @@ class MaterialStatus(models.TextChoices):
     DRAFT = "draft", "Черновик"
     PUBLISHED = "published", "Опубликован"
     ARCHIVED = "archived", "В архиве"
+
+
+class ContentAccessLevel(models.TextChoices):
+    """Уровни доступа к материалам библиотеки платформы."""
+
+    FREE = "free", "Бесплатно"
+    TEACHER = "teacher", "Учитель"
+    PROFESSIONAL = "professional", "Профи"
+    PREMIUM = "premium", "Премиум"
+    CORPORATE = "corporate", "Корпоративный"
+
+
+CONTENT_ACCESS_RANK = {
+    ContentAccessLevel.FREE: 0,
+    ContentAccessLevel.TEACHER: 1,
+    ContentAccessLevel.PROFESSIONAL: 2,
+    ContentAccessLevel.PREMIUM: 3,
+    ContentAccessLevel.CORPORATE: 4,
+}
 
 
 class MeetingProvider(models.TextChoices):
@@ -203,6 +257,7 @@ class SeriesStatus(models.TextChoices):
 
 class ParticipantRole(models.TextChoices):
     ORGANIZER = "organizer", "Организатор"
+    COTEACHER = "coteacher", "Соучитель"
     STUDENT = "student", "Ученик"
     PARENT = "parent", "Родитель"
     GUEST = "guest", "Гость"

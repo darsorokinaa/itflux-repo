@@ -19,6 +19,11 @@ class MeetingMaterialCollaborativeScope(models.TextChoices):
     SELECTED = "selected", "Выбранные ученики"
 
 
+class MeetingMaterialFollowPolicy(models.TextChoices):
+    STRICT = "strict", "Следовать за учителем"
+    INDEPENDENT = "independent", "Самостоятельный просмотр"
+
+
 class MeetingMaterialSession(models.Model):
     """
     Активный (или недавно закрытый) материал, синхронизируемый между
@@ -85,6 +90,23 @@ class MeetingMaterialSession(models.Model):
         max_length=20,
         choices=MeetingMaterialInteractionMode.choices,
         default=MeetingMaterialInteractionMode.VIEW_ONLY,
+        help_text="view_only / collaborative — рисование и аннотации",
+    )
+    follow_policy = models.CharField(
+        "Следование за ведущим",
+        max_length=20,
+        choices=MeetingMaterialFollowPolicy.choices,
+        default=MeetingMaterialFollowPolicy.STRICT,
+        help_text="strict — ученик на странице ведущего; independent — может листать сам",
+    )
+    controller = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="controlled_meeting_material_sessions",
+        verbose_name="Кто управляет материалом",
+        help_text="Ведущий глобальной позиции (учитель или соучитель)",
     )
     collaborative_scope = models.CharField(
         "Кому разрешено совместное управление",
@@ -97,6 +119,12 @@ class MeetingMaterialSession(models.Model):
         default=list,
         blank=True,
         help_text="Используется при scope=selected; пустой список при scope=all означает всех учеников урока",
+    )
+    independent_user_ids = models.JSONField(
+        "User id в самостоятельном просмотре",
+        default=list,
+        blank=True,
+        help_text="Персональные исключения из strict follow",
     )
     current_state = models.JSONField("Состояние материала", default=dict, blank=True)
     recent_operation_ids = models.JSONField(

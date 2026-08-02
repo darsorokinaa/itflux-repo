@@ -464,6 +464,13 @@ if not DEBUG:
         "on",
     )
 
+# —— Подписка платформы (SaaS). Не путать с биллингом учеников.
+PAYMENT_PROVIDER = (os.environ.get("PAYMENT_PROVIDER") or "mock").strip()
+PAYMENT_SECRET_KEY = (os.environ.get("PAYMENT_SECRET_KEY") or "").strip()
+PAYMENT_SHOP_ID = (os.environ.get("PAYMENT_SHOP_ID") or "").strip()
+ANON_VARIANTS_MONTHLY_LIMIT = int(os.environ.get("ANON_VARIANTS_MONTHLY_LIMIT", "5"))
+ANON_WORKBOOKS_MONTHLY_LIMIT = int(os.environ.get("ANON_WORKBOOKS_MONTHLY_LIMIT", "3"))
+
 # Web Push (VAPID). Generate with: python -c "from py_vapid import Vapid01; ..."
 # or leave empty — push UI will show that the channel is not configured yet.
 VAPID_PUBLIC_KEY = (os.environ.get("VAPID_PUBLIC_KEY") or "").strip()

@@ -362,3 +362,10 @@ if not DEBUG and not _TESTING and not LESSON_SECRET:
         "LESSON_SECRET is not set — JWT for homework/lesson links will not be issued.",
         stacklevel=1,
     )
+
+# —— Подписка платформы (SaaS). Не путать с биллингом учеников.
+PAYMENT_PROVIDER = (os.environ.get("PAYMENT_PROVIDER") or "mock").strip()
+PAYMENT_SECRET_KEY = (os.environ.get("PAYMENT_SECRET_KEY") or "").strip()
+PAYMENT_SHOP_ID = (os.environ.get("PAYMENT_SHOP_ID") or "").strip()
+ANON_VARIANTS_MONTHLY_LIMIT = int(os.environ.get("ANON_VARIANTS_MONTHLY_LIMIT", "5"))
+ANON_WORKBOOKS_MONTHLY_LIMIT = int(os.environ.get("ANON_WORKBOOKS_MONTHLY_LIMIT", "3"))

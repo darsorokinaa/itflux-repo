@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { externalizeSceneFiles, filesForLivePublish, preferStableFile } from "./boardFiles";
+import {
+  externalizeSceneFiles,
+  filesForLivePublish,
+  filesForPersist,
+  preferDisplayFile,
+  preferStableFile,
+  STABLE_URL_KEY,
+} from "./boardFiles";
 import { mergeSceneFiles } from "./boardSceneMerge";
 
 function bigPngDataUrl(bytesLength: number): string {
@@ -72,11 +79,39 @@ describe("externalizeSceneFiles", () => {
     expect(stable.dataURL).toContain("/api/");
   });
 
-  it("mergeSceneFiles не затирает remote permanent локальным blob", () => {
+  it("mergeSceneFiles сохраняет гидратированный blob того же asset", () => {
+    const stable = "/api/cabinet/interactive-boards/b/assets/x/";
     const merged = mergeSceneFiles(
-      { f1: { dataURL: "blob:http://local/1" } },
-      { f1: { dataURL: "/api/cabinet/interactive-boards/b/assets/x/" } },
+      { f1: { dataURL: "blob:http://local/1", [STABLE_URL_KEY]: stable } },
+      { f1: { dataURL: stable } },
     );
-    expect((merged.f1 as { dataURL: string }).dataURL).toContain("/api/");
+    expect((merged.f1 as { dataURL: string }).dataURL).toMatch(/^blob:/);
+  });
+
+  it("preferDisplayFile не затирает decoded blob стабильным URL", () => {
+    const stable = "/api/cabinet/interactive-boards/b/assets/x/";
+    const picked = preferDisplayFile(
+      { dataURL: "blob:http://local/1", [STABLE_URL_KEY]: stable },
+      { dataURL: stable },
+    );
+    expect(String(picked.dataURL)).toMatch(/^blob:/);
+  });
+
+  it("filesForPersist пишет стабильный URL, не blob", () => {
+    const stable = "/api/cabinet/interactive-boards/b/assets/x/";
+    const out = filesForPersist({
+      f1: { dataURL: "blob:http://local/1", [STABLE_URL_KEY]: stable, mimeType: "image/png" },
+    });
+    expect(out.f1.dataURL).toBe(stable);
+  });
+
+  it("filesForLivePublish публикует стабильный URL из hydrate-метаданных", () => {
+    const stable = "/api/cabinet/interactive-boards/b/assets/x/";
+    const out = filesForLivePublish({
+      f1: { dataURL: "blob:http://local/1", [STABLE_URL_KEY]: stable },
+      f2: { dataURL: "data:image/png;base64,aaa" },
+    });
+    expect(Object.keys(out)).toEqual(["f1"]);
+    expect(out.f1.dataURL).toBe(stable);
   });
 });

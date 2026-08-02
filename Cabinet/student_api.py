@@ -12,6 +12,7 @@ from .avatar_api import build_avatar_url
 from .choices import (
     AssignmentStatus,
     HomeworkStatus,
+    HomeworkTaskType,
     MaterialStatus,
     MeetingProvider,
     StudentStatus,
@@ -27,6 +28,7 @@ from .models import (
     InteractiveAttempt,
     Lesson,
     LessonAssignment,
+    LessonPlanItem,
     MatchingPair,
     DirectMaterialAssignment,
     Material,
@@ -303,6 +305,72 @@ def _serialize_recent_lesson_card(assignment, students):
     }
 
 
+_MATERIAL_HW_TASK_TYPES = {
+    HomeworkTaskType.FILE,
+    HomeworkTaskType.EXTERNAL_LINK,
+    HomeworkTaskType.GENERATED_TASK,
+}
+
+
+def _serialize_library_material(
+    material,
+    *,
+    lesson_topic="",
+    assignment_id=None,
+    homework_id=None,
+    direct=False,
+    source="lesson",
+    assigned_at=None,
+    updated_at=None,
+    student_subject_id=None,
+    student_subject_label="",
+    message="",
+    description="",
+):
+    stamp = updated_at or assigned_at
+    if stamp is None and getattr(material, "updated_at", None):
+        stamp = material.updated_at.isoformat()
+    elif stamp is not None and hasattr(stamp, "isoformat"):
+        stamp = stamp.isoformat()
+    return {
+        "id": material.id,
+        "title": material.title,
+        "description": description or (material.description or ""),
+        "type": material.material_type,
+        "type_label": material.get_material_type_display(),
+        "topic": material.topic or "",
+        "lesson_topic": lesson_topic or "",
+        "assignment_id": assignment_id,
+        "homework_id": homework_id,
+        "external_url": material.external_url or "",
+        "file_url": material_file_url(material, for_student=True),
+        "cover_theme": "material",
+        "message": message or "",
+        "direct": direct,
+        "source": source,
+        "assigned_at": assigned_at.isoformat() if hasattr(assigned_at, "isoformat") else assigned_at,
+        "updated_at": stamp,
+        "student_subject_id": student_subject_id,
+        "student_subject_label": student_subject_label or "",
+    }
+
+
+def _published_materials_for_lesson(lesson):
+    """Материалы урока + актуальные вложения из связанных пунктов плана."""
+    by_id = {}
+    for material in lesson.materials.filter(status=MaterialStatus.PUBLISHED):
+        by_id[material.id] = material
+    plan_items = LessonPlanItem.objects.filter(linked_lesson=lesson).prefetch_related("materials")
+    for plan_item in plan_items:
+        for material in plan_item.materials.filter(status=MaterialStatus.PUBLISHED):
+            by_id[material.id] = material
+    return sorted(
+        by_id.values(),
+        key=lambda m: (m.updated_at or m.created_at, m.id),
+        reverse=True,
+    )
+
+
 def _collect_student_materials(students, limit=None):
     items = []
     seen = set()
@@ -315,31 +383,171 @@ def _collect_student_materials(students, limit=None):
     for assignment in assignments:
         lesson = assignment.lesson
         lesson_topic = lesson.topic or lesson.title
-        for material in lesson.materials.filter(status=MaterialStatus.PUBLISHED).order_by("-updated_at", "-id"):
+        for material in _published_materials_for_lesson(lesson):
             if material.id in seen:
                 continue
             seen.add(material.id)
-            items.append({
-                "id": material.id,
-                "title": material.title,
-                "type": material.material_type,
-                "type_label": material.get_material_type_display(),
-                "topic": material.topic or "",
-                "lesson_topic": lesson_topic,
-                "assignment_id": assignment.id,
-                "external_url": material.external_url or "",
-                "file_url": material_file_url(material, for_student=True),
-                "cover_theme": "material",
-                "updated_at": material.updated_at.isoformat() if material.updated_at else None,
-            })
-    items.sort(key=lambda row: row.get("updated_at") or "", reverse=True)
+            items.append(
+                _serialize_library_material(
+                    material,
+                    lesson_topic=lesson_topic,
+                    assignment_id=assignment.id,
+                    source="lesson",
+                    assigned_at=assignment.assigned_at,
+                    updated_at=material.updated_at,
+                )
+            )
+    items.sort(key=lambda row: row.get("updated_at") or row.get("assigned_at") or "", reverse=True)
     if limit is not None:
         return items[:limit]
     return items
 
 
-def _recent_materials(students, limit=3):
-    return _collect_student_materials(students, limit=limit)
+def _resolve_homework_task_material(task, homework, plan_materials_by_title):
+    """Найти Material, из которого создан task ДЗ (файл / ссылка / вариант)."""
+    if not task.is_active or task.task_type not in _MATERIAL_HW_TASK_TYPES:
+        return None
+    title = (task.title or "").strip()
+    if title and title in plan_materials_by_title:
+        return plan_materials_by_title[title]
+
+    desc = (task.description or "").strip()
+    qs = Material.objects.filter(
+        Q(teacher_id=homework.teacher_id) | Q(is_public=True),
+        status=MaterialStatus.PUBLISHED,
+    )
+    if desc:
+        by_url = qs.filter(Q(external_url=desc) | Q(file=desc)).first()
+        if by_url:
+            return by_url
+    # Title-only: только файлы/ссылки (не задачи из банка без привязки к Material)
+    if title and task.task_type in (HomeworkTaskType.FILE, HomeworkTaskType.EXTERNAL_LINK):
+        return qs.filter(title=title).order_by("-updated_at", "-id").first()
+    return None
+
+
+def _collect_homework_materials(students, limit=None):
+    """Материалы, прикреплённые учителем к выданным ДЗ."""
+    from .files_models import CabinetFileRelationType
+
+    items = []
+    seen = set()
+    homeworks = (
+        _homework_qs(students)
+        .select_related("lesson", "lesson_plan_item", "student_subject", "teacher")
+        .prefetch_related(
+            "tasks",
+            "lesson_plan_item__homework_materials",
+            "cabinet_file_relations__material",
+        )
+        .order_by("-updated_at", "-id")
+    )
+    for hw in homeworks:
+        subject_id = hw.student_subject_id
+        subject_label = ""
+        if hw.student_subject_id and hw.student_subject:
+            subject_label = hw.student_subject.display_label
+        lesson_topic = ""
+        if hw.lesson_id and hw.lesson:
+            lesson_topic = hw.lesson.topic or hw.lesson.title or ""
+        if not lesson_topic:
+            lesson_topic = hw.title or ""
+
+        materials_by_id = {}
+        plan_by_title = {}
+        plan_item = hw.lesson_plan_item
+        if plan_item is not None:
+            for material in plan_item.homework_materials.all():
+                if material.status != MaterialStatus.PUBLISHED:
+                    continue
+                materials_by_id[material.id] = material
+                title = (material.title or "").strip()
+                if title:
+                    plan_by_title[title] = material
+
+        for rel in hw.cabinet_file_relations.all():
+            if rel.relation_type != CabinetFileRelationType.HOMEWORK:
+                continue
+            material = rel.material
+            if material is None or material.status != MaterialStatus.PUBLISHED:
+                continue
+            materials_by_id[material.id] = material
+
+        for task in hw.tasks.all():
+            material = _resolve_homework_task_material(task, hw, plan_by_title)
+            if material is not None:
+                materials_by_id[material.id] = material
+
+        for material in materials_by_id.values():
+            if material.id in seen:
+                continue
+            seen.add(material.id)
+            items.append(
+                _serialize_library_material(
+                    material,
+                    lesson_topic=lesson_topic,
+                    homework_id=hw.id,
+                    source="homework",
+                    assigned_at=hw.created_at,
+                    updated_at=material.updated_at or hw.updated_at,
+                    student_subject_id=subject_id,
+                    student_subject_label=subject_label,
+                )
+            )
+
+    items.sort(key=lambda row: row.get("updated_at") or row.get("assigned_at") or "", reverse=True)
+    if limit is not None:
+        return items[:limit]
+    return items
+
+
+def _merge_student_library_materials(
+    students,
+    *,
+    user=None,
+    student_subject_id=None,
+    include_boards=True,
+    limit=None,
+):
+    """Единый список материалов ученика: прямые + уроки + ДЗ (+ доски), без дублей."""
+    direct_items = _collect_direct_materials(students, student_subject_id=student_subject_id)
+    lesson_items = _collect_student_materials(students, limit=200)
+    homework_items = _collect_homework_materials(students, limit=200)
+    board_items = _collect_student_boards(user) if include_boards and user is not None else []
+
+    merged = list(direct_items)
+    seen = {it["id"] for it in merged}
+    for bucket in (lesson_items, homework_items, board_items):
+        for it in bucket:
+            if it["id"] in seen:
+                continue
+            merged.append(it)
+            seen.add(it["id"])
+
+    if student_subject_id:
+        sid = int(student_subject_id)
+        merged = [
+            it
+            for it in merged
+            if it.get("student_subject_id") in (None, sid) or it.get("type") == "board"
+        ]
+
+    merged.sort(
+        key=lambda row: row.get("updated_at") or row.get("assigned_at") or "",
+        reverse=True,
+    )
+    if limit is not None:
+        return merged[:limit]
+    return merged
+
+
+def _recent_materials(students, limit=3, user=None):
+    return _merge_student_library_materials(
+        students,
+        user=user,
+        include_boards=bool(user),
+        limit=limit,
+    )
 
 
 def _cover_theme_from_lesson(lesson):
@@ -844,7 +1052,7 @@ class StudentDashboardView(StudentScopedView):
                     break
         recent_lessons = recent_lessons[:3]
 
-        recent_materials = _recent_materials(students, limit=3)
+        recent_materials = _recent_materials(students, limit=3, user=request.user)
 
         return Response({
             "greeting_name": profile.get_display_name().split()[0] if profile.get_display_name() else "Ученик",
@@ -1340,24 +1548,19 @@ def _collect_direct_materials(students, student_subject_id=None):
         subject_label = ""
         if da.student_subject_id and da.student_subject:
             subject_label = da.student_subject.display_label
-        items.append({
-            "id": m.id,
-            "title": m.title,
-            "description": m.description or "",
-            "type": m.material_type,
-            "type_label": m.get_material_type_display(),
-            "topic": m.topic or "",
-            "lesson_topic": "",
-            "assignment_id": None,
-            "external_url": m.external_url or "",
-            "file_url": material_file_url(m, for_student=True),
-            "cover_theme": "material",
-            "message": da.message or "",
-            "direct": True,
-            "assigned_at": da.assigned_at.isoformat(),
-            "student_subject_id": da.student_subject_id,
-            "student_subject_label": subject_label,
-        })
+        items.append(
+            _serialize_library_material(
+                m,
+                direct=True,
+                source="direct",
+                assigned_at=da.assigned_at,
+                updated_at=m.updated_at or da.assigned_at,
+                student_subject_id=da.student_subject_id,
+                student_subject_label=subject_label,
+                message=da.message or "",
+                description=m.description or "",
+            )
+        )
     return items
 
 
@@ -1432,27 +1635,13 @@ class StudentMaterialsView(StudentScopedView):
         self.sync_student_releases(students)
         q = (request.GET.get("q") or "").strip().lower()
         subject_id = request.GET.get("student_subject") or request.GET.get("subject")
-        lesson_items = _collect_student_materials(students, limit=200)
-        direct_items = _collect_direct_materials(students, student_subject_id=subject_id or None)
-        board_items = _collect_student_boards(request.user)
-        # merge, deduplicate by id (direct takes priority)
-        seen = {it["id"] for it in direct_items}
-        for it in lesson_items:
-            if it["id"] not in seen:
-                direct_items.append(it)
-                seen.add(it["id"])
-        for it in board_items:
-            if it["id"] not in seen:
-                direct_items.append(it)
-                seen.add(it["id"])
-        all_items = direct_items
-        if subject_id:
-            sid = int(subject_id)
-            all_items = [
-                it for it in all_items
-                if it.get("student_subject_id") in (None, sid)
-                or it.get("type") == "board"
-            ]
+        all_items = _merge_student_library_materials(
+            students,
+            user=request.user,
+            student_subject_id=subject_id or None,
+            include_boards=True,
+            limit=100,
+        )
         if q:
             all_items = [
                 it for it in all_items
@@ -1463,11 +1652,6 @@ class StudentMaterialsView(StudentScopedView):
                 or q in it.get("lesson_topic", "").lower()
                 or q in (it.get("student_subject_label") or "").lower()
             ]
-        # Доски и материалы: свежие сверху
-        all_items.sort(
-            key=lambda row: row.get("updated_at") or row.get("assigned_at") or "",
-            reverse=True,
-        )
         return Response({"items": all_items[:100]})
 
 

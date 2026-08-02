@@ -147,9 +147,12 @@ def api_register(request):
     surname = (data.get("surname") or "").strip()
     role = (data.get("role") or Profile.Role.STUDENT).strip()
     invite_token = (data.get("invite_token") or "").strip()
+    parent_invite_token = (data.get("parent_invite_token") or "").strip()
     referral_code = (data.get("referral_code") or data.get("ref") or "").strip()
 
-    if invite_token:
+    if parent_invite_token:
+        role = Profile.Role.PARENT
+    elif invite_token:
         role = Profile.Role.STUDENT
 
     if not email:
@@ -172,10 +175,10 @@ def api_register(request):
 
     if role not in Profile.Role.values:
         role = Profile.Role.STUDENT
-    # Кабинет родителя пока не доступен — регистрация с этой ролью отключена.
-    if role == Profile.Role.PARENT:
+    # Родительская регистрация только по приглашению из карточки ученика.
+    if role == Profile.Role.PARENT and not parent_invite_token:
         return JsonResponse(
-            {"ok": False, "error": "Регистрация с ролью «Родитель» временно недоступна"},
+            {"ok": False, "error": "Регистрация родителя доступна только по приглашению преподавателя"},
             status=400,
         )
 
@@ -184,7 +187,7 @@ def api_register(request):
     except ValidationError as exc:
         return JsonResponse({"ok": False, "error": " ".join(exc.messages)}, status=400)
 
-    if referral_code and not invite_token:
+    if referral_code and not invite_token and not parent_invite_token:
         role = Profile.Role.TEACHER
 
     user = User.objects.create_user(username=username, email=email, password=password)
@@ -195,10 +198,22 @@ def api_register(request):
     profile.save(update_fields=["name", "surname", "role"])
 
     login(request, user)
-    invite_result = try_accept_invite_token(user, invite_token)
+    invite_result = try_accept_invite_token(user, invite_token) if invite_token else None
+
+    parent_invite_result = None
+    if parent_invite_token:
+        try:
+            from .parent_invitations import accept_parent_invitation, get_invitation_by_raw_token
+
+            parent_inv = get_invitation_by_raw_token(parent_invite_token)
+            if parent_inv:
+                parent_invite_result = accept_parent_invitation(user, parent_inv)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Parent invite accept failed: %s", exc)
 
     referral_result = None
-    if referral_code and role == Profile.Role.TEACHER:
+    if referral_code and not invite_token and not parent_invite_token:
         from .referral_service import ReferralError, ReferralService
         try:
             referral_result = ReferralService.apply_on_registration(user, referral_code)
@@ -225,6 +240,9 @@ def api_register(request):
         payload["invite_accepted"] = True
         payload["student_id"] = student.id
         payload["invite"] = invite_accept_api_payload(student, invitation, user)
+    if parent_invite_result:
+        payload["parent_invite_accepted"] = True
+        payload["redirect"] = "/cabinet/parent"
     if referral_result:
         payload["referral_applied"] = True
         payload["referral_reward"] = referral_result

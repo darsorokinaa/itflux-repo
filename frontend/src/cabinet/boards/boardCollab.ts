@@ -1,10 +1,16 @@
 /** WebSocket-синхронизация совместного редактирования доски. */
 
 import { filesForLivePublish } from "./boardFiles";
+import {
+  applyBoardOps,
+  buildLivePublishPayload,
+  type BoardSceneOpsPayload,
+} from "./boardOps";
 import { mergeCollabScenes, type CollabScene } from "./boardSceneMerge";
 
 export type { CollabScene } from "./boardSceneMerge";
 export { mergeCollabScenes };
+export type { BoardSceneOpsPayload };
 
 export type CollabPeer = {
   clientId: string;
@@ -30,6 +36,7 @@ export type CollabMessage =
   | { type: "presence_join"; client_id: string; user_id?: number; display_name?: string; can_edit?: boolean; role?: string }
   | { type: "presence_leave"; client_id: string; user_id?: number; display_name?: string }
   | { type: "scene_live"; client_id: string; user_id?: number; display_name?: string; version?: number; scene: CollabScene }
+  | { type: "scene_ops"; client_id: string; user_id?: number; display_name?: string; version?: number; ops: BoardSceneOpsPayload }
   | { type: "scene_saved"; board_id?: string; version: number; scene: CollabScene; user_id?: number; display_name?: string; client_id?: string }
   | { type: "cursor_move"; client_id: string; user_id?: number; display_name?: string; role?: string; x?: number; y?: number; tool?: string }
   | { type: "cursor"; client_id: string; user_id?: number; display_name?: string; role?: string; x?: number; y?: number; tool?: string }
@@ -40,9 +47,11 @@ type Handlers = {
   onReady?: (meta?: { canEdit?: boolean; permission?: string; role?: string }) => void;
   onPeersChange?: (peers: CollabPeer[]) => void;
   onRemoteScene?: (scene: CollabScene, meta: { version?: number; fromSaved?: boolean; clientId?: string }) => void;
+  onRemoteOps?: (ops: BoardSceneOpsPayload, meta: { version?: number; clientId?: string }) => void;
   onRemoteCursor?: (cursor: RemoteCursor | null, clientId: string) => void;
   onRemoteTool?: (clientId: string, tool: string) => void;
   onStatus?: (status: "connecting" | "open" | "closed" | "error") => void;
+  onResyncNeeded?: () => void;
 };
 
 function wsUrl(boardId: string): string {
@@ -67,10 +76,14 @@ export function createBoardCollabSession(
   let liveTimer: number | null = null;
   let pendingLive: CollabScene | null = null;
   let pendingVersion: number | undefined;
+  let lastPublishedElements: unknown[] | null = null;
   let lastPresenceReplyAt = 0;
   let heartbeatTimer: number | null = null;
   let cursorRaf: number | null = null;
   let pendingCursor: { x: number; y: number; tool?: string } | null = null;
+  let lastCursorSentAt = 0;
+  let reconnectAttempt = 0;
+  const CURSOR_MIN_INTERVAL_MS = 40; // ~25 Hz max
   const peers = new Map<string, CollabPeer>();
   const selfRole = opts.role || "";
 
@@ -117,6 +130,10 @@ export function createBoardCollabSession(
       sendJoin();
       startHeartbeat();
       handlers.onReady?.();
+      if (reconnectAttempt > 0) {
+        handlers.onResyncNeeded?.();
+      }
+      reconnectAttempt = 0;
     };
 
     socket.onmessage = (event) => {
@@ -195,6 +212,16 @@ export function createBoardCollabSession(
         handlers.onRemoteTool?.(data.client_id, String(data.tool || ""));
         return;
       }
+      if (data.type === "scene_ops") {
+        if (data.client_id === clientId) return;
+        const ops = data.ops;
+        if (!ops || !Array.isArray(ops.ops)) return;
+        handlers.onRemoteOps?.(ops, {
+          version: typeof data.version === "number" ? data.version : undefined,
+          clientId: data.client_id,
+        });
+        return;
+      }
       if (data.type === "scene_live" || data.type === "scene_saved") {
         if (data.type === "scene_live" && data.client_id === clientId) return;
         const scene = data.scene;
@@ -223,7 +250,9 @@ export function createBoardCollabSession(
       stopHeartbeat();
       socket = null;
       if (closed) return;
-      reconnectTimer = window.setTimeout(connect, 1500);
+      reconnectAttempt += 1;
+      const delay = Math.min(8000, 800 + reconnectAttempt * 700);
+      reconnectTimer = window.setTimeout(connect, delay);
     };
   };
 
@@ -232,30 +261,50 @@ export function createBoardCollabSession(
   const flushLive = () => {
     liveTimer = null;
     if (!pendingLive || !socket || socket.readyState !== WebSocket.OPEN) return;
-    const scene = {
-      elements: pendingLive.elements,
-      appState: pendingLive.appState,
-      files: filesForLivePublish(pendingLive.files as Record<string, Record<string, unknown>>),
-    };
-    sendRaw({
-      type: "scene_live",
-      client_id: clientId,
-      version: pendingVersion,
-      scene,
-    });
+    const built = buildLivePublishPayload(lastPublishedElements, pendingLive, pendingVersion);
+    if (built.kind === "ops") {
+      if (!built.payload.ops.length && !Object.keys(built.payload.files || {}).length) {
+        pendingLive = null;
+        return;
+      }
+      sendRaw({
+        type: "scene_ops",
+        client_id: clientId,
+        version: built.version,
+        ops: {
+          ...built.payload,
+          files: filesForLivePublish(built.payload.files as Record<string, Record<string, unknown>>),
+        },
+      });
+      lastPublishedElements = pendingLive.elements;
+    } else {
+      sendRaw({
+        type: "scene_live",
+        client_id: clientId,
+        version: built.version,
+        scene: built.scene,
+      });
+      lastPublishedElements = built.scene.elements;
+    }
     pendingLive = null;
   };
 
   const flushCursor = () => {
     cursorRaf = null;
     if (!pendingCursor) return;
+    const now = Date.now();
+    if (now - lastCursorSentAt < CURSOR_MIN_INTERVAL_MS) {
+      cursorRaf = window.requestAnimationFrame(flushCursor);
+      return;
+    }
     const payload = pendingCursor;
     pendingCursor = null;
+    lastCursorSentAt = now;
     sendRaw({
       type: "cursor_move",
       client_id: clientId,
-      x: payload.x,
-      y: payload.y,
+      x: Math.round(payload.x * 10) / 10,
+      y: Math.round(payload.y * 10) / 10,
       tool: payload.tool || "pointer",
     });
   };
@@ -271,6 +320,13 @@ export function createBoardCollabSession(
       pendingVersion = version;
       if (liveTimer != null) return;
       liveTimer = window.setTimeout(flushLive, 80);
+    },
+    /** После полного resync — база для следующего diff. */
+    resetPublishBase(elements: unknown[] | null | undefined) {
+      lastPublishedElements = Array.isArray(elements) ? elements : null;
+    },
+    applyOpsLocally(local: CollabScene, ops: BoardSceneOpsPayload): CollabScene {
+      return applyBoardOps(local, ops);
     },
     publishCursor(x: number, y: number, tool = "pointer") {
       pendingCursor = { x, y, tool };

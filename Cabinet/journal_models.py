@@ -7,6 +7,8 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import models
 
+from .choices import CommentVisibility
+
 
 class AttendanceStatus(models.TextChoices):
     PRESENT = "present", "Присутствовал"
@@ -442,6 +444,13 @@ class StudentLessonRecord(models.Model):
     overall_score_manual = models.BooleanField(default=False)
     overall_score_explanation = models.CharField(max_length=500, blank=True)
     teacher_comment = models.TextField("Комментарий ученику", blank=True)
+    comment_visibility = models.CharField(
+        "Видимость комментария",
+        max_length=32,
+        choices=CommentVisibility.choices,
+        default=CommentVisibility.STUDENT_ONLY,
+        help_text="Старые комментарии по умолчанию только ученику; родителю не открываются автоматически.",
+    )
     private_note = models.TextField("Приватная заметка", blank=True)
     recommendation = models.TextField("Рекомендации", blank=True)
     strengths = models.TextField("Сильные стороны", blank=True)

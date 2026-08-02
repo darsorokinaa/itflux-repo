@@ -1,0 +1,28 @@
+# itflux background jobs — устанавливается скриптом deploy/install_cron.sh
+# Не редактируйте crontab вручную: правки делайте здесь и перезапускайте install_cron.sh
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+APP_DIR=/opt/itfluxacademy/itflux
+RUN=/opt/itfluxacademy/itflux/deploy/run_management.sh
+LOG=/var/log/itflux
+
+# Напоминания об уроках и отсутствие ученика
+*/5 * * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh send_lesson_reminders >>/var/log/itflux/cron-lesson-reminders.log 2>&1
+*/5 * * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh send_student_absent_alerts >>/var/log/itflux/cron-absent.log 2>&1
+
+# Дайджесты проверки ДЗ
+*/15 * * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh send_homework_review_digests >>/var/log/itflux/cron-hw-review.log 2>&1
+
+# Расписание / биллинг учеников (раз в час)
+5 * * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh send_daily_schedule_digests >>/var/log/itflux/cron-schedule.log 2>&1
+10 * * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh send_billing_digests >>/var/log/itflux/cron-billing.log 2>&1
+
+# Просроченные ДЗ: частый immediate + утренний daily
+*/30 * * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh send_overdue_homework_digests --mode=immediate >>/var/log/itflux/cron-overdue-immediate.log 2>&1
+30 7 * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh send_overdue_homework_digests --mode=daily >>/var/log/itflux/cron-overdue-daily.log 2>&1
+
+# Окончание подписки платформы (14/7/3/1 день)
+15 9 * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh notify_subscription_expiring >>/var/log/itflux/cron-sub-expiring.log 2>&1
+
+# Очистка анонимных счётчиков
+0 3 * * 0 APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh cleanup_anonymous_usage >>/var/log/itflux/cron-anon-cleanup.log 2>&1

@@ -349,9 +349,56 @@ class MeetingMaterialSessionApiTests(TestCase):
             format="json",
         )
         self.assertEqual(res.status_code, 200, res.content)
-        answer = res.data["materialSession"]["state"]["answers"]["q1"]
+        # Per-user: answers[userId][questionId]
+        answers = res.data["materialSession"]["state"]["answers"]
+        user_key = str(self.student_user.pk)
+        self.assertIn(user_key, answers)
+        answer = answers[user_key]["q1"]
         self.assertEqual(answer["value"], "B")
         self.assertEqual(answer["author_id"], self.student_user.pk)
+
+    def test_student_can_answer_in_follow_mode(self):
+        """view_only: ученик следует за слайдами, но может отвечать на текущем."""
+        self.client.force_login(self.teacher)
+        open_res = self.client.post(
+            f"/api/video-meetings/{self.meeting.uuid}/material-session/",
+            {
+                "resourceKind": "test",
+                "title": "Тест follow",
+                "url": "/cabinet/interactives/2",
+            },
+            format="json",
+        )
+        session_id = open_res.data["materialSession"]["sessionId"]
+        self.assertEqual(open_res.data["materialSession"]["interactionMode"], "view_only")
+        self.client.force_login(self.student_user)
+        res = self.client.post(
+            f"/api/video-meetings/{self.meeting.uuid}/material-session/operation/",
+            {
+                "sessionId": session_id,
+                "operationId": "ans-follow-1",
+                "action": "answer_selected",
+                "payload": {"questionId": "q2", "value": "A", "status": "draft"},
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        # Ученик в sync видит только свои ответы.
+        sync = self.client.get(f"/api/video-meetings/{self.meeting.uuid}/material-session/")
+        mine = sync.data["materialSession"]["state"]["answers"][str(self.student_user.pk)]
+        self.assertEqual(mine["q2"]["value"], "A")
+        # Навигация по-прежнему запрещена.
+        nav = self.client.post(
+            f"/api/video-meetings/{self.meeting.uuid}/material-session/operation/",
+            {
+                "sessionId": session_id,
+                "operationId": "nav-follow-blocked",
+                "action": "page_changed",
+                "payload": {"page": 5},
+            },
+            format="json",
+        )
+        self.assertEqual(nav.status_code, 403)
 
     def test_close_material_clears_active_session(self):
         open_res = self._open()
@@ -578,6 +625,57 @@ class MeetingMaterialSessionApiTests(TestCase):
                 action="page_changed",
                 payload={"page": 9},
                 operation_id="nav-student-view",
+                session_id=session_id,
+            )
+        self.assertIn(ctx.exception.code, ("forbidden", "nav_locked", "view_only"))
+
+    def test_independent_follow_allows_student_navigation(self):
+        from Cabinet.meeting_material_session import set_follow_policy
+
+        open_res = self._open()
+        session_id = open_res.data["materialSession"]["sessionId"]
+        set_follow_policy(
+            meeting=self.meeting,
+            user=self.teacher,
+            policy="independent",
+            session_id=session_id,
+        )
+        self.meeting.refresh_from_db()
+        result = apply_material_operation(
+            meeting=self.meeting,
+            user=self.student_user,
+            action="page_changed",
+            payload={"page": 4},
+            operation_id="nav-independent-1",
+            session_id=session_id,
+        )
+        self.assertEqual(result["session"].current_state.get("page"), 4)
+
+    def test_return_to_strict_blocks_navigation_again(self):
+        from Cabinet.meeting_material_session import set_follow_policy
+
+        open_res = self._open()
+        session_id = open_res.data["materialSession"]["sessionId"]
+        set_follow_policy(
+            meeting=self.meeting,
+            user=self.teacher,
+            policy="independent",
+            session_id=session_id,
+        )
+        set_follow_policy(
+            meeting=self.meeting,
+            user=self.teacher,
+            policy="strict",
+            session_id=session_id,
+        )
+        self.meeting.refresh_from_db()
+        with self.assertRaises(VideoMeetingError) as ctx:
+            apply_material_operation(
+                meeting=self.meeting,
+                user=self.student_user,
+                action="page_changed",
+                payload={"page": 7},
+                operation_id="nav-strict-again",
                 session_id=session_id,
             )
         self.assertIn(ctx.exception.code, ("forbidden", "nav_locked", "view_only"))

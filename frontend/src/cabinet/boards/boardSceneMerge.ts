@@ -1,6 +1,6 @@
 /** Слияние сцен Excalidraw для совместного рисования (element-level, не last-writer-wins). */
 
-import { preferStableFile } from "./boardFiles";
+import { preferDisplayFile } from "./boardFiles";
 
 export type CollabScene = {
   elements: unknown[];
@@ -20,7 +20,9 @@ export function mergeSceneFiles(
       out[id] = remoteFile;
       continue;
     }
-    out[id] = preferStableFile(
+    // Не затираем уже декодированный blob стабильным API URL — иначе картинка
+    // пропадает до повторного открытия доски.
+    out[id] = preferDisplayFile(
       localFile as Record<string, unknown>,
       remoteFile as Record<string, unknown>,
     );

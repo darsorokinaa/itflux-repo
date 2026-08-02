@@ -164,8 +164,23 @@ export function fetchPushDevices() {
   return cabinetFetch("/push/devices/", { method: "GET" });
 }
 
-export function sendPushTestNotification() {
-  return cabinetFetch("/push/test/", { method: "POST", body: "{}" });
+export async function sendPushTestNotification({ allDevices = false } = {}) {
+  let endpoint = "";
+  if (!allDevices) {
+    try {
+      const { getCurrentPushEndpoint } = await import("../cabinet/pwa/pwaHelpers");
+      endpoint = await getCurrentPushEndpoint();
+    } catch {
+      endpoint = "";
+    }
+  }
+  return cabinetFetch("/push/test/", {
+    method: "POST",
+    body: JSON.stringify({
+      endpoint: endpoint || undefined,
+      all_devices: Boolean(allDevices),
+    }),
+  });
 }
 
 export async function subscribeCabinetPush(deviceLabel = "") {
@@ -350,6 +365,20 @@ export function closeMeetingMaterialSession(meetingUuid, payload = {}) {
 
 export function setMeetingMaterialPermission(meetingUuid, payload) {
   return videoMeetingFetch(`/${meetingUuid}/material-session/permission/`, {
+    method: "POST",
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export function setMeetingMaterialFollowPolicy(meetingUuid, payload) {
+  return videoMeetingFetch(`/${meetingUuid}/material-session/permission/`, {
+    method: "POST",
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export function transferMeetingMaterialControl(meetingUuid, payload) {
+  return videoMeetingFetch(`/${meetingUuid}/material-session/control/`, {
     method: "POST",
     body: JSON.stringify(payload || {}),
   });
@@ -724,6 +753,27 @@ export function returnReviewItem(reviewId, body = {}) {
     method: "POST",
     body: JSON.stringify(body && typeof body === "object" ? body : {}),
   });
+}
+
+export function fetchReviewHomeworkPreview(reviewId) {
+  return cabinetFetch(
+    `/review/${encodeURIComponent(String(reviewId))}/create-homework-preview/`,
+    { method: "GET" },
+  );
+}
+
+export function createHomeworkFromReview(reviewId, payload = {}) {
+  const body = payload && typeof payload === "object" ? payload : {};
+  return cabinetFetch(
+    `/review/${encodeURIComponent(String(reviewId))}/create-homework/`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: body.idempotency_key
+        ? { "X-Idempotency-Key": body.idempotency_key }
+        : undefined,
+    },
+  );
 }
 
 async function cabinetFetchMultipart(path, formData, { method = "POST" } = {}) {
@@ -1102,6 +1152,26 @@ export function fetchSubscriptionPlans() {
   return cabinetFetch("/subscription/plans/", { method: "GET" });
 }
 
+export function fetchPublicPricingPlans() {
+  return fetch("/api/cabinet/pricing/plans/", { credentials: "same-origin" }).then(async (res) => {
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.detail || "Failed to load pricing");
+      err.data = data;
+      throw err;
+    }
+    return data;
+  });
+}
+
+export function trackWorkbookUsage() {
+  return cabinetFetch("/usage/workbook/", { method: "POST", body: "{}" });
+}
+
+export function fetchLibraryNewThisMonth() {
+  return cabinetFetch("/library/new-this-month/", { method: "GET" });
+}
+
 export function changePlan(planSlug, billingPeriod = "month") {
   return cabinetFetch("/subscription/change-plan/", {
     method: "POST",
@@ -1116,10 +1186,28 @@ export function createPayment(planSlug, billingPeriod = "month", promoCode = nul
   });
 }
 
-export function validatePromoCode(code, planSlug = null) {
+export function validatePromoCode(code, planSlug = null, billingPeriod = "month") {
   return cabinetFetch("/subscription/apply-promo/", {
     method: "POST",
-    body: JSON.stringify({ code, plan_slug: planSlug || undefined }),
+    body: JSON.stringify({
+      code,
+      plan_slug: planSlug || undefined,
+      billing_period: billingPeriod || "month",
+    }),
+  });
+}
+
+export function createReferralLink() {
+  return cabinetFetch("/subscription/referral-link/", {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function manageSubscription(action, extra = {}) {
+  return cabinetFetch("/subscription/manage/", {
+    method: "POST",
+    body: JSON.stringify({ action, ...extra }),
   });
 }
 
@@ -1142,6 +1230,7 @@ export function getCabinetHomePath(user) {
   const role = user?.role;
   if (role === "teacher") return "/cabinet";
   if (role === "student") return "/cabinet/student";
+  if (role === "parent") return "/cabinet/parent";
   return "/cabinet";
 }
 
@@ -1151,6 +1240,83 @@ export function isTeacherRole(user) {
 
 export function isStudentRole(user) {
   return user?.role === "student";
+}
+
+export function isParentRole(user) {
+  return user?.role === "parent";
+}
+
+/* ── Родительский кабинет и приглашения ───────────────────────────── */
+
+export function fetchStudentParentsAccess(studentId) {
+  return cabinetFetch(`/students/${studentId}/parents/`, { method: "GET" });
+}
+
+export function createStudentParentInvite(studentId, payload) {
+  return cabinetFetch(`/students/${studentId}/parents/invite/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function revokeStudentParentInvite(studentId, invitationId) {
+  return cabinetFetch(`/students/${studentId}/parents/invitations/${invitationId}/revoke/`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function updateStudentParentAccess(studentId, relationshipId, payload) {
+  return cabinetFetch(`/students/${studentId}/parents/relationships/${relationshipId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchParentInvitePreview(token) {
+  return cabinetFetch(`/parent/invite/${encodeURIComponent(token)}/`, { method: "GET" });
+}
+
+export function acceptParentInvite(token) {
+  return cabinetFetch(`/parent/invite/${encodeURIComponent(token)}/accept/`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function fetchParentDashboard(params = {}) {
+  return cabinetFetch(buildCabinetQueryPath("/parent/dashboard/", params), { method: "GET" });
+}
+
+export function fetchParentChildren() {
+  return cabinetFetch("/parent/children/", { method: "GET" });
+}
+
+export function fetchParentHomework(params = {}) {
+  return cabinetFetch(buildCabinetQueryPath("/parent/homework/", params), { method: "GET" });
+}
+
+export function fetchParentJournal(params = {}) {
+  return cabinetFetch(buildCabinetQueryPath("/parent/journal/", params), { method: "GET" });
+}
+
+export function fetchParentSchedule(params = {}) {
+  return cabinetFetch(buildCabinetQueryPath("/parent/schedule/", params), { method: "GET" });
+}
+
+export function fetchParentBilling(params = {}) {
+  return cabinetFetch(buildCabinetQueryPath("/parent/billing/", params), { method: "GET" });
+}
+
+export function claimParentPayment(payload) {
+  return cabinetFetch("/parent/billing/claim/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchJournalEntries(params = {}) {
+  return cabinetFetch(buildCabinetQueryPath("/journal/entries/", params), { method: "GET" });
 }
 
 // --- Student cabinet ---
@@ -1385,6 +1551,57 @@ export function extendBillingPackage(packageId, payload) {
 
 export function adjustBillingPackage(packageId, payload) {
   return cabinetFetch(`/billing/packages/${packageId}/adjust/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function previewAccountChargeFromPackage(accountId, payload) {
+  return cabinetFetch(`/billing/accounts/${accountId}/charge-from-package/`, {
+    method: "POST",
+    body: JSON.stringify({ ...payload, preview: true }),
+  });
+}
+
+export function chargeAccountFromPackage(accountId, payload) {
+  return cabinetFetch(`/billing/accounts/${accountId}/charge-from-package/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    headers: payload?.idempotency_key
+      ? { "X-Idempotency-Key": payload.idempotency_key }
+      : undefined,
+  });
+}
+
+export function settlePackageUnpaid(packageId, payload) {
+  return cabinetFetch(`/billing/packages/${packageId}/settle-unpaid/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    headers: payload?.idempotency_key
+      ? { "X-Idempotency-Key": payload.idempotency_key }
+      : undefined,
+  });
+}
+
+export function chargeEventBillingFromPackage(recordId, payload) {
+  return cabinetFetch(`/billing/event-billing/${recordId}/charge-from-package/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    headers: payload?.idempotency_key
+      ? { "X-Idempotency-Key": payload.idempotency_key }
+      : undefined,
+  });
+}
+
+export function refundEventBillingPackage(recordId, payload = {}) {
+  return cabinetFetch(`/billing/event-billing/${recordId}/refund-package/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function markEventBillingPaid(recordId, payload) {
+  return cabinetFetch(`/billing/event-billing/${recordId}/mark-paid/`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

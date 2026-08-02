@@ -52,7 +52,7 @@ export default function CabinetAiPage() {
         code: "AI_LIMIT_REACHED",
         current: aiUsed,
         limit: aiLimit,
-        recommended_plan: "repetitor",
+        recommended_plan: "teacher",
       });
       return;
     }

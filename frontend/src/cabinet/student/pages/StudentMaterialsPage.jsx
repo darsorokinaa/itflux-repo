@@ -56,7 +56,11 @@ function MaterialRow({ item }) {
             item.lesson_topic || item.topic,
             item.teacher_name ? `Учитель: ${item.teacher_name}` : "",
             addedAt ? formatStudentDate(addedAt) : "",
-            item.direct ? "Выдано учителем" : "",
+            item.source === "homework"
+              ? "Из ДЗ"
+              : item.direct
+                ? "Выдано учителем"
+                : "",
           ].filter(Boolean).join(" · ")}
         </span>
         {item.message ? <span className="st-mat-row__msg">{item.message}</span> : null}

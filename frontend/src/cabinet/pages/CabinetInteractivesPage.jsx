@@ -142,7 +142,7 @@ export default function CabinetInteractivesPage() {
         code: "INTERACTIVE_LIMIT_REACHED",
         current: subscription.usage.interactives,
         limit: subscription.limits.interactives,
-        recommended_plan: "repetitor",
+        recommended_plan: "teacher",
       });
       return;
     }

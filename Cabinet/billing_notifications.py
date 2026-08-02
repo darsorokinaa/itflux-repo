@@ -71,46 +71,69 @@ def notify_payment_received(teacher: User, payment: StudentPayment) -> None:
         },
         push_priority="important",
         tag=f"payment-{payment.id}",
+        dedup_key=f"billing_payment:{payment.id}:{teacher.pk}",
     )
     if prefs.telegram_enabled:
         _send_telegram(teacher, tg_text)
 
+    try:
+        from .student_notifications import notify_student_payment_recorded
+
+        notify_student_payment_recorded(
+            teacher=teacher,
+            student=payment.student,
+            amount=payment.amount,
+            currency=payment.currency,
+        )
+    except Exception:
+        logger.exception("Failed student payment notification for payment=%s", payment.id)
+
 def send_billing_message_to_student(account: BillingAccount, text: str) -> bool:
-    """Отправка ученику только если явно разрешено на аккаунте и в prefs учителя."""
+    """Отправка ученику: аккаунт + prefs учителя notify_student_payment_due."""
+    from .notification_catalog import NotificationEventType
+    from .notification_dispatch import NotificationDispatcher
+
+    teacher_prefs = _prefs(account.teacher)
     if not account.student_billing_notifications:
-        # Still create in-app for linked user if show_billing allowed — reminder is explicit teacher action
-        pass
+        return False
+    if not getattr(teacher_prefs, "notify_student_payment_due", False):
+        return False
+
     student_user = account.student.user
     if not student_user:
-        # Store as notification on student roster only
         Notification.objects.create(
             recipient_student=account.student,
             recipient_teacher=account.teacher,
             channel=NotificationChannel.IN_APP,
+            event_type=NotificationEventType.BILLING_REMINDER,
             title="Напоминание об оплате",
             message=text,
-            payload={"type": "billing_reminder", "url": "/cabinet/student"},
+            payload={"type": "billing_reminder", "event_type": "billing_reminder", "url": "/cabinet/student"},
             status=NotificationStatus.SENT,
+            sent_at=__import__("django.utils.timezone", fromlist=["now"]).now(),
         )
         return False
 
-    from .webpush import notify_user_channels
-
-    notify_user_channels(
+    result = NotificationDispatcher.notify(
         student_user,
+        NotificationEventType.BILLING_REMINDER,
         title="Напоминание об оплате",
         message=text,
+        actor=account.teacher,
         payload={
             "type": "billing_reminder",
             "event_type": "billing_reminder",
             "url": "/cabinet/student",
         },
+        url="/cabinet/student",
+        dedup_key=f"billing_reminder:{account.student_id}:{hash(text) & 0xFFFFFFFF}",
         recipient_student=account.student,
-        push_priority="important",
-        tag=f"billing-reminder-{account.student_id}",
-        skip_push_log=True,
+        skip_actor=True,
+        create_telegram=True,
+        telegram_text=text,
+        push_tag=f"billing-reminder-{account.student_id}",
     )
-    return _send_telegram(student_user, text)
+    return not result.skipped
 
 
 def build_daily_digest_text(summary: dict) -> str:

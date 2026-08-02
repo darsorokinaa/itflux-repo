@@ -928,3 +928,383 @@ class ArchivedStudentBillingTests(BillingTestBase):
         data = dashboard_summary(self.teacher)
         self.assertIn("planned_income", data)
         self.assertEqual(event.student_id, self.student.id)
+
+
+class PackageSettleDebtTests(BillingTestBase):
+    """Сценарий: урок без абонемента → долг → новый абонемент → ручное списание задним числом."""
+
+    def test_settle_past_unpaid_lesson_from_new_package(self):
+        from Cabinet.billing_service import charge_lesson_from_package
+
+        event = self._event()
+        # Урок в прошлом относительно «оплаты» абонемента
+        event.starts_at = timezone.now() - timedelta(days=10)
+        event.ends_at = event.starts_at + timedelta(minutes=60)
+        event.save(update_fields=["starts_at", "ends_at"])
+
+        records = finalize_event_billing(
+            event=event,
+            teacher=self.teacher,
+            financial_action="charge",
+            idempotency_key="settle-debt-1",
+        )
+        self.assertEqual(records[0].financial_status, FinancialStatus.AWAITING_PAYMENT)
+
+        pkg = create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="Новый",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("8"),
+            purchase_amount=Decimal("8000"),
+        )
+        self.assertEqual(pkg.remaining_units, Decimal("8.00"))
+
+        result = charge_lesson_from_package(
+            teacher=self.teacher,
+            event_billing=records[0],
+            package_id=str(pkg.id),
+            idempotency_key="manual-settle-1",
+        )
+        pkg.refresh_from_db()
+        records[0].refresh_from_db()
+        self.assertEqual(pkg.remaining_units, Decimal("7.00"))
+        self.assertEqual(records[0].financial_status, FinancialStatus.PAID_FROM_PACKAGE)
+        self.assertTrue(result["before_package_payment"])
+        self.assertEqual(
+            BillingTransaction.objects.filter(
+                event_billing=records[0],
+                transaction_type=TransactionType.PACKAGE_CONSUMPTION,
+                is_reversal=False,
+            ).count(),
+            1,
+        )
+
+    def test_cannot_settle_twice(self):
+        from Cabinet.billing_service import charge_lesson_from_package
+
+        event = self._event()
+        records = finalize_event_billing(
+            event=event,
+            teacher=self.teacher,
+            financial_action="charge",
+            idempotency_key="twice-1",
+        )
+        pkg = create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="P",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("2"),
+            purchase_amount=Decimal("2000"),
+        )
+        charge_lesson_from_package(
+            teacher=self.teacher,
+            event_billing=records[0],
+            package_id=str(pkg.id),
+        )
+        with self.assertRaises(BillingError) as ctx:
+            charge_lesson_from_package(
+                teacher=self.teacher,
+                event_billing=records[0],
+                package_id=str(pkg.id),
+            )
+        self.assertIn(ctx.exception.code, ("ALREADY_PAID", "ALREADY_CHARGED"))
+
+    def test_idempotent_http_settle(self):
+        event = self._event()
+        records = finalize_event_billing(
+            event=event,
+            teacher=self.teacher,
+            financial_action="charge",
+            idempotency_key="http-idem-1",
+        )
+        pkg = create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="P",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("5"),
+            purchase_amount=Decimal("5000"),
+        )
+        url = f"/api/cabinet/billing/event-billing/{records[0].id}/charge-from-package/"
+        payload = {"package_id": str(pkg.id), "idempotency_key": "same-key-settle"}
+        r1 = self.client.post(url, payload, format="json")
+        r2 = self.client.post(url, payload, format="json")
+        self.assertEqual(r1.status_code, 200, r1.content)
+        self.assertEqual(r2.status_code, 200, r2.content)
+        pkg.refresh_from_db()
+        self.assertEqual(pkg.remaining_units, Decimal("4.00"))
+        self.assertEqual(
+            BillingTransaction.objects.filter(
+                event_billing=records[0],
+                transaction_type=TransactionType.PACKAGE_CONSUMPTION,
+                is_reversal=False,
+            ).count(),
+            1,
+        )
+
+    def test_mass_settle_respects_remaining(self):
+        from Cabinet.billing_service import charge_multiple_lessons_from_package
+
+        events = []
+        for i in range(3):
+            ev = self._event()
+            ev.starts_at = timezone.now() - timedelta(days=5 - i)
+            ev.ends_at = ev.starts_at + timedelta(minutes=60)
+            ev.save(update_fields=["starts_at", "ends_at"])
+            finalize_event_billing(
+                event=ev,
+                teacher=self.teacher,
+                financial_action="charge",
+                idempotency_key=f"mass-{i}",
+            )
+            events.append(ev)
+
+        pkg = create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="2 урока",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("2"),
+            purchase_amount=Decimal("2000"),
+        )
+        result = charge_multiple_lessons_from_package(
+            teacher=self.teacher,
+            account=self.account,
+            package=pkg,
+            select_earliest=True,
+        )
+        pkg.refresh_from_db()
+        self.assertEqual(result["charged_count"], 2)
+        self.assertEqual(pkg.remaining_units, Decimal("0.00"))
+        unpaid = EventBillingRecord.objects.filter(
+            billing_account=self.account,
+            financial_status=FinancialStatus.AWAITING_PAYMENT,
+        ).count()
+        self.assertEqual(unpaid, 1)
+
+    def test_cannot_use_other_student_package(self):
+        from Cabinet.billing_service import charge_lesson_from_package
+
+        other = Student.objects.create(
+            teacher=self.teacher,
+            first_name="Другой",
+            last_name="Ученик",
+        )
+        other_account = get_or_create_billing_account(self.teacher, other)
+        other_account.settings.default_lesson_price = Decimal("1000")
+        other_account.settings.save()
+
+        event = self._event()
+        records = finalize_event_billing(
+            event=event,
+            teacher=self.teacher,
+            financial_action="charge",
+            idempotency_key="other-pkg",
+        )
+        pkg = create_package(
+            teacher=self.teacher,
+            student=other,
+            title="Чужой",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("4"),
+            purchase_amount=Decimal("4000"),
+        )
+        with self.assertRaises(BillingError) as ctx:
+            charge_lesson_from_package(
+                teacher=self.teacher,
+                event_billing=records[0],
+                package_id=str(pkg.id),
+            )
+        self.assertEqual(ctx.exception.code, "PACKAGE_MISMATCH")
+
+    def test_cannot_charge_cancelled_lesson(self):
+        from Cabinet.billing_service import charge_lesson_from_package
+
+        event = self._event()
+        records = finalize_event_billing(
+            event=event,
+            teacher=self.teacher,
+            financial_action="charge",
+            delivery_status=DeliveryStatus.CANCELLED_BY_TEACHER,
+            idempotency_key="cancel-no",
+        )
+        # force awaiting for test edge
+        rec = records[0]
+        rec.delivery_status = DeliveryStatus.CANCELLED_BY_TEACHER
+        rec.financial_status = FinancialStatus.AWAITING_PAYMENT
+        rec.save()
+        pkg = create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="P",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("2"),
+            purchase_amount=Decimal("2000"),
+        )
+        with self.assertRaises(BillingError) as ctx:
+            charge_lesson_from_package(
+                teacher=self.teacher,
+                event_billing=rec,
+                package_id=str(pkg.id),
+            )
+        self.assertEqual(ctx.exception.code, "NOT_CONDUCTED")
+
+    def test_manual_cash_payment_does_not_reduce_package(self):
+        from Cabinet.billing_service import mark_lesson_as_paid_manually
+
+        event = self._event()
+        records = finalize_event_billing(
+            event=event,
+            teacher=self.teacher,
+            financial_action="charge",
+            idempotency_key="cash-1",
+        )
+        pkg = create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="P",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("4"),
+            purchase_amount=Decimal("4000"),
+            create_payment_tx=False,
+        )
+        mark_lesson_as_paid_manually(
+            teacher=self.teacher,
+            event_billing=records[0],
+            amount=Decimal("1600"),
+            method="cash",
+            comment="Наличные",
+        )
+        pkg.refresh_from_db()
+        records[0].refresh_from_db()
+        self.assertEqual(pkg.remaining_units, Decimal("4.00"))
+        self.assertEqual(records[0].financial_status, FinancialStatus.PAID)
+
+    def test_refund_package_charge_restores_awaiting(self):
+        from Cabinet.billing_service import (
+            charge_lesson_from_package,
+            refund_lesson_package_charge,
+        )
+
+        event = self._event()
+        records = finalize_event_billing(
+            event=event,
+            teacher=self.teacher,
+            financial_action="charge",
+            idempotency_key="ref-1",
+        )
+        charged = records[0].charged_amount
+        pkg = create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="P",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("3"),
+            purchase_amount=Decimal("3000"),
+        )
+        charge_lesson_from_package(
+            teacher=self.teacher,
+            event_billing=records[0],
+            package_id=str(pkg.id),
+        )
+        refund_lesson_package_charge(
+            teacher=self.teacher,
+            event_billing=records[0],
+        )
+        pkg.refresh_from_db()
+        records[0].refresh_from_db()
+        self.assertEqual(pkg.remaining_units, Decimal("3.00"))
+        self.assertEqual(records[0].financial_status, FinancialStatus.AWAITING_PAYMENT)
+        self.assertEqual(records[0].charged_amount, charged)
+
+        with self.assertRaises(BillingError):
+            refund_lesson_package_charge(
+                teacher=self.teacher,
+                event_billing=records[0],
+            )
+
+    def test_other_teacher_forbidden(self):
+        event = self._event()
+        records = finalize_event_billing(
+            event=event,
+            teacher=self.teacher,
+            financial_action="charge",
+            idempotency_key="forbid-1",
+        )
+        pkg = create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="P",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("2"),
+            purchase_amount=Decimal("2000"),
+        )
+        self.client.force_login(self.other_teacher)
+        url = f"/api/cabinet/billing/event-billing/{records[0].id}/charge-from-package/"
+        resp = self.client.post(url, {"package_id": str(pkg.id)}, format="json")
+        self.assertIn(resp.status_code, (403, 404))
+
+    def test_legacy_migration_idempotent_and_preserves_remaining(self):
+        from django.core.management import call_command
+        from io import StringIO
+
+        pkg = create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="LegacyPkg",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("5"),
+            purchase_amount=Decimal("5000"),
+        )
+        event = self._event()
+        finalize_event_billing(
+            event=event,
+            teacher=self.teacher,
+            financial_action="package",
+            package_id=str(pkg.id),
+            idempotency_key="leg-fin",
+        )
+        pkg.refresh_from_db()
+        remaining_before = pkg.remaining_units
+        record = EventBillingRecord.objects.get(event=event, student=self.student)
+
+        # Имитируем «старую» запись без live tx: удаляем live consumption, оставляем статус
+        BillingTransaction.objects.filter(
+            event_billing=record,
+            transaction_type=TransactionType.PACKAGE_CONSUMPTION,
+        ).delete()
+        # Остаток уже уменьшен — не трогаем
+        self.assertEqual(pkg.remaining_units, remaining_before)
+
+        out = StringIO()
+        call_command(
+            "migrate_legacy_finances",
+            "--apply",
+            "--i-have-backup",
+            stdout=out,
+        )
+        pkg.refresh_from_db()
+        self.assertEqual(pkg.remaining_units, remaining_before)
+        legacy_count = BillingTransaction.objects.filter(
+            event_billing=record,
+            is_legacy=True,
+            transaction_type=TransactionType.PACKAGE_CONSUMPTION,
+        ).count()
+        self.assertEqual(legacy_count, 1)
+
+        call_command(
+            "migrate_legacy_finances",
+            "--apply",
+            "--i-have-backup",
+            stdout=StringIO(),
+        )
+        self.assertEqual(
+            BillingTransaction.objects.filter(
+                event_billing=record,
+                is_legacy=True,
+                transaction_type=TransactionType.PACKAGE_CONSUMPTION,
+            ).count(),
+            1,
+        )

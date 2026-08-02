@@ -289,14 +289,15 @@ def notify_students_homework_edited(
 ) -> int:
     """
     Уведомление ученику об изменении ДЗ.
-    Дедупликация: не чаще одного in-app уведомления на правку (по history.id)
-    и не чаще одного за 30 секунд на homework_id.
+    Дедупликация через event_key (history.id) и prefs.notify_homework.
     """
-    from .homework_api import _homework_recipient_students
-    from .telegram_connect import platform_path_url, send_telegram_to_user
-    from .webpush import notify_user_channels
-    from Generator.telegram_utils import escape_telegram_html
     import html
+
+    from .homework_api import _homework_recipient_students
+    from .notification_catalog import NotificationEventType
+    from .notification_dispatch import NotificationDispatcher
+    from .telegram_connect import platform_path_url
+    from Generator.telegram_utils import escape_telegram_html
 
     title = "Домашнее задание изменено"
     message = (
@@ -305,81 +306,50 @@ def notify_students_homework_edited(
     )
     assignment_path = f"/cabinet/student/assignments/{homework.id}"
     history_id = history.id if history else None
-    since = timezone.now() - timedelta(seconds=30)
-
+    cabinet_url = platform_path_url(assignment_path)
+    tg_text = (
+        f"{escape_telegram_html(title)}\n\n"
+        f"{escape_telegram_html(message)}\n\n"
+        f'<a href="{html.escape(cabinet_url, quote=True)}">Открыть задание</a>'
+    )
+    actor = getattr(homework, "teacher", None)
     sent = 0
     for student in _homework_recipient_students(homework):
         user = student.user if student and student.user_id else None
         if user is None:
             continue
 
-        recent_qs = Notification.objects.filter(
-            recipient_user=user,
-            payload__type="homework_edited",
-            payload__homework_id=homework.id,
-            created_at__gte=since,
-        )
         if history_id:
-            if Notification.objects.filter(
-                recipient_user=user,
-                payload__type="homework_edited",
-                payload__history_id=history_id,
-            ).exists():
-                continue
-        elif recent_qs.exists():
-            continue
+            dedup_key = f"homework_edited:{homework.id}:{user.pk}:h{history_id}"
+        else:
+            # Fallback: one per minute window
+            bucket = timezone.now().strftime("%Y%m%d%H%M")
+            dedup_key = f"homework_edited:{homework.id}:{user.pk}:{bucket}"
 
-        notify_user_channels(
+        result = NotificationDispatcher.notify(
             user,
+            NotificationEventType.HOMEWORK_EDITED,
             title=title,
             message=message,
+            actor=actor if getattr(actor, "pk", None) else None,
+            related_object=homework,
             payload={
-                "type": "homework_edited",
-                "event_type": "homework_edited",
+                "type": NotificationEventType.HOMEWORK_EDITED,
+                "event_type": NotificationEventType.HOMEWORK_EDITED,
                 "homework_id": homework.id,
                 "history_id": history_id,
                 "url": assignment_path,
             },
+            url=assignment_path,
+            dedup_key=dedup_key,
             recipient_student=student,
-            push_priority="important",
-            tag=f"hw-edited-{homework.id}-{history_id or 'x'}",
-            skip_push_log=True,
+            skip_actor=True,
+            create_telegram=True,
+            telegram_text=tg_text,
+            push_tag=f"hw-edited-{homework.id}-{history_id or 'x'}",
         )
-        sent += 1
-
-        from .notifications import get_or_create_preferences
-
-        prefs = get_or_create_preferences(user)
-        if getattr(prefs, "telegram_connected", False):
-            cabinet_url = platform_path_url(assignment_path)
-            tg_text = (
-                f"{escape_telegram_html(title)}\n\n"
-                f"{escape_telegram_html(message)}\n\n"
-                f'<a href="{html.escape(cabinet_url, quote=True)}">Открыть задание</a>'
-            )
-            try:
-                ok = send_telegram_to_user(user, tg_text)
-            except Exception:
-                logger.exception(
-                    "Failed to send homework-edited Telegram to user %s", user.pk
-                )
-                ok = False
-            Notification.objects.create(
-                recipient_user=user,
-                recipient_student=student,
-                channel=NotificationChannel.TELEGRAM,
-                title=title,
-                message=message,
-                payload={
-                    "type": "homework_edited",
-                    "homework_id": homework.id,
-                    "history_id": history_id,
-                    "url": assignment_path,
-                    "cabinet_url": cabinet_url,
-                },
-                status=NotificationStatus.SENT if ok else NotificationStatus.FAILED,
-                sent_at=timezone.now() if ok else None,
-            )
+        if not result.skipped:
+            sent += 1
     return sent
 
 

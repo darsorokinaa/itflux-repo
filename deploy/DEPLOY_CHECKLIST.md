@@ -121,9 +121,23 @@ sudo systemctl restart itflux
 sudo systemctl status itflux
 ```
 
+## Фоновые задачи (cron)
+
+Устанавливаются автоматически в `deploy/update.sh` через `deploy/install_cron.sh`.
+
+Вручную:
+
+```bash
+sudo bash /opt/itfluxacademy/itflux/deploy/install_cron.sh
+crontab -l | grep itflux-cron
+```
+
+Задачи: напоминания об уроках, отсутствие, дайджесты ДЗ, просрочки ДЗ, окончание подписки, очистка anon. Логи: `/var/log/itflux/cron-*.log`. Нужен env: `/etc/itflux/itflux.env` (или `.env` в корне приложения).
+
 ## Проверки после деплоя
 
 0. `python manage.py check --deploy` — предупреждения Django по безопасности (с `DEBUG=false` и целевым `.env`).
+0a. `crontab -l | grep itflux-cron` — блок cron установлен; `ls -lt /var/log/itflux/cron-*.log`.
 
 1. `GET /api/site-config/` — в ответе `lk_public_url`, `lk_nav_password_required`, `lk_nav_unlocked`.
 2. Кнопка «Личный кабинет» — при включённом пароле открывается только после `POST /api/lk-nav-unlock/` с верным паролем.

@@ -6,6 +6,7 @@ from django.views.static import serve
 
 from . import views
 from Cabinet import homework_api
+from Cabinet.subscription_api import PaymentWebhookView
 from Cabinet.views import api_teacher_application, api_teacher_community_feedback
 
 
@@ -45,6 +46,11 @@ urlpatterns = [
     path("ckeditor/upload/", views.ckeditor_upload, name="ckeditor_upload"),
     path("api/lk-nav-unlock/", views.api_lk_nav_unlock, name="api_lk_nav_unlock"),
     path("api/cabinet/", include("Cabinet.urls")),
+    path(
+        "payments/webhook/<str:provider>/",
+        PaymentWebhookView.as_view(),
+        name="payment_webhook",
+    ),
     path("api/video-meetings/", include("Cabinet.video_meeting_urls")),
     path(
         "api/homework/assignment/fetch-by-token/",

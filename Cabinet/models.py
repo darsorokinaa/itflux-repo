@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from .choices import (
     AssignmentStatus,
+    ContentAccessLevel,
     Direction,
     EnrollmentStatus,
     ExamType,
@@ -467,6 +468,24 @@ class Material(models.Model):
         choices=MaterialStatus.choices,
         default=MaterialStatus.PUBLISHED,
     )
+    access_level = models.CharField(
+        "Уровень доступа",
+        max_length=20,
+        choices=ContentAccessLevel.choices,
+        default=ContentAccessLevel.FREE,
+        db_index=True,
+    )
+    published_at = models.DateTimeField("Опубликован", null=True, blank=True)
+    is_new = models.BooleanField("Новинка", default=False)
+    new_until = models.DateTimeField("Новинка до", null=True, blank=True)
+    priority_release_plan = models.ForeignKey(
+        "TariffPlan",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="priority_materials",
+        verbose_name="Приоритетный тариф релиза",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -602,6 +621,24 @@ class Lesson(models.Model):
         related_name="lessons",
         blank=True,
         verbose_name="Материалы",
+    )
+    access_level = models.CharField(
+        "Уровень доступа",
+        max_length=20,
+        choices=ContentAccessLevel.choices,
+        default=ContentAccessLevel.FREE,
+        db_index=True,
+    )
+    published_at = models.DateTimeField("Опубликован", null=True, blank=True)
+    is_new = models.BooleanField("Новинка", default=False)
+    new_until = models.DateTimeField("Новинка до", null=True, blank=True)
+    priority_release_plan = models.ForeignKey(
+        "TariffPlan",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="priority_lessons",
+        verbose_name="Приоритетный тариф релиза",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1107,6 +1144,24 @@ class Interactive(models.Model):
         choices=InteractiveStatus.choices,
         default=InteractiveStatus.DRAFT,
     )
+    access_level = models.CharField(
+        "Уровень доступа",
+        max_length=20,
+        choices=ContentAccessLevel.choices,
+        default=ContentAccessLevel.FREE,
+        db_index=True,
+    )
+    published_at = models.DateTimeField("Опубликован", null=True, blank=True)
+    is_new = models.BooleanField("Новинка", default=False)
+    new_until = models.DateTimeField("Новинка до", null=True, blank=True)
+    priority_release_plan = models.ForeignKey(
+        "TariffPlan",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="priority_interactives",
+        verbose_name="Приоритетный тариф релиза",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1461,6 +1516,34 @@ class Homework(models.Model):
         choices=HomeworkStatus.choices,
         default=HomeworkStatus.DRAFT,
     )
+    # Связь с проверкой, из которой создано ДЗ (обратно совместимо, null для старых)
+    source_review_item = models.ForeignKey(
+        "ReviewItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="homeworks_created_from_review",
+        verbose_name="Исходная проверка",
+    )
+    source_homework = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reassigned_homeworks",
+        verbose_name="Исходное ДЗ",
+    )
+    created_from_review = models.BooleanField(
+        "Создано из проверки",
+        default=False,
+    )
+    idempotency_key = models.CharField(
+        "Ключ идемпотентности",
+        max_length=128,
+        blank=True,
+        null=True,
+        help_text="Защита от повторного создания при двойном запросе",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1468,6 +1551,13 @@ class Homework(models.Model):
         verbose_name = "Домашнее задание"
         verbose_name_plural = "Домашние задания"
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["teacher", "idempotency_key"],
+                condition=models.Q(idempotency_key__isnull=False),
+                name="cabinet_unique_homework_teacher_idempotency",
+            ),
+        ]
 
     def __str__(self):
         return self.title
@@ -1595,6 +1685,7 @@ class HomeworkSubmission(models.Model):
         blank=True,
     )
     teacher_comment = models.TextField("Комментарий учителя", blank=True)
+    attempt_count = models.PositiveIntegerField("Число попыток", default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1605,6 +1696,52 @@ class HomeworkSubmission(models.Model):
 
     def __str__(self):
         return f"{self.student} — {self.homework.title}"
+
+
+class HomeworkSubmissionAttempt(models.Model):
+    """История попыток: снимок перед перезаписью текущей сдачи."""
+
+    submission = models.ForeignKey(
+        HomeworkSubmission,
+        on_delete=models.CASCADE,
+        related_name="attempts",
+        verbose_name="Сдача",
+    )
+    attempt_number = models.PositiveIntegerField("Номер попытки")
+    status = models.CharField(
+        "Статус",
+        max_length=20,
+        choices=SubmissionStatus.choices,
+        default=SubmissionStatus.SUBMITTED,
+    )
+    score = models.DecimalField(
+        "Оценка",
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    result_payload = models.JSONField("Результат", default=dict, blank=True)
+    answer_text = models.TextField("Ответ", blank=True)
+    teacher_comment = models.TextField("Комментарий учителя", blank=True)
+    submitted_at = models.DateTimeField("Сдано", null=True, blank=True)
+    checked_at = models.DateTimeField("Проверено", null=True, blank=True)
+    is_final = models.BooleanField("Итоговая на момент снимка", default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Попытка сдачи ДЗ"
+        verbose_name_plural = "Попытки сдачи ДЗ"
+        ordering = ["submission_id", "attempt_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["submission", "attempt_number"],
+                name="cabinet_unique_homework_attempt_number",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Attempt {self.attempt_number} of submission {self.submission_id}"
 
 
 class ReviewItem(models.Model):
@@ -2055,11 +2192,34 @@ class Notification(models.Model):
         related_name="teacher_notifications",
         verbose_name="Учитель",
     )
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="acted_notifications",
+        verbose_name="Автор действия",
+    )
     channel = models.CharField(
         "Канал",
         max_length=16,
         choices=NotificationChannel.choices,
         default=NotificationChannel.IN_APP,
+    )
+    event_type = models.CharField(
+        "Тип события",
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Системный код из notification_catalog",
+    )
+    event_key = models.CharField(
+        "Ключ дедупликации",
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Устойчивый ключ; пустая строка — без дедупликации",
     )
     title = models.CharField("Заголовок", max_length=255)
     message = models.TextField("Сообщение")
@@ -2079,6 +2239,17 @@ class Notification(models.Model):
         verbose_name = "Уведомление"
         verbose_name_plural = "Уведомления"
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["recipient_user", "channel", "event_key"],
+                condition=~models.Q(event_key=""),
+                name="cabinet_notification_unique_event_key",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["recipient_user", "is_read", "channel"]),
+            models.Index(fields=["event_type", "created_at"]),
+        ]
 
     def __str__(self):
         return self.title
@@ -2127,6 +2298,10 @@ class NotificationPreference(models.Model):
     notify_student_package_ended = models.BooleanField("Ученику: абонемент закончился", default=False)
     notify_student_unpaid_lesson = models.BooleanField("Ученику: неоплаченный урок", default=False)
     notify_student_payment_due = models.BooleanField("Ученику: приближается срок оплаты", default=False)
+    notify_payment_claim = models.BooleanField(
+        "Уведомление «родитель/ученик сообщил об оплате»",
+        default=True,
+    )
     # Журнал успеваемости
     notify_journal_results = models.BooleanField("Итоги урока опубликованы", default=True)
     notify_journal_comment = models.BooleanField("Комментарий учителя (в итогах)", default=True)
@@ -2253,6 +2428,61 @@ class PushSubscription(models.Model):
         return f"Push {self.user_id} · {self.endpoint[:48]}"
 
 
+class PushDeliveryLog(models.Model):
+    """Результат попытки доставки Web Push (без секретов и полного payload)."""
+
+    class DeliveryStatus(models.TextChoices):
+        SENT = "sent", "Отправлено"
+        FAILED = "failed", "Ошибка"
+        GONE = "gone", "Подписка устарела"
+        SKIPPED = "skipped", "Пропущено"
+
+    notification = models.ForeignKey(
+        Notification,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="push_deliveries",
+        verbose_name="Уведомление",
+    )
+    subscription = models.ForeignKey(
+        PushSubscription,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="delivery_logs",
+        verbose_name="Подписка",
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="push_delivery_logs",
+        verbose_name="Пользователь",
+    )
+    event_type = models.CharField("Тип события", max_length=64, blank=True, default="")
+    status = models.CharField(
+        max_length=16,
+        choices=DeliveryStatus.choices,
+        default=DeliveryStatus.SENT,
+    )
+    http_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    error_message = models.CharField("Ошибка", max_length=500, blank=True)
+    attempt_count = models.PositiveSmallIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Лог доставки push"
+        verbose_name_plural = "Логи доставки push"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "created_at"]),
+            models.Index(fields=["status", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"PushDelivery {self.user_id} · {self.status}"
+
+
 class StudentNotifyOverride(models.Model):
     """Per-student notification refinements on top of teacher global prefs."""
 
@@ -2356,9 +2586,16 @@ class TariffPlan(models.Model):
         MONTH = "month", "Месяц"
         YEAR = "year", "Год"
 
+    class CtaType(models.TextChoices):
+        REGISTER = "register", "Регистрация"
+        CHECKOUT = "checkout", "Оплата"
+        CONTACT = "contact", "Оставить заявку"
+
     name = models.CharField("Название", max_length=100)
     slug = models.SlugField("Slug", max_length=50, unique=True)
     description = models.TextField("Описание", blank=True)
+    short_description = models.CharField("Краткое описание", max_length=255, blank=True, default="")
+    badge_text = models.CharField("Бейдж", max_length=64, blank=True, default="")
     price_month = models.DecimalField("Цена/месяц", max_digits=10, decimal_places=2, default=0)
     price_year = models.DecimalField("Цена/год", max_digits=10, decimal_places=2, default=0)
     currency = models.CharField("Валюта", max_length=8, default="RUB")
@@ -2366,6 +2603,34 @@ class TariffPlan(models.Model):
     max_groups = models.PositiveIntegerField("Макс. групп", default=2)
     max_lessons = models.PositiveIntegerField("Макс. уроков", default=10)
     max_interactives = models.PositiveIntegerField("Макс. интерактивов", default=5)
+    max_variants_monthly = models.PositiveIntegerField(
+        "Лимит вариантов / мес",
+        null=True,
+        blank=True,
+        help_text="Пусто — без лимита",
+    )
+    max_workbooks_monthly = models.PositiveIntegerField(
+        "Лимит рабочих тетрадей / мес",
+        null=True,
+        blank=True,
+        help_text="Пусто — без лимита",
+    )
+    content_access_rank = models.PositiveSmallIntegerField(
+        "Ранг доступа к материалам",
+        default=0,
+        help_text="0=free, 1=teacher, 2=professional, 3=premium, 4=corporate",
+    )
+    monthly_library_promise = models.BooleanField(
+        "Обещание пополнения библиотеки",
+        default=False,
+        help_text="«Не менее 5 новых материалов в месяц»",
+    )
+    cta_type = models.CharField(
+        "Тип CTA",
+        max_length=20,
+        choices=CtaType.choices,
+        default=CtaType.CHECKOUT,
+    )
     ai_requests_monthly_limit = models.PositiveIntegerField("ИИ-запросы в месяц", default=10)
     max_storage_mb = models.PositiveIntegerField("Хранилище МБ", default=512)
     has_homework = models.BooleanField("Домашние задания", default=True)
@@ -2375,8 +2640,15 @@ class TariffPlan(models.Model):
     has_extended_library = models.BooleanField("Расширенная библиотека", default=False)
     has_multi_teacher = models.BooleanField("Несколько учителей", default=False)
     has_team_roles = models.BooleanField("Роли в команде", default=False)
+    has_mass_actions = models.BooleanField("Массовые действия", default=False)
+    has_priority_support = models.BooleanField("Приоритетная поддержка", default=False)
+    has_analytics = models.BooleanField("Расширенная аналитика", default=False)
+    has_simulators = models.BooleanField("Симуляторы", default=False)
     is_active = models.BooleanField("Активен", default=True)
+    is_public = models.BooleanField("Показывать на витрине", default=True)
     is_recommended = models.BooleanField("Рекомендуемый", default=False)
+    is_featured = models.BooleanField("Выделенный", default=False)
+    is_free = models.BooleanField("Бесплатный", default=False)
     sort_order = models.PositiveSmallIntegerField("Порядок", default=0)
     created_at = models.DateTimeField("Создан", auto_now_add=True)
     updated_at = models.DateTimeField("Обновлён", auto_now=True)
@@ -2397,10 +2669,20 @@ class TeacherSubscription(models.Model):
         EXPIRED = "expired", "Истекла"
         CANCELLED = "cancelled", "Отменена"
         PENDING = "pending", "Ожидает"
+        PAST_DUE = "past_due", "Просрочена оплата"
+        SUSPENDED = "suspended", "Приостановлена"
 
     class BillingPeriod(models.TextChoices):
         MONTH = "month", "Месяц"
         YEAR = "year", "Год"
+
+    class Source(models.TextChoices):
+        SELF = "self", "Самостоятельно"
+        LAUNCH_PROMO = "launch_promo", "Стартовая акция"
+        REFERRAL = "referral", "Реферальная программа"
+        ADMIN = "admin", "Администратор"
+        PAYMENT = "payment", "Оплата"
+        PROMO_CODE = "promo_code", "Промокод"
 
     teacher = models.OneToOneField(
         User,
@@ -2415,21 +2697,43 @@ class TeacherSubscription(models.Model):
         verbose_name="Тарифный план",
     )
     status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    source = models.CharField(
+        "Источник доступа",
+        max_length=32,
+        choices=Source.choices,
+        default=Source.SELF,
+        blank=True,
+    )
     started_at = models.DateTimeField("Начало", auto_now_add=True)
     expires_at = models.DateTimeField("Истекает", null=True, blank=True)
+    current_period_start = models.DateTimeField("Начало периода", null=True, blank=True)
+    current_period_end = models.DateTimeField("Конец периода", null=True, blank=True)
+    promo_started_at = models.DateTimeField("Начало промо", null=True, blank=True)
+    promo_ends_at = models.DateTimeField("Конец промо", null=True, blank=True)
+    is_legacy_promo = models.BooleanField("Стартовая акция (legacy)", default=False)
+    cancelled_at = models.DateTimeField("Отменена", null=True, blank=True)
+    scheduled_plan = models.ForeignKey(
+        TariffPlan,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scheduled_subscriptions",
+        verbose_name="Запланированный тариф",
+    )
+    scheduled_change_at = models.DateTimeField("Дата смены тарифа", null=True, blank=True)
     billing_period = models.CharField(
         "Период",
         max_length=10,
         choices=BillingPeriod.choices,
         default=BillingPeriod.MONTH,
     )
-    auto_renew = models.BooleanField("Автопродление", default=True)
+    auto_renew = models.BooleanField("Автопродление", default=False)
     created_at = models.DateTimeField("Создана", auto_now_add=True)
     updated_at = models.DateTimeField("Обновлена", auto_now=True)
 
     class Meta:
-        verbose_name = "Подписка"
-        verbose_name_plural = "Подписки"
+        verbose_name = "Подписка платформы"
+        verbose_name_plural = "Подписки платформы"
 
     def __str__(self):
         return f"{self.teacher.username} — {self.plan.name} ({self.get_status_display()})"
@@ -2501,6 +2805,11 @@ class Payment(models.Model):
         PAID = "paid", "Оплачен"
         FAILED = "failed", "Ошибка"
         REFUNDED = "refunded", "Возврат"
+        CANCELLED = "cancelled", "Отменён"
+
+    class BillingPeriod(models.TextChoices):
+        MONTH = "month", "Месяц"
+        YEAR = "year", "Год"
 
     teacher = models.ForeignKey(
         User,
@@ -2516,22 +2825,161 @@ class Payment(models.Model):
         related_name="payments",
         verbose_name="Подписка",
     )
+    plan = models.ForeignKey(
+        TariffPlan,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="payments",
+        verbose_name="Оплачиваемый тариф",
+    )
     amount = models.DecimalField("Сумма", max_digits=10, decimal_places=2)
+    discount_amount = models.DecimalField(
+        "Скидка", max_digits=10, decimal_places=2, default=0
+    )
+    final_amount = models.DecimalField(
+        "Итоговая сумма", max_digits=10, decimal_places=2, null=True, blank=True
+    )
     currency = models.CharField("Валюта", max_length=8, default="RUB")
     status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.PENDING)
     provider = models.CharField("Провайдер", max_length=50, default="mock")
     provider_payment_id = models.CharField("ID платежа провайдера", max_length=255, blank=True)
+    idempotency_key = models.CharField(
+        "Ключ идемпотентности", max_length=64, unique=True, null=True, blank=True
+    )
+    billing_period = models.CharField(
+        "Период оплаты",
+        max_length=10,
+        choices=BillingPeriod.choices,
+        default=BillingPeriod.MONTH,
+    )
+    promo_code = models.ForeignKey(
+        "PromoCode",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payments",
+        verbose_name="Промокод",
+    )
+    metadata = models.JSONField("Метаданные", default=dict, blank=True)
     paid_at = models.DateTimeField("Оплачен", null=True, blank=True)
     created_at = models.DateTimeField("Создан", auto_now_add=True)
     updated_at = models.DateTimeField("Обновлён", auto_now=True)
 
     class Meta:
-        verbose_name = "Платёж"
-        verbose_name_plural = "Платежи"
+        verbose_name = "Платёж подписки платформы"
+        verbose_name_plural = "Платежи подписки платформы"
         ordering = ["-created_at"]
 
     def __str__(self):
         return f"{self.teacher.username} {self.amount} {self.currency} [{self.get_status_display()}]"
+
+
+class Receipt(models.Model):
+    """Фискальный чек (поля nullable до подключения кассы)."""
+
+    payment = models.OneToOneField(
+        Payment,
+        on_delete=models.CASCADE,
+        related_name="receipt",
+        verbose_name="Платёж",
+    )
+    provider_receipt_id = models.CharField("ID чека у провайдера", max_length=255, blank=True)
+    fiscal_number = models.CharField("ФН / номер чека", max_length=128, blank=True)
+    fiscal_document = models.CharField("ФД", max_length=128, blank=True)
+    fiscal_sign = models.CharField("ФП", max_length=128, blank=True)
+    receipt_url = models.URLField("Ссылка на чек", blank=True)
+    status = models.CharField("Статус", max_length=32, blank=True, default="pending")
+    raw_payload = models.JSONField("Сырой ответ", default=dict, blank=True)
+    created_at = models.DateTimeField("Создан", auto_now_add=True)
+    updated_at = models.DateTimeField("Обновлён", auto_now=True)
+
+    class Meta:
+        verbose_name = "Чек подписки"
+        verbose_name_plural = "Чеки подписки"
+
+    def __str__(self):
+        return f"Чек #{self.pk} для платежа {self.payment_id}"
+
+
+class PaymentWebhookEvent(models.Model):
+    """Идемпотентность webhook-событий платёжного провайдера."""
+
+    provider = models.CharField("Провайдер", max_length=50, db_index=True)
+    event_id = models.CharField("ID события", max_length=255)
+    payment = models.ForeignKey(
+        Payment,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="webhook_events",
+        verbose_name="Платёж",
+    )
+    payload = models.JSONField("Payload", default=dict, blank=True)
+    processed = models.BooleanField("Обработано", default=False)
+    processed_at = models.DateTimeField("Обработано в", null=True, blank=True)
+    created_at = models.DateTimeField("Создано", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Webhook платежа"
+        verbose_name_plural = "Webhook платежи"
+        unique_together = [("provider", "event_id")]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.provider}:{self.event_id}"
+
+
+class AnonymousUsage(models.Model):
+    """Лимиты для гостей без fingerprinting (cookie ds_anon_id)."""
+
+    anonymous_id = models.UUIDField("Anon ID", unique=True, db_index=True)
+    session_key = models.CharField("Session key", max_length=64, blank=True, default="")
+    variants_created = models.PositiveIntegerField("Вариантов создано", default=0)
+    workbooks_created = models.PositiveIntegerField("Тетрадей создано", default=0)
+    first_seen_at = models.DateTimeField("Первый визит", auto_now_add=True)
+    last_seen_at = models.DateTimeField("Последний визит", auto_now=True)
+    registered_user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="anonymous_usage_records",
+        verbose_name="Зарегистрированный пользователь",
+    )
+
+    class Meta:
+        verbose_name = "Анонимное использование"
+        verbose_name_plural = "Анонимные использования"
+        ordering = ["-last_seen_at"]
+
+    def __str__(self):
+        return f"{self.anonymous_id} v={self.variants_created} w={self.workbooks_created}"
+
+
+class TeacherMonthlyUsage(models.Model):
+    """Месячные счётчики вариантов и рабочих тетрадей для лимитов тарифа."""
+
+    teacher = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="monthly_usage_records",
+        verbose_name="Учитель",
+    )
+    period_start = models.DateField("Начало периода")
+    period_end = models.DateField("Конец периода")
+    variants_created = models.PositiveIntegerField("Вариантов создано", default=0)
+    workbooks_created = models.PositiveIntegerField("Тетрадей создано", default=0)
+    created_at = models.DateTimeField("Создан", auto_now_add=True)
+    updated_at = models.DateTimeField("Обновлён", auto_now=True)
+
+    class Meta:
+        verbose_name = "Месячное использование учителя"
+        verbose_name_plural = "Месячные использования учителей"
+        unique_together = [("teacher", "period_start")]
+
+    def __str__(self):
+        return f"{self.teacher_id} {self.period_start} v={self.variants_created}"
 
 
 class PromoCode(models.Model):
@@ -2539,6 +2987,7 @@ class PromoCode(models.Model):
         PERCENT = "percent", "Скидка %"
         FIXED = "fixed", "Фиксированная скидка ₽"
         FREE_MONTHS = "free_months", "Бесплатные месяцы"
+        BONUS_DAYS = "bonus_days", "Бонусные дни"
 
     code = models.CharField("Промокод", max_length=64, unique=True)
     discount_type = models.CharField(
@@ -2546,8 +2995,15 @@ class PromoCode(models.Model):
     )
     discount_value = models.DecimalField(
         "Значение скидки", max_digits=10, decimal_places=2,
-        help_text="Процент (0–100), сумма ₽ или кол-во месяцев",
+        help_text="Процент (0–100), сумма ₽, кол-во месяцев или дней",
     )
+    bonus_days = models.PositiveIntegerField(
+        "Бонусные дни",
+        default=0,
+        help_text="Дополнительные дни доступа (можно комбинировать со скидкой)",
+    )
+    first_payment_only = models.BooleanField("Только первый платёж", default=False)
+    stackable_with_referral = models.BooleanField("Совмещается с рефералом", default=False)
     applicable_plans = models.ManyToManyField(
         TariffPlan,
         blank=True,
@@ -2591,6 +3047,11 @@ class PromoCode(models.Model):
 
 
 class PromoCodeUsage(models.Model):
+    class Status(models.TextChoices):
+        RESERVED = "reserved", "Зарезервирован"
+        APPLIED = "applied", "Применён"
+        CANCELLED = "cancelled", "Отменён"
+
     promo_code = models.ForeignKey(
         PromoCode, on_delete=models.CASCADE, related_name="usages", verbose_name="Промокод"
     )
@@ -2600,6 +3061,12 @@ class PromoCodeUsage(models.Model):
     payment = models.ForeignKey(
         Payment, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="promo_usages", verbose_name="Платёж"
+    )
+    status = models.CharField(
+        "Статус",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.APPLIED,
     )
     discount_applied = models.DecimalField(
         "Скидка применена", max_digits=10, decimal_places=2, default=0
@@ -2715,6 +3182,66 @@ class ReferralLinkRegistration(models.Model):
 
     def __str__(self):
         return f"{self.referral_link.code} → {self.user.username}"
+
+
+class ReferralReward(models.Model):
+    """Награда рефереру после успешной оплаты приглашённого (отдельно от launch-награды при регистрации)."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Ожидает"
+        GRANTED = "granted", "Выдана"
+        CANCELLED = "cancelled", "Отменена"
+
+    referral_link = models.ForeignKey(
+        ReferralLink,
+        on_delete=models.CASCADE,
+        related_name="payment_rewards",
+        verbose_name="Реферальная ссылка",
+    )
+    referrer = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="referral_rewards_earned",
+        verbose_name="Реферер",
+    )
+    referred_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="referral_rewards_triggered",
+        verbose_name="Приглашённый",
+    )
+    payment = models.ForeignKey(
+        Payment,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="referral_rewards",
+        verbose_name="Платёж",
+    )
+    reward_plan = models.ForeignKey(
+        TariffPlan,
+        on_delete=models.PROTECT,
+        related_name="referral_payment_rewards",
+        verbose_name="Тариф награды",
+    )
+    reward_months = models.PositiveSmallIntegerField("Месяцев награды", default=1)
+    status = models.CharField(
+        "Статус",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    granted_at = models.DateTimeField("Выдана", null=True, blank=True)
+    created_at = models.DateTimeField("Создана", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Реферальная награда за оплату"
+        verbose_name_plural = "Реферальные награды за оплату"
+        unique_together = [("referred_user", "payment")]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.referrer_id} ← {self.referred_user_id} [{self.status}]"
 
 
 class StudentTaskHistory(models.Model):
@@ -3204,4 +3731,12 @@ from .meeting_material_models import (  # noqa: E402
     MeetingMaterialInteractionMode,
     MeetingMaterialSession,
     MeetingMaterialWork,
+)
+
+# ── Кабинет родителя (см. parent_models.py) ──────────────────────────────────
+from .parent_models import (  # noqa: E402
+    ParentAccessAuditLog,
+    ParentInvitation,
+    ParentStudentRelationship,
+    default_parent_permissions,
 )

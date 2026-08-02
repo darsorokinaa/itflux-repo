@@ -84,6 +84,7 @@ class PaymentMethod(models.TextChoices):
     CARD = "card", "Банковская карта"
     SBP = "sbp", "СБП"
     OTHER = "other", "Другое"
+    LEGACY = "legacy_payment", "Оплачено по старой системе"
 
 
 class StudentPaymentStatus(models.TextChoices):
@@ -150,6 +151,11 @@ class TeacherBillingSettings(models.Model):
     )
     show_billing_to_student = models.BooleanField(default=False)
     allow_student_history = models.BooleanField(default=False)
+    show_billing_to_parent = models.BooleanField(
+        "Показывать финансы родителю",
+        default=False,
+        help_text="По умолчанию выключено. Можно переопределить в приглашении родителя.",
+    )
     digest_weekday = models.PositiveSmallIntegerField(
         default=0,
         help_text="0=пн … 6=вс для еженедельной сводки",
@@ -506,6 +512,21 @@ class BillingTransaction(models.Model):
     )
     is_reversal = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    # Поля безопасной миграции legacy-данных (не меняют остатки при создании)
+    is_legacy = models.BooleanField(
+        default=False,
+        help_text="Историческая операция из миграции; не должна повторно менять остаток",
+    )
+    legacy_source_model = models.CharField(max_length=64, blank=True, default="")
+    legacy_source_id = models.CharField(max_length=64, blank=True, default="")
+    migration_key = models.CharField(
+        max_length=128,
+        blank=True,
+        null=True,
+        help_text="Уникальный ключ идемпотентной миграции",
+    )
+    migration_batch_id = models.CharField(max_length=64, blank=True, default="")
 
     class Meta:
         verbose_name = "Финансовая операция"
@@ -514,6 +535,13 @@ class BillingTransaction(models.Model):
         indexes = [
             models.Index(fields=["billing_account", "occurred_at"]),
             models.Index(fields=["transaction_type", "occurred_at"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["migration_key"],
+                condition=models.Q(migration_key__isnull=False),
+                name="cabinet_unique_billing_tx_migration_key",
+            ),
         ]
 
     def __str__(self):

@@ -113,7 +113,10 @@ class PushTestView(APIView):
         if not webpush_configured():
             return Response({"error": "Web Push не настроен."}, status=503)
         home = _home_path_for(request.user)
-        # force: тестовая кнопка не должна молчать из‑за DND / push_enabled
+        data = request.data or {}
+        # Тест только текущему пользователю; опционально — только текущее устройство.
+        only_endpoint = (data.get("endpoint") or "").strip() or None
+        all_devices = bool(data.get("all_devices"))
         result = send_web_push_to_user(
             request.user,
             title="Тестовое уведомление",
@@ -121,8 +124,10 @@ class PushTestView(APIView):
             url=home,
             tag="push-test",
             priority="important",
-            create_log=True,
+            create_log=False,
             force=True,
+            event_type="push_test",
+            only_endpoint=None if all_devices else only_endpoint,
         )
         sent = int(result.get("sent") or 0)
         if sent <= 0:
@@ -130,30 +135,31 @@ class PushTestView(APIView):
             errors = result.get("errors") or []
             messages = {
                 "no_devices": (
-                    "Нет активных устройств. Сначала нажмите «Включить на этом устройстве» "
-                    "и разрешите уведомления в браузере."
+                    "На этом устройстве нет активной подписки. "
+                    "Сначала нажмите «Включить на этом устройстве»."
                 ),
                 "pywebpush_missing": "На сервере не установлен pywebpush (pip install pywebpush).",
                 "not_configured": "Web Push не настроен (VAPID-ключи).",
                 "send_failed": (
-                    "Подписка есть, но отправка не удалась. Нажмите «Включить на этом устройстве» "
-                    "ещё раз (после hard refresh), затем повторите тест."
+                    "Сервер не смог отправить уведомление. Подробности записаны в журнал. "
+                    "Подписка могла устареть — включите уведомления повторно."
                 ),
             }
             error = messages.get(reason, messages["send_failed"])
             detail = (errors[0] if errors else "") or ""
             if "pkhash" in detail.lower() or "mismatch" in detail.lower():
                 error = (
-                    "Ключ подписки не совпадает с сервером (ValidPkHashMismatch). "
-                    "Сделайте hard refresh страницы (Ctrl/Cmd+Shift+R), затем снова "
-                    "«Включить на этом устройстве» и тест. "
-                    "Если не поможет — в .env должны быть парные VAPID_PUBLIC_KEY и "
-                    "VAPID_PRIVATE_KEY из одной команды generate_vapid_keys."
+                    "Подписка устарела. Включите уведомления повторно "
+                    "(hard refresh, затем «Включить на этом устройстве»)."
                 )
-            elif detail:
-                error = f"{error} Детали: {detail}"
+            elif "410" in detail or "404" in detail:
+                error = "Подписка устарела. Включите уведомления повторно."
             return Response(
                 {"error": error, "reason": reason, "errors": errors[:3]},
                 status=400,
             )
-        return Response({"ok": True, "sent": sent})
+        return Response({
+            "ok": True,
+            "sent": sent,
+            "message": "Тестовое уведомление отправлено",
+        })

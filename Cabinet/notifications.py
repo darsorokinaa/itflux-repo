@@ -1,4 +1,4 @@
-"""Unified notification dispatch for schedule events."""
+"""Schedule-event notification helpers (delegates prefs to notification_dispatch)."""
 
 import html
 import logging
@@ -7,15 +7,12 @@ from datetime import datetime
 from django.utils import timezone
 
 from .choices import NotificationChannel, NotificationStatus, ParticipantStatus
-from .models import Notification, NotificationPreference, ScheduleEvent, ScheduleEventParticipant
+from .models import Notification, ScheduleEvent, ScheduleEventParticipant
+from .notification_catalog import NotificationEventType
+from .notification_dispatch import get_or_create_preferences  # noqa: F401 — public re-export
 from .vk_notifications import VKNotificationService
 
 logger = logging.getLogger(__name__)
-
-
-def get_or_create_preferences(user):
-    prefs, _ = NotificationPreference.objects.get_or_create(user=user)
-    return prefs
 
 
 def _event_payload(event):
@@ -50,10 +47,23 @@ def _iter_recipients(event):
             yield user, p
 
 
-def _create_notification(*, user, title, message, channel, payload, status=NotificationStatus.PENDING):
+def _create_notification(
+    *,
+    user,
+    title,
+    message,
+    channel,
+    payload,
+    status=NotificationStatus.PENDING,
+    event_type="",
+    event_key="",
+):
+    resolved = event_type or (payload or {}).get("event_type") or (payload or {}).get("type") or ""
     return Notification.objects.create(
         recipient_user=user,
         channel=channel,
+        event_type=resolved,
+        event_key=event_key or "",
         title=title,
         message=message,
         payload=payload,
@@ -61,11 +71,28 @@ def _create_notification(*, user, title, message, channel, payload, status=Notif
     )
 
 
-def _dispatch_to_user(user, participant, title, message, payload, vk_formatter=None):
+def _dispatch_to_user(
+    user,
+    participant,
+    title,
+    message,
+    payload,
+    vk_formatter=None,
+    *,
+    event_type="",
+    event_key="",
+):
     prefs = get_or_create_preferences(user)
     notifications = []
+    resolved_type = event_type or (payload or {}).get("event_type") or ""
 
     if prefs.in_app_enabled and participant.notification_enabled:
+        if event_key and Notification.objects.filter(
+            recipient_user=user,
+            channel=NotificationChannel.IN_APP,
+            event_key=event_key,
+        ).exists():
+            return notifications
         n = _create_notification(
             user=user,
             title=title,
@@ -73,6 +100,8 @@ def _dispatch_to_user(user, participant, title, message, payload, vk_formatter=N
             channel=NotificationChannel.IN_APP,
             payload=payload,
             status=NotificationStatus.SENT,
+            event_type=resolved_type,
+            event_key=event_key,
         )
         n.sent_at = timezone.now()
         n.save(update_fields=["sent_at"])
@@ -167,31 +196,69 @@ def cabinet_path_for_user(user):
         return "/cabinet/student/lessons"
     return "/cabinet/schedule"
 
-def _notify_all(event, title, message, vk_formatter=None, change_type=None, skip_user_id=None, extra_payload=None):
-    if change_type:
-        prefs_check = {
-            "created": "notify_lesson_created",
-            "moved": "notify_lesson_moved",
-            "cancelled": "notify_lesson_cancelled",
-            "updated": "notify_lesson_updated",
-            "participants_changed": "notify_participants_changed",
-        }
+_CHANGE_TO_EVENT = {
+    "created": NotificationEventType.LESSON_CREATED,
+    "moved": NotificationEventType.LESSON_MOVED,
+    "cancelled": NotificationEventType.LESSON_CANCELLED,
+    "updated": NotificationEventType.LESSON_UPDATED,
+    "participants_changed": NotificationEventType.LESSON_PARTICIPANTS,
+    "reminder": NotificationEventType.LESSON_REMINDER,
+}
+
+
+def _notify_all(
+    event,
+    title,
+    message,
+    vk_formatter=None,
+    change_type=None,
+    skip_user_id=None,
+    extra_payload=None,
+    dedup_suffix="",
+):
+    prefs_check = {
+        "created": "notify_lesson_created",
+        "moved": "notify_lesson_moved",
+        "cancelled": "notify_lesson_cancelled",
+        "updated": "notify_lesson_updated",
+        "participants_changed": "notify_participants_changed",
+    }
     payload = _event_payload(event)
+    event_code = _CHANGE_TO_EVENT.get(change_type or "", NotificationEventType.SCHEDULE_EVENT)
     if change_type:
         payload["change_type"] = change_type
+    payload["event_type"] = event_code
+    skip_extra_ids = set()
     if extra_payload:
+        raw_skip = extra_payload.pop("skip_user_ids", None)
+        if raw_skip:
+            skip_extra_ids = {int(x) for x in raw_skip if x is not None}
         payload.update(extra_payload)
     all_notes = []
     for user, participant in _iter_recipients(event):
         if skip_user_id and user.pk == skip_user_id:
             continue
-        if change_type:
+        if user.pk in skip_extra_ids:
+            continue
+        if change_type and change_type != "reminder":
             field = prefs_check.get(change_type)
             if field and not getattr(get_or_create_preferences(user), field, True):
                 continue
         try:
+            event_key = ""
+            if dedup_suffix:
+                event_key = f"{event_code}:{event.pk}:{user.pk}:{dedup_suffix}"
             all_notes.extend(
-                _dispatch_to_user(user, participant, title, message, payload, vk_formatter)
+                _dispatch_to_user(
+                    user,
+                    participant,
+                    title,
+                    message,
+                    payload,
+                    vk_formatter,
+                    event_type=event_code,
+                    event_key=event_key,
+                )
             )
         except Exception:
             logger.exception("Failed to notify user %s for event %s", user.pk, event.pk)
@@ -255,26 +322,38 @@ class NotificationService:
         )
 
     @staticmethod
-    def notify_participants_changed(event, added=None, removed=None):
+    def notify_participants_changed(event, added=None, removed=None, *, skip_user_id=None):
         added = added or []
         removed = removed or []
         results = []
+        prefs_field = "notify_participants_changed"
+        touched_ids = set()
         for participant in added:
             user = participant.user or (
                 participant.student.user if participant.student else None
             ) or participant.teacher
             if not user:
                 continue
+            if skip_user_id and user.pk == skip_user_id:
+                continue
+            if not getattr(get_or_create_preferences(user), prefs_field, True):
+                continue
+            touched_ids.add(user.pk)
             title = "Вас добавили на занятие"
             message = VKNotificationService.format_participant_added(event)
+            payload = _event_payload(event)
+            payload["change_type"] = "participants_changed"
+            payload["event_type"] = NotificationEventType.LESSON_PARTICIPANTS
             results.extend(
                 _dispatch_to_user(
                     user,
                     participant,
                     title,
                     message,
-                    _event_payload(event),
+                    payload,
                     vk_formatter=lambda: VKNotificationService.format_participant_added(event),
+                    event_type=NotificationEventType.LESSON_PARTICIPANTS,
+                    event_key=f"lesson_participants:{event.pk}:{user.pk}:added",
                 )
             )
         for participant in removed:
@@ -283,24 +362,38 @@ class NotificationService:
             ) or participant.teacher
             if not user:
                 continue
+            if skip_user_id and user.pk == skip_user_id:
+                continue
+            if not getattr(get_or_create_preferences(user), prefs_field, True):
+                continue
+            touched_ids.add(user.pk)
             title = "Изменение участников"
             message = VKNotificationService.format_participant_removed(event)
+            payload = _event_payload(event)
+            payload["change_type"] = "participants_changed"
+            payload["event_type"] = NotificationEventType.LESSON_PARTICIPANTS
             results.extend(
                 _dispatch_to_user(
                     user,
                     participant,
                     title,
                     message,
-                    _event_payload(event),
+                    payload,
                     vk_formatter=lambda: VKNotificationService.format_participant_removed(event),
+                    event_type=NotificationEventType.LESSON_PARTICIPANTS,
+                    event_key=f"lesson_participants:{event.pk}:{user.pk}:removed",
                 )
             )
+        # Broadcast to remaining participants once (skip those already notified as added/removed)
         if added or removed:
             _notify_all(
                 event,
                 "Изменён состав участников",
                 f'Состав занятия «{event.title}» обновлён.',
                 change_type="participants_changed",
+                skip_user_id=skip_user_id,
+                dedup_suffix="broadcast",
+                extra_payload={"skip_user_ids": list(touched_ids)},
             )
         return results
 
@@ -308,7 +401,6 @@ class NotificationService:
     def notify_before_lesson(event, minutes):
         audience = _event_audience_label(event)
         topic = (getattr(event, "topic", None) or "").strip()
-        starts = _local_time(event.starts_at)
         time_only = timezone.localtime(event.starts_at).strftime("%H:%M") if event.starts_at else ""
 
         if minutes >= 1400:
@@ -334,13 +426,15 @@ class NotificationService:
             title,
             message,
             vk_formatter=lambda: VKNotificationService.format_before_lesson(event, minutes),
+            change_type="reminder",
             extra_payload={"reminder_minutes": minutes, "change_type": "reminder"},
+            dedup_suffix=f"{minutes}_minutes",
         )
 
 
 def _event_audience_label(event):
     names = []
-    for p in event.participants.select_related("student", "group").all()[:6]:
+    for p in event.participants.select_related("student").all()[:6]:
         if p.student_id and p.student:
             names.append(p.student.full_name)
         elif getattr(p, "group_id", None) and getattr(p, "group", None):

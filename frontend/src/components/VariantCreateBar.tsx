@@ -55,7 +55,7 @@ export default function VariantCreateBar({
       );
       window.clearTimeout(timeoutId);
       const text = await res.text();
-      let data: { variant_id?: number; error?: string } | null = null;
+      let data: { variant_id?: number; error?: string; message?: string; min_plan?: string } | null = null;
       if (text) {
         try {
           data = JSON.parse(text);
@@ -68,7 +68,12 @@ export default function VariantCreateBar({
         }
       }
       if (!res.ok) {
-        throw new Error(data?.error || res.statusText || "Не удалось сформировать вариант");
+        const limitMsg = data?.message || data?.error;
+        throw new Error(
+          limitMsg ||
+            res.statusText ||
+            "Не удалось сформировать вариант"
+        );
       }
       if (!data?.variant_id) {
         throw new Error("Сервер не вернул номер варианта");

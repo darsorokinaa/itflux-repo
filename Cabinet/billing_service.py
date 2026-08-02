@@ -842,6 +842,23 @@ def consume_package(
                 remaining=locked.remaining_units,
                 unit_label="занятий",
             )
+            try:
+                from .student_notifications import (
+                    notify_student_package_ended,
+                    notify_student_package_low,
+                )
+
+                if locked.remaining_units <= 0:
+                    notify_student_package_ended(teacher=account.teacher, student=student)
+                else:
+                    notify_student_package_low(
+                        teacher=account.teacher,
+                        student=student,
+                        remaining=locked.remaining_units,
+                        unit_label="занятий",
+                    )
+            except Exception:
+                pass
         min_threshold = (
             getattr(account.settings, "low_balance_threshold_minutes", None)
             or teacher_settings.low_balance_threshold_minutes
@@ -856,6 +873,23 @@ def consume_package(
                 remaining=locked.remaining_units,
                 unit_label="минут",
             )
+            try:
+                from .student_notifications import (
+                    notify_student_package_ended,
+                    notify_student_package_low,
+                )
+
+                if locked.remaining_units <= 0:
+                    notify_student_package_ended(teacher=account.teacher, student=student)
+                else:
+                    notify_student_package_low(
+                        teacher=account.teacher,
+                        student=student,
+                        remaining=locked.remaining_units,
+                        unit_label="минут",
+                    )
+            except Exception:
+                pass
     except Exception:
         pass
     return tx
@@ -891,6 +925,658 @@ def return_package_units(
         package=locked,
         comment=comment or "Возврат единиц абонемента",
     )
+
+
+UNPAID_FINANCIAL_STATUSES = (
+    FinancialStatus.AWAITING_PAYMENT,
+    FinancialStatus.PARTIALLY_PAID,
+    FinancialStatus.NEEDS_DECISION,
+)
+
+CHARGEABLE_DELIVERY_STATUSES = (
+    DeliveryStatus.CONDUCTED,
+    DeliveryStatus.NO_SHOW,
+)
+
+
+def unpaid_reason_for_record(record: EventBillingRecord) -> str:
+    """Понятная причина, почему урок ещё не списан/не оплачен."""
+    if record.financial_status == FinancialStatus.PAID_FROM_PACKAGE:
+        return ""
+    if record.financial_status == FinancialStatus.PAID:
+        return ""
+    if record.delivery_status not in CHARGEABLE_DELIVERY_STATUSES:
+        return "Урок не проведён"
+    if record.financial_status == FinancialStatus.NEEDS_DECISION:
+        return "Требует финансового оформления"
+    if record.package_id and D_units(record.package_units) > 0:
+        return "Списание отменено или не завершено"
+    if D(record.paid_amount or 0) > 0 and D(record.paid_amount) < D(record.charged_amount or 0):
+        return "Оплачен частично"
+    package = active_package_for_account(record.billing_account)
+    if not package:
+        return "На момент проведения не было активного абонемента"
+    if D_units(package.remaining_units) <= 0:
+        return "В абонементе закончились занятия"
+    return "Ожидает списания из абонемента или оплаты"
+
+
+def get_unpaid_completed_lessons(
+    account: BillingAccount,
+    *,
+    order_oldest_first: bool = True,
+) -> list[EventBillingRecord]:
+    """Проведённые (или no-show) уроки, ожидающие оплаты/списания."""
+    qs = (
+        EventBillingRecord.objects.select_related("event", "student", "billing_account", "package")
+        .filter(
+            billing_account=account,
+            delivery_status__in=CHARGEABLE_DELIVERY_STATUSES,
+            financial_status__in=UNPAID_FINANCIAL_STATUSES,
+        )
+    )
+    if order_oldest_first:
+        qs = qs.order_by("event__starts_at", "created_at")
+    else:
+        qs = qs.order_by("-event__starts_at", "-created_at")
+    return list(qs)
+
+
+def find_available_packages_for_charge(
+    account: BillingAccount,
+    *,
+    allow_unpaid_package: bool = True,
+) -> list[LessonPackage]:
+    """Абонементы, из которых можно вручную списать занятия (в т.ч. задним числом)."""
+    today = timezone.localdate()
+    qs = (
+        LessonPackage.objects.filter(
+            billing_account=account,
+            status__in=(PackageStatus.ACTIVE, PackageStatus.FROZEN),
+        )
+        .filter(remaining_units__gt=0)
+        .order_by("expires_at", "created_at")
+    )
+    result = []
+    for pkg in qs:
+        # Замороженный — только с явным выбором; в списке показываем active в первую очередь
+        if pkg.status == PackageStatus.FROZEN:
+            continue
+        # Истёкший по дате: для ручного погашения задолженности всё равно доступен
+        # (учитель подтверждает явно). Для автосписка оставляем и истёкшие с остатком.
+        if not allow_unpaid_package and package_amount_due(pkg) > 0:
+            continue
+        result.append(pkg)
+    # Если активных нет — предложим истёкшие с остатком (ручное погашение долга)
+    if not result:
+        expired = LessonPackage.objects.filter(
+            billing_account=account,
+            status__in=(PackageStatus.ACTIVE, PackageStatus.EXPIRED, PackageStatus.EXHAUSTED),
+            remaining_units__gt=0,
+        ).order_by("-created_at")
+        result = list(expired)
+    _ = today  # reserved for future strict auto-period checks
+    return result
+
+
+def _active_package_consumption_for_record(record: EventBillingRecord) -> Optional[BillingTransaction]:
+    """Активное (не отменённое) списание занятия по уроку."""
+    consumptions = BillingTransaction.objects.filter(
+        event_billing=record,
+        transaction_type=TransactionType.PACKAGE_CONSUMPTION,
+        is_reversal=False,
+        is_legacy=False,
+    ).order_by("-created_at")
+    for tx in consumptions:
+        if BillingTransaction.objects.filter(reversed_transaction=tx).exists():
+            continue
+        if D_units(tx.package_units) > 0:
+            return tx
+    return None
+
+
+def _clear_money_charge_for_package_settle(
+    *,
+    teacher: User,
+    record: EventBillingRecord,
+    comment: str = "",
+) -> Decimal:
+    """
+    Сторнировать денежное начисление по уроку перед списанием из абонемента.
+    Не трогает delivery_status и finalized_at. Возвращает сумму снятого charge.
+    """
+    cleared = ZERO
+    # Уже есть денежные allocation — нельзя конвертировать в абонемент молча
+    has_payment = StudentPaymentAllocation.objects.filter(
+        event_billing=record,
+        payment__status=StudentPaymentStatus.CONFIRMED,
+    ).exists()
+    if has_payment or D(record.paid_amount or 0) > 0:
+        raise BillingError(
+            "HAS_PAYMENT",
+            "По уроку уже есть денежная оплата. Сначала отмените оплату.",
+        )
+
+    charge_txs = list(
+        BillingTransaction.objects.select_for_update().filter(
+            event_billing=record,
+            transaction_type=TransactionType.CHARGE,
+            is_reversal=False,
+        )
+    )
+    for tx in charge_txs:
+        if BillingTransaction.objects.filter(reversed_transaction=tx).exists():
+            continue
+        # Сторно без смены финансового статуса через reverse_transaction —
+        # статус выставит charge_lesson_from_package.
+        reverse_amount = D(-tx.amount)
+        _append_tx(
+            billing_account=tx.billing_account,
+            student=tx.student,
+            transaction_type=TransactionType.CHARGE,
+            amount=reverse_amount,
+            currency=tx.currency,
+            created_by=teacher,
+            event=tx.event,
+            event_billing=record,
+            comment=comment or "Сторно начисления перед списанием из абонемента",
+            reversed_transaction=tx,
+            is_reversal=True,
+            metadata={"reverses": str(tx.id), "reason": "package_settle"},
+        )
+        cleared = D(cleared + tx.amount)
+        record.charged_amount = D(max(ZERO, D(record.charged_amount or 0) - tx.amount))
+
+    if D(record.charged_amount or 0) > 0 and cleared <= 0:
+        # Начисление без tx (редкий legacy) — обнуляем снимок
+        cleared = D(record.charged_amount)
+        record.charged_amount = ZERO
+    elif D(record.charged_amount or 0) > 0:
+        record.charged_amount = ZERO
+    return cleared
+
+
+def preview_charge_lessons_from_package(
+    *,
+    teacher: User,
+    account: BillingAccount,
+    package: LessonPackage,
+    event_billing_ids: Optional[list] = None,
+    select_earliest: bool = False,
+) -> dict:
+    """Превью массового списания: сколько спишется и какой будет остаток."""
+    if account.teacher_id != teacher.id:
+        raise BillingError("FORBIDDEN", "Нет доступа", 403)
+    if package.billing_account_id != account.id:
+        raise BillingError("PACKAGE_MISMATCH", "Абонемент не принадлежит этому ученику")
+    if package.status in (PackageStatus.CANCELLED,):
+        raise BillingError("PACKAGE_UNAVAILABLE", "Абонемент отменён или недоступен")
+
+    unpaid = get_unpaid_completed_lessons(account, order_oldest_first=True)
+    if event_billing_ids:
+        id_set = {str(i) for i in event_billing_ids}
+        unpaid = [r for r in unpaid if str(r.id) in id_set]
+    settings = account.settings
+    remaining = D_units(package.remaining_units)
+    selected = []
+    units_needed_total = ZERO
+    warnings = []
+
+    package_paid_at = None
+    first_payment = (
+        StudentPayment.objects.filter(
+            package=package, status=StudentPaymentStatus.CONFIRMED
+        )
+        .order_by("paid_at")
+        .first()
+    )
+    if first_payment:
+        package_paid_at = first_payment.paid_at
+
+    for record in unpaid:
+        if select_earliest and remaining - units_needed_total <= 0:
+            break
+        duration = (
+            record.actual_duration_minutes
+            if settings.use_actual_duration_for_package and record.actual_duration_minutes
+            else (record.planned_duration_minutes or event_duration_minutes(record.event))
+        )
+        units = package_units_for_lesson(
+            settings=settings, package=package, duration_minutes=duration
+        )
+        if units_needed_total + units > remaining:
+            if select_earliest:
+                break
+            warnings.append(
+                {
+                    "event_billing_id": str(record.id),
+                    "message": "В абонементе недостаточно занятий",
+                }
+            )
+            continue
+        before_payment = False
+        if package_paid_at and record.event_id and record.event.starts_at:
+            if record.event.starts_at < package_paid_at:
+                before_payment = True
+        selected.append(
+            {
+                "event_billing_id": str(record.id),
+                "event_id": record.event_id,
+                "event_title": record.event.title if record.event_id else "",
+                "event_starts_at": (
+                    record.event.starts_at.isoformat() if record.event_id and record.event.starts_at else None
+                ),
+                "units": str(units),
+                "due_amount": str(
+                    max(ZERO, D(record.charged_amount or 0) - D(record.paid_amount or 0))
+                ),
+                "before_package_payment": before_payment,
+                "unpaid_reason": unpaid_reason_for_record(record),
+            }
+        )
+        units_needed_total = D_units(units_needed_total + units)
+        if select_earliest and event_billing_ids is None:
+            # select_earliest без явных id — набираем пока хватает остатка
+            pass
+
+    remaining_after = D_units(remaining - units_needed_total)
+    return {
+        "package_id": str(package.id),
+        "package_title": package.title,
+        "remaining_before": str(remaining),
+        "units_to_charge": str(units_needed_total),
+        "lessons_count": len(selected),
+        "remaining_after": str(remaining_after),
+        "message": (
+            f"Будет списано: {len(selected)} занятий. "
+            f"Остаток после списания: {remaining_after} "
+            f"{'мин' if package.unit_type == PackageUnitType.MINUTE else 'занятий'}."
+        ),
+        "items": selected,
+        "warnings": warnings,
+        "package_paid_at": package_paid_at.isoformat() if package_paid_at else None,
+    }
+
+
+@transaction.atomic
+def charge_lesson_from_package(
+    *,
+    teacher: User,
+    event_billing: EventBillingRecord,
+    package: Optional[LessonPackage] = None,
+    package_id: Optional[str] = None,
+    comment: str = "",
+    idempotency_key: str = "",
+) -> dict:
+    """
+    Списать одно проведённое неоплаченное занятие из абонемента.
+    Дата урока может быть раньше даты оплаты абонемента — это погашение долга.
+    """
+    record = EventBillingRecord.objects.select_for_update().get(pk=event_billing.pk)
+    record = EventBillingRecord.objects.select_related(
+        "billing_account", "event", "student", "package"
+    ).get(pk=record.pk)
+    account = record.billing_account
+    if account.teacher_id != teacher.id:
+        raise BillingError("FORBIDDEN", "Нет доступа", 403)
+
+    if idempotency_key:
+        existing = BillingTransaction.objects.filter(
+            event_billing=record,
+            transaction_type=TransactionType.PACKAGE_CONSUMPTION,
+            is_reversal=False,
+            metadata__idempotency_key=idempotency_key,
+        ).first()
+        if existing and not BillingTransaction.objects.filter(reversed_transaction=existing).exists():
+            record.refresh_from_db()
+            pkg = existing.package
+            remaining = pkg.remaining_units if pkg else ZERO
+            return {
+                "record": record,
+                "transaction": existing,
+                "package": pkg,
+                "idempotent": True,
+                "message": "Операция уже была выполнена",
+                "remaining_units": remaining,
+                "before_package_payment": bool(
+                    (existing.metadata or {}).get("before_package_payment")
+                ),
+            }
+
+    if record.delivery_status not in CHARGEABLE_DELIVERY_STATUSES:
+        raise BillingError(
+            "NOT_CONDUCTED",
+            "Нельзя списать отменённый или непроведённый урок",
+        )
+
+    if record.financial_status in (
+        FinancialStatus.PAID,
+        FinancialStatus.PAID_FROM_PACKAGE,
+        FinancialStatus.NOT_BILLABLE,
+    ):
+        raise BillingError("ALREADY_PAID", "Этот урок уже оплачен")
+
+    if record.financial_status not in UNPAID_FINANCIAL_STATUSES:
+        raise BillingError(
+            "NOT_AWAITING",
+            "Урок не ожидает оплаты",
+        )
+
+    active_consumption = _active_package_consumption_for_record(record)
+    if active_consumption:
+        raise BillingError("ALREADY_CHARGED", "Этот урок уже оплачен")
+
+    if package_id and not package:
+        package = LessonPackage.objects.filter(pk=package_id, billing_account=account).first()
+        if not package:
+            foreign = LessonPackage.objects.filter(pk=package_id).first()
+            if foreign:
+                raise BillingError("PACKAGE_MISMATCH", "Абонемент не принадлежит этому ученику")
+            raise BillingError("NO_PACKAGE", "Абонемент не найден")
+    if not package:
+        package = resolve_usable_package(account) or (
+            find_available_packages_for_charge(account)[:1] or [None]
+        )[0]
+    if not package:
+        raise BillingError("NO_PACKAGE", "Нет доступного абонемента для списания")
+    if package.billing_account_id != account.id:
+        raise BillingError("PACKAGE_MISMATCH", "Абонемент не принадлежит этому ученику")
+    if package.status == PackageStatus.CANCELLED:
+        raise BillingError("PACKAGE_UNAVAILABLE", "Абонемент отменён или недоступен")
+
+    settings = account.settings
+    duration = (
+        record.actual_duration_minutes
+        if settings.use_actual_duration_for_package and record.actual_duration_minutes
+        else (record.planned_duration_minutes or event_duration_minutes(record.event))
+    )
+    units = package_units_for_lesson(
+        settings=settings, package=package, duration_minutes=duration
+    )
+
+    locked = LessonPackage.objects.select_for_update().get(pk=package.pk)
+    if locked.status == PackageStatus.CANCELLED:
+        raise BillingError("PACKAGE_UNAVAILABLE", "Абонемент отменён или недоступен")
+    if D_units(locked.remaining_units) < units:
+        raise BillingError("INSUFFICIENT_PACKAGE", "В абонементе недостаточно занятий")
+
+    before_payment = False
+    first_payment = (
+        StudentPayment.objects.filter(
+            package=locked, status=StudentPaymentStatus.CONFIRMED
+        )
+        .order_by("paid_at")
+        .first()
+    )
+    if first_payment and record.event_id and record.event.starts_at:
+        if record.event.starts_at < first_payment.paid_at:
+            before_payment = True
+
+    cleared_charge = _clear_money_charge_for_package_settle(
+        teacher=teacher,
+        record=record,
+        comment=comment,
+    )
+
+    settle_comment = comment or "Списание из абонемента (погашение задолженности)"
+    if before_payment and not comment:
+        settle_comment = (
+            "Списание из абонемента: погашение задолженности "
+            "(урок прошёл до оплаты абонемента)"
+        )
+
+    tx = consume_package(
+        package=locked,
+        units=units,
+        account=account,
+        student=record.student,
+        created_by=teacher,
+        event=record.event,
+        event_billing=record,
+        comment=settle_comment,
+    )
+    meta = {
+        "manual_settle": True,
+        "before_package_payment": before_payment,
+        "cleared_charge_amount": str(cleared_charge),
+    }
+    if idempotency_key:
+        meta["idempotency_key"] = idempotency_key
+    BillingTransaction.objects.filter(pk=tx.pk).update(metadata=meta)
+    tx.refresh_from_db()
+
+    locked.refresh_from_db()
+    record.package = locked
+    record.package_units = units
+    record.charged_amount = ZERO
+    record.paid_amount = ZERO
+    record.calculated_amount = ZERO
+    record.billing_type = billing_type_for_package_unit(locked.unit_type)
+    record.price_source = PriceSource.PACKAGE
+    record.price_source_label = (
+        f"Списано {units} "
+        f"{'мин' if locked.unit_type == PackageUnitType.MINUTE else 'ур.'}; "
+        f"остаток {locked.remaining_units}"
+    )
+    record.financial_status = FinancialStatus.PAID_FROM_PACKAGE
+    if not record.finalized_at:
+        record.finalized_at = timezone.now()
+    if comment:
+        record.comment = comment
+    record.save()
+
+    audit(
+        teacher=teacher,
+        actor=teacher,
+        action="package_settle",
+        billing_account=account,
+        entity_type="EventBillingRecord",
+        entity_id=str(record.id),
+        new_value={
+            "package_id": str(locked.id),
+            "units": str(units),
+            "remaining": str(locked.remaining_units),
+            "before_package_payment": before_payment,
+        },
+        related_transaction=tx,
+        reason=settle_comment,
+    )
+
+    unit_label = "занятий" if locked.unit_type != PackageUnitType.MINUTE else "минут"
+    message = f"Урок списан из абонемента. Осталось {locked.remaining_units} {unit_label}"
+    return {
+        "record": record,
+        "transaction": tx,
+        "package": locked,
+        "idempotent": False,
+        "before_package_payment": before_payment,
+        "message": message,
+        "remaining_units": locked.remaining_units,
+    }
+
+
+@transaction.atomic
+def charge_multiple_lessons_from_package(
+    *,
+    teacher: User,
+    account: BillingAccount,
+    package: LessonPackage,
+    event_billing_ids: Optional[list] = None,
+    select_earliest: bool = False,
+    comment: str = "",
+    idempotency_key: str = "",
+) -> dict:
+    """Массовое списание неоплаченных уроков из абонемента (без отрицательного остатка)."""
+    if account.teacher_id != teacher.id:
+        raise BillingError("FORBIDDEN", "Нет доступа", 403)
+    if package.billing_account_id != account.id:
+        raise BillingError("PACKAGE_MISMATCH", "Абонемент не принадлежит этому ученику")
+
+    preview = preview_charge_lessons_from_package(
+        teacher=teacher,
+        account=account,
+        package=package,
+        event_billing_ids=event_billing_ids,
+        select_earliest=select_earliest or not event_billing_ids,
+    )
+    if preview["lessons_count"] <= 0:
+        raise BillingError("NOTHING_TO_CHARGE", "Нет уроков для списания")
+
+    # Если передали больше, чем хватает остатка — без select_earliest ошибка
+    if event_billing_ids and not select_earliest:
+        requested = len({str(i) for i in event_billing_ids})
+        if requested > preview["lessons_count"] and preview["warnings"]:
+            raise BillingError(
+                "INSUFFICIENT_PACKAGE",
+                "В абонементе недостаточно занятий",
+            )
+
+    results = []
+    last_pkg = package
+    for item in preview["items"]:
+        record = EventBillingRecord.objects.get(pk=item["event_billing_id"])
+        key = ""
+        if idempotency_key:
+            key = f"{idempotency_key}:{record.id}"
+        row = charge_lesson_from_package(
+            teacher=teacher,
+            event_billing=record,
+            package_id=str(package.id),
+            comment=comment,
+            idempotency_key=key,
+        )
+        results.append(row)
+        last_pkg = row["package"]
+
+    n = len(results)
+    unit_label = "занятий" if last_pkg.unit_type != PackageUnitType.MINUTE else "минут"
+    if n == 1:
+        message = results[0]["message"]
+    else:
+        message = (
+            f"{n} урока списаны из абонемента. "
+            f"Осталось {last_pkg.remaining_units} {unit_label}"
+        )
+    return {
+        "charged_count": n,
+        "remaining_units": last_pkg.remaining_units,
+        "package": last_pkg,
+        "results": results,
+        "message": message,
+        "preview": preview,
+    }
+
+
+@transaction.atomic
+def refund_lesson_package_charge(
+    *,
+    teacher: User,
+    event_billing: EventBillingRecord,
+    comment: str = "",
+) -> dict:
+    """
+    Отменить списание занятия из абонемента: вернуть единицу, урок → «Ожидает оплаты».
+    Первоначальная операция не удаляется.
+    """
+    record = EventBillingRecord.objects.select_for_update().get(pk=event_billing.pk)
+    record = EventBillingRecord.objects.select_related(
+        "billing_account", "event", "package"
+    ).get(pk=record.pk)
+    if record.billing_account.teacher_id != teacher.id:
+        raise BillingError("FORBIDDEN", "Нет доступа", 403)
+
+    tx = _active_package_consumption_for_record(record)
+    if not tx:
+        raise BillingError("NO_CONSUMPTION", "Активное списание по уроку не найдено")
+
+    cleared_meta = (tx.metadata or {}).get("cleared_charge_amount") or "0"
+    try:
+        restored_charge = D(cleared_meta)
+    except Exception:
+        restored_charge = ZERO
+
+    rev = reverse_transaction(
+        teacher=teacher,
+        tx=tx,
+        comment=comment or "Отмена списания из абонемента",
+        restore_awaiting_payment=True,
+        restore_charge_amount=restored_charge,
+    )
+    record.refresh_from_db()
+    return {
+        "record": record,
+        "reversal": rev,
+        "message": "Списание отменено. Занятие возвращено в абонемент",
+    }
+
+
+@transaction.atomic
+def mark_lesson_as_paid_manually(
+    *,
+    teacher: User,
+    event_billing: EventBillingRecord,
+    amount: Decimal,
+    paid_at=None,
+    method: str = "",
+    comment: str = "",
+) -> StudentPayment:
+    """Ручная оплата отдельного урока без списания из абонемента."""
+    record = EventBillingRecord.objects.select_for_update().get(pk=event_billing.pk)
+    record = EventBillingRecord.objects.select_related(
+        "billing_account", "student"
+    ).get(pk=record.pk)
+    account = record.billing_account
+    if account.teacher_id != teacher.id:
+        raise BillingError("FORBIDDEN", "Нет доступа", 403)
+    if record.delivery_status not in CHARGEABLE_DELIVERY_STATUSES:
+        raise BillingError(
+            "NOT_CONDUCTED",
+            "Нельзя списать отменённый или непроведённый урок",
+        )
+    if record.financial_status in (
+        FinancialStatus.PAID,
+        FinancialStatus.PAID_FROM_PACKAGE,
+    ):
+        raise BillingError("ALREADY_PAID", "Этот урок уже оплачен")
+    if _active_package_consumption_for_record(record):
+        raise BillingError("ALREADY_CHARGED", "Этот урок уже оплачен из абонемента")
+
+    amount = D(amount)
+    if amount <= 0:
+        due = D(record.charged_amount or 0) - D(record.paid_amount or 0)
+        amount = due if due > 0 else D(record.calculated_amount or 0)
+    if amount <= 0:
+        raise BillingError("INVALID_AMOUNT", "Укажите сумму оплаты")
+
+    # Если урок ещё без начисления — зафиксируем charged_amount
+    if D(record.charged_amount or 0) <= 0:
+        record.charged_amount = amount
+        record.calculated_amount = amount
+        record.financial_status = FinancialStatus.AWAITING_PAYMENT
+        if not record.finalized_at:
+            record.finalized_at = timezone.now()
+        record.save(
+            update_fields=[
+                "charged_amount",
+                "calculated_amount",
+                "financial_status",
+                "finalized_at",
+                "updated_at",
+            ]
+        )
+
+    payment = register_payment(
+        teacher=teacher,
+        student=record.student,
+        amount=amount,
+        paid_at=paid_at,
+        method=method or "",
+        purpose="Оплата урока",
+        comment=comment or "Ручная оплата урока",
+        event_billing_ids=[str(record.id)],
+    )
+    record.refresh_from_db()
+    return payment
 
 
 def _refresh_financial_status(record: EventBillingRecord):
@@ -1314,6 +2000,13 @@ def finalize_event_billing(
                     student=record.student,
                     when_label=when_label,
                 )
+                from .student_notifications import notify_student_unpaid_lesson
+
+                notify_student_unpaid_lesson(
+                    teacher=teacher,
+                    student=record.student,
+                    when_label=when_label,
+                )
             except Exception:
                 pass
 
@@ -1692,19 +2385,20 @@ def create_package(
 
 
 @transaction.atomic
-@transaction.atomic
 def reverse_transaction(
     *,
     teacher: User,
     tx: BillingTransaction,
     comment: str = "",
+    restore_awaiting_payment: bool = False,
+    restore_charge_amount: Optional[Decimal] = None,
 ) -> BillingTransaction:
     if tx.billing_account.teacher_id != teacher.id:
         raise BillingError("FORBIDDEN", "Нет доступа", 403)
     if tx.is_reversal:
         raise BillingError("ALREADY_REVERSAL", "Нельзя отменить отмену")
     if BillingTransaction.objects.filter(reversed_transaction=tx).exists():
-        raise BillingError("ALREADY_REVERSED", "Операция уже отменена")
+        raise BillingError("ALREADY_REVERSED", "Операция уже была выполнена")
 
     # Reverse package units
     if tx.package_id and tx.package_units:
@@ -1750,15 +2444,44 @@ def reverse_transaction(
         metadata={"reverses": str(tx.id)},
     )
     if tx.event_billing_id:
-        record = tx.event_billing
+        record = EventBillingRecord.objects.select_for_update().get(pk=tx.event_billing_id)
         if tx.transaction_type == TransactionType.CHARGE:
             record.charged_amount = D(max(ZERO, record.charged_amount - tx.amount))
         if tx.transaction_type == TransactionType.PACKAGE_CONSUMPTION:
             record.package_units = ZERO
             record.package = None
-        record.finalized_at = None
-        record.financial_status = FinancialStatus.NEEDS_DECISION
-        record.save()
+            if restore_awaiting_payment:
+                restored = D(restore_charge_amount or 0)
+                if restored > 0:
+                    record.charged_amount = restored
+                    record.calculated_amount = restored
+                    _append_tx(
+                        billing_account=record.billing_account,
+                        student=record.student,
+                        transaction_type=TransactionType.CHARGE,
+                        amount=restored,
+                        currency=record.currency or record.billing_account.currency,
+                        created_by=teacher,
+                        event=record.event,
+                        event_billing=record,
+                        comment=comment or "Восстановление начисления после отмены списания",
+                        metadata={"restored_after_package_refund": str(tx.id)},
+                    )
+                record.financial_status = FinancialStatus.AWAITING_PAYMENT
+                record.price_source = PriceSource.MANUAL if restored > 0 else record.price_source
+                record.price_source_label = (
+                    "Ожидает оплаты (списание из абонемента отменено)"
+                )
+                record.finalized_at = record.finalized_at or timezone.now()
+                record.save()
+            else:
+                record.finalized_at = None
+                record.financial_status = FinancialStatus.NEEDS_DECISION
+                record.save()
+        else:
+            record.finalized_at = None
+            record.financial_status = FinancialStatus.NEEDS_DECISION
+            record.save()
     audit(
         teacher=teacher,
         actor=teacher,
@@ -2045,7 +2768,48 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
             **serialize_event_billing(rec),
             "due_amount": str(due),
             "price_missing": due <= 0 and D(rec.charged_amount or 0) <= 0,
+            "unpaid_reason": unpaid_reason_for_record(rec),
+            "can_charge_from_package": True,
         })
+
+    available_packages = [
+        {
+            "id": str(p.id),
+            "title": p.title,
+            "remaining_units": str(p.remaining_units),
+            "total_units": str(p.total_units),
+            "unit_type": p.unit_type,
+            "is_paid": package_amount_due(p) <= 0,
+            "paid_amount": str(package_confirmed_paid_amount(p)),
+            "purchase_amount": str(p.purchase_amount),
+            "starts_at": p.starts_at.isoformat() if p.starts_at else None,
+            "expires_at": p.expires_at.isoformat() if p.expires_at else None,
+            "status": p.status,
+            "display_status": package_display_status(p)[0],
+            "display_status_label": package_display_status(p)[1],
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in find_available_packages_for_charge(account)
+    ]
+
+    used_units_total = ZERO
+    remaining_units_total = ZERO
+    for pkg in LessonPackage.objects.filter(
+        billing_account=account,
+        status__in=(PackageStatus.ACTIVE, PackageStatus.FROZEN, PackageStatus.EXHAUSTED),
+    ):
+        used_units_total += D_units(pkg.total_units - pkg.remaining_units)
+        if pkg.status == PackageStatus.ACTIVE:
+            remaining_units_total += D_units(pkg.remaining_units)
+
+    last_payment = (
+        StudentPayment.objects.filter(
+            billing_account=account,
+            status=StudentPaymentStatus.CONFIRMED,
+        )
+        .order_by("-paid_at")
+        .first()
+    )
 
     needs = EventBillingRecord.objects.filter(
         billing_account=account,
@@ -2155,6 +2919,18 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
         "unpaid_lessons_count": unpaid_count,
         "unpaid_lessons_amount": str(D(unpaid_amount)),
         "unpaid_lessons": unpaid_items,
+        "available_packages": available_packages,
+        "summary": {
+            "available_units": str(remaining_units_total),
+            "used_units": str(used_units_total),
+            "unpaid_completed_lessons": unpaid_count,
+            "debt_amount": str(D(unpaid_amount) if unpaid_amount > 0 else balance["debt"]),
+            "active_packages_count": len(available_packages),
+            "last_payment_at": (
+                last_payment.paid_at.isoformat() if last_payment and last_payment.paid_at else None
+            ),
+            "last_payment_amount": str(last_payment.amount) if last_payment else None,
+        },
     }
     if include_history:
         from django.db.models import Exists, OuterRef
@@ -2226,6 +3002,8 @@ def serialize_transaction(tx: BillingTransaction) -> dict:
         "reversed_transaction_id": (
             str(tx.reversed_transaction_id) if tx.reversed_transaction_id else None
         ),
+        "is_legacy": bool(getattr(tx, "is_legacy", False)),
+        "metadata": tx.metadata or {},
         "created_at": tx.created_at.isoformat() if tx.created_at else None,
     }
 
@@ -2355,6 +3133,9 @@ def serialize_event_billing(record: EventBillingRecord) -> dict:
         "event_starts_at": (
             record.event.starts_at.isoformat() if record.event_id else None
         ),
+        "unpaid_reason": unpaid_reason_for_record(record),
+        "can_charge_from_package": record.financial_status in UNPAID_FINANCIAL_STATUSES
+        and record.delivery_status in CHARGEABLE_DELIVERY_STATUSES,
     }
 
 
@@ -2873,6 +3654,7 @@ def serialize_teacher_settings(settings: TeacherBillingSettings) -> dict:
         "package_balance_check": settings.package_balance_check,
         "show_billing_to_student": settings.show_billing_to_student,
         "allow_student_history": settings.allow_student_history,
+        "show_billing_to_parent": bool(getattr(settings, "show_billing_to_parent", False)),
         "digest_weekday": settings.digest_weekday,
         "reminder_cooldown_hours": settings.reminder_cooldown_hours,
         "reminder_template": settings.reminder_template,
@@ -2914,6 +3696,7 @@ def update_teacher_settings(teacher: User, data: dict) -> TeacherBillingSettings
         "package_balance_check",
         "show_billing_to_student",
         "allow_student_history",
+        "show_billing_to_parent",
         "digest_weekday",
         "reminder_cooldown_hours",
         "reminder_template",

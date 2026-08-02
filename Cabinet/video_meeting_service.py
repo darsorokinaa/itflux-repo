@@ -38,7 +38,7 @@ class VideoMeetingError(Exception):
         self.status = status
 
 
-AccessRole = Literal["teacher", "student", "staff", "none"]
+AccessRole = Literal["teacher", "coteacher", "student", "staff", "none"]
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,7 @@ class AccessResult:
     is_moderator: bool
     reason: str = ""
     ui_state: str = ""
+    can_control_material: bool = False
 
 
 def _join_before_minutes() -> int:
@@ -92,6 +93,17 @@ def user_is_event_teacher(user: User, event: ScheduleEvent) -> bool:
     ).exists()
 
 
+def user_is_event_coteacher(user: User, event: ScheduleEvent) -> bool:
+    """Соучитель: отдельная роль или organizer-участник, не являющийся owner."""
+    if event.owner_id == user.pk:
+        return False
+    return event.participants.filter(
+        role__in=[ParticipantRole.COTEACHER, ParticipantRole.ORGANIZER],
+        teacher_id=user.pk,
+        status__in=[ParticipantStatus.INVITED, ParticipantStatus.ACCEPTED],
+    ).exists()
+
+
 def user_is_event_student(user: User, event: ScheduleEvent) -> bool:
     students = get_student_profiles_for_user(user)
     if not students.exists():
@@ -117,7 +129,7 @@ def resolve_access(user: User | None, event: ScheduleEvent) -> AccessResult:
         return AccessResult(False, "none", False, "Аккаунт недоступен", "account_blocked")
 
     if user.is_staff or user.is_superuser:
-        return AccessResult(True, "staff", True, "", "ok")
+        return AccessResult(True, "staff", True, "", "ok", can_control_material=True)
 
     if profile is not None and profile.role == Profile.Role.PARENT:
         return AccessResult(
@@ -128,11 +140,22 @@ def resolve_access(user: User | None, event: ScheduleEvent) -> AccessResult:
             "no_access",
         )
 
+    if event.owner_id == user.pk or (
+        user_is_event_teacher(user, event) and not user_is_event_coteacher(user, event)
+    ):
+        # Owner / основной учитель.
+        if event.owner_id == user.pk:
+            return AccessResult(True, "teacher", True, "", "ok", can_control_material=True)
+        return AccessResult(True, "teacher", True, "", "ok", can_control_material=True)
+
+    if user_is_event_coteacher(user, event):
+        return AccessResult(True, "coteacher", True, "", "ok", can_control_material=True)
+
     if user_is_event_teacher(user, event):
-        return AccessResult(True, "teacher", True, "", "ok")
+        return AccessResult(True, "teacher", True, "", "ok", can_control_material=True)
 
     if user_is_event_student(user, event):
-        return AccessResult(True, "student", False, "", "ok")
+        return AccessResult(True, "student", False, "", "ok", can_control_material=False)
 
     return AccessResult(
         False,
@@ -204,7 +227,7 @@ def assert_can_manage_meeting(user: User, meeting: VideoMeeting) -> AccessResult
     access = resolve_access(user, meeting.schedule_event)
     if not access.allowed:
         raise VideoMeetingError(access.reason or "Доступ запрещён", code="forbidden", status=403)
-    if access.role not in ("teacher", "staff"):
+    if access.role not in ("teacher", "coteacher", "staff"):
         raise VideoMeetingError("Только учитель может управлять конференцией", code="forbidden", status=403)
     return access
 

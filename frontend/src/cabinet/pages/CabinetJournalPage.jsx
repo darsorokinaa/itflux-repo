@@ -7,6 +7,7 @@ import {
   fetchStudents,
   normalizeCabinetList,
 } from "../../utils/cabinetAuth";
+import JournalEntriesFeed from "../components/JournalEntriesFeed";
 import JournalLessonsTable from "../components/JournalLessonsTable";
 import JournalPerformanceSummary from "../components/JournalPerformanceSummary";
 import { openLessonSummaryTab } from "../journal/openLessonSummary";
@@ -231,6 +232,7 @@ export default function CabinetJournalPage() {
             loading={loading}
             onOpenLesson={openLesson}
           />
+          <JournalEntriesFeed studentId={studentId} groupId={groupId} />
         </div>
       )}
     </div>

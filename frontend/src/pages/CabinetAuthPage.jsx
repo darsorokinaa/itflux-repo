@@ -8,6 +8,7 @@ const GUIDE_OPEN_ON_REGISTER_KEY = "cabinet-guide-open-on-register";
 const ROLE_OPTIONS = [
   { value: "student", label: "Ученик" },
   { value: "teacher", label: "Учитель" },
+  { value: "parent", label: "Родитель" },
 ];
 
 function displayName(user) {
@@ -20,8 +21,11 @@ export default function CabinetAuthPage() {
   const location = useLocation();
   const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const inviteToken = searchParams.get("invite") || "";
+  const parentInviteToken = searchParams.get("parent_invite") || "";
   const referralCode = searchParams.get("ref") || searchParams.get("referral") || "";
-  const redirectTo = location.state?.from || (inviteToken ? `/invite/${inviteToken}/` : "/cabinet");
+  const redirectTo = location.state?.from
+    || (parentInviteToken ? `/parent/invite/accept/${parentInviteToken}/` : "")
+    || (inviteToken ? `/invite/${inviteToken}/` : "/cabinet");
 
   const [mode, setMode] = useState(() => (
     searchParams.get("mode") === "register" ? "register" : "login"
@@ -95,9 +99,23 @@ export default function CabinetAuthPage() {
   }, [navigate, redirectTo]);
 
   const goAfterAuth = async () => {
+    // После входа по parent_invite сразу принимаем приглашение, как при регистрации.
+    if (parentInviteToken) {
+      try {
+        const { acceptParentInvite } = await import("../utils/cabinetAuth");
+        const accepted = await acceptParentInvite(parentInviteToken);
+        navigate(accepted?.redirect || "/cabinet/parent", { replace: true });
+        return;
+      } catch {
+        navigate(`/parent/invite/accept/${encodeURIComponent(parentInviteToken)}/`, { replace: true });
+        return;
+      }
+    }
     const session = await fetchCabinetSession();
     const home = getCabinetHomePath(session?.user);
-    const target = redirectTo.startsWith("/cabinet") ? redirectTo : home;
+    const target = (
+      redirectTo.startsWith("/cabinet") || redirectTo.startsWith("/parent/")
+    ) ? redirectTo : home;
     navigate(target, { replace: true });
   };
 
@@ -114,11 +132,13 @@ export default function CabinetAuthPage() {
 
   const authPayload = (payload) => {
     let next = payload;
-    if (inviteToken) {
+    if (parentInviteToken) {
+      next = { ...next, parent_invite_token: parentInviteToken, role: "parent" };
+    } else if (inviteToken) {
       next = { ...next, invite_token: inviteToken };
     }
     const ref = storedReferralCode();
-    if (ref && !inviteToken) {
+    if (ref && !inviteToken && !parentInviteToken) {
       next = { ...next, referral_code: ref };
     }
     return next;
@@ -145,9 +165,17 @@ export default function CabinetAuthPage() {
     try {
       const payload = authPayload({
         ...registerForm,
-        role: inviteToken ? "student" : (hasReferralSignup || referralPreview ? "teacher" : registerForm.role),
+        role: parentInviteToken
+          ? "parent"
+          : inviteToken
+            ? "student"
+            : (hasReferralSignup || referralPreview ? "teacher" : registerForm.role),
       });
-      await registerCabinet(payload);
+      const result = await registerCabinet(payload);
+      if (result?.redirect) {
+        navigate(result.redirect, { replace: true });
+        return;
+      }
       try {
         sessionStorage.removeItem("cabinet_referral_code");
         sessionStorage.setItem(GUIDE_OPEN_ON_REGISTER_KEY, "1");
@@ -179,7 +207,9 @@ export default function CabinetAuthPage() {
           <span className="cabinet-auth-badge">Личный кабинет</span>
           <h1 className="cabinet-auth-title">Вход в аккаунт</h1>
           <p className="cabinet-auth-lead">
-            {inviteToken
+            {parentInviteToken
+              ? "Создайте аккаунт родителя или войдите, чтобы принять приглашение к кабинету ребёнка."
+              : inviteToken
               ? "Создайте аккаунт ученика или войдите, чтобы принять приглашение от учителя."
               : referralPreview
                 ? `Зарегистрируйтесь как учитель — получите ${referralPreview.message} бесплатно.`
@@ -297,11 +327,25 @@ export default function CabinetAuthPage() {
             <label className="cabinet-auth-field">
               <span>Роль</span>
               <select
-                value={inviteToken ? "student" : (hasReferralSignup || referralPreview ? "teacher" : registerForm.role)}
-                disabled={Boolean(inviteToken) || Boolean(referralPreview) || hasReferralSignup}
+                value={
+                  parentInviteToken
+                    ? "parent"
+                    : inviteToken
+                      ? "student"
+                      : (hasReferralSignup || referralPreview ? "teacher" : registerForm.role)
+                }
+                disabled={
+                  Boolean(parentInviteToken)
+                  || Boolean(inviteToken)
+                  || Boolean(referralPreview)
+                  || hasReferralSignup
+                }
                 onChange={(e) => setRegisterForm((prev) => ({ ...prev, role: e.target.value }))}
               >
-                {ROLE_OPTIONS.map((opt) => (
+                {(parentInviteToken
+                  ? ROLE_OPTIONS.filter((opt) => opt.value === "parent")
+                  : ROLE_OPTIONS.filter((opt) => opt.value !== "parent")
+                ).map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>

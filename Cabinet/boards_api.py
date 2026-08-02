@@ -153,6 +153,97 @@ def normalize_scene_data(raw: Any) -> dict:
     }
 
 
+def _element_owner_id(el: dict) -> int | None:
+    data = el.get("customData") if isinstance(el, dict) else None
+    if not isinstance(data, dict):
+        return None
+    raw = data.get("itfluxOwnerId")
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def _element_ownership(el: dict) -> str:
+    data = el.get("customData") if isinstance(el, dict) else None
+    if not isinstance(data, dict):
+        return "shared"
+    return str(data.get("itfluxOwnership") or "shared")
+
+
+def _is_newer_element(a: dict, b: dict) -> bool:
+    av, bv = int(a.get("version") or 0), int(b.get("version") or 0)
+    if av != bv:
+        return av > bv
+    an, bn = int(a.get("versionNonce") or 0), int(b.get("versionNonce") or 0)
+    if an != bn:
+        return an > bn
+    return int(a.get("updated") or 0) > int(b.get("updated") or 0)
+
+
+def enforce_element_ownership(
+    prev_scene: dict,
+    next_scene: dict,
+    *,
+    user_id: int,
+    is_owner: bool,
+) -> dict:
+    """
+    Ученик не может менять/удалять элементы учителя.
+    Владелец доски (учитель) — без ограничений.
+    """
+    if is_owner:
+        return next_scene
+    prev_els = {
+        str(el.get("id")): el
+        for el in (prev_scene.get("elements") or [])
+        if isinstance(el, dict) and el.get("id")
+    }
+    out_elements = []
+    seen = set()
+    for el in next_scene.get("elements") or []:
+        if not isinstance(el, dict) or not el.get("id"):
+            continue
+        eid = str(el["id"])
+        seen.add(eid)
+        prev = prev_els.get(eid)
+        if prev is None:
+            # Новый элемент — проставляем владельца, если нет.
+            data = el.get("customData") if isinstance(el.get("customData"), dict) else {}
+            if "itfluxOwnerId" not in data:
+                data = {
+                    **data,
+                    "itfluxOwnerId": user_id,
+                    "itfluxOwnerRole": "student",
+                    "itfluxOwnership": "student",
+                }
+                el = {**el, "customData": data}
+            out_elements.append(el)
+            continue
+        ownership = _element_ownership(prev)
+        owner_id = _element_owner_id(prev)
+        if ownership == "teacher" or (owner_id and owner_id != user_id and ownership != "shared"):
+            # Сохраняем предыдущую версию (запрет мутации чужого).
+            out_elements.append(prev)
+            continue
+        out_elements.append(el)
+    # Нельзя удалить чужой элемент, просто исключив его.
+    for eid, prev in prev_els.items():
+        if eid in seen:
+            continue
+        ownership = _element_ownership(prev)
+        owner_id = _element_owner_id(prev)
+        if ownership == "teacher" or (owner_id and owner_id != user_id and ownership != "shared"):
+            out_elements.append(prev)
+    return {
+        **next_scene,
+        "elements": out_elements,
+        "appState": next_scene.get("appState") or {},
+        "files": next_scene.get("files") or {},
+    }
+
+
 def detect_raster_mime(content: bytes) -> str | None:
     if not content or len(content) < 12:
         return None
@@ -801,6 +892,8 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
         data["can_edit"] = perm in ("owner", InteractiveBoardAccess.EDIT)
         data["can_manage"] = perm == "owner"
         data["can_export"] = bool(board.allow_export or perm == "owner")
+        data["viewer_user_id"] = request.user.id
+        data["viewer_role"] = "teacher" if perm == "owner" else ("student" if perm == InteractiveBoardAccess.EDIT else "viewer")
         return Response(data)
 
     def update(self, request, *args, **kwargs):
@@ -852,6 +945,12 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
                         return version_conflict_response(locked.version)
 
                     scene = normalize_scene_data(data["scene_data"])
+                    scene = enforce_element_ownership(
+                        normalize_scene_data(locked.scene_data),
+                        scene,
+                        user_id=request.user.id,
+                        is_owner=(perm == "owner"),
+                    )
                     size = estimate_json_bytes(scene)
                     if size > MAX_SCENE_JSON_BYTES:
                         return Response(

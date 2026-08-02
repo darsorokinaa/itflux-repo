@@ -11,6 +11,7 @@ import ExamPage from "./pages/ExamPage";
 import SearchTaskPage from "./pages/SearchTaskPage";
 import SearchVariantPage from "./pages/SearchVariantPage";
 import PrivacyPage from "./pages/PrivacyPage";
+import PricingPage from "./pages/PricingPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import LessonJoinBridge from "./pages/LessonJoinBridge";
 import ReadyLessonsPage from "./pages/ReadyLessonsPage";
@@ -51,6 +52,14 @@ import CabinetPaymentsPage from "./cabinet/pages/CabinetPaymentsPage";
 import CabinetJournalPage from "./cabinet/pages/CabinetJournalPage";
 import CabinetJournalAnalyticsPage from "./cabinet/pages/CabinetJournalAnalyticsPage";
 import CabinetLessonSummaryPage from "./cabinet/pages/CabinetLessonSummaryPage";
+import ParentCabinetPage from "./cabinet/pages/ParentCabinetPage";
+import ParentDashboardPage from "./cabinet/pages/ParentDashboardPage";
+import ParentHomeworkPage from "./cabinet/pages/ParentHomeworkPage";
+import ParentResultsPage from "./cabinet/pages/ParentResultsPage";
+import ParentSchedulePage from "./cabinet/pages/ParentSchedulePage";
+import ParentBillingPage from "./cabinet/pages/ParentBillingPage";
+import ParentMorePage from "./cabinet/pages/ParentMorePage";
+import ParentInviteAcceptPage from "./cabinet/pages/ParentInviteAcceptPage";
 import StudentCabinetPage from "./pages/StudentCabinetPage";
 import StudentDashboard from "./cabinet/student/pages/StudentDashboard";
 import StudentLessonsPage from "./cabinet/student/pages/StudentLessonsPage";
@@ -103,6 +112,9 @@ function getMetaDescriptionForPath(pathname) {
   }
   if (path === "/privacy") {
     return "Политика конфиденциальности платформы «Цифровой поток».";
+  }
+  if (path === "/pricing" || path.startsWith("/pricing/")) {
+    return "Тарифы «Цифровой поток»: Старт, Учитель, Профи, Премиум и Школа — кабинет, библиотека и лимиты для преподавателей.";
   }
   if (path.startsWith("/cabinet/student")) {
     return "Личный кабинет ученика: уроки, домашние задания, интерактивы и результаты обучения.";
@@ -247,6 +259,8 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/about" element={<Navigate to="/" replace />} />
           <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/pricing/" element={<PricingPage />} />
           <Route path="/tasks" element={<AllTasksPage />} />
           <Route path="/generator" element={<Navigate to="/subject" replace />} />
           <Route path="/lessons" element={<ReadyLessonsPage />} />
@@ -257,6 +271,8 @@ function App() {
           <Route path="/cabinet/login" element={<CabinetAuthPage />} />
           <Route path="/invite/:token" element={<CabinetJoinPage />} />
           <Route path="/invite/:token/" element={<CabinetJoinPage />} />
+          <Route path="/parent/invite/accept/:token" element={<ParentInviteAcceptPage />} />
+          <Route path="/parent/invite/accept/:token/" element={<ParentInviteAcceptPage />} />
           <Route path="/cabinet/join/:token" element={<LegacyInviteRedirect />} />
           <Route path="/cabinet/join/:token/" element={<LegacyInviteRedirect />} />
           <Route path="/cabinet/interactives/:id/play" element={<CabinetInteractivePlayPage />} />
@@ -284,6 +300,17 @@ function App() {
             <Route path="interactives" element={<Navigate to="/cabinet/student/assignments" replace />} />
             <Route path="schedule"     element={<Navigate to="/cabinet/student/lessons" replace />} />
             <Route path="more"         element={<StudentMorePage />} />
+            <Route path="settings/notifications" element={<CabinetNotificationsSettingsPage />} />
+            <Route path="settings/notifications/" element={<CabinetNotificationsSettingsPage />} />
+          </Route>
+          <Route path="/cabinet/parent" element={<ParentCabinetPage />}>
+            <Route index element={<ParentDashboardPage />} />
+            <Route path="schedule" element={<ParentSchedulePage />} />
+            <Route path="homework" element={<ParentHomeworkPage />} />
+            <Route path="results" element={<ParentResultsPage />} />
+            <Route path="journal" element={<ParentResultsPage />} />
+            <Route path="billing" element={<ParentBillingPage />} />
+            <Route path="more" element={<ParentMorePage />} />
             <Route path="settings/notifications" element={<CabinetNotificationsSettingsPage />} />
             <Route path="settings/notifications/" element={<CabinetNotificationsSettingsPage />} />
           </Route>

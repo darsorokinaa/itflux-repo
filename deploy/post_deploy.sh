@@ -60,8 +60,14 @@ systemctl daemon-reload
 systemctl enable itflux
 systemctl restart itflux
 
+echo "=== Установка cron (напоминания, ДЗ, подписка) ==="
+mkdir -p /var/log/itflux
+chmod +x $APP_DIR/deploy/run_management.sh $APP_DIR/deploy/install_cron.sh
+APP_DIR=$APP_DIR bash $APP_DIR/deploy/install_cron.sh || echo "WARN: cron не установился"
+
 echo ""
 echo "=== Готово! ==="
 echo "Проверьте сайт: http://$DOMAIN"
 echo "Для SSL: certbot --nginx -d $DOMAIN -d www.$DOMAIN"
 echo "После SSL не забудьте поменять пароль admin в /admin/"
+echo "Cron: crontab -l | grep itflux-cron"

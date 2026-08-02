@@ -1,60 +1,168 @@
 """
-PaymentProviderService — заглушка платёжной интеграции.
+PaymentProviderInterface — payment-agnostic слой для подписки платформы.
 
-Секреты провайдера берутся из settings, не хардкодятся.
-Для реального подключения нужно реализовать методы под конкретный провайдер
-(Prodamus / ЮKassa / CloudPayments) и задать в settings.py:
-    PAYMENT_PROVIDER = "yookassa"
-    PAYMENT_SECRET_KEY = env("PAYMENT_SECRET_KEY")
-    PAYMENT_SHOP_ID = env("PAYMENT_SHOP_ID")
+Секреты из settings:
+    PAYMENT_PROVIDER = "mock" | "yookassa" | …
+    PAYMENT_SECRET_KEY, PAYMENT_SHOP_ID — когда будет касса
+
+Не смешивать с StudentPayment / биллингом учеников.
 """
 
+from __future__ import annotations
+
+import abc
+import calendar
 import uuid
+from datetime import timedelta
+from decimal import Decimal
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 
+def add_months(dt, months: int):
+    month_index = dt.month - 1 + int(months)
+    year = dt.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(dt.day, calendar.monthrange(year, month)[1])
+    return dt.replace(
+        year=year,
+        month=month,
+        day=day,
+        hour=dt.hour,
+        minute=dt.minute,
+        second=dt.second,
+        microsecond=dt.microsecond,
+    )
+
+
+class PaymentProviderInterface(abc.ABC):
+    @abc.abstractmethod
+    def create_checkout(self, payment, plan) -> str:
+        """Возвращает URL оплаты."""
+
+    @abc.abstractmethod
+    def check_status(self, payment) -> dict:
+        ...
+
+    @abc.abstractmethod
+    def parse_webhook(self, payload: dict) -> dict:
+        """Нормализованный результат: payment_id, status, event_id, provider_payment_id."""
+
+
+class MockPaymentProvider(PaymentProviderInterface):
+    def create_checkout(self, payment, plan) -> str:
+        return f"/cabinet/upgrade?payment_id={payment.pk}&status=mock"
+
+    def check_status(self, payment) -> dict:
+        return {
+            "status": payment.status,
+            "provider_payment_id": payment.provider_payment_id,
+        }
+
+    def parse_webhook(self, payload: dict) -> dict:
+        return {
+            "payment_id": payload.get("payment_id"),
+            "status": payload.get("status", "paid"),
+            "event_id": payload.get("event_id") or f"mock_{payload.get('payment_id')}_{payload.get('status', 'paid')}",
+            "provider_payment_id": payload.get("provider_payment_id") or "",
+        }
+
+
+class UnconfiguredPaymentProvider(PaymentProviderInterface):
+    def create_checkout(self, payment, plan) -> str:
+        raise NotImplementedError("Real payment provider not configured")
+
+    def check_status(self, payment) -> dict:
+        raise NotImplementedError("Real payment provider not configured")
+
+    def parse_webhook(self, payload: dict) -> dict:
+        raise NotImplementedError("Real payment provider not configured")
+
+
+def get_payment_provider() -> PaymentProviderInterface:
+    name = getattr(settings, "PAYMENT_PROVIDER", "mock")
+    if name == "mock":
+        return MockPaymentProvider()
+    return UnconfiguredPaymentProvider()
+
+
 class PaymentProviderService:
+    """Фасад совместимости со старым API + активация подписки при оплате."""
 
     PROVIDER = getattr(settings, "PAYMENT_PROVIDER", "mock")
     SECRET_KEY = getattr(settings, "PAYMENT_SECRET_KEY", "")
     SHOP_ID = getattr(settings, "PAYMENT_SHOP_ID", "")
 
     @classmethod
-    def create_payment(cls, teacher, plan, billing_period: str = "month",
-                       promo_code: str = None, discount_info: dict = None):
-        """
-        Создаёт запись платежа и возвращает payment_url.
-        В mock-режиме возвращает заглушку (только при DEBUG).
-        """
+    def create_payment(
+        cls,
+        teacher,
+        plan,
+        billing_period: str = "month",
+        promo_code: str = None,
+        discount_info: dict = None,
+        *,
+        idempotency_key: str = None,
+    ):
         from django.conf import settings as django_settings
-        from decimal import Decimal
-        from .models import Payment, TeacherSubscription
+
+        from .models import Payment, PromoCode
         from .subscription_service import SubscriptionLimitService
 
         if cls.PROVIDER == "mock" and not django_settings.DEBUG:
             raise ValueError("Mock payments are disabled in production")
 
         original_amount = plan.price_year if billing_period == "year" else plan.price_month
-        final_amount = Decimal(str(discount_info["final_amount"])) if discount_info else Decimal(str(original_amount))
+        original_amount = Decimal(str(original_amount))
+        if discount_info:
+            final_amount = Decimal(str(discount_info["final_amount"]))
+            discount_amount = Decimal(str(discount_info.get("discount", 0)))
+        else:
+            final_amount = original_amount
+            discount_amount = Decimal("0")
 
-        # Получаем или создаём подписку
         sub = SubscriptionLimitService.get_or_create_subscription(teacher)
+        key = (idempotency_key or "").strip() or f"pay_{teacher.pk}_{plan.slug}_{uuid.uuid4().hex[:12]}"
+
+        existing = Payment.objects.filter(idempotency_key=key).first()
+        if existing:
+            provider = get_payment_provider()
+            return {
+                "payment_id": existing.pk,
+                "provider_payment_id": existing.provider_payment_id,
+                "status": existing.status,
+                "payment_url": provider.create_checkout(existing, plan),
+                "amount": str(existing.final_amount or existing.amount),
+                "currency": existing.currency,
+                "idempotent": True,
+            }
+
+        promo_obj = None
+        if promo_code:
+            promo_obj = PromoCode.objects.filter(code__iexact=promo_code.strip()).first()
 
         payment = Payment.objects.create(
             teacher=teacher,
             subscription=sub,
-            amount=final_amount,
+            plan=plan,
+            amount=original_amount,
+            discount_amount=discount_amount,
+            final_amount=final_amount,
             currency=plan.currency,
             status=Payment.Status.PENDING,
             provider=cls.PROVIDER,
             provider_payment_id=f"mock_{uuid.uuid4().hex[:16]}",
+            idempotency_key=key,
+            billing_period=billing_period,
+            promo_code=promo_obj,
+            metadata={"plan_slug": plan.slug, "billing_period": billing_period},
         )
 
-        # Применяем промокод, если передан
         if promo_code and discount_info:
             from .subscription_service import PromoCodeService
+
             try:
                 PromoCodeService.apply(
                     teacher=teacher,
@@ -63,12 +171,10 @@ class PaymentProviderService:
                     payment=payment,
                 )
             except Exception:
-                pass  # применение уже прошло валидацию раньше
+                pass
 
-        if cls.PROVIDER == "mock":
-            payment_url = f"/cabinet/upgrade?payment_id={payment.pk}&status=mock"
-        else:
-            payment_url = cls._create_real_payment_url(payment, plan)
+        provider = get_payment_provider()
+        payment_url = provider.create_checkout(payment, plan)
 
         result = {
             "payment_id": payment.pk,
@@ -84,46 +190,145 @@ class PaymentProviderService:
 
     @classmethod
     def check_payment_status(cls, payment):
-        """Проверяет статус платежа у провайдера."""
-        if cls.PROVIDER == "mock":
-            return {"status": payment.status, "provider_payment_id": payment.provider_payment_id}
-        return cls._check_real_payment_status(payment)
+        return get_payment_provider().check_status(payment)
 
     @classmethod
-    def handle_webhook(cls, payload: dict):
-        """Обрабатывает webhook от платёжного провайдера."""
-        if cls.PROVIDER == "mock":
-            return cls._handle_mock_webhook(payload)
-        return cls._handle_real_webhook(payload)
+    @transaction.atomic
+    def handle_webhook(cls, payload: dict, *, provider_name: str | None = None):
+        from django.conf import settings as django_settings
 
-    @classmethod
-    def _handle_mock_webhook(cls, payload: dict):
-        from .models import Payment
-        payment_id = payload.get("payment_id")
-        new_status = payload.get("status", "paid")
+        from .models import Payment, PaymentWebhookEvent
+
+        provider_name = (provider_name or cls.PROVIDER or "").strip().lower()
+        configured = (getattr(django_settings, "PAYMENT_PROVIDER", "mock") or "mock").strip().lower()
+        if (
+            not django_settings.DEBUG
+            and (provider_name == "mock" or configured == "mock")
+        ):
+            return {"ok": False, "error": "mock_disabled"}
+
+        provider = get_payment_provider()
+        parsed = provider.parse_webhook(payload or {})
+        event_id = str(parsed.get("event_id") or "")
+        if not event_id:
+            # Без стабильного event_id повторная доставка может создать новый ключ —
+            # требуем явный id от провайдера (кроме DEBUG/mock для локальных тестов).
+            if not django_settings.DEBUG and provider_name != "mock":
+                return {"ok": False, "error": "event_id_required"}
+            event_id = f"auto_{uuid.uuid4().hex}"
+
+        event, created = PaymentWebhookEvent.objects.get_or_create(
+            provider=provider_name,
+            event_id=event_id,
+            defaults={"payload": payload or {}},
+        )
+        if not created and event.processed:
+            return {"ok": True, "duplicate": True}
+
+        payment_id = parsed.get("payment_id")
+        new_status = parsed.get("status", "paid")
         try:
-            payment = Payment.objects.get(pk=payment_id)
-            payment.status = new_status
-            if new_status == "paid":
-                payment.paid_at = timezone.now()
-                # Активируем подписку
-                if payment.subscription:
-                    sub = payment.subscription
-                    sub.status = "active"
-                    sub.save(update_fields=["status", "updated_at"])
-            payment.save(update_fields=["status", "paid_at", "updated_at"])
+            # Без select_related на nullable FK: PostgreSQL запрещает FOR UPDATE на OUTER JOIN.
+            payment = Payment.objects.select_for_update().get(pk=payment_id)
         except Payment.DoesNotExist:
+            event.payload = payload or {}
+            event.save(update_fields=["payload"])
+            return {"ok": False, "error": "payment_not_found"}
+
+        event.payment = payment
+        event.payload = payload or {}
+
+        if new_status == "paid" and payment.status != Payment.Status.PAID:
+            payment.status = Payment.Status.PAID
+            payment.paid_at = timezone.now()
+            if parsed.get("provider_payment_id"):
+                payment.provider_payment_id = parsed["provider_payment_id"]
+            payment.save(update_fields=["status", "paid_at", "provider_payment_id", "updated_at"])
+            cls.activate_subscription_from_payment(payment)
+            from .subscription_service import PromoCodeService
+
+            PromoCodeService.confirm_for_payment(payment)
+        elif new_status in ("failed", "cancelled", "refunded"):
+            payment.status = new_status
+            payment.save(update_fields=["status", "updated_at"])
+            from .subscription_service import PromoCodeService
+
+            PromoCodeService.release_for_payment(payment)
+
+        event.processed = True
+        event.processed_at = timezone.now()
+        event.save()
+        return {"ok": True, "payment_id": payment.pk, "status": payment.status}
+
+    @classmethod
+    def activate_subscription_from_payment(cls, payment):
+        """Назначает plan с платежа и продлевает период — фикс бага mock webhook."""
+        from .models import PromoCode, TariffPlan, TeacherSubscription
+        from .referral_service import ReferralService
+        from .subscription_service import SubscriptionLimitService
+
+        plan = payment.plan
+        if plan is None:
+            slug = (payment.metadata or {}).get("plan_slug")
+            if slug:
+                plan = TariffPlan.objects.filter(slug=slug, is_active=True).first()
+        if plan is None:
+            return
+
+        sub = payment.subscription
+        if sub is None:
+            sub = SubscriptionLimitService.get_or_create_subscription(
+                payment.teacher, apply_promo=False
+            )
+            payment.subscription = sub
+            payment.save(update_fields=["subscription", "updated_at"])
+
+        now = timezone.now()
+        months = 12 if payment.billing_period == "year" else 1
+        bonus_days = 0
+        if payment.promo_code_id:
+            promo = payment.promo_code
+            if promo.discount_type == PromoCode.DiscountType.FREE_MONTHS:
+                months = max(months, int(promo.discount_value or 0) or months)
+            elif promo.discount_type == PromoCode.DiscountType.BONUS_DAYS:
+                bonus_days = int(promo.discount_value or 0)
+            bonus_days += int(getattr(promo, "bonus_days", 0) or 0)
+
+        base = sub.expires_at if sub.expires_at and sub.expires_at > now else now
+        expires = add_months(base, months)
+        if bonus_days:
+            expires = expires + timedelta(days=bonus_days)
+
+        # Автопродление — только при явном согласии (metadata / поле платежа).
+        # По умолчанию False: без recurring-провайдера и без opt-in списаний нет.
+        meta = payment.metadata if isinstance(payment.metadata, dict) else {}
+        auto_renew = bool(meta.get("auto_renew") is True or meta.get("consent_auto_renew") is True)
+
+        sub.plan = plan
+        sub.status = TeacherSubscription.Status.ACTIVE
+        sub.source = TeacherSubscription.Source.PAYMENT
+        sub.billing_period = payment.billing_period
+        sub.current_period_start = now
+        sub.current_period_end = expires
+        sub.expires_at = expires
+        sub.auto_renew = auto_renew
+        sub.cancelled_at = None
+        sub.save(
+            update_fields=[
+                "plan",
+                "status",
+                "source",
+                "billing_period",
+                "current_period_start",
+                "current_period_end",
+                "expires_at",
+                "auto_renew",
+                "cancelled_at",
+                "updated_at",
+            ]
+        )
+
+        try:
+            ReferralService.grant_payment_reward_if_applicable(payment)
+        except Exception:
             pass
-
-    @classmethod
-    def _create_real_payment_url(cls, payment, plan) -> str:
-        # Место для интеграции с реальным провайдером
-        raise NotImplementedError("Real payment provider not configured")
-
-    @classmethod
-    def _check_real_payment_status(cls, payment) -> dict:
-        raise NotImplementedError("Real payment provider not configured")
-
-    @classmethod
-    def _handle_real_webhook(cls, payload: dict):
-        raise NotImplementedError("Real payment provider not configured")

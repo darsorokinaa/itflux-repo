@@ -588,8 +588,13 @@ class Lesson(models.Model):
 
     class AccessLevel(models.TextChoices):
         FREE = "free", "Бесплатный"
-        PAID = "paid", "Платный"
-        PRIVATE = "private", "Закрытый"
+        TEACHER = "teacher", "Учитель"
+        PROFESSIONAL = "professional", "Профи"
+        PREMIUM = "premium", "Премиум"
+        CORPORATE = "corporate", "Корпоративный"
+        # Legacy aliases kept for DB values until data migration remaps them.
+        PAID = "paid", "Платный (legacy)"
+        PRIVATE = "private", "Закрытый (legacy)"
 
     title = models.CharField(max_length=255, db_index=True)
     slug = models.SlugField(max_length=255, unique=True, db_index=True)
@@ -628,6 +633,9 @@ class Lesson(models.Model):
         default=AccessLevel.FREE,
         db_index=True,
     )
+    published_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    is_new = models.BooleanField(default=False)
+    new_until = models.DateTimeField(null=True, blank=True)
     cover_image = models.ImageField(upload_to=lesson_cover_upload_to, blank=True, null=True)
     card_background_image = models.ImageField(upload_to=lesson_cover_upload_to, blank=True, null=True, verbose_name="Фон карточки (картинка)")
     card_background_color = models.CharField(max_length=7, blank=True, default="", verbose_name="Фон карточки (HEX цвет)", help_text="Например, #2B52F5")

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import CabinetIcon from "../CabinetIcons";
 import BoardLessonBlock from "./BoardLessonBlock";
 import LiveVariantAnswersTable from "./LiveVariantAnswersTable";
+import LiveMaterialAnswersTable from "./LiveMaterialAnswersTable";
 
 function kindIcon(kind) {
   if (kind === "board") return "board";
@@ -183,6 +184,7 @@ export default function VideoLessonMaterialsPanel({
   event,
   liveAnswers,
   liveAnswersLoading,
+  materialPresence = [],
   attachError = "",
   toast = "",
   onClose,
@@ -351,6 +353,16 @@ export default function VideoLessonMaterialsPanel({
         {canManage && presented?.kind === "variant" ? (
           <section className="video-lesson-aside__section video-lesson-aside__section--live">
             <LiveVariantAnswersTable answers={liveAnswers} loading={liveAnswersLoading} compact />
+          </section>
+        ) : null}
+
+        {canManage && materialSession?.state ? (
+          <section className="video-lesson-aside__section video-lesson-aside__section--live">
+            <LiveMaterialAnswersTable
+              state={materialSession.state}
+              presence={materialPresence}
+              compact
+            />
           </section>
         ) : null}
       </div>

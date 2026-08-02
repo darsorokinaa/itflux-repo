@@ -27,6 +27,8 @@ from .billing_service import (
     apply_cancel_billing,
     apply_no_show,
     build_reminder_text,
+    charge_lesson_from_package,
+    charge_multiple_lessons_from_package,
     check_package_for_planning,
     create_adjustment,
     cancel_package,
@@ -41,12 +43,16 @@ from .billing_service import (
     export_transactions_xlsx,
     extend_package,
     finalize_event_billing,
+    find_available_packages_for_charge,
     freeze_package,
     get_or_create_billing_account,
     get_or_create_teacher_settings,
     legacy_backfill_apply,
     legacy_backfill_preview,
+    mark_lesson_as_paid_manually,
+    preview_charge_lessons_from_package,
     preview_finalize,
+    refund_lesson_package_charge,
     register_payment,
     reports,
     reverse_transaction,
@@ -468,6 +474,222 @@ class BillingPackageAdjustView(APIView):
         except BillingError as exc:
             return _err(exc)
         return Response(serialize_package(package))
+
+
+class BillingPackageSettleUnpaidView(APIView):
+    """Погасить неоплаченные уроки из абонемента (в т.ч. задним числом)."""
+
+    permission_classes = [IsAuthenticated, IsCabinetTeacher]
+
+    def post(self, request, package_id):
+        package = get_object_or_404(
+            LessonPackage, pk=package_id, billing_account__teacher=request.user
+        )
+        account = package.billing_account
+        data = request.data or {}
+        preview_only = bool(data.get("preview"))
+        try:
+            if preview_only:
+                result = preview_charge_lessons_from_package(
+                    teacher=request.user,
+                    account=account,
+                    package=package,
+                    event_billing_ids=data.get("event_billing_ids") or data.get("lesson_ids"),
+                    select_earliest=bool(data.get("select_earliest")),
+                )
+                return Response(result)
+            result = charge_multiple_lessons_from_package(
+                teacher=request.user,
+                account=account,
+                package=package,
+                event_billing_ids=data.get("event_billing_ids") or data.get("lesson_ids"),
+                select_earliest=bool(data.get("select_earliest")),
+                comment=data.get("comment") or "",
+                idempotency_key=data.get("idempotency_key")
+                or request.headers.get("X-Idempotency-Key", ""),
+            )
+        except BillingError as exc:
+            return _err(exc)
+        return Response(
+            {
+                "message": result["message"],
+                "charged_count": result["charged_count"],
+                "remaining_units": str(result["remaining_units"]),
+                "package": serialize_package(result["package"]),
+                "items": [
+                    serialize_event_billing(row["record"]) for row in result["results"]
+                ],
+                "account": serialize_account(account, include_history=True),
+            }
+        )
+
+
+class BillingAccountChargeFromPackageView(APIView):
+    """Списать выбранные неоплаченные уроки ученика из абонемента."""
+
+    permission_classes = [IsAuthenticated, IsCabinetTeacher]
+
+    def get(self, request, account_id):
+        account = get_object_or_404(BillingAccount, pk=account_id, teacher=request.user)
+        packages = find_available_packages_for_charge(account)
+        return Response(
+            {
+                "account": serialize_account(account, include_history=False),
+                "packages": [serialize_package(p, include_history=False) for p in packages],
+            }
+        )
+
+    def post(self, request, account_id):
+        account = get_object_or_404(BillingAccount, pk=account_id, teacher=request.user)
+        data = request.data or {}
+        package_id = data.get("package_id")
+        if not package_id:
+            return _err(BillingError("NO_PACKAGE", "Выберите абонемент"))
+        package = get_object_or_404(
+            LessonPackage, pk=package_id, billing_account=account
+        )
+        preview_only = bool(data.get("preview"))
+        try:
+            if preview_only:
+                result = preview_charge_lessons_from_package(
+                    teacher=request.user,
+                    account=account,
+                    package=package,
+                    event_billing_ids=data.get("event_billing_ids") or data.get("lesson_ids"),
+                    select_earliest=bool(data.get("select_earliest")),
+                )
+                return Response(result)
+            result = charge_multiple_lessons_from_package(
+                teacher=request.user,
+                account=account,
+                package=package,
+                event_billing_ids=data.get("event_billing_ids") or data.get("lesson_ids"),
+                select_earliest=bool(data.get("select_earliest")),
+                comment=data.get("comment") or "",
+                idempotency_key=data.get("idempotency_key")
+                or request.headers.get("X-Idempotency-Key", ""),
+            )
+        except BillingError as exc:
+            return _err(exc)
+        return Response(
+            {
+                "message": result["message"],
+                "charged_count": result["charged_count"],
+                "remaining_units": str(result["remaining_units"]),
+                "package": serialize_package(result["package"]),
+                "items": [
+                    serialize_event_billing(row["record"]) for row in result["results"]
+                ],
+                "account": serialize_account(account, include_history=True),
+            }
+        )
+
+
+class BillingEventBillingChargeFromPackageView(APIView):
+    """Списать один конкретный урок из абонемента."""
+
+    permission_classes = [IsAuthenticated, IsCabinetTeacher]
+
+    def post(self, request, record_id):
+        record = get_object_or_404(
+            EventBillingRecord,
+            pk=record_id,
+            billing_account__teacher=request.user,
+        )
+        data = request.data or {}
+        try:
+            result = charge_lesson_from_package(
+                teacher=request.user,
+                event_billing=record,
+                package_id=data.get("package_id"),
+                comment=data.get("comment") or "",
+                idempotency_key=data.get("idempotency_key")
+                or request.headers.get("X-Idempotency-Key", ""),
+            )
+        except BillingError as exc:
+            return _err(exc)
+        return Response(
+            {
+                "message": result["message"],
+                "before_package_payment": result.get("before_package_payment"),
+                "remaining_units": str(result["remaining_units"]),
+                "item": serialize_event_billing(result["record"]),
+                "transaction": serialize_transaction(result["transaction"]),
+                "package": serialize_package(result["package"]),
+                "account": serialize_account(
+                    result["record"].billing_account, include_history=True
+                ),
+            }
+        )
+
+
+class BillingEventBillingRefundPackageView(APIView):
+    """Отменить списание урока из абонемента."""
+
+    permission_classes = [IsAuthenticated, IsCabinetTeacher]
+
+    def post(self, request, record_id):
+        record = get_object_or_404(
+            EventBillingRecord,
+            pk=record_id,
+            billing_account__teacher=request.user,
+        )
+        data = request.data or {}
+        try:
+            result = refund_lesson_package_charge(
+                teacher=request.user,
+                event_billing=record,
+                comment=data.get("comment") or "",
+            )
+        except BillingError as exc:
+            return _err(exc)
+        return Response(
+            {
+                "message": result["message"],
+                "item": serialize_event_billing(result["record"]),
+                "transaction": serialize_transaction(result["reversal"]),
+                "account": serialize_account(
+                    result["record"].billing_account, include_history=True
+                ),
+            }
+        )
+
+
+class BillingEventBillingMarkPaidView(APIView):
+    """Отметить урок оплаченным отдельно (без абонемента)."""
+
+    permission_classes = [IsAuthenticated, IsCabinetTeacher]
+
+    def post(self, request, record_id):
+        record = get_object_or_404(
+            EventBillingRecord,
+            pk=record_id,
+            billing_account__teacher=request.user,
+        )
+        data = request.data or {}
+        try:
+            payment = mark_lesson_as_paid_manually(
+                teacher=request.user,
+                event_billing=record,
+                amount=_dec(data.get("amount"), Decimal("0")),
+                paid_at=_parse_dt(data.get("paid_at")),
+                method=data.get("method") or "",
+                comment=data.get("comment") or "",
+            )
+        except BillingError as exc:
+            return _err(exc)
+        record.refresh_from_db()
+        return Response(
+            {
+                "message": "Оплата урока отмечена",
+                "payment_id": str(payment.id),
+                "item": serialize_event_billing(record),
+                "account": serialize_account(
+                    record.billing_account, include_history=True
+                ),
+            },
+            status=201,
+        )
 
 
 class BillingUnresolvedLessonsView(APIView):

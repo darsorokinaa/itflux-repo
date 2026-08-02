@@ -11,6 +11,10 @@ WorkingDirectory=/opt/itfluxacademy/itflux
 RuntimeDirectory=itflux
 LogsDirectory=itflux
 
+# Секреты и production-env ТОЛЬКО через EnvironmentFile (не коммитить реальные значения).
+# Скопируйте deploy/.env.production.example → /etc/itflux/itflux.env и заполните на сервере.
+EnvironmentFile=-/etc/itflux/itflux.env
+
 # WSGI (Gunicorn) не обрабатывает WebSocket: комната урока (/ws/lesson/…) не работает.
 # Нужен ASGI — Daphne, иначе ученик не получает вариант и fetch к API не вызывается / падает по таймауту.
 ExecStart=/opt/itfluxacademy/itflux/venv/bin/python3 -m daphne \
@@ -21,64 +25,19 @@ ExecStart=/opt/itfluxacademy/itflux/venv/bin/python3 -m daphne \
     Generator.asgi:application
 
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
-Environment="PGDATABASE=itflux"
-Environment="PGUSER=generator_user"
-Environment="PGPASSWORD=StrongPass123"
-Environment="PGHOST=localhost"
-Environment="PGPORT=5432"
 Environment="DJANGO_SETTINGS_MODULE=Generator.settings"
 Environment="DEBUG=false"
-Environment="SECRET_KEY=WNbG1HzC4_lta5i_vvh6TPK3_G33Xlhzlr167fDXCFd_CVc0fS72WcaWvtLXwHreDpo"
-# CSRF_TRUSTED_ORIGINS задавать не нужно: они строятся автоматически из DJANGO_ALLOWED_HOSTS.
-# Если нужны дополнительные origins — добавьте: Environment="CSRF_TRUSTED_ORIGINS=https://extra.domain.ru"
-Environment="DJANGO_ALLOWED_HOSTS=tes.itflux.ru,lk.tes.itflux.ru,localhost,127.0.0.1"
-Environment="LK_PUBLIC_URL=https://lk.tes.itflux.ru"
-# Куда редирект после /admin/logout/ (публичный сайт, не localhost)
-Environment="ITFLUX_PUBLIC_HOME_URL=https://tes.itflux.ru"
-# Куда открывать ЛК по кнопке (дашборд). Пример: http://lk.itflux.ru/dashboard
-# Environment="LK_DASHBOARD_URL=http://lk.itflux.ru/dashboard"
-# Пароль для кнопки «Личный кабинет»: если не задать — в коде по умолчанию 100326.
-# На проде лучше задать только на сервере (не коммитить): Environment="LK_NAVIGATION_PASSWORD=..."
-# Отключить проверку: Environment="LK_NAVIGATION_PASSWORD="
-# Тестовый стенд часто без Redis — in-memory каналы (один процесс Daphne). С Redis — удалите эту строку.
+# Несекретные defaults (переопределяются EnvironmentFile при необходимости)
 Environment="CHANNEL_LAYER_BACKEND=inmemory"
-Environment="LESSON_SECRET=eKPoaKBpV0QeRzYi3YWUV3gBNfWamBmGwK5MgLWvSoKmenpLVQGf7s0"
-# Если ЛК проверяет X-Lesson-Webhook-Secret: задайте тот же ключ, что в ЛК, или оставьте пустым —
-# тогда генератор отправит LESSON_SECRET (если в ЛК разрешён тот же секрет, что у JWT).
-# Environment="LESSON_WEBHOOK_SECRET=..."
-# Прямой HTTP к ЛК (порт 8003) — минует nginx и самоподписанный SSL-сертификат.
-# Генератор и ЛК на одном сервере, поэтому http://127.0.0.1:8003 работает без TLS.
-Environment="LK_LESSON_NOTIFY_URL=http://127.0.0.1:8003/api/lesson/teacher-joined/"
-# —— Telegram-уведомления (расписание, публикация оценок, привязка аккаунта) ——
-# Токен бота от @BotFather. Без него отправка молча не работает (send_telegram_message
-# логирует warning и возвращает False), а команда set_telegram_webhook откажет с ошибкой.
-# Environment="TELEGRAM_BOT_TOKEN=..."
-# Username бота без @ — для кнопки «Подключить Telegram» (t.me/<bot>?start=...).
-# Environment="TELEGRAM_BOT_USERNAME=..."
-# Секрет вебхука (setWebhook secret_token → заголовок X-Telegram-Bot-Api-Secret-Token).
-# Environment="TELEGRAM_WEBHOOK_SECRET=..."
-# Опционально — общий чат для отчётов об ошибках (TELEGRAM_CHAT_ID/TELEGRAM_TOPIC_ID),
-# на личные уведомления пользователям не влияет — там используется их привязанный chat_id.
-# Environment="TELEGRAM_CHAT_ID=..."
-# Environment="TELEGRAM_TOPIC_ID=..."
-# После заполнения токена/секрета и рестарта сервиса один раз выполните:
-#   cd /opt/itfluxacademy/itflux && venv/bin/python manage.py set_telegram_webhook
-# Без этого шага привязка Telegram и личные уведомления не работают.
-# —— Jitsi Meet (кабинет /cabinet/meetings/) ——
-# Системный Jitsi на lesson.itflux-academy.ru (Prosody token).
-Environment="JITSI_DOMAIN=lesson.itflux-academy.ru"
-Environment="JITSI_AUTH_MODE=jwt"
-Environment="JITSI_SUB=lesson.itflux-academy.ru"
-Environment="JITSI_EMBED_EXTRA_HOSTS=lesson.itflux-academy.ru"
-Environment="JITSI_APP_ID=generator_test"
-Environment="JITSI_APP_SECRET=y4vz0t7pmGM8uppejoQwhGxIZv1vtWF3"
-Environment="JITSI_AUD=jitsi"
-Environment="JITSI_TOKEN_TTL_SECONDS=7200"
-Environment="JITSI_JOIN_BEFORE_MINUTES=15"
-Environment="JITSI_JOIN_AFTER_MINUTES=30"
+Environment="ITFLUX_PUBLIC_HOME_URL=https://tes.itflux.ru"
+
+# Обязательные переменные задайте в /etc/itflux/itflux.env:
+#   SECRET_KEY, DJANGO_ALLOWED_HOSTS, PGDATABASE, PGUSER, PGPASSWORD, PGHOST, PGPORT,
+#   LESSON_SECRET, LK_PUBLIC_URL, LK_LESSON_NOTIFY_URL,
+#   JITSI_*, VAPID_*, TELEGRAM_*, PAYMENT_* (не mock в production)
 
 Restart=always
-RestartSec=5
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target

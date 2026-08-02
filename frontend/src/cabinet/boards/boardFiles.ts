@@ -2,6 +2,16 @@
 
 const ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp"]);
 
+/** Стабильный URL для persist/live — не blob/data. */
+const STABLE_URL_KEY = "itfluxStableURL";
+
+/** Прозрачный 1×1 PNG — fallback, если asset недоступен. */
+const MISSING_IMAGE_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+const MAX_HYDRATE_RETRIES = 2;
+const HYDRATE_CONCURRENCY = 4;
+
 function parseDataUrl(dataUrl: string): { mime: string; bytes: Uint8Array } | null {
   if (!dataUrl.startsWith("data:") || !dataUrl.includes(",")) return null;
   const [header, b64] = dataUrl.split(",", 2);
@@ -55,6 +65,46 @@ export function preferStableFile(
   const left = a && typeof a === "object" ? a : {};
   const right = b && typeof b === "object" ? b : {};
   return fileUrlStability(left) >= fileUrlStability(right) ? { ...right, ...left } : { ...left, ...right };
+}
+
+function stableUrlOf(meta: Record<string, unknown>): string {
+  const tagged = String(meta[STABLE_URL_KEY] || "");
+  if (isStableFileUrl(tagged)) return tagged;
+  const url = String(meta.dataURL || meta.url || "");
+  return isStableFileUrl(url) ? url : "";
+}
+
+/**
+ * Для отображения на canvas: если один файл — гидратированный blob того же
+ * asset, что и стабильный URL другого, оставляем blob (иначе remount-баг).
+ * Для persist/live по-прежнему используйте preferStableFile / filesForPersist.
+ */
+export function preferDisplayFile(
+  a: Record<string, unknown> | null | undefined,
+  b: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const left = a && typeof a === "object" ? a : {};
+  const right = b && typeof b === "object" ? b : {};
+  const leftUrl = String(left.dataURL || left.url || "");
+  const rightUrl = String(right.dataURL || right.url || "");
+  const leftStable = stableUrlOf(left);
+  const rightStable = stableUrlOf(right);
+
+  if (leftStable && rightStable && leftStable === rightStable) {
+    if (isTransientFileUrl(leftUrl) && !isTransientFileUrl(rightUrl)) {
+      return { ...right, ...left, [STABLE_URL_KEY]: leftStable };
+    }
+    if (isTransientFileUrl(rightUrl) && !isTransientFileUrl(leftUrl)) {
+      return { ...left, ...right, [STABLE_URL_KEY]: rightStable };
+    }
+  }
+  if (leftStable && isTransientFileUrl(leftUrl) && isStableFileUrl(rightUrl) && rightUrl === leftStable) {
+    return { ...right, ...left, [STABLE_URL_KEY]: leftStable };
+  }
+  if (rightStable && isTransientFileUrl(rightUrl) && isStableFileUrl(leftUrl) && leftUrl === rightStable) {
+    return { ...left, ...right, [STABLE_URL_KEY]: rightStable };
+  }
+  return preferStableFile(left, right);
 }
 
 /**
@@ -111,9 +161,230 @@ export function filesForLivePublish(files: SceneFiles | null | undefined): Scene
   const out: SceneFiles = {};
   for (const [id, meta] of Object.entries(files)) {
     if (!meta || typeof meta !== "object") continue;
+    const stable = String(meta[STABLE_URL_KEY] || "");
     const url = String(meta.dataURL || meta.url || "");
-    if (isTransientFileUrl(url)) continue;
-    out[id] = meta;
+    const publishUrl = isStableFileUrl(stable) ? stable : (isStableFileUrl(url) ? url : "");
+    if (!publishUrl) continue;
+    out[id] = {
+      ...meta,
+      dataURL: publishUrl,
+      url: publishUrl,
+    };
+    delete out[id][STABLE_URL_KEY];
   }
   return out;
 }
+
+/**
+ * Для REST-сохранения: предпочитаем стабильный API URL, не локальный blob.
+ * Иначе каждый autosave перезаливал бы уже загруженные картинки.
+ */
+export function filesForPersist(files: SceneFiles | null | undefined): SceneFiles {
+  if (!files || typeof files !== "object") return {};
+  const out: SceneFiles = {};
+  for (const [id, meta] of Object.entries(files)) {
+    if (!meta || typeof meta !== "object") continue;
+    const stable = String(meta[STABLE_URL_KEY] || "");
+    const url = String(meta.dataURL || meta.url || "");
+    const persistUrl = isStableFileUrl(stable) ? stable : url;
+    const next = { ...meta, dataURL: persistUrl, url: persistUrl };
+    delete next[STABLE_URL_KEY];
+    // Не сохраняем missing-placeholder как «настоящий» файл.
+    if (next.dataURL === MISSING_IMAGE_DATA_URL && !isStableFileUrl(stable)) {
+      continue;
+    }
+    out[id] = next;
+  }
+  return out;
+}
+
+export type HydrateBoardFilesResult = {
+  files: SceneFiles;
+  /** Blob URL, созданные при hydrate — отозвать при размонтировании. */
+  blobUrls: string[];
+  missingFileIds: string[];
+  failedFileIds: string[];
+};
+
+async function decodeImageBlob(blob: Blob): Promise<void> {
+  if (typeof createImageBitmap === "function") {
+    try {
+      const bmp = await createImageBitmap(blob);
+      bmp.close?.();
+      return;
+    } catch {
+      /* fall through */
+    }
+  }
+  if (typeof Image === "undefined") return;
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        if (typeof img.decode === "function") {
+          img.decode().then(() => resolve()).catch(() => resolve());
+        } else {
+          resolve();
+        }
+      };
+      img.onerror = () => reject(new Error("image_decode_failed"));
+      img.src = objectUrl;
+    });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function fetchAssetAsBlob(url: string, attempt = 0): Promise<Blob> {
+  const res = await fetch(url, {
+    credentials: "same-origin",
+    headers: { Accept: "image/*,*/*" },
+  });
+  if (!res.ok) {
+    if (attempt < MAX_HYDRATE_RETRIES && (res.status >= 500 || res.status === 429)) {
+      await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+      return fetchAssetAsBlob(url, attempt + 1);
+    }
+    throw new Error(`asset_http_${res.status}`);
+  }
+  const blob = await res.blob();
+  if (!blob || blob.size === 0) throw new Error("asset_empty");
+  return blob;
+}
+
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  async function run() {
+    while (cursor < items.length) {
+      const idx = cursor;
+      cursor += 1;
+      results[idx] = await worker(items[idx]);
+    }
+  }
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, () => run());
+  await Promise.all(runners);
+  return results;
+}
+
+/**
+ * Перед монтированием Excalidraw: стабильные API URL → blob URL + decode.
+ * Excalidraw надёжно рисует blob/data с первого кадра; raw /api/... часто
+ * «молчит» до remount (особенно в iframe комнаты урока).
+ *
+ * Стабильный URL сохраняется в itfluxStableURL для persist/live.
+ */
+export async function hydrateBoardFiles(
+  files: SceneFiles | null | undefined,
+  opts: { signal?: AbortSignal } = {},
+): Promise<HydrateBoardFilesResult> {
+  if (!files || typeof files !== "object") {
+    return { files: {}, blobUrls: [], missingFileIds: [], failedFileIds: [] };
+  }
+
+  const blobUrls: string[] = [];
+  const missingFileIds: string[] = [];
+  const failedFileIds: string[] = [];
+  const next: SceneFiles = { ...files };
+  const entries = Object.entries(files).filter(([, meta]) => meta && typeof meta === "object");
+
+  await mapPool(entries, HYDRATE_CONCURRENCY, async ([fileId, meta]) => {
+    if (opts.signal?.aborted) return;
+    const record = meta as Record<string, unknown>;
+    const rawUrl = String(record.dataURL || record.url || "");
+    if (!rawUrl) {
+      missingFileIds.push(fileId);
+      next[fileId] = {
+        ...record,
+        id: record.id || fileId,
+        mimeType: record.mimeType || "image/png",
+        dataURL: MISSING_IMAGE_DATA_URL,
+        url: MISSING_IMAGE_DATA_URL,
+        status: "error",
+      };
+      return;
+    }
+    // Уже data:/blob: — только decode для надёжного первого кадра.
+    if (isTransientFileUrl(rawUrl)) {
+      if (rawUrl.startsWith("blob:")) {
+        try {
+          const blob = await parseBlobUrl(rawUrl).then((p) => (
+            p ? new Blob([p.bytes.buffer as ArrayBuffer], { type: p.mime }) : null
+          ));
+          if (blob) await decodeImageBlob(blob);
+        } catch {
+          /* best-effort */
+        }
+      }
+      next[fileId] = { ...record, id: record.id || fileId };
+      return;
+    }
+
+    try {
+      const blob = await fetchAssetAsBlob(rawUrl);
+      if (opts.signal?.aborted) return;
+      await decodeImageBlob(blob);
+      if (opts.signal?.aborted) return;
+      const objectUrl = URL.createObjectURL(blob);
+      blobUrls.push(objectUrl);
+      next[fileId] = {
+        ...record,
+        id: record.id || fileId,
+        mimeType: record.mimeType || blob.type || "image/png",
+        dataURL: objectUrl,
+        url: objectUrl,
+        [STABLE_URL_KEY]: rawUrl,
+        created: record.created || Date.now(),
+      };
+    } catch {
+      failedFileIds.push(fileId);
+      next[fileId] = {
+        ...record,
+        id: record.id || fileId,
+        mimeType: record.mimeType || "image/png",
+        dataURL: MISSING_IMAGE_DATA_URL,
+        url: MISSING_IMAGE_DATA_URL,
+        [STABLE_URL_KEY]: rawUrl,
+        status: "error",
+      };
+    }
+  });
+
+  return { files: next, blobUrls, missingFileIds, failedFileIds };
+}
+
+export function revokeBoardBlobUrls(urls: Iterable<string> | null | undefined): void {
+  if (!urls) return;
+  for (const url of urls) {
+    if (typeof url === "string" && url.startsWith("blob:")) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+/** fileId изображений в elements, для которых нет записи в files. */
+export function findMissingImageFileIds(
+  elements: unknown[] | null | undefined,
+  files: SceneFiles | null | undefined,
+): string[] {
+  const fileMap = files || {};
+  const missing: string[] = [];
+  for (const raw of elements || []) {
+    if (!raw || typeof raw !== "object") continue;
+    const el = raw as { type?: string; fileId?: string; isDeleted?: boolean };
+    if (el.isDeleted || el.type !== "image" || !el.fileId) continue;
+    if (!fileMap[el.fileId]) missing.push(el.fileId);
+  }
+  return missing;
+}
+
+export { STABLE_URL_KEY, MISSING_IMAGE_DATA_URL };

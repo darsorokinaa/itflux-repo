@@ -36,6 +36,7 @@ from .journal_service import (
     attendance_report,
     build_gradebook,
     build_homework_result_payload,
+    build_journal_entries_feed,
     performance_summary,
     bulk_apply_comment,
     bulk_apply_criterion,
@@ -85,6 +86,29 @@ class JournalGradebookView(APIView):
             )
         except JournalError as e:
             return _err(e)
+        return Response(data)
+
+
+class JournalEntriesView(APIView):
+    """Единая лента: уроки + ДЗ (результат из HomeworkSubmission)."""
+
+    permission_classes = [IsAuthenticated, IsCabinetTeacher]
+
+    def get(self, request):
+        params = request.query_params
+        data = build_journal_entries_feed(
+            request.user,
+            student_id=params.get("student_id"),
+            group_id=params.get("group_id"),
+            date_from=params.get("date_from"),
+            date_to=params.get("date_to"),
+            entry_type=params.get("entry_type"),
+            homework_status=params.get("homework_status"),
+            overdue_only=params.get("overdue") in {"1", "true", "yes"},
+            reviewed=params.get("reviewed"),
+            homework_only=params.get("homework_only") in {"1", "true", "yes"},
+            limit=min(int(params.get("limit") or 200), 500),
+        )
         return Response(data)
 
 
@@ -813,11 +837,18 @@ class JournalExportView(APIView):
         for r in qs[:2000]:
             row = {
                 "date": r.journal.lesson_date.isoformat(),
+                "entry_type": "lesson",
                 "topic": r.journal.actual_topic or r.journal.planned_topic,
                 "student": r.student.full_name,
                 "group": r.journal.group.title if r.journal.group_id else "",
                 "attendance": r.attendance_status,
+                "status": r.publish_status,
                 "overall_score": str(r.overall_score) if r.overall_score is not None else "",
+                "score_percent": str(r.overall_score) if r.overall_score is not None else "",
+                "max_score": "100",
+                "due_at": "",
+                "submitted_at": "",
+                "is_overdue": "",
                 "comment": r.teacher_comment,
             }
             if include_private:
@@ -828,6 +859,42 @@ class JournalExportView(APIView):
                 elif sc.value is not None:
                     row[sc.criterion.title] = str(sc.value)
             rows.append(row)
+
+        # Include homework results from canonical HomeworkSubmission source.
+        include_hw = request.query_params.get("include_homework") not in {"0", "false", "no"}
+        if include_hw:
+            feed = build_journal_entries_feed(
+                request.user,
+                student_id=request.query_params.get("student_id"),
+                group_id=request.query_params.get("group_id"),
+                date_from=request.query_params.get("date_from"),
+                date_to=request.query_params.get("date_to"),
+                homework_only=True,
+                limit=2000,
+            )
+            for e in feed.get("entries") or []:
+                rows.append(
+                    {
+                        "date": e.get("date") or "",
+                        "entry_type": "homework",
+                        "topic": e.get("title") or "",
+                        "student": e.get("student_name") or "",
+                        "group": e.get("group_name") or "",
+                        "attendance": "",
+                        "status": e.get("status") or "",
+                        "overall_score": (
+                            str(e["score_percent"]) if e.get("score_percent") is not None else ""
+                        ),
+                        "score_percent": (
+                            str(e["score_percent"]) if e.get("score_percent") is not None else ""
+                        ),
+                        "max_score": "100",
+                        "due_at": e.get("due_at") or "",
+                        "submitted_at": e.get("submitted_at") or "",
+                        "is_overdue": "yes" if e.get("is_overdue") else "",
+                        "comment": e.get("comment") or "",
+                    }
+                )
 
         if fmt == "xlsx":
             try:

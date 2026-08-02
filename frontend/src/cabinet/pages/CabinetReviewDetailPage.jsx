@@ -38,6 +38,7 @@ import {
 } from "../../utils/cabinetAuth";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import HomeworkCopyModal from "../components/HomeworkCopyModal";
+import HomeworkFromReviewModal from "../components/HomeworkFromReviewModal";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import HomeworkReviewSummary, {
   buildHomeworkReviewFromVariant,
@@ -277,6 +278,9 @@ export default function CabinetReviewDetailPage() {
   const [addingTask, setAddingTask] = useState(false);
   const [notice, setNotice] = useState("");
   const [copyModalOpen, setCopyModalOpen] = useState(false);
+  const [hwModalOpen, setHwModalOpen] = useState(false);
+  const [hwPreselectPartial, setHwPreselectPartial] = useState(false);
+  const [checkDoneBanner, setCheckDoneBanner] = useState(false);
 
   useEffect(() => {
     const fromQuery = searchParams.get("notice");
@@ -443,20 +447,50 @@ export default function CabinetReviewDetailPage() {
     });
   };
 
-  const runCheck = async () => {
+  const runCheck = async ({ stay = false, openHomework = false } = {}) => {
     setBusy(true);
     setError(null);
     try {
       const updated = await checkReviewItem(reviewId, buildPayload());
       setReview(updated);
       window.dispatchEvent(new Event("cabinet:nav-counts-refresh"));
-      navigate("/cabinet/review");
+      if (openHomework) {
+        setHwPreselectPartial(false);
+        setHwModalOpen(true);
+        setCheckDoneBanner(true);
+      } else if (stay) {
+        setCheckDoneBanner(true);
+        setNotice("Проверка сохранена");
+      } else {
+        navigate("/cabinet/review");
+      }
     } catch (err) {
       setError(err.message || "Не удалось сохранить проверку");
     } finally {
       setBusy(false);
       setConfirmAction(null);
     }
+  };
+
+  const openHomeworkFromReview = async ({ includePartial = false } = {}) => {
+    setError(null);
+    setHwPreselectPartial(includePartial);
+    if (isPending && !awaitingSubmission) {
+      setBusy(true);
+      try {
+        const updated = await checkReviewItem(reviewId, buildPayload());
+        setReview(updated);
+        window.dispatchEvent(new Event("cabinet:nav-counts-refresh"));
+        setNotice("Результаты проверки сохранены");
+      } catch (err) {
+        setError(err.message || "Сначала сохраните проверку");
+        setBusy(false);
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
+    setHwModalOpen(true);
   };
 
   const runReturn = async () => {
@@ -497,7 +531,18 @@ export default function CabinetReviewDetailPage() {
       text: "Сохранить оценку и отметить работу проверенной?",
       confirmLabel: "Проверено",
       danger: false,
-      onConfirm: runCheck,
+      onConfirm: () => runCheck({ stay: true }),
+    });
+  };
+
+  const handleCheckAndHomework = () => {
+    setConfirmAction({
+      type: "check-hw",
+      title: "Завершить проверку и задать ДЗ?",
+      text: "Сохраним проверку и откроем форму нового домашнего задания по ошибкам.",
+      confirmLabel: "Сохранить и задать ДЗ",
+      danger: false,
+      onConfirm: () => runCheck({ openHomework: true }),
     });
   };
 
@@ -975,6 +1020,34 @@ export default function CabinetReviewDetailPage() {
       </section>
       ) : null}
 
+      {checkDoneBanner ? (
+        <section className="cb-review-detail__done-banner" aria-live="polite">
+          <div>
+            <strong>Проверка завершена</strong>
+            <p className="cabinet-auth-muted" style={{ margin: "4px 0 0" }}>
+              Можно задать ДЗ по ошибкам или перейти к другим работам.
+            </p>
+          </div>
+          <div className="cb-review-detail__done-actions">
+            <button
+              type="button"
+              className="cb-review-detail__btn cb-review-detail__btn--primary"
+              disabled={busy || !canCopyHomework}
+              onClick={() => void openHomeworkFromReview({ includePartial: false })}
+            >
+              Задать ДЗ по ошибкам
+            </button>
+            <button
+              type="button"
+              className="cb-review-detail__btn cb-review-detail__btn--ghost"
+              onClick={() => navigate("/cabinet/review")}
+            >
+              К списку работ
+            </button>
+          </div>
+        </section>
+      ) : null}
+
       <div className="cb-review-detail__footer">
         <Link
           to="/cabinet/journal"
@@ -982,6 +1055,16 @@ export default function CabinetReviewDetailPage() {
         >
           Итоги урока
         </Link>
+        {canCopyHomework ? (
+          <button
+            type="button"
+            className="cb-review-detail__btn cb-review-detail__btn--secondary"
+            disabled={busy || awaitingSubmission}
+            onClick={() => void openHomeworkFromReview()}
+          >
+            Задать домашнее задание
+          </button>
+        ) : null}
         {canCopyHomework || submission?.homework ? (
           <div className="cb-review-detail__more" ref={moreMenuRef}>
             <button
@@ -1063,6 +1146,14 @@ export default function CabinetReviewDetailPage() {
             </button>
             <button
               type="button"
+              className="cb-review-detail__btn cb-review-detail__btn--ghost"
+              disabled={busy}
+              onClick={handleCheckAndHomework}
+            >
+              Завершить и задать ДЗ
+            </button>
+            <button
+              type="button"
               className="cb-review-detail__btn cb-review-detail__btn--primary"
               disabled={busy}
               onClick={handleCheck}
@@ -1114,6 +1205,18 @@ export default function CabinetReviewDetailPage() {
           }}
         />
       ) : null}
+
+      <HomeworkFromReviewModal
+        open={hwModalOpen}
+        reviewId={reviewId}
+        preselectIncorrect
+        preselectPartial={hwPreselectPartial}
+        onClose={() => setHwModalOpen(false)}
+        onDone={(result) => {
+          setNotice(result?.message || "Домашнее задание создано");
+          window.dispatchEvent(new Event("cabinet:nav-counts-refresh"));
+        }}
+      />
     </CabinetPageShell>
   );
 }

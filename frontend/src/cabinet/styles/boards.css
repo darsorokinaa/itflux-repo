@@ -1073,12 +1073,34 @@ a.cb-board-card {
   inset: 0;
   z-index: 2;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   background: #f4f6fb;
   color: var(--text-sub);
   font-size: 0.95rem;
   pointer-events: none;
+  text-align: center;
+  padding: 24px;
+}
+
+.cb-board-editor__skeleton-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  opacity: 0.75;
+  max-width: 320px;
+}
+
+.cb-board-editor__linkbtn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #1d4ed8;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
 }
 
 /* Только хост Excalidraw — не трогаем .cb-board-burger (иначе height:100%

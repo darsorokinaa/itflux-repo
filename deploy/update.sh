@@ -48,6 +48,10 @@ nginx -t && systemctl reload nginx
 echo "=== Перезапуск Daphne (itflux) ==="
 systemctl restart itflux
 
+echo "=== Установка cron (напоминания, ДЗ, подписка) ==="
+chmod +x "$APP_DIR/deploy/run_management.sh" "$APP_DIR/deploy/install_cron.sh"
+APP_DIR="$APP_DIR" bash "$APP_DIR/deploy/install_cron.sh" || echo "WARN: cron не установился — запустите вручную deploy/install_cron.sh"
+
 if [[ -x "$APP_DIR/deploy/jitsi/fix-jwt-prosody.sh" ]]; then
   echo "=== Синхронизация JWT Prosody (если Jitsi на этом сервере) ==="
   bash "$APP_DIR/deploy/jitsi/fix-jwt-prosody.sh" || echo "WARN: fix-jwt-prosody.sh не применился — проверьте вручную"
@@ -57,3 +61,4 @@ echo "=== JITSI (текущие env процесса) ==="
 systemctl show itflux -p Environment --no-pager 2>/dev/null | tr ' ' '\n' | grep -E '^JITSI_' || true
 
 echo "Готово. Проверка: systemctl status itflux --no-pager"
+echo "Cron: crontab -l | grep itflux-cron"

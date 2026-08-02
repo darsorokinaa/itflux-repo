@@ -62,11 +62,16 @@ class Command(BaseCommand):
             label = teacher.email or teacher.username
 
             if dry_run:
-                current = getattr(getattr(teacher, "subscription", None), "plan", None)
+                current_sub = getattr(teacher, "subscription", None)
+                current = getattr(current_sub, "plan", None)
                 current_slug = current.slug if current else "—"
+                current_exp = getattr(current_sub, "expires_at", None)
+                note = ""
+                if current_exp and current_exp > expires_at:
+                    note = " (не сокращаем: текущий срок дольше)"
                 self.stdout.write(
                     f"  [dry-run] {label}: {current_slug} → {PROMO_PLAN_SLUG} "
-                    f"до {expires_at:%Y-%m-%d} (с {started_at:%Y-%m-%d})"
+                    f"до {expires_at:%Y-%m-%d} (с {started_at:%Y-%m-%d}){note}"
                 )
                 granted += 1
                 continue
