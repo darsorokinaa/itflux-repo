@@ -777,6 +777,39 @@
   .td-attention-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  /*
+   * Mobile priority: today (nearest + lessons + reviews) → attention →
+   * side widgets (schedule/students) → analytics last.
+   */
+  .td-workspace {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .td-main-column,
+  .td-side-column {
+    display: contents;
+  }
+
+  .td-today-board { order: 1; }
+  .td-attention-card { order: 2; }
+  .td-side-card,
+  .pay-dash-widget { order: 3; }
+  .td-analytics-card { order: 4; }
+
+  .td-lesson h4,
+  .td-review-item h4,
+  .td-attention-item h4 {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .td-lesson,
+  .td-review-item {
+    min-width: 0;
+  }
 }
 
 @media (max-width: 620px) {

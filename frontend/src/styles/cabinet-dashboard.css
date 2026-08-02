@@ -9526,13 +9526,7 @@ button.cb-sch-event {
 @media (max-width: 900px) {
   .cabinet-layout { flex-direction: column; overflow: auto; position: static; min-height: 100dvh; padding: 0; overflow-x: hidden; }
 
-  /* Tablet + mobile: bottom nav instead of cramped horizontal sidebar */
-  .cb-layout .cabinet-sidebar,
-  .cb-layout .cb-layout__sidebar,
-  .st-layout .cabinet-sidebar {
-    display: none !important;
-  }
-
+  /* Tablet + mobile: slide-out drawer (cabinet-mobile-system.css) + bottom nav */
   .cb-desktop-pills,
   .st-desktop-pills {
     display: none !important;
@@ -13276,12 +13270,6 @@ button.cb-sch-event {
     overflow-x: hidden;
     padding: 0;
     background-image: none;
-  }
-
-  .cb-layout .cabinet-sidebar,
-  .cb-layout .cb-layout__sidebar,
-  .st-layout .cabinet-sidebar {
-    display: none !important;
   }
 
   .cb-desktop-pills,

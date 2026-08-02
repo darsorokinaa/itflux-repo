@@ -32,6 +32,7 @@ function NavSidebarItem({ item, active }) {
       to={item.path}
       className={`cabinet-nav-item${active ? " active" : ""}`}
       aria-label={item.label}
+      aria-current={active ? "page" : undefined}
     >
       <span className="cabinet-nav-item__icon">
         <CabinetIcon name={item.icon} />
@@ -47,8 +48,22 @@ export default function StudentCabinetLayout() {
   const [user, setUser] = useState(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutConfirm, setLogoutConfirm] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+  const [isMobileShell, setIsMobileShell] = useState(false);
 
   useEffect(() => { document.title = PAGE_TITLE; }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return undefined;
+    const mq = window.matchMedia("(max-width: 900px)");
+    const sync = () => {
+      setIsMobileShell(mq.matches);
+      if (!mq.matches) setNavOpen(false);
+    };
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,6 +79,24 @@ export default function StudentCabinetLayout() {
     ensureCabinetPushSubscription().catch(() => null);
     return undefined;
   }, [user]);
+
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!navOpen) return undefined;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e) => {
+      if (e.key === "Escape") setNavOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [navOpen]);
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -113,9 +146,33 @@ export default function StudentCabinetLayout() {
   const outletContext = { user, handleLogout, loggingOut, refreshUser };
 
   return (
-    <div className="cabinet-layout st-layout">
-      {/* Sidebar — visible only on desktop */}
-      <aside className="cabinet-sidebar">
+    <div className={`cabinet-layout st-layout${navOpen ? " is-nav-open" : ""}`}>
+      {navOpen ? (
+        <button
+          type="button"
+          className="cabinet-nav-backdrop"
+          aria-label="Закрыть меню"
+          onClick={() => setNavOpen(false)}
+        />
+      ) : null}
+
+      <aside
+        className={`cabinet-sidebar${navOpen ? " is-open" : ""}`}
+        id="student-sidebar-nav"
+        aria-hidden={isMobileShell ? !navOpen : undefined}
+        inert={isMobileShell && !navOpen ? true : undefined}
+      >
+        <div className="cabinet-sidebar__drawer-head">
+          <p className="cabinet-sidebar__drawer-title">Меню</p>
+          <button
+            type="button"
+            className="cabinet-sidebar__drawer-close"
+            aria-label="Закрыть меню"
+            onClick={() => setNavOpen(false)}
+          >
+            <CabinetIcon name="close" />
+          </button>
+        </div>
         <nav className="cabinet-nav" aria-label="Разделы кабинета ученика">
           {STUDENT_NAV.map((item) => (
             <NavSidebarItem
@@ -149,6 +206,16 @@ export default function StudentCabinetLayout() {
       <main className="cabinet-main">
         <header className="cabinet-header cabinet-header--student">
           <div className="cabinet-header-title">
+            <button
+              type="button"
+              className="cabinet-header-menu-btn"
+              aria-label={navOpen ? "Закрыть меню" : "Открыть меню"}
+              aria-expanded={navOpen}
+              aria-controls="student-sidebar-nav"
+              onClick={() => setNavOpen((v) => !v)}
+            >
+              <CabinetIcon name="menu" />
+            </button>
             <h1 className="cabinet-header-section">{getStudentSectionTitle(location.pathname)}</h1>
           </div>
           <div className="cabinet-header-right">

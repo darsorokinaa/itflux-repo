@@ -130,14 +130,6 @@ export default function StudentDashboard() {
           />
         </DashBlock>
 
-        <DashBlock title="Прогресс" className="st-dash-grid__progress">
-          <StudentProgressSummary
-            metrics={metrics}
-            lastResult={lastResult}
-            hasData={hasProgress}
-          />
-        </DashBlock>
-
         <DashBlock
           title="Последние материалы"
           linkLabel="Все материалы"
@@ -145,6 +137,14 @@ export default function StudentDashboard() {
           className="st-dash-grid__materials"
         >
           <RecentMaterials items={recent_materials || []} />
+        </DashBlock>
+
+        <DashBlock title="Прогресс" className="st-dash-grid__progress">
+          <StudentProgressSummary
+            metrics={metrics}
+            lastResult={lastResult}
+            hasData={hasProgress}
+          />
         </DashBlock>
       </div>
 

@@ -30,10 +30,7 @@
     inset: 0;
   }
 
-  .cb-layout .cabinet-sidebar,
-  .cb-layout .cb-layout__sidebar {
-    display: none !important;
-  }
+  /* Sidebar becomes a slide-out drawer via cabinet-mobile-system.css */
 
   .cb-layout .cabinet-main {
     width: 100%;

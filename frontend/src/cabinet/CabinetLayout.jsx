@@ -93,6 +93,7 @@ function NavSidebarItem({ item, active, badgeCount = 0 }) {
       to={item.path}
       className={className}
       aria-label={ariaLabel}
+      aria-current={active && !item.soon ? "page" : undefined}
       target={item.newTab ? "_blank" : undefined}
       rel={item.newTab ? "noopener noreferrer" : undefined}
     >
@@ -109,12 +110,31 @@ export default function CabinetLayout() {
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+  const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
+  const [isMobileShell, setIsMobileShell] = useState(false);
   const [navCounts, setNavCounts] = useState({ students: 0, reviews: 0 });
   const searchInputRef = useRef(null);
+  const headerMoreRef = useRef(null);
   const subscription = useSubscription();
   const planName = subscription.currentPlan?.name || "";
 
   useEffect(() => { document.title = PAGE_TITLE; }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return undefined;
+    const mq = window.matchMedia("(max-width: 900px)");
+    const sync = () => {
+      setIsMobileShell(mq.matches);
+      if (!mq.matches) {
+        setNavOpen(false);
+        setHeaderMoreOpen(false);
+      }
+    };
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,6 +179,8 @@ export default function CabinetLayout() {
 
   useEffect(() => {
     setSearchOpen(false);
+    setNavOpen(false);
+    setHeaderMoreOpen(false);
   }, [location.pathname]);
 
   useEffect(() => {
@@ -166,6 +188,38 @@ export default function CabinetLayout() {
       searchInputRef.current.focus();
     }
   }, [searchOpen]);
+
+  useEffect(() => {
+    if (!navOpen) return undefined;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e) => {
+      if (e.key === "Escape") setNavOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [navOpen]);
+
+  useEffect(() => {
+    if (!headerMoreOpen) return undefined;
+    const onDoc = (e) => {
+      if (headerMoreRef.current && !headerMoreRef.current.contains(e.target)) {
+        setHeaderMoreOpen(false);
+      }
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setHeaderMoreOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [headerMoreOpen]);
 
   useEffect(() => {
     if (loading || !user || user.role === "student") return;
@@ -263,8 +317,33 @@ export default function CabinetLayout() {
 
   return (
     <CabinetCallProvider>
-    <div className="cabinet-layout cb-layout">
-      <aside className="cabinet-sidebar cb-layout__sidebar">
+    <div className={`cabinet-layout cb-layout${navOpen ? " is-nav-open" : ""}`}>
+      {navOpen ? (
+        <button
+          type="button"
+          className="cabinet-nav-backdrop"
+          aria-label="Закрыть меню"
+          onClick={() => setNavOpen(false)}
+        />
+      ) : null}
+
+      <aside
+        className={`cabinet-sidebar cb-layout__sidebar${navOpen ? " is-open" : ""}`}
+        id="cabinet-sidebar-nav"
+        aria-hidden={isMobileShell ? !navOpen : undefined}
+        inert={isMobileShell && !navOpen ? true : undefined}
+      >
+        <div className="cabinet-sidebar__drawer-head">
+          <p className="cabinet-sidebar__drawer-title">Меню</p>
+          <button
+            type="button"
+            className="cabinet-sidebar__drawer-close"
+            aria-label="Закрыть меню"
+            onClick={() => setNavOpen(false)}
+          >
+            <CabinetIcon name="close" />
+          </button>
+        </div>
         <nav className="cabinet-nav" aria-label="Разделы кабинета">
           {CABINET_NAV_GROUPS.map((group) => (
             <div key={group.id} className="cabinet-nav-group">
@@ -334,6 +413,16 @@ export default function CabinetLayout() {
           <div className="cabinet-header-title">
             <button
               type="button"
+              className="cabinet-header-menu-btn"
+              aria-label={navOpen ? "Закрыть меню" : "Открыть меню"}
+              aria-expanded={navOpen}
+              aria-controls="cabinet-sidebar-nav"
+              onClick={() => setNavOpen((v) => !v)}
+            >
+              <CabinetIcon name="menu" />
+            </button>
+            <button
+              type="button"
               className="cabinet-header-guide-btn"
               aria-label="Открыть инструкцию"
               title="Инструкция"
@@ -348,13 +437,61 @@ export default function CabinetLayout() {
             <CabinetNotificationsBell />
             <button
               type="button"
-              className="cabinet-header-icon-btn"
+              className="cabinet-header-icon-btn cabinet-header-search-toggle"
               aria-label={searchOpen ? "Закрыть поиск" : "Поиск"}
               aria-expanded={searchOpen}
               onClick={() => setSearchOpen((v) => !v)}
             >
               <CabinetIcon name="search" />
             </button>
+            <div className="cabinet-header-more" ref={headerMoreRef}>
+              <button
+                type="button"
+                className="cabinet-header-icon-btn cabinet-header-more-btn"
+                aria-label="Дополнительные действия"
+                aria-expanded={headerMoreOpen}
+                onClick={() => setHeaderMoreOpen((v) => !v)}
+              >
+                <CabinetIcon name="more" />
+              </button>
+              {headerMoreOpen ? (
+                <div className="cabinet-header-more__menu" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="cabinet-header-more__item"
+                    onClick={() => {
+                      setHeaderMoreOpen(false);
+                      openGuide();
+                    }}
+                  >
+                    <CabinetIcon name="bulb" />
+                    <span>Инструкция</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="cabinet-header-more__item"
+                    onClick={() => {
+                      setHeaderMoreOpen(false);
+                      setSearchOpen(true);
+                    }}
+                  >
+                    <CabinetIcon name="search" />
+                    <span>Поиск</span>
+                  </button>
+                  <Link
+                    to="/cabinet/settings/notifications/"
+                    role="menuitem"
+                    className="cabinet-header-more__item"
+                    onClick={() => setHeaderMoreOpen(false)}
+                  >
+                    <CabinetIcon name="settings" />
+                    <span>Настройки</span>
+                  </Link>
+                </div>
+              ) : null}
+            </div>
             <Link
               to="/cabinet/more"
               className={`cabinet-user-avatar cabinet-header-avatar${user?.avatar ? " cabinet-user-avatar--photo" : ""}`}

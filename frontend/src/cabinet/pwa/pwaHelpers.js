@@ -70,6 +70,10 @@ export async function registerServiceWorker() {
   }
   try {
     const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    // Дождаться activate — иначе subscribe может упасть с «ещё не готов»
+    if (reg.installing || reg.waiting) {
+      await withTimeout(navigator.serviceWorker.ready, 8000, null);
+    }
     return reg;
   } catch (err) {
     console.warn("SW registration failed", err);
@@ -144,8 +148,15 @@ function withTimeout(promise, ms, fallback) {
 async function getPushRegistration() {
   if (!("serviceWorker" in navigator)) return null;
   try {
-    const existing = await navigator.serviceWorker.getRegistration();
-    if (existing) return existing;
+    let existing = await navigator.serviceWorker.getRegistration();
+    if (!existing) {
+      existing = await registerServiceWorker();
+    }
+    if (existing) {
+      if (existing.active) return existing;
+      const ready = await withTimeout(navigator.serviceWorker.ready, 8000, null);
+      return ready || existing;
+    }
     return await withTimeout(navigator.serviceWorker.ready, 1500, null);
   } catch {
     return null;

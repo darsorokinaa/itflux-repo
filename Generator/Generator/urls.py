@@ -115,6 +115,8 @@ urlpatterns = [
     path("api/search_variant/", views.search_variant, name="search_variant"),
     path("favicon.png", views.favicon),
     path("favicon.ico", views.favicon),
+    path("sw.js", views.service_worker),
+    path("manifest.webmanifest", views.web_manifest),
     path("robots.txt", views.robots_txt),
     path("sitemap.xml", views.sitemap_xml),
     re_path(r"^(?P<filename>yandex_[0-9a-f]+\.html)$", views.yandex_webmaster_verification),

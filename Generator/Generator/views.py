@@ -8,6 +8,7 @@ import csv
 import html as html_lib
 import zipfile
 from functools import lru_cache
+from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
 from urllib import request as urlrequest, error as urlerror
 import secrets
@@ -855,6 +856,48 @@ def favicon(request):
     if png_path and os.path.isfile(png_path):
         return FileResponse(open(png_path, "rb"), content_type="image/png")
     return HttpResponse(status=404)
+
+
+def _frontend_public_file(filename: str):
+    """Файл из frontend/dist (или public), без SPA fallback на index.html."""
+    from django.contrib.staticfiles import finders
+
+    frontend_dir = getattr(
+        django_settings,
+        "FRONTEND_DIR",
+        django_settings.BASE_DIR.parent / "frontend" / "dist",
+    )
+    candidates = [
+        Path(frontend_dir) / filename,
+        django_settings.BASE_DIR.parent / "frontend" / "public" / filename,
+    ]
+    found = finders.find(filename)
+    if found:
+        candidates.insert(0, Path(found))
+    for path in candidates:
+        if path and Path(path).is_file():
+            return Path(path)
+    return None
+
+
+def service_worker(request):
+    path = _frontend_public_file("sw.js")
+    if not path:
+        return HttpResponse(status=404)
+    resp = FileResponse(open(path, "rb"), content_type="application/javascript; charset=utf-8")
+    # SW должен обновляться; иначе браузер залипает на старой версии.
+    resp["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+    resp["Service-Worker-Allowed"] = "/"
+    return resp
+
+
+def web_manifest(request):
+    path = _frontend_public_file("manifest.webmanifest")
+    if not path:
+        return HttpResponse(status=404)
+    resp = FileResponse(open(path, "rb"), content_type="application/manifest+json; charset=utf-8")
+    resp["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+    return resp
 
 
 def robots_txt(request):
