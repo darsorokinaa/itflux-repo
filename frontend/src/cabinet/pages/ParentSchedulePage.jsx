@@ -61,11 +61,10 @@ export default function ParentSchedulePage() {
       <ul className="st-simple-list">
         {items.map((ev) => (
           <li key={ev.id} className="st-list-card">
-            <strong>{ev.title}</strong>
+            <strong>{ev.topic || ev.title}</strong>
             <p className="st-muted">
               {ev.starts_at ? new Date(ev.starts_at).toLocaleString("ru-RU") : "—"}
-              {ev.status ? ` · ${ev.status}` : ""}
-              {ev.format ? ` · ${ev.format}` : ""}
+              {ev.format_label ? ` · ${ev.format_label}` : ev.format ? ` · ${ev.format}` : ""}
             </p>
             <p className="st-muted">Вход в видеоурок для родителя недоступен</p>
           </li>

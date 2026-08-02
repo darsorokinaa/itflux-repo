@@ -411,19 +411,29 @@ class ParentDashboardView(APIView):
                 )
                 .filter(Q(student=student) | Q(group__students=student))
                 .exclude(status__in=["cancelled", "draft"])
-                .select_related("group")
+                .select_related("group", "lesson", "lesson_plan_item", "student_subject")
                 .order_by("starts_at")
                 .first()
             )
             if event:
+                from .student_api import _schedule_event_topic, _schedule_format_label
+
+                topic = _schedule_event_topic(event, [student])
                 next_lesson = {
                     "id": event.id,
-                    "title": event.title or event.topic or "Урок",
+                    "title": event.title or topic or "Урок",
+                    "topic": topic,
                     "starts_at": event.starts_at.isoformat(),
                     "ends_at": event.ends_at.isoformat() if event.ends_at else None,
                     "format": event.format,
+                    "format_label": _schedule_format_label(event),
                     "status": event.status,
                     "teacher_name": serialize_child_card(rel)["teachers"][0]["name"],
+                    "subject_label": (
+                        event.student_subject.display_label
+                        if getattr(event, "student_subject_id", None) and event.student_subject
+                        else ""
+                    ),
                 }
 
         homework_attention = []
@@ -455,16 +465,20 @@ class ParentDashboardView(APIView):
 
         recent_results = []
         if rel.has_permission("view_results") or rel.has_permission("view_journal"):
-            feed = build_journal_entries_feed(
-                student.teacher,
-                student_id=student.id,
-                limit=12,
-            )
-            recent_results = _filter_parent_journal_entries(
-                feed.get("entries") or [],
-                rel=rel,
-                include_comments=rel.has_permission("view_comments"),
-            )
+            try:
+                feed = build_journal_entries_feed(
+                    student.teacher,
+                    student_id=student.id,
+                    limit=12,
+                )
+                recent_results = _filter_parent_journal_entries(
+                    feed.get("entries") or [],
+                    rel=rel,
+                    include_comments=rel.has_permission("view_comments"),
+                )
+            except Exception:
+                logger.exception("parent dashboard journal failed student=%s", student.id)
+                recent_results = []
 
         attendance = None
         if rel.has_permission("view_attendance"):
@@ -501,7 +515,11 @@ class ParentDashboardView(APIView):
 
         billing = None
         if rel.has_permission("view_billing"):
-            billing = _parent_billing_payload(student, rel)
+            try:
+                billing = _parent_billing_payload(student, rel)
+            except Exception:
+                logger.exception("parent dashboard billing failed student=%s", student.id)
+                billing = {"allowed": False, "reason": "unavailable"}
 
         notifications = []
         if rel.has_permission("receive_notifications"):
@@ -514,10 +532,18 @@ class ParentDashboardView(APIView):
                 if n.get("created_at"):
                     n["created_at"] = n["created_at"].isoformat()
 
+        child_card = serialize_child_card(rel)
+        activity_summary = _parent_activity_summary(
+            child_card,
+            next_lesson=next_lesson,
+            homework_attention=homework_attention,
+        )
+
         return Response(
             {
                 "children": [serialize_child_card(r) for r in rels],
-                "active_child": serialize_child_card(rel),
+                "active_child": child_card,
+                "activity_summary": activity_summary,
                 "next_lesson": next_lesson,
                 "homework_attention": homework_attention,
                 "recent_results": recent_results[:10],
@@ -528,9 +554,39 @@ class ParentDashboardView(APIView):
         )
 
 
+def _parent_activity_summary(child: dict, *, next_lesson, homework_attention) -> dict:
+    """Краткая сводка: чем занимается ученик и что сейчас в фокусе."""
+    subjects = child.get("subjects") or []
+    subject_titles = [s.get("title") or s.get("subject") for s in subjects if s.get("title") or s.get("subject")]
+    studies = subject_titles or ([child.get("direction_label")] if child.get("direction_label") else [])
+    studies_label = ", ".join([s for s in studies if s]) or "направление пока не указано"
+    focus_parts = []
+    open_hw = [
+        hw
+        for hw in (homework_attention or [])
+        if hw.get("is_overdue")
+        or hw.get("status") in {"not_submitted", "overdue", "returned", "needs_revision", "submitted"}
+    ]
+    if open_hw:
+        hw = open_hw[0]
+        label = hw.get("title") or "домашнее задание"
+        focus_parts.append(f"ДЗ: {label}")
+    if next_lesson and next_lesson.get("topic"):
+        focus_parts.append(f"следующая тема: {next_lesson['topic']}")
+    return {
+        "studies_label": studies_label,
+        "subjects": subject_titles,
+        "direction_label": child.get("direction_label") or "",
+        "grade": child.get("grade"),
+        "teacher_name": (child.get("teachers") or [{}])[0].get("name") or "",
+        "focus_label": " · ".join(focus_parts) if focus_parts else "Сейчас без срочных заданий",
+        "open_homework_count": len(open_hw),
+    }
+
+
 def _parent_billing_payload(student: Student, rel: ParentStudentRelationship) -> dict | None:
     from .billing_models import TeacherBillingSettings
-    from .billing_service import get_or_create_account, serialize_account
+    from .billing_service import get_or_create_billing_account, serialize_account
 
     teacher_settings = TeacherBillingSettings.objects.filter(teacher_id=student.teacher_id).first()
     teacher_allows = bool(teacher_settings and teacher_settings.show_billing_to_parent)
@@ -541,7 +597,7 @@ def _parent_billing_payload(student: Student, rel: ParentStudentRelationship) ->
         # invite can enable only if teacher also allows globally OR we honour invite override
         # Product: invite permission is enough when teacher set it at invite time.
         pass
-    account = get_or_create_account(student.teacher, student)
+    account = get_or_create_billing_account(student.teacher, student)
     data = serialize_account(account, include_history=True)
     return {"allowed": True, "account": data}
 
@@ -613,28 +669,32 @@ class ParentScheduleView(APIView):
         except (KeyError, ValueError, ParentAccessError) as exc:
             return _error(exc if isinstance(exc, ParentAccessError) else ParentAccessError("Укажите student_id"))
         student = rel.student
+        from .student_api import _schedule_event_topic, _schedule_format_label
+
         events = (
             ScheduleEvent.objects.filter(owner=student.teacher_id)
             .filter(Q(student=student) | Q(group__students=student))
             .exclude(status="draft")
+            .select_related("lesson", "lesson_plan_item", "student_subject")
             .order_by("starts_at")[:80]
         )
-        return Response(
-            {
-                "items": [
-                    {
-                        "id": e.id,
-                        "title": e.title or e.topic or "Урок",
-                        "starts_at": e.starts_at.isoformat(),
-                        "ends_at": e.ends_at.isoformat() if e.ends_at else None,
-                        "status": e.status,
-                        "format": e.format,
-                        "can_join_video": False,
-                    }
-                    for e in events
-                ]
-            }
-        )
+        items = []
+        for e in events:
+            topic = _schedule_event_topic(e, [student])
+            items.append(
+                {
+                    "id": e.id,
+                    "title": e.title or topic or "Урок",
+                    "topic": topic,
+                    "starts_at": e.starts_at.isoformat(),
+                    "ends_at": e.ends_at.isoformat() if e.ends_at else None,
+                    "status": e.status,
+                    "format": e.format,
+                    "format_label": _schedule_format_label(e),
+                    "can_join_video": False,
+                }
+            )
+        return Response({"items": items})
 
 
 class ParentBillingView(APIView):
