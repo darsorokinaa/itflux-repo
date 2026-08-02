@@ -40,6 +40,30 @@ def _vapid_claims() -> dict:
     return {"sub": mailto}
 
 
+def _vapid_private_key() -> str:
+    """Normalize private key from .env (PEM with \\n, optional quotes)."""
+    raw = (getattr(settings, "VAPID_PRIVATE_KEY", "") or "").strip()
+    if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
+        raw = raw[1:-1].strip()
+    raw = raw.replace("\\n", "\n").strip()
+    return raw
+
+
+def _load_vapid():
+    """
+    pywebpush → Vapid.from_string() не понимает PEM (только raw/DER).
+    PEM из generate_vapid_keys / openssl нужно грузить через from_pem.
+    """
+    from py_vapid import Vapid
+
+    key = _vapid_private_key()
+    if not key:
+        raise ValueError("VAPID_PRIVATE_KEY пуст")
+    if "BEGIN" in key:
+        return Vapid.from_pem(key.encode("utf-8"))
+    return Vapid.from_string(private_key=key)
+
+
 def _is_in_dnd(prefs) -> bool:
     if not getattr(prefs, "dnd_enabled", False):
         return False
@@ -98,9 +122,12 @@ def send_web_push_to_user(
         logger.warning("pywebpush is not installed — skip web push")
         return {**empty, "reason": "pywebpush_missing"}
 
-    private_key = (getattr(settings, "VAPID_PRIVATE_KEY", "") or "").strip()
-    private_key = private_key.replace("\\n", "\n")
-    public_key = vapid_public_key()
+    try:
+        vapid = _load_vapid()
+    except Exception as exc:
+        logger.exception("Failed to load VAPID private key")
+        return {**empty, "reason": "send_failed", "errors": [f"VAPID key error: {exc}"[:300]]}
+
     data = {
         "title": title[:120],
         "body": (body or "")[:180],
@@ -122,15 +149,16 @@ def send_web_push_to_user(
 
     for sub in qs:
         try:
+            # Важно: у pywebpush нет аргумента vapid_public_key — публичный ключ
+            # берётся из private; лишний kwargs валил TypeError на каждой отправке.
             webpush(
                 subscription_info={
                     "endpoint": sub.endpoint,
                     "keys": {"p256dh": sub.p256dh, "auth": sub.auth},
                 },
                 data=json.dumps(data, ensure_ascii=False),
-                vapid_private_key=private_key,
+                vapid_private_key=vapid,
                 vapid_claims=_vapid_claims(),
-                vapid_public_key=public_key,
                 ttl=86400,
             )
             sub.last_seen_at = timezone.now()

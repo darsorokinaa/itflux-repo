@@ -17,9 +17,14 @@ class Command(BaseCommand):
 
         vapid = Vapid()
         vapid.generate_keys()
-        private_pem = vapid.private_pem()
-        if isinstance(private_pem, bytes):
-            private_pem = private_pem.decode("utf-8")
+
+        # One-line DER (base64url) — удобно для .env, pywebpush/py_vapid это понимают.
+        private_der = vapid.private_key.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        private_b64 = base64.urlsafe_b64encode(private_der).decode("utf-8").rstrip("=")
 
         public_raw = vapid.public_key.public_bytes(
             encoding=serialization.Encoding.X962,
@@ -29,7 +34,12 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS("Add these lines to your .env:\n"))
         self.stdout.write(f"VAPID_PUBLIC_KEY={public_b64}")
-        # pywebpush accepts raw private key string; store PEM escaped or as multiline secret
-        one_line = private_pem.replace("\n", "\\n")
-        self.stdout.write(f"VAPID_PRIVATE_KEY={one_line}")
+        self.stdout.write(f"VAPID_PRIVATE_KEY={private_b64}")
         self.stdout.write("VAPID_ADMIN_EMAIL=mailto:admin@itflux.ru")
+        self.stdout.write("")
+        self.stdout.write(
+            self.style.WARNING(
+                "После смены ключей пользователям нужно заново нажать "
+                "«Включить на этом устройстве»."
+            )
+        )
