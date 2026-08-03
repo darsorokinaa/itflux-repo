@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -33,6 +34,8 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
         self.user = self.scope.get("user")
         self._last_cursor_at = 0.0
         self._last_scene_live_at = 0.0
+        self._pending_scene_event = None
+        self._scene_flush_task = None
 
         if not self.user or not self.user.is_authenticated:
             await self.close(code=4401)
@@ -61,6 +64,22 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
         )
 
     async def disconnect(self, close_code):
+        task = getattr(self, "_scene_flush_task", None)
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        pending = getattr(self, "_pending_scene_event", None)
+        if pending and getattr(self, "group_name", None):
+            # Последний buffered кадр — отдать пирам перед выходом.
+            try:
+                await self.channel_layer.group_send(self.group_name, pending)
+            except Exception:
+                logger.debug("board collab flush on disconnect failed", exc_info=True)
+        self._pending_scene_event = None
+        self._scene_flush_task = None
         if getattr(self, "group_name", None):
             if self.client_id:
                 await self.channel_layer.group_send(
@@ -76,6 +95,37 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                     },
                 )
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def _flush_pending_scene(self, delay: float):
+        try:
+            if delay > 0:
+                await asyncio.sleep(delay)
+            event = self._pending_scene_event
+            self._pending_scene_event = None
+            self._scene_flush_task = None
+            if not event:
+                return
+            self._last_scene_live_at = time.monotonic()
+            await self.channel_layer.group_send(self.group_name, event)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("board collab pending scene flush failed", exc_info=True)
+            self._scene_flush_task = None
+
+    async def _send_or_buffer_scene(self, event: dict):
+        """Rate-limit с latest-wins: не дропаем кадры, держим последний payload."""
+        now = time.monotonic()
+        elapsed = now - self._last_scene_live_at
+        if elapsed >= SCENE_LIVE_MIN_INTERVAL_SEC:
+            self._pending_scene_event = None
+            self._last_scene_live_at = now
+            await self.channel_layer.group_send(self.group_name, event)
+            return
+        self._pending_scene_event = event
+        if self._scene_flush_task is None or self._scene_flush_task.done():
+            delay = max(0.0, SCENE_LIVE_MIN_INTERVAL_SEC - elapsed)
+            self._scene_flush_task = asyncio.create_task(self._flush_pending_scene(delay))
 
     async def receive(self, text_data=None, bytes_data=None):
         if bytes_data and len(bytes_data) > MAX_WS_TEXT_BYTES:
@@ -121,10 +171,6 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
         if msg_type in ("scene_live", "scene_ops"):
             if not self.can_edit:
                 return
-            now = time.monotonic()
-            if now - self._last_scene_live_at < SCENE_LIVE_MIN_INTERVAL_SEC:
-                return
-            self._last_scene_live_at = now
 
             def _clean_files(files):
                 clean = {}
@@ -166,8 +212,7 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                         el = item.get("element")
                         if isinstance(el, dict) and el.get("id"):
                             clean_ops.append({"op": "upsert", "element": el})
-                await self.channel_layer.group_send(
-                    self.group_name,
+                await self._send_or_buffer_scene(
                     {
                         "type": "board.collab",
                         "payload": {
@@ -185,7 +230,7 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                                 else {},
                             },
                         },
-                    },
+                    }
                 )
                 return
 
@@ -198,8 +243,7 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             elements = scene.get("elements") or []
             if isinstance(elements, list) and len(elements) > 20_000:
                 return
-            await self.channel_layer.group_send(
-                self.group_name,
+            await self._send_or_buffer_scene(
                 {
                     "type": "board.collab",
                     "payload": {
@@ -214,7 +258,7 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                             "files": clean_files,
                         },
                     },
-                },
+                }
             )
             return
 

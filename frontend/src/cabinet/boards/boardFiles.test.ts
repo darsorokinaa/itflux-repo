@@ -3,6 +3,7 @@ import {
   externalizeSceneFiles,
   filesForLivePublish,
   filesForPersist,
+  filesNeedRemoteHydrate,
   preferDisplayFile,
   preferStableFile,
   STABLE_URL_KEY,
@@ -113,5 +114,14 @@ describe("externalizeSceneFiles", () => {
     });
     expect(Object.keys(out)).toEqual(["f1"]);
     expect(out.f1.dataURL).toBe(stable);
+  });
+
+  it("filesNeedRemoteHydrate не блокирует штрихи, если blob уже локально", () => {
+    const stable = "/api/cabinet/interactive-boards/b/assets/x/";
+    expect(filesNeedRemoteHydrate({ f1: { dataURL: stable } }, {
+      f1: { dataURL: "blob:http://local/1", [STABLE_URL_KEY]: stable },
+    })).toBe(false);
+    expect(filesNeedRemoteHydrate({ f1: { dataURL: stable } }, {})).toBe(true);
+    expect(filesNeedRemoteHydrate({}, {})).toBe(false);
   });
 });

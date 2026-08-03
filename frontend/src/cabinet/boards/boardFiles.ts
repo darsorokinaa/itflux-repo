@@ -48,6 +48,29 @@ export function isStableFileUrl(url: string): boolean {
   return Boolean(url) && !isTransientFileUrl(url);
 }
 
+/**
+ * Нужна ли сетевая гидратация перед показом сцены пиру.
+ * Если локально уже есть blob:/data: для fileId — не блокируем штрихи ожиданием fetch.
+ */
+export function filesNeedRemoteHydrate(
+  files: SceneFiles | null | undefined,
+  localFiles?: SceneFiles | null,
+): boolean {
+  if (!files || typeof files !== "object") return false;
+  for (const [fileId, meta] of Object.entries(files)) {
+    if (!meta || typeof meta !== "object") continue;
+    const url = String(meta.dataURL || meta.url || "");
+    if (!url || isTransientFileUrl(url)) continue;
+    const local = localFiles?.[fileId];
+    if (local && typeof local === "object") {
+      const localUrl = String(local.dataURL || local.url || "");
+      if (localUrl && isTransientFileUrl(localUrl)) continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 /** Оценка «стабильности» файла: постоянный URL лучше data/blob. */
 export function fileUrlStability(meta: Record<string, unknown> | null | undefined): number {
   const url = String(meta?.dataURL || meta?.url || "");

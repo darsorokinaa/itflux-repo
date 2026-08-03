@@ -319,7 +319,15 @@ export function createBoardCollabSession(
       };
       pendingVersion = version;
       if (liveTimer != null) return;
-      liveTimer = window.setTimeout(flushLive, 80);
+      liveTimer = window.setTimeout(flushLive, 32);
+    },
+    /** Сразу отправить накопленный live (конец штриха / pointerup). */
+    flushLiveNow() {
+      if (liveTimer != null) {
+        window.clearTimeout(liveTimer);
+        liveTimer = null;
+      }
+      flushLive();
     },
     /** После полного resync — база для следующего diff. */
     resetPublishBase(elements: unknown[] | null | undefined) {
