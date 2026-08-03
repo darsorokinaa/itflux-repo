@@ -26,6 +26,7 @@ from .meeting_present import (
     redact_plan_item_for_student,
     serialize_presented,
 )
+from .student_api import _interactive_to_player_payload
 from .video_meeting_service import (
     VideoMeetingError,
     build_join_config,
@@ -549,6 +550,39 @@ class VideoMeetingMaterialControlView(APIView):
             },
         )
         return Response({"success": True, "materialSession": serialized})
+
+
+class VideoMeetingMaterialInteractiveView(APIView):
+    """
+    Player-payload интерактива, который сейчас открыт в материале урока.
+    Отдельно от /interactives/<id>/ — тот эндпоинт доступен только владельцу-учителю
+    (IsCabinetTeacher), поэтому ученик не мог получить контент интерактива,
+    который учитель показывает на уроке.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, meeting_uuid, interactive_id):
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+        except VideoMeetingError as exc:
+            return _error_response(exc)
+        access = resolve_access(request.user, meeting.schedule_event)
+        if not access.allowed:
+            return Response(
+                {"detail": access.reason or "Доступ запрещён"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        session = get_active_material_session(meeting)
+        if not session or not session.interactive_id or int(session.interactive_id) != int(interactive_id):
+            return Response(
+                {"detail": "Интерактив сейчас не открыт на уроке."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        interactive = session.interactive
+        if interactive is None:
+            return Response({"detail": "Интерактив не найден."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"interactive": _interactive_to_player_payload(interactive)})
 
 
 class VideoMeetingMaterialOperationView(APIView):

@@ -1667,6 +1667,7 @@ class ScheduleEventSerializer(serializers.ModelSerializer):
     participants = ScheduleEventParticipantSerializer(many=True, read_only=True)
     series_id = serializers.IntegerField(read_only=True)
     student_subject_label = serializers.SerializerMethodField()
+    plan_sync_meta = serializers.SerializerMethodField()
 
     class Meta:
         model = ScheduleEvent
@@ -1675,6 +1676,9 @@ class ScheduleEventSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "topic",
+            "subtopic",
+            "goal",
+            "homework_description",
             "starts_at",
             "ends_at",
             "event_type",
@@ -1705,16 +1709,25 @@ class ScheduleEventSerializer(serializers.ModelSerializer):
             "is_recurring_instance",
             "original_start_at",
             "reminder_minutes",
+            "plan_sync_enabled",
+            "content_source",
+            "manual_override_fields",
+            "plan_synced_at",
+            "plan_sync_meta",
             "participants",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at", "plan_synced_at", "plan_sync_meta"]
 
     def get_student_subject_label(self, obj):
         if obj.student_subject_id and obj.student_subject:
             return obj.student_subject.display_label
         return None
+
+    def get_plan_sync_meta(self, obj):
+        from .lesson_plan_content_sync import LessonLearningPlanSyncService
+        return LessonLearningPlanSyncService.sync_meta_payload(obj)
 
 
 class ScheduleEventSeriesSerializer(serializers.ModelSerializer):

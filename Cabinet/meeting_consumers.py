@@ -172,7 +172,15 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
             if payload.get("user_id") == getattr(self.user, "id", None):
                 return
         # openUrl зависит от роли: учитель и ученик ходят в разные preview API.
-        if payload.get("type") in ("material.opened", "material.permission_changed", "material.sync_state"):
+        # state тоже персонален для ученика (только свои answers/fields) — без
+        # переперсонализации на control.transferred все получали бы срез сессии,
+        # посчитанный для учителя, который вызвал передачу управления.
+        if payload.get("type") in (
+            "material.opened",
+            "material.permission_changed",
+            "material.sync_state",
+            "control.transferred",
+        ):
             session_id = payload.get("session_id") or (payload.get("materialSession") or {}).get("sessionId")
             if session_id:
                 personalized = await self._serialize_session_by_id(session_id)
@@ -202,7 +210,7 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps(body, ensure_ascii=False))
 
     async def _handle_open(self, data: dict):
-        if self.role not in ("teacher", "staff"):
+        if self.role not in ("teacher", "coteacher", "staff"):
             await self._send_error("Только преподаватель может открыть материал", code="forbidden")
             logger.info(
                 "material_open_denied meeting=%s user=%s",
@@ -235,7 +243,7 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         })
 
     async def _handle_close(self, data: dict):
-        if self.role not in ("teacher", "staff"):
+        if self.role not in ("teacher", "coteacher", "staff"):
             await self._send_error("Только преподаватель может закрыть материал", code="forbidden")
             return
         try:
@@ -250,7 +258,7 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         })
 
     async def _handle_permission(self, data: dict):
-        if self.role not in ("teacher", "staff"):
+        if self.role not in ("teacher", "coteacher", "staff"):
             await self._send_error("Только преподаватель может менять режим", code="forbidden")
             logger.info(
                 "material_permission_denied meeting=%s user=%s",

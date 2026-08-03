@@ -12,6 +12,22 @@ export type { CollabScene } from "./boardSceneMerge";
 export { mergeCollabScenes };
 export type { BoardSceneOpsPayload };
 
+/** Dev-only диагностика WS. Не пишет содержимое dataURL/base64. */
+const BOARD_DEBUG = Boolean(import.meta.env?.DEV);
+function boardWsLog(tag: string, data?: Record<string, unknown>) {
+  if (!BOARD_DEBUG) return;
+  // Строкой, а не вторым аргументом console.debug — иначе при копировании
+  // текста консоли объект печатается как нераскрытое "Object".
+  let json = "";
+  try {
+    json = data ? JSON.stringify(data) : "";
+  } catch {
+    json = "[unserializable]";
+  }
+  // eslint-disable-next-line no-console
+  console.debug(`[board-ws] ${tag} ${json}`);
+}
+
 export type CollabPeer = {
   clientId: string;
   userId?: number | null;
@@ -37,17 +53,32 @@ export type CollabMessage =
   | { type: "presence_leave"; client_id: string; user_id?: number; display_name?: string }
   | { type: "scene_live"; client_id: string; user_id?: number; display_name?: string; version?: number; scene: CollabScene }
   | { type: "scene_ops"; client_id: string; user_id?: number; display_name?: string; version?: number; ops: BoardSceneOpsPayload }
-  | { type: "scene_saved"; board_id?: string; version: number; scene: CollabScene; user_id?: number; display_name?: string; client_id?: string }
+  | { type: "scene_saved"; board_id?: string; version: number; scene: CollabScene; user_id?: number; display_name?: string; client_id?: string; cleared?: boolean }
+  | {
+      type: "file_add";
+      client_id: string;
+      user_id?: number;
+      display_name?: string;
+      files: Array<{ id: string; url: string; mimeType?: string; created?: number }>;
+      elements?: unknown[];
+    }
   | { type: "cursor_move"; client_id: string; user_id?: number; display_name?: string; role?: string; x?: number; y?: number; tool?: string }
   | { type: "cursor"; client_id: string; user_id?: number; display_name?: string; role?: string; x?: number; y?: number; tool?: string }
   | { type: "active_tool_change"; client_id: string; user_id?: number; display_name?: string; tool?: string }
-  | { type: "pong"; t?: number };
+  | { type: "pong"; t?: number }
+  | { type: "error"; code?: string; detail?: string }
+  | { type: "snapshot_request_ack"; board_id?: string; known_revision?: number };
 
 type Handlers = {
   onReady?: (meta?: { canEdit?: boolean; permission?: string; role?: string }) => void;
   onPeersChange?: (peers: CollabPeer[]) => void;
-  onRemoteScene?: (scene: CollabScene, meta: { version?: number; fromSaved?: boolean; clientId?: string }) => void;
+  onRemoteScene?: (scene: CollabScene, meta: { version?: number; fromSaved?: boolean; clientId?: string; cleared?: boolean }) => void;
   onRemoteOps?: (ops: BoardSceneOpsPayload, meta: { version?: number; clientId?: string }) => void;
+  onRemoteFileAdd?: (
+    files: Array<{ id: string; url: string; mimeType?: string; created?: number }>,
+    elements: unknown[],
+    meta: { clientId?: string },
+  ) => void;
   onRemoteCursor?: (cursor: RemoteCursor | null, clientId: string) => void;
   onRemoteTool?: (clientId: string, tool: string) => void;
   onStatus?: (status: "connecting" | "open" | "closed" | "error") => void;
@@ -84,8 +115,12 @@ export function createBoardCollabSession(
   let lastCursorSentAt = 0;
   let reconnectAttempt = 0;
   const CURSOR_MIN_INTERVAL_MS = 40; // ~25 Hz max
+  /** Throttle промежуточных live-кадров (~30–60 мс). Финал — flushLiveNow(). */
+  const LIVE_PUBLISH_INTERVAL_MS = 33;
   const peers = new Map<string, CollabPeer>();
   const selfRole = opts.role || "";
+  const seenEventKeys = new Map<string, number>();
+  const EVENT_DEDUP_TTL_MS = 8000;
 
   const emitPeers = () => {
     handlers.onPeersChange?.(Array.from(peers.values()));
@@ -123,14 +158,22 @@ export function createBoardCollabSession(
   const connect = () => {
     if (closed) return;
     handlers.onStatus?.("connecting");
+    boardWsLog("connecting", { boardId, clientId, attempt: reconnectAttempt });
     socket = new WebSocket(wsUrl(boardId));
 
     socket.onopen = () => {
       handlers.onStatus?.("open");
+      boardWsLog("open", { boardId, clientId, reconnect: reconnectAttempt > 0 });
       sendJoin();
       startHeartbeat();
       handlers.onReady?.();
       if (reconnectAttempt > 0) {
+        boardWsLog("resync after reconnect", { boardId, clientId, attempt: reconnectAttempt });
+        sendRaw({
+          type: "snapshot_request",
+          client_id: clientId,
+          known_revision: pendingVersion,
+        });
         handlers.onResyncNeeded?.();
       }
       reconnectAttempt = 0;
@@ -212,10 +255,54 @@ export function createBoardCollabSession(
         handlers.onRemoteTool?.(data.client_id, String(data.tool || ""));
         return;
       }
+      if (data.type === "file_add") {
+        if (data.client_id === clientId) return;
+        const files = Array.isArray(data.files) ? data.files : [];
+        if (!files.length) return;
+        boardWsLog("recv file_add", {
+          fromClient: data.client_id,
+          fileIds: files.map((f) => f.id),
+          elementCount: Array.isArray(data.elements) ? data.elements.length : 0,
+        });
+        handlers.onRemoteFileAdd?.(files, Array.isArray(data.elements) ? data.elements : [], {
+          clientId: data.client_id,
+        });
+        return;
+      }
+      if (data.type === "error") {
+        boardWsLog("server error", { code: data.code, detail: data.detail });
+        return;
+      }
+      if (data.type === "snapshot_request_ack") {
+        boardWsLog("snapshot_request_ack", {
+          boardId: data.board_id,
+          knownRevision: data.known_revision,
+        });
+        return;
+      }
       if (data.type === "scene_ops") {
         if (data.client_id === clientId) return;
         const ops = data.ops;
         if (!ops || !Array.isArray(ops.ops)) return;
+        const dedupKey = `ops:${data.client_id}:${typeof data.version === "number" ? data.version : ""}:${ops.ops.length}:${String(event.data).length}`;
+        const now = Date.now();
+        const prevAt = seenEventKeys.get(dedupKey);
+        if (prevAt && now - prevAt < EVENT_DEDUP_TTL_MS) {
+          boardWsLog("skip duplicate scene_ops", { fromClient: data.client_id, version: data.version });
+          return;
+        }
+        seenEventKeys.set(dedupKey, now);
+        if (seenEventKeys.size > 200) {
+          for (const [k, t] of seenEventKeys) {
+            if (now - t > EVENT_DEDUP_TTL_MS) seenEventKeys.delete(k);
+          }
+        }
+        boardWsLog("recv scene_ops", {
+          fromClient: data.client_id,
+          opsCount: ops.ops.length,
+          fileIds: Object.keys(ops.files || {}),
+          bytes: String(event.data).length,
+        });
         handlers.onRemoteOps?.(ops, {
           version: typeof data.version === "number" ? data.version : undefined,
           clientId: data.client_id,
@@ -226,6 +313,13 @@ export function createBoardCollabSession(
         if (data.type === "scene_live" && data.client_id === clientId) return;
         const scene = data.scene;
         if (!scene || !Array.isArray(scene.elements)) return;
+        boardWsLog(`recv ${data.type}`, {
+          fromClient: "client_id" in data ? data.client_id : undefined,
+          elementCount: scene.elements.length,
+          fileIds: Object.keys(scene.files || {}),
+          bytes: String(event.data).length,
+          version: typeof data.version === "number" ? data.version : undefined,
+        });
         handlers.onRemoteScene?.(
           {
             elements: scene.elements,
@@ -236,6 +330,7 @@ export function createBoardCollabSession(
             version: typeof data.version === "number" ? data.version : undefined,
             fromSaved: data.type === "scene_saved",
             clientId: "client_id" in data ? data.client_id : undefined,
+            cleared: data.type === "scene_saved" ? Boolean(data.cleared) : undefined,
           },
         );
       }
@@ -243,10 +338,12 @@ export function createBoardCollabSession(
 
     socket.onerror = () => {
       handlers.onStatus?.("error");
+      boardWsLog("error", { boardId, clientId });
     };
 
     socket.onclose = () => {
       handlers.onStatus?.("closed");
+      boardWsLog("closed", { boardId, clientId, willReconnect: !closed });
       stopHeartbeat();
       socket = null;
       if (closed) return;
@@ -267,7 +364,7 @@ export function createBoardCollabSession(
         pendingLive = null;
         return;
       }
-      sendRaw({
+      const payload = {
         type: "scene_ops",
         client_id: clientId,
         version: built.version,
@@ -275,9 +372,20 @@ export function createBoardCollabSession(
           ...built.payload,
           files: filesForLivePublish(built.payload.files as Record<string, Record<string, unknown>>),
         },
+      };
+      boardWsLog("send scene_ops", {
+        opsCount: built.payload.ops.length,
+        fileIds: Object.keys(payload.ops.files || {}),
+        version: built.version,
       });
+      sendRaw(payload);
       lastPublishedElements = pendingLive.elements;
     } else {
+      boardWsLog("send scene_live", {
+        elementCount: built.scene.elements?.length || 0,
+        fileIds: Object.keys(built.scene.files || {}),
+        version: built.version,
+      });
       sendRaw({
         type: "scene_live",
         client_id: clientId,
@@ -319,9 +427,9 @@ export function createBoardCollabSession(
       };
       pendingVersion = version;
       if (liveTimer != null) return;
-      liveTimer = window.setTimeout(flushLive, 32);
+      liveTimer = window.setTimeout(flushLive, LIVE_PUBLISH_INTERVAL_MS);
     },
-    /** Сразу отправить накопленный live (конец штриха / pointerup). */
+    /** Сразу отправить накопленный live (конец штриха / pointerup) — без debounce. */
     flushLiveNow() {
       if (liveTimer != null) {
         window.clearTimeout(liveTimer);
@@ -346,6 +454,34 @@ export function createBoardCollabSession(
         type: "active_tool_change",
         client_id: clientId,
         tool: String(tool || "").slice(0, 64),
+      });
+    },
+    /**
+     * После HTTP-аплоада: сообщить пирам стабильные URL + image-элементы.
+     * Без blob/base64. Пир обязан addFiles до updateScene(elements).
+     */
+    publishFileAdd(
+      files: Array<{ id: string; url: string; mimeType?: string; created?: number }>,
+      elements: unknown[] = [],
+    ) {
+      const clean = (files || [])
+        .filter((f) => f && f.id && f.url && !String(f.url).startsWith("blob:") && !String(f.url).startsWith("data:"))
+        .map((f) => ({
+          id: String(f.id).slice(0, 128),
+          url: String(f.url).slice(0, 2048),
+          mimeType: String(f.mimeType || "image/png").slice(0, 64),
+          created: typeof f.created === "number" ? f.created : Date.now(),
+        }));
+      if (!clean.length) return false;
+      boardWsLog("send file_add", {
+        fileIds: clean.map((f) => f.id),
+        elementCount: Array.isArray(elements) ? elements.length : 0,
+      });
+      return sendRaw({
+        type: "file_add",
+        client_id: clientId,
+        files: clean,
+        elements: Array.isArray(elements) ? elements.slice(0, 50) : [],
       });
     },
     close() {

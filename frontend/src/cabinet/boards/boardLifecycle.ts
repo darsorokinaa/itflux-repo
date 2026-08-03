@@ -39,12 +39,17 @@ export function createBoardLoadMetrics(): BoardLoadMetrics {
   };
 }
 
-/** Безопасный лог метрик — без содержимого сцены и URL. */
+/**
+ * Безопасный лог метрик — без содержимого сцены и URL.
+ * Строкой, а не вторым аргументом console.info: при копировании текста
+ * консоли (без ручного разворачивания) объект печатается как "Object" —
+ * реальные данные не видны в скопированном логе.
+ */
 export function logBoardMetrics(phase: BoardLoadPhase, metrics: BoardLoadMetrics): void {
   if (typeof console === "undefined" || !console.info) return;
   const now = performance.now();
   const base = metrics.startedAt;
-  console.info("[board]", {
+  const payload = {
     phase,
     initMs: Math.round(now - base),
     sceneMs: metrics.sceneLoadedAt != null ? Math.round(metrics.sceneLoadedAt - base) : null,
@@ -56,7 +61,14 @@ export function logBoardMetrics(phase: BoardLoadPhase, metrics: BoardLoadMetrics
     sceneKb: Math.round(metrics.sceneBytesApprox / 1024),
     reconnects: metrics.reconnectCount,
     error: metrics.lastErrorCode,
-  });
+  };
+  let json = "";
+  try {
+    json = JSON.stringify(payload);
+  } catch {
+    json = "[unserializable]";
+  }
+  console.info(`[board] lifecycle ${json}`);
 }
 
 export function estimateSceneBytes(scene: {

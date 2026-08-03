@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type MutableRefObject,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { Excalidraw, useHandleLibrary } from "@excalidraw/excalidraw";
 import { boardLibraryAdapter } from "./boardLibrary";
@@ -17,6 +18,7 @@ export type ExcalidrawAPI = {
   getAppState: () => Record<string, unknown>;
   getFiles: () => SceneFiles;
   updateScene: (payload: Record<string, unknown>) => void;
+  addFiles?: (files: unknown[]) => void;
   scrollToContent?: (target?: unknown, opts?: { fitToContent?: boolean; animate?: boolean }) => void;
   refresh?: () => void;
 };
@@ -34,6 +36,8 @@ type Props = {
   onApiReady: (api: ExcalidrawAPI) => void;
   /** Scene-space pointer (Excalidraw coordinates) for remote cursors. */
   onPointerSceneMove?: (x: number, y: number, tool: string) => void;
+  /** Начало жеста — отложить применение входящих remote-апдейтов до pointerUp. */
+  onPointerSceneDown?: () => void;
   /** Конец жеста — сразу flush live-сцены пирам. */
   onPointerSceneUp?: () => void;
   generateIdForFile?: (file: File) => string | Promise<string>;
@@ -66,6 +70,7 @@ function BoardExcalidrawInner({
   onChangeRef,
   onApiReadyRef,
   onPointerSceneMoveRef,
+  onPointerSceneDownRef,
   onPointerSceneUpRef,
   generateIdForFileRef,
   onHostReadyRef,
@@ -79,6 +84,7 @@ function BoardExcalidrawInner({
   onChangeRef: MutableRefObject<Props["onChange"]>;
   onApiReadyRef: MutableRefObject<Props["onApiReady"]>;
   onPointerSceneMoveRef: MutableRefObject<Props["onPointerSceneMove"]>;
+  onPointerSceneDownRef: MutableRefObject<Props["onPointerSceneDown"]>;
   onPointerSceneUpRef: MutableRefObject<Props["onPointerSceneUp"]>;
   generateIdForFileRef: MutableRefObject<Props["generateIdForFile"]>;
   onHostReadyRef: MutableRefObject<Props["onHostReady"]>;
@@ -156,7 +162,7 @@ function BoardExcalidrawInner({
       ? `${window.location.origin}${window.location.pathname}${window.location.search}`
       : undefined;
 
-  const handleHostPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+  const handleHostPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     const cb = onPointerSceneMoveRef.current;
     const current = apiRef.current;
     if (!cb || !current) return;
@@ -175,6 +181,13 @@ function BoardExcalidrawInner({
     cb(x, y, String(activeTool?.type || "pointer"));
   }, [onPointerSceneMoveRef]);
 
+  const handleHostPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    // Только холст: клик по тулбару/панелям не должен блокировать remote-sync.
+    const target = e.target as HTMLElement | null;
+    if (!target?.closest?.("canvas.excalidraw__canvas")) return;
+    onPointerSceneDownRef.current?.();
+  }, [onPointerSceneDownRef]);
+
   const handleHostPointerUp = useCallback(() => {
     onPointerSceneUpRef.current?.();
   }, [onPointerSceneUpRef]);
@@ -184,8 +197,10 @@ function BoardExcalidrawInner({
       className="cb-board-excalidraw-host"
       ref={hostRef}
       onPointerMove={handleHostPointerMove}
+      onPointerDown={handleHostPointerDown}
       onPointerUp={handleHostPointerUp}
       onPointerCancel={handleHostPointerUp}
+      onLostPointerCapture={handleHostPointerUp}
     >
       <Excalidraw
         langCode="ru-RU"
@@ -246,6 +261,7 @@ const ExcalidrawHost = memo(
     onChangeRef: MutableRefObject<Props["onChange"]>;
     onApiReadyRef: MutableRefObject<Props["onApiReady"]>;
     onPointerSceneMoveRef: MutableRefObject<Props["onPointerSceneMove"]>;
+    onPointerSceneDownRef: MutableRefObject<Props["onPointerSceneDown"]>;
     onPointerSceneUpRef: MutableRefObject<Props["onPointerSceneUp"]>;
     generateIdForFileRef: MutableRefObject<Props["generateIdForFile"]>;
     onHostReadyRef: MutableRefObject<Props["onHostReady"]>;
@@ -263,6 +279,7 @@ function BoardExcalidrawCanvas({
   onChange,
   onApiReady,
   onPointerSceneMove,
+  onPointerSceneDown,
   onPointerSceneUp,
   generateIdForFile,
   onHostReady,
@@ -270,12 +287,14 @@ function BoardExcalidrawCanvas({
   const onChangeRef = useRef(onChange);
   const onApiReadyRef = useRef(onApiReady);
   const onPointerSceneMoveRef = useRef(onPointerSceneMove);
+  const onPointerSceneDownRef = useRef(onPointerSceneDown);
   const onPointerSceneUpRef = useRef(onPointerSceneUp);
   const generateIdForFileRef = useRef(generateIdForFile);
   const onHostReadyRef = useRef(onHostReady);
   onChangeRef.current = onChange;
   onApiReadyRef.current = onApiReady;
   onPointerSceneMoveRef.current = onPointerSceneMove;
+  onPointerSceneDownRef.current = onPointerSceneDown;
   onPointerSceneUpRef.current = onPointerSceneUp;
   generateIdForFileRef.current = generateIdForFile;
   onHostReadyRef.current = onHostReady;
@@ -293,6 +312,7 @@ function BoardExcalidrawCanvas({
       onChangeRef={onChangeRef}
       onApiReadyRef={onApiReadyRef}
       onPointerSceneMoveRef={onPointerSceneMoveRef}
+      onPointerSceneDownRef={onPointerSceneDownRef}
       onPointerSceneUpRef={onPointerSceneUpRef}
       generateIdForFileRef={generateIdForFileRef}
       onHostReadyRef={onHostReadyRef}

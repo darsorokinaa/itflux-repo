@@ -1218,6 +1218,22 @@
     width: 28px;
     height: 28px;
   }
+
+  /* Дублирует таб-переключатель Звонок/Материалы под шапкой — только отнимает
+     место у заголовка урока на узком экране. */
+  .video-lesson-header__materials-btn {
+    display: none;
+  }
+
+  .video-lesson-btn__label-tail {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .video-lesson-btn__label {
+    display: none;
+  }
 }
 
 @media (max-width: 640px) {

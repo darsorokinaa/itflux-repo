@@ -57,6 +57,7 @@ from .models import (
     ReviewItem,
     ScheduleEvent,
     ScheduleEventChangeLog,
+    ScheduleEventMaterial,
     ScheduleEventParticipant,
     ScheduleEventSeries,
     VideoMeeting,
@@ -559,18 +560,49 @@ class ReviewItemAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
 
 
+class ScheduleEventMaterialInline(admin.TabularInline):
+    model = ScheduleEventMaterial
+    extra = 0
+    autocomplete_fields = ("material", "interactive")
+
+
 @admin.register(ScheduleEvent)
 class ScheduleEventAdmin(admin.ModelAdmin):
-    list_display = ("title", "owner", "event_type", "starts_at", "status", "series")
-    list_filter = ("event_type", "format", "status", "is_recurring_instance")
+    list_display = (
+        "title",
+        "owner",
+        "event_type",
+        "starts_at",
+        "status",
+        "plan_sync_enabled",
+        "content_source",
+        "series",
+    )
+    list_filter = (
+        "event_type",
+        "format",
+        "status",
+        "is_recurring_instance",
+        "plan_sync_enabled",
+        "content_source",
+    )
     search_fields = ("title", "topic", "audience")
     ordering = ("starts_at",)
-    readonly_fields = ("created_at", "updated_at", "original_start_at")
+    readonly_fields = ("created_at", "updated_at", "original_start_at", "plan_synced_at")
+    inlines = [ScheduleEventMaterialInline]
 
 
 class ScheduleEventParticipantInline(admin.TabularInline):
     model = ScheduleEventParticipant
     extra = 0
+
+
+@admin.register(ScheduleEventMaterial)
+class ScheduleEventMaterialAdmin(admin.ModelAdmin):
+    list_display = ("event", "material", "interactive", "source", "order")
+    list_filter = ("source",)
+    search_fields = ("event__title", "material__title")
+    ordering = ("event", "order", "id")
 
 
 @admin.register(ScheduleEventSeries)

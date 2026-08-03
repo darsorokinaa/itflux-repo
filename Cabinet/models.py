@@ -17,6 +17,7 @@ from .choices import (
     InvitationStatus,
     InteractiveStatus,
     InteractiveType,
+    LessonContentSource,
     LessonStatus,
     LessonType,
     MaterialStatus,
@@ -36,6 +37,7 @@ from .choices import (
     ReviewStatus,
     ScheduleChangeType,
     ScheduleEventType,
+    ScheduleMaterialSource,
     SeriesStatus,
     StudentStatus,
     StudentSubjectStatus,
@@ -1831,6 +1833,9 @@ class ScheduleEvent(models.Model):
     title = models.CharField("Название", max_length=200)
     description = models.TextField("Описание", blank=True)
     topic = models.CharField("Тема", max_length=500, blank=True)
+    subtopic = models.CharField("Подтема", max_length=255, blank=True)
+    goal = models.TextField("Цель урока", blank=True)
+    homework_description = models.TextField("Домашнее задание", blank=True)
     starts_at = models.DateTimeField("Начало")
     ends_at = models.DateTimeField("Окончание")
     event_type = models.CharField(
@@ -1938,6 +1943,28 @@ class ScheduleEvent(models.Model):
             ("skip", "Пропустить тему для ученика"),
         ],
     )
+    plan_sync_enabled = models.BooleanField(
+        "Автообновление из плана обучения",
+        default=True,
+        help_text="Если выключено, изменения пункта плана не перезаписывают этот урок",
+    )
+    content_source = models.CharField(
+        "Источник данных урока",
+        max_length=16,
+        choices=LessonContentSource.choices,
+        default=LessonContentSource.MANUAL,
+    )
+    manual_override_fields = models.JSONField(
+        "Поля с ручным переопределением",
+        default=list,
+        blank=True,
+        help_text="Список полей (topic, subtopic, description, goal), которые не синхронизируются из плана",
+    )
+    plan_synced_at = models.DateTimeField(
+        "Последняя синхронизация с планом",
+        null=True,
+        blank=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1952,6 +1979,69 @@ class ScheduleEvent(models.Model):
     @property
     def meeting_url(self):
         return self.telemost_url
+
+
+class ScheduleEventMaterial(models.Model):
+    """Материал, привязанный к уроку в расписании, с указанием источника."""
+
+    event = models.ForeignKey(
+        ScheduleEvent,
+        on_delete=models.CASCADE,
+        related_name="event_materials",
+        verbose_name="Урок",
+    )
+    material = models.ForeignKey(
+        Material,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="schedule_event_links",
+        verbose_name="Материал",
+    )
+    interactive = models.ForeignKey(
+        "Interactive",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="schedule_event_links",
+        verbose_name="Интерактив",
+    )
+    source = models.CharField(
+        "Источник",
+        max_length=20,
+        choices=ScheduleMaterialSource.choices,
+        default=ScheduleMaterialSource.LESSON_MANUAL,
+    )
+    order = models.PositiveIntegerField("Порядок", default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Материал урока расписания"
+        verbose_name_plural = "Материалы уроков расписания"
+        ordering = ["order", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event", "material", "source"],
+                condition=models.Q(material__isnull=False),
+                name="uniq_event_material_source",
+            ),
+            models.UniqueConstraint(
+                fields=["event", "interactive", "source"],
+                condition=models.Q(interactive__isnull=False),
+                name="uniq_event_interactive_source",
+            ),
+        ]
+
+    def clean(self):
+        has_material = self.material_id is not None
+        has_interactive = self.interactive_id is not None
+        if has_material == has_interactive:
+            raise ValidationError("Укажите либо материал, либо интерактив.")
+
+    def __str__(self):
+        target = self.material_id or self.interactive_id
+        return f"Event#{self.event_id} · {self.source} · {target}"
 
 
 class ScheduleEventSeries(models.Model):

@@ -95,6 +95,12 @@ def normalize_event_update_data(data):
         normalized["telemost_url"] = (
             normalized.get("telemost_url") or normalized.get("link") or ""
         ).strip()
+    if "homework_description" not in normalized and "homeworkDescription" in normalized:
+        normalized["homework_description"] = normalized.get("homeworkDescription") or ""
+    if "lesson_plan_item" not in normalized and "lesson_plan_item_id" in normalized:
+        normalized["lesson_plan_item"] = normalized.get("lesson_plan_item_id")
+    if "plan_sync_enabled" not in normalized and "planSyncEnabled" in normalized:
+        normalized["plan_sync_enabled"] = normalized["planSyncEnabled"]
     return normalized
 
 
@@ -102,6 +108,9 @@ SERIES_SHARED_EVENT_FIELDS = (
     "title",
     "description",
     "topic",
+    "subtopic",
+    "goal",
+    "homework_description",
     "telemost_url",
     "meeting_provider",
     "location",
@@ -621,12 +630,25 @@ def update_event(event, *, changed_by, data, notify=True):
     data = normalize_event_update_data(data)
     old = event_snapshot(event)
     fields = [
-        "title", "description", "topic", "telemost_url", "meeting_provider",
+        "title", "description", "topic", "subtopic", "goal", "homework_description",
+        "telemost_url", "meeting_provider",
         "location", "materials", "teacher_comment", "reminder_minutes", "timezone",
+        "plan_sync_enabled", "content_source", "manual_override_fields",
+        "lesson_plan_item",
     ]
     for f in fields:
-        if f in data:
-            setattr(event, f, data[f])
+        if f not in data:
+            continue
+        value = data[f]
+        if f == "lesson_plan_item":
+            if value in (None, "", 0, "0"):
+                event.lesson_plan_item = None
+            elif hasattr(value, "pk"):
+                event.lesson_plan_item = value
+            else:
+                event.lesson_plan_item_id = int(value)
+            continue
+        setattr(event, f, value)
     if "starts_at" in data:
         event.starts_at = data["starts_at"]
     if "ends_at" in data:

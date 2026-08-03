@@ -1106,7 +1106,13 @@ class LessonPlanItemViewSet(
         # После M2M-обновления не полагаемся на устаревший prefetch.
         if hasattr(item, "_prefetched_objects_cache"):
             item._prefetched_objects_cache.clear()
-        return Response(LessonPlanItemSerializer(item).data)
+        from .lesson_plan_content_sync import LessonLearningPlanSyncService
+        sync_result = LessonLearningPlanSyncService.sync_plan_item_to_lessons(
+            item, teacher=self.get_teacher(), update_source="plan",
+        )
+        data = LessonPlanItemSerializer(item).data
+        data["synced_events"] = sync_result
+        return Response(data)
 
     def destroy(self, request, *args, **kwargs):
         item = self.get_object()
@@ -1146,16 +1152,45 @@ class LessonPlanItemViewSet(
     @action(detail=False, methods=["post"], url_path="reorder")
     def reorder(self, request):
         order_map = request.data.get("items") or []
+        plan_ids = set()
         for entry in order_map:
             item_id = entry.get("id")
             order = entry.get("order")
             if item_id is None or order is None:
                 continue
-            LessonPlanItem.objects.filter(
+            updated = LessonPlanItem.objects.filter(
                 pk=item_id,
                 plan__teacher=self.get_teacher(),
-            ).update(order=order)
-        return Response({"ok": True})
+            )
+            for item in updated:
+                plan_ids.add(item.plan_id)
+            updated.update(order=order)
+
+        from .choices import EnrollmentStatus
+        from .lesson_plan_content_sync import LessonLearningPlanSyncService
+        from .models import LessonPlanEnrollment
+
+        warnings = []
+        updated_event_ids = []
+        for plan_id in plan_ids:
+            enrollments = LessonPlanEnrollment.objects.filter(
+                plan_id=plan_id,
+                teacher=self.get_teacher(),
+            ).exclude(status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED])
+            for enrollment in enrollments:
+                result = LessonLearningPlanSyncService.reorder_future_lessons_from_plan(
+                    enrollment, teacher=self.get_teacher(),
+                )
+                updated_event_ids.extend(result.get("updated_event_ids") or [])
+                if result.get("warning"):
+                    warnings.append(result["warning"])
+
+        return Response({
+            "ok": True,
+            "warning": warnings[0] if warnings else None,
+            "warnings": warnings,
+            "updated_event_ids": list(dict.fromkeys(updated_event_ids)),
+        })
 
 
 class LessonPlanEnrollmentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):

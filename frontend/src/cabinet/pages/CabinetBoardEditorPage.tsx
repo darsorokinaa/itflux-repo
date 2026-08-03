@@ -36,13 +36,20 @@ import {
   downloadBlob,
 } from "../boards/boardExport";
 import {
+  attachStableUrls,
+  createStableUrlMap,
   externalizeSceneFiles,
   filesForPersist,
   filesNeedRemoteHydrate,
   findMissingImageFileIds,
   hydrateBoardFiles,
   isTransientFileUrl,
+  markImageElementsSaved,
+  pendingUploadFileIds,
+  rememberStableUrls,
   revokeBoardBlobUrls,
+  stableUrlOf,
+  STABLE_URL_KEY,
 } from "../boards/boardFiles";
 import {
   BG_COLOR_KEY,
@@ -57,10 +64,12 @@ import {
 import {
   createBoardCollabSession,
   mergeCollabScenes,
+  type BoardSceneOpsPayload,
   type CollabPeer,
+  type CollabScene,
   type RemoteCursor,
 } from "../boards/boardCollab";
-import { applyBoardOps } from "../boards/boardOps";
+import { applyBoardOps, coalesceBoardOps, type BoardElementOp } from "../boards/boardOps";
 import {
   filterUnauthorizedMutations,
   stampElementOwnership,
@@ -125,8 +134,83 @@ type ExcalidrawAPI = {
   getAppState: () => Record<string, unknown>;
   getFiles: () => Record<string, unknown>;
   updateScene: (payload: Record<string, unknown>) => void;
+  addFiles?: (files: unknown[]) => void;
   resetScene?: () => void;
 };
+
+/** Dev-only диагностика синка доски. Не пишет содержимое dataURL/base64. */
+const BOARD_DEBUG = Boolean(import.meta.env?.DEV);
+function boardLog(tag: string, data?: Record<string, unknown>) {
+  if (!BOARD_DEBUG) return;
+  // Строкой, а не вторым аргументом console.debug: при копировании текста
+  // консоли (не разворачивая объект вручную) второй аргумент печатается как
+  // нераскрытое "Object" — реальные данные не видны в скопированном логе.
+  let json = "";
+  try {
+    json = data ? JSON.stringify(data) : "";
+  } catch {
+    json = "[unserializable]";
+  }
+  // eslint-disable-next-line no-console
+  console.debug(`[board] ${tag} ${json}`);
+}
+
+/**
+ * Excalidraw.updateScene() игнорирует ключ `files` — сцена (`sceneData`)
+ * принимает только elements/appState/collaborators/captureUpdate. Файлы
+ * регистрируются только через отдельный imperative-метод addFiles(). Без
+ * этого шага картинки, добавленные удалённо, не появляются на холсте пира
+ * вообще (а не «с задержкой») — element типа image рендерится, но данных
+ * файла в состоянии Excalidraw нет.
+ *
+ * addFiles() молча игнорирует id, который уже зарегистрирован (docs: "if
+ * file already exists in editor state, the file data is not updated"). Со
+ * стороны сети файлы всегда приходят как «сырой» стабильный URL
+ * (filesForLivePublish вырезает blob:/data:), а не сразу рисуемый blob —
+ * его ещё нужно догрузить (hydrateBoardFiles). Если зарегистрировать id
+ * сразу с сырым URL, а не дождаться blob, то более поздний addFiles() с
+ * рабочим blob для того же id будет просто отброшен — картинка так и
+ * останется невидимой до перезахода. Поэтому сюда должны попадать только
+ * уже пригодные для рендера файлы (blob:/data:); для остальных единственная
+ * регистрация — из ветки, которая применяется ПОСЛЕ hydrateBoardFiles.
+ */
+function urlKind(url: unknown): string {
+  const s = typeof url === "string" ? url : "";
+  if (s.startsWith("blob:")) return "blob";
+  if (s.startsWith("data:")) return "data";
+  if (s) return "stable";
+  return "missing";
+}
+
+function toBinaryFileDataList(files: Record<string, unknown> | null | undefined, source = ""): unknown[] {
+  const out: unknown[] = [];
+  const deferred: string[] = [];
+  for (const [id, raw] of Object.entries(files || {})) {
+    if (!raw || typeof raw !== "object") continue;
+    const meta = raw as Record<string, unknown>;
+    const dataURL = meta.dataURL || meta.url;
+    if (!dataURL || typeof dataURL !== "string") continue;
+    if (!dataURL.startsWith("blob:") && !dataURL.startsWith("data:")) {
+      deferred.push(id);
+      continue;
+    }
+    const now = Date.now();
+    out.push({
+      id: meta.id || id,
+      dataURL,
+      mimeType: meta.mimeType || "image/png",
+      created: typeof meta.created === "number" ? meta.created : now,
+      lastRetrieved: typeof meta.lastRetrieved === "number" ? meta.lastRetrieved : now,
+    });
+  }
+  if (BOARD_DEBUG && (out.length || deferred.length)) {
+    boardLog(`addFiles:${source}`, {
+      registering: out.map((f) => (f as { id: string }).id),
+      deferredUntilHydrate: deferred,
+    });
+  }
+  return out;
+}
 
 /** Локальные элементы для merge: включая soft-deleted, иначе удаление «откатывается». */
 function getLocalElementsForMerge(api: ExcalidrawAPI | null, fallback: unknown[] | null | undefined): unknown[] {
@@ -143,6 +227,8 @@ function applyRemoteSceneToApi(
   scene: { elements: unknown[]; appState?: Record<string, unknown>; files?: Record<string, unknown> },
 ) {
   const local = api.getAppState?.() || {};
+  const filesList = toBinaryFileDataList(scene.files, "applyRemoteScene");
+  if (filesList.length) api.addFiles?.(filesList);
   api.updateScene?.({
     elements: scene.elements,
     appState: {
@@ -262,6 +348,20 @@ export default function CabinetBoardEditorPage() {
   const applyingRemoteRef = useRef(false);
   /** Sync-гард только на onChange от updateScene(collaborators); не держит publishLive. */
   const applyingCollaboratorsRef = useRef(false);
+  /**
+   * true между pointerdown и pointerup на холсте. Excalidraw теряет активный
+   * жест (штрих обрывается до одной точки), если во время рисования прилетает
+   * наш собственный updateScene() из применения удалённой сцены/ops — поэтому
+   * такие применения на время жеста откладываются, а не выполняются сразу.
+   */
+  const isDrawingGestureRef = useRef(false);
+  const pendingRemoteOpsQueueRef = useRef<Array<{ ops: BoardSceneOpsPayload; meta: { version?: number } }>>([]);
+  const pendingRemoteSceneRef = useRef<{ scene: CollabScene; meta: { fromSaved?: boolean; version?: number; cleared?: boolean } } | null>(null);
+  const pendingResyncRef = useRef(false);
+  /** Файлы, догруженные во время локального жеста — применяем на pointerup, не revoke. */
+  const pendingHydrateFilesRef = useRef<Record<string, unknown> | null>(null);
+  const gestureEndBoundRef = useRef<(() => void) | null>(null);
+  const flushPendingRemoteAppliesRef = useRef<() => void>(() => {});
   const lastElementsRef = useRef<readonly unknown[] | null>(null);
   const lastFilesRef = useRef<Record<string, unknown> | null>(null);
   const knownElementIdsRef = useRef(new Set<string>());
@@ -273,6 +373,11 @@ export default function CabinetBoardEditorPage() {
   const remoteCursorsRef = useRef(new Map<string, RemoteCursor>());
   const boardNamesRef = useRef({ owner: "", student: "" });
   const uploadingFileIdsRef = useRef(new Set<string>());
+  /** Постоянные API URL вне Excalidraw — BinaryFileData не сохраняет itfluxStableURL. */
+  const stableFileUrlsRef = useRef(createStableUrlMap());
+  /** fileId, успешно загруженные/восстановленные в этой сессии — без повторного upload. */
+  const loadedFilesRef = useRef(new Set<string>());
+  const loadingRemoteFilesRef = useRef(new Set<string>());
   const lastActiveToolRef = useRef("");
   const imageUploadStatusRef = useRef<"idle" | "uploading" | "error">("idle");
   const [imageUploadStatus, setImageUploadStatus] = useState<"idle" | "uploading" | "error">("idle");
@@ -349,32 +454,61 @@ export default function CabinetBoardEditorPage() {
     const revisionAtSave = localRevisionRef.current;
     const versionAtSave = versionRef.current;
     // Снимок на момент старта: правки во время запроса остаются в latestSceneRef.
+    // Прикрепляем стабильные URL из registry — onChange мог отдать только blob:.
+    const filesWithStable = attachStableUrls(
+      scene.files as Record<string, Record<string, unknown>>,
+      stableFileUrlsRef.current,
+    );
     const snapshot: BoardScenePayload = {
       elements: Array.isArray(scene.elements) ? [...scene.elements] : [],
       appState: { ...(scene.appState || {}) },
-      files: { ...(scene.files || {}) },
+      files: filesWithStable,
     };
 
     safeSetSaveStatus("saving");
     try {
+      const preUploadFiles = filesForPersist(snapshot.files as Record<string, Record<string, unknown>>) as Record<string, Record<string, unknown>>;
+      boardLog("persist:before", {
+        version: versionAtSave,
+        elementCount: snapshot.elements.length,
+        files: Object.fromEntries(
+          Object.entries(preUploadFiles).map(([id, meta]) => [id, urlKind(meta?.dataURL || meta?.url)]),
+        ),
+      });
       const files = await externalizeSceneFiles(
-        filesForPersist(snapshot.files as Record<string, Record<string, unknown>>) as Record<string, Record<string, unknown>>,
+        preUploadFiles,
         (form) => uploadInteractiveBoardImage(boardIdAtSave, form),
       );
+      rememberStableUrls(stableFileUrlsRef.current, files);
+      for (const id of Object.keys(files)) loadedFilesRef.current.add(id);
       // Смена доски — бросаем. Размонтирование — всё равно сохраняем снимок.
       if (boardIdRef.current !== boardIdAtSave) return;
 
-      const persistFiles = filesForPersist(files) as Record<string, unknown>;
+      const persistFiles = filesForPersist(
+        attachStableUrls(files, stableFileUrlsRef.current),
+      ) as Record<string, unknown>;
 
       // Подмешиваем только стабильные URL файлов — не затираем более новые elements.
       if (latestSceneRef.current && boardIdRef.current === boardIdAtSave) {
+        const mergedDisplay = attachStableUrls(
+          { ...latestSceneRef.current.files, ...files } as Record<string, Record<string, unknown>>,
+          stableFileUrlsRef.current,
+        );
         latestSceneRef.current = {
           ...latestSceneRef.current,
-          files: { ...latestSceneRef.current.files, ...files },
+          files: mergedDisplay,
         };
       }
 
       const payload: BoardScenePayload = { ...snapshot, files: persistFiles };
+      boardLog("persist:sending", {
+        files: Object.fromEntries(
+          Object.entries(persistFiles).map(([id, meta]) => {
+            const m = meta as Record<string, unknown>;
+            return [id, urlKind(m?.dataURL || m?.url)];
+          }),
+        ),
+      });
       const data = await updateInteractiveBoard(boardIdAtSave, {
         scene_data: payload,
         version: versionAtSave,
@@ -432,11 +566,48 @@ export default function CabinetBoardEditorPage() {
             if (mountedRef.current && apiRef.current) {
               applyingRemoteRef.current = true;
               applyRemoteSceneToApi(apiRef.current, merged);
-              queueMicrotask(() => { applyingRemoteRef.current = false; });
+              clearApplyingRemoteSoon();
             }
             latestSceneRef.current = buildScenePayload(merged.elements, merged.appState, merged.files);
             lastElementsRef.current = merged.elements;
             lastFilesRef.current = merged.files;
+            // Новые картинки из серверной сцены (например, добавил пир, пока
+            // мы не успели сохранить) ещё не blob — не блокируем merge, но
+            // догружаем их так же, как для scene_saved/resync.
+            if (filesNeedRemoteHydrate(
+              merged.files as Record<string, Record<string, unknown>>,
+              localFiles as Record<string, Record<string, unknown>>,
+            )) {
+              void hydrateBoardFiles(merged.files as Record<string, Record<string, unknown>>).then((hydrated) => {
+                boardLog("hydrate:conflictMerge", {
+                  ok: hydrated.blobUrls.length,
+                  missing: hydrated.missingFileIds,
+                  failed: hydrated.failedFileIds,
+                });
+                if (boardIdRef.current !== boardIdAtSave || !apiRef.current) {
+                  revokeBoardBlobUrls(hydrated.blobUrls);
+                  return;
+                }
+                hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
+                // За время await hydrateBoardFiles на канвас мог прилететь более
+                // свежий апдейт — пересливаем поверх текущего состояния, а не
+                // поверх merged, снятого до await.
+                const freshLocal = getLocalElementsForMerge(apiRef.current, latestSceneRef.current?.elements);
+                const freshApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
+                const freshFiles = (apiRef.current.getFiles?.() || {}) as Record<string, unknown>;
+                const reMerged = mergeCollabScenes(
+                  { elements: freshLocal, appState: freshApp, files: freshFiles },
+                  { elements: merged.elements, appState: merged.appState, files: hydrated.files },
+                );
+                applyingRemoteRef.current = true;
+                applyRemoteSceneToApi(apiRef.current, reMerged);
+                clearApplyingRemoteSoon();
+                const mergedFiles = { ...freshFiles, ...reMerged.files };
+                latestSceneRef.current = buildScenePayload(reMerged.elements, reMerged.appState, mergedFiles);
+                lastElementsRef.current = reMerged.elements;
+                lastFilesRef.current = mergedFiles;
+              });
+            }
             // После merge нужно пересохранить нашу актуальную версию поверх серверной.
             markLocalSceneChange();
             saveRequestedRef.current = true;
@@ -480,9 +651,22 @@ export default function CabinetBoardEditorPage() {
     }
   }, [boardId, canEdit, collaborative, conflict, markLocalSceneChange, safeSetSaveStatus, scheduleThumbnailRefresh, showNotice]);
 
+  // persistScene пересоздаётся при каждом изменении conflict/canEdit/... (а conflict
+  // переключается прямо внутри обработки 409 несколько раз за один цикл). Если
+  // debouncedSaver зависел бы от persistScene, каждое такое пересоздание рождало бы
+  // новый singleflight-домен (inFlight/timer сбрасывались бы в исходное состояние) —
+  // старый и новый saver переставали делить между собой "идёт ли уже запрос", и
+  // ретраи после конфликта версий могли уйти параллельно тому запросу, что ещё не
+  // завершился. Результат наблюдался как шквал повторяющихся 409 подряд и риск
+  // того, что более старый (и потому неполный) снимок сцены перезапишет в БД уже
+  // сохранённый более новый — например, без только что добавленной картинки.
+  // Поэтому debouncedSaver создаётся один раз на весь жизненный цикл компонента,
+  // а актуальную persistScene читает через ref.
+  const persistSceneRef = useRef(persistScene);
+  persistSceneRef.current = persistScene;
   const debouncedSaver = useMemo(
-    () => createDebouncedSaver(() => persistScene(), AUTOSAVE_DEBOUNCE_MS),
-    [persistScene],
+    () => createDebouncedSaver(() => persistSceneRef.current(), AUTOSAVE_DEBOUNCE_MS),
+    [],
   );
   saverRef.current = debouncedSaver;
 
@@ -500,6 +684,11 @@ export default function CabinetBoardEditorPage() {
       if (thumbnailTimerRef.current) {
         clearTimeout(thumbnailTimerRef.current);
         thumbnailTimerRef.current = null;
+      }
+      if (gestureEndBoundRef.current) {
+        window.removeEventListener("pointerup", gestureEndBoundRef.current);
+        window.removeEventListener("pointercancel", gestureEndBoundRef.current);
+        gestureEndBoundRef.current = null;
       }
       saverRef.current?.cancel();
     };
@@ -524,6 +713,12 @@ export default function CabinetBoardEditorPage() {
     latestSceneRef.current = null;
     lastElementsRef.current = null;
     lastFilesRef.current = null;
+    stableFileUrlsRef.current = createStableUrlMap();
+    loadedFilesRef.current = new Set();
+    loadingRemoteFilesRef.current = new Set();
+    uploadingFileIdsRef.current = new Set();
+    imageUploadStatusRef.current = "idle";
+    setImageUploadStatus("idle");
     metricsRef.current = createBoardLoadMetrics();
     setLoading(true);
     setLoadPhase("loading_scene");
@@ -563,13 +758,32 @@ export default function CabinetBoardEditorPage() {
           return;
         }
         hydratedBlobUrlsRef.current = hydrated.blobUrls;
+        rememberStableUrls(stableFileUrlsRef.current, rawFiles);
+        rememberStableUrls(stableFileUrlsRef.current, hydrated.files);
+        for (const id of Object.keys(hydrated.files)) {
+          if (stableFileUrlsRef.current.has(id)) loadedFilesRef.current.add(id);
+        }
         const orphanIds = findMissingImageFileIds(elements, hydrated.files);
+        boardLog("hydrate:initialLoad", {
+          fileCount: Object.keys(hydrated.files).length,
+          ok: hydrated.blobUrls.length,
+          missing: hydrated.missingFileIds,
+          failed: hydrated.failedFileIds,
+          orphanImageElements: orphanIds,
+          registrySize: stableFileUrlsRef.current.size,
+        });
         setMissingImageCount(hydrated.failedFileIds.length + orphanIds.length + hydrated.missingFileIds.length);
 
-        const scene = buildScenePayload(
+        const filesReady = attachStableUrls(hydrated.files, stableFileUrlsRef.current);
+        // Snapshot мог сохранить pending — после hydrate считаем изображения saved.
+        const elementsReady = markImageElementsSaved(
           elements,
+          Object.keys(filesReady).filter((id) => loadedFilesRef.current.has(id)),
+        );
+        const scene = buildScenePayload(
+          elementsReady,
           { ...rawApp, ...gridAppStatePatch(style, solidBg), theme },
-          hydrated.files,
+          filesReady,
         );
         metricsRef.current.filesLoadedAt = performance.now();
         metricsRef.current.elementCount = Array.isArray(elements) ? elements.length : 0;
@@ -695,11 +909,15 @@ export default function CabinetBoardEditorPage() {
   }, []);
 
   const publishLiveScene = useCallback((scene: BoardScenePayload) => {
+    const files = attachStableUrls(
+      (scene.files || {}) as Record<string, Record<string, unknown>>,
+      stableFileUrlsRef.current,
+    );
     collabRef.current?.publishLive(
       {
         elements: scene.elements as unknown[],
         appState: scene.appState,
-        files: scene.files as Record<string, unknown>,
+        files,
       },
       versionRef.current,
     );
@@ -707,54 +925,123 @@ export default function CabinetBoardEditorPage() {
 
   const externalizeAndSyncFiles = useCallback(async (scene: BoardScenePayload) => {
     if (!boardId || !apiRef.current) return scene;
-    const files = (scene.files || {}) as Record<string, Record<string, unknown>>;
-    const pendingIds = Object.entries(files)
-      .filter(([id, meta]) => {
-        const url = String(meta?.dataURL || meta?.url || "");
-        return isTransientFileUrl(url) && !uploadingFileIdsRef.current.has(id);
-      })
-      .map(([id]) => id);
+    const files = attachStableUrls(
+      (scene.files || {}) as Record<string, Record<string, unknown>>,
+      stableFileUrlsRef.current,
+    );
+    const pendingIds = pendingUploadFileIds(
+      files,
+      stableFileUrlsRef.current,
+      uploadingFileIdsRef.current,
+    ).filter((id) => !loadedFilesRef.current.has(id));
     if (!pendingIds.length) {
-      publishLiveScene(scene);
-      return scene;
+      boardLog("upload:skip", {
+        reason: "already_stable_or_in_flight",
+        fileIds: Object.keys(files),
+        registrySize: stableFileUrlsRef.current.size,
+      });
+      return { ...scene, files };
     }
     pendingIds.forEach((id) => uploadingFileIdsRef.current.add(id));
     imageUploadStatusRef.current = "uploading";
     setImageUploadStatus("uploading");
+    boardLog("upload:start", {
+      ids: pendingIds,
+      mime: pendingIds.map((id) => String(files[id]?.mimeType || "")),
+    });
     try {
-      const nextFiles = await externalizeSceneFiles(files, (form) =>
+      const onlyPending = Object.fromEntries(
+        pendingIds.map((id) => [id, files[id]]).filter(([, m]) => m),
+      ) as Record<string, Record<string, unknown>>;
+      const nextFiles = await externalizeSceneFiles(onlyPending, (form) =>
         uploadInteractiveBoardImage(boardId, form),
       );
-      // Сразу гидратируем новые API URL → blob, иначе локальный canvas «теряет» картинку.
-      const hydratedUpload = await hydrateBoardFiles(
-        Object.fromEntries(pendingIds.map((id) => [id, nextFiles[id]]).filter(([, m]) => m)),
+      rememberStableUrls(stableFileUrlsRef.current, nextFiles);
+      for (const id of pendingIds) {
+        if (stableFileUrlsRef.current.has(id)) loadedFilesRef.current.add(id);
+      }
+      boardLog("upload:done", {
+        ids: pendingIds,
+        urls: Object.fromEntries(
+          pendingIds.map((id) => [id, stableFileUrlsRef.current.get(id) || ""]),
+        ),
+      });
+      // Локально оставляем уже отрисованный blob Excalidraw; в registry — API URL.
+      // Перегидратация API→blob после собственного аплоада опасна: addFiles
+      // игнорирует существующий id, а при ошибке fetch подставлялся 1×1 placeholder.
+      const displayFiles = attachStableUrls(
+        { ...files, ...nextFiles },
+        stableFileUrlsRef.current,
       );
-      hydratedBlobUrlsRef.current.push(...hydratedUpload.blobUrls);
-      const displayFiles = { ...nextFiles, ...hydratedUpload.files };
+      // Для отображения предпочитаем исходный blob/data, если он ещё жив.
+      for (const id of pendingIds) {
+        const prev = files[id];
+        const next = displayFiles[id];
+        if (!prev || !next) continue;
+        const prevUrl = String(prev.dataURL || prev.url || "");
+        if (prevUrl.startsWith("blob:") || prevUrl.startsWith("data:")) {
+          displayFiles[id] = {
+            ...next,
+            dataURL: prevUrl,
+            url: prevUrl,
+            [STABLE_URL_KEY]: stableFileUrlsRef.current.get(id) || stableUrlOf(next),
+          };
+        }
+      }
       pendingIds.forEach((id) => uploadingFileIdsRef.current.delete(id));
       if (!mountedRef.current || boardIdRef.current !== boardId) return scene;
-      // Не затираем elements, которые пользователь успел изменить во время upload.
-      if (latestSceneRef.current) {
-        latestSceneRef.current = {
-          ...latestSceneRef.current,
-          files: { ...latestSceneRef.current.files, ...displayFiles },
-        };
-      }
-      lastFilesRef.current = {
-        ...(lastFilesRef.current || {}),
-        ...displayFiles,
-      };
+
+      const baseElements = (latestSceneRef.current?.elements || scene.elements || []) as unknown[];
+      const savedElements = markImageElementsSaved(baseElements, pendingIds);
       applyingRemoteRef.current = true;
+      // Файл уже в Excalidraw (локальный blob). Добавляем только если вдруг нет.
+      const apiFiles = (apiRef.current.getFiles?.() || {}) as Record<string, unknown>;
+      const missingForApi = pendingIds.filter((id) => !apiFiles[id]);
+      if (missingForApi.length) {
+        const toAdd = Object.fromEntries(missingForApi.map((id) => [id, displayFiles[id]]));
+        apiRef.current.addFiles?.(toBinaryFileDataList(toAdd, "ownUpload"));
+      }
       apiRef.current.updateScene?.({
-        files: displayFiles,
+        elements: savedElements,
         captureUpdate: CaptureUpdateAction.NEVER,
       });
-      queueMicrotask(() => {
-        applyingRemoteRef.current = false;
-      });
+      const publishFiles = attachStableUrls(displayFiles, stableFileUrlsRef.current);
+      latestSceneRef.current = buildScenePayload(
+        savedElements,
+        latestSceneRef.current?.appState || scene.appState,
+        publishFiles,
+      );
+      lastElementsRef.current = savedElements;
+      lastFilesRef.current = publishFiles;
+      clearApplyingRemoteSoon();
       imageUploadStatusRef.current = "idle";
       setImageUploadStatus("idle");
-      const publishScene = latestSceneRef.current || { ...scene, files: displayFiles };
+
+      const publishScene = latestSceneRef.current;
+      boardLog("upload:publish", {
+        elementCount: publishScene.elements.length,
+        imageIds: pendingIds,
+        fileIds: Object.keys(filesForPersist(publishFiles)),
+        statuses: pendingIds.map((id) => {
+          const el = savedElements.find(
+            (raw) => raw && typeof raw === "object" && (raw as { fileId?: string }).fileId === id,
+          ) as { status?: string; id?: string } | undefined;
+          return { fileId: id, elementId: el?.id, status: el?.status };
+        }),
+      });
+      // Явное file_add + обычный live: пир сначала получит файл, затем элемент.
+      collabRef.current?.publishFileAdd(
+        pendingIds.map((id) => ({
+          id,
+          url: stableFileUrlsRef.current.get(id) || "",
+          mimeType: String(publishFiles[id]?.mimeType || "image/png"),
+          created: Number(publishFiles[id]?.created) || Date.now(),
+        })),
+        savedElements.filter((raw) => {
+          const el = raw as { type?: string; fileId?: string; isDeleted?: boolean };
+          return el.type === "image" && !!el.fileId && pendingIds.includes(el.fileId) && !el.isDeleted;
+        }),
+      );
       publishLiveScene(publishScene);
       markLocalSceneChange();
       safeSetSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));
@@ -765,8 +1052,9 @@ export default function CabinetBoardEditorPage() {
       imageUploadStatusRef.current = "error";
       setImageUploadStatus("error");
       const error = err as { message?: string };
+      boardLog("upload:error", { ids: pendingIds, message: error?.message || "unknown" });
       showNotice(error?.message || "Не удалось загрузить изображение на доску");
-      // Не публикуем blob:/data: пирам — только локальный предпросмотр.
+      // Не публикуем blob:/data: пирам — только локальный предпросмотр. Элемент не удаляем.
       return scene;
     }
   }, [boardId, debouncedSaver, markLocalSceneChange, publishLiveScene, safeSetSaveStatus, showNotice]);
@@ -776,9 +1064,15 @@ export default function CabinetBoardEditorPage() {
   canManageRefLocal.current = canManage;
 
   const clearApplyingRemoteSoon = useCallback(() => {
-    // Снимаем флаг на следующем микротаске: onChange от updateScene обычно sync,
-    // а длинный setTimeout(40–80ms) раньше блокировал исходящий publishLive при курсорах пира.
-    queueMicrotask(() => {
+    // Снимаем флаг ПОСЛЕ следующего кадра, не на микротаске: onChange от
+    // updateScene у Excalidraw не гарантированно синхронный (иногда уходит
+    // за пределы текущего таска). При микротаске флаг снимался раньше, чем
+    // реально прилетал echo-onChange от applyMerged — тот проходил как
+    // «настоящее» локальное изменение, запускал autosave, сервер рассылал
+    // новый scene_saved, applyMerged срабатывал снова — самоподдерживающийся
+    // цикл автосохранений примерно раз в секунду даже без единого действия
+    // пользователя (наблюдалось: version доски росла без остановки).
+    requestAnimationFrame(() => {
       applyingRemoteRef.current = false;
     });
   }, []);
@@ -810,7 +1104,12 @@ export default function CabinetBoardEditorPage() {
         if (id) knownElementIdsRef.current.add(id);
       }
 
-      const scene = buildScenePayload(nextElements, appState, files);
+      // Excalidraw onChange отдаёт BinaryFileData без itfluxStableURL — возвращаем из registry.
+      const filesAttached = attachStableUrls(
+        files as Record<string, Record<string, unknown>>,
+        stableFileUrlsRef.current,
+      );
+      const scene = buildScenePayload(nextElements, appState, filesAttached);
       // Сохраняем наш стиль сетки и цвет бумаги (Excalidraw может не вернуть кастомные ключи)
       scene.appState[GRID_STYLE_KEY] = gridStyleRef.current;
       scene.appState[BG_COLOR_KEY] = bgColorRef.current;
@@ -834,21 +1133,33 @@ export default function CabinetBoardEditorPage() {
       }
       if (!elementsChanged && !filesChanged && !bgChanged && !gridChanged && !themeChanged) return;
       lastElementsRef.current = nextElements;
-      lastFilesRef.current = files;
+      lastFilesRef.current = filesAttached;
       markLocalSceneChange();
       safeSetSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));
       debouncedSaver.schedule();
-      const hasTransient = Object.values(files).some((meta) => {
-        if (!meta || typeof meta !== "object") return false;
-        const url = String((meta as { dataURL?: string; url?: string }).dataURL
-          || (meta as { url?: string }).url || "");
-        return isTransientFileUrl(url);
-      });
-      if (hasTransient) {
+      const pendingFileIds = new Set(
+        pendingUploadFileIds(
+          filesAttached,
+          stableFileUrlsRef.current,
+          uploadingFileIdsRef.current,
+        ).filter((id) => !loadedFilesRef.current.has(id)),
+      );
+      if (pendingFileIds.size) {
         void externalizeAndSyncFiles(scene);
-      } else {
-        publishLiveScene(scene);
       }
+      // Публикуем сразу, не дожидаясь аплоада картинок — иначе один медленный
+      // upload блокирует live-синк остальных правок. Элементы-картинки с ещё
+      // не загруженным файлом временно вырезаем: их отправит externalizeAndSyncFiles
+      // вместе с готовым файлом, чтобы у пиров не было «сироты» без данных.
+      const liveElements = pendingFileIds.size
+        ? nextElements.filter((raw) => {
+            const el = raw as { type?: string; fileId?: string };
+            return !(el.type === "image" && el.fileId && pendingFileIds.has(el.fileId));
+          })
+        : nextElements;
+      publishLiveScene(
+        liveElements.length === nextElements.length ? scene : { ...scene, elements: liveElements },
+      );
     },
     [debouncedSaver, externalizeAndSyncFiles, markLocalSceneChange, publishLiveScene, safeSetSaveStatus, syncPaperOverlay, syncLeftPanels],
   );
@@ -866,6 +1177,11 @@ export default function CabinetBoardEditorPage() {
 
     const applyCollaborators = () => {
       if (!apiRef.current) return;
+      // Во время активного локального жеста (рисуем) не трогаем сцену вообще —
+      // даже безобидный updateScene(collaborators) сбивает Excalidraw с толку
+      // и штрих обрывается до одной точки. Курсор пира на долю секунды
+      // отстанет — не страшно, следующий тик догонит.
+      if (isDrawingGestureRef.current) return;
       const collaborators = buildCollaboratorsMap(remoteCursorsRef.current);
       // Не трогаем applyingRemoteRef: курсоры пира раньше блокировали publishLive на десятки ms.
       applyingCollaboratorsRef.current = true;
@@ -878,75 +1194,275 @@ export default function CabinetBoardEditorPage() {
       });
     };
 
-    const session = createBoardCollabSession(
-      boardId,
-      displayName,
-      {
-        onStatus: (status) => {
-          if (status === "open") {
-            metricsRef.current.wsConnectedAt = performance.now();
-            setLoadPhase(hostReadyRef.current ? "ready" : "connecting");
-          } else if (status === "closed") {
-            metricsRef.current.reconnectCount += 1;
-            setLoadPhase("reconnecting");
+    const handleRemoteOpsNow = (ops: BoardSceneOpsPayload, meta: { version?: number }) => {
+      if (!apiRef.current || boardIdRef.current !== boardId) return;
+      rememberStableUrls(
+        stableFileUrlsRef.current,
+        ops.files as Record<string, Record<string, unknown>>,
+      );
+      const localElements = getLocalElementsForMerge(
+        apiRef.current,
+        latestSceneRef.current?.elements,
+      );
+      const localApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
+      const localFiles = attachStableUrls(
+        (apiRef.current.getFiles?.() || latestSceneRef.current?.files || {}) as Record<string, Record<string, unknown>>,
+        stableFileUrlsRef.current,
+      );
+      const applied = applyBoardOps(
+        { elements: localElements, appState: localApp, files: localFiles },
+        ops,
+      );
+      const paintFiles = attachStableUrls(
+        { ...localFiles, ...(applied.files || {}) } as Record<string, Record<string, unknown>>,
+        stableFileUrlsRef.current,
+      );
+      const imageUpserts = (ops.ops || []).some((op) => {
+        if (op.op !== "upsert" || !op.element) return false;
+        return (op.element as { type?: string }).type === "image";
+      });
+      const needsHydrate = filesNeedRemoteHydrate(
+        applied.files as Record<string, Record<string, unknown>>,
+        localFiles,
+      );
+
+      const paintNow = (displayFiles: Record<string, unknown>, elements = applied.elements) => {
+        if (!apiRef.current || boardIdRef.current !== boardId) return;
+        const attached = attachStableUrls(
+          displayFiles as Record<string, Record<string, unknown>>,
+          stableFileUrlsRef.current,
+        );
+        applyingRemoteRef.current = true;
+        const collaborators = buildCollaboratorsMap(remoteCursorsRef.current);
+        applyRemoteSceneToApi(apiRef.current, {
+          elements,
+          appState: { ...applied.appState, collaborators },
+          files: attached,
+        });
+        latestSceneRef.current = buildScenePayload(elements, applied.appState, attached);
+        lastElementsRef.current = elements;
+        lastFilesRef.current = attached;
+        if (typeof meta.version === "number" && meta.version > versionRef.current) {
+          versionRef.current = meta.version;
+        }
+        clearApplyingRemoteSoon();
+      };
+
+      const finishHydrate = (hydratedFiles: Record<string, unknown>) => {
+        rememberStableUrls(
+          stableFileUrlsRef.current,
+          hydratedFiles as Record<string, Record<string, unknown>>,
+        );
+        for (const id of Object.keys(hydratedFiles)) {
+          if (stableFileUrlsRef.current.has(id)) loadedFilesRef.current.add(id);
+        }
+        const savedElements = markImageElementsSaved(
+          applied.elements,
+          Object.keys(hydratedFiles),
+        );
+        paintNow({ ...paintFiles, ...hydratedFiles }, savedElements);
+      };
+
+      // Image-элемент нельзя применять до addFiles — иначе вечный pending у пира.
+      if (imageUpserts && needsHydrate) {
+        const remoteFiles = applied.files as Record<string, Record<string, unknown>>;
+        const fetchIds = Object.keys(remoteFiles || {}).filter((id) => {
+          if (loadingRemoteFilesRef.current.has(id)) return false;
+          const local = localFiles[id];
+          if (local && typeof local === "object") {
+            const localUrl = String((local as { dataURL?: string; url?: string }).dataURL
+              || (local as { url?: string }).url
+              || "");
+            if (localUrl && isTransientFileUrl(localUrl)) return false;
           }
-          setCollabStatus(status === "connecting" ? "connecting" : status);
-        },
-        onPeersChange: setCollabPeers,
-        onRemoteOps: (ops, meta) => {
-          if (!apiRef.current || boardIdRef.current !== boardId) return;
-          const localElements = getLocalElementsForMerge(
-            apiRef.current,
-            latestSceneRef.current?.elements,
-          );
-          const localApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
-          const localFiles = (apiRef.current.getFiles?.() || latestSceneRef.current?.files || {}) as Record<string, unknown>;
-          const applied = applyBoardOps(
-            { elements: localElements, appState: localApp, files: localFiles },
-            ops,
-          );
-          const paintFiles = { ...localFiles, ...(applied.files || {}) } as Record<string, unknown>;
-          const paintNow = (displayFiles: Record<string, unknown>) => {
-            if (!apiRef.current || boardIdRef.current !== boardId) return;
-            applyingRemoteRef.current = true;
-            const collaborators = buildCollaboratorsMap(remoteCursorsRef.current);
-            applyRemoteSceneToApi(apiRef.current, {
-              elements: applied.elements,
-              appState: { ...applied.appState, collaborators },
-              files: displayFiles,
+          return true;
+        });
+        fetchIds.forEach((id) => loadingRemoteFilesRef.current.add(id));
+        void hydrateBoardFiles(remoteFiles).then((hydrated) => {
+          fetchIds.forEach((id) => loadingRemoteFilesRef.current.delete(id));
+          boardLog("hydrate:remoteOpsBeforeImage", {
+            ok: hydrated.blobUrls.length,
+            missing: hydrated.missingFileIds,
+            failed: hydrated.failedFileIds,
+          });
+          if (boardIdRef.current !== boardId || !apiRef.current) {
+            revokeBoardBlobUrls(hydrated.blobUrls);
+            return;
+          }
+          hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
+          if (isDrawingGestureRef.current) {
+            pendingHydrateFilesRef.current = {
+              ...(pendingHydrateFilesRef.current || {}),
+              ...hydrated.files,
+            };
+            // Уже гидратированные blob в ops.files — на pointerup apply без повторного fetch.
+            pendingRemoteOpsQueueRef.current.push({
+              ops: { ...ops, files: { ...(ops.files || {}), ...hydrated.files } },
+              meta,
             });
-            latestSceneRef.current = buildScenePayload(applied.elements, applied.appState, displayFiles);
-            lastElementsRef.current = applied.elements;
-            lastFilesRef.current = displayFiles;
-            if (typeof meta.version === "number" && meta.version > versionRef.current) {
-              versionRef.current = meta.version;
-            }
-            clearApplyingRemoteSoon();
+            return;
+          }
+          applyingRemoteRef.current = true;
+          apiRef.current.addFiles?.(toBinaryFileDataList(hydrated.files, "remoteOpsHydrated"));
+          clearApplyingRemoteSoon();
+          finishHydrate(hydrated.files);
+        });
+        return;
+      }
+
+      paintNow(paintFiles);
+      if (needsHydrate) {
+        void hydrateBoardFiles(applied.files as Record<string, Record<string, unknown>>).then((hydrated) => {
+          boardLog("hydrate:remoteOps", {
+            ok: hydrated.blobUrls.length,
+            missing: hydrated.missingFileIds,
+            failed: hydrated.failedFileIds,
+          });
+          if (boardIdRef.current !== boardId || !apiRef.current) {
+            revokeBoardBlobUrls(hydrated.blobUrls);
+            return;
+          }
+          hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
+          rememberStableUrls(stableFileUrlsRef.current, hydrated.files);
+          if (isDrawingGestureRef.current) {
+            pendingHydrateFilesRef.current = {
+              ...(pendingHydrateFilesRef.current || {}),
+              ...hydrated.files,
+            };
+            return;
+          }
+          applyingRemoteRef.current = true;
+          apiRef.current.addFiles?.(toBinaryFileDataList(hydrated.files, "remoteOpsHydrated"));
+          const prev = latestSceneRef.current;
+          const mergedFiles = attachStableUrls(
+            { ...(prev?.files || {}), ...hydrated.files } as Record<string, Record<string, unknown>>,
+            stableFileUrlsRef.current,
+          );
+          if (prev) latestSceneRef.current = { ...prev, files: mergedFiles };
+          lastFilesRef.current = mergedFiles;
+          clearApplyingRemoteSoon();
+        });
+      }
+    };
+
+    const handleRemoteFileAddNow = (
+      files: Array<{ id: string; url: string; mimeType?: string; created?: number }>,
+      elements: unknown[],
+    ) => {
+      if (!apiRef.current || boardIdRef.current !== boardId) return;
+      const asSceneFiles: Record<string, Record<string, unknown>> = {};
+      for (const f of files) {
+        if (!f?.id || !f?.url) continue;
+        if (String(f.url).startsWith("blob:") || String(f.url).startsWith("data:")) continue;
+        if (loadedFilesRef.current.has(f.id) && apiRef.current.getFiles?.()?.[f.id]) {
+          stableFileUrlsRef.current.set(f.id, f.url);
+          continue;
+        }
+        if (loadingRemoteFilesRef.current.has(f.id)) continue;
+        asSceneFiles[f.id] = {
+          id: f.id,
+          dataURL: f.url,
+          url: f.url,
+          mimeType: f.mimeType || "image/png",
+          created: f.created || Date.now(),
+        };
+        stableFileUrlsRef.current.set(f.id, f.url);
+      }
+      if (!Object.keys(asSceneFiles).length && !elements.length) return;
+
+      const applyElements = (displayFiles: Record<string, unknown>) => {
+        if (!apiRef.current || boardIdRef.current !== boardId) return;
+        if (!elements.length) {
+          const prev = latestSceneRef.current;
+          const mergedFiles = attachStableUrls(
+            { ...(prev?.files || {}), ...displayFiles } as Record<string, Record<string, unknown>>,
+            stableFileUrlsRef.current,
+          );
+          if (prev) latestSceneRef.current = { ...prev, files: mergedFiles };
+          lastFilesRef.current = mergedFiles;
+          return;
+        }
+        const localElements = getLocalElementsForMerge(
+          apiRef.current,
+          latestSceneRef.current?.elements,
+        );
+        const localApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
+        const localFiles = (latestSceneRef.current?.files || {}) as Record<string, unknown>;
+        const savedRemote = markImageElementsSaved(
+          elements,
+          Object.keys(displayFiles),
+        );
+        const merged = mergeCollabScenes(
+          { elements: localElements, appState: localApp, files: localFiles },
+          { elements: savedRemote, appState: {}, files: displayFiles },
+        );
+        applyingRemoteRef.current = true;
+        applyRemoteSceneToApi(apiRef.current, {
+          elements: merged.elements,
+          appState: { ...merged.appState, collaborators: buildCollaboratorsMap(remoteCursorsRef.current) },
+          files: attachStableUrls(
+            merged.files as Record<string, Record<string, unknown>>,
+            stableFileUrlsRef.current,
+          ),
+        });
+        const attached = attachStableUrls(
+          merged.files as Record<string, Record<string, unknown>>,
+          stableFileUrlsRef.current,
+        );
+        latestSceneRef.current = buildScenePayload(merged.elements, merged.appState, attached);
+        lastElementsRef.current = merged.elements;
+        lastFilesRef.current = attached;
+        clearApplyingRemoteSoon();
+        boardLog("file_add:applied", {
+          fileIds: Object.keys(displayFiles),
+          elementCount: elements.length,
+          inApi: Object.keys(displayFiles).filter((id) => Boolean(apiRef.current?.getFiles?.()?.[id])),
+        });
+      };
+
+      if (!Object.keys(asSceneFiles).length) {
+        applyElements({});
+        return;
+      }
+      Object.keys(asSceneFiles).forEach((id) => loadingRemoteFilesRef.current.add(id));
+      void hydrateBoardFiles(asSceneFiles).then((hydrated) => {
+        Object.keys(asSceneFiles).forEach((id) => loadingRemoteFilesRef.current.delete(id));
+        boardLog("hydrate:file_add", {
+          ok: hydrated.blobUrls.length,
+          missing: hydrated.missingFileIds,
+          failed: hydrated.failedFileIds,
+        });
+        if (boardIdRef.current !== boardId || !apiRef.current) {
+          revokeBoardBlobUrls(hydrated.blobUrls);
+          return;
+        }
+        hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
+        rememberStableUrls(stableFileUrlsRef.current, hydrated.files);
+        for (const id of Object.keys(hydrated.files)) {
+          if (stableFileUrlsRef.current.has(id)) loadedFilesRef.current.add(id);
+        }
+        if (isDrawingGestureRef.current) {
+          pendingHydrateFilesRef.current = {
+            ...(pendingHydrateFilesRef.current || {}),
+            ...hydrated.files,
           };
-          // Штрихи/текст — сразу; гидратацию картинок не ждём на критическом пути.
-          paintNow(paintFiles);
-          if (filesNeedRemoteHydrate(applied.files as Record<string, Record<string, unknown>>, localFiles as Record<string, Record<string, unknown>>)) {
-            void hydrateBoardFiles(applied.files as Record<string, Record<string, unknown>>).then((hydrated) => {
-              if (boardIdRef.current !== boardId || !apiRef.current) {
-                revokeBoardBlobUrls(hydrated.blobUrls);
-                return;
-              }
-              hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
-              applyingRemoteRef.current = true;
-              apiRef.current.updateScene?.({
-                files: hydrated.files,
-                captureUpdate: CaptureUpdateAction.NEVER,
-              });
-              const prev = latestSceneRef.current;
-              if (prev) {
-                latestSceneRef.current = { ...prev, files: hydrated.files };
-              }
-              lastFilesRef.current = hydrated.files;
-              clearApplyingRemoteSoon();
-            });
+          if (elements.length) {
+            pendingRemoteSceneRef.current = {
+              scene: { elements, appState: {}, files: hydrated.files },
+              meta: { fromSaved: false },
+            };
           }
-        },
-        onResyncNeeded: () => {
+          return;
+        }
+        // Сначала addFiles, потом elements — требование Excalidraw.
+        applyingRemoteRef.current = true;
+        apiRef.current.addFiles?.(toBinaryFileDataList(hydrated.files, "file_add"));
+        clearApplyingRemoteSoon();
+        applyElements(hydrated.files);
+      });
+    };
+
+    const handleResyncNeededNow = () => {
           // После reconnect подтягиваем серверный snapshot и сливаем с локальным.
           void (async () => {
             try {
@@ -955,44 +1471,67 @@ export default function CabinetBoardEditorPage() {
               if (typeof fresh.version === "number" && fresh.version >= versionRef.current) {
                 versionRef.current = fresh.version;
               }
+              rememberStableUrls(
+                stableFileUrlsRef.current,
+                (fresh.scene_data?.files || {}) as Record<string, Record<string, unknown>>,
+              );
+              let remoteFiles = (fresh.scene_data?.files || {}) as Record<string, Record<string, unknown>>;
+              const localFilesForHydrate = attachStableUrls(
+                (apiRef.current.getFiles?.() || latestSceneRef.current?.files || {}) as Record<string, Record<string, unknown>>,
+                stableFileUrlsRef.current,
+              );
+              if (filesNeedRemoteHydrate(remoteFiles, localFilesForHydrate)) {
+                const hydrated = await hydrateBoardFiles(remoteFiles);
+                boardLog("hydrate:resync", {
+                  ok: hydrated.blobUrls.length,
+                  missing: hydrated.missingFileIds,
+                  failed: hydrated.failedFileIds,
+                });
+                hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
+                rememberStableUrls(stableFileUrlsRef.current, hydrated.files);
+                for (const id of Object.keys(hydrated.files)) {
+                  if (stableFileUrlsRef.current.has(id)) loadedFilesRef.current.add(id);
+                }
+                remoteFiles = hydrated.files as Record<string, Record<string, unknown>>;
+                if (apiRef.current) {
+                  applyingRemoteRef.current = true;
+                  apiRef.current.addFiles?.(toBinaryFileDataList(remoteFiles, "resync"));
+                  clearApplyingRemoteSoon();
+                }
+              }
+              if (boardIdRef.current !== boardId || !apiRef.current) return;
               const remoteScene = buildScenePayload(
-                fresh.scene_data?.elements || [],
+                markImageElementsSaved(
+                  fresh.scene_data?.elements || [],
+                  Object.keys(remoteFiles),
+                ),
                 fresh.scene_data?.appState || {},
-                fresh.scene_data?.files || {},
+                remoteFiles,
               );
               const localElements = getLocalElementsForMerge(
                 apiRef.current,
                 latestSceneRef.current?.elements,
               );
               const localApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
-              const localFiles = (apiRef.current.getFiles?.() || latestSceneRef.current?.files || {}) as Record<string, unknown>;
+              const localFiles = attachStableUrls(
+                (apiRef.current.getFiles?.() || latestSceneRef.current?.files || {}) as Record<string, Record<string, unknown>>,
+                stableFileUrlsRef.current,
+              );
               const merged = mergeCollabScenes(
                 { elements: localElements, appState: localApp, files: localFiles },
                 remoteScene,
               );
-              const localFilesForHydrate = localFiles as Record<string, Record<string, unknown>>;
+              const displayFiles = attachStableUrls(
+                merged.files as Record<string, Record<string, unknown>>,
+                stableFileUrlsRef.current,
+              );
               applyingRemoteRef.current = true;
               applyRemoteSceneToApi(apiRef.current, {
                 elements: merged.elements,
                 appState: merged.appState,
-                files: { ...localFiles, ...(merged.files || {}) },
+                files: displayFiles,
               });
               clearApplyingRemoteSoon();
-              let displayFiles: Record<string, unknown> = { ...localFiles, ...(merged.files || {}) };
-              if (filesNeedRemoteHydrate(merged.files as Record<string, Record<string, unknown>>, localFilesForHydrate)) {
-                const hydrated = await hydrateBoardFiles(merged.files as Record<string, Record<string, unknown>>);
-                hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
-                displayFiles = hydrated.files;
-                if (boardIdRef.current === boardId && apiRef.current) {
-                  applyingRemoteRef.current = true;
-                  applyRemoteSceneToApi(apiRef.current, {
-                    elements: merged.elements,
-                    appState: merged.appState,
-                    files: displayFiles,
-                  });
-                  clearApplyingRemoteSoon();
-                }
-              }
               latestSceneRef.current = buildScenePayload(merged.elements, merged.appState, displayFiles);
               lastElementsRef.current = merged.elements;
               lastFilesRef.current = displayFiles;
@@ -1005,18 +1544,16 @@ export default function CabinetBoardEditorPage() {
               showNotice("Не удалось полностью восстановить сцену после разрыва связи");
             }
           })();
-        },
-        onRemoteCursor: (cursor, clientId) => {
-          if (!cursor) {
-            remoteCursorsRef.current.delete(clientId);
-          } else {
-            remoteCursorsRef.current.set(clientId, cursor);
-          }
-          applyCollaborators();
-        },
-        onRemoteScene: (scene, meta) => {
+        };
+
+    const handleRemoteSceneNow = (scene: CollabScene, meta: { fromSaved?: boolean; version?: number; cleared?: boolean }) => {
           if (!apiRef.current) return;
           if (boardIdRef.current !== boardId) return;
+
+          rememberStableUrls(
+            stableFileUrlsRef.current,
+            scene.files as Record<string, Record<string, unknown>>,
+          );
 
           // Свой scene_saved после PATCH: не трогаем холст (иначе откат/воскрешение удалений).
           if (
@@ -1039,6 +1576,29 @@ export default function CabinetBoardEditorPage() {
             setBoard((prev) => (prev ? { ...prev, version: meta.version! } : prev));
           }
 
+          // Полная очистка доски пиром — element-level merge с [] оставил бы локальные элементы.
+          if (meta.fromSaved && meta.cleared) {
+            const localApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
+            const clearedScene = {
+              elements: [] as unknown[],
+              appState: { ...localApp, ...(scene.appState || {}) },
+              files: {},
+            };
+            applyingRemoteRef.current = true;
+            applyRemoteSceneToApi(apiRef.current, clearedScene);
+            latestSceneRef.current = buildScenePayload([], clearedScene.appState, {});
+            lastElementsRef.current = [];
+            lastFilesRef.current = {};
+            knownElementIdsRef.current.clear();
+            collabRef.current?.resetPublishBase([]);
+            dirtyRef.current = false;
+            lastSavedRevisionRef.current = localRevisionRef.current;
+            safeSetSaveStatus("saved");
+            setConflict(false);
+            clearApplyingRemoteSoon();
+            return;
+          }
+
           // Prefer latestSceneRef + IncludingDeleted — getSceneElements() без deleted воскрешает элементы.
           const localElements = getLocalElementsForMerge(
             apiRef.current,
@@ -1051,14 +1611,18 @@ export default function CabinetBoardEditorPage() {
             scene,
           );
 
-          const applyMerged = (displayFiles: Record<string, unknown>) => {
+          const applyMerged = (
+            displayFiles: Record<string, unknown>,
+            elements: unknown[] = merged.elements,
+            appStateIn: Record<string, unknown> = merged.appState,
+          ) => {
             if (!apiRef.current || boardIdRef.current !== boardId) return;
             applyingRemoteRef.current = true;
             const collaborators = buildCollaboratorsMap(remoteCursorsRef.current);
             applyRemoteSceneToApi(apiRef.current, {
-              elements: merged.elements,
+              elements,
               appState: {
-                ...merged.appState,
+                ...appStateIn,
                 collaborators,
               },
               files: displayFiles,
@@ -1069,7 +1633,7 @@ export default function CabinetBoardEditorPage() {
             });
             const local = apiRef.current.getAppState?.() || {};
             const nextApp = {
-              ...merged.appState,
+              ...appStateIn,
               scrollX: local.scrollX,
               scrollY: local.scrollY,
               zoom: local.zoom,
@@ -1077,9 +1641,9 @@ export default function CabinetBoardEditorPage() {
               selectedElementIds: local.selectedElementIds,
               theme: boardThemeRef.current,
             };
-            const payload = buildScenePayload(merged.elements, nextApp, displayFiles);
+            const payload = buildScenePayload(elements, nextApp, displayFiles);
             latestSceneRef.current = payload;
-            lastElementsRef.current = merged.elements;
+            lastElementsRef.current = elements;
             lastFilesRef.current = displayFiles;
             if (meta.fromSaved) {
               if (!dirtyRef.current) {
@@ -1098,14 +1662,166 @@ export default function CabinetBoardEditorPage() {
             localFiles as Record<string, Record<string, unknown>>,
           )) {
             void hydrateBoardFiles(merged.files as Record<string, Record<string, unknown>>).then((hydrated) => {
-              if (boardIdRef.current !== boardId) {
+              boardLog("hydrate:remoteScene", {
+                ok: hydrated.blobUrls.length,
+                missing: hydrated.missingFileIds,
+                failed: hydrated.failedFileIds,
+              });
+              if (boardIdRef.current !== boardId || !apiRef.current) {
                 revokeBoardBlobUrls(hydrated.blobUrls);
                 return;
               }
               hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
-              applyMerged(hydrated.files as Record<string, unknown>);
+              if (isDrawingGestureRef.current) {
+                pendingHydrateFilesRef.current = {
+                  ...(pendingHydrateFilesRef.current || {}),
+                  ...hydrated.files,
+                };
+                return;
+              }
+              // За время fetch'а на канвас мог прилететь более свежий апдейт
+              // (ops/сцена) — пересливаем поверх текущего состояния, а не поверх
+              // merged.elements, снятого до await, иначе мы бы его затёрли.
+              const freshLocal = getLocalElementsForMerge(apiRef.current, latestSceneRef.current?.elements);
+              const freshApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
+              const freshFiles = (apiRef.current.getFiles?.() || {}) as Record<string, unknown>;
+              const reMerged = mergeCollabScenes(
+                { elements: freshLocal, appState: freshApp, files: freshFiles },
+                { elements: merged.elements, appState: merged.appState, files: hydrated.files },
+              );
+              applyMerged(
+                { ...freshFiles, ...reMerged.files },
+                reMerged.elements,
+                reMerged.appState,
+              );
             });
           }
+        };
+
+    // Во время активного локального жеста (палец/мышь ещё «внизу») применения
+    // откладываются сюда и разом «доигрываются» на pointerup — см. комментарий
+    // у isDrawingGestureRef.
+    const flushPendingRemoteApplies = () => {
+      const opsQueue = pendingRemoteOpsQueueRef.current;
+      pendingRemoteOpsQueueRef.current = [];
+      if (opsQueue.length) {
+        // Сжимаем накопившуюся очередь: для одного id — последняя версия.
+        const mergedOps: BoardElementOp[] = [];
+        let files: Record<string, unknown> = {};
+        let appStatePatch: Record<string, unknown> = {};
+        let version: number | undefined;
+        for (const { ops, meta } of opsQueue) {
+          mergedOps.push(...(ops.ops || []));
+          files = { ...files, ...(ops.files || {}) };
+          appStatePatch = { ...appStatePatch, ...(ops.appStatePatch || {}) };
+          if (typeof meta.version === "number") version = meta.version;
+        }
+        handleRemoteOpsNow(
+          {
+            ops: coalesceBoardOps(mergedOps),
+            files,
+            appStatePatch,
+          },
+          { version },
+        );
+      }
+      const pendingScene = pendingRemoteSceneRef.current;
+      pendingRemoteSceneRef.current = null;
+      if (pendingScene) {
+        handleRemoteSceneNow(pendingScene.scene, pendingScene.meta);
+      }
+      const pendingFiles = pendingHydrateFilesRef.current;
+      pendingHydrateFilesRef.current = null;
+      if (pendingFiles && apiRef.current && boardIdRef.current === boardId) {
+        applyingRemoteRef.current = true;
+        apiRef.current.addFiles?.(toBinaryFileDataList(pendingFiles, "gestureHydrated"));
+        apiRef.current.updateScene?.({
+          files: pendingFiles,
+          captureUpdate: CaptureUpdateAction.NEVER,
+        });
+        const prev = latestSceneRef.current;
+        const mergedFiles = { ...(prev?.files || {}), ...pendingFiles };
+        if (prev) latestSceneRef.current = { ...prev, files: mergedFiles };
+        lastFilesRef.current = mergedFiles;
+        clearApplyingRemoteSoon();
+      }
+      if (pendingResyncRef.current) {
+        pendingResyncRef.current = false;
+        handleResyncNeededNow();
+      }
+    };
+    flushPendingRemoteAppliesRef.current = flushPendingRemoteApplies;
+
+    const session = createBoardCollabSession(
+      boardId,
+      displayName,
+      {
+        onStatus: (status) => {
+          if (status === "open") {
+            metricsRef.current.wsConnectedAt = performance.now();
+            setLoadPhase(hostReadyRef.current ? "ready" : "connecting");
+          } else if (status === "closed") {
+            metricsRef.current.reconnectCount += 1;
+            setLoadPhase("reconnecting");
+          }
+          setCollabStatus(status === "connecting" ? "connecting" : status);
+        },
+        onPeersChange: setCollabPeers,
+        onRemoteOps: (ops, meta) => {
+          if (isDrawingGestureRef.current) {
+            pendingRemoteOpsQueueRef.current.push({ ops, meta });
+            return;
+          }
+          handleRemoteOpsNow(ops, meta);
+        },
+        onRemoteFileAdd: (files, elements) => {
+          if (isDrawingGestureRef.current) {
+            // Откладываем целиком — file_add требует addFiles до elements.
+            pendingRemoteOpsQueueRef.current.push({
+              ops: {
+                ops: (elements || [])
+                  .filter((raw) => raw && typeof raw === "object")
+                  .map((raw) => ({ op: "upsert" as const, element: raw as Record<string, unknown> })),
+                files: Object.fromEntries(
+                  (files || []).map((f) => [
+                    f.id,
+                    {
+                      id: f.id,
+                      dataURL: f.url,
+                      url: f.url,
+                      mimeType: f.mimeType || "image/png",
+                      created: f.created || Date.now(),
+                    },
+                  ]),
+                ),
+              },
+              meta: {},
+            });
+            return;
+          }
+          handleRemoteFileAddNow(files, elements);
+        },
+        onResyncNeeded: () => {
+          if (isDrawingGestureRef.current) {
+            pendingResyncRef.current = true;
+            return;
+          }
+          handleResyncNeededNow();
+        },
+        onRemoteCursor: (cursor, clientId) => {
+          if (!cursor) {
+            remoteCursorsRef.current.delete(clientId);
+          } else {
+            remoteCursorsRef.current.set(clientId, cursor);
+          }
+          applyCollaborators();
+        },
+        onRemoteScene: (scene, meta) => {
+          if (isDrawingGestureRef.current) {
+            pendingRemoteSceneRef.current = { scene, meta };
+            return;
+          }
+          handleRemoteSceneNow(scene, meta);
         },
       },
       { role },
@@ -1138,10 +1854,67 @@ export default function CabinetBoardEditorPage() {
     collabRef.current?.publishCursor(x, y, tool);
   }, [canEdit, collaborative]);
 
+  const handlePointerSceneDown = useCallback(() => {
+    isDrawingGestureRef.current = true;
+    // Страховка: pointerup может уйти мимо host (iframe / capture) — слушаем window.
+    if (gestureEndBoundRef.current) {
+      window.removeEventListener("pointerup", gestureEndBoundRef.current);
+      window.removeEventListener("pointercancel", gestureEndBoundRef.current);
+    }
+    const endGesture = () => {
+      window.removeEventListener("pointerup", endGesture);
+      window.removeEventListener("pointercancel", endGesture);
+      gestureEndBoundRef.current = null;
+      if (!isDrawingGestureRef.current) return;
+      isDrawingGestureRef.current = false;
+      flushPendingRemoteAppliesRef.current();
+      collabRef.current?.flushLiveNow();
+    };
+    gestureEndBoundRef.current = endGesture;
+    window.addEventListener("pointerup", endGesture);
+    window.addEventListener("pointercancel", endGesture);
+  }, []);
+
   const handlePointerSceneUp = useCallback(() => {
+    if (gestureEndBoundRef.current) {
+      window.removeEventListener("pointerup", gestureEndBoundRef.current);
+      window.removeEventListener("pointercancel", gestureEndBoundRef.current);
+      gestureEndBoundRef.current = null;
+    }
+    if (!isDrawingGestureRef.current) {
+      // Уже завершили через window-listener — только досылаем live на всякий случай.
+      if (collaborative || canEdit) collabRef.current?.flushLiveNow();
+      return;
+    }
+    isDrawingGestureRef.current = false;
+    flushPendingRemoteAppliesRef.current();
     if (!collaborative && !canEdit) return;
     collabRef.current?.flushLiveNow();
   }, [canEdit, collaborative]);
+
+  /** Клик по аватарке участника — центрируем холст на его последнем курсоре (как в Miro). */
+  const jumpToPeer = useCallback((clientId: string | null) => {
+    if (!clientId) return;
+    const api = apiRef.current;
+    const cursor = remoteCursorsRef.current.get(clientId);
+    if (!api || !cursor) {
+      showNotice("Курсор участника пока не виден");
+      return;
+    }
+    const appState = api.getAppState?.() || {};
+    const rawZoom = appState.zoom;
+    const zoom = typeof rawZoom === "number"
+      ? rawZoom
+      : Number((rawZoom as { value?: number } | undefined)?.value) || 1;
+    const width = Number(appState.width) || (editorRootRef.current?.clientWidth || window.innerWidth);
+    const height = Number(appState.height) || (editorRootRef.current?.clientHeight || window.innerHeight);
+    api.updateScene?.({
+      appState: {
+        scrollX: width / (2 * zoom) - cursor.x,
+        scrollY: height / (2 * zoom) - cursor.y,
+      },
+    });
+  }, [showNotice]);
 
   const generateIdForFile = useCallback(async (_file: File) => {
     if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -1161,6 +1934,7 @@ export default function CabinetBoardEditorPage() {
       // при первом paint в iframe с нулевым размером.
       const bootFiles = latestSceneRef.current?.files;
       if (bootFiles && Object.keys(bootFiles).length) {
+        api.addFiles?.(toBinaryFileDataList(bootFiles, "boot"));
         api.updateScene?.({
           files: bootFiles,
           captureUpdate: CaptureUpdateAction.NEVER,
@@ -1512,27 +2286,28 @@ export default function CabinetBoardEditorPage() {
     : board.allow_export !== false || canManage;
 
   const collabParticipants = (() => {
-    if (!collaborative) return [] as Array<{ key: string; name: string; initials: string; color: string }>;
+    if (!collaborative) return [] as Array<{ key: string; name: string; initials: string; color: string; clientId: string | null }>;
     const selfName =
       (canManage ? board.owner_name : board.student_name)
       || (canManage ? "Учитель" : "Ученик");
-    const byKey = new Map<string, string>();
-    byKey.set("self", selfName);
+    const byKey = new Map<string, { name: string; clientId: string | null }>();
+    byKey.set("self", { name: selfName, clientId: null });
     if (collabPeers.length > 0) {
       for (const peer of collabPeers) {
         const name = peer.displayName || "Участник";
         if (name === selfName) continue;
-        byKey.set(peer.clientId, name);
+        byKey.set(peer.clientId, { name, clientId: peer.clientId });
       }
     } else {
       const other = canManage ? board.student_name : board.owner_name;
-      if (other && other !== selfName) byKey.set("other", other);
+      if (other && other !== selfName) byKey.set("other", { name: other, clientId: null });
     }
-    return Array.from(byKey.entries()).map(([key, name]) => ({
+    return Array.from(byKey.entries()).map(([key, info]) => ({
       key,
-      name,
-      initials: participantInitials(name),
-      color: avatarColor(name),
+      name: info.name,
+      initials: participantInitials(info.name),
+      color: avatarColor(info.name),
+      clientId: info.clientId,
     }));
   })();
 
@@ -1600,14 +2375,20 @@ export default function CabinetBoardEditorPage() {
               aria-label={collabTitle}
             >
               {collabParticipants.map((person) => (
-                <span
+                <button
                   key={person.key}
-                  className="cb-board-editor__avatar"
+                  type="button"
+                  className={[
+                    "cb-board-editor__avatar",
+                    person.clientId ? "cb-board-editor__avatar--clickable" : "",
+                  ].filter(Boolean).join(" ")}
                   style={{ backgroundColor: person.color }}
-                  title={person.name}
+                  title={person.clientId ? `Перейти к ${person.name}` : person.name}
+                  disabled={!person.clientId}
+                  onClick={() => jumpToPeer(person.clientId)}
                 >
                   {person.initials}
-                </span>
+                </button>
               ))}
             </div>
           ) : null}
@@ -1833,6 +2614,7 @@ export default function CabinetBoardEditorPage() {
           onApiReady={handleApiReady}
           onHostReady={handleHostReady}
           onPointerSceneMove={handlePointerSceneMove}
+          onPointerSceneDown={handlePointerSceneDown}
           onPointerSceneUp={handlePointerSceneUp}
           generateIdForFile={generateIdForFile}
         />

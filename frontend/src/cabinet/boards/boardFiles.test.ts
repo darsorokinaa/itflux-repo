@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  attachStableUrls,
+  createStableUrlMap,
   externalizeSceneFiles,
   filesForLivePublish,
   filesForPersist,
   filesNeedRemoteHydrate,
+  markImageElementsSaved,
+  pendingUploadFileIds,
   preferDisplayFile,
   preferStableFile,
+  rememberStableUrls,
   STABLE_URL_KEY,
 } from "./boardFiles";
 import { mergeSceneFiles } from "./boardSceneMerge";
@@ -123,5 +128,55 @@ describe("externalizeSceneFiles", () => {
     })).toBe(false);
     expect(filesNeedRemoteHydrate({ f1: { dataURL: stable } }, {})).toBe(true);
     expect(filesNeedRemoteHydrate({}, {})).toBe(false);
+  });
+
+  it("attachStableUrls восстанавливает ключ после onChange без кастомных полей", () => {
+    const map = createStableUrlMap();
+    const stable = "/api/cabinet/interactive-boards/b/assets/x/";
+    rememberStableUrls(map, { f1: { dataURL: stable } });
+    // Как отдаёт Excalidraw BinaryFileData — только blob, без itfluxStableURL.
+    const attached = attachStableUrls(
+      { f1: { id: "f1", dataURL: "blob:http://local/1", mimeType: "image/png" } },
+      map,
+    );
+    expect(attached.f1[STABLE_URL_KEY]).toBe(stable);
+    expect(pendingUploadFileIds(attached, map)).toEqual([]);
+    expect(filesForLivePublish(attached).f1.dataURL).toBe(stable);
+  });
+
+  it("pendingUploadFileIds не требует повторной загрузки при registry hit", () => {
+    const map = createStableUrlMap();
+    map.set("f1", "/api/cabinet/interactive-boards/b/assets/x/");
+    const pending = pendingUploadFileIds(
+      { f1: { dataURL: "blob:http://local/1", mimeType: "image/png" } },
+      map,
+    );
+    expect(pending).toEqual([]);
+  });
+
+  it("markImageElementsSaved меняет pending → saved", () => {
+    const out = markImageElementsSaved(
+      [
+        { id: "img1", type: "image", fileId: "f1", status: "pending", version: 1 },
+        { id: "line1", type: "freedraw", version: 1 },
+      ],
+      ["f1"],
+    ) as Array<{ id: string; status?: string; version?: number }>;
+    expect(out.find((e) => e.id === "img1")?.status).toBe("saved");
+    expect(out.find((e) => e.id === "img1")?.version).toBe(2);
+    expect(out.find((e) => e.id === "line1")?.status).toBeUndefined();
+  });
+
+  it("externalizeSceneFiles пишет STABLE_URL_KEY", async () => {
+    const upload = vi.fn().mockResolvedValue({
+      id: "f1",
+      dataURL: "/api/cabinet/interactive-boards/b/assets/a/",
+      mimeType: "image/png",
+    });
+    const out = await externalizeSceneFiles(
+      { f1: { mimeType: "image/png", dataURL: "data:image/png;base64,iVBORw0KGgo=" } },
+      upload,
+    );
+    expect(out.f1[STABLE_URL_KEY]).toBe("/api/cabinet/interactive-boards/b/assets/a/");
   });
 });

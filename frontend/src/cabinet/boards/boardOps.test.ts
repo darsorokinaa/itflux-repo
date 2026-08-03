@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { applyBoardOps, diffBoardElements, shouldPublishFullScene } from "./boardOps";
+import {
+  applyBoardOps,
+  coalesceBoardOps,
+  diffBoardElements,
+  shouldPublishFullScene,
+} from "./boardOps";
 
 describe("boardOps", () => {
   it("diffBoardElements находит upsert и delete", () => {
@@ -47,5 +52,39 @@ describe("boardOps", () => {
     const ops = diffBoardElements(prev, next);
     expect(ops).toHaveLength(1);
     expect(shouldPublishFullScene(50, ops.length)).toBe(false);
+  });
+
+  it("coalesceBoardOps оставляет последнюю версию штриха и delete", () => {
+    const ops = coalesceBoardOps([
+      { op: "upsert", element: { id: "stroke", version: 1, points: [0] } },
+      { op: "upsert", element: { id: "other", version: 1 } },
+      { op: "upsert", element: { id: "stroke", version: 5, points: [0, 1, 2, 3, 4] } },
+      { op: "delete", id: "other", version: 2 },
+    ]);
+    expect(ops).toHaveLength(2);
+    const stroke = ops.find((o) => o.op === "upsert") as unknown as {
+      element: { id: string; version: number; points: number[] };
+    };
+    expect(stroke.element.id).toBe("stroke");
+    expect(stroke.element.version).toBe(5);
+    expect(stroke.element.points).toHaveLength(5);
+    expect(ops.some((o) => o.op === "delete" && o.id === "other")).toBe(true);
+  });
+
+  it("applyBoardOps не откатывает более новый isDeleted устаревшим upsert", () => {
+    const local = {
+      elements: [{ id: "gone", version: 4, isDeleted: true }],
+      appState: {},
+      files: {},
+    };
+    const next = applyBoardOps(local, {
+      ops: [{ op: "upsert", element: { id: "gone", version: 2, isDeleted: false, x: 1 } }],
+    });
+    const gone = next.elements.find((e) => (e as { id: string }).id === "gone") as {
+      isDeleted?: boolean;
+      version: number;
+    };
+    expect(gone?.isDeleted).toBe(true);
+    expect(gone?.version).toBe(4);
   });
 });

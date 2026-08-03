@@ -261,24 +261,50 @@ def schedule_event_to_json(event):
     if not audience and participants:
         audience = ", ".join(p["name"] for p in participants if p["role"] != "organizer")
 
+    overrides = set(event.manual_override_fields or [])
     topic = event.topic or ""
-    if plan_item_json:
+    subtopic = event.subtopic or ""
+    description = event.description or ""
+    goal = event.goal or ""
+    homework_description = event.homework_description or ""
+
+    use_plan_topic = (
+        bool(event.plan_sync_enabled)
+        and "topic" not in overrides
+        and event.status not in (
+            ScheduleEvent.Status.DONE,
+            ScheduleEvent.Status.COMPLETED,
+            ScheduleEvent.Status.CANCELLED,
+        )
+    )
+    if plan_item_json and use_plan_topic:
         plan_topic = (plan_item_json.get("topic") or "").strip()
         plan_title = (plan_item_json.get("title") or "").strip()
         # Не подставляем title пункта плана (часто имя ученика) как «тему» —
         # иначе в шапке комнаты получается «Имя · Имя».
         if plan_topic:
             topic = plan_topic
-        elif plan_title and plan_title.lower() not in {
+        elif not topic and plan_title and plan_title.lower() not in {
             (event.title or "").strip().lower(),
             (audience or "").strip().lower(),
         }:
             topic = plan_title
+        if "subtopic" not in overrides:
+            subtopic = plan_item_json.get("subtopic") or subtopic
+        if "description" not in overrides:
+            description = plan_item_json.get("description") or description
+        if "goal" not in overrides:
+            goal = plan_item_json.get("goal") or goal
+        if "homework_description" not in overrides:
+            homework_description = plan_item_json.get("homeworkDescription") or homework_description
 
     has_plan = plan_item_json is not None or get_active_enrollment(event) is not None
     assigned_homework = _assigned_homework_to_json(
         resolve_assigned_homework_for_event(event),
     )
+
+    from .lesson_plan_content_sync import LessonLearningPlanSyncService
+    sync_meta = LessonLearningPlanSyncService.sync_meta_payload(event, plan_item)
 
     return {
         "id": local_event_id(event.pk),
@@ -289,6 +315,10 @@ def schedule_event_to_json(event):
         "endTime": local_end.strftime("%H:%M"),
         "title": event.title,
         "topic": topic,
+        "subtopic": subtopic,
+        "description": description,
+        "goal": goal,
+        "homeworkDescription": homework_description,
         "type": event.event_type,
         "audience": audience,
         "format": "Онлайн" if is_online else "Офлайн",
@@ -326,6 +356,17 @@ def schedule_event_to_json(event):
         "assignedHomework": assigned_homework,
         "homeworkId": assigned_homework["id"] if assigned_homework else None,
         "teacherComment": event.teacher_comment or "",
+        "planSyncEnabled": sync_meta["planSyncEnabled"],
+        "contentSource": sync_meta["contentSource"],
+        "manualOverrideFields": sync_meta["manualOverrideFields"],
+        "planSyncedAt": sync_meta["planSyncedAt"],
+        "linkedPlanId": sync_meta["linkedPlanId"],
+        "linkedPlanTitle": sync_meta["linkedPlanTitle"],
+        "isAutoMaterialsPlan": sync_meta["isAutoMaterialsPlan"],
+        "planMaterials": sync_meta["planMaterials"],
+        "manualMaterials": sync_meta["manualMaterials"],
+        "homeworkMaterials": sync_meta["homeworkMaterials"],
+        "eventMaterials": sync_meta["allMaterials"],
     }
 
 
@@ -368,6 +409,9 @@ def list_schedule_events(*, user, date_from, date_to, include_cancelled=False):
         "series__lesson_plan_item__attached_interactives",
         "series__lesson_plan_item__homework_materials",
         "series__lesson_plan_item__homework_interactives",
+        "event_materials",
+        "event_materials__material",
+        "event_materials__interactive",
     )
     if not include_cancelled:
         qs = qs.exclude(status=ScheduleEvent.Status.CANCELLED)

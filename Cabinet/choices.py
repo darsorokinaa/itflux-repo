@@ -279,6 +279,18 @@ class ScheduleChangeType(models.TextChoices):
     RESTORED = "restored", "Восстановлено"
 
 
+class LessonContentSource(models.TextChoices):
+    PLAN = "plan", "Из плана обучения"
+    MANUAL = "manual", "Введено вручную"
+    MIXED = "mixed", "Смешанный"
+
+
+class ScheduleMaterialSource(models.TextChoices):
+    LEARNING_PLAN = "learning_plan", "Из плана обучения"
+    LESSON_MANUAL = "lesson_manual", "Только в уроке"
+    HOMEWORK = "homework", "Домашнее задание"
+
+
 class NotificationChannel(models.TextChoices):
     IN_APP = "in_app", "В кабинете"
     EMAIL = "email", "Email"

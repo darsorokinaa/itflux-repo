@@ -91,6 +91,29 @@ export function shouldPublishFullScene(
   return opsCount >= Math.max(FULL_SCENE_OPS_THRESHOLD, Math.floor(elementCount * 0.45));
 }
 
+/**
+ * Сжимает очередь upsert/delete: для одного id остаётся последнее действие.
+ * Upsert несёт полное состояние элемента — промежуточные версии штриха не нужны.
+ */
+export function coalesceBoardOps(ops: BoardElementOp[] | null | undefined): BoardElementOp[] {
+  if (!ops?.length) return [];
+  const latest = new Map<string, BoardElementOp>();
+  const order: string[] = [];
+  for (const op of ops) {
+    if (!op || typeof op !== "object") continue;
+    let id = "";
+    if (op.op === "delete") {
+      id = String(op.id || "");
+    } else if (op.op === "upsert" && op.element && typeof op.element === "object") {
+      id = String((op.element as { id?: string }).id || "");
+    }
+    if (!id) continue;
+    if (!latest.has(id)) order.push(id);
+    latest.set(id, op);
+  }
+  return order.map((id) => latest.get(id)!).filter(Boolean);
+}
+
 export function applyBoardOps(
   local: CollabScene,
   payload: BoardSceneOpsPayload,
@@ -151,7 +174,7 @@ export function buildLivePublishPayload(
   version?: number,
 ): { kind: "ops"; payload: BoardSceneOpsPayload; version?: number }
   | { kind: "full"; scene: CollabScene; version?: number } {
-  const ops = diffBoardElements(prevElements, scene.elements);
+  const ops = coalesceBoardOps(diffBoardElements(prevElements, scene.elements));
   const files = filesForLivePublish(scene.files as Record<string, Record<string, unknown>>);
   if (!ops.length && !Object.keys(files).length) {
     return { kind: "ops", payload: { ops: [], files }, version };

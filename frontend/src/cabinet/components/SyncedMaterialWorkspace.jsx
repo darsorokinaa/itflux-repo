@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import MaterialCollabBar from "./MaterialCollabBar";
 import InteractivePlayer from "./InteractivePlayer";
-import { fetchInteractive } from "../../utils/cabinetAuth";
+import { fetchInteractive, fetchMeetingMaterialInteractive } from "../../utils/cabinetAuth";
 
 const PEN_COLORS = ["#e11d48", "#2563eb", "#16a34a", "#ca8a04", "#7c3aed", "#0f172a"];
 const WIDTHS = [2, 3, 5, 8];
@@ -127,6 +127,7 @@ function roleCursorClass(role) {
  */
 export default function SyncedMaterialWorkspace({
   canManage,
+  meetingUuid,
   material,
   state,
   interactionMode = "view_only",
@@ -206,7 +207,12 @@ export default function SyncedMaterialWorkspace({
     }
     let cancelled = false;
     setInteractiveError("");
-    fetchInteractive(id)
+    // В комнате урока — только через meeting-scoped эндпоинт: /interactives/<id>/
+    // доступен лишь учителю-владельцу (IsCabinetTeacher), ученик получал бы 403.
+    const request = meetingUuid
+      ? fetchMeetingMaterialInteractive(meetingUuid, id).then((data) => data?.interactive)
+      : fetchInteractive(id);
+    request
       .then((data) => {
         if (!cancelled) setInteractive(data);
       })
@@ -219,7 +225,7 @@ export default function SyncedMaterialWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [material?.interactiveId]);
+  }, [material?.interactiveId, meetingUuid]);
 
   const patchState = useCallback((action, payload) => {
     if (remoteApplyGuard?.isRemote?.()) return;

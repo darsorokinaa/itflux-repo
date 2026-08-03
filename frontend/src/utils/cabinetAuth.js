@@ -384,6 +384,13 @@ export function transferMeetingMaterialControl(meetingUuid, payload) {
   });
 }
 
+/** Player-payload интерактива, открытого в материале урока (доступно и ученику). */
+export function fetchMeetingMaterialInteractive(meetingUuid, interactiveId) {
+  return videoMeetingFetch(`/${meetingUuid}/material-session/interactive/${interactiveId}/`, {
+    method: "GET",
+  });
+}
+
 export function sendMeetingMaterialOperation(meetingUuid, payload) {
   return videoMeetingFetch(`/${meetingUuid}/material-session/operation/`, {
     method: "POST",
@@ -428,6 +435,48 @@ export function ensureScheduleEventPlanItem(eventId) {
   return cabinetFetch(`/schedule/${encodeURIComponent(eventId)}/ensure-plan-item/`, {
     method: "POST",
     body: "{}",
+  });
+}
+
+export function linkScheduleEventPlanItem(eventId, lessonPlanItemId) {
+  return cabinetFetch(`/schedule/${encodeURIComponent(eventId)}/link-plan-item/`, {
+    method: "POST",
+    body: JSON.stringify({ lesson_plan_item_id: lessonPlanItemId }),
+  });
+}
+
+export function syncScheduleEventToPlan(eventId, payload = {}) {
+  return cabinetFetch(`/schedule/${encodeURIComponent(eventId)}/sync-to-plan/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function syncScheduleEventFromPlan(eventId) {
+  return cabinetFetch(`/schedule/${encodeURIComponent(eventId)}/sync-from-plan/`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function setScheduleEventPlanSync(eventId, enabled) {
+  return cabinetFetch(`/schedule/${encodeURIComponent(eventId)}/plan-sync/`, {
+    method: "POST",
+    body: JSON.stringify({ plan_sync_enabled: Boolean(enabled) }),
+  });
+}
+
+export function updateScheduleEventContent(eventId, payload = {}) {
+  return cabinetFetch(`/schedule/${encodeURIComponent(eventId)}/content/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateScheduleEventMaterials(eventId, payload = {}) {
+  return cabinetFetch(`/schedule/${encodeURIComponent(eventId)}/event-materials/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 

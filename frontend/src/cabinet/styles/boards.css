@@ -548,6 +548,7 @@ a.cb-board-card {
   width: 28px;
   height: 28px;
   margin-left: -8px;
+  padding: 0;
   border-radius: 50%;
   border: 2px solid var(--cb-board-surface, #fff);
   color: #fff;
@@ -555,12 +556,25 @@ a.cb-board-card {
   font-weight: 700;
   letter-spacing: 0.02em;
   line-height: 1;
+  font-family: inherit;
   user-select: none;
+  cursor: default;
   box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.06);
+  transition: transform 0.12s ease;
 }
 
 .cb-board-editor__avatar:first-child {
   margin-left: 0;
+}
+
+.cb-board-editor__avatar--clickable {
+  cursor: pointer;
+}
+
+.cb-board-editor__avatar--clickable:hover,
+.cb-board-editor__avatar--clickable:focus-visible {
+  transform: translateY(-2px) scale(1.08);
+  z-index: 1;
 }
 
 .cb-board-editor__avatars--live .cb-board-editor__avatar {
@@ -1148,6 +1162,12 @@ a.cb-board-card {
 
 .cb-board-editor .excalidraw .layer-ui__wrapper__footer-left {
   transform: none !important;
+}
+
+/* «Вернуться к содержимому» — выше полной нижней панели zoom/undo (иначе перекрывается). */
+.cb-board-editor .excalidraw .scroll-back-to-content {
+  bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px)) !important;
+  z-index: 8 !important;
 }
 
 .cb-board-editor__banner {

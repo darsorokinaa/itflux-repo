@@ -9,6 +9,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from .models import (
+    LessonPlanItem,
     Notification,
     ScheduleEvent,
     ScheduleEventChangeLog,
@@ -221,6 +222,178 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
             "eventId": event.pk,
             "planItem": _plan_item_to_json(item, lesson_number=lesson_number),
         })
+
+    def _sync_error_response(self, exc):
+        from .lesson_plan_content_sync import LessonPlanSyncConflict, LessonPlanSyncError
+        if isinstance(exc, LessonPlanSyncConflict):
+            return Response(
+                {"detail": exc.message, **exc.extra},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if isinstance(exc, LessonPlanSyncError):
+            return Response(
+                {"detail": exc.message, "code": exc.code, **exc.extra},
+                status=exc.status,
+            )
+        raise
+
+    def _event_payload(self, event):
+        from .schedule_events import schedule_event_to_json
+        event.refresh_from_db()
+        return {
+            "ok": True,
+            "event": ScheduleEventSerializer(event, context=self.get_serializer_context()).data,
+            "scheduleEvent": schedule_event_to_json(event),
+        }
+
+    @action(detail=True, methods=["post"], url_path="link-plan-item")
+    def link_plan_item(self, request, pk=None):
+        from .lesson_plan_content_sync import LessonLearningPlanSyncService, LessonPlanSyncError
+
+        event = self.get_object()
+        item_id = request.data.get("lesson_plan_item_id") or request.data.get("lesson_plan_item")
+        if not item_id:
+            return Response({"detail": "Укажите lesson_plan_item_id."}, status=400)
+        item = get_object_or_404(LessonPlanItem, pk=item_id)
+        try:
+            LessonLearningPlanSyncService.link_plan_item(event, item, teacher=self.get_teacher())
+        except LessonPlanSyncError as exc:
+            return self._sync_error_response(exc)
+        return Response(self._event_payload(event))
+
+    @action(detail=True, methods=["post"], url_path="sync-to-plan")
+    def sync_to_plan(self, request, pk=None):
+        from .lesson_plan_content_sync import LessonLearningPlanSyncService, LessonPlanSyncError
+
+        event = self.get_object()
+        try:
+            result = LessonLearningPlanSyncService.sync_lesson_to_plan(
+                event,
+                teacher=self.get_teacher(),
+                mode=request.data.get("mode") or "update_linked",
+                student_ids=request.data.get("student_ids"),
+                confirm_all_students=bool(request.data.get("confirm_all_students")),
+                title=request.data.get("create_title") or request.data.get("title") or "",
+                material_ids=request.data.get("material_ids"),
+            )
+        except LessonPlanSyncError as exc:
+            return self._sync_error_response(exc)
+        payload = self._event_payload(event)
+        payload["sync"] = result
+        return Response(payload)
+
+    @action(detail=True, methods=["post"], url_path="sync-from-plan")
+    def sync_from_plan(self, request, pk=None):
+        from .lesson_plan_content_sync import LessonLearningPlanSyncService, LessonPlanSyncError
+        from .plan_schedule import resolve_plan_item_for_event
+
+        event = self.get_object()
+        item = event.lesson_plan_item
+        if item is None:
+            item, _ = resolve_plan_item_for_event(event)
+        if item is None:
+            return Response({"detail": "Урок не связан с пунктом плана."}, status=400)
+        try:
+            if not event.lesson_plan_item_id:
+                LessonLearningPlanSyncService.link_plan_item(
+                    event, item, teacher=self.get_teacher(),
+                )
+            else:
+                LessonLearningPlanSyncService.set_plan_sync_enabled(
+                    event, teacher=self.get_teacher(), enabled=True,
+                )
+                result = LessonLearningPlanSyncService.sync_plan_item_to_lessons(
+                    item, teacher=self.get_teacher(),
+                )
+                # force this event even if starts_at in the past but still planned
+                if event.pk not in result.get("updated_event_ids", []):
+                    if event.status not in LessonLearningPlanSyncService.TERMINAL_STATUSES:
+                        LessonLearningPlanSyncService._copy_item_fields_to_event(
+                            event, item, force_fields=None,
+                        )
+                        LessonLearningPlanSyncService._sync_plan_materials_onto_event(event, item)
+                        from django.utils import timezone as dj_tz
+                        from .choices import LessonContentSource
+                        event.plan_sync_enabled = True
+                        event.content_source = LessonContentSource.PLAN
+                        event.plan_synced_at = dj_tz.now()
+                        event.manual_override_fields = []
+                        event.save()
+        except LessonPlanSyncError as exc:
+            return self._sync_error_response(exc)
+        return Response(self._event_payload(event))
+
+    @action(detail=True, methods=["post"], url_path="plan-sync")
+    def plan_sync(self, request, pk=None):
+        from .lesson_plan_content_sync import LessonLearningPlanSyncService, LessonPlanSyncError
+
+        event = self.get_object()
+        if "plan_sync_enabled" not in request.data and "enabled" not in request.data:
+            return Response({"detail": "Укажите plan_sync_enabled."}, status=400)
+        enabled = request.data.get("plan_sync_enabled", request.data.get("enabled"))
+        try:
+            LessonLearningPlanSyncService.set_plan_sync_enabled(
+                event, teacher=self.get_teacher(), enabled=bool(enabled),
+            )
+        except LessonPlanSyncError as exc:
+            return self._sync_error_response(exc)
+        return Response(self._event_payload(event))
+
+    @action(detail=True, methods=["post"], url_path="content")
+    def update_content(self, request, pk=None):
+        """Редактирование темы/описания с выбором направления синхронизации."""
+        from .lesson_plan_content_sync import LessonLearningPlanSyncService, LessonPlanSyncError
+
+        event = self.get_object()
+        try:
+            result = LessonLearningPlanSyncService.apply_lesson_edit(
+                event,
+                request.data,
+                teacher=self.get_teacher(),
+                sync_action=request.data.get("sync_action") or "",
+                resolve_conflict=request.data.get("resolve_conflict"),
+                student_ids=request.data.get("student_ids"),
+                confirm_all_students=bool(request.data.get("confirm_all_students")),
+            )
+        except LessonPlanSyncError as exc:
+            return self._sync_error_response(exc)
+        payload = self._event_payload(event)
+        payload["edit"] = result
+        return Response(payload)
+
+    @action(detail=True, methods=["post"], url_path="event-materials")
+    def event_materials(self, request, pk=None):
+        from .choices import ScheduleMaterialSource
+        from .lesson_plan_content_sync import LessonLearningPlanSyncService, LessonPlanSyncError
+
+        event = self.get_object()
+        action_name = (request.data.get("action") or "attach").strip().lower()
+        source = request.data.get("source") or ScheduleMaterialSource.LESSON_MANUAL
+        try:
+            if action_name == "detach":
+                deleted = LessonLearningPlanSyncService.detach_material(
+                    event,
+                    teacher=self.get_teacher(),
+                    material_id=request.data.get("material_id"),
+                    interactive_id=request.data.get("interactive_id"),
+                    source=request.data.get("source"),
+                )
+                payload = self._event_payload(event)
+                payload["deleted"] = deleted
+                return Response(payload)
+            link = LessonLearningPlanSyncService.attach_material(
+                event,
+                teacher=self.get_teacher(),
+                material_id=request.data.get("material_id"),
+                interactive_id=request.data.get("interactive_id"),
+                source=source,
+                order=request.data.get("order"),
+            )
+        except LessonPlanSyncError as exc:
+            return self._sync_error_response(exc)
+        payload = self._event_payload(event)
+        payload["linkId"] = link.id
+        return Response(payload)
 
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):

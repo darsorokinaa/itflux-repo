@@ -13916,6 +13916,27 @@ button.cb-sch-event {
   font-size: 0.85rem;
 }
 
+.cb-sch-plan-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+}
+
+.cb-sch-plan-status__row {
+  font-size: 0.82rem;
+  color: #334155;
+}
+
+.cb-sch-plan-status__row a {
+  color: #2563EB;
+  font-weight: 600;
+}
+
 .cabinet-notifications {
   position: relative;
 }

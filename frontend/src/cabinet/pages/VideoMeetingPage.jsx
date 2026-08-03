@@ -1863,7 +1863,10 @@ export default function VideoMeetingPage() {
           {showJitsi ? (
             <button
               type="button"
-              className={`video-lesson-btn video-lesson-btn--ghost${asideOpen ? " is-active" : ""}`}
+              // На мобильном (≤720px) под шапкой уже есть таб-переключатель
+              // Звонок/Материалы — эта кнопка дублировала бы его, отнимая
+              // место у заголовка урока, поэтому там скрыта через CSS.
+              className={`video-lesson-btn video-lesson-btn--ghost video-lesson-header__materials-btn${asideOpen ? " is-active" : ""}`}
               onClick={() => {
                 setFocusCall(false);
                 setAsideOpen((v) => !v);
@@ -1881,9 +1884,11 @@ export default function VideoMeetingPage() {
             className={`video-lesson-btn video-lesson-btn--ghost${roomFullscreen ? " is-active" : ""}`}
             onClick={() => void toggleRoomFullscreen()}
             aria-pressed={roomFullscreen}
+            aria-label={roomFullscreen ? "Выйти из полноэкранного режима" : "Полноэкранный режим"}
             title={roomFullscreen ? "Выйти из полноэкранного режима" : "Полноэкранный режим"}
           >
-            {roomFullscreen ? "Окно" : "На весь экран"}
+            <CabinetIcon name="expand" />
+            <span className="video-lesson-btn__label">{roomFullscreen ? "Окно" : "На весь экран"}</span>
           </button>
 
           {canManage && status === "live" && showJitsi ? (
@@ -1892,8 +1897,11 @@ export default function VideoMeetingPage() {
               className="video-lesson-btn video-lesson-btn--danger"
               disabled={finishing}
               onClick={() => setFinishConfirm(true)}
+              aria-label="Завершить урок"
             >
-              {finishing ? "…" : "Завершить урок"}
+              {finishing ? "…" : (
+                <>Завершить<span className="video-lesson-btn__label-tail"> урок</span></>
+              )}
             </button>
           ) : null}
         </div>
@@ -1948,6 +1956,7 @@ export default function VideoMeetingPage() {
         {syncedWorkspaceOpen && showJitsi ? (
           <SyncedMaterialWorkspace
             canManage={canManage}
+            meetingUuid={meetingUuid}
             material={materialSession.material}
             state={materialSession.state || {}}
             interactionMode={materialSession.interactionMode || "view_only"}

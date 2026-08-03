@@ -90,7 +90,7 @@ export function preferStableFile(
   return fileUrlStability(left) >= fileUrlStability(right) ? { ...right, ...left } : { ...left, ...right };
 }
 
-function stableUrlOf(meta: Record<string, unknown>): string {
+export function stableUrlOf(meta: Record<string, unknown>): string {
   const tagged = String(meta[STABLE_URL_KEY] || "");
   if (isStableFileUrl(tagged)) return tagged;
   const url = String(meta.dataURL || meta.url || "");
@@ -166,16 +166,131 @@ export async function externalizeSceneFiles(
     const uploaded = await upload(form);
     const path = uploaded.dataURL || uploaded.url;
     if (!path) continue;
+    // STABLE_URL_KEY обязателен: Excalidraw BinaryFileData не хранит кастомные
+    // поля — после addFiles/onChange dataURL станет blob:, и без этого ключа
+    // (или внешнего registry) файл снова попадёт в очередь аплоада.
     next[fileId] = {
       ...meta,
       id: uploaded.id || fileId,
       mimeType: uploaded.mimeType || parsed.mime,
       dataURL: path,
       url: path,
+      [STABLE_URL_KEY]: path,
     };
   }
 
   return next;
+}
+
+/** fileId → постоянный API URL. Живёт вне Excalidraw (тот стрипает кастомные поля). */
+export type StableUrlMap = Map<string, string>;
+
+export function createStableUrlMap(): StableUrlMap {
+  return new Map();
+}
+
+/** Запомнить стабильные URL из метаданных файлов (hydrate / upload / snapshot). */
+export function rememberStableUrls(
+  map: StableUrlMap,
+  files: SceneFiles | null | undefined,
+): void {
+  if (!files || typeof files !== "object") return;
+  for (const [fileId, meta] of Object.entries(files)) {
+    if (!meta || typeof meta !== "object") continue;
+    const stable = stableUrlOf(meta);
+    if (stable) map.set(fileId, stable);
+  }
+}
+
+/**
+ * Вернуть в files ключ itfluxStableURL из внешнего registry.
+ * Excalidraw onChange отдаёт только BinaryFileData (blob dataURL без наших полей).
+ */
+export function attachStableUrls(
+  files: SceneFiles | null | undefined,
+  map: StableUrlMap,
+): SceneFiles {
+  if (!files || typeof files !== "object") return {};
+  const out: SceneFiles = {};
+  for (const [fileId, meta] of Object.entries(files)) {
+    if (!meta || typeof meta !== "object") {
+      out[fileId] = meta as Record<string, unknown>;
+      continue;
+    }
+    const remembered = map.get(fileId) || "";
+    const existing = stableUrlOf(meta);
+    const stable = existing || (isStableFileUrl(remembered) ? remembered : "");
+    if (stable) {
+      out[fileId] = { ...meta, [STABLE_URL_KEY]: stable };
+      if (!map.has(fileId)) map.set(fileId, stable);
+    } else {
+      out[fileId] = { ...meta };
+    }
+  }
+  // Файлы, которые есть только в registry (элемент ещё не в getFiles) — не добавляем
+  // сюда: publish/ops берут files из сцены. Registry нужен для attach к существующим.
+  return out;
+}
+
+/** fileId, которым ещё нужна HTTP-загрузка (нет стабильного URL и не грузятся сейчас). */
+export function pendingUploadFileIds(
+  files: SceneFiles | null | undefined,
+  map: StableUrlMap,
+  uploadingIds?: Set<string> | null,
+): string[] {
+  if (!files || typeof files !== "object") return [];
+  const out: string[] = [];
+  for (const [fileId, meta] of Object.entries(files)) {
+    if (!meta || typeof meta !== "object") continue;
+    if (uploadingIds?.has(fileId)) continue;
+    if (map.has(fileId) && isStableFileUrl(map.get(fileId) || "")) continue;
+    if (stableUrlOf(meta)) {
+      const s = stableUrlOf(meta);
+      map.set(fileId, s);
+      continue;
+    }
+    const url = String(meta.dataURL || meta.url || "");
+    // Уже стабильный API URL в dataURL (ещё не помечен в map).
+    if (isStableFileUrl(url)) {
+      map.set(fileId, url);
+      continue;
+    }
+    if (!url || !isTransientFileUrl(url)) continue;
+    out.push(fileId);
+  }
+  return out;
+}
+
+/**
+ * После успешного аплоада image.status должен стать "saved"
+ * (ExcalidrawImageElement: pending | saved | error) — иначе спиннер на холсте.
+ */
+export function markImageElementsSaved(
+  elements: unknown[] | null | undefined,
+  fileIds: Iterable<string>,
+): unknown[] {
+  const ids = fileIds instanceof Set ? fileIds : new Set(fileIds);
+  if (!ids.size) return Array.isArray(elements) ? [...elements] : [];
+  const now = Date.now();
+  return (elements || []).map((raw) => {
+    if (!raw || typeof raw !== "object") return raw;
+    const el = raw as {
+      type?: string;
+      fileId?: string;
+      status?: string;
+      version?: number;
+      isDeleted?: boolean;
+    };
+    if (el.isDeleted || el.type !== "image" || !el.fileId || !ids.has(el.fileId)) return raw;
+    if (el.status === "saved") return raw;
+    return {
+      ...el,
+      status: "saved",
+      version: (Number(el.version) || 0) + 1,
+      versionNonce: Math.floor(Math.random() * 2 ** 31),
+      updated: now,
+    };
+  });
 }
 
 /** Для live-sync: убираем blob:/data: — пирам нужен только постоянный URL. */

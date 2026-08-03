@@ -1119,6 +1119,26 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
             locked.thumbnail = ""
             locked.save(update_fields=["scene_data", "version", "thumbnail", "updated_at"])
             board = locked
+        # Пиры должны сразу очистить холст — раньше clear не вещал в WS-группу.
+        # Флаг cleared обязателен: пустой elements[] при element-level merge
+        # иначе оставляет локальные элементы пира («воскрешение» после очистки).
+        broadcast_board_collab_event(
+            board.id,
+            {
+                "type": "scene_saved",
+                "board_id": str(board.id),
+                "version": board.version,
+                "cleared": True,
+                "scene": rewrite_scene_asset_urls(board, normalize_scene_data(board.scene_data)),
+                "user_id": request.user.id,
+                "display_name": (
+                    getattr(getattr(request.user, "profile", None), "display_name", None)
+                    or getattr(getattr(request.user, "profile", None), "name", None)
+                    or request.user.get_full_name()
+                    or request.user.username
+                ),
+            },
+        )
         return Response({
             "id": str(board.id),
             "version": board.version,

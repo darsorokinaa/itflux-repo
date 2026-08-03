@@ -685,6 +685,47 @@ def apply_material_operation(
     if len(str(payload or {})) > 48_000:
         raise VideoMeetingError("Слишком большой payload", code="payload_too_large", status=413)
 
+    # Курсор/указка/предпросмотр штриха не пишутся в БД и не меняют версию —
+    # не берём select_for_update() на строку сессии для них: раньше каждое
+    # движение курсора вставало в очередь за реальными правками (и другими
+    # курсорами) через один и тот же row-lock, из-за чего рисование/курсоры
+    # заметно лагали при нескольких участниках.
+    if action in EPHEMERAL_ACTIONS:
+        session = MeetingMaterialSession.objects.filter(meeting=meeting, is_active=True).first()
+        if session is None:
+            raise VideoMeetingError("Нет активного материала", code="no_session", status=404)
+        if session_id and int(session_id) != session.pk:
+            raise VideoMeetingError("Сессия материала не совпадает", code="session_mismatch", status=409)
+        role = access.role
+        can_collab = user_can_collaborate(session, user, role)
+        if role == "student" and action not in ("cursor", "pointer") and not can_collab:
+            raise VideoMeetingError("Режим просмотра: действие запрещено", code="view_only", status=403)
+        if role not in ("teacher", "coteacher", "staff", "student"):
+            raise VideoMeetingError("Нет прав", code="forbidden", status=403)
+        return {
+            "duplicate": False,
+            "ephemeral": True,
+            "session": session,
+            "operation": {
+                "type": "material.cursor" if action in ("cursor", "pointer") else f"material.{action}",
+                "session_id": session.pk,
+                "operation_id": operation_id,
+                "author_id": user.pk,
+                "author_role": role,
+                "display_name": (
+                    (getattr(getattr(user, "profile", None), "name", None) or "").strip()
+                    or f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip()
+                    or getattr(user, "username", "")
+                    or "Участник"
+                )[:120],
+                "action": action,
+                "payload": payload if isinstance(payload, dict) else {},
+                "base_version": session.version,
+                "version": session.version,
+            },
+            "version": session.version,
+        }
+
     with transaction.atomic():
         session = (
             MeetingMaterialSession.objects.select_for_update()
@@ -717,36 +758,6 @@ def apply_material_operation(
             can_collaborate=can_collab,
             can_browse_independently=can_browse,
         )
-
-        # Курсор: учитель всегда; ученик — в collaborative или follow (лёгкий pointer).
-        if action in EPHEMERAL_ACTIONS:
-            if role == "student" and action not in ("cursor", "pointer") and not can_collab:
-                raise VideoMeetingError("Режим просмотра: действие запрещено", code="view_only", status=403)
-            if role not in ("teacher", "coteacher", "staff", "student"):
-                raise VideoMeetingError("Нет прав", code="forbidden", status=403)
-            return {
-                "duplicate": False,
-                "ephemeral": True,
-                "session": session,
-                "operation": {
-                    "type": "material.cursor" if action in ("cursor", "pointer") else f"material.{action}",
-                    "session_id": session.pk,
-                    "operation_id": operation_id,
-                    "author_id": user.pk,
-                    "author_role": role,
-                    "display_name": (
-                        (getattr(getattr(user, "profile", None), "name", None) or "").strip()
-                        or f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip()
-                        or getattr(user, "username", "")
-                        or "Участник"
-                    )[:120],
-                    "action": action,
-                    "payload": payload if isinstance(payload, dict) else {},
-                    "base_version": session.version,
-                    "version": session.version,
-                },
-                "version": session.version,
-            }
 
         if action not in allowed:
             logger.info(
