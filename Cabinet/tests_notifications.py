@@ -45,11 +45,14 @@ class NotificationCatalogTests(TestCase):
             if field in (
                 "notify_daily_schedule_empty",
                 "notify_billing_weekly_digest",
-                "notify_journal_comment",
-                "notify_journal_recommendation",
             ):
                 continue
             self.assertIn(field, PREFERENCE_EVENT_MAP, msg=f"{field} not in catalog")
+        self.assertIn("journal_comment", PREFERENCE_EVENT_MAP.get("notify_journal_comment", ()))
+        self.assertIn(
+            "journal_recommendation",
+            PREFERENCE_EVENT_MAP.get("notify_journal_recommendation", ()),
+        )
 
 
 class NotificationPreferenceTests(TestCase):
@@ -528,3 +531,296 @@ class SystemAnnouncementPrefTests(TestCase):
             dedup_key="sys-1",
         )
         self.assertFalse(result2.skipped)
+
+
+class ReminderMinutesAndQuietHoursTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="tz_user", password="pass")
+        Profile.objects.update_or_create(
+            user=self.user,
+            defaults={"role": Profile.Role.TEACHER, "timezone": "Europe/Moscow"},
+        )
+
+    def test_empty_reminder_list_disables(self):
+        prefs = get_or_create_preferences(self.user)
+        prefs.lesson_reminder_minutes = []
+        prefs.save(update_fields=["lesson_reminder_minutes"])
+        self.assertEqual(prefs.effective_lesson_reminder_minutes(), [])
+        enabled, reason = NotificationPreferenceService.is_event_enabled(
+            self.user, NotificationEventType.LESSON_REMINDER, prefs=prefs
+        )
+        self.assertFalse(enabled)
+        self.assertEqual(reason, "reminders_disabled")
+
+    def test_selected_reminders_only(self):
+        prefs = get_or_create_preferences(self.user)
+        prefs.lesson_reminder_minutes = [60]
+        prefs.save(update_fields=["lesson_reminder_minutes"])
+        self.assertEqual(prefs.effective_lesson_reminder_minutes(), [60])
+
+    def test_quiet_hours_overnight(self):
+        from datetime import datetime, time
+        from zoneinfo import ZoneInfo
+
+        from Cabinet.notification_time import is_in_quiet_hours
+
+        tz = ZoneInfo("Europe/Moscow")
+        self.assertTrue(
+            is_in_quiet_hours(
+                enabled=True,
+                start=time(22, 0),
+                end=time(7, 0),
+                now_local=datetime(2026, 8, 3, 23, 30, tzinfo=tz),
+            )
+        )
+        self.assertTrue(
+            is_in_quiet_hours(
+                enabled=True,
+                start=time(22, 0),
+                end=time(7, 0),
+                now_local=datetime(2026, 8, 4, 6, 0, tzinfo=tz),
+            )
+        )
+        self.assertFalse(
+            is_in_quiet_hours(
+                enabled=True,
+                start=time(22, 0),
+                end=time(7, 0),
+                now_local=datetime(2026, 8, 4, 12, 0, tzinfo=tz),
+            )
+        )
+
+    def test_quiet_hours_same_start_end_means_always(self):
+        from datetime import datetime, time
+        from zoneinfo import ZoneInfo
+
+        from Cabinet.notification_time import is_in_quiet_hours
+
+        tz = ZoneInfo("UTC")
+        self.assertTrue(
+            is_in_quiet_hours(
+                enabled=True,
+                start=time(0, 0),
+                end=time(0, 0),
+                now_local=datetime(2026, 8, 3, 15, 0, tzinfo=tz),
+            )
+        )
+
+    def test_dnd_blocks_non_urgent_push(self):
+        from datetime import time
+
+        prefs = get_or_create_preferences(self.user)
+        prefs.dnd_enabled = True
+        prefs.dnd_start = time(8, 0)
+        prefs.dnd_end = time(8, 0)  # одинаковые границы = круглосуточная тишина
+        prefs.dnd_allow_urgent = True
+        prefs.push_enabled = True
+        prefs.save()
+        PushSubscription.objects.create(
+            user=self.user,
+            endpoint="https://push.example/dnd",
+            p256dh="p" * 30,
+            auth="a" * 20,
+            is_active=True,
+        )
+        with patch("Cabinet.webpush.webpush_configured", return_value=True):
+            result = send_web_push_to_user(
+                self.user,
+                title="Обычное",
+                body="текст",
+                priority="normal",
+                urgent=False,
+                create_log=False,
+            )
+        self.assertEqual(result["reason"], "dnd")
+        self.assertEqual(result["sent"], 0)
+
+    def test_privacy_mode_hides_push_body(self):
+        prefs = get_or_create_preferences(self.user)
+        prefs.push_privacy_mode = True
+        prefs.push_enabled = True
+        prefs.in_app_enabled = True
+        prefs.notify_system = True
+        prefs.save()
+        with patch(
+            "Cabinet.webpush.send_web_push_to_user",
+            return_value={"sent": 1, "active": 1, "reason": "", "errors": []},
+        ) as mock_push:
+            result = NotificationDispatcher.notify(
+                self.user,
+                NotificationEventType.SYSTEM_ANNOUNCEMENT,
+                title="Новый ученик Александр",
+                message='Сдал работу "Системы счисления"',
+                skip_actor=False,
+                create_telegram=False,
+                create_push=True,
+                dedup_key="privacy-test-1",
+            )
+        self.assertFalse(result.skipped, result.reason)
+        self.assertTrue(mock_push.called)
+        self.assertEqual(mock_push.call_args.kwargs["title"], "Новое уведомление")
+        self.assertIn("новое событие", mock_push.call_args.kwargs["body"].lower())
+
+
+class PushSubscriptionDedupTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="push_dedup", password="pass")
+        Profile.objects.update_or_create(
+            user=self.user, defaults={"role": Profile.Role.TEACHER}
+        )
+
+    def test_upsert_same_endpoint_no_duplicate(self):
+        from Cabinet.webpush import upsert_subscription
+
+        a = upsert_subscription(
+            self.user,
+            endpoint="https://push.example/same",
+            p256dh="p" * 30,
+            auth="a" * 20,
+            user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Safari/605",
+        )
+        b = upsert_subscription(
+            self.user,
+            endpoint="https://push.example/same",
+            p256dh="q" * 30,
+            auth="b" * 20,
+            user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Safari/605",
+        )
+        self.assertEqual(a.pk, b.pk)
+        self.assertEqual(
+            PushSubscription.objects.filter(endpoint="https://push.example/same").count(),
+            1,
+        )
+
+    def test_serialize_distinguishes_iphone_ipad(self):
+        from Cabinet.webpush import serialize_device
+
+        iphone = PushSubscription.objects.create(
+            user=self.user,
+            endpoint="https://push.example/iphone",
+            p256dh="p" * 30,
+            auth="a" * 20,
+            user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Version/17.0 Mobile/15E148 Safari/604.1",
+            is_active=True,
+        )
+        ipad = PushSubscription.objects.create(
+            user=self.user,
+            endpoint="https://push.example/ipad",
+            p256dh="q" * 30,
+            auth="b" * 20,
+            user_agent="Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) Version/17.0 Mobile/15E148 Safari/604.1",
+            is_active=True,
+        )
+        s1 = serialize_device(iphone, current_endpoint=iphone.endpoint)
+        s2 = serialize_device(ipad)
+        self.assertIn("iPhone", s1["device_type"])
+        self.assertIn("iPad", s2["device_type"])
+        self.assertTrue(s1["is_current"])
+        self.assertFalse(s2["is_current"])
+        self.assertIn("текущее устройство", s1["device_label"])
+
+
+class RescheduleReminderLogTests(TestCase):
+    def setUp(self):
+        from Cabinet.models import EventReminderLog, ScheduleEvent, ScheduleEventParticipant
+        from Cabinet.choices import ParticipantStatus
+
+        self.teacher = User.objects.create_user(username="t_move", password="pass")
+        Profile.objects.update_or_create(
+            user=self.teacher, defaults={"role": Profile.Role.TEACHER}
+        )
+        now = timezone.now()
+        self.event = ScheduleEvent.objects.create(
+            owner=self.teacher,
+            title="Урок",
+            starts_at=now + timedelta(hours=2),
+            ends_at=now + timedelta(hours=3),
+            status=ScheduleEvent.Status.PLANNED,
+        )
+        ScheduleEventParticipant.objects.create(
+            event=self.event,
+            user=self.teacher,
+            status=ParticipantStatus.ACCEPTED,
+            notification_enabled=True,
+        )
+        EventReminderLog.objects.create(
+            event=self.event,
+            recipient=self.teacher,
+            reminder_minutes=60,
+        )
+        self.EventReminderLog = EventReminderLog
+
+    def test_move_clears_reminder_logs(self):
+        from Cabinet.models import ScheduleEvent
+        from Cabinet.schedule_service import move_event
+
+        new_start = timezone.now() + timedelta(hours=5)
+        move_event(
+            self.event,
+            starts_at=new_start,
+            ends_at=new_start + timedelta(hours=1),
+            changed_by=self.teacher,
+            notify=False,
+        )
+        self.assertEqual(
+            self.EventReminderLog.objects.filter(event=self.event).count(),
+            0,
+        )
+        self.event.refresh_from_db()
+        self.assertEqual(self.event.status, ScheduleEvent.Status.MOVED)
+
+
+class TelegramChannelAutoTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="tg_auto", password="pass")
+        Profile.objects.update_or_create(
+            user=self.user, defaults={"role": Profile.Role.TEACHER}
+        )
+        # Сброс кэша reverse OneToOne после update_or_create
+        if hasattr(self.user, "_state"):
+            self.user.refresh_from_db()
+        try:
+            del self.user.profile
+        except AttributeError:
+            pass
+        prefs = get_or_create_preferences(self.user)
+        prefs.telegram_enabled = True
+        prefs.telegram_chat_id = "123456"
+        prefs.notify_system = True
+        prefs.save()
+
+    @patch("Cabinet.telegram_connect.send_telegram_to_user", return_value=True)
+    def test_dispatcher_sends_telegram_when_connected(self, mock_tg):
+        prefs = get_or_create_preferences(self.user)
+        self.assertTrue(prefs.telegram_connected)
+        result = NotificationDispatcher.notify(
+            self.user,
+            NotificationEventType.SYSTEM_ANNOUNCEMENT,
+            title="Системное",
+            message="Тест",
+            payload={"type": "system_announcement", "url": "/cabinet"},
+            dedup_key="tg-auto-1",
+            skip_actor=False,
+            create_push=False,
+            create_telegram=True,
+        )
+        self.assertFalse(result.skipped, result.reason)
+        mock_tg.assert_called_once()
+        self.assertIn("telegram", result.channels)
+
+    @patch("Cabinet.telegram_connect.send_telegram_to_user", return_value=True)
+    def test_disabled_type_skips_telegram(self, mock_tg):
+        prefs = get_or_create_preferences(self.user)
+        prefs.notify_system = False
+        prefs.save(update_fields=["notify_system"])
+        result = NotificationDispatcher.notify(
+            self.user,
+            NotificationEventType.SYSTEM_ANNOUNCEMENT,
+            title="Системное",
+            message="Тест",
+            skip_actor=False,
+            create_push=False,
+            create_telegram=True,
+        )
+        self.assertTrue(result.skipped)
+        mock_tg.assert_not_called()

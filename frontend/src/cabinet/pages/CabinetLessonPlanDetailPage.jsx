@@ -20,6 +20,7 @@ import {
   fetchLessonPlan,
   updateLessonPlan,
 } from "../../utils/cabinetAuth";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 function LessonPlanItemCard({ item, plan, onOpen }) {
   const subject = planSubjectLabel(plan);
@@ -94,6 +95,7 @@ export default function CabinetLessonPlanDetailPage() {
   const [actionError, setActionError] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [canPublishCatalog, setCanPublishCatalog] = useState(false);
+  usePageTitle(plan?.title || "План занятий");
 
   useEffect(() => {
     fetchCabinetSession()

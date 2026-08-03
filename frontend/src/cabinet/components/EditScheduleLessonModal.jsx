@@ -25,7 +25,7 @@ const CONTENT_SOURCE_LABEL = {
 };
 
 /** Тема/описание/цель/ДЗ занятия + связь с планом обучения ученика. */
-function PlanSyncSection({ event, disabled }) {
+function PlanSyncSection({ event, disabled, onEventUpdated }) {
   const [topic, setTopic] = useState(event.topic || "");
   const [subtopic, setSubtopic] = useState(event.subtopic || "");
   const [description, setDescription] = useState(event.description || "");
@@ -43,6 +43,7 @@ function PlanSyncSection({ event, disabled }) {
   });
   const [conflict, setConflict] = useState(null);
   const [savingContent, setSavingContent] = useState(false);
+  const [saveOk, setSaveOk] = useState(false);
   const [planBusy, setPlanBusy] = useState(false);
   const [planNotice, setPlanNotice] = useState("");
   const [pickerItems, setPickerItems] = useState([]);
@@ -80,6 +81,7 @@ function PlanSyncSection({ event, disabled }) {
       planSyncEnabled: patch.planSyncEnabled !== undefined ? patch.planSyncEnabled : prev.planSyncEnabled,
       planSyncedAt: patch.planSyncedAt !== undefined ? patch.planSyncedAt : prev.planSyncedAt,
     }));
+    onEventUpdated?.(patch);
   };
 
   const isGroup = Boolean(event.groupId || event.type === "group" || event.type === "group_lesson");
@@ -130,12 +132,20 @@ function PlanSyncSection({ event, disabled }) {
     if (savingRef.current) return;
     savingRef.current = true;
     setSavingContent(true);
+    setSaveOk(false);
+    // По умолчанию пишем и в карточку, и в связанный пункт плана (или создаём пункт).
+    const payload = { ...patch, ...extra };
+    if (!payload.sync_action && !payload.resolve_conflict) {
+      payload.sync_action = "lesson_and_plan";
+    }
     try {
-      const data = await updateScheduleEventContent(event.id, { ...patch, ...extra });
+      const data = await updateScheduleEventContent(event.id, payload);
       setConflict(null);
       setPlanNotice("");
+      setSaveOk(true);
       applyServerEvent(data?.scheduleEvent);
     } catch (err) {
+      setSaveOk(false);
       if (err?.status === 409 && err?.data?.conflict) {
         setConflict({
           message: err.data.detail || "Тема этого урока отличается от темы в плане обучения.",
@@ -295,26 +305,55 @@ function PlanSyncSection({ event, disabled }) {
       )}
 
       {planNotice ? <p className="cb-sch-form__hint" role="status">{planNotice}</p> : null}
+      {saveOk && !planNotice ? (
+        <p className="cb-sch-form__hint" role="status">Сохранено. Карточка и план обучения обновлены.</p>
+      ) : null}
 
       <label className="cb-sch-field">
         <span>Тема урока</span>
-        <input type="text" value={topic} onChange={(e) => setTopic(e.target.value)} disabled={disabled} />
+        <input
+          type="text"
+          value={topic}
+          onChange={(e) => { setTopic(e.target.value); setSaveOk(false); }}
+          disabled={disabled}
+        />
       </label>
       <label className="cb-sch-field">
         <span>Подтема</span>
-        <input type="text" value={subtopic} onChange={(e) => setSubtopic(e.target.value)} disabled={disabled} />
+        <input
+          type="text"
+          value={subtopic}
+          onChange={(e) => { setSubtopic(e.target.value); setSaveOk(false); }}
+          disabled={disabled}
+        />
       </label>
       <label className="cb-sch-field">
         <span>Цель урока</span>
-        <textarea rows={2} value={goal} onChange={(e) => setGoal(e.target.value)} disabled={disabled} />
+        <textarea
+          rows={2}
+          value={goal}
+          onChange={(e) => { setGoal(e.target.value); setSaveOk(false); }}
+          disabled={disabled}
+        />
       </label>
       <label className="cb-sch-field">
-        <span>Описание</span>
-        <textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} disabled={disabled} />
+        <span>О занятии</span>
+        <textarea
+          rows={2}
+          value={description}
+          onChange={(e) => { setDescription(e.target.value); setSaveOk(false); }}
+          disabled={disabled}
+          placeholder="Что планируется или что было пройдено на уроке"
+        />
       </label>
       <label className="cb-sch-field">
-        <span>Домашнее задание</span>
-        <textarea rows={2} value={homeworkDescription} onChange={(e) => setHomeworkDescription(e.target.value)} disabled={disabled} />
+        <span>Домашнее задание (черновик)</span>
+        <textarea
+          rows={2}
+          value={homeworkDescription}
+          onChange={(e) => { setHomeworkDescription(e.target.value); setSaveOk(false); }}
+          disabled={disabled}
+        />
       </label>
 
       {conflict ? (
@@ -344,13 +383,30 @@ function PlanSyncSection({ event, disabled }) {
           >
             {savingContent ? "Сохранение…" : "Сохранить тему/описание"}
           </button>
+          <button
+            type="button"
+            className="cb-btn cb-btn--outline"
+            disabled={disabled || savingContent}
+            onClick={() => {
+              setTopic(event.topic || "");
+              setSubtopic(event.subtopic || "");
+              setDescription(event.description || "");
+              setGoal(event.goal || "");
+              setHomeworkDescription(event.homeworkDescription || "");
+              setConflict(null);
+              setPlanNotice("");
+              setSaveOk(false);
+            }}
+          >
+            Отмена
+          </button>
         </div>
       )}
     </section>
   );
 }
 
-export default function EditScheduleLessonModal({ event, onClose, onSave }) {
+export default function EditScheduleLessonModal({ event, onClose, onSave, onEventUpdated }) {
   const [date, setDate] = useState(eventScheduleDate(event));
   const [startTime, setStartTime] = useState(normalizeTimeValue(event.startTime || "15:00"));
   const [endTime, setEndTime] = useState(normalizeTimeValue(event.endTime || "15:45"));
@@ -506,7 +562,7 @@ export default function EditScheduleLessonModal({ event, onClose, onSave }) {
               ) : null}
             </section>
 
-            <PlanSyncSection event={event} disabled={saving} />
+            <PlanSyncSection event={event} disabled={saving} onEventUpdated={onEventUpdated} />
 
             <section className="cb-sch-form__section">
               <h3>Время</h3>

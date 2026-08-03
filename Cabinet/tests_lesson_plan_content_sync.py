@@ -321,6 +321,42 @@ class LessonPlanContentSyncServiceTests(TestCase):
         self.assertTrue(result.get("skipped"))
         self.assertFalse(_guard_active())
 
+    def test_plan_item_title_equal_to_audience_not_copied_as_topic(self):
+        """Legacy пункты с title=имя ученика не должны отравлять topic урока."""
+        event = self._make_event(student=self.student)
+        event.title = "Александр Федоров"
+        event.audience = "Александр Федоров"
+        event.topic = ""
+        event.save(update_fields=["title", "audience", "topic"])
+        poisoned = LessonPlanItem.objects.create(
+            plan=self.plan,
+            order=3,
+            title="Александр Федоров",
+            topic="",
+        )
+        LessonLearningPlanSyncService.link_plan_item(event, poisoned, teacher=self.teacher)
+        event.refresh_from_db()
+        self.assertEqual(event.topic, "")
+
+    def test_detach_material_removes_plan_link_keeps_library(self):
+        event = self._make_event(student=self.student)
+        LessonLearningPlanSyncService.link_plan_item(event, self.item1, teacher=self.teacher)
+        material = Material.objects.create(teacher=self.teacher, title="Файл к уроку")
+        LessonLearningPlanSyncService.attach_material(
+            event, teacher=self.teacher, material_id=material.id,
+            source=ScheduleMaterialSource.LESSON_MANUAL,
+        )
+        self.assertTrue(self.item1.materials.filter(pk=material.id).exists())
+
+        LessonLearningPlanSyncService.detach_material(
+            event, teacher=self.teacher, material_id=material.id,
+        )
+        self.assertFalse(self.item1.materials.filter(pk=material.id).exists())
+        self.assertTrue(Material.objects.filter(pk=material.id).exists())
+        self.assertFalse(
+            ScheduleEventMaterial.objects.filter(event=event, material=material).exists()
+        )
+
 
 class LessonPlanContentSyncApiTests(TestCase):
     """Проверка, что обычный PATCH карточки урока идёт через сервис синхронизации."""
@@ -355,13 +391,14 @@ class LessonPlanContentSyncApiTests(TestCase):
         self.client = APIClient()
         self.client.force_authenticate(self.teacher)
 
-    def test_patch_topic_conflict_then_resolve(self):
-        url = f"/api/cabinet/schedule/{self.event.pk}/"
-        res = self.client.patch(url, {"topic": "Конфликтная тема"}, format="json")
+    def test_content_endpoint_conflict_then_resolve(self):
+        """Конфликт темы ловится на /content/, а не на обычном PATCH времени/ссылки."""
+        url = f"/api/cabinet/schedule/{self.event.pk}/content/"
+        res = self.client.post(url, {"topic": "Конфликтная тема"}, format="json")
         self.assertEqual(res.status_code, 409, res.content)
         self.assertTrue(res.data.get("conflict"))
 
-        res2 = self.client.patch(
+        res2 = self.client.post(
             url,
             {"topic": "Конфликтная тема", "resolve_conflict": "lesson_and_plan"},
             format="json",

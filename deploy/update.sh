@@ -21,12 +21,37 @@ cd "$APP_DIR"
 git fetch origin
 git pull --ff-only origin "$DEPLOY_BRANCH"
 
-echo "=== Сборка фронтенда ==="
+echo "=== Сборка фронтенда (атомарно в dist-next) ==="
 cd "$APP_DIR/frontend"
-rm -rf dist
+rm -rf dist-next
 npm ci
-npm run build
-test -f dist/index.html || { echo "Ошибка: нет frontend/dist/index.html после сборки"; exit 1; }
+npm run build -- --outDir dist-next
+test -f dist-next/index.html || { echo "Ошибка: нет frontend/dist-next/index.html после сборки"; exit 1; }
+test -f dist-next/sw.js || { echo "Ошибка: нет frontend/dist-next/sw.js после сборки"; exit 1; }
+test -f dist-next/version.json || { echo "Ошибка: нет frontend/dist-next/version.json после сборки"; exit 1; }
+# Не оставляем плейсхолдер версии в SW
+if grep -q '__ITFLUX_APP_VERSION__' dist-next/sw.js; then
+  echo "Ошибка: в dist-next/sw.js не подставлена версия сборки"
+  exit 1
+fi
+# Хэшированные чанки обязаны содержать content-hash в имени
+js_count="$(find dist-next/assets -maxdepth 1 -type f -name 'main-*.js' | wc -l | tr -d ' ')"
+test "$js_count" -ge 1 || { echo "Ошибка: нет hashed main-*.js в dist-next/assets"; exit 1; }
+
+# Сохраняем старые hashed-чанки на период открытых вкладок (не перезаписываем новые)
+if [[ -d dist/assets ]]; then
+  mkdir -p dist-next/assets
+  # cp -n: не затирать файлы новой сборки
+  cp -n dist/assets/* dist-next/assets/ 2>/dev/null || true
+fi
+
+# Атомарное переключение release directory
+rm -rf dist-prev
+if [[ -d dist ]]; then
+  mv dist dist-prev
+fi
+mv dist-next dist
+echo "Frontend version: $(cat dist/version.json)"
 
 echo "=== Python-зависимости (requirements.txt) ==="
 "$VENV_PIP" install -r "$APP_DIR/requirements.txt"
@@ -34,6 +59,7 @@ echo "=== Python-зависимости (requirements.txt) ==="
 echo "=== Миграции и статика ==="
 cd "$APP_DIR"
 "$VENV_PY" manage.py migrate --noinput
+# Не используем --clear: старые hashed-чанки могут ещё запрашиваться открытыми вкладками
 "$VENV_PY" manage.py collectstatic --noinput
 
 echo "=== Unit systemd (Daphne из репозитория) ==="
@@ -60,5 +86,10 @@ fi
 echo "=== JITSI (текущие env процесса) ==="
 systemctl show itflux -p Environment --no-pager 2>/dev/null | tr ' ' '\n' | grep -E '^JITSI_' || true
 
+echo "=== Проверка новой сборки ==="
+curl -fsS -o /dev/null -w "version.json HTTP %{http_code}\n" "https://test.itflux.ru/version.json" || echo "WARN: version.json недоступен по https (проверьте вручную)"
+curl -fsS -o /dev/null -w "sw.js HTTP %{http_code}\n" "https://test.itflux.ru/sw.js" || true
+
 echo "Готово. Проверка: systemctl status itflux --no-pager"
 echo "Cron: crontab -l | grep itflux-cron"
+echo "Версия: cat ${APP_DIR}/frontend/dist/version.json"

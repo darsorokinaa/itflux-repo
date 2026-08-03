@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
+import { usePageTitle } from "../hooks/usePageTitle";
 import {
   disconnectTelegram,
   fetchNotificationPreferences,
@@ -15,6 +16,7 @@ import {
   unsubscribeCabinetPushDevice,
   updateNotificationPreferences,
 } from "../../utils/cabinetAuth";
+import AppDiagnosticsPanel from "../../components/AppDiagnosticsPanel";
 import "../styles/notifications-settings.css";
 
 const REMINDER_OPTIONS = [
@@ -466,9 +468,7 @@ export default function CabinetNotificationsSettingsPage() {
     return data;
   }, [refreshDevicePushStatus]);
 
-  useEffect(() => {
-    document.title = "Настройки уведомлений — Личный кабинет";
-  }, []);
+  usePageTitle("Настройки уведомлений");
 
   useEffect(() => {
     if (!user) return undefined;
@@ -561,6 +561,10 @@ export default function CabinetNotificationsSettingsPage() {
       group.fields.forEach((field) => {
         next[field.key] = enabled;
       });
+      if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = window.setTimeout(() => {
+        persistPrefs(next, { silent: true }).catch(() => {});
+      }, 400);
       return next;
     });
     setSaveError("");
@@ -878,10 +882,12 @@ export default function CabinetNotificationsSettingsPage() {
                 {devices.length > 0 ? (
                   <ul className="cb-notify-devices">
                     {devices.map((device) => (
-                      <li key={device.id} className="cb-notify-devices__item">
+                      <li
+                        key={device.id}
+                        className={`cb-notify-devices__item${device.is_current ? " is-current" : ""}`}
+                      >
                         <span>
                           {device.device_label || `${device.device_type} · ${device.browser}`}
-                          {!device.is_active ? " (отключено)" : ""}
                         </span>
                         {device.is_active ? (
                           <button
@@ -890,8 +896,16 @@ export default function CabinetNotificationsSettingsPage() {
                             disabled={Boolean(busy)}
                             onClick={() => runAction(
                               `dev-${device.id}`,
-                              () => unsubscribeCabinetPushDevice(device.id),
-                              "Устройство отключено",
+                              async () => {
+                                if (device.is_current) {
+                                  const { unsubscribeCurrentPush } = await import("../pwa/pwaHelpers");
+                                  await unsubscribeCurrentPush().catch(() => {});
+                                }
+                                await unsubscribeCabinetPushDevice(device.id);
+                              },
+                              device.is_current
+                                ? "Уведомления отключены на этом устройстве"
+                                : "Устройство отключено",
                             )}
                           >
                             Отключить
@@ -1139,6 +1153,8 @@ export default function CabinetNotificationsSettingsPage() {
                   </div>
                 ))}
               </section>
+
+              <AppDiagnosticsPanel />
             </div>
           </div>
         </>

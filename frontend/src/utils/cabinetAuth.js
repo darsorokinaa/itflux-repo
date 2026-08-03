@@ -1,5 +1,28 @@
+import { getAppVersion } from "./appVersion";
+
 function apiBase() {
   return "/api/cabinet";
+}
+
+function clientVersionHeaders() {
+  const version = getAppVersion();
+  return version && version !== "dev" ? { "X-Client-Version": version } : {};
+}
+
+function handleClientUpdateRequired(data) {
+  if (data?.code !== "client_update_required") return;
+  try {
+    window.dispatchEvent(
+      new CustomEvent("itflux:client-update-required", {
+        detail: {
+          minimumVersion: data.minimum_version || "",
+          message: data.message || "Требуется обновление платформы",
+        },
+      }),
+    );
+  } catch {
+    /* ignore */
+  }
 }
 
 /** DRF list or plain array — always returns an array. */
@@ -53,13 +76,14 @@ function getCsrfToken() {
 
 export async function ensureCsrfCookie() {
   if (getCsrfToken()) return;
-  await fetch("/api/csrf/", { credentials: "same-origin" });
+  await fetch("/api/csrf/", { credentials: "same-origin", cache: "no-store" });
 }
 
 async function cabinetFetch(path, options = {}) {
   await ensureCsrfCookie();
   const headers = {
     Accept: "application/json",
+    ...clientVersionHeaders(),
     ...(options.body ? { "Content-Type": "application/json" } : {}),
     ...(options.headers || {}),
   };
@@ -68,6 +92,7 @@ async function cabinetFetch(path, options = {}) {
 
   const res = await fetch(`${apiBase()}${path}`, {
     credentials: "same-origin",
+    cache: "no-store",
     ...options,
     headers,
   });
@@ -80,6 +105,7 @@ async function cabinetFetch(path, options = {}) {
   }
 
   if (!res.ok) {
+    handleClientUpdateRequired(data);
     const message = formatApiError(data);
     const err = new Error(message);
     err.code = data?.code;
@@ -160,8 +186,16 @@ export function fetchPushVapidKey() {
   return cabinetFetch("/push/vapid-public-key/", { method: "GET" });
 }
 
-export function fetchPushDevices() {
-  return cabinetFetch("/push/devices/", { method: "GET" });
+export async function fetchPushDevices() {
+  let endpoint = "";
+  try {
+    const { getCurrentPushEndpoint } = await import("../cabinet/pwa/pwaHelpers");
+    endpoint = (await getCurrentPushEndpoint()) || "";
+  } catch {
+    endpoint = "";
+  }
+  const qs = endpoint ? `?endpoint=${encodeURIComponent(endpoint)}` : "";
+  return cabinetFetch(`/push/devices/${qs}`, { method: "GET" });
 }
 
 export async function sendPushTestNotification({ allDevices = false } = {}) {
@@ -240,6 +274,7 @@ async function videoMeetingFetch(path, options = {}) {
   await ensureCsrfCookie();
   const headers = {
     Accept: "application/json",
+    ...clientVersionHeaders(),
     ...(options.body && !(options.body instanceof FormData)
       ? { "Content-Type": "application/json" }
       : {}),
@@ -250,6 +285,7 @@ async function videoMeetingFetch(path, options = {}) {
 
   const res = await fetch(`/api/video-meetings${path}`, {
     credentials: "same-origin",
+    cache: "no-store",
     ...options,
     headers,
   });
@@ -273,6 +309,7 @@ async function videoMeetingFetch(path, options = {}) {
   }
 
   if (!res.ok) {
+    handleClientUpdateRequired(data);
     const message = formatApiError(data, "Ошибка видеоконференции");
     const err = new Error(message);
     err.code = data?.code;
@@ -827,7 +864,7 @@ export function createHomeworkFromReview(reviewId, payload = {}) {
 
 async function cabinetFetchMultipart(path, formData, { method = "POST" } = {}) {
   await ensureCsrfCookie();
-  const headers = { Accept: "application/json" };
+  const headers = { Accept: "application/json", ...clientVersionHeaders() };
   const csrf = getCsrfToken();
   if (csrf) headers["X-CSRFToken"] = csrf;
 
@@ -835,6 +872,7 @@ async function cabinetFetchMultipart(path, formData, { method = "POST" } = {}) {
     method,
     body: formData,
     credentials: "same-origin",
+    cache: "no-store",
     headers,
   });
 
@@ -846,6 +884,7 @@ async function cabinetFetchMultipart(path, formData, { method = "POST" } = {}) {
   }
 
   if (!res.ok || (Object.prototype.hasOwnProperty.call(data || {}, "ok") && !data.ok)) {
+    handleClientUpdateRequired(data);
     const message = formatApiError(data, "Не удалось загрузить файл");
     const err = new Error(message);
     err.status = res.status;
@@ -1153,7 +1192,7 @@ export function fetchMaterials(params = {}) {
 export async function createTeacherMaterial(payload) {
   await ensureCsrfCookie();
   const isFormData = typeof FormData !== "undefined" && payload instanceof FormData;
-  const headers = { Accept: "application/json" };
+  const headers = { Accept: "application/json", ...clientVersionHeaders() };
   const csrf = getCsrfToken();
   if (csrf) headers["X-CSRFToken"] = csrf;
   if (!isFormData) headers["Content-Type"] = "application/json";
@@ -1161,6 +1200,7 @@ export async function createTeacherMaterial(payload) {
   const res = await fetch(`${apiBase()}/materials/`, {
     method: "POST",
     credentials: "same-origin",
+    cache: "no-store",
     headers,
     body: isFormData ? payload : JSON.stringify(payload),
   });
@@ -1172,6 +1212,7 @@ export async function createTeacherMaterial(payload) {
     data = null;
   }
   if (!res.ok) {
+    handleClientUpdateRequired(data);
     const message = formatApiError(data);
     const err = new Error(message);
     err.status = res.status;
@@ -1761,6 +1802,13 @@ export function saveJournalLesson(lessonId, payload) {
   });
 }
 
+export function updateJournalLessonTopics(lessonId, payload) {
+  return cabinetFetch(`/journal/lessons/${lessonId}/topics/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function completeJournalLesson(lessonId, payload = {}) {
   return cabinetFetch(`/journal/lessons/${lessonId}/complete/`, {
     method: "POST",
@@ -1869,6 +1917,25 @@ export function uploadMyFile(file, { folderId, displayName, student = false } = 
   if (folderId) formData.append("folder_id", folderId);
   if (displayName) formData.append("display_name", displayName);
   return cabinetFetchMultipart(`${filesBase(student)}/upload/`, formData);
+}
+
+export function fetchHomeworkAttachments(homeworkId) {
+  return cabinetFetch(`/homework/${homeworkId}/attachments/`, { method: "GET" });
+}
+
+export function uploadHomeworkAttachments(homeworkId, files) {
+  const formData = new FormData();
+  const list = Array.isArray(files) ? files : [files];
+  list.forEach((file) => {
+    if (file) formData.append("files", file);
+  });
+  return cabinetFetchMultipart(`/homework/${homeworkId}/attachments/`, formData);
+}
+
+export function deleteHomeworkAttachment(homeworkId, attachmentId) {
+  return cabinetFetch(`/homework/${homeworkId}/attachments/${attachmentId}/`, {
+    method: "DELETE",
+  });
 }
 
 export function fetchMyFile(fileId, { student = false } = {}) {

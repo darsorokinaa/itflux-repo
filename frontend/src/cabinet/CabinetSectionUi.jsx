@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import CabinetIcon from "./CabinetIcons";
+import { usePageTitle } from "./hooks/usePageTitle";
 
 export function CabinetPageShell({ children, className = "" }) {
   return (
@@ -11,6 +12,7 @@ export function CabinetPageShell({ children, className = "" }) {
 }
 
 export function CabinetPageHeader({ title, subtitle, badge, actions = [], children }) {
+  usePageTitle(title);
   const btnClass = (a) =>
     `cb-btn${a.primary ? " cb-btn--primary" : " cb-btn--outline"}${a.pill ? " cb-btn--pill" : ""}`;
 

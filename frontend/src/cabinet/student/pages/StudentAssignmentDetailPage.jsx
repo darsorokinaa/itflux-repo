@@ -11,6 +11,7 @@ import {
   StudentPageShell,
   formatDueDate,
 } from "../StudentSectionUi";
+import { usePageTitle } from "../../hooks/usePageTitle";
 
 const TASK_TYPE_META = {
   text: { icon: "note", typeLabel: "Текст" },
@@ -197,6 +198,7 @@ export default function StudentAssignmentDetailPage() {
   const [msg, setMsg] = useState("");
   const [variantTasks, setVariantTasks] = useState(null);
   const isDirtyRef = useRef(false);
+  usePageTitle(item?.title || "Домашнее задание");
 
   useEffect(() => {
     isDirtyRef.current = isDirty;
@@ -485,6 +487,40 @@ export default function StudentAssignmentDetailPage() {
                 </p>
               </div>
             </div>
+            {(item.attachments || []).length > 0 ? (
+              <ul className="st-hw-attachments">
+                {(item.attachments || []).map((file) => {
+                  const isImage = Boolean(file.is_image || String(file.mime_type || "").startsWith("image/"));
+                  const href = file.url || file.preview_url || "";
+                  return (
+                    <li key={file.id || file.url} className="st-hw-attachments__item">
+                      {isImage && (file.preview_url || href) ? (
+                        <a className="st-hw-attachments__thumb" href={href} target="_blank" rel="noreferrer">
+                          <img src={file.preview_url || href} alt={file.name || "Файл"} />
+                        </a>
+                      ) : (
+                        <span className="st-hw-attachments__icon" aria-hidden="true">
+                          <CabinetIcon name="file" />
+                        </span>
+                      )}
+                      <span className="st-hw-attachments__meta">
+                        <span className="st-hw-attachments__name">{file.name || file.original_name || "Файл"}</span>
+                        <span className="st-hw-attachments__sub">
+                          {[file.extension, file.size ? `${Math.round(file.size / 1024)} КБ` : ""]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
+                      </span>
+                      {href ? (
+                        <a className="st-hw-btn st-hw-btn--outline" href={href} target="_blank" rel="noreferrer">
+                          Открыть
+                        </a>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
             {materialTasks.length > 0 ? (
               <div className="st-hw-materials">
                 {materialTasks.map((task) => (
@@ -497,9 +533,9 @@ export default function StudentAssignmentDetailPage() {
                   />
                 ))}
               </div>
-            ) : (
+            ) : (item.attachments || []).length === 0 ? (
               <p className="st-hw-empty">Материалы не прикреплены</p>
-            )}
+            ) : null}
           </section>
 
           {variantOnly ? (

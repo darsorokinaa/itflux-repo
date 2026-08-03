@@ -64,7 +64,7 @@ export function isParentMobileNavActive(pathname, item) {
 
 export function getParentSectionTitle(pathname) {
   if (pathname === "/cabinet/parent" || pathname === "/cabinet/parent/") return "Главная";
-  if (pathname.startsWith("/cabinet/parent/settings/notifications")) return "Уведомления";
+  if (pathname.startsWith("/cabinet/parent/settings/notifications")) return "Настройки уведомлений";
   if (pathname === "/cabinet/parent/more" || pathname.startsWith("/cabinet/parent/more/")) {
     return "Ещё";
   }

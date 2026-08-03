@@ -182,8 +182,10 @@ class NotificationDispatcher:
         push_tag: str = "",
         create_in_app: bool | None = None,
         create_push: bool | None = None,
-        create_telegram: bool = False,
+        create_telegram: bool | None = None,
         telegram_text: str | None = None,
+        private_title: str | None = None,
+        private_message: str | None = None,
     ) -> NotifyResult:
         context = dict(context or {})
         payload = dict(payload or {})
@@ -253,9 +255,10 @@ class NotificationDispatcher:
             channels.discard(CHANNEL_PUSH)
         if create_telegram is False:
             channels.discard(CHANNEL_TELEGRAM)
-        elif create_telegram:
+        elif create_telegram is True:
             if prefs.telegram_connected:
                 channels.add(CHANNEL_TELEGRAM)
+        # create_telegram is None → leave channel decision to prefs + catalog
 
         if force and force_channels:
             channels = set(force_channels)
@@ -348,6 +351,12 @@ class NotificationDispatcher:
                     in_app_note.pk,
                 )
 
+        push_title = title
+        push_body = message
+        if getattr(prefs, "push_privacy_mode", False) and not force:
+            push_title = private_title or "Новое уведомление"
+            push_body = private_message or "На платформе появилось новое событие"
+
         push_result = {"sent": 0, "active": 0, "reason": ""}
         if CHANNEL_PUSH in channels or (force and create_push is not False):
             from .webpush import send_web_push_to_user
@@ -355,8 +364,8 @@ class NotificationDispatcher:
             push_url = payload.get("url") if isinstance(payload.get("url"), str) else "/cabinet"
             push_result = send_web_push_to_user(
                 recipient,
-                title=title,
-                body=message,
+                title=push_title,
+                body=push_body,
                 url=push_url,
                 tag=push_tag or event_type,
                 priority=priority,
@@ -380,11 +389,17 @@ class NotificationDispatcher:
                 push_result.get("reason") or "",
             )
 
-        if CHANNEL_TELEGRAM in channels and (create_telegram or CHANNEL_TELEGRAM in channels):
+        if CHANNEL_TELEGRAM in channels:
             try:
                 from .telegram_connect import send_telegram_to_user
 
-                text = telegram_text or f"{title}\n\n{message}"
+                if getattr(prefs, "push_privacy_mode", False) and not force:
+                    text = telegram_text or (
+                        f"{private_title or 'Новое уведомление'}\n\n"
+                        f"{private_message or 'На платформе появилось новое событие'}"
+                    )
+                else:
+                    text = telegram_text or f"{title}\n\n{message}"
                 ok = send_telegram_to_user(recipient, text)
                 Notification.objects.create(
                     recipient_user=recipient,

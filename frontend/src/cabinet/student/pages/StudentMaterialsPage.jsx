@@ -9,6 +9,7 @@ import {
 } from "../StudentSectionUi";
 import StudentSubjectTabs, { getStoredStudentSubjectId } from "../StudentSubjectTabs";
 import CabinetIcon from "../../CabinetIcons";
+import { usePageTitle } from "../../hooks/usePageTitle";
 
 const TYPE_ICONS = {
   lesson:       { icon: "lessons",   color: "#2F5EF5", bg: "#EEF2FF" },
@@ -120,6 +121,7 @@ function groupByTopic(items) {
 }
 
 export default function StudentMaterialsPage() {
+  usePageTitle("Материалы");
   const [allItems, setAllItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");

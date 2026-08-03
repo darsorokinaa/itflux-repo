@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { fetchCabinetSession, loginCabinet, registerCabinet, getCabinetHomePath, fetchReferralPreview } from "../utils/cabinetAuth";
+import { usePageTitle } from "../cabinet/hooks/usePageTitle";
 
-const PAGE_TITLE = "Личный кабинет — вход — Цифровой поток";
 const GUIDE_OPEN_ON_REGISTER_KEY = "cabinet-guide-open-on-register";
 
 const ROLE_OPTIONS = [
@@ -75,9 +75,8 @@ export default function CabinetAuthPage() {
     };
   }, [referralCode, inviteToken]);
 
-  useEffect(() => {
-    document.title = PAGE_TITLE;
-  }, []);
+  const authTitle = mode === "register" ? "Регистрация" : "Вход в аккаунт";
+  usePageTitle(authTitle);
 
   useEffect(() => {
     let cancelled = false;
@@ -205,7 +204,7 @@ export default function CabinetAuthPage() {
       <div className="cabinet-auth-card">
         <div className="cabinet-auth-head">
           <span className="cabinet-auth-badge">Личный кабинет</span>
-          <h1 className="cabinet-auth-title">Вход в аккаунт</h1>
+          <h1 className="cabinet-auth-title">{authTitle}</h1>
           <p className="cabinet-auth-lead">
             {parentInviteToken
               ? "Создайте аккаунт родителя или войдите, чтобы принять приглашение к кабинету ребёнка."

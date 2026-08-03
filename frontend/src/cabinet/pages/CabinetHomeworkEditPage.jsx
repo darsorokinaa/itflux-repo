@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-r
 import CabinetIcon from "../CabinetIcons";
 import { CabinetPageShell, CabinetPageHeader } from "../CabinetSectionUi";
 import ConfirmActionModal from "../components/ConfirmActionModal";
+import HomeworkAttachmentsField from "../components/HomeworkAttachmentsField";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import { getInteractiveDisplayTitle } from "../interactivesData";
 import { fetchHomeworkForEdit, updateHomework } from "../../utils/cabinetAuth";
@@ -515,6 +516,13 @@ export default function CabinetHomeworkEditPage() {
               ))}
             </div>
           )}
+        </div>
+
+        <div className="cb-attach-section">
+          <HomeworkAttachmentsField
+            homeworkId={homeworkId}
+            disabled={submitting}
+          />
         </div>
 
         <div className="cb-modal-form__actions">

@@ -87,28 +87,43 @@ def _vapid_claims() -> dict:
     return {"sub": mailto}
 
 
-def _is_in_dnd(prefs) -> bool:
-    if not getattr(prefs, "dnd_enabled", False):
-        return False
-    start = getattr(prefs, "dnd_start", None)
-    end = getattr(prefs, "dnd_end", None)
-    if not start or not end:
-        return False
-    now_t = timezone.localtime().time()
-    if start <= end:
-        return start <= now_t < end
-    # Overnight window, e.g. 22:00–07:00
-    return now_t >= start or now_t < end
+def _is_in_dnd(prefs, user: User | None = None) -> bool:
+    from .notification_time import is_in_quiet_hours, user_local_now
+
+    return is_in_quiet_hours(
+        enabled=bool(getattr(prefs, "dnd_enabled", False)),
+        start=getattr(prefs, "dnd_start", None),
+        end=getattr(prefs, "dnd_end", None),
+        now_local=user_local_now(user) if user is not None else None,
+        user=user,
+    )
 
 
-def _priority_allows_push(priority: str, urgent: bool, prefs) -> bool:
-    if _is_in_dnd(prefs):
+def _priority_allows_push(priority: str, urgent: bool, prefs, user: User | None = None) -> bool:
+    if _is_in_dnd(prefs, user=user):
         if urgent and getattr(prefs, "dnd_allow_urgent", True):
             return True
         if priority == "critical":
             return True
         return False
     return priority in ("critical", "important", "normal", "")
+
+
+def _privacy_push_copy(title: str, body: str, prefs) -> tuple[str, str]:
+    if not getattr(prefs, "push_privacy_mode", False):
+        return title, body
+    return "Новое уведомление", "На платформе появилось новое событие"
+
+
+def vapid_key_fingerprint() -> str:
+    """Короткий отпечаток текущего публичного ключа для привязки подписки."""
+    try:
+        key = vapid_public_key()
+    except Exception:
+        return ""
+    if not key:
+        return ""
+    return f"{key[:6]}…{key[-4:]}" if len(key) > 12 else key
 
 
 def _record_delivery(
@@ -163,8 +178,24 @@ def send_web_push_to_user(
 
     prefs = _prefs(user)
     if not force and not getattr(prefs, "push_enabled", True):
+        _record_delivery(
+            user=user,
+            subscription=None,
+            notification=notification,
+            event_type=event_type or "",
+            status=PushDeliveryLog.DeliveryStatus.SKIPPED_BY_PREFERENCES,
+            error_message="push_disabled",
+        )
         return {**empty, "reason": "push_disabled"}
-    if not force and not _priority_allows_push(priority, urgent, prefs):
+    if not force and not _priority_allows_push(priority, urgent, prefs, user=user):
+        _record_delivery(
+            user=user,
+            subscription=None,
+            notification=notification,
+            event_type=event_type or "",
+            status=PushDeliveryLog.DeliveryStatus.DEFERRED_BY_QUIET_HOURS,
+            error_message="dnd",
+        )
         return {**empty, "reason": "dnd"}
 
     try:
@@ -184,9 +215,10 @@ def send_web_push_to_user(
         or (payload_extra or {}).get("type")
         or ""
     )
+    push_title, push_body = (title, body) if force else _privacy_push_copy(title, body, prefs)
     data = {
-        "title": title[:120],
-        "body": (body or "")[:180],
+        "title": push_title[:120],
+        "body": (push_body or "")[:180],
         "url": url or "/cabinet",
         "tag": tag or "",
         "role": getattr(getattr(user, "profile", None), "role", "") or "",
@@ -222,7 +254,9 @@ def send_web_push_to_user(
                 ttl=86400,
             )
             sub.last_seen_at = timezone.now()
-            sub.save(update_fields=["last_seen_at", "updated_at"])
+            sub.last_error_at = None
+            sub.last_error_message = ""
+            sub.save(update_fields=["last_seen_at", "last_error_at", "last_error_message", "updated_at"])
             sent += 1
             _record_delivery(
                 user=user,
@@ -237,8 +271,8 @@ def send_web_push_to_user(
                     recipient_user=user,
                     channel=NotificationChannel.PUSH,
                     event_type=resolved_event,
-                    title=title,
-                    message=body or "",
+                    title=push_title,
+                    message=push_body or "",
                     payload={**data, "subscription_id": sub.pk},
                     status=NotificationStatus.SENT,
                     sent_at=timezone.now(),
@@ -255,19 +289,22 @@ def send_web_push_to_user(
             gone = status_code in (404, 410) or (status_code in (401, 403) and key_mismatch)
             # 429 / 5xx — временные ошибки, подписку не трогаем
             temporary = status_code in (429, 500, 502, 503, 504)
+            sub.last_error_at = timezone.now()
+            sub.last_error_message = err_text[:300]
             if gone:
                 sub.is_active = False
-                sub.save(update_fields=["is_active", "updated_at"])
+                sub.save(update_fields=["is_active", "last_error_at", "last_error_message", "updated_at"])
                 _record_delivery(
                     user=user,
                     subscription=sub,
                     notification=notification,
                     event_type=resolved_event,
-                    status=PushDeliveryLog.DeliveryStatus.GONE,
+                    status=PushDeliveryLog.DeliveryStatus.INVALID_SUBSCRIPTION,
                     http_status=status_code,
                     error_message=err_text,
                 )
             else:
+                sub.save(update_fields=["last_error_at", "last_error_message", "updated_at"])
                 _record_delivery(
                     user=user,
                     subscription=sub,
@@ -282,8 +319,8 @@ def send_web_push_to_user(
                         recipient_user=user,
                         channel=NotificationChannel.PUSH,
                         event_type=resolved_event,
-                        title=title,
-                        message=body or "",
+                        title=push_title,
+                        message=push_body or "",
                         payload=data,
                         status=NotificationStatus.FAILED,
                         error_message=err_text[:500],
@@ -292,6 +329,9 @@ def send_web_push_to_user(
         except Exception as exc:
             errors.append(str(exc)[:300])
             logger.exception("Unexpected web push error for user %s", user.pk)
+            sub.last_error_at = timezone.now()
+            sub.last_error_message = str(exc)[:300]
+            sub.save(update_fields=["last_error_at", "last_error_message", "updated_at"])
             _record_delivery(
                 user=user,
                 subscription=sub,
@@ -355,11 +395,13 @@ def notify_user_channels(
     if check_preferences and resolved_type:
         from .notification_dispatch import NotificationDispatcher
 
+        # Не вырезаем telegram из allowed: канал включается по prefs + каталогу.
         force_channels = set()
         if in_app:
             force_channels.add("in_app")
         if push:
             force_channels.add("push")
+        force_channels.add("telegram")
         result = NotificationDispatcher.notify(
             user,
             resolved_type,
@@ -377,7 +419,7 @@ def notify_user_channels(
             push_tag=tag,
             create_in_app=in_app,
             create_push=push,
-            create_telegram=False,
+            create_telegram=None,
         )
         return [result.in_app] if result.in_app else []
 
@@ -441,6 +483,8 @@ def upsert_subscription(
         is_active=False,
     )
 
+    key_version = vapid_key_fingerprint()
+    auto_label = device_label or _build_device_label(user_agent)
     sub, created = PushSubscription.objects.get_or_create(
         endpoint=endpoint,
         defaults={
@@ -448,9 +492,10 @@ def upsert_subscription(
             "p256dh": p256dh,
             "auth": auth,
             "user_agent": (user_agent or "")[:500],
-            "device_label": (device_label or "")[:120],
+            "device_label": (auto_label or "")[:120],
             "is_active": True,
             "last_seen_at": timezone.now(),
+            "vapid_key_version": key_version,
         },
     )
     if not created:
@@ -460,8 +505,11 @@ def upsert_subscription(
         sub.user_agent = (user_agent or sub.user_agent or "")[:500]
         if device_label:
             sub.device_label = device_label[:120]
+        elif not sub.device_label:
+            sub.device_label = (auto_label or "")[:120]
         sub.is_active = True
         sub.last_seen_at = timezone.now()
+        sub.vapid_key_version = key_version
         sub.save()
     return sub
 
@@ -477,33 +525,74 @@ def deactivate_user_subscriptions(user: User) -> int:
     return PushSubscription.objects.filter(user=user, is_active=True).update(is_active=False)
 
 
-def serialize_device(sub: PushSubscription) -> dict[str, Any]:
-    ua = sub.user_agent or ""
+def _parse_ua(user_agent: str) -> tuple[str, str]:
+    ua = user_agent or ""
     browser = "Браузер"
     device = "Устройство"
     low = ua.lower()
     if "edg/" in low:
         browser = "Edge"
-    elif "chrome/" in low and "edg/" not in low:
+    elif "chrome/" in low and "edg/" not in low and "crios" not in low:
         browser = "Chrome"
-    elif "firefox/" in low:
+    elif "crios" in low:
+        browser = "Chrome"
+    elif "firefox/" in low or "fxios" in low:
         browser = "Firefox"
-    elif "safari/" in low and "chrome/" not in low:
+    elif "safari/" in low and "chrome/" not in low and "crios" not in low:
         browser = "Safari"
-    if "iphone" in low or "ipad" in low:
-        device = "iPhone/iPad"
+    if "iphone" in low:
+        device = "iPhone"
+    elif "ipad" in low:
+        device = "iPad"
     elif "android" in low:
         device = "Android"
     elif "mac os" in low or "macintosh" in low:
         device = "Mac"
     elif "windows" in low:
         device = "Windows"
+    return device, browser
+
+
+def _build_device_label(user_agent: str) -> str:
+    device, browser = _parse_ua(user_agent)
+    return f"{device} · {browser}"
+
+
+def _format_ru_date(dt) -> str:
+    if not dt:
+        return ""
+    local = timezone.localtime(dt)
+    months = (
+        "", "января", "февраля", "марта", "апреля", "мая", "июня",
+        "июля", "августа", "сентября", "октября", "ноября", "декабря",
+    )
+    return f"{local.day} {months[local.month]}"
+
+
+def serialize_device(sub: PushSubscription, *, current_endpoint: str | None = None) -> dict[str, Any]:
+    device, browser = _parse_ua(sub.user_agent or "")
+    base_label = sub.device_label or f"{device} · {browser}"
+    added = _format_ru_date(sub.created_at)
+    is_current = bool(current_endpoint and sub.endpoint == current_endpoint)
+    parts = [base_label]
+    if is_current:
+        parts.append("текущее устройство")
+    elif added:
+        parts.append(f"добавлено {added}")
+    if not sub.is_active:
+        parts.append("неактивно")
+    display = " · ".join(parts)
     return {
         "id": sub.pk,
-        "device_label": sub.device_label or f"{device} · {browser}",
+        "endpoint_suffix": (sub.endpoint or "")[-24:],
+        "device_label": display,
+        "device_label_short": base_label,
         "browser": browser,
         "device_type": device,
         "created_at": sub.created_at.isoformat() if sub.created_at else None,
         "last_seen_at": sub.last_seen_at.isoformat() if sub.last_seen_at else None,
+        "last_error_at": sub.last_error_at.isoformat() if sub.last_error_at else None,
         "is_active": sub.is_active,
+        "is_current": is_current,
+        "vapid_key_version": sub.vapid_key_version or "",
     }

@@ -122,12 +122,24 @@ export function isCabinetMobileNavActive(pathname, item) {
 
 export function getCabinetSectionTitle(pathname) {
   if (pathname === "/cabinet/more") return "Ещё";
-  if (pathname.startsWith("/cabinet/settings/notifications")) return "Уведомления";
+  if (pathname.startsWith("/cabinet/settings/notifications")) return "Настройки уведомлений";
+  if (pathname.startsWith("/cabinet/upgrade")) return "Подписка и оплата";
+  if (pathname.startsWith("/cabinet/homework/")) return "Редактировать ДЗ";
+  if (pathname.startsWith("/cabinet/review/")) return "Проверка";
+  if (pathname.startsWith("/cabinet/journal/lesson/")) return "Итоги урока";
+  if (pathname.startsWith("/cabinet/journal/analytics")) return "Сводка";
+  if (pathname.startsWith("/cabinet/plans/") && pathname.includes("/edit")) return "Редактирование плана";
+  if (pathname.startsWith("/cabinet/plans/new")) return "Новый план";
+  if (/\/cabinet\/plans\/[^/]+$/.test(pathname)) return "План занятий";
+  if (pathname.startsWith("/cabinet/interactives/create")) return "Тип интерактива";
+  if (pathname.startsWith("/cabinet/interactives/")) return "Интерактив";
+  if (pathname.startsWith("/cabinet/boards/")) return "Доска";
 
+  // Desktop-навигация приоритетнее mobile (там другие подписи, напр. «Расписание» vs «Календарь»).
   const candidates = [
-    ...CABINET_MOBILE_NAV.filter((item) => item.id !== "more"),
-    ...CABINET_MORE_ITEMS,
     ...CABINET_NAV,
+    ...CABINET_MORE_ITEMS,
+    ...CABINET_MOBILE_NAV.filter((item) => item.id !== "more"),
   ];
 
   for (const item of candidates) {

@@ -491,6 +491,7 @@ export default function LessonSummaryDrawer({
       const payload = {
         version: current.version,
         tab_token: tabTokenRef.current,
+        planned_topic: current.planned_topic,
         actual_topic: current.actual_topic,
         lesson_summary: current.lesson_summary,
         material_covered: current.material_covered,
@@ -689,6 +690,7 @@ export default function LessonSummaryDrawer({
   const { filled, total } = filledRecordsCount(records);
   const active = records[activeIdx] || records[0];
   const plannedTopic = journal?.planned_topic || "";
+  const actualTopic = journal?.actual_topic || "";
   const timeRange = formatLessonTimeRange(journal);
 
   return (
@@ -759,8 +761,16 @@ export default function LessonSummaryDrawer({
           <div className="jl-drawer__body">
             <section className="jl-topic-block">
               <label className="jl-field">
-                <span>Плановая тема</span>
-                <input type="text" value={plannedTopic} readOnly />
+                <span>Планируемая тема</span>
+                <input
+                  type="text"
+                  value={plannedTopic}
+                  placeholder="Тема не запланирована"
+                  onChange={(e) => patchJournal({ planned_topic: e.target.value })}
+                />
+                <span className="jl-field__hint">
+                  Синхронизируется с карточкой урока и пунктом плана обучения
+                </span>
               </label>
               <label className="jl-field">
                 <span className="jl-field__label-row">
@@ -778,9 +788,13 @@ export default function LessonSummaryDrawer({
                 </span>
                 <input
                   type="text"
-                  value={journal.actual_topic || ""}
+                  value={actualTopic}
+                  placeholder="Фактическая тема не указана"
                   onChange={(e) => patchJournal({ actual_topic: e.target.value })}
                 />
+                <span className="jl-field__hint">
+                  Не изменяет план и будущие уроки
+                </span>
               </label>
             </section>
 

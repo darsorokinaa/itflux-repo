@@ -17,13 +17,13 @@ import CabinetGuideModal from "./components/CabinetGuideModal";
 import ConfirmActionModal from "./components/ConfirmActionModal";
 import { UserAvatarMark } from "./components/ProfileAvatarEditor";
 import { useSubscription } from "./hooks/useSubscription";
+import { PageTitleProvider } from "./hooks/usePageTitle";
 import PwaEnableNotificationsPrompt from "./pwa/PwaEnableNotificationsPrompt";
 import PwaInstallPrompt from "./pwa/PwaInstallPrompt";
 import "../styles/cabinet-dashboard.css";
 import "./styles/teacher-cabinet.css";
 import "../styles/cabinet-mobile-system.css";
 
-const PAGE_TITLE = "Кабинет учителя — Цифровой поток";
 const GUIDE_SEEN_KEY = "cabinet-guide-seen-v1";
 const GUIDE_OPEN_ON_REGISTER_KEY = "cabinet-guide-open-on-register";
 
@@ -118,8 +118,6 @@ export default function CabinetLayout() {
   const headerMoreRef = useRef(null);
   const subscription = useSubscription();
   const planName = subscription.currentPlan?.name || "";
-
-  useEffect(() => { document.title = PAGE_TITLE; }, []);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return undefined;
@@ -323,6 +321,7 @@ export default function CabinetLayout() {
   };
 
   return (
+    <PageTitleProvider defaultTitle={sectionTitle}>
     <CabinetCallProvider>
     <div className={`cabinet-layout cb-layout${navOpen ? " is-nav-open" : ""}`}>
       {navOpen ? (
@@ -578,5 +577,6 @@ export default function CabinetLayout() {
       />
     </div>
     </CabinetCallProvider>
+    </PageTitleProvider>
   );
 }

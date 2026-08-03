@@ -42,6 +42,7 @@ import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import VideoLessonMaterialsPanel from "../components/VideoLessonMaterialsPanel";
 import SyncedMaterialWorkspace from "../components/SyncedMaterialWorkspace";
 import CabinetIcon from "../CabinetIcons";
+import { formatPageTitle } from "../hooks/usePageTitle";
 import {
   claimMeetingCall,
   releaseMeetingCall,
@@ -556,7 +557,7 @@ export default function VideoMeetingPage() {
       setDetail(meta);
       const tabTitle = resolveLessonTabTitle(meta);
       lessonTitleRef.current = tabTitle;
-      document.title = tabTitle;
+      document.title = formatPageTitle(tabTitle);
       setPresented(meta?.presented || meta?.videoMeeting?.presented || null);
       setMaterialSession(
         meta?.materialSession

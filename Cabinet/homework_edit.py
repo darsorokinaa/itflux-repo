@@ -191,6 +191,9 @@ def serialize_homework_for_edit(homework: Homework) -> dict:
         row["is_active"] = task.is_active
         tasks.append(row)
 
+    from .homework_attachments import list_homework_attachments
+
+    attachments = list_homework_attachments(homework)
     return {
         "id": homework.id,
         "title": homework.title,
@@ -203,6 +206,8 @@ def serialize_homework_for_edit(homework: Homework) -> dict:
         "student_name": homework.student.full_name if homework.student_id else None,
         "group": homework.group_id,
         "tasks": tasks,
+        "attachments": attachments,
+        "attachments_count": len(attachments),
         "warnings": {
             "student_started": student_has_started_homework(homework),
             "is_checked_or_completed": homework_is_checked_or_completed(homework),

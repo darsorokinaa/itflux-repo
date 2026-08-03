@@ -16,6 +16,8 @@ LOG=/var/log/itflux
 # Расписание / биллинг учеников (раз в час)
 5 * * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh send_daily_schedule_digests >>/var/log/itflux/cron-schedule.log 2>&1
 10 * * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh send_billing_digests >>/var/log/itflux/cron-billing.log 2>&1
+# Еженедельная финансовая сводка (понедельник, час из prefs.digest_hour)
+15 * * * 1 APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh send_billing_digests --weekly >>/var/log/itflux/cron-billing-weekly.log 2>&1
 
 # Просроченные ДЗ: частый immediate + утренний daily
 */30 * * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh send_overdue_homework_digests --mode=immediate >>/var/log/itflux/cron-overdue-immediate.log 2>&1

@@ -45,6 +45,11 @@ from .choices import (
 )
 
 
+def default_lesson_reminder_minutes():
+    """Стандарт: за 24 часа, 1 час и 10 минут."""
+    return [1440, 60, 10]
+
+
 class Profile(models.Model):
     class Role(models.TextChoices):
         STUDENT = "student", "Ученик"
@@ -2406,11 +2411,12 @@ class NotificationPreference(models.Model):
         help_text="Не показывать суммы и чувствительные детали на экране блокировки",
     )
     # Напоминания об уроках: список минут до начала, напр. [1440, 60, 10]
+    # Пустой список [] — напоминания выключены.
     lesson_reminder_minutes = models.JSONField(
         "Интервалы напоминаний (мин)",
-        default=list,
+        default=default_lesson_reminder_minutes,
         blank=True,
-        help_text="Пустой список — стандарт 24ч / 1ч / 10мин",
+        help_text="Список минут до урока. Пустой список — напоминания выключены.",
     )
     notify_daily_schedule = models.BooleanField("Расписание на день", default=True)
     daily_schedule_hour = models.PositiveSmallIntegerField(
@@ -2471,20 +2477,19 @@ class NotificationPreference(models.Model):
         return bool(self.telegram_enabled and self.telegram_chat_id)
 
     def effective_lesson_reminder_minutes(self) -> list[int]:
+        """Возвращает выбранные интервалы. Пустой список = напоминания выключены."""
         raw = self.lesson_reminder_minutes
-        if isinstance(raw, list) and raw:
-            out = []
-            for item in raw:
-                try:
-                    minutes = int(item)
-                except (TypeError, ValueError):
-                    continue
-                if 0 < minutes <= 24 * 60 and minutes not in out:
-                    out.append(minutes)
-            if out:
-                return sorted(out, reverse=True)
-        # Стандарт: 24ч, 1ч, 10мин
-        return [1440, 60, 10]
+        if not isinstance(raw, list):
+            return [1440, 60, 10]
+        out = []
+        for item in raw:
+            try:
+                minutes = int(item)
+            except (TypeError, ValueError):
+                continue
+            if 0 < minutes <= 24 * 60 and minutes not in out:
+                out.append(minutes)
+        return sorted(out, reverse=True)
 
 
 class PushSubscription(models.Model):
@@ -2505,6 +2510,15 @@ class PushSubscription(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     last_seen_at = models.DateTimeField(null=True, blank=True)
+    last_error_at = models.DateTimeField("Последняя ошибка", null=True, blank=True)
+    last_error_message = models.CharField("Текст ошибки", max_length=300, blank=True)
+    vapid_key_version = models.CharField(
+        "Версия VAPID",
+        max_length=32,
+        blank=True,
+        default="",
+        help_text="Короткий fingerprint публичного ключа на момент подписки",
+    )
 
     class Meta:
         verbose_name = "Push-подписка"
@@ -2522,10 +2536,14 @@ class PushDeliveryLog(models.Model):
     """Результат попытки доставки Web Push (без секретов и полного payload)."""
 
     class DeliveryStatus(models.TextChoices):
+        PENDING = "pending", "Ожидает"
         SENT = "sent", "Отправлено"
         FAILED = "failed", "Ошибка"
         GONE = "gone", "Подписка устарела"
         SKIPPED = "skipped", "Пропущено"
+        SKIPPED_BY_PREFERENCES = "skipped_by_preferences", "Отключено настройками"
+        DEFERRED_BY_QUIET_HOURS = "deferred_by_quiet_hours", "Отложено (тишина)"
+        INVALID_SUBSCRIPTION = "invalid_subscription", "Недействительная подписка"
 
     notification = models.ForeignKey(
         Notification,
@@ -2551,7 +2569,7 @@ class PushDeliveryLog(models.Model):
     )
     event_type = models.CharField("Тип события", max_length=64, blank=True, default="")
     status = models.CharField(
-        max_length=16,
+        max_length=32,
         choices=DeliveryStatus.choices,
         default=DeliveryStatus.SENT,
     )

@@ -30,9 +30,28 @@ from Cabinet.journal_service import (
     get_or_create_journal,
     publish_record,
     update_journal,
+    update_lesson_topics,
 )
-from Cabinet.choices import SubmissionStatus
-from Cabinet.models import Homework, HomeworkSubmission, Profile, ScheduleEvent, Student, StudentGroup
+from Cabinet.choices import (
+    Direction,
+    EnrollmentStatus,
+    ExamType,
+    PlanFormat,
+    PlanStatus,
+    PlanSubject,
+    SubmissionStatus,
+)
+from Cabinet.models import (
+    Homework,
+    HomeworkSubmission,
+    LessonPlan,
+    LessonPlanEnrollment,
+    LessonPlanItem,
+    Profile,
+    ScheduleEvent,
+    Student,
+    StudentGroup,
+)
 
 
 class JournalTestBase(TestCase):
@@ -688,3 +707,160 @@ class JournalHomeworkResultTests(JournalTestBase):
         self.assertEqual(detail_resp.data["lesson_summary"], "Разобрали системы счисления")
         self.assertEqual(detail_resp.data["homework_result"]["title"], "ДЗ к прошлому уроку")
         self.assertEqual(detail_resp.data["previous_homework_status"], "full")
+
+
+class JournalTopicsSyncTests(JournalTestBase):
+    def test_create_journal_keeps_actual_topic_empty(self):
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        self.assertEqual(journal.planned_topic, "Системы счисления")
+        self.assertEqual(journal.actual_topic, "")
+
+    def test_update_planned_topic_syncs_event_and_plan_item(self):
+        plan = LessonPlan.objects.create(
+            teacher=self.teacher,
+            title="План",
+            direction=Direction.OGE,
+            subject=PlanSubject.INFORMATICS,
+            exam_type=ExamType.OGE,
+            status=PlanStatus.PUBLISHED,
+        )
+        LessonPlanEnrollment.objects.create(
+            teacher=self.teacher,
+            plan=plan,
+            student=self.student,
+            format=PlanFormat.INDIVIDUAL,
+            status=EnrollmentStatus.ACTIVE,
+        )
+        item = LessonPlanItem.objects.create(
+            plan=plan,
+            order=1,
+            title="Старая тема",
+            topic="Старая тема",
+        )
+        event = self._individual_event(lesson_plan_item=item)
+        item.scheduled_event = event
+        item.save(update_fields=["scheduled_event", "updated_at"])
+        journal = get_or_create_journal(event, self.teacher)
+
+        journal = update_lesson_topics(
+            journal,
+            self.teacher,
+            {"planned_topic": "Перевод чисел"},
+        )
+        event.refresh_from_db()
+        item.refresh_from_db()
+        journal.refresh_from_db()
+
+        self.assertEqual(journal.planned_topic, "Перевод чисел")
+        self.assertEqual(journal.actual_topic, "")
+        self.assertEqual(event.topic, "Перевод чисел")
+        self.assertEqual(item.topic, "Перевод чисел")
+
+    def test_actual_topic_does_not_change_plan(self):
+        plan = LessonPlan.objects.create(
+            teacher=self.teacher,
+            title="План",
+            direction=Direction.OGE,
+            subject=PlanSubject.INFORMATICS,
+            exam_type=ExamType.OGE,
+            status=PlanStatus.PUBLISHED,
+        )
+        LessonPlanEnrollment.objects.create(
+            teacher=self.teacher,
+            plan=plan,
+            student=self.student,
+            format=PlanFormat.INDIVIDUAL,
+            status=EnrollmentStatus.ACTIVE,
+        )
+        item = LessonPlanItem.objects.create(
+            plan=plan,
+            order=1,
+            title="Системы счисления",
+            topic="Системы счисления",
+        )
+        event = self._individual_event(lesson_plan_item=item)
+        journal = get_or_create_journal(event, self.teacher)
+
+        update_lesson_topics(
+            journal,
+            self.teacher,
+            {"actual_topic": "Практика ОГЭ по переводу"},
+        )
+        event.refresh_from_db()
+        item.refresh_from_db()
+        journal.refresh_from_db()
+
+        self.assertEqual(journal.planned_topic, "Системы счисления")
+        self.assertEqual(journal.actual_topic, "Практика ОГЭ по переводу")
+        self.assertEqual(event.topic, "Системы счисления")
+        self.assertEqual(item.topic, "Системы счисления")
+
+    def test_topics_api_partial_update_keeps_both_fields(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from Cabinet.journal_api import JournalLessonTopicsView
+        from Cabinet.journal_service import serialize_journal
+
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        self.assertEqual(journal.planned_topic, "Системы счисления")
+        self.assertEqual(journal.actual_topic, "")
+
+        factory = APIRequestFactory()
+        req = factory.patch(
+            f"/api/cabinet/journal/lessons/{event.id}/topics/",
+            {
+                "planned_topic": "Системы счисления. Перевод чисел",
+                "actual_topic": "Перевод из десятичной в двоичную",
+                "version": journal.version,
+            },
+            format="json",
+        )
+        force_authenticate(req, user=self.teacher)
+        resp = JournalLessonTopicsView.as_view()(req, lesson_id=event.id)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["planned_topic"], "Системы счисления. Перевод чисел")
+        self.assertEqual(resp.data["actual_topic"], "Перевод из десятичной в двоичную")
+
+        req2 = factory.patch(
+            f"/api/cabinet/journal/lessons/{event.id}/topics/",
+            {"actual_topic": "Только практика ОГЭ"},
+            format="json",
+        )
+        force_authenticate(req2, user=self.teacher)
+        resp2 = JournalLessonTopicsView.as_view()(req2, lesson_id=event.id)
+        self.assertEqual(resp2.status_code, 200)
+        self.assertEqual(resp2.data["planned_topic"], "Системы счисления. Перевод чисел")
+        self.assertEqual(resp2.data["actual_topic"], "Только практика ОГЭ")
+
+        # serialize_journal отдаёт оба поля раздельно
+        data = serialize_journal(
+            LessonJournal.objects.select_related("schedule_event").prefetch_related(
+                "student_records"
+            ).get(pk=journal.pk)
+        )
+        self.assertEqual(data["planned_topic"], "Системы счисления. Перевод чисел")
+        self.assertEqual(data["actual_topic"], "Только практика ОГЭ")
+
+    def test_student_journal_list_exposes_both_topics(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from Cabinet.journal_api import JournalStudentView
+
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        update_lesson_topics(
+            journal,
+            self.teacher,
+            {
+                "planned_topic": "План А",
+                "actual_topic": "Факт Б",
+            },
+        )
+        factory = APIRequestFactory()
+        req = factory.get(f"/api/cabinet/journal/students/{self.student.id}/")
+        force_authenticate(req, user=self.teacher)
+        resp = JournalStudentView.as_view()(req, student_id=self.student.id)
+        self.assertEqual(resp.status_code, 200)
+        lesson = resp.data["lessons"][0]
+        self.assertEqual(lesson["planned_topic"], "План А")
+        self.assertEqual(lesson["actual_topic"], "Факт Б")

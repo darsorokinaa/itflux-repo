@@ -9,6 +9,7 @@ import {
   StudentStatusBadge,
 } from "../StudentSectionUi";
 import CabinetIcon from "../../CabinetIcons";
+import { usePageTitle } from "../../hooks/usePageTitle";
 
 const MATERIAL_ICONS = {
   lesson:       { icon: "lessons",   color: "blue"   },
@@ -49,6 +50,7 @@ export default function StudentLessonDetailPage() {
   const [lesson, setLesson] = useState(null);
   const [loading, setLoading] = useState(true);
   const [completing, setCompleting] = useState(false);
+  usePageTitle(lesson?.title || "Урок");
 
   useEffect(() => {
     fetchStudentLesson(id)

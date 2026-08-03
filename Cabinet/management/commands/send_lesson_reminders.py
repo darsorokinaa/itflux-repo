@@ -13,9 +13,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         now = timezone.now()
         sent = 0
-        # Смотрим события в ближайшие 25 часов — покрывает 24ч-напоминание
+        # Смотрим события в ближайшие 25 часов — покрывает 24ч-напоминание.
+        # PLANNED и MOVED: после переноса урок остаётся актуальным.
         events = ScheduleEvent.objects.filter(
-            status=ScheduleEvent.Status.PLANNED,
+            status__in=[ScheduleEvent.Status.PLANNED, ScheduleEvent.Status.MOVED],
             starts_at__gt=now,
             starts_at__lte=now + timedelta(hours=25),
         ).prefetch_related(
@@ -34,15 +35,17 @@ class Command(BaseCommand):
                     continue
                 prefs = get_or_create_preferences(user)
                 minutes_list = prefs.effective_lesson_reminder_minutes()
-                # Legacy single-field fallback if JSON empty already handled in effective_*
-                if prefs.notify_before_lesson_minutes and prefs.notify_before_lesson_minutes not in minutes_list:
-                    # Не дублируем, если пользователь явно задал только старое поле
-                    pass
+                if not minutes_list:
+                    continue
 
                 for minutes in minutes_list:
+                    # Окно ±2 минуты вокруг целевого момента (cron каждые 5 мин)
                     window_start = event.starts_at - timedelta(minutes=minutes + 2)
                     window_end = event.starts_at - timedelta(minutes=max(0, minutes - 2))
                     if not (window_start <= now <= window_end):
+                        continue
+                    # Дополнительная защита: starts_at ещё в будущем
+                    if event.starts_at <= now:
                         continue
                     if EventReminderLog.objects.filter(
                         event=event,

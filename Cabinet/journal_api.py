@@ -59,6 +59,7 @@ from .journal_service import (
     topic_history,
     unpublish_record,
     update_journal,
+    update_lesson_topics,
 )
 from .models import ScheduleEvent, Student, StudentGroup
 from .permissions import IsCabinetStudent, IsCabinetTeacher
@@ -197,6 +198,8 @@ class JournalLessonsListView(APIView):
                     "starts_at": event.starts_at.isoformat() if event else None,
                     "ends_at": event.ends_at.isoformat() if event else None,
                     "topic": j.actual_topic or j.planned_topic,
+                    "planned_topic": j.planned_topic,
+                    "actual_topic": j.actual_topic,
                     "audience": audience,
                     "is_group": bool(j.group_id),
                     "status": j.status,
@@ -257,6 +260,30 @@ class JournalLessonDetailView(APIView):
         except JournalError as e:
             return _err(e)
         return Response(serialize_journal(journal))
+
+
+class JournalLessonTopicsView(APIView):
+    """Частичное обновление планируемой и фактической темы занятия."""
+
+    permission_classes = [IsAuthenticated, IsCabinetTeacher]
+
+    def patch(self, request, lesson_id: int):
+        event = get_object_or_404(ScheduleEvent, pk=lesson_id, owner=request.user)
+        try:
+            journal = get_or_create_journal(event, request.user)
+            payload = request.data if isinstance(request.data, dict) else {}
+            journal = update_lesson_topics(
+                journal,
+                request.user,
+                payload,
+                expected_version=payload.get("version"),
+            )
+        except JournalError as e:
+            return _err(e)
+        return Response(serialize_journal(journal))
+
+    def post(self, request, lesson_id: int):
+        return self.patch(request, lesson_id)
 
 
 class JournalLessonCompleteView(APIView):
@@ -432,6 +459,8 @@ class JournalStudentView(APIView):
                             else (r.journal.finished_at.isoformat() if r.journal.finished_at else None)
                         ),
                         "topic": r.journal.actual_topic or r.journal.planned_topic,
+                        "planned_topic": r.journal.planned_topic,
+                        "actual_topic": r.journal.actual_topic,
                         "attendance_status": r.attendance_status,
                         "overall_score": str(r.overall_score) if r.overall_score is not None else None,
                         "overall_score_mode": r.journal.overall_score_mode,
@@ -503,6 +532,8 @@ class JournalGroupView(APIView):
                             else (j.finished_at.isoformat() if j.finished_at else None)
                         ),
                         "topic": j.actual_topic or j.planned_topic,
+                        "planned_topic": j.planned_topic,
+                        "actual_topic": j.actual_topic,
                         "fill_status": fill_status_for_journal(j),
                         "status": j.status,
                         "homework_id": j.homework_id,

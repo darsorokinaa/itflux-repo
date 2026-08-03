@@ -900,6 +900,17 @@ def web_manifest(request):
     return resp
 
 
+def app_version_json(request):
+    """Build identity for update checks — must never be cached long-term."""
+    path = _frontend_public_file("version.json")
+    if not path:
+        return JsonResponse({"version": "", "builtAt": ""}, status=404)
+    resp = FileResponse(open(path, "rb"), content_type="application/json; charset=utf-8")
+    resp["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp["Pragma"] = "no-cache"
+    return resp
+
+
 def robots_txt(request):
     base = request.build_absolute_uri("/")
     sitemap_url = request.build_absolute_uri("/sitemap.xml")

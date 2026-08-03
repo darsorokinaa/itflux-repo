@@ -525,6 +525,11 @@
   color: var(--notify-muted);
 }
 
+.cb-notify-devices__item.is-current {
+  color: #1e3a5f;
+  font-weight: 600;
+}
+
 .cb-notify-group {
   padding-top: 16px;
   margin-top: 8px;

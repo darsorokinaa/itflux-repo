@@ -43,6 +43,7 @@ import {
   sessionResourceSummary,
 } from "../planEditorSession";
 import { useAutoSave } from "../hooks/useAutoSave";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 function planTypeLabel(id, options = PLAN_LEVELS) {
   return options.find((t) => t.id === id)?.label || id;
@@ -325,6 +326,7 @@ export default function CabinetLessonPlanEditorPage() {
   const navigate = useNavigate();
   const isNew = !planId || planId === "new";
   const { toast, showToast } = useSoonToast();
+  usePageTitle(isNew ? "Новый план" : "Редактирование плана");
 
   const [loadingExisting, setLoadingExisting] = useState(!isNew);
   const [notFound, setNotFound] = useState(false);

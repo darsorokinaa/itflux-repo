@@ -7,6 +7,7 @@ from . import (
     billing_api,
     boards_api,
     files_api,
+    homework_attachments,
     journal_api,
     parent_api,
     push_api,
@@ -110,6 +111,11 @@ urlpatterns = [
     path("journal/entries/", journal_api.JournalEntriesView.as_view(), name="journal_entries"),
     path("journal/lessons/", journal_api.JournalLessonsListView.as_view(), name="journal_lessons"),
     path("journal/lessons/<int:lesson_id>/", journal_api.JournalLessonDetailView.as_view(), name="journal_lesson_detail"),
+    path(
+        "journal/lessons/<int:lesson_id>/topics/",
+        journal_api.JournalLessonTopicsView.as_view(),
+        name="journal_lesson_topics",
+    ),
     path("journal/lessons/<int:lesson_id>/complete/", journal_api.JournalLessonCompleteView.as_view(), name="journal_lesson_complete"),
     path("journal/lessons/<int:lesson_id>/publish/", journal_api.JournalLessonPublishView.as_view(), name="journal_lesson_publish"),
     path("journal/lessons/<int:lesson_id>/bulk/", journal_api.JournalLessonBulkView.as_view(), name="journal_lesson_bulk"),
@@ -139,6 +145,16 @@ urlpatterns = [
     path("reports/topics/", api_views.ReportsTopicsView.as_view(), name="cabinet_reports_topics"),
     path("reports/parent-summary/", api_views.ReportsParentSummaryView.as_view(), name="cabinet_reports_parent_summary"),
     path("homework/<int:homework_id>/", api_views.HomeworkDetailView.as_view(), name="cabinet_homework_detail"),
+    path(
+        "homework/<int:homework_id>/attachments/",
+        homework_attachments.HomeworkAttachmentsView.as_view(),
+        name="cabinet_homework_attachments",
+    ),
+    path(
+        "homework/<int:homework_id>/attachments/<uuid:attachment_id>/",
+        homework_attachments.HomeworkAttachmentDetailView.as_view(),
+        name="cabinet_homework_attachment_detail",
+    ),
     path(
         "homework/<int:homework_id>/tasks/",
         api_views.HomeworkTasksAddView.as_view(),

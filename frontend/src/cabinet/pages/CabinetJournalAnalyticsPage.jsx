@@ -5,6 +5,7 @@ import {
   fetchJournalStudent,
 } from "../../utils/cabinetAuth";
 import JournalPerformanceSummary from "../components/JournalPerformanceSummary";
+import { usePageTitle } from "../hooks/usePageTitle";
 import "../styles/journal.css";
 
 /**
@@ -20,6 +21,7 @@ export default function CabinetJournalAnalyticsPage() {
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  usePageTitle(title || "Сводка");
 
   useEffect(() => {
     let cancelled = false;

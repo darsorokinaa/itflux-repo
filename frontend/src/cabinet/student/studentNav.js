@@ -67,12 +67,18 @@ export function isStudentMobileNavActive(pathname, item) {
 
 export function getStudentSectionTitle(pathname) {
   if (pathname === "/cabinet/student" || pathname === "/cabinet/student/") return "Главная";
-  if (pathname.startsWith("/cabinet/student/settings/notifications")) return "Уведомления";
+  if (pathname.startsWith("/cabinet/student/settings/notifications")) return "Настройки уведомлений";
   if (pathname === "/cabinet/student/more" || pathname.startsWith("/cabinet/student/more/")) {
     return "Ещё";
   }
   if (pathname === "/cabinet/student/boards" || pathname.startsWith("/cabinet/student/boards/")) {
-    return "Доски";
+    return "Интерактивные доски";
+  }
+  if (pathname.startsWith("/cabinet/student/lessons/") && pathname !== "/cabinet/student/lessons") {
+    return "Урок";
+  }
+  if (pathname.startsWith("/cabinet/student/assignments/") && pathname !== "/cabinet/student/assignments") {
+    return "Домашнее задание";
   }
   if (pathname === "/cabinet/student/results" || pathname.startsWith("/cabinet/student/results/")) {
     return "Мои результаты";

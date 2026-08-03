@@ -116,7 +116,10 @@ def notify_teacher_homework_submitted(
         recipient_teacher=teacher,
         skip_actor=False,
         create_push=use_push,
+        create_telegram=use_push,  # digest modes: telegram тоже через cron-сводку
         push_tag=f"hw-review-{payload.get('homework_id')}-{student.pk}",
+        private_title="Новая работа на проверку",
+        private_message="Ученик сдал работу",
     )
     # digest_15 / digest_60 / in_app_only — push handled by cron
 

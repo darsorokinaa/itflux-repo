@@ -29,6 +29,7 @@ export function createTabToken(): string {
 export type JournalDraftPayload = {
   version?: number;
   tab_token?: string;
+  planned_topic?: string;
   actual_topic?: string;
   lesson_summary?: string;
   material_covered?: string;

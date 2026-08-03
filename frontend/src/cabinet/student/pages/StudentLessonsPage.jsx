@@ -24,6 +24,7 @@ import {
   useScheduleNow,
   LESSON_CONNECT_BEFORE_MS,
 } from "../StudentSectionUi";
+import { usePageTitle } from "../../hooks/usePageTitle";
 import { formatDayLabel } from "../studentDisplay";
 
 const FILTERS = [
@@ -37,9 +38,9 @@ function looksLikeBadTitle(value) {
 }
 
 function lessonTopic(event) {
-  const candidate = event.topic || event.title;
-  if (!looksLikeBadTitle(candidate)) return candidate;
-  return "Индивидуальное занятие";
+  const candidate = (event.topic || "").trim();
+  if (candidate && !looksLikeBadTitle(candidate)) return candidate;
+  return "Тема урока не указана";
 }
 
 function eventEndMs(event) {
@@ -209,6 +210,7 @@ function DateGroup({ group, onOpen, past = false, now }) {
 }
 
 export default function StudentLessonsPage() {
+  usePageTitle("Расписание");
   const location = useLocation();
   const navigate = useNavigate();
   const [schedule, setSchedule] = useState([]);

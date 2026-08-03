@@ -185,6 +185,9 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # manage.py кладёт Generator/ в sys.path → пакет называется Generator (= Generator/Generator/)
+    "Generator.middleware.NoStoreApiMiddleware",
+    "Generator.middleware.MinimumClientVersionMiddleware",
 ]
 
 # Разрешаем iframe на том же origin (урок встраивает страницу варианта).
@@ -327,6 +330,13 @@ CABINET_FILE_STORAGE_QUOTA_BYTES = int(
     os.environ.get("CABINET_FILE_STORAGE_QUOTA_BYTES", str(1024 * 1024 * 1024))
 )
 CABINET_FILE_TRASH_DAYS = int(os.environ.get("CABINET_FILE_TRASH_DAYS", "30"))
+
+# Homework attachments (централизованные лимиты; fallback на cabinet upload)
+HOMEWORK_ATTACHMENT_MAX_SIZE = int(
+    os.environ.get("HOMEWORK_ATTACHMENT_MAX_SIZE", str(CABINET_MAX_UPLOAD_BYTES))
+)
+HOMEWORK_ATTACHMENT_MAX_COUNT = int(os.environ.get("HOMEWORK_ATTACHMENT_MAX_COUNT", "20"))
+HOMEWORK_ALLOWED_ATTACHMENT_TYPES = None  # None → upload_validation.ALLOWED_UPLOAD_*
 
 
 LESSON_PLAN_CATALOG_PUBLISHER_EMAILS = tuple(

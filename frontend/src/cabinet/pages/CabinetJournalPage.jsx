@@ -11,6 +11,7 @@ import JournalEntriesFeed from "../components/JournalEntriesFeed";
 import JournalLessonsTable from "../components/JournalLessonsTable";
 import JournalPerformanceSummary from "../components/JournalPerformanceSummary";
 import { openLessonSummaryTab } from "../journal/openLessonSummary";
+import { usePageTitle } from "../hooks/usePageTitle";
 import "../styles/journal.css";
 
 function studentLabel(s) {
@@ -155,14 +156,15 @@ export default function CabinetJournalPage() {
     openLessonSummaryTab(scheduleEventId);
   };
 
+  const journalTitle = scopeTitle || (scopeMode === "group" ? "Группа" : "Ученик");
+  usePageTitle(journalTitle);
+
   return (
     <div className="jg-page">
       <header className="jg-toolbar">
         <div className="jg-toolbar__title-block">
           <span className="jg-toolbar__eyebrow">Журнал</span>
-          <h1 className="jg-toolbar__title">
-            {scopeTitle || (scopeMode === "group" ? "Группа" : "Ученик")}
-          </h1>
+          <h1 className="jg-toolbar__title">{journalTitle}</h1>
         </div>
 
         <div className="jg-scope">

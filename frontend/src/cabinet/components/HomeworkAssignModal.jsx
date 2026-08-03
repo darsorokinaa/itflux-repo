@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import CabinetModal from "./CabinetModal";
+import HomeworkAttachmentsField, {
+  uploadPendingHomeworkFiles,
+} from "./HomeworkAttachmentsField";
 import PlanItemResourcesPicker from "./PlanItemResourcesPicker";
 import { getInteractiveDisplayTitle } from "../interactivesData";
 import { assignStudentHomework, checkVariantTasksOverlap, fetchStudentHomeworkOptions } from "../../utils/cabinetAuth";
@@ -90,6 +93,7 @@ export default function HomeworkAssignModal({
   const [customInteractives, setCustomInteractives] = useState([]);
   const [resourcePickerOpen, setResourcePickerOpen] = useState(false);
   const [duplicateTaskIds, setDuplicateTaskIds] = useState([]);
+  const [pendingAttachmentFiles, setPendingAttachmentFiles] = useState([]);
 
   const toDateTimeLocalValue = (iso) => {
     if (!iso) return "";
@@ -205,15 +209,30 @@ export default function HomeworkAssignModal({
       throw new Error(isGroupAssign ? "В группе пока нет учеников" : "Не выбран ученик");
     }
     const errors = [];
+    const homeworkIds = [];
     for (const target of targets) {
       try {
-        await assignStudentHomework(target.id, payload);
+        const created = await assignStudentHomework(target.id, payload);
+        if (created?.id) homeworkIds.push(created.id);
       } catch (err) {
         errors.push(`${target.name || target.id}: ${err.message || "ошибка"}`);
       }
     }
     if (errors.length === targets.length) {
       throw new Error(errors[0] || "Не удалось выдать ДЗ");
+    }
+    if (pendingAttachmentFiles.length && homeworkIds.length) {
+      const uploadResult = await uploadPendingHomeworkFiles(homeworkIds, pendingAttachmentFiles);
+      if (uploadResult.errors?.length && !uploadResult.uploaded) {
+        throw new Error(
+          uploadResult.errors[0]?.detail || "ДЗ создано, но файлы не удалось прикрепить",
+        );
+      }
+      if (uploadResult.errors?.length) {
+        errors.push(
+          `Часть файлов не загрузилась: ${uploadResult.errors.map((e) => e.name || e.detail).join("; ")}`,
+        );
+      }
     }
     if (errors.length) {
       throw new Error(`Выдано частично. Не удалось: ${errors.join("; ")}`);
@@ -252,8 +271,13 @@ export default function HomeworkAssignModal({
       setError("Укажите название задания");
       return;
     }
-    if (!description && customMaterialIds.length === 0 && customInteractiveIds.length === 0) {
-      setError("Добавьте описание или материалы");
+    if (
+      !description
+      && customMaterialIds.length === 0
+      && customInteractiveIds.length === 0
+      && pendingAttachmentFiles.length === 0
+    ) {
+      setError("Добавьте описание, материалы или файлы");
       return;
     }
     setSubmitting(true);
@@ -387,6 +411,13 @@ export default function HomeworkAssignModal({
                     </div>
                   ) : null}
 
+                  <div className="cb-attach-section">
+                    <HomeworkAttachmentsField
+                      pendingFiles={pendingAttachmentFiles}
+                      onPendingFilesChange={setPendingAttachmentFiles}
+                      disabled={submitting}
+                    />
+                  </div>
                   <div className="cb-attach-section">
                     <h3 className="cb-attach-section__title">Занятие с ДЗ</h3>
                     {loading ? (
@@ -526,6 +557,14 @@ export default function HomeworkAssignModal({
                     ))}
                   </div>
                 )}
+              </div>
+
+              <div className="cb-attach-section">
+                <HomeworkAttachmentsField
+                  pendingFiles={pendingAttachmentFiles}
+                  onPendingFilesChange={setPendingAttachmentFiles}
+                  disabled={submitting}
+                />
               </div>
 
               <label className="cb-field">

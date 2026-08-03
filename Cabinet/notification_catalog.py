@@ -43,6 +43,8 @@ class NotificationEventType:
 
     # Journal
     JOURNAL_RESULTS = "journal_results"
+    JOURNAL_COMMENT = "journal_comment"
+    JOURNAL_RECOMMENDATION = "journal_recommendation"
     JOURNAL_DAILY_DIGEST = "journal_daily_digest"
 
     # Billing (teacher)
@@ -77,6 +79,9 @@ CHANNEL_PUSH = "push"
 CHANNEL_TELEGRAM = "telegram"
 CHANNEL_VK = "vk"
 
+# Каналы по умолчанию для большинства событий кабинета
+DEFAULT_CHANNELS = frozenset({CHANNEL_IN_APP, CHANNEL_PUSH, CHANNEL_TELEGRAM})
+
 
 @dataclass(frozen=True)
 class EventDefinition:
@@ -86,7 +91,7 @@ class EventDefinition:
     preference_field: str | None
     roles: frozenset[str]
     channels: frozenset[str] = field(
-        default_factory=lambda: frozenset({CHANNEL_IN_APP, CHANNEL_PUSH})
+        default_factory=lambda: frozenset(DEFAULT_CHANNELS)
     )
     default_enabled: bool = True
     can_disable: bool = True
@@ -185,6 +190,8 @@ def _init_catalog() -> None:
             channels=frozenset({CHANNEL_IN_APP, CHANNEL_PUSH, CHANNEL_TELEGRAM, CHANNEL_VK}),
             can_disable=True,
             priority="important",
+            # 10-минутные считаются срочными на уровне эмиттера (urgent=True)
+            urgent=False,
             group="schedule",
             url_default="/cabinet/schedule",
         ),
@@ -341,6 +348,27 @@ def _init_catalog() -> None:
             description="Сообщать ученику об опубликованных итогах занятия.",
             preference_field="notify_journal_results",
             roles=frozenset({ROLE_STUDENT, ROLE_PARENT}),
+            channels=frozenset({CHANNEL_IN_APP, CHANNEL_PUSH, CHANNEL_TELEGRAM}),
+            group="review",
+            url_default="/cabinet/student",
+        ),
+        EventDefinition(
+            code=NotificationEventType.JOURNAL_COMMENT,
+            label="Комментарий в итогах",
+            description="Сообщать, когда в опубликованных итогах появился комментарий учителя.",
+            preference_field="notify_journal_comment",
+            roles=frozenset({ROLE_STUDENT, ROLE_PARENT}),
+            channels=frozenset({CHANNEL_IN_APP, CHANNEL_PUSH, CHANNEL_TELEGRAM}),
+            group="review",
+            url_default="/cabinet/student",
+        ),
+        EventDefinition(
+            code=NotificationEventType.JOURNAL_RECOMMENDATION,
+            label="Новая рекомендация",
+            description="Сообщать о новой рекомендации в опубликованных итогах.",
+            preference_field="notify_journal_recommendation",
+            roles=frozenset({ROLE_STUDENT, ROLE_PARENT}),
+            channels=frozenset({CHANNEL_IN_APP, CHANNEL_PUSH, CHANNEL_TELEGRAM}),
             group="review",
             url_default="/cabinet/student",
         ),
@@ -581,8 +609,6 @@ def preference_fields_for_role(role: str) -> list[str]:
         for extra in (
             "notify_daily_schedule_empty",
             "notify_billing_weekly_digest",
-            "notify_journal_comment",
-            "notify_journal_recommendation",
         ):
             if extra not in fields:
                 fields.append(extra)
@@ -596,10 +622,8 @@ def orphan_ui_preference_fields() -> list[str]:
         if field_name in (
             "notify_daily_schedule_empty",
             "notify_billing_weekly_digest",
-            "notify_journal_comment",
-            "notify_journal_recommendation",
         ):
-            # Bound to sibling events / digest modes
+            # Meta modes bound to sibling digest events
             continue
         if field_name not in PREFERENCE_EVENT_MAP:
             orphans.append(field_name)

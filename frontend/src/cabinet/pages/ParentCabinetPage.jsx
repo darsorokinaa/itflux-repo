@@ -19,12 +19,11 @@ import {
   isParentMobileNavActive,
   isParentNavActive,
 } from "../parent/parentNav";
+import { PageTitleProvider } from "../hooks/usePageTitle";
 import "../../styles/cabinet-dashboard.css";
 import "../student/styles/student-cabinet.css";
 import "../../styles/cabinet-mobile-system.css";
 import "../styles/parent-cabinet.css";
-
-const PAGE_TITLE = "Кабинет родителя — Цифровой поток";
 
 function formatNavCount(count) {
   if (!count || count <= 0) return null;
@@ -67,8 +66,6 @@ export default function ParentCabinetPage() {
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [isMobileShell, setIsMobileShell] = useState(false);
-
-  useEffect(() => { document.title = PAGE_TITLE; }, []);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return undefined;
@@ -156,9 +153,11 @@ export default function ParentCabinetPage() {
 
   const isDashboard = location.pathname === "/cabinet/parent" || location.pathname === "/cabinet/parent/";
   const contentClass = isDashboard ? "cabinet-content" : "cabinet-content cabinet-content--page";
+  const sectionTitle = getParentSectionTitle(location.pathname);
   const outletContext = { user, handleLogout, loggingOut, refreshUser };
 
   return (
+    <PageTitleProvider defaultTitle={sectionTitle}>
     <div className={`cabinet-layout st-layout${navOpen ? " is-nav-open" : ""}`}>
       {navOpen ? (
         <button
@@ -284,5 +283,6 @@ export default function ParentCabinetPage() {
         onConfirm={handleLogout}
       />
     </div>
+    </PageTitleProvider>
   );
 }

@@ -6,6 +6,7 @@ import {
   fetchParentInvitePreview,
   logoutCabinetAndDetachPush,
 } from "../../utils/cabinetAuth";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 const REL_LABELS = {
   mother: "Мама",
@@ -43,9 +44,7 @@ export default function ParentInviteAcceptPage() {
   const [accepting, setAccepting] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  useEffect(() => {
-    document.title = "Приглашение родителя — Цифровой поток";
-  }, []);
+  usePageTitle(error ? "Ссылка недоступна" : "Подключение родительского доступа");
 
   useEffect(() => {
     let cancelled = false;

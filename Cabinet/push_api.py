@@ -93,10 +93,12 @@ class PushDevicesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        current_endpoint = (request.query_params.get("endpoint") or "").strip() or None
         devices = [
-            serialize_device(sub)
+            serialize_device(sub, current_endpoint=current_endpoint)
             for sub in PushSubscription.objects.filter(user=request.user).order_by("-updated_at")[:20]
         ]
+        # Активные сверху, затем по дате; одинаковые лейблы различаются датой в serialize_device
         prefs = get_or_create_preferences(request.user)
         return Response({
             "configured": webpush_configured(),

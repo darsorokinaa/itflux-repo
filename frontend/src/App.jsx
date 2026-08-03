@@ -76,7 +76,9 @@ import StudentTopicsPage from "./cabinet/student/pages/StudentTopicsPage";
 import StudentProgressPage from "./cabinet/student/pages/StudentProgressPage";
 import StudentMorePage from "./cabinet/student/pages/StudentMorePage";
 import ErrorBoundary from "./components/ErrorBoundary";
+import AppUpdateBanner from "./components/AppUpdateBanner";
 import { ensureSiteFavicon } from "./utils/ensureSiteFavicon";
+import { markUpdateFromClientRequired } from "./utils/appUpdate";
 
 const DEFAULT_META_DESCRIPTION =
   "Цифровой поток: подготовка к ОГЭ и ЕГЭ, генератор вариантов, банк задач, интерактивные уроки и личный кабинет учителя.";
@@ -246,12 +248,25 @@ function ExamPageWithBoundary() {
   );
 }
 
+function ClientUpdateRequiredListener() {
+  useEffect(() => {
+    const onRequired = (event) => {
+      markUpdateFromClientRequired(event?.detail?.minimumVersion || "");
+    };
+    window.addEventListener("itflux:client-update-required", onRequired);
+    return () => window.removeEventListener("itflux:client-update-required", onRequired);
+  }, []);
+  return null;
+}
+
 function App() {
   return (
     <BrowserRouter>
       <CyrillicPathRedirect />
       <ScrollToTop />
       <MetaDescriptionSync />
+      <ClientUpdateRequiredListener />
+      <AppUpdateBanner />
       <Routes>
 
         <Route element={<Layout />}>

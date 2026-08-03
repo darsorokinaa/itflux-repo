@@ -7,6 +7,7 @@ import {
   getCabinetHomePath,
   openTelegramConnect,
 } from "../../utils/cabinetAuth";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 function formatExpiry(iso) {
   if (!iso) return "";
@@ -102,9 +103,12 @@ export default function CabinetJoinPage() {
   const [session, setSession] = useState(null);
   const [accepting, setAccepting] = useState(false);
 
-  useEffect(() => {
-    document.title = "Приглашение — Личный кабинет";
-  }, []);
+  const joinTitle = joined
+    ? "Вы присоединились к платформе"
+    : error
+      ? "Приглашение недоступно"
+      : "Присоединиться к классу";
+  usePageTitle(joinTitle);
 
   useEffect(() => {
     let cancelled = false;

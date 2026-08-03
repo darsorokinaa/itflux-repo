@@ -173,11 +173,22 @@ def _dispatch_to_user(
         tmp.title = title
         push_url = payload.get("url") if isinstance(payload.get("url"), str) else resolve_notification_url(tmp)
         change = (payload or {}).get("change_type") or ""
-        urgent = change in ("cancelled", "moved")
+        reminder_minutes = (payload or {}).get("reminder_minutes")
+        try:
+            reminder_minutes = int(reminder_minutes) if reminder_minutes is not None else None
+        except (TypeError, ValueError):
+            reminder_minutes = None
+        urgent = change in ("cancelled", "moved") or (
+            change == "reminder" and reminder_minutes is not None and reminder_minutes <= 15
+        )
+        push_title, push_body = title, message
+        if getattr(prefs, "push_privacy_mode", False):
+            push_title = "Новое уведомление"
+            push_body = "На платформе появилось новое событие"
         send_web_push_to_user(
             user,
-            title=title,
-            body=message,
+            title=push_title,
+            body=push_body,
             url=push_url or cabinet_path_for_user(user),
             tag=f"schedule-{payload.get('event_id')}-{change or 'event'}",
             priority="important" if urgent else "normal",

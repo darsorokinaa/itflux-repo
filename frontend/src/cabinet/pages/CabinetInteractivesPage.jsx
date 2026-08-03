@@ -9,6 +9,7 @@ import {
   TypeSelectModal,
 } from "../components/InteractivesUi";
 import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
+import { usePageTitle } from "../hooks/usePageTitle";
 import UpgradeLimitModal from "../components/UpgradeLimitModal";
 import CompactUpgradeModal from "../components/CompactUpgradeModal";
 import { useSubscription } from "../hooks/useSubscription";
@@ -65,6 +66,7 @@ function InteractivesSkeleton() {
 }
 
 export default function CabinetInteractivesPage() {
+  usePageTitle("Интерактивы");
   const navigate = useNavigate();
   const [sort, setSort] = useState("updated");
   const [typeFilter, setTypeFilter] = useState("all");

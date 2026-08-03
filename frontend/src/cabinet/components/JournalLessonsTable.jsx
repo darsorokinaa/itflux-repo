@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import CabinetIcon from "../CabinetIcons";
 import { openLessonSummaryTab } from "../journal/openLessonSummary";
+import { updateJournalLessonTopics } from "../../utils/cabinetAuth";
 
 const ATTENDANCE_RU = {
   present: "Присутствовал",
@@ -27,6 +28,9 @@ const ATTENDANCE_TONE = {
   technical_issue: "warning",
   not_marked: "muted",
 };
+
+const PLANNED_EMPTY = "Тема не запланирована";
+const ACTUAL_EMPTY = "Фактическая тема не указана";
 
 function formatDate(iso) {
   if (!iso) return "—";
@@ -123,26 +127,42 @@ function sortLessonsNewestFirst(lessons) {
   return [...(lessons || [])].sort((a, b) => lessonSortKey(b).localeCompare(lessonSortKey(a)));
 }
 
+function topicFieldsFromLesson(lesson) {
+  const planned = (lesson.planned_topic ?? "").trim();
+  const actual = (lesson.actual_topic ?? "").trim();
+  // Fallback for older payloads that only had combined topic
+  const legacy = (lesson.topic || "").trim();
+  return {
+    plannedTopic: planned || (!actual && legacy ? legacy : planned),
+    actualTopic: actual,
+  };
+}
+
 function flattenRows(scopeType, lessons) {
   const ordered = sortLessonsNewestFirst(lessons);
   if (scopeType === "student") {
-    return ordered.map((lesson) => ({
-      key: String(lesson.record_id || lesson.journal_id),
-      scheduleEventId: lesson.schedule_event_id,
-      lessonDate: lesson.lesson_date,
-      lessonTime: formatLessonTime(lesson),
-      topic: lesson.topic || "Без темы",
-      studentName: null,
-      scoreDisplay: lesson.overall_score_display || null,
-      scoreRaw: lesson.overall_score,
-      comment: lesson.teacher_comment || "",
-      attendance: lesson.attendance_status,
-      details: collectDetailFields(lesson, lesson),
-    }));
+    return ordered.map((lesson) => {
+      const topics = topicFieldsFromLesson(lesson);
+      return {
+        key: String(lesson.record_id || lesson.journal_id),
+        scheduleEventId: lesson.schedule_event_id,
+        lessonDate: lesson.lesson_date,
+        lessonTime: formatLessonTime(lesson),
+        plannedTopic: topics.plannedTopic,
+        actualTopic: topics.actualTopic,
+        studentName: null,
+        scoreDisplay: lesson.overall_score_display || null,
+        scoreRaw: lesson.overall_score,
+        comment: lesson.teacher_comment || "",
+        attendance: lesson.attendance_status,
+        details: collectDetailFields(lesson, lesson),
+      };
+    });
   }
 
   const rows = [];
   for (const lesson of ordered) {
+    const topics = topicFieldsFromLesson(lesson);
     const students = lesson.students || [];
     if (!students.length) {
       rows.push({
@@ -150,7 +170,8 @@ function flattenRows(scopeType, lessons) {
         scheduleEventId: lesson.schedule_event_id,
         lessonDate: lesson.lesson_date,
         lessonTime: formatLessonTime(lesson),
-        topic: lesson.topic || "Без темы",
+        plannedTopic: topics.plannedTopic,
+        actualTopic: topics.actualTopic,
         studentName: null,
         scoreDisplay: lesson.avg_overall_display || null,
         scoreRaw: lesson.avg_overall,
@@ -166,7 +187,8 @@ function flattenRows(scopeType, lessons) {
         scheduleEventId: lesson.schedule_event_id,
         lessonDate: lesson.lesson_date,
         lessonTime: formatLessonTime(lesson),
-        topic: lesson.topic || "Без темы",
+        plannedTopic: topics.plannedTopic,
+        actualTopic: topics.actualTopic,
         studentName: s.student_name || null,
         scoreDisplay: s.overall_score_display || null,
         scoreRaw: s.overall_score,
@@ -196,7 +218,128 @@ function ScoreChip({ display, raw }) {
   return <span className={`jg-score-chip jg-score-chip--${tone}`}>{display}</span>;
 }
 
-function JournalRow({ row, showStudentName, onOpenLesson }) {
+function TopicInlineField({
+  label,
+  emptyLabel,
+  value,
+  fieldKey,
+  scheduleEventId,
+  disabled,
+  onSaved,
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value || "");
+  const [status, setStatus] = useState("idle"); // idle | saving | saved | error
+  const [error, setError] = useState("");
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (!editing) setDraft(value || "");
+  }, [value, editing]);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  const display = (value || "").trim();
+
+  const cancel = () => {
+    setDraft(value || "");
+    setError("");
+    setStatus("idle");
+    setEditing(false);
+  };
+
+  const save = async () => {
+    if (!scheduleEventId || disabled) return;
+    const next = String(draft || "").trim();
+    if (next === String(value || "").trim()) {
+      setEditing(false);
+      setStatus("idle");
+      return;
+    }
+    setStatus("saving");
+    setError("");
+    try {
+      const saved = await updateJournalLessonTopics(scheduleEventId, {
+        [fieldKey]: next,
+      });
+      onSaved?.(saved, fieldKey);
+      setStatus("saved");
+      setEditing(false);
+      window.setTimeout(() => setStatus((s) => (s === "saved" ? "idle" : s)), 1600);
+    } catch (err) {
+      setStatus("error");
+      setError(err?.message || "Не удалось сохранить тему");
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className={`jg-topic-field jg-topic-field--editing jg-topic-field--${status}`}>
+        <span className="jg-topic-field__label">{label}</span>
+        <textarea
+          ref={inputRef}
+          className="jg-topic-field__input"
+          rows={2}
+          value={draft}
+          disabled={status === "saving"}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              cancel();
+            }
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              void save();
+            }
+          }}
+        />
+        <div className="jg-topic-field__actions">
+          <button
+            type="button"
+            className="jg-topic-field__btn jg-topic-field__btn--primary"
+            disabled={status === "saving"}
+            onClick={() => void save()}
+          >
+            {status === "saving" ? "Сохранение…" : "Сохранить"}
+          </button>
+          <button
+            type="button"
+            className="jg-topic-field__btn"
+            disabled={status === "saving"}
+            onClick={cancel}
+          >
+            Отмена
+          </button>
+        </div>
+        {error ? <span className="jg-topic-field__error">{error}</span> : null}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className={`jg-topic-field jg-topic-field--view${display ? "" : " is-empty"}`}
+      disabled={!scheduleEventId || disabled}
+      title="Нажмите, чтобы изменить"
+      onClick={() => {
+        if (!scheduleEventId || disabled) return;
+        setEditing(true);
+        setStatus("idle");
+        setError("");
+      }}
+    >
+      <span className="jg-topic-field__label">{label}</span>
+      <span className="jg-topic-field__value">{display || emptyLabel}</span>
+      {status === "saved" ? <span className="jg-topic-field__hint">Сохранено</span> : null}
+    </button>
+  );
+}
+
+function JournalRow({ row, showStudentName, onOpenLesson, onTopicsSaved }) {
   const openSummary = () => {
     if (row.scheduleEventId) {
       openLessonSummaryTab(row.scheduleEventId);
@@ -213,7 +356,24 @@ function JournalRow({ row, showStudentName, onOpenLesson }) {
           {row.lessonTime ? <span className="jg-sub">{row.lessonTime}</span> : null}
         </div>
         <div className="jg-cell jg-cell--topic">
-          <span className="jg-topic-title">{row.topic}</span>
+          <div className="jg-topic-stack">
+            <TopicInlineField
+              label="Планируемая тема"
+              emptyLabel={PLANNED_EMPTY}
+              value={row.plannedTopic}
+              fieldKey="planned_topic"
+              scheduleEventId={row.scheduleEventId}
+              onSaved={onTopicsSaved}
+            />
+            <TopicInlineField
+              label="Фактическая тема"
+              emptyLabel={ACTUAL_EMPTY}
+              value={row.actualTopic}
+              fieldKey="actual_topic"
+              scheduleEventId={row.scheduleEventId}
+              onSaved={onTopicsSaved}
+            />
+          </div>
           {showStudentName && row.studentName ? (
             <span className="jg-sub">{row.studentName}</span>
           ) : null}
@@ -244,16 +404,45 @@ function JournalRow({ row, showStudentName, onOpenLesson }) {
 }
 
 /**
- * Таблица журнала: дата → урок → результат % → комментарий → статус → итоги.
+ * Таблица журнала: дата → темы → результат % → комментарий → статус → итоги.
  */
 export default function JournalLessonsTable({
   scopeType,
   lessons = [],
   onOpenLesson,
+  onLessonTopicsUpdated,
   loading,
 }) {
-  const rows = useMemo(() => flattenRows(scopeType, lessons), [scopeType, lessons]);
+  const [localLessons, setLocalLessons] = useState(lessons);
+
+  useEffect(() => {
+    setLocalLessons(lessons);
+  }, [lessons]);
+
+  const rows = useMemo(
+    () => flattenRows(scopeType, localLessons),
+    [scopeType, localLessons],
+  );
   const showStudentName = scopeType === "group";
+
+  const handleTopicsSaved = (saved) => {
+    if (!saved) return;
+    setLocalLessons((prev) =>
+      (prev || []).map((lesson) => {
+        const eventId = lesson.schedule_event_id;
+        if (eventId && Number(eventId) === Number(saved.schedule_event_id)) {
+          return {
+            ...lesson,
+            planned_topic: saved.planned_topic ?? "",
+            actual_topic: saved.actual_topic ?? "",
+            topic: saved.actual_topic || saved.planned_topic || lesson.topic,
+          };
+        }
+        return lesson;
+      }),
+    );
+    onLessonTopicsUpdated?.(saved);
+  };
 
   if (loading) {
     return (
@@ -278,7 +467,7 @@ export default function JournalLessonsTable({
       <h2 className="jg-lessons-wrap__title">Таблица уроков</h2>
       <div className="jg-grid-head" role="row">
         <div className="jg-cell jg-cell--date">Дата</div>
-        <div className="jg-cell jg-cell--topic">Урок</div>
+        <div className="jg-cell jg-cell--topic">Темы урока</div>
         <div className="jg-cell jg-cell--score">Результат</div>
         <div className="jg-cell jg-cell--comment">Комментарий</div>
         <div className="jg-cell jg-cell--extra">Статус</div>
@@ -292,6 +481,7 @@ export default function JournalLessonsTable({
             row={row}
             showStudentName={showStudentName}
             onOpenLesson={onOpenLesson}
+            onTopicsSaved={handleTopicsSaved}
           />
         ))}
       </div>

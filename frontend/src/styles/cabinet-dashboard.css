@@ -2422,6 +2422,149 @@
   margin-bottom: 8px;
 }
 
+.cb-hw-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.cb-hw-attachments__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cb-hw-attachments__drop {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px dashed #CBD5E1;
+  border-radius: 12px;
+  background: #F8FAFC;
+  color: #475569;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.cb-hw-attachments__drop.is-dragover {
+  border-color: #2563EB;
+  background: #EFF6FF;
+}
+
+.cb-hw-attachments__drop > svg {
+  width: 22px;
+  height: 22px;
+  color: #64748B;
+}
+
+.cb-hw-attachments__hint {
+  font-size: 0.75rem;
+  color: #94A3B8;
+}
+
+.cb-hw-attachments__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cb-hw-attachments__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #E5E7EB;
+  border-radius: 12px;
+  background: #fff;
+  min-width: 0;
+}
+
+.cb-hw-attachments__thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #F1F5F9;
+  display: block;
+}
+
+.cb-hw-attachments__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cb-hw-attachments__file-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: #F1F5F9;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #64748B;
+}
+
+.cb-hw-attachments__meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cb-hw-attachments__name {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #111827;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.cb-hw-attachments__sub {
+  font-size: 0.74rem;
+  color: #6B7280;
+}
+
+.cb-hw-attachments__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.cb-hw-attachments__remove {
+  border: none;
+  background: transparent;
+  color: #9CA3AF;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.cb-hw-attachments__remove:hover:not(:disabled) {
+  color: #EF4444;
+}
+
+.cb-hw-attachments__errors {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #B91C1C;
+  font-size: 0.8rem;
+}
+
 .cb-hw-assign-section-head .cb-attach-section__title {
   margin: 0;
 }
@@ -7626,7 +7769,7 @@ button.cb-sch-event {
   line-height: 1.05;
   word-break: break-word;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -7938,6 +8081,56 @@ button.cb-sch-event {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+}
+
+.cb-lesson-card__about-value.is-empty {
+  font-weight: 600;
+  color: #94A3B8;
+}
+
+.cb-lesson-card__about-field--multiline {
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: start;
+}
+
+.cb-lesson-card__about-value.is-multiline {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.cb-lesson-card__resource-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.cb-lesson-card__resource-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  background: #FFFFFF;
+  color: #64748B;
+  cursor: pointer;
+}
+
+.cb-lesson-card__resource-remove:hover {
+  color: #B91C1C;
+  border-color: #FECACA;
+  background: #FEF2F2;
+}
+
+.cb-lesson-card__resource-remove svg {
+  width: 14px;
+  height: 14px;
 }
 
 .cb-lesson-card__participants {

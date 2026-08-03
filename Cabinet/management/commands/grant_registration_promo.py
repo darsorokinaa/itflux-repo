@@ -1,6 +1,7 @@
 """
 Выдаёт акционный тариф «Профи» на 3 месяца с даты регистрации
 всем учителям, зарегистрировавшимся до 1 октября 2026.
+Также мигрирует legacy slug=profi → актуальный slug=pro.
 
 python manage.py grant_registration_promo
 python manage.py grant_registration_promo --dry-run
@@ -60,18 +61,14 @@ class Command(BaseCommand):
 
             expires_at = add_months(started_at, PROMO_MONTHS)
             label = teacher.email or teacher.username
+            current_sub = getattr(teacher, "subscription", None)
+            current = getattr(current_sub, "plan", None)
+            current_slug = current.slug if current else "—"
 
             if dry_run:
-                current_sub = getattr(teacher, "subscription", None)
-                current = getattr(current_sub, "plan", None)
-                current_slug = current.slug if current else "—"
-                current_exp = getattr(current_sub, "expires_at", None)
-                note = ""
-                if current_exp and current_exp > expires_at:
-                    note = " (не сокращаем: текущий срок дольше)"
                 self.stdout.write(
                     f"  [dry-run] {label}: {current_slug} → {PROMO_PLAN_SLUG} "
-                    f"до {expires_at:%Y-%m-%d} (с {started_at:%Y-%m-%d}){note}"
+                    f"до {expires_at:%Y-%m-%d} (с {started_at:%Y-%m-%d})"
                 )
                 granted += 1
                 continue
@@ -80,12 +77,14 @@ class Command(BaseCommand):
             if result:
                 self.stdout.write(
                     self.style.SUCCESS(
-                        f"  {label}: «{result['plan_name']}» до {result['expires_at'][:10]}"
+                        f"  {label}: «{result['plan_name']}» ({result['plan_slug']}) "
+                        f"до {result['expires_at'][:10]}"
                     )
                 )
                 granted += 1
             else:
                 skipped += 1
+                self.stdout.write(f"  skip {label}: текущий={current_slug}")
 
         self.stdout.write(
             self.style.NOTICE(f"Готово: выдано/к выдаче={granted}, пропущено={skipped}")

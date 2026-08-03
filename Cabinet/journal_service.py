@@ -81,14 +81,42 @@ def resolve_event_students(event: ScheduleEvent) -> list[Student]:
 
 
 def planned_topic_for_event(event: ScheduleEvent) -> str:
-    if event.topic:
-        return event.topic
+    """Планируемая тема из карточки урока / пункта плана / каталожного урока.
+
+    Не подставляет имя ученика/группы (часто лежит в event.title / item.title).
+    """
+    audience_names = {
+        (getattr(event, "title", None) or "").strip().lower(),
+        (getattr(event, "audience", None) or "").strip().lower(),
+    }
+
+    def _clean(value: str) -> str:
+        text = (value or "").strip()
+        if not text:
+            return ""
+        if text.lower() in audience_names:
+            return ""
+        return text
+
+    topic = _clean(getattr(event, "topic", None) or "")
+    if topic:
+        return topic
     item = getattr(event, "lesson_plan_item", None)
     if item is not None:
-        return (item.topic or item.title or "").strip()
+        topic = _clean(item.topic or "")
+        if topic:
+            return topic
+        topic = _clean(item.title or "")
+        if topic:
+            return topic
     lesson = getattr(event, "lesson", None)
     if lesson is not None:
-        return (lesson.topic or lesson.title or "").strip()
+        topic = _clean(lesson.topic or "")
+        if topic:
+            return topic
+        topic = _clean(lesson.title or "")
+        if topic:
+            return topic
     return ""
 
 
@@ -344,7 +372,7 @@ def get_or_create_journal(event: ScheduleEvent, teacher: User) -> LessonJournal:
         planned_duration_minutes=duration,
         actual_duration_minutes=duration,
         planned_topic=planned,
-        actual_topic=planned,
+        actual_topic="",
         assessment_template=template,
         homework=event.homework,
         overall_score_mode=settings.overall_score_mode,
@@ -683,10 +711,8 @@ def apply_live_variant_results_to_journal(
     tasks = _variant_tasks_answer_key(variant_id)
     journal = get_or_create_journal(event, teacher)
     update_fields = ["updated_at"]
-    if not journal.actual_topic and title:
-        journal.actual_topic = title
-        update_fields.append("actual_topic")
     # Live-вариант — материал урока; не затираем обычное ДЗ, если оно уже привязано.
+    # Фактическую тему не заполняем автоматически — только по действию учителя.
     if journal.homework_id is None:
         journal.homework = homework
         update_fields.append("homework")
@@ -814,6 +840,168 @@ def apply_absence_na(record: StudentLessonRecord, *, clear_values: bool = False)
         score.save(update_fields=["is_not_applicable", "value"] if clear_values else ["is_not_applicable"])
 
 
+def _reload_journal(journal_id: int) -> LessonJournal:
+    return (
+        LessonJournal.objects.select_related(
+            "schedule_event",
+            "schedule_event__lesson",
+            "schedule_event__lesson_plan_item",
+            "group",
+            "student",
+            "homework",
+            "assessment_template",
+        )
+        .prefetch_related(
+            Prefetch(
+                "student_records",
+                queryset=StudentLessonRecord.objects.select_related("student").prefetch_related(
+                    "criterion_scores__criterion", "tags", "tag_links__tag"
+                ),
+            )
+        )
+        .get(pk=journal_id)
+    )
+
+
+def _sync_planned_topic_to_lesson_and_plan(journal: LessonJournal, teacher: User) -> dict:
+    """Синхронизирует planned_topic → ScheduleEvent / Lesson / LessonPlanItem.
+
+    Фактическая тема сюда не передаётся. Циклы блокируются guard'ом
+    LessonLearningPlanSyncService.
+    """
+    from .lesson_plan_content_sync import LessonLearningPlanSyncService, LessonPlanSyncError
+
+    event = journal.schedule_event
+    if event is None:
+        return {"synced": False, "reason": "no_event"}
+
+    planned = (journal.planned_topic or "").strip()
+    event_updates = []
+    if (event.topic or "").strip() != planned:
+        event.topic = planned[:500]
+        event_updates.append("topic")
+    # Убрать topic из manual overrides, чтобы план мог снова синхронизироваться
+    overrides = list(event.manual_override_fields or [])
+    if "topic" in overrides:
+        overrides = [f for f in overrides if f != "topic"]
+        event.manual_override_fields = overrides
+        event_updates.append("manual_override_fields")
+    if event_updates:
+        event.save(update_fields=list(dict.fromkeys(event_updates + ["updated_at"])))
+
+    lesson = getattr(event, "lesson", None)
+    if lesson is not None and lesson.teacher_id == teacher.id:
+        lesson_updates = []
+        if (lesson.topic or "").strip() != planned[:255]:
+            lesson.topic = planned[:255]
+            lesson_updates.append("topic")
+        # Не перезаписываем title, если это не «техническое» название
+        if lesson_updates:
+            lesson.save(update_fields=list(dict.fromkeys(lesson_updates + ["updated_at"])))
+
+    plan_result = None
+    try:
+        plan_result = LessonLearningPlanSyncService.sync_lesson_to_plan(
+            event,
+            teacher=teacher,
+            mode="update_linked",
+            confirm_all_students=True,
+            title=planned,
+        )
+    except LessonPlanSyncError as exc:
+        # Нет enrollment / draft plan — тема уже сохранена в журнале и карточке.
+        if getattr(exc, "code", None) in {
+            "no_enrollment",
+            "draft_plan",
+            "group_confirm_required",
+            "alien_plan",
+            "public_plan",
+        }:
+            return {
+                "synced": True,
+                "event_id": event.pk,
+                "plan_updated": False,
+                "plan_error": exc.code,
+                "plan_message": exc.message,
+            }
+        raise JournalError(exc.message, code=exc.code, status=exc.status) from exc
+
+    return {
+        "synced": True,
+        "event_id": event.pk,
+        "plan_updated": bool((plan_result or {}).get("plan_updated")),
+        "plan": plan_result,
+    }
+
+
+@transaction.atomic
+def update_lesson_topics(
+    journal: LessonJournal,
+    teacher: User,
+    payload: dict,
+    *,
+    expected_version: int | None = None,
+) -> LessonJournal:
+    """Частичное обновление planned_topic / actual_topic.
+
+    planned_topic синхронизируется с карточкой урока и пунктом плана.
+    actual_topic сохраняется только в журнале и не меняет план.
+    """
+    if journal.teacher_id != teacher.id:
+        raise JournalError("Нет доступа", code="forbidden", status=403)
+    if journal.is_archived:
+        raise JournalError("Запись архивирована", code="archived", status=400)
+    if expected_version is not None and journal.version != expected_version:
+        raise JournalError(
+            "Журнал изменён в другой вкладке. Обновите данные.",
+            code="version_conflict",
+            status=409,
+        )
+    if not isinstance(payload, dict):
+        raise JournalError("Некорректные данные", code="invalid_payload")
+
+    changed: list[str] = []
+    if "planned_topic" in payload:
+        new_planned = (payload.get("planned_topic") or "").strip()[:500]
+        if journal.planned_topic != new_planned:
+            write_audit(
+                actor=teacher,
+                action="update",
+                journal=journal,
+                field_name="planned_topic",
+                old_value=journal.planned_topic,
+                new_value=new_planned,
+            )
+            journal.planned_topic = new_planned
+            changed.append("planned_topic")
+
+    if "actual_topic" in payload:
+        new_actual = (payload.get("actual_topic") or "").strip()[:500]
+        if journal.actual_topic != new_actual:
+            write_audit(
+                actor=teacher,
+                action="update",
+                journal=journal,
+                field_name="actual_topic",
+                old_value=journal.actual_topic,
+                new_value=new_actual,
+            )
+            journal.actual_topic = new_actual
+            changed.append("actual_topic")
+
+    if not changed:
+        return _reload_journal(journal.pk)
+
+    journal.updated_by = teacher
+    journal.version += 1
+    journal.save(update_fields=["planned_topic", "actual_topic", "updated_by", "version", "updated_at"])
+
+    if "planned_topic" in changed:
+        _sync_planned_topic_to_lesson_and_plan(journal, teacher)
+
+    return _reload_journal(journal.pk)
+
+
 @transaction.atomic
 def update_journal(
     journal: LessonJournal,
@@ -836,6 +1024,13 @@ def update_journal(
     if tab_token:
         _acquire_edit_lock(journal, teacher, tab_token)
 
+    # Планируемая тема — только через единый сервис синхронизации.
+    topics_payload = {}
+    if "planned_topic" in payload:
+        topics_payload["planned_topic"] = payload.get("planned_topic")
+    if topics_payload:
+        journal = update_lesson_topics(journal, teacher, topics_payload)
+
     journal_fields = [
         "actual_topic",
         "lesson_summary",
@@ -856,6 +1051,8 @@ def update_journal(
         if field in payload:
             old = getattr(journal, field)
             new = payload[field]
+            if field == "actual_topic" and new is not None:
+                new = (new or "").strip()[:500]
             if old != new:
                 write_audit(
                     actor=teacher,
@@ -892,30 +1089,31 @@ def update_journal(
             _sync_criteria_for_records(journal, teacher)
 
     if "use_planned_topic" in payload and payload["use_planned_topic"]:
-        journal.actual_topic = journal.planned_topic
-        changed.append("actual_topic")
+        if journal.actual_topic != journal.planned_topic:
+            write_audit(
+                actor=teacher,
+                action="update",
+                journal=journal,
+                field_name="actual_topic",
+                old_value=journal.actual_topic,
+                new_value=journal.planned_topic,
+            )
+            journal.actual_topic = journal.planned_topic
+            changed.append("actual_topic")
 
     records_payload = payload.get("student_records") or []
     for rp in records_payload:
         _update_student_record(journal, teacher, rp)
+        changed.append("student_records")
 
-    journal.updated_by = teacher
-    journal.version += 1
-    journal.save()
-    return (
-        LessonJournal.objects.select_related(
-            "schedule_event", "group", "student", "homework", "assessment_template"
-        )
-        .prefetch_related(
-            Prefetch(
-                "student_records",
-                queryset=StudentLessonRecord.objects.select_related("student").prefetch_related(
-                    "criterion_scores__criterion", "tags", "tag_links__tag"
-                ),
-            )
-        )
-        .get(pk=journal.pk)
-    )
+    if not changed and not topics_payload:
+        return _reload_journal(journal.pk)
+
+    if changed:
+        journal.updated_by = teacher
+        journal.version += 1
+        journal.save()
+    return _reload_journal(journal.pk)
 
 
 def _sync_criteria_for_records(journal: LessonJournal, teacher: User) -> None:
@@ -1043,6 +1241,25 @@ def _update_student_record(journal: LessonJournal, teacher: User, rp: dict) -> S
     if record.publish_status == RecordPublishStatus.DRAFT and any(touched.values()):
         record.publish_status = RecordPublishStatus.SAVED
     record.save()
+
+    # Уже опубликованные итоги: отдельные события по комментарию/рекомендации
+    # (не при автосохранении черновика — только после публикации).
+    if record.publish_status in {
+        RecordPublishStatus.PUBLISHED,
+        RecordPublishStatus.EDITED_AFTER_PUBLISH,
+    }:
+        try:
+            from .journal_notifications import (
+                notify_journal_comment_added,
+                notify_journal_recommendation_added,
+            )
+
+            if touched.get("teacher_comment"):
+                notify_journal_comment_added(record)
+            if touched.get("recommendation"):
+                notify_journal_recommendation_added(record)
+        except Exception:
+            pass
     return record
 
 
@@ -2140,9 +2357,13 @@ def serialize_journal(journal: LessonJournal, *, for_student: bool = False) -> d
             )
         )
 
+    plan_item_id = None
+    if event is not None:
+        plan_item_id = event.lesson_plan_item_id
     data = {
         "id": journal.id,
         "schedule_event_id": journal.schedule_event_id,
+        "lesson_plan_item_id": plan_item_id,
         "teacher_id": journal.teacher_id,
         "group_id": journal.group_id,
         "group_title": journal.group.title if journal.group_id else None,
@@ -2156,6 +2377,7 @@ def serialize_journal(journal: LessonJournal, *, for_student: bool = False) -> d
         "actual_duration_minutes": journal.actual_duration_minutes,
         "planned_topic": journal.planned_topic,
         "actual_topic": journal.actual_topic,
+        "topic": (journal.actual_topic or journal.planned_topic or ""),
         "lesson_summary": journal.lesson_summary,
         "material_covered": journal.material_covered,
         "material_to_repeat": journal.material_to_repeat,
@@ -2186,12 +2408,17 @@ def serialize_journal(journal: LessonJournal, *, for_student: bool = False) -> d
         },
     }
     if hw:
+        from .homework_attachments import list_homework_attachments
+
+        attachments = list_homework_attachments(hw)
         data["homework"] = {
             "id": hw.id,
             "title": hw.title,
             "due_at": hw.due_at.isoformat() if hw.due_at else None,
             "tasks_count": hw.tasks.count(),
             "status": hw.status,
+            "attachments": attachments,
+            "attachments_count": len(attachments),
         }
     if prev_hw:
         data["previous_homework"] = {

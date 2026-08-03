@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { fetchStudentResultDetail, fetchStudentResults } from "../../../utils/cabinetAuth";
+import { usePageTitle } from "../../hooks/usePageTitle";
 import "../../styles/journal.css";
 
 const ATTENDANCE_RU = {
@@ -196,6 +197,7 @@ export default function StudentResultsPage() {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  usePageTitle(recordId ? "Итоги урока" : "Мои результаты");
 
   useEffect(() => {
     let cancelled = false;

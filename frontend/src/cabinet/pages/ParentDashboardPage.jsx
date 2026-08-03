@@ -7,6 +7,7 @@ import {
   StudentPageShell,
   StudentStatusBadge,
 } from "../student/StudentSectionUi";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 function formatWhen(iso) {
   if (!iso) return "—";
@@ -38,6 +39,7 @@ export default function ParentDashboardPage() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  usePageTitle(data?.active_child?.name || "Главная");
 
   const load = useCallback(async () => {
     setLoading(true);

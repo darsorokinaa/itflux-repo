@@ -21,11 +21,10 @@ import {
   isStudentMobileNavActive,
   isStudentNavActive,
 } from "./studentNav";
+import { PageTitleProvider } from "../hooks/usePageTitle";
 import "../../styles/cabinet-dashboard.css";
 import "./styles/student-cabinet.css";
 import "../../styles/cabinet-mobile-system.css";
-
-const PAGE_TITLE = "Кабинет ученика — Цифровой поток";
 
 function formatNavCount(count) {
   if (!count || count <= 0) return null;
@@ -69,8 +68,6 @@ export default function StudentCabinetLayout() {
   const [navOpen, setNavOpen] = useState(false);
   const [isMobileShell, setIsMobileShell] = useState(false);
   const [assignmentsDue, setAssignmentsDue] = useState(0);
-
-  useEffect(() => { document.title = PAGE_TITLE; }, []);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return undefined;
@@ -182,12 +179,14 @@ export default function StudentCabinetLayout() {
   const isDashboard  = location.pathname === "/cabinet/student" || location.pathname === "/cabinet/student/";
   const contentClass = isDashboard ? "cabinet-content" : "cabinet-content cabinet-content--page";
   const isPlayPage   = /^\/cabinet\/student\/interactives\/\d+\/play$/.test(location.pathname);
+  const sectionTitle = getStudentSectionTitle(location.pathname);
 
   if (isPlayPage) return <Outlet />;
 
   const outletContext = { user, handleLogout, loggingOut, refreshUser };
 
   return (
+    <PageTitleProvider defaultTitle={sectionTitle}>
     <div className={`cabinet-layout st-layout${navOpen ? " is-nav-open" : ""}`}>
       {navOpen ? (
         <button
@@ -326,5 +325,6 @@ export default function StudentCabinetLayout() {
         onConfirm={handleLogout}
       />
     </div>
+    </PageTitleProvider>
   );
 }

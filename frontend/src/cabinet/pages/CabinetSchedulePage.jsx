@@ -15,6 +15,7 @@ import {
   startTelemostLesson,
   updateLessonPlanItem,
   updateScheduleEvent,
+  updateScheduleEventMaterials,
 } from "../../utils/cabinetAuth";
 import FinalizeLessonBillingModal from "../components/FinalizeLessonBillingModal";
 import BillingPaymentModal from "../components/BillingPaymentModal";
@@ -32,6 +33,7 @@ import "../styles/schedule-mobile.css";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import CabinetIcon from "../CabinetIcons";
 import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
+import { usePageTitle } from "../hooks/usePageTitle";
 import {
   applySeriesTimeUpdate,
   getSeriesRefreshRange,
@@ -44,6 +46,12 @@ import {
   planItemTaskPopoverRows,
   scheduleEventPlanItemToModalItem,
 } from "../planItemAttachments";
+import {
+  resolveLessonCourseTitle,
+  resolveLessonDescription,
+  resolveLessonSubjectLabel,
+  resolveLessonTopic,
+} from "../lessonCardContent";
 
 const VIEWS = [
   { id: "day", label: "День" },
@@ -1521,11 +1529,7 @@ function getEventPlanItem(event) {
 }
 
 function getEventPlanTopics(event) {
-  const item = getEventPlanItem(event);
-  if (item) {
-    return item.topic || item.title || "";
-  }
-  return displayEventField(event.topic, "");
+  return resolveLessonTopic(event);
 }
 
 function getEventPlanMaterials(event) {
@@ -1597,11 +1601,12 @@ function EventDetailPopover(props) {
   const planItem = getEventPlanItem(event);
   const materials = getEventPlanMaterials(event);
   const homework = getEventPlanHomework(event);
-  const topic = planItem
-    ? (planItem.topic || planItem.title)
-    : getEventPlanTopics(event);
-  const hasAbout = planItem && (
-    hasText(planItem.goal) || hasText(planItem.description) || hasText(planItem.teacherComment)
+  const topic = resolveLessonTopic(event);
+  const notesAbout = Boolean(
+    hasText(planItem?.goal)
+    || hasText(event.goal)
+    || hasText(planItem?.teacherComment)
+    || hasText(event.teacherComment),
   );
 
   return (
@@ -1626,8 +1631,11 @@ function EventDetailPopover(props) {
       materials={materials}
       homework={homework}
       planItem={planItem}
-      hasAbout={hasAbout}
-      topic={topic || ""}
+      hasAbout={notesAbout}
+      topic={topic}
+      subjectLabel={resolveLessonSubjectLabel(event)}
+      courseTitle={resolveLessonCourseTitle(event)}
+      description={resolveLessonDescription(event)}
       participants={Array.isArray(event.participants) ? event.participants : []}
       participantsFallback={formatEventParticipants(event) || "—"}
       shortenMeetingUrl={shortenMeetingUrl}
@@ -1651,6 +1659,7 @@ function useMobileDefaultView() {
 }
 
 export default function CabinetSchedulePage() {
+  usePageTitle("Календарь");
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useMobileDefaultView();
@@ -1831,6 +1840,18 @@ export default function CabinetSchedulePage() {
       const data = await updateLessonPlanItem(lessonResourcePicker.planItemId, {
         material_ids: current,
       });
+      // Дублирующую связь на событии создаём через event-materials (unique по source+material).
+      if (lessonResourcePicker.eventId) {
+        try {
+          await updateScheduleEventMaterials(lessonResourcePicker.eventId, {
+            action: "attach",
+            material_id: material.id,
+            source: "learning_plan",
+          });
+        } catch {
+          /* связь могла уже существовать после sync_plan_item_to_lessons */
+        }
+      }
       const mapped = planItemForScheduleEvent(data, {
         lessonNumber: getEventPlanItem(selectedEvent)?.lessonNumber,
         planTitle: getEventPlanItem(selectedEvent)?.planTitle,
@@ -1855,6 +1876,17 @@ export default function CabinetSchedulePage() {
       const data = await updateLessonPlanItem(lessonResourcePicker.planItemId, {
         interactive_ids: current,
       });
+      if (lessonResourcePicker.eventId) {
+        try {
+          await updateScheduleEventMaterials(lessonResourcePicker.eventId, {
+            action: "attach",
+            interactive_id: interactive.id,
+            source: "learning_plan",
+          });
+        } catch {
+          /* already synced */
+        }
+      }
       const mapped = planItemForScheduleEvent(data, {
         lessonNumber: getEventPlanItem(selectedEvent)?.lessonNumber,
         planTitle: getEventPlanItem(selectedEvent)?.planTitle,
@@ -1869,6 +1901,56 @@ export default function CabinetSchedulePage() {
       setLessonResourceBusy(false);
     }
   }, [lessonResourcePicker, patchEventPlanItem, selectedEvent, showToast]);
+
+  const handleRemoveLessonMaterial = useCallback(async (row) => {
+    const event = selectedEvent;
+    if (!event?.id || !row) return;
+    const planItem = getEventPlanItem(event);
+    if (!planItem?.id) {
+      showToast("Урок не связан с пунктом плана");
+      return;
+    }
+    setLessonResourceBusy(true);
+    try {
+      if (row.materialId) {
+        const nextIds = (planItem.materials || [])
+          .map((m) => m.id)
+          .filter((id) => Number(id) !== Number(row.materialId));
+        const data = await updateLessonPlanItem(planItem.id, { material_ids: nextIds });
+        await updateScheduleEventMaterials(event.id, {
+          action: "detach",
+          material_id: row.materialId,
+        });
+        const mapped = planItemForScheduleEvent(data, {
+          lessonNumber: planItem.lessonNumber,
+          planTitle: planItem.planTitle,
+        });
+        patchEventPlanItem(event.id, mapped);
+      } else if (row.interactiveId) {
+        const nextIds = (planItem.attachedInteractives || [])
+          .map((i) => i.id)
+          .filter((id) => Number(id) !== Number(row.interactiveId));
+        const data = await updateLessonPlanItem(planItem.id, { interactive_ids: nextIds });
+        await updateScheduleEventMaterials(event.id, {
+          action: "detach",
+          interactive_id: row.interactiveId,
+        });
+        const mapped = planItemForScheduleEvent(data, {
+          lessonNumber: planItem.lessonNumber,
+          planTitle: planItem.planTitle,
+        });
+        patchEventPlanItem(event.id, mapped);
+      } else {
+        showToast("Не удалось определить материал");
+        return;
+      }
+      showToast("Материал убран из урока");
+    } catch (err) {
+      showToast(err.message || "Не удалось убрать материал");
+    } finally {
+      setLessonResourceBusy(false);
+    }
+  }, [patchEventPlanItem, selectedEvent, showToast]);
 
   const handleAddHomework = useCallback(async (event) => {
     try {
@@ -2634,6 +2716,7 @@ export default function CabinetSchedulePage() {
           }}
           onOpenLesson={(focusMaterials) => handleOpenLesson(selectedEvent, focusMaterials)}
           onAddMaterials={() => void handleAddMaterials(selectedEvent)}
+          onRemoveMaterial={(row) => void handleRemoveLessonMaterial(row)}
           onAddHomework={() => void handleAddHomework(selectedEvent)}
           onStart={handleStartLesson}
           onCreateLink={handleCreateMeetingLink}
@@ -2762,6 +2845,13 @@ export default function CabinetSchedulePage() {
           event={editEvent}
           onClose={() => setEditEvent(null)}
           onSave={handleEditSave}
+          onEventUpdated={(patch) => {
+            if (!patch?.id && !editEvent?.id) return;
+            const id = patch.id || editEvent.id;
+            setEvents((prev) => prev.map((ev) => (ev.id === id ? { ...ev, ...patch } : ev)));
+            setEditEvent((prev) => (prev?.id === id ? { ...prev, ...patch } : prev));
+            setSelectedEvent((prev) => (prev?.id === id ? { ...prev, ...patch } : prev));
+          }}
         />
       ) : null}
 

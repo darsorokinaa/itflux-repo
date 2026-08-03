@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:check": "vite build && node scripts/check-release-build.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:release": "node scripts/check-release-build.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

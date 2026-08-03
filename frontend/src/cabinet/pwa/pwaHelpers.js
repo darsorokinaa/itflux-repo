@@ -69,10 +69,44 @@ export async function registerServiceWorker() {
     return null;
   }
   try {
+    // Убрать чужие/устаревшие SW с другого script URL (service-worker.js и т.п.)
+    const existingRegs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(
+      existingRegs.map(async (reg) => {
+        const script = reg.active?.scriptURL || reg.waiting?.scriptURL || reg.installing?.scriptURL || "";
+        if (script && !script.endsWith("/sw.js")) {
+          try {
+            await reg.unregister();
+          } catch {
+            /* ignore */
+          }
+        }
+      }),
+    );
+
     const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
     // Дождаться activate — иначе subscribe может упасть с «ещё не готов»
     if (reg.installing || reg.waiting) {
       await withTimeout(navigator.serviceWorker.ready, 8000, null);
+    }
+    // Не оставлять waiting: просим немедленную активацию (SW тоже делает skipWaiting)
+    if (reg.waiting) {
+      reg.waiting.postMessage({ type: "ITFLUX_SKIP_WAITING" });
+    }
+    reg.addEventListener?.("updatefound", () => {
+      const worker = reg.installing;
+      if (!worker) return;
+      worker.addEventListener("statechange", () => {
+        if (worker.state === "installed" && navigator.serviceWorker.controller) {
+          worker.postMessage({ type: "ITFLUX_SKIP_WAITING" });
+        }
+      });
+    });
+    // Периодическая проверка обновления SW (иначе Chrome может ждать до 24ч)
+    try {
+      await reg.update();
+    } catch {
+      /* ignore */
     }
     return reg;
   } catch (err) {

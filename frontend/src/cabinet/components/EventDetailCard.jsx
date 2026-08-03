@@ -148,12 +148,15 @@ function PassportMiniCell({ label, value, meta }) {
   );
 }
 
-function AboutField({ label, value }) {
-  if (!value || !String(value).trim()) return null;
+function AboutField({ label, value, empty = "Не указан", multiline = false }) {
+  const text = value && String(value).trim() ? String(value).trim() : empty;
+  const isEmpty = !value || !String(value).trim();
   return (
-    <div className="cb-lesson-card__about-field">
+    <div className={`cb-lesson-card__about-field${multiline ? " cb-lesson-card__about-field--multiline" : ""}`}>
       <span className="cb-lesson-card__about-label">{label}</span>
-      <span className="cb-lesson-card__about-value">{value}</span>
+      <span className={`cb-lesson-card__about-value${isEmpty ? " is-empty" : ""}${multiline ? " is-multiline" : ""}`}>
+        {text}
+      </span>
     </div>
   );
 }
@@ -219,9 +222,10 @@ function SectionHead({ title, count, variant = "material", onAdd = null, addLabe
   );
 }
 
-function ResourceCard({ row, variant = "material" }) {
+function ResourceCard({ row, variant = "material", onRemove = null }) {
   const external = row.url && /^https?:\/\//.test(row.url);
   const isNotes = row.kind === "notes";
+  const canRemove = Boolean(onRemove) && !isNotes && (row.materialId || row.interactiveId);
   return (
     <li className={`cb-lesson-card__resource cb-lesson-card__resource--${variant}${isNotes ? " cb-lesson-card__resource--notes" : ""}`}>
       <span className="cb-lesson-card__resource-icon" aria-hidden="true">
@@ -236,21 +240,34 @@ function ResourceCard({ row, variant = "material" }) {
           <p className="cb-lesson-card__resource-note">{row.text}</p>
         ) : null}
       </div>
-      {row.submitted ? (
-        <span className="cb-lesson-card__resource-submitted">
-          <CabinetIcon name="check" />
-          Сдано
-        </span>
-      ) : row.url ? (
-        <a
-          href={row.url}
-          target={external ? "_blank" : undefined}
-          rel={external ? "noreferrer" : undefined}
-          className="cb-lesson-card__resource-open"
-        >
-          Открыть
-        </a>
-      ) : null}
+      <div className="cb-lesson-card__resource-actions">
+        {row.submitted ? (
+          <span className="cb-lesson-card__resource-submitted">
+            <CabinetIcon name="check" />
+            Сдано
+          </span>
+        ) : row.url ? (
+          <a
+            href={row.url}
+            target={external ? "_blank" : undefined}
+            rel={external ? "noreferrer" : undefined}
+            className="cb-lesson-card__resource-open"
+          >
+            Открыть
+          </a>
+        ) : null}
+        {canRemove ? (
+          <button
+            type="button"
+            className="cb-lesson-card__resource-remove"
+            onClick={() => onRemove(row)}
+            aria-label="Убрать из урока"
+            title="Убрать из урока"
+          >
+            <CabinetIcon name="close" />
+          </button>
+        ) : null}
+      </div>
     </li>
   );
 }
@@ -325,6 +342,7 @@ function ResourceSection({
   emptyActionLabel,
   onEmptyAction,
   onAdd = null,
+  onRemove = null,
   addLabel = "Добавить",
   variant = "material",
   isMobile,
@@ -353,7 +371,7 @@ function ResourceSection({
             ].filter(Boolean).join(" ")}
           >
             {visibleRows.map((row) => (
-              <ResourceCard key={row.key} row={row} variant={variant} />
+              <ResourceCard key={row.key} row={row} variant={variant} onRemove={onRemove} />
             ))}
           </ul>
           {hiddenCount > 0 && !showAll ? (
@@ -596,8 +614,13 @@ export default function EventDetailCard({
   onEdit,
   onOpenLesson,
   onAddMaterials,
+  onRemoveMaterial,
   onAddHomework,
   onStart,
+  subjectLabel = "",
+  courseTitle: courseTitleProp = "",
+  description: descriptionProp = "",
+  topicPlaceholder = "Тема урока не указана",
   onCreateLink,
   onOpenMeetingPage,
   onRequestDelete,
@@ -675,19 +698,17 @@ export default function EventDetailCard({
     onStart?.(event);
   };
 
-  const headerTitle = topic?.trim() || typeLabel;
-  const subtitleParts = topic?.trim()
-    ? [typeLabel, profileName].filter(Boolean)
-    : [profileName].filter(Boolean);
+  const lessonTopic = topic?.trim() || "";
+  const headerTitle = lessonTopic || topicPlaceholder;
   const subtitle = studentMode
     ? (profileName || "")
-    : subtitleParts.join(" · ");
+    : [typeLabel, profileName].filter(Boolean).join(" · ");
 
-  const courseTitle = planItem?.planTitle || "";
-  const lessonTopic = topic?.trim() || "";
-  const subtopic = planItem?.subtopic || "";
-  const taskNumber = planItem?.taskNumber || "";
-  const showAbout = courseTitle || lessonTopic || subtopic || taskNumber;
+  const courseTitle = (courseTitleProp || "").trim() || "";
+  const subject = (subjectLabel || "").trim() || "";
+  const description = (descriptionProp || "").trim() || "";
+  const subtopic = (planItem?.subtopic || event.subtopic || "").trim() || "";
+  const showAbout = true;
 
   const participantList = Array.isArray(participants) ? participants : [];
   const participantCount = participantList.length
@@ -835,10 +856,16 @@ export default function EventDetailCard({
                 <section className="cb-lesson-card__section cb-lesson-card__section--compact cb-lesson-card__section--about">
                   <h3 className="cb-lesson-card__section-title cb-lesson-card__section-title--plain">О занятии</h3>
                   <div className="cb-lesson-card__about">
-                    <AboutField label="Курс" value={courseTitle} />
-                    <AboutField label="Тема урока" value={lessonTopic} />
-                    <AboutField label="Подтема" value={subtopic} />
-                    <AboutField label="№ задания" value={taskNumber} />
+                    <AboutField label="Предмет" value={subject} empty="Не указан" />
+                    <AboutField label="Курс" value={courseTitle} empty="Не указан" />
+                    <AboutField label="Тема" value={lessonTopic} empty="Не указана" />
+                    {subtopic ? <AboutField label="Подтема" value={subtopic} /> : null}
+                    <AboutField
+                      label="Описание"
+                      value={description}
+                      empty="Описание не добавлено"
+                      multiline
+                    />
                   </div>
                 </section>
               ) : null}
@@ -1011,22 +1038,16 @@ export default function EventDetailCard({
                     {notesOpen ? (
                       <div className="cb-lesson-card__accordion-body">
                         <div className="cb-lesson-card__notes">
-                          {planItem?.goal ? (
+                          {(planItem?.goal || event.goal) ? (
                             <div className="cb-lesson-card__note">
                               <span className="cb-lesson-card__note-label">Цель</span>
-                              <p>{planItem.goal}</p>
+                              <p>{planItem?.goal || event.goal}</p>
                             </div>
                           ) : null}
-                          {planItem?.description ? (
-                            <div className="cb-lesson-card__note">
-                              <span className="cb-lesson-card__note-label">План</span>
-                              <p>{planItem.description}</p>
-                            </div>
-                          ) : null}
-                          {planItem?.teacherComment ? (
+                          {(planItem?.teacherComment || event.teacherComment) ? (
                             <div className="cb-lesson-card__note">
                               <span className="cb-lesson-card__note-label">Комментарий</span>
-                              <p>{planItem.teacherComment}</p>
+                              <p>{planItem?.teacherComment || event.teacherComment}</p>
                             </div>
                           ) : null}
                         </div>
@@ -1037,22 +1058,16 @@ export default function EventDetailCard({
                   <section className="cb-lesson-card__section cb-lesson-card__section--compact cb-lesson-card__section--notes">
                     <h3 className="cb-lesson-card__section-title cb-lesson-card__section-title--plain">Заметки</h3>
                     <div className="cb-lesson-card__notes cb-lesson-card__notes--scroll">
-                      {planItem?.goal ? (
+                      {(planItem?.goal || event.goal) ? (
                         <div className="cb-lesson-card__note">
                           <span className="cb-lesson-card__note-label">Цель</span>
-                          <p>{planItem.goal}</p>
+                          <p>{planItem?.goal || event.goal}</p>
                         </div>
                       ) : null}
-                      {planItem?.description ? (
-                        <div className="cb-lesson-card__note">
-                          <span className="cb-lesson-card__note-label">План</span>
-                          <p>{planItem.description}</p>
-                        </div>
-                      ) : null}
-                      {planItem?.teacherComment ? (
+                      {(planItem?.teacherComment || event.teacherComment) ? (
                         <div className="cb-lesson-card__note">
                           <span className="cb-lesson-card__note-label">Комментарий</span>
-                          <p>{planItem.teacherComment}</p>
+                          <p>{planItem?.teacherComment || event.teacherComment}</p>
                         </div>
                       ) : null}
                     </div>
@@ -1065,10 +1080,11 @@ export default function EventDetailCard({
               <ResourceSection
                 title="Материалы урока"
                 rows={materials}
-                emptyLabel="Материалов нет"
-                emptyActionLabel="Добавить"
+                emptyLabel="Материалы пока не добавлены"
+                emptyActionLabel="Добавить материал"
                 addLabel="Добавить"
                 onAdd={event.readOnly || studentMode ? null : handleAddMaterials}
+                onRemove={event.readOnly || studentMode ? null : onRemoveMaterial || null}
                 variant="material"
                 isMobile={isMobile}
                 suppressEmpty={

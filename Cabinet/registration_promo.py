@@ -1,6 +1,9 @@
 """
-Акция при регистрации: тариф «Профи» на 3 месяца с даты регистрации
+Акция при регистрации: тариф «Профи» (slug=pro) на 3 месяца с даты регистрации
 для всех учителей, зарегистрировавшихся до 1 октября 2026.
+
+Legacy-тариф slug=profi (rank=0) считается тем же продуктом и принудительно
+мигрируется на актуальный slug=pro (rank=2).
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from .referral_service import ReferralService, add_months, get_default_reward_pl
 logger = logging.getLogger(__name__)
 
 PROMO_PLAN_SLUG = "pro"
+LEGACY_PRO_SLUGS = frozenset({"profi", "pro"})
 PROMO_MONTHS = 3
 # Акция действует для регистраций строго до этой даты (1 октября не включается).
 PROMO_UNTIL_DATE = datetime(2026, 10, 1, 0, 0, 0)
@@ -29,6 +33,7 @@ _PLAN_RANK = {
     "start": 0,
     "teacher": 1,
     "repetitor": 1,  # legacy
+    "profi": 2,  # legacy alias of pro
     "pro": 2,
     "premium": 3,
     "school": 4,
@@ -74,25 +79,45 @@ def _plan_rank(slug: str) -> int:
     return _PLAN_RANK.get(slug or "", 0)
 
 
-def _should_skip_existing(sub: TeacherSubscription, promo_expires_at) -> bool:
-    """Не затираем более выгодную или уже выданную подписку."""
+def _resolve_pro_plan() -> TariffPlan | None:
+    plan = TariffPlan.objects.filter(slug=PROMO_PLAN_SLUG, is_active=True).first()
+    if plan:
+        return plan
+    plan = get_default_reward_plan()
+    if plan and plan.slug == PROMO_PLAN_SLUG:
+        return plan
+    # Fallback: legacy «profi», если seed ещё не создал pro
+    return TariffPlan.objects.filter(slug="profi", is_active=True).first()
+
+
+def _should_skip_existing(sub: TeacherSubscription, promo_expires_at, *, pro_plan: TariffPlan) -> bool:
+    """Не затираем более выгодную подписку. Legacy profi → всегда мигрируем на pro."""
     if not sub or not sub.plan_id:
         return False
+    slug = sub.plan.slug
+
+    # Legacy «profi» с нулевым rank — нельзя оставлять: нет доступа уровня Профи.
+    if slug == "profi" and sub.plan_id != pro_plan.pk:
+        return False
+
     if not sub.is_valid():
         return False
-    slug = sub.plan.slug
+
     if _plan_rank(slug) > _plan_rank(PROMO_PLAN_SLUG):
         return True
-    if slug == PROMO_PLAN_SLUG:
+
+    if slug in LEGACY_PRO_SLUGS and sub.plan_id == pro_plan.pk:
         if sub.expires_at is None:
             return True
         if sub.expires_at >= promo_expires_at:
             return True
+
     # Платный активный тариф без срока (ручная выдача) — не трогаем.
     if (
         sub.status == TeacherSubscription.Status.ACTIVE
         and sub.expires_at is None
         and float(sub.plan.price_month or 0) > 0
+        and slug not in LEGACY_PRO_SLUGS
     ):
         return True
     return False
@@ -101,7 +126,7 @@ def _should_skip_existing(sub: TeacherSubscription, promo_expires_at) -> bool:
 @transaction.atomic
 def apply_registration_promo(user: User, *, force: bool = False) -> Optional[dict]:
     """
-    Выдаёт Профи на 3 месяца с даты регистрации.
+    Выдаёт актуальный тариф «Профи» (slug=pro) на 3 месяца с даты регистрации.
     Возвращает dict с деталями или None, если акция не применена.
     """
     profile = getattr(user, "profile", None)
@@ -112,40 +137,88 @@ def apply_registration_promo(user: User, *, force: bool = False) -> Optional[dic
     if not force and not registration_qualifies_for_promo(started_at):
         return None
 
-    plan = TariffPlan.objects.filter(slug=PROMO_PLAN_SLUG, is_active=True).first()
+    plan = _resolve_pro_plan()
     if not plan:
-        plan = get_default_reward_plan()
-    if not plan or plan.slug != PROMO_PLAN_SLUG:
         logger.warning("Registration promo: plan «pro» not found")
         return None
 
+    # Ровно 3 месяца с даты регистрации (не от «сейчас»).
     promo_expires = add_months(started_at, PROMO_MONTHS)
+    now = timezone.now()
+
     from .subscription_service import SubscriptionLimitService
 
     sub = SubscriptionLimitService.get_or_create_subscription(user, apply_promo=False)
     sub = TeacherSubscription.objects.select_related("plan").get(pk=sub.pk)
-    if not force and _should_skip_existing(sub, promo_expires):
+
+    if not force and _should_skip_existing(sub, promo_expires, pro_plan=plan):
         return None
 
-    sub, expires_at = ReferralService.grant_subscription(
-        user,
-        plan,
-        PROMO_MONTHS,
-        started_at=started_at,
-    )
-    # Переопределяем source: это стартовая акция, не реферал.
+    # Если период с даты регистрации уже закончился — только мигрируем legacy profi→pro,
+    # не продлевая доступ «задним числом».
+    period_over = promo_expires <= now
+    if period_over and not force:
+        if sub.plan_id == plan.pk or (sub.plan and sub.plan.slug not in ("profi", "start", None)):
+            if sub.plan and sub.plan.slug != "profi":
+                return None
+        # legacy profi без актуального срока — переведём на pro, сохранив expires_at
+        if sub.plan and sub.plan.slug == "profi" and sub.is_valid() and sub.expires_at and sub.expires_at > now:
+            sub.plan = plan
+            sub.source = TeacherSubscription.Source.LAUNCH_PROMO
+            sub.is_legacy_promo = True
+            sub.save(update_fields=["plan", "source", "is_legacy_promo", "updated_at"])
+            return {
+                "plan_slug": plan.slug,
+                "plan_name": plan.name,
+                "months": PROMO_MONTHS,
+                "started_at": started_at.isoformat(),
+                "expires_at": sub.expires_at.isoformat(),
+                "source": "launch_promo",
+                "remapped_from": "profi",
+            }
+        return None
+
+    # Не сокращаем уже более длинный срок на том же уровне Профи.
+    expires_at = promo_expires
+    if (
+        sub.plan_id
+        and sub.plan.slug in LEGACY_PRO_SLUGS
+        and sub.expires_at
+        and sub.expires_at > expires_at
+    ):
+        expires_at = sub.expires_at
+
+    sub.plan = plan
+    sub.status = TeacherSubscription.Status.TRIAL
     sub.source = TeacherSubscription.Source.LAUNCH_PROMO
     sub.is_legacy_promo = True
+    sub.started_at = started_at
+    sub.expires_at = expires_at
     sub.promo_started_at = started_at
     sub.promo_ends_at = expires_at
+    sub.current_period_start = started_at
+    sub.current_period_end = expires_at
+    sub.auto_renew = False
     sub.save(update_fields=[
-        "source", "is_legacy_promo", "promo_started_at", "promo_ends_at", "updated_at",
+        "plan",
+        "status",
+        "source",
+        "is_legacy_promo",
+        "started_at",
+        "expires_at",
+        "promo_started_at",
+        "promo_ends_at",
+        "current_period_start",
+        "current_period_end",
+        "auto_renew",
+        "updated_at",
     ])
     logger.info(
-        "Registration promo: user=%s plan=%s until=%s",
+        "Registration promo: user=%s plan=%s until=%s (from registration %s)",
         user.pk,
         plan.slug,
         expires_at,
+        started_at,
     )
     return {
         "plan_slug": plan.slug,
@@ -164,3 +237,21 @@ def ensure_registration_promo(user: User) -> Optional[dict]:
     except Exception:
         logger.exception("Registration promo failed for user=%s", getattr(user, "pk", None))
         return None
+
+
+def grant_promo_to_all_teachers(*, force: bool = False) -> dict:
+    """Массовая выдача/миграция для всех учителей. Используется командой и миграцией."""
+    teachers = (
+        User.objects.filter(profile__role=Profile.Role.TEACHER)
+        .select_related("profile", "subscription", "subscription__plan")
+        .order_by("date_joined")
+    )
+    granted = 0
+    skipped = 0
+    for teacher in teachers:
+        result = apply_registration_promo(teacher, force=force)
+        if result:
+            granted += 1
+        else:
+            skipped += 1
+    return {"granted": granted, "skipped": skipped}

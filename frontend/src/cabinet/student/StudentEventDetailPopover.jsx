@@ -6,6 +6,12 @@ import {
   planItemLessonPopoverRows,
   planItemTaskPopoverRows,
 } from "../planItemAttachments";
+import {
+  resolveLessonCourseTitle,
+  resolveLessonDescription,
+  resolveLessonSubjectLabel,
+  resolveLessonTopic,
+} from "../lessonCardContent";
 import { fetchStudentScheduleEvent } from "../../utils/cabinetAuth";
 import { useLessonConnectAvailable } from "./StudentSectionUi";
 
@@ -79,10 +85,6 @@ function getEventPlanHomework(event) {
   return eventAssignedHomeworkRows(event);
 }
 
-function hasText(value) {
-  return Boolean(typeof value === "string" ? value.trim() : value);
-}
-
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches,
@@ -151,9 +153,12 @@ export default function StudentEventDetailPopover({ eventId, onClose }) {
   const planItem = getEventPlanItem(event);
   const materials = getEventPlanMaterials(event);
   const homework = getEventPlanHomework(event);
-  const topic = planItem ? (planItem.topic || planItem.title) : (event.topic || event.title || "");
-  const hasAbout = planItem && (
-    hasText(planItem.goal) || hasText(planItem.description) || hasText(planItem.teacherComment)
+  const topic = resolveLessonTopic(event);
+  const hasAbout = Boolean(
+    (planItem?.goal || "").trim()
+    || (event.goal || "").trim()
+    || (planItem?.teacherComment || "").trim()
+    || (event.teacherComment || "").trim(),
   );
   const meetingHref = event.videoMeeting?.pageUrl || event.link || "";
   const meetingStatus = event.videoMeeting?.status || null;
@@ -200,6 +205,9 @@ export default function StudentEventDetailPopover({ eventId, onClose }) {
       planItem={planItem}
       hasAbout={hasAbout}
       topic={topic}
+      subjectLabel={resolveLessonSubjectLabel(event)}
+      courseTitle={resolveLessonCourseTitle(event)}
+      description={resolveLessonDescription(event)}
       participants={Array.isArray(event.participants) ? event.participants : []}
       participantsFallback={event.teacher_name || "—"}
       shortenMeetingUrl={shortenMeetingUrl}

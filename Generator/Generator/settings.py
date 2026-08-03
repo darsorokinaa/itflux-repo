@@ -245,6 +245,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "Generator.middleware.NoStoreApiMiddleware",
+    "Generator.middleware.MinimumClientVersionMiddleware",
 ]
 
 # Разрешаем встраивать страницы в iframe на том же origin

@@ -9,6 +9,7 @@ import {
   StudentPageShell,
 } from "../StudentSectionUi";
 import CabinetIcon from "../../CabinetIcons";
+import { usePageTitle } from "../../hooks/usePageTitle";
 import "../../styles/boards.css";
 
 function pluralRu(n, one, few, many) {
@@ -40,6 +41,7 @@ function formatRelativeUpdated(value) {
 }
 
 export default function StudentBoardsPage() {
+  usePageTitle("Интерактивные доски");
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");

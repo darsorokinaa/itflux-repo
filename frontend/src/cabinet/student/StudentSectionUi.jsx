@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import CabinetIcon from "../CabinetIcons";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 export const ASSIGNMENT_STATUS_COLORS = {
   new: "#2563EB",
@@ -50,6 +51,7 @@ export function StudentPageShell({ children, className = "" }) {
 }
 
 export function StudentPageHeader({ title, subtitle, actions }) {
+  usePageTitle(title);
   return (
     <header className="st-page-header">
       <div>

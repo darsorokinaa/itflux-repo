@@ -33,7 +33,6 @@ def _send_telegram(user: User, text: str) -> bool:
 
 def notify_payment_received(teacher: User, payment: StudentPayment) -> None:
     from .teacher_notifications import _override_allows
-    from .webpush import notify_user_channels
 
     prefs = _prefs(teacher)
     if not prefs.notify_payment_received:
@@ -58,8 +57,12 @@ def notify_payment_received(teacher: User, payment: StudentPayment) -> None:
             f"Открыть: /cabinet/payments"
         )
 
-    notify_user_channels(
+    from .notification_catalog import NotificationEventType
+    from .notification_dispatch import NotificationDispatcher
+
+    NotificationDispatcher.notify(
         teacher,
+        NotificationEventType.BILLING_PAYMENT,
         title=title,
         message=message,
         payload={
@@ -69,12 +72,16 @@ def notify_payment_received(teacher: User, payment: StudentPayment) -> None:
             "student_id": payment.student_id,
             "url": f"/cabinet/payments?student={payment.student_id}",
         },
-        push_priority="important",
-        tag=f"payment-{payment.id}",
+        url=f"/cabinet/payments?student={payment.student_id}",
         dedup_key=f"billing_payment:{payment.id}:{teacher.pk}",
+        recipient_teacher=teacher,
+        skip_actor=False,
+        create_telegram=True,
+        telegram_text=tg_text,
+        push_tag=f"payment-{payment.id}",
+        private_title="Поступила оплата",
+        private_message="Зафиксирована новая оплата",
     )
-    if prefs.telegram_enabled:
-        _send_telegram(teacher, tg_text)
 
     try:
         from .student_notifications import notify_student_payment_recorded
@@ -159,20 +166,33 @@ def send_teacher_billing_digest(teacher: User, summary: dict, *, weekly: bool = 
         text = text.replace("за сегодня", "за неделю")
     from .webpush import notify_user_channels
 
-    notify_user_channels(
+    from .notification_catalog import NotificationEventType
+    from .notification_dispatch import NotificationDispatcher
+    from django.utils import timezone as dj_tz
+
+    period = "weekly" if weekly else "daily"
+    day_key = dj_tz.localdate().isoformat()
+    # Weekly gated above via notify_billing_weekly_digest; catalog maps digest → daily field.
+    result = NotificationDispatcher.notify(
         teacher,
+        NotificationEventType.BILLING_DIGEST,
         title=title,
         message=text,
         payload={
             "type": "billing_digest",
             "event_type": "billing_digest",
+            "period": period,
             "url": "/cabinet/payments",
         },
+        url="/cabinet/payments",
+        dedup_key=f"billing_digest:{period}:{teacher.pk}:{day_key}",
         recipient_teacher=teacher,
-        push_priority="normal",
-        tag="billing-digest",
-        skip_push_log=True,
+        skip_actor=False,
+        force=weekly,  # weekly already checked its own pref; bypass daily-field gate
+        create_telegram=True,
+        telegram_text=f"{text}\n\nОткрыть: /cabinet/payments",
+        push_tag=f"billing-digest-{period}",
+        private_title=title,
+        private_message="Финансовая сводка за период",
     )
-    if prefs.telegram_enabled:
-        return _send_telegram(teacher, f"{text}\n\nОткрыть: /cabinet/payments")
-    return True
+    return not result.skipped

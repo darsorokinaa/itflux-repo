@@ -511,6 +511,14 @@ class LessonLearningPlanSyncService:
             link.order = order
             link.save(update_fields=["order", "updated_at"])
 
+        # Двусторонняя связь: материал урока ↔ пункт плана (без дубля объекта).
+        item = event.lesson_plan_item
+        if item is not None:
+            if material_id:
+                item.materials.add(material_id)
+            if interactive_id:
+                item.attached_interactives.add(interactive_id)
+
         if source == ScheduleMaterialSource.LESSON_MANUAL and event.content_source == LessonContentSource.PLAN:
             event.content_source = LessonContentSource.MIXED
             event.save(update_fields=["content_source", "updated_at"])
@@ -537,6 +545,15 @@ class LessonLearningPlanSyncService:
         if source:
             qs = qs.filter(source=source)
         deleted, _ = qs.delete()
+
+        # Убираем связь и из пункта плана — сам материал в библиотеке остаётся.
+        item = event.lesson_plan_item
+        if item is not None:
+            if material_id:
+                item.materials.remove(material_id)
+            if interactive_id:
+                item.attached_interactives.remove(interactive_id)
+
         return deleted
 
     # ── Внутренние хелперы ────────────────────────────────────────────────
@@ -706,7 +723,15 @@ class LessonLearningPlanSyncService:
             )
         max_order = plan.items.aggregate(m=Max("order")).get("m") or 0
         topic = (event.topic or "").strip()
-        item_title = (title or topic or event.title or f"Урок {max_order + 1}").strip()[:255]
+        # Не используем event.title (= имя ученика/группы) как название пункта.
+        audience_names = {
+            (event.title or "").strip().lower(),
+            (event.audience or "").strip().lower(),
+        }
+        raw_title = (title or topic or "").strip()
+        if raw_title.lower() in audience_names:
+            raw_title = ""
+        item_title = (raw_title or topic or f"Урок {max_order + 1}").strip()[:255]
         item = LessonPlanItem.objects.create(
             plan=plan,
             order=max_order + 1,
@@ -740,8 +765,19 @@ class LessonLearningPlanSyncService:
     ) -> None:
         overrides = cls._overrides(event)
         fields = list(force_fields) if force_fields is not None else list(SYNCABLE_FROM_PLAN)
+        # item.title часто = имя ученика (legacy ensure_event_plan_item) —
+        # не копируем его в topic, иначе в карточке «Александр» вместо темы.
+        topic_candidate = (item.topic or "").strip()
+        if not topic_candidate:
+            title_candidate = (item.title or "").strip()
+            audience_names = {
+                (event.title or "").strip().lower(),
+                (event.audience or "").strip().lower(),
+            }
+            if title_candidate and title_candidate.lower() not in audience_names:
+                topic_candidate = title_candidate
         mapping = {
-            "topic": (item.topic or item.title or "")[:500],
+            "topic": topic_candidate[:500],
             "subtopic": (item.subtopic or "")[:255],
             "description": item.description or "",
             "goal": item.goal or "",
@@ -760,10 +796,14 @@ class LessonLearningPlanSyncService:
         item.description = event.description or ""
         item.goal = event.goal or ""
         item.homework_description = event.homework_description or ""
-        if event.topic and not item.title:
-            item.title = event.topic[:255]
-        elif event.topic and item.title in ("Урок", event.title):
-            item.title = event.topic[:255]
+        topic = (event.topic or "").strip()
+        audience_titles = {
+            (event.title or "").strip(),
+            (event.audience or "").strip(),
+            "Урок",
+        }
+        if topic and (not item.title or item.title in audience_titles or item.title.startswith("Материалы:")):
+            item.title = topic[:255]
         item.save(update_fields=[
             "topic", "subtopic", "description", "goal",
             "homework_description", "title", "updated_at",
@@ -873,8 +913,16 @@ class LessonLearningPlanSyncService:
         updates: dict,
     ) -> list[str]:
         conflicts = []
+        plan_topic = (item.topic or "").strip()
+        if not plan_topic:
+            title_candidate = (item.title or "").strip()
+            if title_candidate.lower() not in {
+                (event.title or "").strip().lower(),
+                (event.audience or "").strip().lower(),
+            }:
+                plan_topic = title_candidate
         plan_values = {
-            "topic": (item.topic or item.title or "").strip(),
+            "topic": plan_topic,
             "subtopic": (item.subtopic or "").strip(),
             "description": (item.description or "").strip(),
             "goal": (item.goal or "").strip(),

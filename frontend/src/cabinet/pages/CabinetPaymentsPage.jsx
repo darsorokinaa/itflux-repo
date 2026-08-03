@@ -5,6 +5,7 @@ import BillingPackageModal from "../components/BillingPackageModal";
 import ChargeFromPackageModal from "../components/ChargeFromPackageModal";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import { CabinetSoonBadge } from "../CabinetSectionUi";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { PAYMENTS_ENABLED } from "../featureFlags";
 import {
   fetchBillingAccount,
@@ -360,6 +361,7 @@ function StudentDetailDrawer({
 }
 
 function CabinetPaymentsPlaceholder() {
+  usePageTitle("Оплаты");
   return (
     <div className="pay-page">
       <header className="pay-head">
@@ -377,6 +379,7 @@ function CabinetPaymentsPlaceholder() {
 }
 
 function CabinetPaymentsPageInner() {
+  usePageTitle("Оплаты");
   const [searchParams, setSearchParams] = useSearchParams();
   const [monthCursor, setMonthCursor] = useState(() => {
     const now = new Date();
@@ -432,10 +435,6 @@ function CabinetPaymentsPageInner() {
       setLoading(false);
     }
   }, [monthCursor]);
-
-  useEffect(() => {
-    document.title = "Оплаты — Личный кабинет";
-  }, []);
 
   useEffect(() => {
     reload();

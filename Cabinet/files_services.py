@@ -897,6 +897,8 @@ def attach_file(user, file_id, target_type: str, target_id) -> dict:
         if not homework:
             raise FileServiceError("Домашнее задание не найдено", code="NOT_FOUND", status=404)
         rel_kwargs["homework"] = homework
+        material = _ensure_material_bridge(user, file_obj)
+        rel_kwargs["material"] = material
         if homework.student_id:
             rel_kwargs["student"] = homework.student
         if homework.group_id:

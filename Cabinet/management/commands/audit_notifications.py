@@ -54,6 +54,8 @@ CODE_EVENT_HANDLERS = {
     "student_entered_room": "teacher_notifications",
     "student_absent": "send_student_absent_alerts",
     "journal_results": "journal_notifications",
+    "journal_comment": "journal_notifications / journal_service.update_student_record",
+    "journal_recommendation": "journal_notifications / journal_service.update_student_record",
     "journal_daily_digest": "send_daily_schedule_digests / journal_notifications",
     "billing_payment": "billing_notifications",
     "billing_package_low": "teacher_notifications",

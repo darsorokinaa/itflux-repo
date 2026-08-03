@@ -1131,6 +1131,142 @@
   line-height: 1.35;
 }
 
+.jg-topic-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+
+.jg-topic-field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+button.jg-topic-field--view {
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+}
+
+button.jg-topic-field--view:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+button.jg-topic-field--view:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.jg-topic-field__label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--jg-muted);
+  line-height: 1.2;
+}
+
+.jg-topic-field__value {
+  display: block;
+  font-weight: 500;
+  font-size: 0.8125rem;
+  color: var(--jg-ink);
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.jg-topic-field--view.is-empty .jg-topic-field__value {
+  color: var(--jg-muted);
+  font-weight: 400;
+  font-style: italic;
+}
+
+.jg-topic-field__input {
+  width: 100%;
+  min-height: 2.5rem;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--jg-ink);
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.jg-topic-field__input:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  outline-offset: 1px;
+  border-color: #2563eb;
+}
+
+.jg-topic-field__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.jg-topic-field__btn {
+  appearance: none;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: var(--jg-ink);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.jg-topic-field__btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.jg-topic-field__btn--primary {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+
+.jg-topic-field__error {
+  color: #b91c1c;
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+.jg-topic-field__hint {
+  font-size: 0.6875rem;
+  color: #15803d;
+}
+
+.jg-topic-field--error .jg-topic-field__input {
+  border-color: #ef4444;
+}
+
+.jg-cell--topic {
+  min-width: 0;
+  align-items: flex-start;
+}
+
 .jg-sub {
   display: block;
   margin-top: 2px;

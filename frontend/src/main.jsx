@@ -10,10 +10,14 @@ import './styles/cabinet.css'
 import App from './App.jsx'
 import { ensureSiteFavicon } from './utils/ensureSiteFavicon'
 import { bindPushNavigation, registerServiceWorker } from './cabinet/pwa/pwaHelpers'
+import { migrateClientDataSchema } from './utils/appVersion'
+import { startAppUpdateMonitor } from './utils/appUpdate'
 
 ensureSiteFavicon()
+migrateClientDataSchema()
 registerServiceWorker()
 bindPushNavigation()
+startAppUpdateMonitor()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

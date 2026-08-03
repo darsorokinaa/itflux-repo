@@ -634,6 +634,9 @@ def _serialize_assignment_card(homework, students):
     elif sid in ("in_progress", "needs_fix", "overdue"):
         progress_percent = 45 if tasks_total else 30
         tasks_done = round(tasks_total * progress_percent / 100) if tasks_total else 0
+    from .homework_attachments import list_homework_attachments
+
+    attachments = list_homework_attachments(homework, for_student=True)
     return {
         "id": homework.id,
         "title": homework.title,
@@ -654,6 +657,8 @@ def _serialize_assignment_card(homework, students):
         "progress_percent": progress_percent,
         "teacher_comment": (submission.teacher_comment or "") if submission else "",
         "description": (homework.description or "")[:240],
+        "attachments": attachments[:4],
+        "attachments_count": len(attachments),
     }
 
 
@@ -1242,10 +1247,15 @@ class StudentAssignmentDetailView(StudentScopedView):
             elif submission.attached_file:
                 attached_name = submission.attached_file.name.split("/")[-1]
 
+        from .homework_attachments import list_homework_attachments
+
+        attachments = list_homework_attachments(hw, for_student=True)
         card = _serialize_assignment_card(hw, students)
         card.update({
             "description": hw.description or "",
             "tasks": tasks,
+            "attachments": attachments,
+            "attachments_count": len(attachments),
             "has_variant": homework_has_variant_task(hw),
             "answer_text": submission.answer_text if submission else "",
             "attached_file_url": submission_file_url(submission, for_student=True) if submission else "",

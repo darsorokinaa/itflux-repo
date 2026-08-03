@@ -423,6 +423,11 @@ def move_event(event, *, starts_at, ends_at, changed_by, notify=True):
     event.ends_at = ends_at
     event.status = ScheduleEvent.Status.MOVED
     event.save()
+    # Старые логи напоминаний относятся к прежнему времени — сбрасываем,
+    # чтобы cron мог отправить напоминания по новому starts_at.
+    from .models import EventReminderLog
+
+    EventReminderLog.objects.filter(event=event).delete()
     log_change(
         event,
         changed_by=changed_by,
@@ -649,9 +654,18 @@ def update_event(event, *, changed_by, data, notify=True):
                 event.lesson_plan_item_id = int(value)
             continue
         setattr(event, f, value)
+    time_changed = False
     if "starts_at" in data:
+        if old.get("starts_at") != (
+            data["starts_at"].isoformat() if hasattr(data["starts_at"], "isoformat") else data["starts_at"]
+        ):
+            time_changed = True
         event.starts_at = data["starts_at"]
     if "ends_at" in data:
+        if old.get("ends_at") != (
+            data["ends_at"].isoformat() if hasattr(data["ends_at"], "isoformat") else data["ends_at"]
+        ):
+            time_changed = True
         event.ends_at = data["ends_at"]
     if "student_subject" in data:
         ss_val = data["student_subject"]
@@ -662,6 +676,10 @@ def update_event(event, *, changed_by, data, notify=True):
         else:
             event.student_subject_id = int(ss_val)
     event.save()
+    if time_changed:
+        from .models import EventReminderLog
+
+        EventReminderLog.objects.filter(event=event).delete()
     log_change(
         event,
         changed_by=changed_by,
@@ -670,7 +688,14 @@ def update_event(event, *, changed_by, data, notify=True):
         new_data=event_snapshot(event),
     )
     if notify and data.get("notify_participants", True):
-        NotificationService.notify_event_updated(event, changes=data)
+        if time_changed:
+            NotificationService.notify_event_moved(
+                event,
+                old_start_at=old.get("starts_at"),
+                old_end_at=old.get("ends_at"),
+            )
+        else:
+            NotificationService.notify_event_updated(event, changes=data)
     return event
 
 
