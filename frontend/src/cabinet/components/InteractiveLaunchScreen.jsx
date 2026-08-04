@@ -1,12 +1,15 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { TEMPLATE_SWITCHER, getInteractiveDisplayTitle, getTypeMeta } from "../interactivesData";
-import { appearancePageClass, appearancePageStyle } from "../interactiveAppearance";
+import { appearancePageClass, appearancePageStyle, resolvePageTextTone } from "../interactiveAppearance";
+import { isAutoTextBackdropEnabled } from "../interactiveContrast";
 import {
   getInteractiveLaunchMeta,
   interactiveHasPlayableContent,
 } from "../interactivesEditorUtils";
 import InteractivePlayer from "./InteractivePlayer";
+import ContrastingText from "./ContrastingText";
+import ConfirmActionModal from "./ConfirmActionModal";
 
 const TYPE_HELP = {
   flashcards: "Переворачивайте карточки и отмечайте, что уже знаете.",
@@ -29,14 +32,21 @@ export default function InteractiveLaunchScreen({
   appearance,
   started,
   onStart,
+  onRestart,
   fullscreenHref,
   editHref,
   showToolbar = true,
 }) {
   const [soundOn, setSoundOn] = useState(appearance?.soundEnabled !== false);
+  const [sessionKey, setSessionKey] = useState(0);
+  const [confirmRestart, setConfirmRestart] = useState(false);
+  const [hasProgress, setHasProgress] = useState(false);
   const typeMeta = getTypeMeta(interactive.type);
   const metaLine = getInteractiveLaunchMeta(interactive);
   const hasContent = interactiveHasPlayableContent(interactive);
+  const textTone = resolvePageTextTone(appearance);
+  const textColor = textTone === "light" ? "#ffffff" : "#0f172a";
+  const autoBackdrop = isAutoTextBackdropEnabled(interactive);
 
   const frameClass = [
     "ix-launch-hero",
@@ -45,15 +55,46 @@ export default function InteractiveLaunchScreen({
     !hasContent ? " ix-launch-hero--empty" : "",
   ].filter(Boolean).join(" ");
 
+  const requestRestart = useCallback(() => {
+    if (started && hasProgress) {
+      setConfirmRestart(true);
+      return;
+    }
+    setHasProgress(false);
+    setSessionKey((k) => k + 1);
+    onRestart?.();
+    onStart?.();
+  }, [started, hasProgress, onRestart, onStart]);
+
+  const confirmDoRestart = () => {
+    setConfirmRestart(false);
+    setHasProgress(false);
+    setSessionKey((k) => k + 1);
+    onRestart?.();
+    onStart?.();
+  };
+
   return (
     <div className={frameClass} style={appearancePageStyle(appearance)}>
       {!hasContent ? (
         <div className="ix-launch-hero__intro ix-launch-hero__intro--empty">
           <p className="ix-launch-hero__type">{typeMeta.shortLabel}</p>
-          <h2 className="ix-launch-hero__title">{getInteractiveDisplayTitle(interactive)}</h2>
-          <p className="ix-launch-hero__instruction">
+          <ContrastingText
+            as="h2"
+            className="ix-launch-hero__title"
+            color={textColor}
+            autoBackdrop={autoBackdrop}
+          >
+            {getInteractiveDisplayTitle(interactive)}
+          </ContrastingText>
+          <ContrastingText
+            as="p"
+            className="ix-launch-hero__instruction"
+            color={textColor}
+            autoBackdrop={autoBackdrop}
+          >
             {EMPTY_HELP[interactive.type] || "Добавьте содержимое, чтобы запустить интерактив"}
-          </p>
+          </ContrastingText>
           {editHref ? (
             <Link to={editHref} className="cb-btn cb-btn--primary cb-btn--pill ix-launch-hero__edit-link">
               Редактировать
@@ -63,26 +104,51 @@ export default function InteractiveLaunchScreen({
       ) : !started ? (
         <div className="ix-launch-hero__intro">
           <p className="ix-launch-hero__type">{typeMeta.shortLabel}</p>
-          <h2 className="ix-launch-hero__title">{getInteractiveDisplayTitle(interactive)}</h2>
+          <ContrastingText
+            as="h2"
+            className="ix-launch-hero__title"
+            color={textColor}
+            autoBackdrop={autoBackdrop}
+          >
+            {getInteractiveDisplayTitle(interactive)}
+          </ContrastingText>
           {metaLine ? (
-            <p className="ix-launch-hero__meta">{metaLine}</p>
+            <ContrastingText
+              as="p"
+              className="ix-launch-hero__meta"
+              color={textColor}
+              autoBackdrop={autoBackdrop}
+            >
+              {metaLine}
+            </ContrastingText>
           ) : null}
           <div className="ix-launch-hero__intro-actions">
             <button type="button" className="ix-launch-hero__start" onClick={onStart}>
               <span className="ix-launch-hero__start-icon" aria-hidden="true">▶</span>
               Начать
             </button>
+            {editHref ? (
+              <Link to={editHref} className="cb-btn cb-btn--outline cb-btn--pill ix-launch-hero__edit-btn">
+                Редактировать
+              </Link>
+            ) : null}
           </div>
           <p className="ix-launch-hero__help-text" title={TYPE_HELP[interactive.type] || ""}>
             {TYPE_HELP[interactive.type]}
           </p>
         </div>
       ) : (
-        <div className="ix-launch-hero__player">
+        <div
+          className="ix-launch-hero__player"
+          onPointerDown={() => setHasProgress(true)}
+        >
           <InteractivePlayer
+            key={sessionKey}
             interactive={interactive}
             appearance={{ ...appearance, soundEnabled: soundOn }}
             playing
+            sessionKey={sessionKey}
+            onProgress={() => setHasProgress(true)}
           />
         </div>
       )}
@@ -97,6 +163,17 @@ export default function InteractiveLaunchScreen({
           >
             {soundOn ? "🔊" : "🔇"}
           </button>
+          {started ? (
+            <button
+              type="button"
+              className="ix-launch-hero__tool"
+              onClick={requestRestart}
+              aria-label="Начать заново"
+              title="Начать заново"
+            >
+              ↻
+            </button>
+          ) : null}
           {fullscreenHref ? (
             <Link
               to={fullscreenHref}
@@ -110,6 +187,15 @@ export default function InteractiveLaunchScreen({
           ) : null}
         </div>
       ) : null}
+
+      <ConfirmActionModal
+        open={confirmRestart}
+        title="Начать заново?"
+        text="Текущий прогресс будет сброшен. Начать заново?"
+        confirmLabel="Начать заново"
+        onClose={() => setConfirmRestart(false)}
+        onConfirm={confirmDoRestart}
+      />
     </div>
   );
 }

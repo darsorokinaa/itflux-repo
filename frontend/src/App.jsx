@@ -79,6 +79,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import AppUpdateBanner from "./components/AppUpdateBanner";
 import { ensureSiteFavicon } from "./utils/ensureSiteFavicon";
 import { markUpdateFromClientRequired } from "./utils/appUpdate";
+import { SeasonalThemeProvider } from "./seasonal/SeasonalThemeProvider";
 
 const DEFAULT_META_DESCRIPTION =
   "Цифровой поток: подготовка к ОГЭ и ЕГЭ, генератор вариантов, банк задач, интерактивные уроки и личный кабинет учителя.";
@@ -262,6 +263,7 @@ function ClientUpdateRequiredListener() {
 function App() {
   return (
     <BrowserRouter>
+      <SeasonalThemeProvider>
       <CyrillicPathRedirect />
       <ScrollToTop />
       <MetaDescriptionSync />
@@ -425,6 +427,7 @@ function App() {
 
       </Routes>
       <MeetingCallDock />
+      </SeasonalThemeProvider>
     </BrowserRouter>
   );
 }

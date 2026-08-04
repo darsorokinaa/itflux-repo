@@ -20,6 +20,7 @@ import { useSubscription } from "./hooks/useSubscription";
 import { PageTitleProvider } from "./hooks/usePageTitle";
 import PwaEnableNotificationsPrompt from "./pwa/PwaEnableNotificationsPrompt";
 import PwaInstallPrompt from "./pwa/PwaInstallPrompt";
+import { useSeasonalTheme } from "../seasonal/SeasonalThemeProvider";
 import "../styles/cabinet-dashboard.css";
 import "./styles/teacher-cabinet.css";
 import "../styles/cabinet-mobile-system.css";
@@ -104,6 +105,7 @@ function NavSidebarItem({ item, active, badgeCount = 0 }) {
 
 export default function CabinetLayout() {
   const location = useLocation();
+  const { openAppearancePanel, hasSeasonalAppearance } = useSeasonalTheme();
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -499,6 +501,20 @@ export default function CabinetLayout() {
                     <CabinetIcon name="settings" />
                     <span>Настройки</span>
                   </Link>
+                  {hasSeasonalAppearance ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="cabinet-header-more__item"
+                      onClick={() => {
+                        setHeaderMoreOpen(false);
+                        openAppearancePanel();
+                      }}
+                    >
+                      <CabinetIcon name="spark" />
+                      <span>Оформление</span>
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </div>

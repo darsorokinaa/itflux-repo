@@ -41,6 +41,12 @@ export default function WheelPlayer({
     setFinished(true);
   };
 
+  const restart = () => {
+    resultsRef.current = [];
+    setResults([]);
+    setFinished(false);
+  };
+
   if (finished) {
     const totalPoints = results.reduce((sum, item) => sum + (item.points_awarded || 0), 0);
     return (
@@ -59,6 +65,9 @@ export default function WheelPlayer({
         {totalPoints > 0 ? (
           <p className="ix-wheel-player-done__score">Итого: {formatWheelPoints(totalPoints)}</p>
         ) : null}
+        <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={restart}>
+          Пройти ещё раз
+        </button>
       </div>
     );
   }

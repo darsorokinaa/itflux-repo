@@ -4,13 +4,14 @@ import CabinetIcon from "../CabinetIcons";
 import { CABINET_MORE_GROUPS } from "../cabinetNav";
 import { CabinetPageShell, CabinetPageHeader, CabinetSoonBadge } from "../CabinetSectionUi";
 import ProfileAvatarEditor from "../components/ProfileAvatarEditor";
+import { useSeasonalTheme } from "../../seasonal/SeasonalThemeProvider";
 
 function formatNavCount(count) {
   if (!count || count <= 0) return null;
   return count > 99 ? "99+" : String(count);
 }
 
-function MoreCard({ item, onSettings, onGuide, onNotifications, badgeCount = 0 }) {
+function MoreCard({ item, onSettings, onGuide, onNotifications, onAppearance, badgeCount = 0 }) {
   const countLabel = formatNavCount(badgeCount);
 
   if (item.action === "settings") {
@@ -38,6 +39,17 @@ function MoreCard({ item, onSettings, onGuide, onNotifications, badgeCount = 0 }
   if (item.action === "notifications") {
     return (
       <button type="button" className="cb-more-card" onClick={onNotifications}>
+        <span className="cb-more-card__icon">
+          <CabinetIcon name={item.icon} />
+        </span>
+        <span className="cb-more-card__label">{item.label}</span>
+      </button>
+    );
+  }
+
+  if (item.action === "appearance") {
+    return (
+      <button type="button" className="cb-more-card" onClick={onAppearance}>
         <span className="cb-more-card__icon">
           <CabinetIcon name={item.icon} />
         </span>
@@ -116,6 +128,7 @@ export default function CabinetMorePage() {
   ];
   const openNotifications = () => window.dispatchEvent(new Event("cabinet:open-notifications"));
   const openSettings = () => navigate("/cabinet/settings/notifications/");
+  const { openAppearancePanel, hasSeasonalAppearance } = useSeasonalTheme();
 
   const badgeForItem = (itemId) => {
     if (itemId === "review") return navCounts?.reviews || 0;
@@ -127,23 +140,30 @@ export default function CabinetMorePage() {
     <CabinetPageShell>
       <CabinetPageHeader title="Ещё" />
       <div className="cb-more-sections">
-        {moreGroups.map((group) => (
+        {moreGroups.map((group) => {
+          const items = group.items.filter(
+            (item) => item.action !== "appearance" || hasSeasonalAppearance,
+          );
+          if (!items.length) return null;
+          return (
           <section key={group.id} className="cb-more-section">
             <h2 className="cb-more-section__title">{group.label}</h2>
             <div className="cb-more-grid">
-              {group.items.map((item) => (
+              {items.map((item) => (
                 <MoreCard
                   key={item.id}
                   item={item}
                   badgeCount={badgeForItem(item.id)}
                   onSettings={openSettings}
+                  onAppearance={openAppearancePanel}
                   onGuide={openGuide}
                   onNotifications={openNotifications}
                 />
               ))}
             </div>
           </section>
-        ))}
+          );
+        })}
       </div>
       {user ? (
         <div className="cb-more-profile">

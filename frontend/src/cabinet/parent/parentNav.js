@@ -33,12 +33,13 @@ export const PARENT_MORE_GROUPS = [
     items: [
       { id: "billing", label: "Оплата", path: "/cabinet/parent/billing", icon: "wallet" },
       { id: "notifications", label: "Уведомления", path: "/cabinet/parent/settings/notifications", icon: "bell" },
+      { id: "appearance", label: "Оформление", path: null, icon: "spark", action: "appearance" },
     ],
   },
 ];
 
 export const PARENT_MORE_ITEMS = PARENT_MORE_GROUPS.flatMap((group) => group.items);
-const MORE_PATHS = PARENT_MORE_ITEMS.map((item) => item.path);
+const MORE_PATHS = PARENT_MORE_ITEMS.filter((item) => item.path).map((item) => item.path);
 
 export function isParentNavActive(pathname, item) {
   if (item.id === "home") {

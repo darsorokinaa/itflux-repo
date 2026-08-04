@@ -7,6 +7,7 @@ import {
 } from "../interactiveAppearance";
 import { getInteractiveDisplayTitle } from "../interactivesData";
 import { playInteractiveSound, unlockInteractiveAudio, startInteractiveBackgroundSound, stopInteractiveBackgroundSound } from "../interactiveSounds";
+import { shuffleArray } from "../quizUtils";
 
 function InlineImage({ src, alt, className }) {
   const value = String(src || "").trim();
@@ -273,24 +274,24 @@ function MatchingPlayer({ pairs, shuffle, bare, playing, appearance, onComplete 
   const rightRefs = useRef({});
   const studyMode = bare || playing;
 
-  const leftItems = useMemo(() => {
+  const [leftItems] = useState(() => {
     const items = pairs.map((p, i) => ({
       id: `l${i}`,
       text: p.left || `— ${i + 1}`,
       image_url: p.left_image_url || "",
     }));
-    return shuffle ? [...items].sort(() => Math.random() - 0.5) : items;
-  }, [pairs, shuffle]);
+    return shuffle ? shuffleArray(items) : items;
+  });
 
-  const rightItems = useMemo(() => {
+  const [rightItems] = useState(() => {
     const items = pairs.map((p, i) => ({
       id: `r${i}`,
       text: p.right || `— ${i + 1}`,
       image_url: p.right_image_url || "",
       pairIndex: i,
     }));
-    return shuffle ? [...items].sort(() => Math.random() - 0.5) : items;
-  }, [pairs, shuffle]);
+    return shuffle ? shuffleArray(items) : items;
+  });
 
   const updateLines = useCallback(() => {
     const stage = stageRef.current;
@@ -338,7 +339,9 @@ function MatchingPlayer({ pairs, shuffle, bare, playing, appearance, onComplete 
   useEffect(() => {
     if (matched.length === pairs.length && pairs.length > 0 && !done) {
       playInteractiveSound(appearance, "end");
+      /* eslint-disable react-hooks/set-state-in-effect -- one-shot completion when all pairs matched */
       setDone(true);
+      /* eslint-enable react-hooks/set-state-in-effect */
       onComplete?.(100);
     }
   }, [appearance, matched.length, pairs.length, done, onComplete]);
@@ -464,15 +467,15 @@ function SequencePlayer({ steps, shuffle, bare, playing, appearance, onComplete 
 
   const correctOrder = sortedSteps.map((s, i) => s.text || `Шаг ${i + 1}`);
 
-  const shuffled = useMemo(() => {
+  const [shuffled] = useState(() => {
     const items = steps.map((s, i) => ({
       id: `s${i}`,
       text: s.text || `Шаг ${i + 1}`,
       image_url: s.image_url || "",
     }));
     if (!shuffle) return items;
-    return [...items].sort(() => Math.random() - 0.5);
-  }, [steps, shuffle]);
+    return shuffleArray(items);
+  });
 
   const current = order.length > 0 ? order : shuffled.map((s) => s.id);
 
@@ -559,7 +562,9 @@ function PlayIntro({ interactive, onStart }) {
   return (
     <div className="ix-play-intro">
       <p className="ix-play-intro__type">{typeMeta}</p>
-      <h2 className="ix-play-intro__title">{getInteractiveDisplayTitle(interactive, "Интерактив")}</h2>
+      <h2 className="ix-play-intro__title ix-text-backdrop-host">
+        {getInteractiveDisplayTitle(interactive, "Интерактив")}
+      </h2>
       <p className="ix-play-intro__text">
         {interactive.instruction || "Нажмите «Начать», чтобы пройти задание."}
       </p>
@@ -577,6 +582,8 @@ export default function InteractivePlayer({
   appearance: appearanceProp,
   showIntro,
   onComplete,
+  onProgress,
+  sessionKey = 0,
 }) {
   const appearance = useMemo(
     () => appearanceProp || resolveInteractiveAppearance(interactive),
@@ -584,15 +591,12 @@ export default function InteractivePlayer({
   );
   const cardClass = appearance?.cardStyle?.css_class || "ix-cards--classic";
   const needsIntro = interactive.type === "wheel" ? false : (showIntro ?? bare);
-  const [started, setStarted] = useState(!needsIntro || playing);
+  const [introDismissedFor, setIntroDismissedFor] = useState(null);
+  const started = (!needsIntro || playing || introDismissedFor === sessionKey);
 
   useEffect(() => {
     if (bare) unlockInteractiveAudio();
   }, [bare]);
-
-  useEffect(() => {
-    if (playing) setStarted(true);
-  }, [playing]);
 
   useEffect(() => {
     if (!started || !interactive) {
@@ -601,14 +605,28 @@ export default function InteractivePlayer({
     }
     startInteractiveBackgroundSound(appearance);
     return () => stopInteractiveBackgroundSound();
-  }, [started, interactive, appearance]);
+  }, [started, interactive, appearance, sessionKey]);
+
+  const notifyProgress = useCallback(() => {
+    onProgress?.();
+  }, [onProgress]);
+
+  const handleComplete = useCallback((score, details) => {
+    onComplete?.(score, details);
+  }, [onComplete]);
 
   if (!interactive) return null;
 
   if (needsIntro && !started) {
     return (
       <div className={`interactive-player interactive-player--intro ${cardClass}`}>
-        <PlayIntro interactive={interactive} onStart={() => setStarted(true)} />
+        <PlayIntro
+          interactive={interactive}
+          onStart={() => {
+            notifyProgress();
+            setIntroDismissedFor(sessionKey);
+          }}
+        />
       </div>
     );
   }
@@ -616,64 +634,65 @@ export default function InteractivePlayer({
   const studyMode = bare || playing;
 
   return (
-    <div className={`interactive-player${studyMode ? " interactive-player--bare" : ""} ${cardClass}`}>
+    <div
+      className={`interactive-player${studyMode ? " interactive-player--bare" : ""} ${cardClass}`}
+      onPointerDown={notifyProgress}
+    >
       {interactive.type === "flashcards" ? (
         <FlashcardPlayer
+          key={`flash-${sessionKey}`}
           cards={interactive.cards || []}
           bare={bare}
           playing={playing}
           appearance={appearance}
-          onComplete={onComplete}
+          onComplete={handleComplete}
         />
       ) : null}
       {interactive.type === "matching" ? (
         <MatchingPlayer
+          key={`match-${sessionKey}`}
           pairs={interactive.pairs || []}
           shuffle={interactive.shufflePairs !== false}
           bare={bare}
           playing={playing}
           appearance={appearance}
-          onComplete={onComplete}
+          onComplete={handleComplete}
         />
       ) : null}
       {interactive.type === "sequence" ? (
         <SequencePlayer
+          key={`seq-${sessionKey}`}
           steps={interactive.steps || []}
           shuffle={interactive.params?.shuffleQuestions !== false}
           bare={bare}
           playing={playing}
           appearance={appearance}
-          onComplete={onComplete}
+          onComplete={handleComplete}
         />
       ) : null}
       {interactive.type === "quiz" ? (
         <QuizPlayer
+          key={`quiz-${sessionKey}`}
           questions={interactive.questions || []}
           params={interactive.params || {}}
           title={getInteractiveDisplayTitle(interactive, "")}
           bare={bare}
           playing={playing}
           appearance={appearance}
-          onComplete={onComplete}
+          onComplete={handleComplete}
         />
       ) : null}
       {interactive.type === "wheel" ? (
         <WheelPlayer
+          key={`wheel-${sessionKey}`}
           interactive={interactive}
           bare={bare}
           playing={playing}
           appearance={appearance}
-          onComplete={onComplete}
+          onComplete={handleComplete}
         />
       ) : null}
     </div>
   );
 }
 
-export function interactivePlayUrl(id) {
-  return `/cabinet/interactives/${encodeURIComponent(id)}/play`;
-}
-
-export function openInteractivePlay(id) {
-  window.open(interactivePlayUrl(id), "_blank", "noopener,noreferrer");
-}

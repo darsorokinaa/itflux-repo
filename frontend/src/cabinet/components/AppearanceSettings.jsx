@@ -205,6 +205,22 @@ export default function AppearanceSettings({ data, onChange, compact = false }) 
           />
           <span>Звук</span>
         </label>
+        <label className="ix-appearance__toggle">
+          <input
+            type="checkbox"
+            checked={data.params?.autoTextBackdrop !== false}
+            onChange={(e) => onChange("params", {
+              ...(data.params || {}),
+              autoTextBackdrop: e.target.checked,
+            })}
+          />
+          <span>Автоматическая подложка для текста</span>
+        </label>
+        {data.params?.autoTextBackdrop === false ? (
+          <p className="ix-appearance__sound-hint ix-appearance__contrast-hint">
+            Подложка отключена. При слабом контрасте текст может сливаться с фоном — проверьте предпросмотр.
+          </p>
+        ) : null}
       </section>
 
       <section>

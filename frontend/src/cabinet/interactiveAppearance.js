@@ -2,7 +2,68 @@ import { useEffect, useState } from "react";
 import { fetchInteractiveAppearance } from "../utils/cabinetAuth";
 
 export const FALLBACK_APPEARANCE_CATALOG = {
-  backgrounds: [],
+  backgrounds: [
+    {
+      id: 1,
+      slug: "light-gray",
+      name: "Светло-серый",
+      css_background: "#E8EDF4",
+      text_tone: "dark",
+      is_default: true,
+    },
+    {
+      id: 2,
+      slug: "soft-blue",
+      name: "Нежно-голубой",
+      css_background: "linear-gradient(135deg, #DBEAFE 0%, #E0E7FF 100%)",
+      text_tone: "dark",
+      is_default: false,
+    },
+    {
+      id: 3,
+      slug: "soft-violet",
+      name: "Лавандовый",
+      css_background: "linear-gradient(135deg, #EDE9FE 0%, #F3E8FF 100%)",
+      text_tone: "dark",
+      is_default: false,
+    },
+    {
+      id: 4,
+      slug: "warm-sand",
+      name: "Тёплый песок",
+      css_background: "linear-gradient(135deg, #FEF3C7 0%, #FFEDD5 100%)",
+      text_tone: "dark",
+      is_default: false,
+    },
+    {
+      id: 5,
+      slug: "mint-fresh",
+      name: "Мятный",
+      css_background: "linear-gradient(135deg, #D1FAE5 0%, #ECFDF5 100%)",
+      text_tone: "dark",
+      is_default: false,
+    },
+    {
+      id: 6,
+      slug: "navy-dark",
+      name: "Тёмно-синий",
+      css_background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)",
+      text_tone: "light",
+      is_default: false,
+    },
+    {
+      id: 7,
+      slug: "grid-blue",
+      name: "Сетка (как в кабинете)",
+      css_background: (
+        "linear-gradient(rgba(43, 82, 245, 0.05) 1px, transparent 1px), "
+        + "linear-gradient(90deg, rgba(43, 82, 245, 0.05) 1px, transparent 1px), "
+        + "#F4F7FB"
+      ),
+      text_tone: "dark",
+      is_default: false,
+    },
+  ],
   card_styles: [
     {
       id: 1,
@@ -132,11 +193,13 @@ function normalizeAppearanceCatalog(data) {
     return { ...FALLBACK_APPEARANCE_CATALOG };
   }
   return {
-    backgrounds: Array.isArray(data.backgrounds) ? data.backgrounds : [],
-    card_styles: Array.isArray(data.card_styles)
+    backgrounds: Array.isArray(data.backgrounds) && data.backgrounds.length
+      ? data.backgrounds
+      : FALLBACK_APPEARANCE_CATALOG.backgrounds,
+    card_styles: Array.isArray(data.card_styles) && data.card_styles.length
       ? data.card_styles
       : FALLBACK_APPEARANCE_CATALOG.card_styles,
-    sound_packs: Array.isArray(data.sound_packs)
+    sound_packs: Array.isArray(data.sound_packs) && data.sound_packs.length
       ? data.sound_packs
       : FALLBACK_APPEARANCE_CATALOG.sound_packs,
   };
@@ -152,7 +215,7 @@ export function loadAppearanceCatalog({ force = false } = {}) {
       return catalogCache;
     })
     .catch(() => {
-      catalogCache = { ...FALLBACK_APPEARANCE_CATALOG, backgrounds: [] };
+      catalogCache = { ...FALLBACK_APPEARANCE_CATALOG };
       return catalogCache;
     })
     .finally(() => {
@@ -256,10 +319,28 @@ export function backgroundImageStyle(imageUrl, textTone = "dark") {
     ? "rgba(15, 23, 42, 0.5)"
     : "rgba(255, 255, 255, 0.35)";
   return {
+    backgroundColor: textTone === "light" ? "#0F172A" : "#E8EDF4",
     backgroundImage: `linear-gradient(${overlay}, ${overlay}), url("${src}")`,
     backgroundSize: "cover",
     backgroundPosition: "center",
     backgroundRepeat: "no-repeat",
+  };
+}
+
+function cssBackgroundStyle(cssBackground, slug) {
+  if (!cssBackground) return null;
+  if (slug === "grid-blue") {
+    return {
+      backgroundColor: "#F4F7FB",
+      backgroundImage: "none",
+      background: cssBackground,
+      backgroundSize: "32px 32px, 32px 32px, auto",
+    };
+  }
+  // Clear any previous background-image from CSS/custom upload leftovers.
+  return {
+    backgroundImage: "none",
+    background: cssBackground,
   };
 }
 
@@ -276,15 +357,19 @@ export function appearancePageStyle(appearance) {
       appearance.background.text_tone === "light" ? "light" : "dark",
     );
   }
-  if (!appearance?.background) return undefined;
-  const bg = appearance.background.css_background;
-  if (appearance.background.slug === "grid-blue") {
+  if (!appearance?.background) {
     return {
-      background: bg,
-      backgroundSize: "32px 32px, 32px 32px, auto",
+      backgroundImage: "none",
+      background: "#E8EDF4",
     };
   }
-  return { background: bg };
+  return cssBackgroundStyle(
+    appearance.background.css_background,
+    appearance.background.slug,
+  ) || {
+    backgroundImage: "none",
+    background: "#E8EDF4",
+  };
 }
 
 export function resolvePageTextTone(appearance) {

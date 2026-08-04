@@ -4,29 +4,51 @@ import CabinetIcon from "../../CabinetIcons";
 import ProfileAvatarEditor from "../../components/ProfileAvatarEditor";
 import { STUDENT_MORE_GROUPS } from "../studentNav";
 import { StudentPageShell } from "../StudentSectionUi";
+import { useSeasonalTheme } from "../../../seasonal/SeasonalThemeProvider";
 
 export default function StudentMorePage() {
   const { user, handleLogout, loggingOut, refreshUser } = useOutletContext() || {};
+  const { openAppearancePanel, hasSeasonalAppearance } = useSeasonalTheme();
   const name = user ? displayName(user) : "";
 
   return (
     <StudentPageShell className="st-more-page">
       <div className="st-more-sections">
-        {STUDENT_MORE_GROUPS.map((group) => (
+        {STUDENT_MORE_GROUPS.map((group) => {
+          const items = group.items.filter(
+            (item) => item.action !== "appearance" || hasSeasonalAppearance,
+          );
+          if (!items.length) return null;
+          return (
           <section key={group.id} className="st-more-section">
             <h2 className="st-more-section__title">{group.label}</h2>
             <div className="st-more-grid">
-              {group.items.map((item) => (
-                <Link key={item.id} to={item.path} className="st-more-card">
-                  <span className="st-more-card__icon" aria-hidden="true">
-                    <CabinetIcon name={item.icon} />
-                  </span>
-                  <span className="st-more-card__label">{item.label}</span>
-                </Link>
-              ))}
+              {items.map((item) =>
+                item.action === "appearance" ? (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="st-more-card"
+                    onClick={openAppearancePanel}
+                  >
+                    <span className="st-more-card__icon" aria-hidden="true">
+                      <CabinetIcon name={item.icon} />
+                    </span>
+                    <span className="st-more-card__label">{item.label}</span>
+                  </button>
+                ) : (
+                  <Link key={item.id} to={item.path} className="st-more-card">
+                    <span className="st-more-card__icon" aria-hidden="true">
+                      <CabinetIcon name={item.icon} />
+                    </span>
+                    <span className="st-more-card__label">{item.label}</span>
+                  </Link>
+                ),
+              )}
             </div>
           </section>
-        ))}
+          );
+        })}
       </div>
 
       {user ? (

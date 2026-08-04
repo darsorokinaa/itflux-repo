@@ -1,0 +1,444 @@
+/* Сезонное оформление — поверх существующей дизайн-системы */
+
+.seasonal-fx-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 40;
+}
+
+.seasonal-decor-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 35;
+  overflow: hidden;
+}
+
+.seasonal-decor {
+  position: absolute;
+  pointer-events: none;
+  line-height: 0;
+}
+
+.seasonal-decor img {
+  width: 100%;
+  height: auto;
+  display: block;
+  max-width: 100%;
+  user-select: none;
+}
+
+.seasonal-decor--clickable {
+  pointer-events: auto;
+}
+
+.seasonal-decor--pos-top-left {
+  top: var(--seasonal-decor-y, 0);
+  left: var(--seasonal-decor-x, 0);
+}
+.seasonal-decor--pos-top-right {
+  top: var(--seasonal-decor-y, 0);
+  right: var(--seasonal-decor-x, 0);
+}
+.seasonal-decor--pos-bottom-left {
+  bottom: var(--seasonal-decor-y, 0);
+  left: var(--seasonal-decor-x, 0);
+}
+.seasonal-decor--pos-bottom-right {
+  bottom: var(--seasonal-decor-y, 0);
+  right: var(--seasonal-decor-x, 0);
+}
+.seasonal-decor--pos-center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.seasonal-decor--fade_in {
+  animation-name: seasonal-fade-in;
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+  animation-iteration-count: 1;
+}
+.seasonal-decor--sway {
+  animation-name: seasonal-sway;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+.seasonal-decor--float {
+  animation-name: seasonal-float;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+.seasonal-decor--twinkle {
+  animation-name: seasonal-twinkle;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+@keyframes seasonal-fade-in {
+  from { opacity: 0; }
+  to { opacity: var(--seasonal-decoration-opacity, 1); }
+}
+@keyframes seasonal-sway {
+  0%, 100% { transform: rotate(-3deg); }
+  50% { transform: rotate(3deg); }
+}
+@keyframes seasonal-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@keyframes seasonal-twinkle {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* Слои фона (снизу вверх): цвет → клеточки → паттерн → блоки контента.
+   Паттерн — отдельный слой НАД сеткой, но ПОД карточками. */
+html.seasonal-theme-active,
+html.seasonal-theme-active body {
+  background-color: var(--seasonal-page-background, var(--bg-page, #F4F7FB)) !important;
+  background-image:
+    linear-gradient(rgba(43, 82, 245, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(43, 82, 245, 0.04) 1px, transparent 1px) !important;
+  background-repeat: repeat !important;
+  background-size: 32px 32px !important;
+  background-position: 0 0 !important;
+  background-attachment: fixed !important;
+}
+
+/* #root не рисует свою сетку — иначе она перекрыла бы паттерн */
+html.seasonal-theme-active #root {
+  background-color: transparent !important;
+  background-image: none !important;
+  isolation: isolate;
+}
+
+.seasonal-page-pattern-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: var(--seasonal-page-pattern, none);
+  background-repeat: var(--seasonal-page-pattern-repeat, repeat);
+  background-size: var(--seasonal-page-pattern-size, 240px) auto;
+  background-position: var(--seasonal-page-pattern-position, 0 0);
+  background-attachment: fixed;
+  opacity: var(--seasonal-page-pattern-opacity, 0.18);
+}
+
+@media (max-width: 768px) {
+  .seasonal-page-pattern-layer {
+    background-image: var(--seasonal-page-pattern-mobile, var(--seasonal-page-pattern, none));
+  }
+}
+
+html.seasonal-theme-active[data-seasonal-anim="pattern_drift"] .seasonal-page-pattern-layer {
+  animation: seasonal-pattern-drift 60s linear infinite;
+}
+
+@keyframes seasonal-pattern-drift {
+  from { background-position: 0 0; }
+  to { background-position: 240px 240px; }
+}
+
+/* Оболочки прозрачные — виден фон; карточки со своим фоном остаются непрозрачными */
+html.seasonal-theme-active .app-shell,
+html.seasonal-theme-active .app-shell-content,
+html.seasonal-theme-active .cabinet-layout,
+html.seasonal-theme-active .cb-layout,
+html.seasonal-theme-active .st-layout {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+/* Контент всегда выше паттерна */
+html.seasonal-theme-active .app-shell,
+html.seasonal-theme-active .cabinet-layout,
+html.seasonal-theme-active .seasonal-appearance-overlay,
+html.seasonal-theme-active .seasonal-appearance-fab {
+  position: relative;
+  z-index: 1;
+}
+
+html.seasonal-theme-active .app-shell-content {
+  position: relative;
+  z-index: 2;
+}
+
+/* Legacy ::before не используем */
+html.seasonal-theme-active .app-shell::before,
+html.seasonal-theme-active body.seasonal-body-pattern::before {
+  content: none;
+  display: none;
+}
+
+/* Универсальные поверхности */
+.seasonal-surface,
+.seasonal-task-card,
+.seasonal-lesson-card,
+.seasonal-dashboard-widget {
+  position: relative;
+}
+
+html.seasonal-theme-active .seasonal-task-card,
+html.seasonal-theme-active .seasonal-surface {
+  background-color: var(--seasonal-card-background, transparent);
+  border-color: var(--seasonal-card-border, inherit);
+  border-width: var(--seasonal-card-border-width, inherit);
+  border-radius: var(--seasonal-card-radius, inherit);
+  box-shadow: var(--seasonal-card-shadow, inherit);
+}
+
+html.seasonal-theme-active .seasonal-task-card::after,
+html.seasonal-theme-active .seasonal-surface::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background-image: var(--seasonal-card-pattern, none);
+  background-repeat: repeat;
+  opacity: var(--seasonal-card-pattern-opacity, 0);
+}
+
+html.seasonal-theme-active .seasonal-lesson-card {
+  background-color: var(--seasonal-lesson-card-background, var(--seasonal-card-background, transparent));
+  border-color: var(--seasonal-lesson-card-border, var(--seasonal-card-border, inherit));
+}
+
+/* Фон бокового меню кабинета */
+html.seasonal-theme-active .cabinet-sidebar,
+html.seasonal-theme-active .cabinet-nav,
+html.seasonal-theme-active aside.cabinet-sidebar {
+  background-image: var(--seasonal-menu-background, none);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+html.seasonal-theme-active .cabinet-header {
+  background-image: var(--seasonal-header-decor, none);
+  background-size: auto 100%;
+  background-position: right center;
+  background-repeat: no-repeat;
+}
+
+/* Плавающая кнопка оформления — левый нижний угол */
+.seasonal-appearance-fab {
+  position: fixed;
+  left: 16px;
+  bottom: 20px;
+  z-index: 1100;
+  width: 52px;
+  height: 52px;
+  border: 0;
+  border-radius: 16px;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.seasonal-appearance-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.22);
+}
+
+.seasonal-appearance-fab__img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+}
+
+.seasonal-appearance-fab__fallback {
+  font-size: 1.45rem;
+  line-height: 1;
+  color: #2563eb;
+}
+
+@media (max-width: 768px) {
+  .seasonal-appearance-fab {
+    left: 12px;
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    width: 48px;
+    height: 48px;
+  }
+}
+
+/* Панель оформления */
+.seasonal-appearance-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.seasonal-appearance-panel {
+  width: min(380px, 100%);
+  height: 100%;
+  background: #fff;
+  color: #0f172a;
+  box-shadow: -8px 0 32px rgba(15, 23, 42, 0.12);
+  display: flex;
+  flex-direction: column;
+  animation: seasonal-panel-in 0.2s ease-out;
+}
+
+@keyframes seasonal-panel-in {
+  from { transform: translateX(12px); opacity: 0.6; }
+  to { transform: none; opacity: 1; }
+}
+
+.seasonal-appearance-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.seasonal-appearance-panel__head h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 650;
+}
+
+.seasonal-appearance-panel__close {
+  border: 0;
+  background: transparent;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #64748b;
+}
+
+.seasonal-appearance-panel__body {
+  padding: 16px 18px 24px;
+  overflow: auto;
+}
+
+.seasonal-appearance-panel__hint {
+  margin: 0 0 16px;
+  color: #64748b;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.seasonal-appearance-fieldset {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px 14px 8px;
+  margin: 0 0 16px;
+}
+
+.seasonal-appearance-fieldset legend {
+  padding: 0 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.seasonal-appearance-option {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 0;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.seasonal-appearance-option__meta {
+  font-style: normal;
+  color: #64748b;
+  font-size: 0.85em;
+}
+
+.seasonal-appearance-toggle {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.seasonal-appearance-error {
+  color: #b91c1c;
+  font-size: 0.85rem;
+  margin: 12px 0 0;
+}
+
+.seasonal-preview-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1300;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #0f172a;
+  color: #f8fafc;
+  font-size: 0.85rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28);
+  max-width: calc(100vw - 24px);
+}
+
+.seasonal-preview-banner__btn {
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 0.8rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.seasonal-appearance-menu-icon {
+  display: inline-flex;
+  width: 1.1em;
+  justify-content: center;
+}
+
+button.st-more-card,
+button.cb-more-card {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.seasonal-theme-active[data-seasonal-anim="pattern_drift"] .seasonal-page-pattern-layer,
+  .seasonal-decor--sway,
+  .seasonal-decor--float,
+  .seasonal-decor--twinkle,
+  .seasonal-appearance-panel {
+    animation: none !important;
+  }
+}
+
+/* Тяжёлые страницы: на всякий случай прячем слой, даже если JS не отключил */
+.app-shell--lesson-viewer .seasonal-fx-canvas,
+.app-shell--lesson-viewer .seasonal-decor-layer,
+.app-shell--lesson-viewer .seasonal-page-pattern-layer,
+.cb-board-editor .seasonal-fx-canvas,
+.cb-board-editor .seasonal-page-pattern-layer,
+.video-lesson-page .seasonal-fx-canvas,
+.video-lesson-page .seasonal-page-pattern-layer {
+  display: none !important;
+}

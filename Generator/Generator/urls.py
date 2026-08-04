@@ -5,6 +5,7 @@ from django.conf import settings
 from django.views.static import serve
 
 from . import views
+from . import seasonal_theme_api
 from Cabinet import homework_api
 from Cabinet.subscription_api import PaymentWebhookView
 from Cabinet.views import api_teacher_application, api_teacher_community_feedback
@@ -99,6 +100,26 @@ urlpatterns = [
     ),
     path("api/updates/", views.api_updates, name="api_updates"),
     path("api/announcements/", views.api_announcements, name="api_announcements"),
+    path(
+        "api/seasonal-theme/current/",
+        seasonal_theme_api.SeasonalThemeCurrentView.as_view(),
+        name="seasonal_theme_current",
+    ),
+    path(
+        "api/seasonal-theme/preference/",
+        seasonal_theme_api.SeasonalThemePreferenceView.as_view(),
+        name="seasonal_theme_preference",
+    ),
+    path(
+        "api/seasonal-theme/preview/start/",
+        seasonal_theme_api.SeasonalThemePreviewStartView.as_view(),
+        name="seasonal_theme_preview_start",
+    ),
+    path(
+        "api/seasonal-theme/preview/stop/",
+        seasonal_theme_api.SeasonalThemePreviewStopView.as_view(),
+        name="seasonal_theme_preview_stop",
+    ),
     path("api/lessons/", views.api_lessons, name="api_lessons"),
     path("api/lessons/<slug:slug>/view/", views.api_lesson_archive_view, name="api_lesson_archive_view"),
     path(

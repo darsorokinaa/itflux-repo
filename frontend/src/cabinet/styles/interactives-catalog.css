@@ -1822,3 +1822,170 @@
     align-items: stretch;
   }
 }
+
+/* —— UX audit: card structure, mine strip, edit prominence —— */
+
+.ix-activity-card {
+  position: relative;
+}
+
+.ix-activity-card__hit {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  border-radius: inherit;
+}
+
+.ix-activity-card__hit:focus-visible {
+  outline: 2px solid #2563EB;
+  outline-offset: 2px;
+}
+
+.ix-activity-card__body,
+.ix-activity-card__actions,
+.ix-activity-card__menu-wrap {
+  position: relative;
+  z-index: 2;
+}
+
+.ix-activity-card__status {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+}
+
+.ix-activity-card__type {
+  display: none;
+}
+
+.ix-activity-card__desc {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: #64748B;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ix-activity-card__author {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #64748B;
+}
+
+.ix-activity-card__btn--edit {
+  background: #EFF6FF;
+  border-color: #93C5FD;
+  color: #1D4ED8;
+  font-weight: 700;
+  min-height: 36px;
+}
+
+.ix-activity-card__btn--edit:hover {
+  background: #DBEAFE;
+  border-color: #60A5FA;
+}
+
+.ix-activity-card__btn {
+  min-height: 36px;
+  padding: 8px 12px;
+  font-size: 0.78rem;
+}
+
+.ix-activity-card--owned .ix-activity-card__actions,
+.ix-activity-card--mine .ix-activity-card__actions {
+  gap: 8px;
+}
+
+.ix-activity-grid--mine {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(260px, 300px);
+  grid-template-columns: none;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scroll-snap-type: x proximity;
+  gap: 14px;
+}
+
+.ix-activity-grid--mine .ix-activity-card {
+  scroll-snap-align: start;
+  min-width: 260px;
+}
+
+.ix-section__more {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.ix-section__more-btn {
+  border: 1px solid #CBD5E1;
+  background: #FFFFFF;
+  color: #0F172A;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ix-section__more-btn:hover {
+  background: #F8FAFC;
+}
+
+.ix-section__more-btn:focus-visible {
+  outline: 2px solid #2563EB;
+  outline-offset: 2px;
+}
+
+.ix-catalog-reset {
+  border: 1px solid transparent;
+  background: transparent;
+  color: #2563EB;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.ix-catalog-reset:hover {
+  background: #EFF6FF;
+}
+
+.ix-text-backdrop {
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.ix-text-backdrop--dark {
+  color: #FFFFFF;
+}
+
+.ix-text-backdrop--light {
+  color: #0F172A;
+}
+
+@media (max-width: 768px) {
+  .ix-activity-grid--mine {
+    grid-auto-columns: minmax(240px, 85vw);
+  }
+
+  .ix-activity-card__actions {
+    flex-direction: column;
+  }
+
+  .ix-activity-card__btn,
+  .ix-activity-card__btn--edit {
+    width: 100%;
+    min-height: 44px;
+  }
+}
+

@@ -27,22 +27,16 @@
   min-width: 0;
 }
 
-/* Hero player */
+/* Hero player — background comes from appearancePageStyle (inline).
+   Keep only a neutral fallback so CSS does not override selected themes. */
 .ix-launch-hero {
   position: relative;
   min-height: 400px;
   max-height: 420px;
   border-radius: 28px;
   overflow: hidden;
-  background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
-  --ix-tone-text: #FFFFFF;
-  --ix-tone-text-secondary: rgba(255, 255, 255, 0.9);
-  --ix-tone-text-muted: rgba(255, 255, 255, 0.75);
-  --ix-tone-text-soft: rgba(255, 255, 255, 0.82);
-  --ix-tone-tool-bg: rgba(15, 23, 42, 0.45);
-  --ix-tone-tool-border: rgba(255, 255, 255, 0.2);
-  --ix-tone-tool-color: #FFFFFF;
-  color: var(--ix-tone-text);
+  background-color: #E8EDF4;
+  color: var(--ix-tone-text, #0F172A);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -55,10 +49,6 @@
   padding: 16px;
   min-height: 400px;
   max-height: none;
-}
-
-.ix-launch-hero--empty {
-  background: linear-gradient(135deg, #334155 0%, #1E293B 100%);
 }
 
 .ix-launch-hero__decor {
@@ -1243,3 +1233,51 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.ix-launch-info__nav {
+  margin-bottom: 8px;
+}
+
+.ix-launch-info__back {
+  border: none;
+  background: transparent;
+  color: #2563EB;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.ix-launch-info__back:hover {
+  text-decoration: underline;
+}
+
+.ix-launch-info__back:focus-visible {
+  outline: 2px solid #2563EB;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.ix-launch-info__edit {
+  border-color: #93C5FD !important;
+  background: #EFF6FF !important;
+  color: #1D4ED8 !important;
+  font-weight: 700;
+}
+
+.ix-launch-hero__edit-btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ix-launch-hero__intro .ix-text-backdrop {
+  margin-bottom: 0.35em;
+}
+
+.ix-wheel-player-done .cb-btn {
+  margin-top: 14px;
+}
+

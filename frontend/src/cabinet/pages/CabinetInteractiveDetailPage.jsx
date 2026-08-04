@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { displayName } from "../../pages/CabinetAuthPage";
 import {
   assignInteractive,
@@ -68,7 +68,9 @@ export default function CabinetInteractiveDetailPage() {
 
   const [interactive, setInteractive] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [started, setStarted] = useState(false);
+  const [playSession, setPlaySession] = useState(0);
   const [assignOpen, setAssignOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -97,6 +99,7 @@ export default function CabinetInteractiveDetailPage() {
         if (!cancelled) {
           if (import.meta.env.DEV) console.error("Interactive detail load failed:", err);
           setInteractive(null);
+          setLoadError(err?.message || "Не удалось загрузить интерактив");
         }
       })
       .finally(() => {
@@ -136,7 +139,16 @@ export default function CabinetInteractiveDetailPage() {
   }
 
   if (!interactive) {
-    return <Navigate to="/cabinet/interactives" replace />;
+    return (
+      <CabinetPageShell className="cb-section--interactive-detail ix-page ix-launch-page">
+        <div className="ix-error" role="alert">
+          <p className="ix-error__text">{loadError || "Интерактив не найден"}</p>
+          <button type="button" className="ix-error__retry" onClick={() => navigate("/cabinet/interactives")}>
+            К списку интерактивов
+          </button>
+        </div>
+      </CabinetPageShell>
+    );
   }
 
   const activeBackgroundSlug = getActiveBackgroundSlug(interactive);
@@ -144,10 +156,14 @@ export default function CabinetInteractiveDetailPage() {
   const editHref = `/cabinet/interactives/${interactive.id}/edit`;
 
   const handleBackgroundSelect = async (backgroundSlug) => {
+    const previous = interactive;
     const next = applyBackgroundSlug({ ...interactive }, backgroundSlug);
+    // Optimistic update so the hero changes immediately.
+    setInteractive(next);
     try {
       await persistToApi(next);
     } catch (err) {
+      setInteractive(previous);
       setShareMsg(err?.message || "Не удалось сохранить фон");
       window.setTimeout(() => setShareMsg(""), 2800);
     }
@@ -289,37 +305,29 @@ export default function CabinetInteractiveDetailPage() {
     });
   };
 
+  const handleRestart = () => {
+    setPlaySession((k) => k + 1);
+    setStarted(true);
+    window.requestAnimationFrame(() => {
+      document.querySelector(".ix-launch-hero")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
   return (
     <CabinetPageShell className="cb-section--interactive-detail ix-page ix-launch-page">
       {toast}
       {shareMsg ? <div className="cb-soon-toast" role="status">{shareMsg}</div> : null}
-
-      <div className="ix-launch-top ix-launch-top--v2">
-        <InteractiveLaunchScreen
-          interactive={interactive}
-          appearance={appearance}
-          started={started}
-          onStart={() => setStarted(true)}
-          editHref={editHref}
-          fullscreenHref={
-            canShareInteractive(interactive)
-              ? `/cabinet/interactives/${interactive.id}/play`
-              : null
-          }
-        />
-        <TemplateSwitcher
-          activeType={interactive.type}
-          onSelect={() => notifySoon()}
-        />
-      </div>
 
       <LaunchInfoBar
         interactive={interactive}
         authorName={authorName}
         summaryChips={summaryChips}
         canStart={canStart}
+        started={started}
+        onBack={() => navigate("/cabinet/interactives")}
         onPublish={handlePublish}
         onStart={scrollToHero}
+        onRestart={handleRestart}
         onEdit={() => navigate(editHref)}
         onAssign={() => {
           if (!canAssignInteractive(interactive)) {
@@ -335,6 +343,27 @@ export default function CabinetInteractiveDetailPage() {
         onDelete={handleDelete}
         onAccessSettings={() => navigate(editHref)}
       />
+
+      <div className="ix-launch-top ix-launch-top--v2">
+        <InteractiveLaunchScreen
+          key={playSession}
+          interactive={interactive}
+          appearance={appearance}
+          started={started}
+          onStart={() => setStarted(true)}
+          onRestart={handleRestart}
+          editHref={editHref}
+          fullscreenHref={
+            canShareInteractive(interactive)
+              ? `/cabinet/interactives/${interactive.id}/play`
+              : null
+          }
+        />
+        <TemplateSwitcher
+          activeType={interactive.type}
+          onSelect={() => notifySoon()}
+        />
+      </div>
 
       <InteractivePassport interactive={interactive} />
 
@@ -373,12 +402,17 @@ export default function CabinetInteractiveDetailPage() {
               disabled={!canStart}
               onClick={scrollToHero}
             >
-              Начать
+              {started ? "Продолжить" : "Начать"}
             </button>
           )}
           <button type="button" className="cb-btn cb-btn--outline" onClick={() => navigate(editHref)}>
             Редактировать
           </button>
+          {started ? (
+            <button type="button" className="cb-btn cb-btn--ghost" onClick={handleRestart}>
+              Заново
+            </button>
+          ) : null}
         </div>
       ) : null}
 

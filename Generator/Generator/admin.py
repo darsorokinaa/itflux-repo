@@ -592,3 +592,251 @@ class AnnouncementAdmin(admin.ModelAdmin):
     )
 
 
+# --- Сезонное / праздничное оформление ---
+
+from .seasonal_theme_models import SeasonalTheme, SeasonalThemeDecoration  # noqa: E402
+from .seasonal_theme_service import (  # noqa: E402
+    PREVIEW_SESSION_KEY,
+    PREVIEW_TOKEN_SESSION_KEY,
+    make_preview_token,
+)
+
+
+class SeasonalThemeDecorationInline(admin.StackedInline):
+    model = SeasonalThemeDecoration
+    extra = 0
+    classes = ("collapse",)
+    verbose_name_plural = "Доп. декор (необязательно, редко нужно)"
+    fields = (
+        "name",
+        "image",
+        "zone",
+        "position",
+        "width",
+        "opacity",
+        "show_desktop",
+        "show_mobile",
+        "is_active",
+    )
+    show_change_link = True
+
+
+@admin.register(SeasonalTheme)
+class SeasonalThemeAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "status_display",
+        "is_active",
+        "start_at",
+        "end_at",
+        "animation_type",
+        "has_button_icon",
+    )
+    list_filter = ("is_active", "is_draft", "animation_type", "force_active_for_testing")
+    search_fields = ("name", "slug", "description")
+    prepopulated_fields = {"slug": ("name",)}
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+        "status_display",
+        "preview_help",
+        "button_icon_preview",
+        "background_pattern_preview",
+    )
+    inlines = [SeasonalThemeDecorationInline]
+    fieldsets = (
+        (
+            "1. Название и период",
+            {
+                "fields": (
+                    "name",
+                    "slug",
+                    "description",
+                    "status_display",
+                    ("start_at", "end_at"),
+                    ("is_draft", "is_active"),
+                    "priority",
+                )
+            },
+        ),
+        (
+            "2. Картинки оформления — просто загрузите файлы",
+            {
+                "description": (
+                    "Одна тема = один набор картинок. Необязательные поля можно оставить пустыми."
+                ),
+                "fields": (
+                    "background_color",
+                    "background_pattern",
+                    "background_pattern_preview",
+                    "background_pattern_mobile",
+                    "background_opacity",
+                    "menu_background",
+                    "card_pattern",
+                    "card_pattern_opacity",
+                    "card_border_color",
+                    "header_decor",
+                    "corner_image",
+                    "accent_color",
+                ),
+            },
+        ),
+        (
+            "3. Кнопка «Оформление» (левый нижний угол)",
+            {
+                "description": (
+                    "На плавающей кнопке слева внизу: либо загруженная картинка, "
+                    "либо смайлик с клавиатуры (🎄 🎃 🌸). Если есть картинка — она важнее смайлика."
+                ),
+                "fields": ("button_icon", "button_icon_preview", "button_emoji"),
+            },
+        ),
+        (
+            "4. Анимация",
+            {
+                "fields": (
+                    "animation_type",
+                    "animation_intensity",
+                    "animation_max_elements",
+                )
+            },
+        ),
+        (
+            "5. Права пользователя и тест",
+            {
+                "fields": (
+                    "allow_user_disable",
+                    "allow_manual_selection",
+                    "force_active_for_testing",
+                    "admin_only",
+                    "preview_help",
+                )
+            },
+        ),
+        (
+            "Дополнительно (обычно не трогать)",
+            {
+                "classes": ("collapse",),
+                "fields": (
+                    "timezone",
+                    "is_default_seasonal_theme",
+                    "background_repeat",
+                    "background_size",
+                    "background_position",
+                    "background_overlay_color",
+                    "background_overlay_opacity",
+                    "disable_background_on_low_end",
+                    "animation_fps_limit",
+                    "include_routes",
+                    "exclude_routes",
+                    "surfaces",
+                    "created_at",
+                    "updated_at",
+                ),
+            },
+        ),
+    )
+    actions = (
+        "duplicate_themes",
+        "activate_for_testing",
+        "disable_testing_force",
+        "start_preview",
+    )
+
+    @admin.display(boolean=True, description="Иконка кнопки")
+    def has_button_icon(self, obj):
+        return bool(obj.button_icon)
+
+    @admin.display(description="Статус")
+    def status_display(self, obj):
+        labels = {
+            "draft": "Черновик",
+            "scheduled": "Запланирована",
+            "active": "Активна",
+            "finished": "Завершена",
+            "disabled": "Отключена",
+        }
+        return labels.get(obj.compute_status(), obj.compute_status())
+
+    @admin.display(description="Предпросмотр темы")
+    def preview_help(self, obj):
+        if not obj or not obj.pk:
+            return "Сохраните тему, затем отметьте её в списке → действие «Предпросмотр темы»."
+        return format_html(
+            "Отметьте тему в списке → действие «Предпросмотр темы». "
+            "Откройте сайт в той же сессии браузера — появится плашка предпросмотра."
+        )
+
+    @admin.display(description="Превью фона")
+    def background_pattern_preview(self, obj):
+        if not obj or not obj.background_pattern:
+            return "—"
+        return format_html(
+            '<img src="{}" style="max-width:220px;max-height:120px;border-radius:8px;" alt="">',
+            obj.background_pattern.url,
+        )
+
+    @admin.display(description="Превью иконки кнопки")
+    def button_icon_preview(self, obj):
+        if not obj or not obj.button_icon:
+            return "—"
+        return format_html(
+            '<img src="{}" style="width:56px;height:56px;object-fit:contain;border-radius:12px;'
+            'background:#f1f5f9;padding:6px;" alt="">',
+            obj.button_icon.url,
+        )
+
+    @admin.action(description="Продублировать выбранные темы")
+    def duplicate_themes(self, request, queryset):
+        count = 0
+        for theme in queryset:
+            theme.duplicate()
+            count += 1
+        self.message_user(request, f"Создано копий: {count}")
+
+    @admin.action(description="Принудительно активировать для теста")
+    def activate_for_testing(self, request, queryset):
+        updated = queryset.update(force_active_for_testing=True, is_active=True, is_draft=False)
+        self.message_user(request, f"Включено для теста: {updated}")
+
+    @admin.action(description="Снять принудительную активацию")
+    def disable_testing_force(self, request, queryset):
+        updated = queryset.update(force_active_for_testing=False)
+        self.message_user(request, f"Снято: {updated}")
+
+    @admin.action(description="Предпросмотр темы (сессия админа)")
+    def start_preview(self, request, queryset):
+        theme = queryset.first()
+        if theme is None:
+            self.message_user(request, "Выберите одну тему", level="error")
+            return
+        if queryset.count() > 1:
+            self.message_user(request, "Выберите только одну тему", level="error")
+            return
+        token = make_preview_token(theme.id, request.user.id)
+        request.session[PREVIEW_SESSION_KEY] = theme.id
+        request.session[PREVIEW_TOKEN_SESSION_KEY] = token
+        request.session.modified = True
+        self.message_user(
+            request,
+            f"Предпросмотр «{theme.name}» включён. Откройте сайт в этой же сессии браузера.",
+        )
+
+
+@admin.register(SeasonalThemeDecoration)
+class SeasonalThemeDecorationAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "theme",
+        "name",
+        "zone",
+        "position",
+        "show_desktop",
+        "show_mobile",
+        "is_active",
+    )
+    list_filter = ("zone", "is_active")
+    search_fields = ("name", "theme__name", "theme__slug")
+    list_select_related = ("theme",)
+    autocomplete_fields = ("theme",)

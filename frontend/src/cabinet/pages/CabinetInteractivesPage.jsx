@@ -98,10 +98,15 @@ export default function CabinetInteractivesPage() {
     return `${used} из ${limit} создано`;
   }, [subscription]);
 
-  const mineItems = useMemo(
-    () => sortInteractives(items, "updated").slice(0, MINE_PREVIEW_LIMIT),
-    [items],
-  );
+  const [mineExpanded, setMineExpanded] = useState(false);
+
+  const mineItems = useMemo(() => {
+    const sorted = sortInteractives(items, "updated");
+    if (mineExpanded) return sorted;
+    return sorted.slice(0, MINE_PREVIEW_LIMIT);
+  }, [items, mineExpanded]);
+
+  const mineHasMore = items.length > MINE_PREVIEW_LIMIT;
 
   const catalogItems = useMemo(() => {
     let list = items;
@@ -206,10 +211,12 @@ export default function CabinetInteractivesPage() {
     setSort("updated");
   };
 
-  const cardHandlers = (item) => ({
+  const cardHandlers = (item, variant = "owned") => ({
     interactive: item,
+    variant,
     onOpen: () => openInteractive(item),
     onEdit: () => editInteractive(item),
+    onLaunch: () => openInteractive(item),
     onAssign: () => {
       if (!canAssignInteractive(item)) {
         setNotice("Сначала опубликуйте интерактив");
@@ -256,11 +263,31 @@ export default function CabinetInteractivesPage() {
       );
     }
     return (
-      <div className="ix-activity-grid">
-        {mineItems.map((item) => (
-          <SafeActivityCard key={`mine-${item.id}`} {...cardHandlers(item)} />
-        ))}
-      </div>
+      <>
+        <div className={`ix-activity-grid${mineExpanded ? "" : " ix-activity-grid--mine"}`}>
+          {mineItems.map((item) => (
+            <SafeActivityCard key={`mine-${item.id}`} {...cardHandlers(item, "mine")} />
+          ))}
+        </div>
+        {mineHasMore ? (
+          <div className="ix-section__more">
+            <button
+              type="button"
+              className="ix-section__more-btn"
+              onClick={() => {
+                if (mineExpanded) {
+                  setMineExpanded(false);
+                  return;
+                }
+                setMineExpanded(true);
+                document.getElementById("ix-catalog-title")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            >
+              {mineExpanded ? "Свернуть" : `Показать все (${items.length})`}
+            </button>
+          </div>
+        ) : null}
+      </>
     );
   };
 
@@ -309,7 +336,7 @@ export default function CabinetInteractivesPage() {
     return (
       <div className="ix-activity-grid">
         {catalogItems.map((item) => (
-          <SafeActivityCard key={`catalog-${item.id}`} {...cardHandlers(item)} />
+          <SafeActivityCard key={`catalog-${item.id}`} {...cardHandlers(item, "owned")} />
         ))}
       </div>
     );
@@ -326,7 +353,7 @@ export default function CabinetInteractivesPage() {
         <div className="ix-page-head__text">
           <h1 className="ix-page-head__title">Интерактивы</h1>
           <p className="ix-page-head__sub">
-            Создавайте задания для объяснения, закрепления и проверки материала.
+            Ваши задания для урока: создайте, отредактируйте и запустите. Ниже — полный список с поиском и фильтрами.
           </p>
           {usageLabel ? (
             <p className="ix-page-head__usage ix-page-head__usage--mobile">{usageLabel}</p>
@@ -347,7 +374,7 @@ export default function CabinetInteractivesPage() {
           <div className="ix-section__intro">
             <h2 id="ix-mine-title" className="ix-section__title">Мои интерактивы</h2>
             <p className="ix-section__sub">
-              Ваши черновики и опубликованные задания. Редактирование доступно только вам.
+              Недавно изменённые, черновики и опубликованные. Кнопка «Редактировать» всегда на карточке.
             </p>
           </div>
         </div>
@@ -359,7 +386,7 @@ export default function CabinetInteractivesPage() {
           <div className="ix-section__intro">
             <h2 id="ix-catalog-title" className="ix-section__title">Все интерактивы</h2>
             <p className="ix-section__sub">
-              Полный список ваших материалов с поиском и фильтрами.
+              Полный каталог ваших материалов: поиск, фильтры и сортировка.
             </p>
           </div>
         </div>
@@ -372,7 +399,7 @@ export default function CabinetInteractivesPage() {
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Поиск по названию"
+                placeholder="Поиск по названию, теме или предмету"
                 aria-label="Поиск по названию"
               />
               <button
@@ -382,9 +409,6 @@ export default function CabinetInteractivesPage() {
                 onClick={() => setFiltersOpen((v) => !v)}
               >
                 Фильтры
-              </button>
-              <button type="button" className="ix-catalog-create" onClick={openCreateFlow}>
-                Создать
               </button>
             </div>
             <div className={`ix-catalog-toolbar__filters${filtersOpen ? " is-open" : ""}`}>
@@ -418,6 +442,11 @@ export default function CabinetInteractivesPage() {
                   <option key={opt.id} value={opt.id}>{opt.label}</option>
                 ))}
               </select>
+              {hasActiveFilters ? (
+                <button type="button" className="ix-catalog-reset" onClick={resetFilters}>
+                  Сбросить
+                </button>
+              ) : null}
             </div>
           </div>
         ) : null}

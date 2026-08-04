@@ -36,12 +36,13 @@ export const STUDENT_MORE_GROUPS = [
     label: "Аккаунт",
     items: [
       { id: "profile", label: "Профиль", path: "/cabinet/student/profile", icon: "settings" },
+      { id: "appearance", label: "Оформление", path: null, icon: "spark", action: "appearance" },
     ],
   },
 ];
 
 export const STUDENT_MORE_ITEMS = STUDENT_MORE_GROUPS.flatMap((group) => group.items);
-const MORE_PATHS = STUDENT_MORE_ITEMS.map((item) => item.path);
+const MORE_PATHS = STUDENT_MORE_ITEMS.filter((item) => item.path).map((item) => item.path);
 
 export function isStudentNavActive(pathname, item) {
   if (item.id === "home") {

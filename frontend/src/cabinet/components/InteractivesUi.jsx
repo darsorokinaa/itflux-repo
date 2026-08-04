@@ -250,7 +250,9 @@ export function InteractiveActivityCard({
   onAssign,
   onDuplicate,
   onDelete,
+  onLaunch,
   showActions = true,
+  variant = "owned",
 }) {
   const typeMeta = getTypeMeta(interactive?.type);
   const firstSlide = useMemo(
@@ -275,18 +277,22 @@ export function InteractiveActivityCard({
           ? "секторов"
           : "элементов";
 
+  const description = String(interactive?.description || "").trim();
   const metaParts = interactive ? [
     typeMeta.shortLabel,
     count > 0 ? `${count} ${itemLabel}` : null,
     interactive.subject || null,
     interactive.exam && interactive.exam !== "без экзамена" ? interactive.exam : null,
     interactive.topic || null,
-  ].filter(Boolean) : [];
+  ].filter((part) => part && part !== "null" && part !== "undefined") : [];
 
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const canAssign = canAssignInteractive(interactive);
-  const canEdit = Boolean(onEdit);
+  const isOwned = variant === "owned" || variant === "mine";
+  const canEdit = isOwned && Boolean(onEdit);
+  const primaryLabel = onLaunch ? "Запустить" : "Открыть";
+  const primaryAction = onLaunch || onOpen;
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -308,17 +314,19 @@ export function InteractiveActivityCard({
 
   return (
     <article
-      className={`ix-activity-card ix-activity-card--clickable${menuOpen ? " is-menu-open" : ""}`}
-      onClick={() => onOpen?.()}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen?.();
-        }
-      }}
-      role="button"
-      tabIndex={0}
+      className={[
+        "ix-activity-card",
+        "ix-activity-card--clickable",
+        isOwned ? "ix-activity-card--owned" : "ix-activity-card--catalog",
+        menuOpen ? " is-menu-open" : "",
+      ].filter(Boolean).join(" ")}
     >
+      <button
+        type="button"
+        className="ix-activity-card__hit"
+        onClick={() => onOpen?.()}
+        aria-label={`Открыть «${getInteractiveDisplayTitle(interactive)}»`}
+      />
       <div
         className={[
           "ix-activity-card__cover",
@@ -326,6 +334,7 @@ export function InteractiveActivityCard({
           appearance ? appearancePageClass(appearance) : "",
         ].filter(Boolean).join(" ")}
         style={appearance ? appearancePageStyle(appearance) : undefined}
+        aria-hidden="true"
       >
         {hasSlidePreview ? (
           <InteractiveCoverSlide
@@ -337,8 +346,8 @@ export function InteractiveActivityCard({
             <CabinetIcon name={typeMeta.icon} />
           </div>
         )}
-        <span className="ix-activity-card__type">
-          {typeMeta.shortLabel}
+        <span className={`ix-status-badge ix-status-badge--${statusBadgeClass(interactive.status)} ix-activity-card__status`}>
+          {statusMeta.label}
         </span>
       </div>
       <div className="ix-activity-card__body">
@@ -351,7 +360,7 @@ export function InteractiveActivityCard({
             <button
               type="button"
               className="ix-activity-card__menu-btn"
-              aria-label="Действия"
+              aria-label="Дополнительные действия"
               aria-expanded={menuOpen}
               onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
             >
@@ -364,36 +373,56 @@ export function InteractiveActivityCard({
                   <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit?.(); }}>Редактировать</button>
                 ) : null}
                 <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDuplicate?.(); }}>Дублировать</button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={!canAssign}
-                  title={canAssign ? "" : "Сначала опубликуйте"}
-                  onClick={(e) => { e.stopPropagation(); if (!canAssign) return; setMenuOpen(false); onAssign?.(); }}
-                >
-                  Выдать
-                </button>
-                <button type="button" role="menuitem" className="danger" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDelete?.(); }}>Удалить</button>
+                {isOwned ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!canAssign}
+                    title={canAssign ? "" : "Сначала опубликуйте"}
+                    onClick={(e) => { e.stopPropagation(); if (!canAssign) return; setMenuOpen(false); onAssign?.(); }}
+                  >
+                    Выдать
+                  </button>
+                ) : null}
+                {isOwned ? (
+                  <button type="button" role="menuitem" className="danger" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDelete?.(); }}>Удалить</button>
+                ) : null}
               </div>
             ) : null}
           </div>
         </div>
-        <p className="ix-activity-card__meta">{metaParts.join(" · ")}</p>
+        {description ? (
+          <p className="ix-activity-card__desc">{description}</p>
+        ) : null}
+        {metaParts.length > 0 ? (
+          <p className="ix-activity-card__meta">{metaParts.join(" · ")}</p>
+        ) : null}
         <div className="ix-activity-card__footer">
-          <span className={`ix-status-badge ix-status-badge--${statusBadgeClass(interactive.status)}`}>
-            {statusMeta.label}
-          </span>
-          <time className="ix-activity-card__date" dateTime={interactive.updatedAt || undefined}>
-            {formatUpdatedAt(interactive.updatedAt)}
-          </time>
+          {isOwned ? (
+            <time className="ix-activity-card__date" dateTime={interactive.updatedAt || undefined}>
+              Обновлён {formatUpdatedAt(interactive.updatedAt)}
+            </time>
+          ) : interactive.authorName ? (
+            <span className="ix-activity-card__author">{interactive.authorName}</span>
+          ) : (
+            <span className="ix-activity-card__date">{typeMeta.shortLabel}</span>
+          )}
         </div>
         {showActions ? (
-          <div className="ix-activity-card__actions" onClick={(e) => e.stopPropagation()}>
-            <button type="button" className="ix-activity-card__btn ix-activity-card__btn--primary" onClick={() => onOpen?.()}>
-              Открыть
+          <div className="ix-activity-card__actions">
+            <button
+              type="button"
+              className="ix-activity-card__btn ix-activity-card__btn--primary"
+              onClick={(e) => { e.stopPropagation(); primaryAction?.(); }}
+            >
+              {primaryLabel}
             </button>
             {canEdit ? (
-              <button type="button" className="ix-activity-card__btn" onClick={() => onEdit?.()}>
+              <button
+                type="button"
+                className="ix-activity-card__btn ix-activity-card__btn--edit"
+                onClick={(e) => { e.stopPropagation(); onEdit?.(); }}
+              >
                 Редактировать
               </button>
             ) : null}

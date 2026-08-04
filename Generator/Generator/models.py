@@ -957,3 +957,7 @@ class ReportNextStepTemplate(models.Model):
 
     def __str__(self):
         return f"{self.get_condition_type_display()} — {self.text[:50]}"
+
+
+# Сезонное / праздничное оформление (импорт для Django model discovery)
+from .seasonal_theme_models import SeasonalTheme, SeasonalThemeDecoration  # noqa: E402,F401

@@ -1,8 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Outlet, Link, useLocation } from "react-router-dom";
-import {
-  readPersistedTheme,
-} from "../utils/themeStorage";
 import Nav from "../components/Nav";
 import MobileTabBar from "../components/MobileTabBar";
 import { SUMMER_CLUB_NAV_LABEL, SUMMER_CLUB_URL } from "../config/summerClub";
@@ -48,25 +45,18 @@ function Layout() {
   const isHomeworkContext = isHomeworkQuery;
   const isLessonOrHomeworkContext =
     lessonJoinMode ||
+    isHomeworkContext ||
     query.get("lesson_embed") === "1" ||
-    isHomeworkContext;
-  const isLessonEmbedAny = query.get("lesson_embed") === "1";
+    query.get("lesson_embed") === "true";
+  const isLessonEmbedAny =
+    query.get("lesson_embed") === "1" || query.get("lesson_embed") === "true";
   const isHomeworkEmbedContext =
-    isLessonEmbedAny &&
-    (
+    isLessonEmbedAny && (
       query.get("homework_mode") === "1" ||
       String(query.get("cabinet_session") || "").toLowerCase() === "homework" ||
       !!query.get("cabinet_assignment")
     );
-  const isLessonEmbedContext = isLessonEmbedAny && !isHomeworkEmbedContext;
-  const isLessonTeacherEmbedContext = isLessonEmbedContext && query.get("lesson_student") !== "1";
 
-  const handleLessonFinishClick = () => {
-    if (window.parent && window.parent !== window) {
-      window.parent.postMessage({ source: "exam-embedded-lesson", type: "lesson_finish_click" }, "*");
-    }
-  };
-  const [themeData, setThemeData] = useState(() => readPersistedTheme().themeData);
   const [cookieAccepted, setCookieAccepted] = useState(() => {
     try { return !!localStorage.getItem(COOKIE_CONSENT_KEY); } catch { return false; }
   });
@@ -75,60 +65,6 @@ function Layout() {
     try { localStorage.setItem(COOKIE_CONSENT_KEY, "1"); } catch { /* ignore */ }
     setCookieAccepted(true);
   }
-  const [activeThemeId, setActiveThemeId] = useState(() => readPersistedTheme().activeThemeId);
-
-  const themeDataRef = useRef(themeData);
-  const activeThemeIdRef = useRef(activeThemeId);
-  useEffect(() => {
-    themeDataRef.current = themeData;
-  }, [themeData]);
-  useEffect(() => {
-    activeThemeIdRef.current = activeThemeId;
-  }, [activeThemeId]);
-
-  const syncTheme = useCallback(() => {
-    const next = readPersistedTheme();
-    setThemeData(next.themeData);
-    setActiveThemeId(next.activeThemeId);
-  }, []);
-
-  /** После смены календарного дня (вкладка была в фоне) подтянуть актуальное хранилище. */
-  useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState !== "visible") return;
-      const next = readPersistedTheme();
-      if (
-        JSON.stringify(themeDataRef.current) !== JSON.stringify(next.themeData) ||
-        activeThemeIdRef.current !== next.activeThemeId
-      ) {
-        setThemeData(next.themeData);
-        setActiveThemeId(next.activeThemeId);
-        window.dispatchEvent(new Event("theme-change"));
-      }
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, []);
-
-  useEffect(() => {
-    window.addEventListener("theme-change", syncTheme);
-    return () => window.removeEventListener("theme-change", syncTheme);
-  }, [syncTheme]);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (themeData?.decor) {
-      root.style.setProperty("--theme-decor-url", `url(${themeData.decor})`);
-      root.classList.add("theme-decor-active");
-    } else {
-      root.style.removeProperty("--theme-decor-url");
-      root.classList.remove("theme-decor-active");
-    }
-    return () => {
-      root.style.removeProperty("--theme-decor-url");
-      root.classList.remove("theme-decor-active");
-    };
-  }, [themeData?.decor]);
 
   useEffect(() => {
     const run = () => {
@@ -161,46 +97,8 @@ function Layout() {
           backgroundImage: `url('${import.meta.env.BASE_URL}img/bg.png')`,
         }}
       />
-      {!isMarketingHome && themeData?.overlay ? (
-        <div
-          className="app-shell-theme-overlay"
-          aria-hidden="true"
-          style={{ backgroundImage: `url(${themeData.overlay})` }}
-        />
-      ) : null}
       <div className="app-shell-content">
       {!isLessonOrHomeworkContext && !isChromelessPage && (!isCabinetArea || pathname === '/cabinet/login') && <Nav />}
-      {/* !isMarketingHome ? (
-      <header
-        className={themeData?.headerBg ? "header--themed" : undefined}
-        style={themeData?.headerBg ? { backgroundImage: `url(${themeData.headerBg})` } : undefined}
-      >
-    <div className="header-wrapper">
-      <div className="logo-block">
-        <Link to="/" className="logo-link">
-          <img
-            className="logo-theme-icon"
-            src={themeData?.logo || `${import.meta.env.BASE_URL}favicon.png?v=1`}
-            alt="Цифровой поток"
-          />
-          <span className="logo-text">Цифровой поток</span>
-        </Link>
-      </div>
-      <nav className="header-nav">
-        {isHomeworkContext ? null : isLessonEmbedAny && isLessonTeacherEmbedContext ? (
-          <button
-            type="button"
-            className="header-nav-finish"
-            onClick={handleLessonFinishClick}
-          >
-            Завершить
-          </button>
-        ) : null}
-      </nav>
-    </div>
-</header>
-      ) : null */}
-
 
       <aside>
         {/* боковое меню */}
@@ -248,7 +146,7 @@ function Layout() {
         </div>
       )}
 
-      {showMobileTabBar && <MobileTabBar />}
+      {showMobileTabBar ? <MobileTabBar /> : null}
 
       <script
         src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.min.js"

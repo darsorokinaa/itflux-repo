@@ -2493,6 +2493,46 @@ class NotificationPreference(models.Model):
         return sorted(out, reverse=True)
 
 
+class SeasonalThemePreference(models.Model):
+    """Пользовательские настройки сезонного оформления (не путать с оформлением интерактивов)."""
+
+    class Mode(models.TextChoices):
+        AUTO = "auto", "Автоматически"
+        DEFAULT = "default", "Обычное оформление"
+        MANUAL = "manual", "Выбранная тема"
+
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="seasonal_theme_preference",
+        verbose_name="Пользователь",
+    )
+    mode = models.CharField(
+        "Режим",
+        max_length=16,
+        choices=Mode.choices,
+        default=Mode.AUTO,
+    )
+    selected_theme = models.ForeignKey(
+        "Generator.SeasonalTheme",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="user_preferences",
+        verbose_name="Выбранная тема",
+    )
+    animations_enabled = models.BooleanField("Показывать анимацию", default=True)
+    updated_at = models.DateTimeField("Обновлено", auto_now=True)
+    created_at = models.DateTimeField("Создано", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Настройки сезонного оформления"
+        verbose_name_plural = "Настройки сезонного оформления"
+
+    def __str__(self):
+        return f"Оформление: {self.user} ({self.mode})"
+
+
 class PushSubscription(models.Model):
     """Web Push subscription bound to a user and device/browser."""
 

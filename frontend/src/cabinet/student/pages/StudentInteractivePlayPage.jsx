@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import InteractivePlayer from "../../components/InteractivePlayer";
-import { getInteractiveDisplayTitle } from "../../interactivesData";
+import { useParams } from "react-router-dom";
+import InteractiveShell from "../../components/InteractiveShell";
 import {
-  appearancePageClass,
-  appearancePageStyle,
   resolveInteractiveAppearance,
   useInteractiveAppearanceCatalog,
 } from "../../interactiveAppearance";
@@ -14,6 +11,8 @@ import {
 } from "../../../utils/cabinetAuth";
 import "../../styles/interactive-play.css";
 import "../../styles/interactive-appearance.css";
+
+const STUDENT_BACK_HREF = "/cabinet/student/assignments";
 
 export default function StudentInteractivePlayPage() {
   const { id } = useParams();
@@ -50,37 +49,24 @@ export default function StudentInteractivePlayPage() {
         } : {},
         mistakes: details?.mistakes || [],
       });
-    } catch { /* ignore */ }
+    } catch (err) {
+      if (import.meta.env.DEV) console.error("Submit interactive attempt failed:", err);
+    }
   }, [id]);
 
-  if (loading) {
-    return <div className="interactive-play-page st-loading-screen">Загрузка…</div>;
-  }
-
-  if (error || !interactive) {
-    return (
-      <div className="interactive-play-page st-play-error">
-        <p>{error || "Интерактив недоступен"}</p>
-        <Link to="/cabinet/student/interactives" className="cb-btn cb-btn--outline">Назад</Link>
-      </div>
-    );
-  }
-
   return (
-    <div
-      className={`interactive-play-page ${appearancePageClass(appearance)}`}
-      style={appearancePageStyle(appearance)}
-    >
-      <div className="st-play-topbar">
-        <Link to="/cabinet/student/interactives" className="st-play-back">← Назад</Link>
-        <span>{payload.assignment?.title || getInteractiveDisplayTitle(interactive)}</span>
-      </div>
-      <InteractivePlayer
+    <div className="interactive-play-page interactive-play-page--shell">
+      <InteractiveShell
         interactive={interactive}
         appearance={appearance}
+        loading={loading}
+        error={error || (!loading && !interactive ? "Интерактив недоступен" : "")}
+        exitHref={STUDENT_BACK_HREF}
+        exitLabel="К заданиям"
+        onComplete={handleComplete}
         bare
         playing
-        onComplete={handleComplete}
+        canRestart={interactive?.params?.allowRetry !== false}
       />
     </div>
   );

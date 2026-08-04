@@ -46,13 +46,13 @@ export function InteractivePassport({ interactive }) {
 
   const entries = [
     { label: "Тип", value: typeMeta.shortLabel },
-    { label: "Предмет", value: interactive.subject || "—" },
-    { label: "Экзамен", value: interactive.exam || "—" },
-    { label: "Тема", value: interactive.topic || "—" },
+    { label: "Предмет", value: interactive.subject || "" },
+    { label: "Экзамен", value: interactive.exam && interactive.exam !== "без экзамена" ? interactive.exam : "" },
+    { label: "Тема", value: interactive.topic || "" },
     { label: "Сложность", value: difficultyLabel(interactive.difficulty) },
     { label: "Статус", value: statusMeta.label, tone: statusMeta.tone },
     { label: "Доступ", value: accessLabel },
-  ];
+  ].filter((entry) => entry.value && entry.value !== "—" && entry.value !== "null" && entry.value !== "undefined");
 
   return (
     <section className="ix-launch-passport">
@@ -222,6 +222,8 @@ export function ParametersPanel({ params, onChange, mobileAccordion = false }) {
       <ToggleRow label="Перемешивать" checked={p.shuffleQuestions !== false} onChange={(v) => set("shuffleQuestions", v)} />
       <ToggleRow label="Показывать ответы" checked={p.showAnswersAtEnd !== false} onChange={(v) => set("showAnswersAtEnd", v)} />
       <ToggleRow label="Пояснение после ответа" checked={p.showExplanationAfterAnswer !== false} onChange={(v) => set("showExplanationAfterAnswer", v)} />
+      <ToggleRow label="Разрешить повторное прохождение" checked={p.allowRetry !== false} onChange={(v) => set("allowRetry", v)} />
+      <ToggleRow label="Автоматическая подложка для текста" checked={p.autoTextBackdrop !== false} onChange={(v) => set("autoTextBackdrop", v)} />
     </div>
   );
 
@@ -283,8 +285,11 @@ export function LaunchInfoBar({
   authorName,
   summaryChips = [],
   canStart = true,
+  started = false,
+  onBack,
   onPublish,
   onStart,
+  onRestart,
   onEdit,
   onAssign,
   onShare,
@@ -313,6 +318,11 @@ export function LaunchInfoBar({
   return (
     <section className="ix-launch-info ix-launch-info--v2">
       <div className="ix-launch-info__meta">
+        <div className="ix-launch-info__nav">
+          <button type="button" className="ix-launch-info__back" onClick={onBack}>
+            ← К списку
+          </button>
+        </div>
         <h2 className="ix-launch-info__title">{getInteractiveDisplayTitle(interactive)}</h2>
         <p className="ix-launch-info__line">
           <span>{typeMeta.shortLabel}</span>
@@ -337,10 +347,15 @@ export function LaunchInfoBar({
             disabled={!canStart}
             onClick={onStart}
           >
-            Начать
+            {started ? "Продолжить" : "Начать"}
           </button>
         )}
-        <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={onEdit}>
+        {started ? (
+          <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={onRestart}>
+            Начать заново
+          </button>
+        ) : null}
+        <button type="button" className="cb-btn cb-btn--outline cb-btn--sm ix-launch-info__edit" onClick={onEdit}>
           Редактировать
         </button>
         <button type="button" className="cb-btn cb-btn--ghost cb-btn--sm" onClick={onDuplicate}>
@@ -352,21 +367,24 @@ export function LaunchInfoBar({
             className="cb-btn cb-btn--ghost cb-btn--sm"
             onClick={() => setMoreOpen((v) => !v)}
             aria-expanded={moreOpen}
+            aria-label="Дополнительные действия"
           >
-            Больше
+            Ещё
           </button>
           {moreOpen ? (
-            <div className="ix-launch-more__menu">
+            <div className="ix-launch-more__menu" role="menu">
               <button
                 type="button"
+                role="menuitem"
                 disabled={!canShare}
                 title={canShare ? "" : "Сначала опубликуйте интерактив"}
                 onClick={() => { setMoreOpen(false); onShare?.(); }}
               >
-                Поделиться
+                Скопировать ссылку
               </button>
               <button
                 type="button"
+                role="menuitem"
                 disabled={!canAssign}
                 title={canAssign ? "" : "Сначала опубликуйте интерактив"}
                 onClick={() => { setMoreOpen(false); onAssign?.(); }}
@@ -374,14 +392,14 @@ export function LaunchInfoBar({
                 Выдать
               </button>
               {!canPublish ? (
-                <button type="button" onClick={() => { setMoreOpen(false); onUnpublish?.(); }}>
+                <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); onUnpublish?.(); }}>
                   Снять с публикации
                 </button>
               ) : null}
-              <button type="button" onClick={() => { setMoreOpen(false); onAccessSettings?.(); }}>
+              <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); onAccessSettings?.(); }}>
                 Настройки доступа
               </button>
-              <button type="button" className="danger" onClick={() => { setMoreOpen(false); onDelete?.(); }}>
+              <button type="button" role="menuitem" className="danger" onClick={() => { setMoreOpen(false); onDelete?.(); }}>
                 Удалить
               </button>
             </div>

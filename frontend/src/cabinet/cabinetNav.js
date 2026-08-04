@@ -87,6 +87,7 @@ export const CABINET_MORE_GROUPS = [
     label: "Аккаунт",
     items: [
       { id: "notifications", label: "Уведомления", path: null, icon: "bell", action: "notifications" },
+      { id: "appearance", label: "Оформление", path: null, icon: "spark", action: "appearance" },
       // TEMP: ИИ-помощник скрыт
       // { id: "ai", label: "ИИ-помощник", path: "/cabinet/ai", icon: "spark" },
       { id: "settings", label: "Настройки", path: null, icon: "settings", action: "settings" },

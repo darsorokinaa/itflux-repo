@@ -155,6 +155,8 @@ export const DEFAULT_PARAMS = {
   showExplanationAfterAnswer: true,
   allowRetry: true,
   recordInReport: true,
+  /** Auto contrast plate under text on toned/image backgrounds (default on). */
+  autoTextBackdrop: true,
 };
 
 export function applyBackgroundSlug(interactive, backgroundSlug) {

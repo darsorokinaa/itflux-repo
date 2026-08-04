@@ -49,6 +49,7 @@ from .models import (
     Notification,
     NotificationPreference,
     PushSubscription,
+    SeasonalThemePreference,
     OrderingItem,
     QuizQuestion,
     WheelSegment,
@@ -741,6 +742,15 @@ class NotificationPreferenceAdmin(admin.ModelAdmin):
     )
     list_filter = ("in_app_enabled", "push_enabled", "vk_enabled", "telegram_enabled")
     search_fields = ("user__username", "user__email", "telegram_chat_id", "telegram_username")
+
+
+@admin.register(SeasonalThemePreference)
+class SeasonalThemePreferenceAdmin(admin.ModelAdmin):
+    list_display = ("user", "mode", "selected_theme", "animations_enabled", "updated_at")
+    list_filter = ("mode", "animations_enabled")
+    search_fields = ("user__username", "user__email")
+    raw_id_fields = ("user", "selected_theme")
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(PushSubscription)
