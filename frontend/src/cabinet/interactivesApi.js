@@ -35,8 +35,12 @@ function apiTypeFromFrontend(type) {
   return type === "sequence" ? "ordering" : type;
 }
 
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function mapFlashcardsFromApi(items) {
-  return (items || []).map((card) => ({
+  return asArray(items).map((card) => ({
     front: card.front_text || "",
     back: card.back_text || "",
     front_image_url: card.front_image_url || "",
@@ -47,7 +51,7 @@ function mapFlashcardsFromApi(items) {
 }
 
 function mapMatchingFromApi(items) {
-  return (items || []).map((pair) => ({
+  return asArray(items).map((pair) => ({
     left: pair.left_text || "",
     right: pair.right_text || "",
     left_image_url: pair.left_image_url || "",
@@ -57,7 +61,7 @@ function mapMatchingFromApi(items) {
 }
 
 function mapOrderingFromApi(items) {
-  return (items || []).map((step) => ({
+  return asArray(items).map((step) => ({
     text: step.text || "",
     image_url: step.image_url || "",
     explanation: step.explanation || "",
@@ -66,12 +70,12 @@ function mapOrderingFromApi(items) {
 }
 
 function mapQuizFromApi(items) {
-  return (items || []).map((question) => ({
+  return asArray(items).map((question) => ({
     id: String(question.id),
     text: question.question_text || "",
     image_url: question.image_url || "",
     answer_type: question.answer_type || "single",
-    answers: (question.answers || []).map((answer) => ({
+    answers: asArray(question.answers).map((answer) => ({
       ...answer,
       image_url: answer?.image_url || "",
     })),
@@ -81,7 +85,7 @@ function mapQuizFromApi(items) {
 }
 
 function mapWheelFromApi(items) {
-  return (items || []).map((segment) => ({
+  return asArray(items).map((segment) => ({
     id: segment.id || String(segment.order ?? ""),
     title: segment.title || "",
     description: segment.description || "",
@@ -93,22 +97,83 @@ function mapWheelFromApi(items) {
 
 function appearanceFromApi(api) {
   return {
-    backgroundSlug: api.background?.slug || "light-gray",
-    cardStyleSlug: api.card_style?.slug || DEFAULT_APPEARANCE.cardStyleSlug,
-    soundPackSlug: api.sound_pack?.slug || DEFAULT_APPEARANCE.soundPackSlug,
+    backgroundSlug: api.background?.slug || api.background_slug || DEFAULT_APPEARANCE.backgroundSlug || "light-gray",
+    cardStyleSlug: api.card_style?.slug || api.card_style_slug || DEFAULT_APPEARANCE.cardStyleSlug,
+    soundPackSlug: api.sound_pack?.slug || api.sound_pack_slug || DEFAULT_APPEARANCE.soundPackSlug,
     soundEnabled: api.sound_enabled !== false,
     backgroundImage: null,
     backgroundImageTone: "light",
   };
 }
 
+function emptyContentForType(type) {
+  if (type === "flashcards") {
+    return {
+      cards: [{
+        front: "",
+        back: "",
+        front_image_url: "",
+        back_image_url: "",
+        hint: "",
+        explanation: "",
+      }],
+    };
+  }
+  if (type === "matching") {
+    return {
+      pairs: [{
+        left: "",
+        right: "",
+        left_image_url: "",
+        right_image_url: "",
+        explanation: "",
+      }],
+      shufflePairs: true,
+      showResultImmediately: false,
+    };
+  }
+  if (type === "sequence") {
+    return {
+      steps: [{ text: "", image_url: "", explanation: "", position: 1 }],
+      allowMultipleAttempts: true,
+      showAnswerOnError: true,
+    };
+  }
+  if (type === "quiz") {
+    return {
+      questions: [{
+        id: `q${Date.now()}`,
+        text: "",
+        image_url: "",
+        answer_type: "single",
+        answers: [],
+        explanation: "",
+        points: 1,
+      }],
+    };
+  }
+  if (type === "wheel") {
+    return {
+      segments: [],
+      wheelSettings: { ...DEFAULT_WHEEL_SETTINGS },
+    };
+  }
+  return {};
+}
+
+/**
+ * Unified adapter: API Interactive → frontend interactive object.
+ * Handles both Detail and Write-shaped responses.
+ */
 function baseInteractiveFromApi(api) {
-  const type = frontendTypeFromApi(api.interactive_type);
+  const type = frontendTypeFromApi(api.interactive_type || api.type);
   const exam = examLabelFromApi(api.exam_type, api.direction);
+  const id = api.id ?? api.pk ?? null;
   return {
-    id: api.id,
+    id,
     type,
-    title: api.title || "",
+    title: api.title || api.name || "",
+    description: api.description || "",
     subject: subjectLabelFromDirection(api.direction),
     exam,
     topic: api.topic || "",
@@ -116,7 +181,7 @@ function baseInteractiveFromApi(api) {
     taskNumber: api.task_number || "",
     difficulty: api.difficulty || "средний",
     instruction: api.instruction || "",
-    status: api.status || "draft",
+    status: api.status || (api.is_published ? "published" : "draft"),
     access: "assignable",
     updatedAt: api.updated_at || api.created_at || new Date().toISOString(),
     usedIn: [],
@@ -133,12 +198,15 @@ function baseInteractiveFromApi(api) {
 }
 
 export function mapApiInteractiveListItem(api) {
+  if (!api || typeof api !== "object") {
+    return null;
+  }
   const base = baseInteractiveFromApi(api);
   if (base.type === "flashcards") base.cards = [];
-  if (base.type === "matching") base.pairs = [];
-  if (base.type === "sequence") base.steps = [];
-  if (base.type === "quiz") base.questions = [];
-  if (base.type === "wheel") {
+  else if (base.type === "matching") base.pairs = [];
+  else if (base.type === "sequence") base.steps = [];
+  else if (base.type === "quiz") base.questions = [];
+  else if (base.type === "wheel") {
     base.segments = [];
     base.wheelSettings = { ...DEFAULT_WHEEL_SETTINGS };
   }
@@ -146,64 +214,66 @@ export function mapApiInteractiveListItem(api) {
 }
 
 export function mapApiInteractiveDetail(api) {
+  if (!api || typeof api !== "object") {
+    throw new Error("Некорректный ответ API интерактива");
+  }
   const base = baseInteractiveFromApi(api);
   const type = base.type;
 
   if (type === "flashcards") {
     base.cards = mapFlashcardsFromApi(api.flashcards);
     if (!base.cards.length) {
-      base.cards = [{
-        front: "",
-        back: "",
-        front_image_url: "",
-        back_image_url: "",
-        hint: "",
-        explanation: "",
-      }];
+      Object.assign(base, emptyContentForType("flashcards"));
     }
-  }
-  if (type === "matching") {
+  } else if (type === "matching") {
     base.pairs = mapMatchingFromApi(api.matching_pairs);
     base.shufflePairs = true;
     base.showResultImmediately = false;
     if (!base.pairs.length) {
-      base.pairs = [{
-        left: "",
-        right: "",
-        left_image_url: "",
-        right_image_url: "",
-        explanation: "",
-      }];
+      Object.assign(base, emptyContentForType("matching"));
     }
-  }
-  if (type === "sequence") {
+  } else if (type === "sequence") {
     base.steps = mapOrderingFromApi(api.ordering_items);
     base.allowMultipleAttempts = true;
     base.showAnswerOnError = true;
     if (!base.steps.length) {
-      base.steps = [{ text: "", image_url: "", explanation: "", position: 1 }];
+      Object.assign(base, emptyContentForType("sequence"));
     }
-  }
-  if (type === "quiz") {
+  } else if (type === "quiz") {
     base.questions = mapQuizFromApi(api.quiz_questions);
     if (!base.questions.length) {
-      base.questions = [{
-        id: `q${Date.now()}`,
-        text: "",
-        image_url: "",
-        answer_type: "single",
-        answers: [],
-        explanation: "",
-        points: 1,
-      }];
+      Object.assign(base, emptyContentForType("quiz"));
     }
-  }
-  if (type === "wheel") {
+  } else if (type === "wheel") {
     base.segments = mapWheelFromApi(api.wheel_segments);
     base.wheelSettings = { ...(api.wheel_settings || DEFAULT_WHEEL_SETTINGS) };
+  } else {
+    Object.assign(base, emptyContentForType("flashcards"));
+    base.type = "flashcards";
   }
 
   return base;
+}
+
+/**
+ * Merge save response into current editor state without losing id/type content
+ * if the response is partial.
+ */
+export function mergeInteractiveAfterSave(current, apiData) {
+  const mapped = mapApiInteractiveDetail(apiData);
+  if (!mapped.id && current?.id) {
+    mapped.id = current.id;
+  }
+  if (!mapped.type && current?.type) {
+    mapped.type = current.type;
+  }
+  // Preserve local-only fields not returned by API.
+  if (current?.params) mapped.params = current.params;
+  if (current?.backgroundImage) {
+    mapped.backgroundImage = current.backgroundImage;
+    mapped.backgroundImageTone = current.backgroundImageTone || mapped.backgroundImageTone;
+  }
+  return mapped;
 }
 
 function resolveExamAndDirection(interactive) {
@@ -211,6 +281,11 @@ function resolveExamAndDirection(interactive) {
   if (mapped) return mapped;
   const direction = SUBJECT_TO_DIRECTION[interactive.subject] || interactive.direction || "other";
   return { exam_type: "none", direction };
+}
+
+function normalizeImageUrl(url) {
+  const value = String(url || "").trim();
+  return value;
 }
 
 export function buildInteractiveWritePayload(interactive, statusOverride) {
@@ -249,8 +324,8 @@ export function buildInteractiveWritePayload(interactive, statusOverride) {
     payload.flashcards = (interactive.cards || []).map((card, index) => ({
       front_text: card.front || "",
       back_text: card.back || "",
-      front_image_url: card.front_image_url || "",
-      back_image_url: card.back_image_url || "",
+      front_image_url: normalizeImageUrl(card.front_image_url),
+      back_image_url: normalizeImageUrl(card.back_image_url),
       hint: card.hint || "",
       explanation: card.explanation || "",
       order: index,
@@ -261,8 +336,8 @@ export function buildInteractiveWritePayload(interactive, statusOverride) {
     payload.matching_pairs = (interactive.pairs || []).map((pair, index) => ({
       left_text: pair.left || "",
       right_text: pair.right || "",
-      left_image_url: pair.left_image_url || "",
-      right_image_url: pair.right_image_url || "",
+      left_image_url: normalizeImageUrl(pair.left_image_url),
+      right_image_url: normalizeImageUrl(pair.right_image_url),
       explanation: pair.explanation || "",
       order: index,
     }));
@@ -271,7 +346,7 @@ export function buildInteractiveWritePayload(interactive, statusOverride) {
   if (interactive.type === "sequence") {
     payload.ordering_items = (interactive.steps || []).map((step, index) => ({
       text: step.text || "",
-      image_url: step.image_url || "",
+      image_url: normalizeImageUrl(step.image_url),
       explanation: step.explanation || "",
       correct_order: step.position ?? (index + 1),
     }));
@@ -280,11 +355,11 @@ export function buildInteractiveWritePayload(interactive, statusOverride) {
   if (interactive.type === "quiz") {
     payload.quiz_questions = (interactive.questions || []).map((question, index) => ({
       question_text: question.text || "",
-      image_url: question.image_url || "",
+      image_url: normalizeImageUrl(question.image_url),
       answer_type: question.answer_type || "single",
       answers: (question.answers || []).map((answer) => ({
         ...answer,
-        image_url: answer?.image_url || "",
+        image_url: normalizeImageUrl(answer?.image_url),
       })),
       explanation: question.explanation || "",
       points: question.points ?? 1,

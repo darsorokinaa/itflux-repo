@@ -1308,6 +1308,20 @@
   font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ix-error__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ix-error__retry--ghost {
+  background: transparent;
+  border-color: #FECACA;
 }
 
 /* Empty state */

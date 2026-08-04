@@ -15,6 +15,7 @@ import {
 import {
   buildInteractiveWritePayload,
   mapApiInteractiveDetail,
+  mergeInteractiveAfterSave,
 } from "../interactivesApi";
 import {
   createInteractive,
@@ -48,7 +49,6 @@ function useMediaQuery(query) {
 }
 
 function EditorItemShell({
-  index,
   title,
   summary,
   hint,
@@ -226,7 +226,7 @@ function FlashcardsEditor({
         </button>
       </header>
       <div className="ix-ed-panel__body ix-ed-panel__body--stack">
-        {data.cards.map((card, index) => {
+        {(data.cards || []).map((card, index) => {
           const summary = card.front && card.back
             ? `${card.front} → ${card.back}`
             : card.front || card.back || "Пустая карточка";
@@ -396,7 +396,7 @@ function MatchingEditor({
         </button>
       </header>
       <div className="ix-ed-panel__body ix-ed-panel__body--stack">
-        {data.pairs.map((pair, index) => {
+        {(data.pairs || []).map((pair, index) => {
           const summary = pair.left && pair.right
             ? `${pair.left} ↔ ${pair.right}`
             : pair.left || pair.right || "Пустая пара";
@@ -553,7 +553,7 @@ function SequenceEditor({
         </button>
       </header>
       <div className="ix-ed-panel__body ix-ed-panel__body--stack">
-        {data.steps.map((step, index) => (
+        {(data.steps || []).map((step, index) => (
           <EditorItemShell
             key={index}
             index={index}
@@ -661,7 +661,10 @@ export default function CabinetInteractiveEditorPage() {
           }
         })
         .catch((err) => {
-          if (!cancelled) setLoadError(err?.message || "Не удалось загрузить интерактив");
+          if (!cancelled) {
+            if (import.meta.env.DEV) console.error("Interactive load failed:", err);
+            setLoadError(err?.message || "Не удалось загрузить интерактив");
+          }
         })
         .finally(() => {
           if (!cancelled) setLoading(false);
@@ -683,28 +686,36 @@ export default function CabinetInteractiveEditorPage() {
       if (!current) return;
       const payload = buildInteractiveWritePayload(current, status || current.status);
       let apiData;
-      if (isEdit && current.id) {
+      const existingId = isEdit ? current.id : null;
+      if (existingId) {
         if (status === "published") {
-          await updateInteractive(current.id, payload);
-          apiData = await publishInteractive(current.id);
+          await updateInteractive(existingId, payload);
+          apiData = await publishInteractive(existingId);
         } else {
-          apiData = await updateInteractive(current.id, payload);
+          apiData = await updateInteractive(existingId, payload);
         }
       } else {
         apiData = await createInteractive(payload);
       }
-      const next = mapApiInteractiveDetail(apiData);
+      const next = mergeInteractiveAfterSave(current, apiData);
+      if (!next.id) {
+        setPublishError("Сервер не вернул идентификатор интерактива. Обновите страницу и попробуйте снова.");
+        return;
+      }
       setData(next);
       setSaved(true);
-      if (!isEdit) {
+      if (!isEdit || String(id) !== String(next.id)) {
         navigate(`/cabinet/interactives/${next.id}/edit`, { replace: true });
       }
     } catch (err) {
+      if (import.meta.env.DEV) {
+        console.error("Interactive save failed:", err);
+      }
       setPublishError(err?.message || "Не удалось сохранить");
     } finally {
       setSaving(false);
     }
-  }, [data, isEdit, navigate]);
+  }, [data, id, isEdit, navigate]);
 
   const autoSave = useCallback(async () => {
     const current = data;
@@ -713,11 +724,49 @@ export default function CabinetInteractiveEditorPage() {
   }, [data, persist, saving]);
 
   useAutoSave({
-    enabled: Boolean(data) && !loading,
+    enabled: Boolean(data) && !loading && !loadError,
     isDirty: !saved,
     isSaving: saving,
     onSave: autoSave,
   });
+
+  const onImageUpload = useCallback(async (file) => {
+    if (!file) throw new Error("Файл не выбран");
+    setImageUploading(true);
+    setImageError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const uploaded = await uploadInteractiveImage(formData);
+      const url = String(uploaded?.url || "").trim();
+      if (!url) throw new Error("Сервер не вернул ссылку на файл");
+      setSaved(false);
+      return url;
+    } catch (err) {
+      const message = err?.message || "Не удалось загрузить изображение";
+      setImageError(message);
+      throw err instanceof Error ? err : new Error(message);
+    } finally {
+      setImageUploading(false);
+    }
+  }, []);
+
+  const retryLoad = useCallback(() => {
+    if (!id) return;
+    setLoadError("");
+    setLoading(true);
+    fetchInteractive(id)
+      .then((apiData) => {
+        setData(mapApiInteractiveDetail(apiData));
+        setOpenItemIndex(0);
+        setSaved(true);
+      })
+      .catch((err) => {
+        if (import.meta.env.DEV) console.error("Interactive load failed:", err);
+        setLoadError(err?.message || "Не удалось загрузить интерактив");
+      })
+      .finally(() => setLoading(false));
+  }, [id]);
 
   if (loading) {
     return (
@@ -728,7 +777,21 @@ export default function CabinetInteractiveEditorPage() {
   }
 
   if (loadError) {
-    return <Navigate to="/cabinet/interactives" replace state={{ error: loadError }} />;
+    return (
+      <CabinetPageShell className="cb-section--interactive-editor ix-ed-page">
+        <div className="ix-error" role="alert">
+          <p className="ix-error__text">{loadError}</p>
+          <div className="ix-error__actions">
+            <button type="button" className="ix-error__retry" onClick={retryLoad}>
+              Повторить
+            </button>
+            <Link to="/cabinet/interactives" className="ix-error__retry ix-error__retry--ghost">
+              К списку
+            </Link>
+          </div>
+        </div>
+      </CabinetPageShell>
+    );
   }
 
   if (!data) {
@@ -747,27 +810,6 @@ export default function CabinetInteractiveEditorPage() {
     setSaved(false);
   };
 
-  const onImageUpload = useCallback(async (file) => {
-    if (!file) throw new Error("Файл не выбран");
-    setImageUploading(true);
-    setImageError("");
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const data = await uploadInteractiveImage(formData);
-      const url = String(data?.url || "").trim();
-      if (!url) throw new Error("Сервер не вернул ссылку на файл");
-      setSaved(false);
-      return url;
-    } catch (err) {
-      const message = err?.message || "Не удалось загрузить изображение";
-      setImageError(message);
-      throw err instanceof Error ? err : new Error(message);
-    } finally {
-      setImageUploading(false);
-    }
-  }, []);
-
   const handlePublish = async () => {
     if (data.type === "wheel" && !wheelCanPublish(data)) {
       setPublishError(wheelPublishError(data));
@@ -778,16 +820,21 @@ export default function CabinetInteractiveEditorPage() {
   };
 
   const goToLaunch = async () => {
-    let targetId = isEdit ? data.id : null;
+    let targetId = data?.id || (isEdit ? id : null);
     if (!targetId) {
       setSaving(true);
       try {
         const apiData = await createInteractive(buildInteractiveWritePayload(data, "draft"));
-        const next = mapApiInteractiveDetail(apiData);
+        const next = mergeInteractiveAfterSave(data, apiData);
+        if (!next.id) {
+          setPublishError("Сервер не вернул идентификатор интерактива");
+          return;
+        }
         setData(next);
         targetId = next.id;
         navigate(`/cabinet/interactives/${targetId}/edit`, { replace: true });
       } catch (err) {
+        if (import.meta.env.DEV) console.error("Interactive preview save failed:", err);
         setPublishError(err?.message || "Не удалось сохранить");
         return;
       } finally {

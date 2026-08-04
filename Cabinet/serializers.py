@@ -1400,7 +1400,6 @@ class InteractiveWriteSerializer(serializers.ModelSerializer):
                 WheelSegment.objects.create(interactive=interactive, **item)
 
     def create(self, validated_data):
-        self._save_items_placeholder = validated_data
         items_data = {
             "flashcards": validated_data.pop("flashcards", None),
             "matching_pairs": validated_data.pop("matching_pairs", None),

@@ -385,7 +385,8 @@ export function createEmptyInteractive(type) {
 }
 
 export function getItemCount(interactive) {
-  if (typeof interactive?.itemsCount === "number" && interactive.itemsCount > 0) {
+  if (!interactive) return 0;
+  if (typeof interactive.itemsCount === "number" && interactive.itemsCount > 0) {
     return interactive.itemsCount;
   }
   if (interactive.type === "flashcards") return interactive.cards?.length || 0;

@@ -339,11 +339,46 @@ function App() {
             <Route path="plans/new" element={<CabinetLessonPlanEditorPage />} />
             <Route path="plans/:planId" element={<CabinetLessonPlanDetailPage />} />
             <Route path="plans/:planId/edit" element={<CabinetLessonPlanEditorPage />} />
-            <Route path="interactives" element={<CabinetInteractivesPage />} />
-            <Route path="interactives/new" element={<CabinetInteractiveCreatePage />} />
-            <Route path="interactives/new/:type" element={<CabinetInteractiveEditorPage />} />
-            <Route path="interactives/:id/edit" element={<CabinetInteractiveEditorPage />} />
-            <Route path="interactives/:id" element={<CabinetInteractiveDetailPage />} />
+            <Route
+              path="interactives"
+              element={(
+                <ErrorBoundary>
+                  <CabinetInteractivesPage />
+                </ErrorBoundary>
+              )}
+            />
+            <Route
+              path="interactives/new"
+              element={(
+                <ErrorBoundary>
+                  <CabinetInteractiveCreatePage />
+                </ErrorBoundary>
+              )}
+            />
+            <Route
+              path="interactives/new/:type"
+              element={(
+                <ErrorBoundary>
+                  <CabinetInteractiveEditorPage />
+                </ErrorBoundary>
+              )}
+            />
+            <Route
+              path="interactives/:id/edit"
+              element={(
+                <ErrorBoundary>
+                  <CabinetInteractiveEditorPage />
+                </ErrorBoundary>
+              )}
+            />
+            <Route
+              path="interactives/:id"
+              element={(
+                <ErrorBoundary>
+                  <CabinetInteractiveDetailPage />
+                </ErrorBoundary>
+              )}
+            />
             <Route path="boards" element={<CabinetBoardsPage />} />
             <Route path="files" element={<CabinetFilesPage />} />
             <Route path="review/:reviewId" element={<CabinetReviewDetailPage />} />

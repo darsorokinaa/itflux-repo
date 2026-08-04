@@ -5,7 +5,6 @@ import InteractiveAssignModal from "../components/InteractiveAssignModal";
 import {
   InteractivesEmptyState,
   InteractiveActivityCard,
-  InteractiveTypeCard,
   TypeSelectModal,
 } from "../components/InteractivesUi";
 import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
@@ -55,14 +54,21 @@ const STATUS_FILTER_OPTIONS = [
   { id: "assigned", label: "Выданные" },
 ];
 
-function InteractivesSkeleton() {
+const MINE_PREVIEW_LIMIT = 8;
+
+function InteractivesSkeleton({ count = 6 }) {
   return (
     <div className="ix-activity-grid" aria-busy="true" aria-label="Загрузка интерактивов">
-      {Array.from({ length: 6 }, (_, i) => (
+      {Array.from({ length: count }, (_, i) => (
         <div key={i} className="ix-skeleton-card" />
       ))}
     </div>
   );
+}
+
+function SafeActivityCard(props) {
+  if (!props.interactive?.id) return null;
+  return <InteractiveActivityCard {...props} />;
 }
 
 export default function CabinetInteractivesPage() {
@@ -92,7 +98,12 @@ export default function CabinetInteractivesPage() {
     return `${used} из ${limit} создано`;
   }, [subscription]);
 
-  const filtered = useMemo(() => {
+  const mineItems = useMemo(
+    () => sortInteractives(items, "updated").slice(0, MINE_PREVIEW_LIMIT),
+    [items],
+  );
+
+  const catalogItems = useMemo(() => {
     let list = items;
     if (typeFilter !== "all") {
       list = filterInteractives(list, typeFilter);
@@ -105,8 +116,9 @@ export default function CabinetInteractivesPage() {
       list = list.filter((item) => {
         const title = getInteractiveDisplayTitle(item).toLowerCase();
         const topic = String(item.topic || "").toLowerCase();
+        const subject = String(item.subject || "").toLowerCase();
         const typeLabel = String(INTERACTIVE_TYPES[item.type]?.label || "").toLowerCase();
-        return title.includes(q) || topic.includes(q) || typeLabel.includes(q);
+        return title.includes(q) || topic.includes(q) || subject.includes(q) || typeLabel.includes(q);
       });
     }
     return sortInteractives(list, sort);
@@ -119,8 +131,12 @@ export default function CabinetInteractivesPage() {
     setLoadError("");
     try {
       const data = await fetchInteractives();
-      setItems(normalizeInteractivesList(data).map(mapApiInteractiveListItem));
+      const mapped = normalizeInteractivesList(data)
+        .map(mapApiInteractiveListItem)
+        .filter(Boolean);
+      setItems(mapped);
     } catch (err) {
+      if (import.meta.env.DEV) console.error("Interactives list failed:", err);
       setLoadError(err?.message || "Не удалось загрузить интерактивы");
       setItems([]);
     } finally {
@@ -151,6 +167,16 @@ export default function CabinetInteractivesPage() {
     navigate(`/cabinet/interactives/new/${type}`);
   };
 
+  const openInteractive = (item) => {
+    if (!item?.id) return;
+    navigate(`/cabinet/interactives/${item.id}`);
+  };
+
+  const editInteractive = (item) => {
+    if (!item?.id) return;
+    navigate(`/cabinet/interactives/${item.id}/edit`);
+  };
+
   const handleAssign = async (payload) => {
     const item = items.find((i) => i.id === payload.interactiveId);
     if (!item) return;
@@ -167,6 +193,7 @@ export default function CabinetInteractivesPage() {
       window.setTimeout(() => setNotice(""), 2800);
       await refresh();
     } catch (err) {
+      if (import.meta.env.DEV) console.error("Assign interactive failed:", err);
       setNotice(err?.message || "Не удалось выдать интерактив");
       window.setTimeout(() => setNotice(""), 3200);
     }
@@ -177,6 +204,115 @@ export default function CabinetInteractivesPage() {
     setTypeFilter("all");
     setStatusFilter("all");
     setSort("updated");
+  };
+
+  const cardHandlers = (item) => ({
+    interactive: item,
+    onOpen: () => openInteractive(item),
+    onEdit: () => editInteractive(item),
+    onAssign: () => {
+      if (!canAssignInteractive(item)) {
+        setNotice("Сначала опубликуйте интерактив");
+        window.setTimeout(() => setNotice(""), 2800);
+        return;
+      }
+      setAssignTarget(item);
+    },
+    onDuplicate: async () => {
+      try {
+        const detail = await fetchInteractive(item.id);
+        const copy = mapApiInteractiveDetail(detail);
+        copy.title = copy.title ? `${copy.title} (копия)` : "Копия";
+        copy.status = "draft";
+        await createInteractive(buildInteractiveWritePayload(copy, "draft"));
+        await refresh();
+      } catch (err) {
+        if (import.meta.env.DEV) console.error("Duplicate interactive failed:", err);
+        setNotice(err?.message || "Не удалось создать копию");
+        window.setTimeout(() => setNotice(""), 3200);
+      }
+    },
+    onDelete: () => setDeleteTarget(item),
+  });
+
+  const renderMineBody = () => {
+    if (loading) return <InteractivesSkeleton count={4} />;
+    if (loadError) {
+      return (
+        <div className="ix-error" role="alert">
+          <p className="ix-error__text">{loadError}</p>
+          <button type="button" className="ix-error__retry" onClick={refresh}>
+            Повторить
+          </button>
+        </div>
+      );
+    }
+    if (items.length === 0) {
+      return (
+        <InteractivesEmptyState
+          onCreate={openCreateFlow}
+          onQuickCreate={handleTypeSelect}
+        />
+      );
+    }
+    return (
+      <div className="ix-activity-grid">
+        {mineItems.map((item) => (
+          <SafeActivityCard key={`mine-${item.id}`} {...cardHandlers(item)} />
+        ))}
+      </div>
+    );
+  };
+
+  const renderCatalogBody = () => {
+    if (loading) return <InteractivesSkeleton />;
+    if (loadError) {
+      return (
+        <div className="ix-error" role="alert">
+          <p className="ix-error__text">{loadError}</p>
+          <button type="button" className="ix-error__retry" onClick={refresh}>
+            Повторить
+          </button>
+        </div>
+      );
+    }
+    if (items.length === 0) {
+      return (
+        <div className="ix-empty ix-empty--filtered">
+          <div className="ix-empty__panel">
+            <h3 className="ix-empty__title">Каталог пока пуст</h3>
+            <p className="ix-empty__text">
+              Создайте первый интерактив — он появится здесь и в блоке «Мои интерактивы».
+            </p>
+            <button type="button" className="ix-empty__cta" onClick={openCreateFlow}>
+              Создать интерактив
+            </button>
+          </div>
+        </div>
+      );
+    }
+    if (catalogItems.length === 0) {
+      return (
+        <div className="ix-empty ix-empty--filtered">
+          <div className="ix-empty__panel">
+            <h3 className="ix-empty__title">Ничего не найдено</h3>
+            <p className="ix-empty__text">
+              Измените поиск или фильтры, чтобы увидеть созданные интерактивы.
+            </p>
+            <button type="button" className="ix-empty__cta ix-empty__cta--ghost" onClick={resetFilters}>
+              Сбросить фильтры
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="ix-activity-grid">
+        {catalogItems.map((item) => (
+          <SafeActivityCard key={`catalog-${item.id}`} {...cardHandlers(item)} />
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -206,26 +342,24 @@ export default function CabinetInteractivesPage() {
         </div>
       </header>
 
-      <section className="ix-section ix-section--types" aria-labelledby="ix-types-title">
-        <div className="ix-section__intro">
-          <h2 id="ix-types-title" className="ix-section__title">Выберите формат</h2>
-          <p className="ix-section__sub">
-            Выберите формат задания, который подходит для текущего урока.
-          </p>
-        </div>
-        <div className="ix-type-grid">
-          {INTERACTIVE_TYPE_LIST.map((type) => (
-            <InteractiveTypeCard key={type} type={type} onCreate={handleTypeSelect} />
-          ))}
-        </div>
-      </section>
-
       <section className="ix-section ix-section--mine" aria-labelledby="ix-mine-title">
         <div className="ix-section__head">
           <div className="ix-section__intro">
             <h2 id="ix-mine-title" className="ix-section__title">Мои интерактивы</h2>
             <p className="ix-section__sub">
-              Созданные задания, черновики и материалы, выданные ученикам.
+              Ваши черновики и опубликованные задания. Редактирование доступно только вам.
+            </p>
+          </div>
+        </div>
+        {renderMineBody()}
+      </section>
+
+      <section className="ix-section ix-section--catalog" aria-labelledby="ix-catalog-title">
+        <div className="ix-section__head">
+          <div className="ix-section__intro">
+            <h2 id="ix-catalog-title" className="ix-section__title">Все интерактивы</h2>
+            <p className="ix-section__sub">
+              Полный список ваших материалов с поиском и фильтрами.
             </p>
           </div>
         </div>
@@ -288,66 +422,7 @@ export default function CabinetInteractivesPage() {
           </div>
         ) : null}
 
-        {loading ? (
-          <InteractivesSkeleton />
-        ) : loadError ? (
-          <div className="ix-error" role="alert">
-            <p className="ix-error__text">{loadError}</p>
-            <button type="button" className="ix-error__retry" onClick={refresh}>
-              Повторить
-            </button>
-          </div>
-        ) : items.length === 0 ? (
-          <InteractivesEmptyState
-            onCreate={openCreateFlow}
-            onQuickCreate={handleTypeSelect}
-          />
-        ) : filtered.length === 0 ? (
-          <div className="ix-empty ix-empty--filtered">
-            <div className="ix-empty__panel">
-              <h3 className="ix-empty__title">Ничего не найдено</h3>
-              <p className="ix-empty__text">
-                Измените поиск или фильтры, чтобы увидеть созданные интерактивы.
-              </p>
-              <button type="button" className="ix-empty__cta ix-empty__cta--ghost" onClick={resetFilters}>
-                Сбросить фильтры
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="ix-activity-grid">
-            {filtered.map((item) => (
-              <InteractiveActivityCard
-                key={item.id}
-                interactive={item}
-                onOpen={() => navigate(`/cabinet/interactives/${item.id}`)}
-                onEdit={() => navigate(`/cabinet/interactives/${item.id}/edit`)}
-                onAssign={() => {
-                  if (!canAssignInteractive(item)) {
-                    setNotice("Сначала опубликуйте интерактив");
-                    window.setTimeout(() => setNotice(""), 2800);
-                    return;
-                  }
-                  setAssignTarget(item);
-                }}
-                onDuplicate={async () => {
-                  try {
-                    const detail = await fetchInteractive(item.id);
-                    const copy = mapApiInteractiveDetail(detail);
-                    copy.title = copy.title ? `${copy.title} (копия)` : "Копия";
-                    copy.status = "draft";
-                    await createInteractive(buildInteractiveWritePayload(copy, "draft"));
-                    await refresh();
-                  } catch (err) {
-                    setNotice(err?.message || "Не удалось создать копию");
-                    window.setTimeout(() => setNotice(""), 3200);
-                  }
-                }}
-                onDelete={() => setDeleteTarget(item)}
-              />
-            ))}
-          </div>
-        )}
+        {renderCatalogBody()}
       </section>
 
       {showTypeModal ? (
@@ -383,6 +458,7 @@ export default function CabinetInteractivesPage() {
             setDeleteTarget(null);
             await refresh();
           } catch (err) {
+            if (import.meta.env.DEV) console.error("Delete interactive failed:", err);
             setNotice(err?.message || "Не удалось удалить");
             window.setTimeout(() => setNotice(""), 3200);
           } finally {

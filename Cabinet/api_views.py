@@ -1305,7 +1305,11 @@ class InteractiveAppearanceView(TeacherScopedMixin, APIView):
 
 class InteractiveViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
     def get_queryset(self):
-        qs = Interactive.objects.filter(teacher=self.get_teacher())
+        qs = Interactive.objects.filter(teacher=self.get_teacher()).select_related(
+            "background",
+            "card_style",
+            "sound_pack",
+        )
         params = self.request.query_params
         for field in ("direction", "exam_type", "status", "interactive_type"):
             value = params.get(field)
@@ -1314,6 +1318,14 @@ class InteractiveViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         search = (params.get("search") or "").strip()
         if search:
             qs = qs.filter(title__icontains=search)
+        if self.action == "retrieve":
+            qs = qs.prefetch_related(
+                "flashcards",
+                "matching_pairs",
+                "ordering_items",
+                "quiz_questions",
+                "wheel_segments",
+            )
         return qs.order_by("-updated_at")
 
     def get_serializer_class(self):
@@ -1323,12 +1335,33 @@ class InteractiveViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             return InteractiveWriteSerializer
         return InteractiveListSerializer
 
+    def _detail_response(self, interactive, status_code=status.HTTP_200_OK, headers=None):
+        """Create/update must return Detail shape (incl. id), not WriteSerializer."""
+        data = InteractiveDetailSerializer(interactive, context=self.get_serializer_context()).data
+        return Response(data, status=status_code, headers=headers or {})
+
     def create(self, request, *args, **kwargs):
         try:
             SubscriptionLimitService.raise_if_interactive_limit_reached(self.get_teacher())
         except LimitExceeded as exc:
             return Response(exc.to_dict(), status=status.HTTP_403_FORBIDDEN)
-        return super().create(request, *args, **kwargs)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers({"pk": serializer.instance.pk})
+        return self._detail_response(
+            serializer.instance,
+            status_code=status.HTTP_201_CREATED,
+            headers=headers,
+        )
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return self._detail_response(serializer.instance)
 
     def perform_create(self, serializer):
         serializer.save(teacher=self.get_teacher())
@@ -1337,8 +1370,12 @@ class InteractiveViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
     def publish(self, request, pk=None):
         interactive = self.get_object()
         interactive.status = "published"
-        interactive.save(update_fields=["status", "updated_at"])
-        return Response(InteractiveDetailSerializer(interactive).data)
+        update_fields = ["status", "updated_at"]
+        if interactive.published_at is None:
+            interactive.published_at = timezone.now()
+            update_fields.append("published_at")
+        interactive.save(update_fields=update_fields)
+        return Response(InteractiveDetailSerializer(interactive, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["post"], url_path="assign")
     def assign(self, request, pk=None):
@@ -1375,6 +1412,9 @@ class InteractiveViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         rel_path = f"cabinet/interactives/uploads/{self.get_teacher().pk}/{uid}_{safe_name}"
         saved_path = default_storage.save(rel_path, uploaded)
         file_url = default_storage.url(saved_path)
+        # Keep relative /media/... URLs stable across hosts; CharField accepts them on save.
+        if file_url and not file_url.startswith(("http://", "https://", "/")):
+            file_url = request.build_absolute_uri(file_url)
         return Response({"ok": True, "url": file_url, "filename": safe_name}, status=status.HTTP_201_CREATED)
 
 

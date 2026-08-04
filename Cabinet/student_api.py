@@ -772,6 +772,7 @@ def _serialize_interactive_card(assignment, students):
         "matching": "Сопоставление",
         "ordering": "Порядок",
         "quiz": "Викторина",
+        "wheel": "Колесо",
     }
     itype = interactive.interactive_type
     if itype == "ordering":
@@ -783,6 +784,8 @@ def _serialize_interactive_card(assignment, students):
         count = interactive.matching_pairs.count()
     elif interactive.interactive_type == "quiz":
         count = interactive.quiz_questions.count()
+    elif interactive.interactive_type == "wheel":
+        count = interactive.wheel_segments.count()
     else:
         count = interactive.ordering_items.count()
 
@@ -793,6 +796,8 @@ def _serialize_interactive_card(assignment, students):
         cover_theme = "school"
     elif interactive.interactive_type == "quiz":
         cover_theme = "quiz"
+    elif interactive.interactive_type == "wheel":
+        cover_theme = "wheel"
 
     return {
         "id": assignment.id,

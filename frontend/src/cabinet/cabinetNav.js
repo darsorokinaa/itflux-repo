@@ -131,7 +131,7 @@ export function getCabinetSectionTitle(pathname) {
   if (pathname.startsWith("/cabinet/plans/") && pathname.includes("/edit")) return "Редактирование плана";
   if (pathname.startsWith("/cabinet/plans/new")) return "Новый план";
   if (/\/cabinet\/plans\/[^/]+$/.test(pathname)) return "План занятий";
-  if (pathname.startsWith("/cabinet/interactives/create")) return "Тип интерактива";
+  if (pathname.startsWith("/cabinet/interactives/new")) return "Тип интерактива";
   if (pathname.startsWith("/cabinet/interactives/")) return "Интерактив";
   if (pathname.startsWith("/cabinet/boards/")) return "Доска";
 

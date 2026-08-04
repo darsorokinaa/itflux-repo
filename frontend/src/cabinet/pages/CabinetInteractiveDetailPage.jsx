@@ -36,6 +36,7 @@ import {
 import {
   buildInteractiveWritePayload,
   mapApiInteractiveDetail,
+  mergeInteractiveAfterSave,
 } from "../interactivesApi";
 import {
   getInteractiveSummaryChips,
@@ -92,8 +93,11 @@ export default function CabinetInteractiveDetailPage() {
           setStarted(false);
         }
       })
-      .catch(() => {
-        if (!cancelled) setInteractive(null);
+      .catch((err) => {
+        if (!cancelled) {
+          if (import.meta.env.DEV) console.error("Interactive detail load failed:", err);
+          setInteractive(null);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -114,13 +118,8 @@ export default function CabinetInteractiveDetailPage() {
   const persistToApi = useCallback(async (next, statusOverride) => {
     const payload = buildInteractiveWritePayload(next, statusOverride || next.status);
     const data = await updateInteractive(next.id, payload);
-    const mapped = mapApiInteractiveDetail(data);
-    setInteractive({
-      ...mapped,
-      backgroundImage: next.backgroundImage ?? mapped.backgroundImage,
-      backgroundImageTone: next.backgroundImageTone ?? mapped.backgroundImageTone,
-      params: next.params ?? mapped.params,
-    });
+    const mapped = mergeInteractiveAfterSave(next, data);
+    setInteractive(mapped);
     return mapped;
   }, []);
 

@@ -110,6 +110,7 @@ export function InteractivesHero({ onCreate, onTemplates }) {
 
 export function InteractiveTypeCard({ type, onCreate, compact = false }) {
   const meta = INTERACTIVE_TYPES[type];
+  if (!meta) return null;
   const available = isInteractiveTypeAvailable(type);
 
   return (
@@ -249,36 +250,43 @@ export function InteractiveActivityCard({
   onAssign,
   onDuplicate,
   onDelete,
+  showActions = true,
 }) {
-  const typeMeta = getTypeMeta(interactive.type);
-  const firstSlide = useMemo(() => getInteractiveFirstSlide(interactive), [interactive]);
+  const typeMeta = getTypeMeta(interactive?.type);
+  const firstSlide = useMemo(
+    () => (interactive ? getInteractiveFirstSlide(interactive) : null),
+    [interactive],
+  );
   const { catalog } = useInteractiveAppearanceCatalog();
   const appearance = useMemo(
-    () => resolveInteractiveAppearance(interactive, catalog),
+    () => (interactive ? resolveInteractiveAppearance(interactive, catalog) : null),
     [interactive, catalog],
   );
   const hasSlidePreview = Boolean(firstSlide);
-  const statusMeta = getStatusMeta(interactive.status);
+  const statusMeta = getStatusMeta(interactive?.status);
   const count = getItemCount(interactive);
-  const itemLabel = interactive.type === "flashcards"
+  const itemLabel = interactive?.type === "flashcards"
     ? "карточек"
-    : interactive.type === "matching"
+    : interactive?.type === "matching"
       ? "пар"
-      : interactive.type === "quiz"
+      : interactive?.type === "quiz"
         ? "вопросов"
-        : interactive.type === "wheel"
+        : interactive?.type === "wheel"
           ? "секторов"
           : "элементов";
 
-  const metaParts = [
+  const metaParts = interactive ? [
     typeMeta.shortLabel,
     count > 0 ? `${count} ${itemLabel}` : null,
-    interactive.exam !== "без экзамена" ? interactive.exam : null,
-  ].filter(Boolean);
+    interactive.subject || null,
+    interactive.exam && interactive.exam !== "без экзамена" ? interactive.exam : null,
+    interactive.topic || null,
+  ].filter(Boolean) : [];
 
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const canAssign = canAssignInteractive(interactive);
+  const canEdit = Boolean(onEdit);
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -295,6 +303,8 @@ export function InteractiveActivityCard({
       document.removeEventListener("keydown", onKey);
     };
   }, [menuOpen]);
+
+  if (!interactive) return null;
 
   return (
     <article
@@ -313,14 +323,14 @@ export function InteractiveActivityCard({
         className={[
           "ix-activity-card__cover",
           hasSlidePreview ? "ix-activity-card__cover--slide" : "ix-activity-card__cover--icon",
-          appearancePageClass(appearance),
-        ].join(" ")}
-        style={appearancePageStyle(appearance)}
+          appearance ? appearancePageClass(appearance) : "",
+        ].filter(Boolean).join(" ")}
+        style={appearance ? appearancePageStyle(appearance) : undefined}
       >
         {hasSlidePreview ? (
           <InteractiveCoverSlide
             slide={firstSlide}
-            cardClass={appearance.cardStyle?.css_class}
+            cardClass={appearance?.cardStyle?.css_class}
           />
         ) : (
           <div className="ix-cover-theme__icon">
@@ -350,7 +360,9 @@ export function InteractiveActivityCard({
             {menuOpen ? (
               <div className="ix-activity-card__dropdown" role="menu">
                 <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onOpen?.(); }}>Открыть</button>
-                <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit?.(); }}>Редактировать</button>
+                {canEdit ? (
+                  <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit?.(); }}>Редактировать</button>
+                ) : null}
                 <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDuplicate?.(); }}>Дублировать</button>
                 <button
                   type="button"
@@ -375,6 +387,18 @@ export function InteractiveActivityCard({
             {formatUpdatedAt(interactive.updatedAt)}
           </time>
         </div>
+        {showActions ? (
+          <div className="ix-activity-card__actions" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="ix-activity-card__btn ix-activity-card__btn--primary" onClick={() => onOpen?.()}>
+              Открыть
+            </button>
+            {canEdit ? (
+              <button type="button" className="ix-activity-card__btn" onClick={() => onEdit?.()}>
+                Редактировать
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </article>
   );
