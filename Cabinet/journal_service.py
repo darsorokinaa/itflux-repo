@@ -393,6 +393,72 @@ def _strip_answer_html(html: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _import_answers_equal():
+    try:
+        from Generator.answer_check import answers_equal
+    except Exception:
+        try:
+            from Generator.Generator.answer_check import answers_equal
+        except Exception:
+            return None
+    return answers_equal
+
+
+def _resolve_answer_ok(
+    student_answer: str,
+    expected_answer: str,
+    saved_ok,
+    *,
+    subject: str = "",
+):
+    """
+    Вердикт для журнала: при наличии эталона пересчитываем (не доверяем checked ученика).
+    Без эталона оставляем сохранённый флаг.
+    """
+    student = str(student_answer or "").strip()
+    expected = str(expected_answer or "").strip()
+    if not student:
+        return None if saved_ok is None else bool(saved_ok)
+    if expected:
+        answers_equal = _import_answers_equal()
+        if answers_equal is not None:
+            return bool(answers_equal(student_answer, expected_answer, subject=subject))
+    if saved_ok is None:
+        return None
+    return bool(saved_ok)
+
+
+def _refresh_variant_result_verdicts(variant_result: dict | None, *, subject: str = "") -> dict | None:
+    """Пересчитать ok/счётчики в уже сохранённом variant_result (для старых записей)."""
+    if not isinstance(variant_result, dict) or not variant_result:
+        return variant_result
+    tasks = variant_result.get("tasks")
+    if not isinstance(tasks, list) or not tasks:
+        return variant_result
+    fixed_tasks = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        row = dict(task)
+        student = row.get("student_answer") or ""
+        expected = row.get("correct_answer") or ""
+        saved = row.get("ok")
+        if saved is None and not str(student).strip():
+            fixed_tasks.append(row)
+            continue
+        row["ok"] = _resolve_answer_ok(student, expected, saved, subject=subject)
+        fixed_tasks.append(row)
+    checked_count = sum(1 for r in fixed_tasks if r.get("ok") is not None)
+    correct_count = sum(1 for r in fixed_tasks if r.get("ok") is True)
+    out = dict(variant_result)
+    out["tasks"] = fixed_tasks
+    out["checked_count"] = checked_count
+    out["correct_count"] = correct_count if checked_count else out.get("correct_count")
+    if checked_count:
+        out["score_percent"] = round(correct_count * 100 / checked_count, 2)
+    return out
+
+
 def build_variant_result_payload(
     *,
     homework: Homework,
@@ -416,12 +482,12 @@ def build_variant_result_payload(
         num = task.get("number")
         tid_key = str(tid) if tid is not None else ""
         num_key = str(num) if num is not None else ""
-        ok = None
+        saved_ok = None
         if tid_key and tid_key in checked:
-            ok = bool(checked[tid_key])
+            saved_ok = bool(checked[tid_key])
         elif num_key and num_key in checked:
-            ok = bool(checked[num_key])
-        if ok is None:
+            saved_ok = bool(checked[num_key])
+        if saved_ok is None:
             continue
         student_answer = ""
         # Сначала id задачи — номера в варианте могут дублироваться.
@@ -429,18 +495,20 @@ def build_variant_result_payload(
             student_answer = str(by_id.get(tid_key))
         elif num_key and by_num.get(num_key) is not None:
             student_answer = str(by_num.get(num_key))
+        correct_answer = task.get("answer") or ""
+        ok = _resolve_answer_ok(student_answer, correct_answer, saved_ok)
         rows.append(
             {
                 "id": tid,
                 "number": num,
                 "student_answer": student_answer,
-                "correct_answer": _strip_answer_html(task.get("answer") or ""),
+                "correct_answer": _strip_answer_html(correct_answer),
                 "ok": ok,
             }
         )
-    score = compute_score_percent(visible)
     checked_count = len(rows)
     correct_count = sum(1 for r in rows if r.get("ok") is True)
+    score = round(correct_count * 100 / checked_count, 2) if checked_count else compute_score_percent(visible)
     return {
         "homeworkId": homework.id,
         "variantId": variant_id,
@@ -506,11 +574,16 @@ def _answer_rows_from_submission(
             student_answer = str(by_id.get(tid_key))
         elif num_key and number_counts.get(num_key, 0) <= 1 and by_num.get(num_key) is not None:
             student_answer = str(by_num.get(num_key))
-        ok = None
+        saved_ok = None
         if tid_key and tid_key in checked:
-            ok = bool(checked[tid_key])
+            saved_ok = bool(checked[tid_key])
         elif num_key and number_counts.get(num_key, 0) <= 1 and num_key in checked:
-            ok = bool(checked[num_key])
+            saved_ok = bool(checked[num_key])
+        expected_raw = task.get("answer") or ""
+        # Есть ответ ученика и эталон — пересчитываем, даже если checked пустой/ложный.
+        if saved_ok is None and str(student_answer).strip() and str(expected_raw).strip():
+            saved_ok = False
+        ok = _resolve_answer_ok(student_answer, expected_raw, saved_ok)
         row = {
             "id": tid,
             "number": num,
@@ -518,7 +591,7 @@ def _answer_rows_from_submission(
             "ok": ok,
         }
         if not for_student:
-            row["correct_answer"] = _strip_answer_html(task.get("answer") or "")
+            row["correct_answer"] = _strip_answer_html(expected_raw)
         rows.append(row)
     return rows
 
@@ -1663,17 +1736,14 @@ def _safe_float(value) -> float | None:
 def _variant_score_percent(variant_result) -> float | None:
     if not isinstance(variant_result, dict) or not variant_result:
         return None
-    direct = _safe_float(variant_result.get("score_percent"))
-    if direct is not None:
-        return direct
-    tasks = variant_result.get("tasks") or []
-    if not isinstance(tasks, list) or not tasks:
-        return None
-    checked = [t for t in tasks if isinstance(t, dict) and t.get("ok") is not None]
-    if not checked:
-        return None
-    correct = sum(1 for t in checked if t.get("ok") is True)
-    return round(100.0 * correct / len(checked), 1)
+    refreshed = _refresh_variant_result_verdicts(variant_result) or variant_result
+    tasks = refreshed.get("tasks") or []
+    if isinstance(tasks, list) and tasks:
+        checked = [t for t in tasks if isinstance(t, dict) and t.get("ok") is not None]
+        if checked:
+            correct = sum(1 for t in checked if t.get("ok") is True)
+            return round(100.0 * correct / len(checked), 1)
+    return _safe_float(refreshed.get("score_percent"))
 
 
 def sync_previous_homework_status_from_submission(submission) -> None:
@@ -2287,7 +2357,7 @@ def serialize_record(
         data["visible_to_parent"] = record.visible_to_parent
         data["fields_touched"] = record.fields_touched or {}
         data["difficulties"] = record.difficulties
-    variant_result = record.variant_result or {}
+    variant_result = _refresh_variant_result_verdicts(record.variant_result or {}) or {}
     if for_student and isinstance(variant_result, dict):
         # Ученику — свои ответы и верно/неверно, без эталона.
         safe_tasks = []
