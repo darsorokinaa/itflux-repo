@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { isUserAnswerCorrect } from "../../utils/examAnswerCheck";
 
 export function stripAnswerHtml(html) {
   return String(html || "")
@@ -6,6 +7,21 @@ export function stripAnswerHtml(html) {
     .replace(/&nbsp;/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * Вердикт для строки live-таблицы.
+ * Не доверяем checked ученика: у него эталон скрыт, клиент часто шлёт false.
+ */
+export function liveAnswerVerdict(result, task, tasks, subject = "") {
+  const value = liveStudentAnswer(result, task, tasks);
+  const saved = liveStudentChecked(result, task, tasks);
+  // Показываем статус только после «Проверить».
+  if (saved === null) return null;
+  if (task?.answer != null && String(task.answer).trim() !== "" && String(value || "").trim()) {
+    return isUserAnswerCorrect(value, task.answer, subject);
+  }
+  return saved;
 }
 
 export function numberCollisionCount(tasks, numKey) {
@@ -97,6 +113,7 @@ function buildTasks(answers) {
 export default function LiveVariantAnswersTable({ answers, loading = false, compact = false }) {
   const students = answers?.students || [];
   const tasks = useMemo(() => buildTasks(answers), [answers]);
+  const subject = String(answers?.subject || "").toLowerCase();
 
   return (
     <section
@@ -137,7 +154,7 @@ export default function LiveVariantAnswersTable({ answers, loading = false, comp
                   <tbody>
                     {tasks.map((task) => {
                       const value = liveStudentAnswer(result, task, tasks);
-                      const ok = liveStudentChecked(result, task, tasks);
+                      const ok = liveAnswerVerdict(result, task, tasks, subject);
                       const correct = stripAnswerHtml(task.answer);
                       return (
                         <tr key={`${row.studentId}-${task.id || task.number}`}>

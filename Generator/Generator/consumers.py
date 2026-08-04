@@ -5,7 +5,12 @@ import re
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.apps import apps
-from django.utils.html import strip_tags
+
+from .answer_check import (
+    answers_equal,
+    expected_answer_for_variant_task,
+    normalize_answer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -16,37 +21,7 @@ def _get_expected_answer_for_variant_task(variant_id: int, task_number_key: str)
     Сначала ищем по task__task__task_number, затем fallback на order 1..N.
     Ключ ``t<task_id>`` — id строки Task в варианте (см. API варианта), для уникальности при коллизиях номеров.
     """
-    if variant_id <= 0 or not task_number_key:
-        return ""
-    VariantContent = apps.get_model("Generator", "VariantContent")
-    if len(task_number_key) >= 2 and task_number_key[0] == "t" and task_number_key[1:].isdigit():
-        tid = int(task_number_key[1:])
-        vc = (
-            VariantContent.objects.select_related("task")
-            .filter(variant_id=variant_id, task_id=tid)
-            .first()
-        )
-        if vc and vc.task:
-            return str(getattr(vc.task, "answer", "") or "")
-        return ""
-    if task_number_key.isdigit():
-        tn = int(task_number_key)
-        vc = (
-            VariantContent.objects.select_related("task")
-            .filter(variant_id=variant_id, task__task__task_number=tn)
-            .first()
-        )
-        if vc and vc.task:
-            return str(getattr(vc.task, "answer", "") or "")
-        if 1 <= tn <= 500:
-            vc2 = (
-                VariantContent.objects.select_related("task")
-                .filter(variant_id=variant_id, order=tn)
-                .first()
-            )
-            if vc2 and vc2.task:
-                return str(getattr(vc2.task, "answer", "") or "")
-    return ""
+    return expected_answer_for_variant_task(variant_id, task_number_key=task_number_key)
 
 
 class LessonConsumer(AsyncWebsocketConsumer):
@@ -64,10 +39,7 @@ class LessonConsumer(AsyncWebsocketConsumer):
 
     @staticmethod
     def _normalize_answer_value(value):
-        text = strip_tags(str(value or ""))
-        text = text.replace("\xa0", " ")
-        text = re.sub(r"\s+", "", text)
-        return text.lower().strip()
+        return normalize_answer(value)
 
     async def connect(self):
         self.room_id = self.scope["url_route"]["kwargs"]["room_id"]
@@ -278,8 +250,7 @@ class LessonConsumer(AsyncWebsocketConsumer):
         expected_answer = ""
         if variant_id > 0 and task_number:
             expected_answer = _get_expected_answer_for_variant_task(variant_id, task_number)
-        normalized_expected = self._normalize_answer_value(expected_answer)
-        is_correct = bool(normalized_student) and bool(normalized_expected) and normalized_student == normalized_expected
+        is_correct = answers_equal(student_answer, expected_answer)
 
         LessonStudentsAnswer.objects.update_or_create(
             room_id=self.room_id[:200],

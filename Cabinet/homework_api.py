@@ -327,6 +327,66 @@ def compute_score_percent(result: dict | None) -> float | None:
     return None
 
 
+def recompute_variant_checked(result: dict | None, variant_id: int | None, *, subject: str = "") -> dict | None:
+    """
+    Пересчитать checked по эталону варианта.
+    Ученику answer в JSON не отдаётся → клиент часто шлёт checked=false даже при верном ответе.
+    """
+    if not result or not isinstance(result, dict) or not variant_id:
+        return result
+    checked = result.get("checked")
+    if not isinstance(checked, dict) or not checked:
+        return result
+    try:
+        from Generator.answer_check import answers_equal, expected_answer_for_variant_task
+    except Exception:
+        try:
+            from Generator.Generator.answer_check import answers_equal, expected_answer_for_variant_task
+        except Exception:
+            logger.exception("recompute_variant_checked: cannot import answer_check")
+            return result
+
+    by_id = result.get("by_task_id") or result.get("byTaskId") or {}
+    by_num = result.get("by_number") or result.get("byNumber") or {}
+    if not isinstance(by_id, dict):
+        by_id = {}
+    if not isinstance(by_num, dict):
+        by_num = {}
+
+    out_checked = dict(checked)
+    for key, _flag in list(checked.items()):
+        key_s = str(key)
+        answer = ""
+        if key_s in by_id and by_id[key_s] is not None:
+            answer = str(by_id[key_s])
+        elif key in by_id and by_id[key] is not None:
+            answer = str(by_id[key])
+        elif key_s in by_num and by_num[key_s] is not None:
+            answer = str(by_num[key_s])
+        if not str(answer).strip():
+            continue
+        task_id = None
+        try:
+            task_id = int(key_s)
+        except (TypeError, ValueError):
+            task_id = None
+        expected = expected_answer_for_variant_task(
+            int(variant_id),
+            task_id=task_id,
+            task_number_key=key_s if task_id is None else "",
+        )
+        if not expected and task_id is not None:
+            expected = expected_answer_for_variant_task(
+                int(variant_id),
+                task_number_key=key_s,
+            )
+        out_checked[key_s] = answers_equal(answer, expected, subject=subject)
+
+    updated = dict(result)
+    updated["checked"] = out_checked
+    return updated
+
+
 def serialize_assignment_payload(*, homework: Homework, submission: HomeworkSubmission | None) -> dict:
     variant_id = None
     for task in homework.tasks.filter(is_active=True):
@@ -795,6 +855,12 @@ class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
             )
             return Response({"error": message}, status=status.HTTP_403_FORBIDDEN)
         merged = _merge_result_payload(submission.result_payload, result)
+        variant_id = None
+        for task in homework.tasks.filter(is_active=True):
+            variant_id = extract_variant_id(task.description)
+            if variant_id:
+                break
+        merged = recompute_variant_checked(merged, variant_id) or merged
         submission.result_payload = merged
         computed = compute_score_percent(merged)
         if computed is not None:
@@ -810,7 +876,13 @@ class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
             submission.submitted_at.isoformat() if submission.submitted_at else None,
             submission_api_status(submission),
         )
-        return Response({"ok": True, "status": submission_api_status(submission)})
+        return Response(
+            {
+                "ok": True,
+                "status": submission_api_status(submission),
+                "result": merged,
+            }
+        )
 
 
 class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):

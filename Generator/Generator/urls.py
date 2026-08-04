@@ -152,6 +152,11 @@ urlpatterns = [
     path("api/<str:level>/<str:subject>/subtopics/", views.api_subtopics),
     path("api/variant-lookup/<int:variant_id>/", views.api_variant_lookup),
     path(
+        "api/variant/<int:variant_id>/check-answer/",
+        views.api_variant_check_answer,
+        name="api_variant_check_answer",
+    ),
+    path(
         "api/<str:level>/<str:subject>/task-bank-filters/",
         views.api_task_bank_filters,
         name="api_task_bank_filters",

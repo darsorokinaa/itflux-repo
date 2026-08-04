@@ -23,6 +23,7 @@ import {
   sanitizeTruthTableAnswerString,
   truthTableAnswerMaxChars,
 } from "../utils/truthTable";
+import { checkVariantAnswerOnServer } from "../utils/examAnswerCheck";
 import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
 import { getShareablePageUrl } from "../utils/shareablePageUrl";
 import {
@@ -1238,9 +1239,24 @@ function ExamPage() {
     return userNorm === correctNorm;
   }
 
-  function checkTask(taskId, correctAnswer, userValue = null) {
+  async function checkTask(taskId, correctAnswer, userValue = null) {
     const raw = userValue !== null ? userValue : userAnswers[taskId] || "";
-    const isCorrect = isUserAnswerCorrect(raw, correctAnswer);
+    const hasLocalAnswer = correctAnswer != null && String(correctAnswer).trim() !== "";
+    let isCorrect = false;
+    if (hasLocalAnswer) {
+      isCorrect = isUserAnswerCorrect(raw, correctAnswer);
+    } else if (variant?.id) {
+      // Ученику эталон в JSON не отдаётся — сверка только на сервере.
+      const task = (variant.tasks || []).find((t) => String(t.id) === String(taskId));
+      isCorrect = await checkVariantAnswerOnServer(variant.id, {
+        taskId,
+        taskNumber: task?.number,
+        answer: raw,
+        apiBase: devApiBase(),
+      });
+    } else {
+      isCorrect = isUserAnswerCorrect(raw, correctAnswer || "");
+    }
     setCheckedTasks((prev) => ({ ...prev, [taskId]: isCorrect }));
   }
 
@@ -1422,7 +1438,27 @@ function ExamPage() {
     const timer = window.setTimeout(() => {
       const r = buildLiveCheckedHomeworkResult(variant.tasks, userAnswers, scores, checked);
       void saveHomeworkDraft(cabinetAssignmentId, { result: r }, homeworkLkOpts)
-        .then(() => {
+        .then((data) => {
+          const serverChecked = data?.result?.checked;
+          if (serverChecked && typeof serverChecked === "object") {
+            setCheckedTasks((prev) => {
+              let changed = false;
+              const next = { ...prev };
+              for (const [key, val] of Object.entries(serverChecked)) {
+                if (typeof val !== "boolean") continue;
+                if (next[key] !== val) {
+                  next[key] = val;
+                  changed = true;
+                }
+                const asNum = Number(key);
+                if (Number.isFinite(asNum) && next[asNum] !== val) {
+                  next[asNum] = val;
+                  changed = true;
+                }
+              }
+              return changed ? next : prev;
+            });
+          }
           setHwNotice("");
         })
         .catch((err) => {

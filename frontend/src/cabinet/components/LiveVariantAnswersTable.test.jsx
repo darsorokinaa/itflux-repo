@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  liveAnswerVerdict,
   liveStudentAnswer,
   liveStudentChecked,
 } from "./LiveVariantAnswersTable.jsx";
@@ -39,5 +40,22 @@ describe("liveStudentAnswer with duplicate bank numbers", () => {
     };
     expect(liveStudentAnswer(result, uniqueTasks[1], uniqueTasks)).toBe("99");
     expect(liveStudentChecked(result, uniqueTasks[1], uniqueTasks)).toBe(false);
+  });
+});
+
+describe("liveAnswerVerdict", () => {
+  it("marks case-only difference as correct even if checked=false", () => {
+    const tasks = [{ id: 10, number: 1, answer: "нетерпеливого" }];
+    const result = {
+      by_task_id: { "10": "Нетерпеливого" },
+      checked: { "10": false },
+    };
+    expect(liveAnswerVerdict(result, tasks[0], tasks)).toBe(true);
+  });
+
+  it("keeps null when student has not answered", () => {
+    const tasks = [{ id: 10, number: 1, answer: "гуава" }];
+    const result = { by_task_id: {}, checked: {} };
+    expect(liveAnswerVerdict(result, tasks[0], tasks)).toBe(null);
   });
 });

@@ -3438,6 +3438,54 @@ def api_variant_detail(request, level, subject, variant_id):
     )
 
 
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_variant_check_answer(request, variant_id):
+    """
+    Проверка ответа без выдачи эталона.
+    Нужна ученикам на live-уроке/в ДЗ: в JSON варианта answer скрыт, клиентская сверка всегда false.
+    """
+    from .answer_check import answers_equal, expected_answer_for_variant_task
+
+    variant = get_object_or_404(Variant.objects.select_related("level", "var_subject"), id=variant_id)
+    try:
+        data = json.loads(request.body.decode("utf-8") or "{}")
+    except (TypeError, ValueError, UnicodeDecodeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+
+    task_id_raw = data.get("task_id") or data.get("taskId") or ""
+    task_number = str(data.get("task_number") or data.get("taskNumber") or "").strip()
+    answer = data.get("answer")
+    if answer is None:
+        answer = data.get("value") or ""
+    answer = str(answer)
+
+    task_id = None
+    try:
+        if task_id_raw not in (None, ""):
+            task_id = int(task_id_raw)
+    except (TypeError, ValueError):
+        task_id = None
+
+    expected = expected_answer_for_variant_task(
+        int(variant.id),
+        task_id=task_id,
+        task_number_key=task_number,
+    )
+    subject = (getattr(getattr(variant, "var_subject", None), "subject_short", None) or "").strip().lower()
+    is_correct = answers_equal(answer, expected, subject=subject)
+    return JsonResponse(
+        {
+            "ok": True,
+            "correct": bool(is_correct),
+            "is_correct": bool(is_correct),
+            "task_id": task_id,
+        }
+    )
+
+
 @require_http_methods(["GET"])
 def api_lesson_variant_detail(request, variant_id):
     """Вариант для урока: всегда по /api, без зависимости от роутинга SPA."""
@@ -5982,43 +6030,16 @@ def _normalize_lesson_task_number(value) -> str:
 
 
 def _normalize_lesson_answer(value) -> str:
-    text = strip_tags(str(value or "")).replace("\xa0", " ")
-    text = re.sub(r"\s+", "", text)
-    return text.lower().strip()
+    from .answer_check import normalize_answer
+
+    return normalize_answer(value)
 
 
 def _get_expected_answer_for_variant_task(variant_id: int, task_number_key: str) -> str:
     """Номер задания в UI = TaskList.task_number; fallback — порядок в варианте (order). Ключ t<id> = Task.id в варианте."""
-    if variant_id <= 0 or not task_number_key:
-        return ""
-    if len(task_number_key) >= 2 and task_number_key[0] == "t" and task_number_key[1:].isdigit():
-        tid = int(task_number_key[1:])
-        vc = (
-            VariantContent.objects.select_related("task")
-            .filter(variant_id=variant_id, task_id=tid)
-            .first()
-        )
-        if vc and vc.task:
-            return str(getattr(vc.task, "answer", "") or "")
-        return ""
-    if task_number_key.isdigit():
-        tn = int(task_number_key)
-        vc = (
-            VariantContent.objects.select_related("task")
-            .filter(variant_id=variant_id, task__task__task_number=tn)
-            .first()
-        )
-        if vc and vc.task:
-            return str(getattr(vc.task, "answer", "") or "")
-        if 1 <= tn <= 500:
-            vc2 = (
-                VariantContent.objects.select_related("task")
-                .filter(variant_id=variant_id, order=tn)
-                .first()
-            )
-            if vc2 and vc2.task:
-                return str(getattr(vc2.task, "answer", "") or "")
-    return ""
+    from .answer_check import expected_answer_for_variant_task
+
+    return expected_answer_for_variant_task(variant_id, task_number_key=task_number_key)
 
 
 def _upsert_lesson_student_result(
@@ -6031,6 +6052,8 @@ def _upsert_lesson_student_result(
     answer_text: str,
     save_payload: dict | None = None,
 ):
+    from .answer_check import answers_equal, normalize_answer
+
     task_number = _normalize_lesson_task_number(task_number)
     student_name = str(student_name or "").strip()[:200]
     teacher_name = str(teacher_name or "").strip()[:200]
@@ -6039,10 +6062,9 @@ def _upsert_lesson_student_result(
 
     expected_answer = _get_expected_answer_for_variant_task(variant_id, task_number)
 
-    normalized_student = _normalize_lesson_answer(answer_text)
-    normalized_expected = _normalize_lesson_answer(expected_answer)
+    normalized_student = normalize_answer(answer_text)
     is_empty = normalized_student == ""
-    is_correct = bool(normalized_student) and bool(normalized_expected) and normalized_student == normalized_expected
+    is_correct = answers_equal(answer_text, expected_answer)
 
     payload = dict(save_payload or {})
     payload.setdefault("source", "api_lesson_student_answer")

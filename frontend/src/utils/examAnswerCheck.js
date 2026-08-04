@@ -8,9 +8,43 @@ export function normalize(str) {
   return String(str ?? "")
     .normalize("NFC")
     .replace(/[\u200B-\u200D\uFEFF\u00AD]/g, "")
+    .replace(/\u00a0/g, " ")
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "");
+}
+
+/**
+ * Серверная проверка ответа (эталон ученику в JSON не отдаётся).
+ * @param {number|string} variantId
+ * @param {{ taskId?: number|string, taskNumber?: number|string, answer: string, apiBase?: string }} opts
+ * @returns {Promise<boolean>}
+ */
+export async function checkVariantAnswerOnServer(variantId, opts = {}) {
+  const vid = Number(variantId);
+  if (!Number.isFinite(vid) || vid <= 0) return false;
+  const apiBase = String(opts.apiBase || "").replace(/\/$/, "");
+  const url = `${apiBase}/api/variant/${encodeURIComponent(String(vid))}/check-answer/`;
+  const body = {
+    task_id: opts.taskId ?? null,
+    task_number: opts.taskNumber != null ? String(opts.taskNumber) : "",
+    answer: opts.answer ?? "",
+  };
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return false;
+    const data = await res.json().catch(() => ({}));
+    if (typeof data?.correct === "boolean") return data.correct;
+    if (typeof data?.is_correct === "boolean") return data.is_correct;
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 export function getTextFromHtml(html) {
