@@ -15,6 +15,7 @@ from Generator.seasonal_theme_models import SeasonalTheme
 from Generator.seasonal_theme_service import (
     get_cached_active_theme,
     invalidate_seasonal_theme_cache,
+    list_period_themes,
     select_active_theme,
 )
 
@@ -107,6 +108,21 @@ class SeasonalThemeSelectionTests(TestCase):
             end_at=now - timedelta(days=1),
         )
         self.assertEqual(select_active_theme(), theme)
+
+    def test_list_period_themes_returns_all_overlapping(self):
+        low = _make_theme(slug="period-low", priority=10, button_emoji="🍯")
+        high = _make_theme(slug="period-high", priority=200, button_emoji="🎄")
+        _make_theme(
+            slug="period-out",
+            start_at=timezone.now() + timedelta(days=10),
+            end_at=timezone.now() + timedelta(days=20),
+        )
+        items = list_period_themes(None)
+        ids = [item["id"] for item in items]
+        self.assertEqual(ids[0], high.id)
+        self.assertIn(low.id, ids)
+        self.assertEqual(len(ids), 2)
+        self.assertEqual(items[0]["button_emoji"], "🎄")
 
     def test_non_default_without_force_not_selected(self):
         _make_theme(

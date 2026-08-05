@@ -99,6 +99,16 @@ def _theme_in_window(theme: SeasonalTheme, now=None) -> bool:
     return True
 
 
+def _period_theme_queryset(*, include_admin_only: bool = False):
+    """Темы-кандидаты текущего периода (основные + force), без черновиков."""
+    qs = SeasonalTheme.objects.filter(
+        Q(is_default_seasonal_theme=True) | Q(force_active_for_testing=True)
+    ).exclude(is_draft=True)
+    if not include_admin_only:
+        qs = qs.filter(admin_only=False)
+    return qs.order_by("-priority", "-start_at", "-id")
+
+
 def select_active_theme(*, include_admin_only: bool = False) -> SeasonalTheme | None:
     """
     Выбор активной темы:
@@ -107,17 +117,35 @@ def select_active_theme(*, include_admin_only: bool = False) -> SeasonalTheme | 
     3) start_at DESC (более поздний старт)
     4) id DESC
     """
-    # Основные темы периода + принудительно активированные (даже без is_default)
-    qs = SeasonalTheme.objects.filter(
-        Q(is_default_seasonal_theme=True) | Q(force_active_for_testing=True)
-    ).exclude(is_draft=True)
-    if not include_admin_only:
-        qs = qs.filter(admin_only=False)
-
-    for theme in qs.order_by("-priority", "-start_at", "-id"):
+    for theme in _period_theme_queryset(include_admin_only=include_admin_only):
         if _theme_in_window(theme):
             return theme
     return None
+
+
+def list_period_themes(request, *, include_admin_only: bool = False) -> list[dict]:
+    """
+    Все темы, одновременно попадающие в окно дат (для ряда кнопок FAB).
+    Порядок: priority DESC, start_at DESC, id DESC.
+    """
+    items = []
+    for theme in _period_theme_queryset(include_admin_only=include_admin_only):
+        if not _theme_in_window(theme):
+            continue
+        items.append(
+            {
+                "id": theme.id,
+                "name": theme.name,
+                "slug": theme.slug,
+                "status": theme.compute_status(),
+                "allow_user_disable": theme.allow_user_disable,
+                "allow_manual_selection": theme.allow_manual_selection,
+                "button_icon_url": media_url(request, theme.button_icon),
+                "button_emoji": (theme.button_emoji or "✦").strip() or "✦",
+                "priority": theme.priority,
+            }
+        )
+    return items
 
 
 def get_cached_active_theme(*, include_admin_only: bool = False) -> SeasonalTheme | None:
@@ -290,6 +318,50 @@ def serialize_theme(request, theme: SeasonalTheme) -> dict:
         },
         "button_icon_url": media_url(request, theme.button_icon),
         "button_emoji": (theme.button_emoji or "✦").strip() or "✦",
+        "hero_sticker": (
+            {
+                "title": (theme.hero_sticker_title or "").strip(),
+                "text": (theme.hero_sticker_text or "").strip(),
+                "background_color": (theme.hero_sticker_background_color or "").strip()
+                or "#fff6c8",
+                "title_color": (theme.hero_sticker_title_color or "").strip() or "#5a3d0c",
+                "text_color": (theme.hero_sticker_text_color or "").strip() or "#4a3a1a",
+            }
+            if (theme.hero_sticker_title or "").strip()
+            and (theme.hero_sticker_text or "").strip()
+            else None
+        ),
+        "hero_history": (
+            {
+                "title": (theme.hero_history_title or "").strip(),
+                "body": (theme.hero_history_body or "").strip(),
+                "link_label": (
+                    (theme.hero_history_link_label or "").strip()
+                    or "Узнать историю праздника"
+                ),
+                "button_label": (
+                    (theme.hero_history_button_label or "").strip() or "Понятно"
+                ),
+                "icon_url": media_url(request, theme.hero_history_icon),
+                "image_url": media_url(request, theme.hero_history_image),
+                "background_color": (theme.hero_history_background_color or "").strip()
+                or "#faf6ee",
+                "border_color": (theme.hero_history_border_color or "").strip()
+                or "#d4a24a",
+                "title_color": (theme.hero_history_title_color or "").strip()
+                or "#0f2f7f",
+                "text_color": (theme.hero_history_text_color or "").strip()
+                or "#3b2a16",
+                "button_color": (theme.hero_history_button_color or "").strip()
+                or accent
+                or "#1d4ed8",
+                "show_corners": bool(theme.hero_history_show_corners),
+                "corner_image_url": media_url(request, theme.hero_history_corner_image),
+            }
+            if (theme.hero_history_title or "").strip()
+            and (theme.hero_history_body or "").strip()
+            else None
+        ),
         "surfaces": surfaces,
         "cards": {
             **serialize_surface(surfaces_raw.get("task_card") or {}),
@@ -338,6 +410,10 @@ def list_manual_themes(request, *, is_staff: bool = False) -> list[dict]:
                 "slug": theme.slug,
                 "status": status,
                 "allow_user_disable": theme.allow_user_disable,
+                "allow_manual_selection": theme.allow_manual_selection,
+                "button_icon_url": media_url(request, theme.button_icon),
+                "button_emoji": (theme.button_emoji or "✦").strip() or "✦",
+                "priority": theme.priority,
             }
         )
     return items
@@ -441,6 +517,7 @@ def resolve_effective_theme(
         "user_can_disable": user_can_disable,
         "animations_enabled": animations_enabled,
         "available_themes": list_manual_themes(request, is_staff=is_staff),
+        "period_themes": list_period_themes(request, include_admin_only=is_staff),
         "preview": (
             {
                 "active": True,

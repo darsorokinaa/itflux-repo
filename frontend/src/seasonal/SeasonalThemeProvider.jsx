@@ -268,9 +268,15 @@ export function SeasonalThemeProvider({ children }) {
   const heavy = isHeavyRoute(pathname);
   const effectiveTheme = applies ? theme : null;
   const availableThemes = payload?.available_themes || [];
+  const periodThemes = payload?.period_themes || [];
   const hasSeasonalAppearance =
     !loading
-    && (availableThemes.length > 0 || Boolean(theme) || Boolean(preview?.active));
+    && (
+      periodThemes.length > 0
+      || availableThemes.length > 0
+      || Boolean(theme)
+      || Boolean(preview?.active)
+    );
 
   const seasonalEnabled = preferenceMode !== "default" && Boolean(theme);
   const labelName = themeLabelFromPayload(payload);
@@ -318,13 +324,31 @@ export function SeasonalThemeProvider({ children }) {
     };
   }, [effectiveTheme, allowBackgroundPattern]);
 
-  const toggleAppearance = useCallback(async () => {
+  const toggleAppearance = useCallback(async (themeId) => {
     const userCanDisable = payload?.user_can_disable !== false;
-    if (seasonalEnabled) {
+    const targetId = themeId != null ? Number(themeId) : null;
+    const currentId = theme?.id != null ? Number(theme.id) : null;
+    const isTargetOn =
+      seasonalEnabled
+      && targetId != null
+      && currentId != null
+      && targetId === currentId;
+
+    // Клик по уже включённой теме — выключить оформление
+    if (isTargetOn || (seasonalEnabled && targetId == null)) {
       if (!userCanDisable) return payload;
       return setPreference({ mode: "default" }, { dayOverride: true });
     }
-    const first = availableThemes[0];
+
+    // Включить конкретную тему периода / из списка
+    if (targetId) {
+      return setPreference(
+        { mode: "manual", selected_theme_id: targetId },
+        { dayOverride: true },
+      );
+    }
+
+    const first = periodThemes[0] || availableThemes[0];
     if (first?.id) {
       return setPreference(
         { mode: "manual", selected_theme_id: first.id },
@@ -332,7 +356,7 @@ export function SeasonalThemeProvider({ children }) {
       );
     }
     return setPreference({ mode: "auto" }, { dayOverride: true });
-  }, [payload, seasonalEnabled, availableThemes, setPreference]);
+  }, [payload, seasonalEnabled, theme, periodThemes, availableThemes, setPreference]);
 
   const stopPreview = useCallback(async () => {
     try {
@@ -356,6 +380,7 @@ export function SeasonalThemeProvider({ children }) {
       intensity,
       userCanDisable: payload?.user_can_disable !== false,
       availableThemes,
+      periodThemes,
       hasSeasonalAppearance,
       seasonalEnabled,
       appearanceTooltip,
@@ -382,6 +407,7 @@ export function SeasonalThemeProvider({ children }) {
       animationsEnabled,
       intensity,
       availableThemes,
+      periodThemes,
       hasSeasonalAppearance,
       seasonalEnabled,
       appearanceTooltip,
@@ -448,6 +474,7 @@ export function useSeasonalTheme() {
       toggleAppearance: async () => null,
       setPreference: async () => null,
       availableThemes: [],
+      periodThemes: [],
       hasSeasonalAppearance: false,
       seasonalEnabled: false,
       appearanceTooltip: "Оформление",

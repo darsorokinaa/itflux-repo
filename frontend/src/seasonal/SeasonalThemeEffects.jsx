@@ -3,11 +3,11 @@ import { createPortal } from "react-dom";
 
 const PLAYED_KEY = "seasonal_theme_fx_played_v1";
 
-function alreadyPlayed(themeKey) {
+function readPlayedKey() {
   try {
-    return sessionStorage.getItem(PLAYED_KEY) === String(themeKey);
+    return sessionStorage.getItem(PLAYED_KEY);
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -20,16 +20,15 @@ function markPlayed(themeKey) {
 }
 
 /**
- * Одноразовый эффект за сессию браузера (не при каждой смене вкладки).
- * Картинка: theme.animation.image_url, иначе встроенный рисунок.
+ * Одноразовый эффект за сессию: один прогон после входа, без повтора при смене вкладок.
+ * Помечаем «сыграно» только после завершения — иначе React Strict Mode глушит анимацию.
  */
 export default function SeasonalThemeEffects({ theme, intensity, isMobile }) {
   const canvasRef = useRef(null);
   const rafRef = useRef(0);
   const [canvasEl, setCanvasEl] = useState(null);
-  const themeKey = theme?.id || theme?.slug || "theme";
-  const [skipped] = useState(() => alreadyPlayed(themeKey));
-  const [finished, setFinished] = useState(false);
+  const themeKey = String(theme?.id || theme?.slug || "theme");
+  const [done, setDone] = useState(() => readPlayedKey() === themeKey);
   const setCanvasRef = useCallback((node) => {
     canvasRef.current = node;
     setCanvasEl(node);
@@ -43,7 +42,7 @@ export default function SeasonalThemeEffects({ theme, intensity, isMobile }) {
     : spriteUrl && animType !== "none" && animType !== "off"
       ? "leaves"
       : null;
-  const needsCanvas = Boolean(motionType) && !skipped && !finished;
+  const shouldRun = Boolean(motionType) && !done;
 
   const maxElements = Math.min(
     Number(theme?.animation?.max_elements) || 20,
@@ -53,7 +52,7 @@ export default function SeasonalThemeEffects({ theme, intensity, isMobile }) {
 
   useEffect(() => {
     const root = document.documentElement;
-    if (!needsCanvas) {
+    if (!shouldRun) {
       root.removeAttribute("data-seasonal-anim");
       root.removeAttribute("data-seasonal-intensity");
       return undefined;
@@ -64,13 +63,12 @@ export default function SeasonalThemeEffects({ theme, intensity, isMobile }) {
       root.removeAttribute("data-seasonal-anim");
       root.removeAttribute("data-seasonal-intensity");
     };
-  }, [animType, intensity, needsCanvas]);
+  }, [animType, intensity, shouldRun]);
 
   useEffect(() => {
-    if (!needsCanvas || !motionType) return undefined;
+    if (!shouldRun || !motionType || !canvasEl) return undefined;
 
     const canvas = canvasEl;
-    if (!canvas) return undefined;
     const ctx = canvas.getContext("2d", { alpha: true });
     if (!ctx) return undefined;
 
@@ -80,7 +78,8 @@ export default function SeasonalThemeEffects({ theme, intensity, isMobile }) {
     let last = 0;
     let cancelled = false;
     let sprite = null;
-    const startedAt = performance.now();
+    let started = false;
+    const startedAt = { t: 0 };
     const MAX_MS = 6500;
     const frameInterval = 1000 / Math.max(8, fpsLimit);
 
@@ -148,7 +147,7 @@ export default function SeasonalThemeEffects({ theme, intensity, isMobile }) {
 
     const drawParticle = (p) => {
       ctx.save();
-      ctx.globalAlpha = 0.9;
+      ctx.globalAlpha = 0.92;
       ctx.translate(p.x, p.y);
       ctx.rotate(p.rot);
       if (sprite && sprite.complete && sprite.naturalWidth > 0) {
@@ -174,7 +173,7 @@ export default function SeasonalThemeEffects({ theme, intensity, isMobile }) {
       if (cancelled) return;
       ctx.clearRect(0, 0, width, height);
       markPlayed(themeKey);
-      setFinished(true);
+      setDone(true);
     };
 
     const tick = (ts) => {
@@ -186,7 +185,7 @@ export default function SeasonalThemeEffects({ theme, intensity, isMobile }) {
       last = ts;
       ctx.clearRect(0, 0, width, height);
 
-      if (ts - startedAt > MAX_MS) {
+      if (ts - startedAt.t > MAX_MS) {
         finish();
         return;
       }
@@ -217,11 +216,11 @@ export default function SeasonalThemeEffects({ theme, intensity, isMobile }) {
     };
 
     const start = () => {
-      if (cancelled) return;
-      // Помечаем сразу, чтобы при размонтировании/смене вкладки не запустилось снова
-      markPlayed(themeKey);
+      if (cancelled || started) return;
+      started = true;
       resize();
       spawn(motionType);
+      startedAt.t = performance.now();
       window.addEventListener("resize", resize);
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -229,6 +228,7 @@ export default function SeasonalThemeEffects({ theme, intensity, isMobile }) {
     if (spriteUrl) {
       const img = new Image();
       img.decoding = "async";
+      // Без crossOrigin для same-origin media; при ошибке — fallback-рисунок
       img.onload = () => {
         if (cancelled) return;
         sprite = img;
@@ -248,11 +248,17 @@ export default function SeasonalThemeEffects({ theme, intensity, isMobile }) {
       cancelled = true;
       cancelAnimationFrame(rafRef.current);
       window.removeEventListener("resize", resize);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      try {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      } catch {
+        /* ignore */
+      }
+      // Не ставим done/markPlayed здесь: Strict Mode отменит первый прогон,
+      // второй mount должен снова запустить анимацию.
     };
-  }, [motionType, maxElements, fpsLimit, needsCanvas, canvasEl, spriteUrl, themeKey]);
+  }, [motionType, maxElements, fpsLimit, shouldRun, canvasEl, spriteUrl, themeKey]);
 
-  if (!needsCanvas || typeof document === "undefined") {
+  if (!shouldRun || typeof document === "undefined") {
     return null;
   }
 

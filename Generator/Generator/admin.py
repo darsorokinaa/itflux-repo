@@ -645,6 +645,9 @@ class SeasonalThemeAdmin(admin.ModelAdmin):
         "button_icon_preview",
         "background_pattern_preview",
         "animation_image_preview",
+        "hero_history_icon_preview",
+        "hero_history_image_preview",
+        "hero_history_corner_preview",
     )
     inlines = [SeasonalThemeDecorationInline]
     fieldsets = (
@@ -660,6 +663,49 @@ class SeasonalThemeAdmin(admin.ModelAdmin):
                     ("is_draft", "is_active"),
                     "priority",
                 )
+            },
+        ),
+        (
+            "1б. Стикер на главной",
+            {
+                "description": (
+                    "Бумажка слева от синего баннера на главной, когда тема активна. "
+                    "Текст и оформление задаются здесь. Клик открывает справку (блок 1в)."
+                ),
+                "fields": (
+                    "hero_sticker_title",
+                    "hero_sticker_text",
+                    "hero_sticker_background_color",
+                    "hero_sticker_title_color",
+                    "hero_sticker_text_color",
+                ),
+            },
+        ),
+        (
+            "1в. Историческая справка (модалка на главной)",
+            {
+                "description": (
+                    "Всплывающее окно по клику на стикер или ссылку. "
+                    "Текст и оформление (цвета, кнопка, углы) задаются в БД."
+                ),
+                "fields": (
+                    "hero_history_title",
+                    "hero_history_body",
+                    "hero_history_link_label",
+                    "hero_history_button_label",
+                    "hero_history_icon",
+                    "hero_history_icon_preview",
+                    "hero_history_image",
+                    "hero_history_image_preview",
+                    "hero_history_background_color",
+                    "hero_history_border_color",
+                    "hero_history_title_color",
+                    "hero_history_text_color",
+                    "hero_history_button_color",
+                    "hero_history_show_corners",
+                    "hero_history_corner_image",
+                    "hero_history_corner_preview",
+                ),
             },
         ),
         (
@@ -803,6 +849,36 @@ class SeasonalThemeAdmin(admin.ModelAdmin):
             '<img src="{}" style="width:64px;height:64px;object-fit:contain;border-radius:12px;'
             'background:#f1f5f9;padding:6px;" alt="">',
             obj.animation_image.url,
+        )
+
+    @admin.display(description="Превью иконки справки")
+    def hero_history_icon_preview(self, obj):
+        if not obj or not obj.hero_history_icon:
+            return "—"
+        return format_html(
+            '<img src="{}" style="width:48px;height:48px;object-fit:contain;border-radius:10px;'
+            'background:#f8f1e3;padding:4px;" alt="">',
+            obj.hero_history_icon.url,
+        )
+
+    @admin.display(description="Превью картинки справки")
+    def hero_history_image_preview(self, obj):
+        if not obj or not obj.hero_history_image:
+            return "—"
+        return format_html(
+            '<img src="{}" style="max-width:220px;max-height:120px;object-fit:contain;'
+            'border-radius:10px;background:#f8f1e3;padding:4px;" alt="">',
+            obj.hero_history_image.url,
+        )
+
+    @admin.display(description="Превью декора углов")
+    def hero_history_corner_preview(self, obj):
+        if not obj or not obj.hero_history_corner_image:
+            return "—"
+        return format_html(
+            '<img src="{}" style="width:56px;height:56px;object-fit:contain;border-radius:10px;'
+            'background:#f8f1e3;padding:4px;" alt="">',
+            obj.hero_history_corner_image.url,
         )
 
     @admin.action(description="Продублировать выбранные темы")

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import HeroDashboardPreview from "./HeroDashboardPreview";
+import SeasonalHeroSticker from "../seasonal/SeasonalHeroSticker";
 
 type HeroSectionProps = {
   tasksCountLabel: string;
@@ -53,6 +54,8 @@ export default function HeroSection({
           />
         </div>
       </div>
+
+      <SeasonalHeroSticker />
     </section>
   );
 }

@@ -60,6 +60,126 @@ class SeasonalTheme(models.Model):
     name = models.CharField("Название", max_length=160)
     slug = models.SlugField("Код", max_length=80, unique=True)
     description = models.TextField("Описание", blank=True)
+    hero_sticker_title = models.CharField(
+        "Стикер на главной: заголовок",
+        max_length=80,
+        blank=True,
+        default="",
+        help_text="Бумажка-стикер слева от синего hero на главной. Пусто — стикер скрыт.",
+    )
+    hero_sticker_text = models.TextField(
+        "Стикер на главной: текст",
+        blank=True,
+        default="",
+        help_text="Короткое описание на стикере (2–4 предложения).",
+    )
+    hero_sticker_background_color = models.CharField(
+        "Стикер: цвет фона",
+        max_length=32,
+        blank=True,
+        default="#fff6c8",
+        help_text="Например #fff6c8. Пусто — значение по умолчанию.",
+    )
+    hero_sticker_title_color = models.CharField(
+        "Стикер: цвет заголовка",
+        max_length=32,
+        blank=True,
+        default="#5a3d0c",
+    )
+    hero_sticker_text_color = models.CharField(
+        "Стикер: цвет текста",
+        max_length=32,
+        blank=True,
+        default="#4a3a1a",
+    )
+    hero_history_title = models.CharField(
+        "Историческая справка: заголовок",
+        max_length=160,
+        blank=True,
+        default="",
+        help_text="Заголовок модального окна. Пусто — справка скрыта.",
+    )
+    hero_history_body = models.TextField(
+        "Историческая справка: текст",
+        blank=True,
+        default="",
+        help_text="Текст модалки. Абзацы разделяйте пустой строкой.",
+    )
+    hero_history_link_label = models.CharField(
+        "Историческая справка: ссылка",
+        max_length=80,
+        blank=True,
+        default="Узнать историю праздника",
+        help_text="Подпись ссылки рядом со стикером.",
+    )
+    hero_history_button_label = models.CharField(
+        "Историческая справка: кнопка",
+        max_length=40,
+        blank=True,
+        default="Понятно",
+        help_text="Подпись нижней кнопки закрытия.",
+    )
+    hero_history_icon = models.ImageField(
+        "Историческая справка: иконка",
+        upload_to=seasonal_theme_upload_to,
+        blank=True,
+        null=True,
+        help_text="Небольшая тематическая иконка рядом с заголовком. Необязательно.",
+    )
+    hero_history_image = models.ImageField(
+        "Историческая справка: картинка",
+        upload_to=seasonal_theme_upload_to,
+        blank=True,
+        null=True,
+        help_text="Основная иллюстрация внутри модального окна.",
+    )
+    hero_history_background_color = models.CharField(
+        "Справка: цвет фона",
+        max_length=32,
+        blank=True,
+        default="#faf6ee",
+        help_text="Кремовый фон модалки, например #faf6ee.",
+    )
+    hero_history_border_color = models.CharField(
+        "Справка: цвет рамки",
+        max_length=32,
+        blank=True,
+        default="#d4a24a",
+        help_text="Янтарная рамка, например #d4a24a.",
+    )
+    hero_history_title_color = models.CharField(
+        "Справка: цвет заголовка",
+        max_length=32,
+        blank=True,
+        default="#0f2f7f",
+        help_text="Тёмно-синий заголовок для связи с платформой.",
+    )
+    hero_history_text_color = models.CharField(
+        "Справка: цвет текста",
+        max_length=32,
+        blank=True,
+        default="#3b2a16",
+        help_text="Тёмно-коричневый основной текст.",
+    )
+    hero_history_button_color = models.CharField(
+        "Справка: цвет кнопки",
+        max_length=32,
+        blank=True,
+        default="#1d4ed8",
+        help_text="Синяя кнопка платформы, например #1d4ed8.",
+    )
+    hero_history_show_corners = models.BooleanField(
+        "Справка: декоративные углы",
+        default=True,
+        help_text="Показывать декоративные соты/узор по углам модалки.",
+    )
+    hero_history_corner_image = models.ImageField(
+        "Справка: картинка углов",
+        upload_to=seasonal_theme_upload_to,
+        blank=True,
+        null=True,
+        help_text="Опционально: своя картинка для углов. Без файла — встроенные соты.",
+    )
     is_active = models.BooleanField(
         "Разрешена",
         default=False,
