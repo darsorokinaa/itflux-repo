@@ -369,6 +369,7 @@ class SubscriptionPlansView(APIView):
             "subscription": _subscription_payload(sub),
             "anonymous": _anonymous_payload(),
             "referral": _referral_program_payload(request.user),
+            "payments_enabled": bool(getattr(settings, "PAYMENTS_ENABLED", False)),
             "billing": {
                 "year_savings_months": year_savings,
                 "year_savings_label": (
@@ -670,6 +671,15 @@ class SubscriptionCreatePaymentView(APIView):
         from .payment_service import PaymentProviderService
         from .subscription_service import PromoCodeError, PromoCodeService
 
+        if not getattr(settings, "PAYMENTS_ENABLED", False):
+            return Response(
+                {
+                    "detail": "Оплата временно недоступна. Попробуйте позже.",
+                    "code": "PAYMENTS_DISABLED",
+                },
+                status=503,
+            )
+
         slug = request.data.get("plan_slug")
         billing_period = request.data.get("billing_period", "month")
         promo_code = (request.data.get("promo_code") or "").strip()
@@ -703,7 +713,86 @@ class SubscriptionCreatePaymentView(APIView):
             )
         except ValueError as exc:
             return Response({"detail": str(exc), "code": "PAYMENT_UNAVAILABLE"}, status=503)
+        except NotImplementedError as exc:
+            return Response({"detail": str(exc), "code": "PAYMENT_UNAVAILABLE"}, status=503)
         return Response(result, status=201)
+
+
+class SubscriptionPaymentStatusView(APIView):
+    """Статус платежа подписки: sync с банком, confirm mock в DEBUG."""
+
+    permission_classes = [IsCabinetTeacher]
+
+    def get(self, request, payment_id: int):
+        from .payment_service import PaymentProviderService
+
+        payment = (
+            Payment.objects.select_related("plan")
+            .filter(pk=payment_id, teacher=request.user)
+            .first()
+        )
+        if not payment:
+            return Response({"detail": "Платёж не найден."}, status=404)
+
+        # ?sync=1 — спросить банк (GetState) и активировать тариф, если оплачено
+        if str(request.query_params.get("sync") or "").lower() in ("1", "true", "yes"):
+            if payment.status != Payment.Status.PAID:
+                PaymentProviderService.sync_payment_from_provider(payment)
+                payment.refresh_from_db()
+        return Response(self._payload(payment))
+
+    def post(self, request, payment_id: int):
+        from django.conf import settings as django_settings
+
+        from .payment_service import PaymentProviderService
+
+        payment = Payment.objects.filter(pk=payment_id, teacher=request.user).first()
+        if not payment:
+            return Response({"detail": "Платёж не найден."}, status=404)
+
+        action = (request.data.get("action") or "").strip().lower()
+        if action in ("sync", "sync_provider"):
+            # Возврат с формы банка: подтянуть статус и сменить тариф
+            if payment.status != Payment.Status.PAID:
+                PaymentProviderService.sync_payment_from_provider(payment)
+                payment.refresh_from_db()
+            return Response(self._payload(payment))
+
+        if action != "confirm_mock":
+            return Response({"detail": "Неизвестное действие."}, status=400)
+        if not django_settings.DEBUG or (payment.provider or "") != "mock":
+            return Response(
+                {"detail": "Подтверждение mock доступно только в DEBUG."},
+                status=400,
+            )
+        if payment.status != Payment.Status.PAID:
+            PaymentProviderService.handle_webhook(
+                {
+                    "payment_id": payment.pk,
+                    "status": "paid",
+                    "event_id": f"mock_confirm_{payment.pk}",
+                    "provider_payment_id": payment.provider_payment_id,
+                },
+                provider_name="mock",
+                skip_provider_parse=True,
+            )
+            payment.refresh_from_db()
+        return Response(self._payload(payment))
+
+    @staticmethod
+    def _payload(payment: Payment) -> dict:
+        plan = payment.plan
+        return {
+            "payment_id": payment.pk,
+            "status": payment.status,
+            "provider": payment.provider,
+            "amount": str(payment.final_amount or payment.amount),
+            "billing_period": payment.billing_period,
+            "plan_slug": plan.slug if plan else (payment.metadata or {}).get("plan_slug"),
+            "plan_name": plan.name if plan else None,
+            "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
+            "is_paid": payment.status == Payment.Status.PAID,
+        }
 
 
 class PromoCodeValidateView(APIView):
@@ -756,12 +845,23 @@ class PaymentWebhookView(APIView):
     authentication_classes = []
 
     def post(self, request, provider: str):
+        from django.http import HttpResponse
+
         from .payment_service import PaymentProviderService
 
         result = PaymentProviderService.handle_webhook(
             request.data if hasattr(request, "data") else {},
             provider_name=provider,
         )
+        # Т-Банк ожидает тело ответа ровно "OK"
+        if (provider or "").strip().lower() in ("tbank", "tinkoff"):
+            if result.get("ok"):
+                return HttpResponse("OK", content_type="text/plain; charset=utf-8")
+            return HttpResponse(
+                result.get("error") or "ERROR",
+                status=400,
+                content_type="text/plain; charset=utf-8",
+            )
         status = 200 if result.get("ok") else 400
         return Response(result, status=status)
 

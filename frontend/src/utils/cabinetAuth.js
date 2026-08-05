@@ -1276,6 +1276,27 @@ export function createPayment(planSlug, billingPeriod = "month", promoCode = nul
   });
 }
 
+export function fetchSubscriptionPayment(paymentId, { sync = false } = {}) {
+  const q = sync ? "?sync=1" : "";
+  return cabinetFetch(`/subscription/payments/${paymentId}/${q}`);
+}
+
+/** Сверить статус с банком (GetState) и активировать тариф при успехе */
+export function syncSubscriptionPayment(paymentId) {
+  return cabinetFetch(`/subscription/payments/${paymentId}/`, {
+    method: "POST",
+    body: JSON.stringify({ action: "sync" }),
+  });
+}
+
+/** Только локальный DEBUG + provider=mock */
+export function confirmMockSubscriptionPayment(paymentId) {
+  return cabinetFetch(`/subscription/payments/${paymentId}/`, {
+    method: "POST",
+    body: JSON.stringify({ action: "confirm_mock" }),
+  });
+}
+
 export function validatePromoCode(code, planSlug = null, billingPeriod = "month") {
   return cabinetFetch("/subscription/apply-promo/", {
     method: "POST",

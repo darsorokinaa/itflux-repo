@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { ExternalLink, Map, Search } from "lucide-react";
+import CatalogEngagementBar from "../components/CatalogEngagementBar";
 import StateView from "../components/StateView";
+import { CATALOG_ORDERING_OPTIONS, registerCatalogView } from "../utils/catalogEngagement";
 
 function mediaUrl(url) {
   if (!url) return null;
@@ -17,7 +19,7 @@ function getOpenUrl(item) {
   return null;
 }
 
-function InterestingCard({ item }) {
+function InterestingCard({ item, onEngagementChange }) {
   const coverUrl = mediaUrl(item.cover_image_url);
   const openUrl = getOpenUrl(item);
   const accent = item.accent_color || "#1F3A8A";
@@ -29,6 +31,11 @@ function InterestingCard({ item }) {
         backgroundPosition: "center",
       }
     : { backgroundColor: accent };
+
+  const handleOpen = () => {
+    if (!item.slug) return;
+    registerCatalogView("interesting", item.slug).catch(() => {});
+  };
 
   return (
     <article className="interesting-card">
@@ -46,12 +53,21 @@ function InterestingCard({ item }) {
         {item.short_description ? (
           <p className="interesting-card__desc">{item.short_description}</p>
         ) : null}
+        <CatalogEngagementBar
+          kind="interesting"
+          slug={item.slug}
+          viewsCount={item.views_count}
+          likesCount={item.likes_count}
+          isLiked={item.is_liked}
+          onChange={(next) => onEngagementChange?.(item.slug, next)}
+        />
         {openUrl ? (
           <a
             href={openUrl}
             className="interesting-card__btn"
             target="_blank"
             rel="noopener noreferrer"
+            onClick={handleOpen}
           >
             Открыть
             <ExternalLink size={16} strokeWidth={2.2} aria-hidden="true" />
@@ -71,15 +87,35 @@ export default function InterestingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
+  const [ordering, setOrdering] = useState("newest");
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  const handleEngagementChange = useCallback((slug, next) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.slug === slug
+          ? {
+              ...item,
+              views_count: next.views_count,
+              likes_count: next.likes_count,
+              is_liked: next.is_liked,
+            }
+          : item,
+      ),
+    );
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
 
-    fetch("/api/interesting/", { credentials: "same-origin" })
+    const qs = new URLSearchParams();
+    if (ordering && ordering !== "newest") qs.set("ordering", ordering);
+    const url = qs.toString() ? `/api/interesting/?${qs}` : "/api/interesting/";
+
+    fetch(url, { credentials: "same-origin" })
       .then((res) => {
         if (!res.ok) throw new Error("Не удалось загрузить материалы");
         return res.json();
@@ -100,7 +136,7 @@ export default function InterestingPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, ordering]);
 
   const filtered = items.filter((item) => {
     const q = search.trim().toLowerCase();
@@ -123,7 +159,7 @@ export default function InterestingPage() {
             </p>
           </section>
 
-          <section className="lessons-toolbar" aria-label="Поиск материалов">
+          <section className="lessons-toolbar interesting-toolbar" aria-label="Поиск и сортировка">
             <label className="lessons-search">
               <Search className="lessons-search__icon" size={18} strokeWidth={2.2} aria-hidden="true" />
               <input
@@ -133,6 +169,20 @@ export default function InterestingPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
+            </label>
+            <label className="lessons-filter interesting-toolbar__sort">
+              <span className="lessons-filter__label">Сортировка</span>
+              <select
+                className="lessons-filter__control"
+                value={ordering}
+                onChange={(e) => setOrdering(e.target.value)}
+              >
+                {CATALOG_ORDERING_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
             </label>
           </section>
 
@@ -162,7 +212,11 @@ export default function InterestingPage() {
           ) : (
             <section className="interesting-grid" aria-label="Материалы раздела">
               {filtered.map((item) => (
-                <InterestingCard key={item.id} item={item} />
+                <InterestingCard
+                  key={item.id}
+                  item={item}
+                  onEngagementChange={handleEngagementChange}
+                />
               ))}
             </section>
           )}

@@ -2,8 +2,12 @@
 PaymentProviderInterface — payment-agnostic слой для подписки платформы.
 
 Секреты из settings:
-    PAYMENT_PROVIDER = "mock" | "yookassa" | …
-    PAYMENT_SECRET_KEY, PAYMENT_SHOP_ID — когда будет касса
+    PAYMENT_PROVIDER = "mock" | "tbank" | "tinkoff" | …
+    Для Т-Банка: TBANK_TERMINAL_KEY + TBANK_PASSWORD
+    (или совместимость: PAYMENT_SHOP_ID + PAYMENT_SECRET_KEY)
+
+Документация формы банка:
+    https://developer.tbank.ru/eacq/scenarios/payments/nonPCI/
 
 Не смешивать с StudentPayment / биллингом учеников.
 """
@@ -81,10 +85,14 @@ class UnconfiguredPaymentProvider(PaymentProviderInterface):
         raise NotImplementedError("Real payment provider not configured")
 
 
-def get_payment_provider() -> PaymentProviderInterface:
-    name = getattr(settings, "PAYMENT_PROVIDER", "mock")
-    if name == "mock":
+def get_payment_provider(name: str | None = None) -> PaymentProviderInterface:
+    provider = (name or getattr(settings, "PAYMENT_PROVIDER", "mock") or "mock").strip().lower()
+    if provider == "mock":
         return MockPaymentProvider()
+    if provider in ("tbank", "tinkoff"):
+        from .tbank_payment import TBankPaymentProvider
+
+        return TBankPaymentProvider()
     return UnconfiguredPaymentProvider()
 
 
@@ -111,11 +119,17 @@ class PaymentProviderService:
         from .models import Payment, PromoCode
         from .subscription_service import SubscriptionLimitService
 
-        if cls.PROVIDER == "mock" and not django_settings.DEBUG:
+        provider_name = (
+            getattr(django_settings, "PAYMENT_PROVIDER", None) or cls.PROVIDER or "mock"
+        ).strip().lower()
+        if provider_name == "mock" and not django_settings.DEBUG:
             raise ValueError("Mock payments are disabled in production")
 
+        if billing_period not in ("month", "year"):
+            billing_period = "month"
+
         original_amount = plan.price_year if billing_period == "year" else plan.price_month
-        original_amount = Decimal(str(original_amount))
+        original_amount = Decimal(str(original_amount or 0))
         if discount_info:
             final_amount = Decimal(str(discount_info["final_amount"]))
             discount_amount = Decimal(str(discount_info.get("discount", 0)))
@@ -123,19 +137,25 @@ class PaymentProviderService:
             final_amount = original_amount
             discount_amount = Decimal("0")
 
+        if final_amount <= 0:
+            raise ValueError("Для бесплатного тарифа оплата не требуется")
+
         sub = SubscriptionLimitService.get_or_create_subscription(teacher)
         key = (idempotency_key or "").strip() or f"pay_{teacher.pk}_{plan.slug}_{uuid.uuid4().hex[:12]}"
 
         existing = Payment.objects.filter(idempotency_key=key).first()
         if existing:
-            provider = get_payment_provider()
+            provider = get_payment_provider(provider_name)
             return {
                 "payment_id": existing.pk,
                 "provider_payment_id": existing.provider_payment_id,
+                "provider": existing.provider,
                 "status": existing.status,
                 "payment_url": provider.create_checkout(existing, plan),
                 "amount": str(existing.final_amount or existing.amount),
                 "currency": existing.currency,
+                "billing_period": existing.billing_period,
+                "plan_slug": plan.slug,
                 "idempotent": True,
             }
 
@@ -152,8 +172,10 @@ class PaymentProviderService:
             final_amount=final_amount,
             currency=plan.currency,
             status=Payment.Status.PENDING,
-            provider=cls.PROVIDER,
-            provider_payment_id=f"mock_{uuid.uuid4().hex[:16]}",
+            provider=provider_name,
+            provider_payment_id=(
+                f"mock_{uuid.uuid4().hex[:16]}" if provider_name == "mock" else ""
+            ),
             idempotency_key=key,
             billing_period=billing_period,
             promo_code=promo_obj,
@@ -173,16 +195,25 @@ class PaymentProviderService:
             except Exception:
                 pass
 
-        provider = get_payment_provider()
-        payment_url = provider.create_checkout(payment, plan)
+        provider = get_payment_provider(provider_name)
+        try:
+            payment_url = provider.create_checkout(payment, plan)
+        except Exception:
+            payment.status = Payment.Status.FAILED
+            payment.save(update_fields=["status", "updated_at"])
+            raise
 
+        payment.refresh_from_db()
         result = {
             "payment_id": payment.pk,
             "provider_payment_id": payment.provider_payment_id,
+            "provider": payment.provider,
             "status": payment.status,
             "payment_url": payment_url,
             "amount": str(final_amount),
             "currency": payment.currency,
+            "billing_period": billing_period,
+            "plan_slug": plan.slug,
         }
         if discount_info:
             result["discount"] = discount_info
@@ -190,25 +221,128 @@ class PaymentProviderService:
 
     @classmethod
     def check_payment_status(cls, payment):
-        return get_payment_provider().check_status(payment)
+        return get_payment_provider(payment.provider or None).check_status(payment)
 
     @classmethod
     @transaction.atomic
-    def handle_webhook(cls, payload: dict, *, provider_name: str | None = None):
+    def sync_payment_from_provider(cls, payment):
+        """
+        Сверяет статус с банком (GetState) и при CONFIRMED активирует тариф.
+        Нужно, когда webhook ушёл не на этот сервер (локальная разработка)
+        или задержался.
+        """
+        from .models import Payment
+
+        # Без select_related: PostgreSQL запрещает FOR UPDATE на OUTER JOIN (nullable plan).
+        payment = Payment.objects.select_for_update().get(pk=payment.pk)
+        if payment.status == Payment.Status.PAID:
+            return {"ok": True, "status": payment.status, "synced": False, "already_paid": True}
+
+        provider_name = (payment.provider or cls.PROVIDER or "mock").strip().lower()
+        if provider_name in ("", "mock"):
+            return {"ok": True, "status": payment.status, "synced": False}
+
+        try:
+            remote = get_payment_provider(provider_name).check_status(payment)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "status": payment.status}
+
+        mapped = (remote.get("status") or "").strip().lower()
+        provider_payment_id = remote.get("provider_payment_id") or payment.provider_payment_id
+        provider_status = remote.get("provider_status") or mapped
+
+        if mapped == "paid" and payment.status != Payment.Status.PAID:
+            # Идемпотентность через тот же webhook-путь
+            result = cls.handle_webhook(
+                {
+                    # Для tbank parse_webhook ждёт Token — обходим через внутренний apply
+                    "_internal_sync": True,
+                    "payment_id": payment.pk,
+                    "status": "paid",
+                    "event_id": f"sync_{provider_name}_{provider_payment_id}_{provider_status}",
+                    "provider_payment_id": provider_payment_id,
+                },
+                provider_name=provider_name,
+                skip_provider_parse=True,
+            )
+            payment.refresh_from_db()
+            return {
+                "ok": bool(result.get("ok")),
+                "status": payment.status,
+                "synced": True,
+                "provider_status": provider_status,
+            }
+
+        if mapped in ("failed", "cancelled", "refunded") and payment.status == Payment.Status.PENDING:
+            cls.handle_webhook(
+                {
+                    "payment_id": payment.pk,
+                    "status": mapped,
+                    "event_id": f"sync_{provider_name}_{provider_payment_id}_{provider_status}",
+                    "provider_payment_id": provider_payment_id,
+                },
+                provider_name=provider_name,
+                skip_provider_parse=True,
+            )
+            payment.refresh_from_db()
+            return {
+                "ok": True,
+                "status": payment.status,
+                "synced": True,
+                "provider_status": provider_status,
+            }
+
+        return {
+            "ok": True,
+            "status": payment.status,
+            "synced": False,
+            "provider_status": provider_status,
+            "remote_status": mapped,
+        }
+
+    @classmethod
+    @transaction.atomic
+    def handle_webhook(
+        cls,
+        payload: dict,
+        *,
+        provider_name: str | None = None,
+        skip_provider_parse: bool = False,
+    ):
         from django.conf import settings as django_settings
 
         from .models import Payment, PaymentWebhookEvent
 
         provider_name = (provider_name or cls.PROVIDER or "").strip().lower()
+        if provider_name == "tinkoff":
+            provider_name = "tbank"
         configured = (getattr(django_settings, "PAYMENT_PROVIDER", "mock") or "mock").strip().lower()
+        if configured == "tinkoff":
+            configured = "tbank"
         if (
             not django_settings.DEBUG
             and (provider_name == "mock" or configured == "mock")
         ):
             return {"ok": False, "error": "mock_disabled"}
 
-        provider = get_payment_provider()
-        parsed = provider.parse_webhook(payload or {})
+        provider = get_payment_provider(provider_name or configured)
+        if skip_provider_parse:
+            parsed = {
+                "payment_id": (payload or {}).get("payment_id"),
+                "status": (payload or {}).get("status", "paid"),
+                "event_id": (payload or {}).get("event_id") or "",
+                "provider_payment_id": (payload or {}).get("provider_payment_id") or "",
+            }
+        else:
+            try:
+                parsed = provider.parse_webhook(payload or {})
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+
+        # Промежуточные статусы Т-Банка не меняют подписку
+        if parsed.get("status") == "pending":
+            return {"ok": True, "ignored": True, "status": "pending"}
+
         event_id = str(parsed.get("event_id") or "")
         if not event_id:
             # Без стабильного event_id повторная доставка может создать новый ключ —
@@ -250,7 +384,11 @@ class PaymentProviderService:
             PromoCodeService.confirm_for_payment(payment)
         elif new_status in ("failed", "cancelled", "refunded"):
             payment.status = new_status
-            payment.save(update_fields=["status", "updated_at"])
+            if parsed.get("provider_payment_id") and not payment.provider_payment_id:
+                payment.provider_payment_id = parsed["provider_payment_id"]
+                payment.save(update_fields=["status", "provider_payment_id", "updated_at"])
+            else:
+                payment.save(update_fields=["status", "updated_at"])
             from .subscription_service import PromoCodeService
 
             PromoCodeService.release_for_payment(payment)

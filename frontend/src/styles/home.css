@@ -7459,3 +7459,110 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   background: #eef1f8;
 }
 
+/* —— Просмотры и лайки каталога —— */
+.catalog-engagement {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.65rem;
+  margin: 0.35rem 0 0.75rem;
+  color: var(--text-sub, #5a657a);
+  font-size: 0.86rem;
+  line-height: 1.2;
+}
+
+.catalog-engagement__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 40px;
+  padding: 0 0.15rem;
+  color: inherit;
+}
+
+.catalog-engagement__like {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-width: 40px;
+  min-height: 40px;
+  margin: 0;
+  padding: 0 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.catalog-engagement__like:hover {
+  background: var(--blue-soft, #eef3ff);
+  color: var(--blue-hero, #2b52f5);
+}
+
+.catalog-engagement__like:focus-visible {
+  outline: 2px solid var(--blue-hero, #2b52f5);
+  outline-offset: 2px;
+}
+
+.catalog-engagement__like:active {
+  transform: translateY(0.5px);
+}
+
+.catalog-engagement__like:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.catalog-engagement__like--active {
+  color: #c45b7a;
+  background: rgba(196, 91, 122, 0.08);
+}
+
+.catalog-engagement__like--active:hover {
+  color: #b04a6a;
+  background: rgba(196, 91, 122, 0.14);
+}
+
+.catalog-engagement__notice {
+  flex: 1 1 100%;
+  font-size: 0.78rem;
+  color: var(--text-hint, #8a93a8);
+}
+
+.interesting-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1rem;
+}
+
+.interesting-toolbar__sort {
+  min-width: 11rem;
+}
+
+.lesson-viewer-page__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-card, #e4e8ff);
+  background: #fff;
+}
+
+.lesson-viewer-page__toolbar .lesson-viewer-page__title {
+  flex: 1 1 12rem;
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+  color: var(--text-main, #1a2236);
+}
+
+.lesson-viewer-page__toolbar .catalog-engagement {
+  margin: 0;
+}
+

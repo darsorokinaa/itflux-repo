@@ -377,6 +377,11 @@ urlpatterns = [
     path("subscription/change-plan/", subscription_api.SubscriptionChangePlanView.as_view(), name="subscription_change_plan"),
     path("subscription/manage/", subscription_api.SubscriptionManageView.as_view(), name="subscription_manage"),
     path("subscription/create-payment/", subscription_api.SubscriptionCreatePaymentView.as_view(), name="subscription_create_payment"),
+    path(
+        "subscription/payments/<int:payment_id>/",
+        subscription_api.SubscriptionPaymentStatusView.as_view(),
+        name="subscription_payment_status",
+    ),
     path("subscription/apply-promo/", subscription_api.PromoCodeValidateView.as_view(), name="subscription_apply_promo"),
     path("subscription/referral-link/", subscription_api.SubscriptionReferralLinkView.as_view(), name="subscription_referral_link"),
 

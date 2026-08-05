@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ClipboardList, PenLine, Presentation, Search, StickyNote } from "lucide-react";
+import CatalogEngagementBar from "../components/CatalogEngagementBar";
 import StateView from "../components/StateView";
+import { CATALOG_ORDERING_OPTIONS, registerCatalogView } from "../utils/catalogEngagement";
 
 const patternInf = new URL("../assets/subject-patterns/inf.svg", import.meta.url).href;
 const patternMath = new URL("../assets/subject-patterns/math.svg", import.meta.url).href;
@@ -71,7 +73,7 @@ const INCLUDES = [
   { id: "notes", label: "Заметки", Icon: StickyNote },
 ];
 
-function LessonCard({ lesson }) {
+function LessonCard({ lesson, onEngagementChange }) {
   const subjectTheme = getSubjectTheme(lesson.subject);
   const status = lesson.status || "published";
   const statusLabel = STATUS_LABELS[status];
@@ -89,6 +91,12 @@ function LessonCard({ lesson }) {
     : `/api/lessons/${encodeURIComponent(lesson.slug)}/view/`;
 
   const coverUrl = mediaUrl(lesson.cover_image_url);
+
+  const handleOpen = () => {
+    if (!lesson.slug || isReactViewer) return;
+    // HTML/архив открывается в новой вкладке — регистрируем просмотр здесь
+    registerCatalogView("lessons", lesson.slug).catch(() => {});
+  };
 
   const tags = [
     lesson.grade ? `${lesson.grade} класс` : null,
@@ -156,12 +164,22 @@ function LessonCard({ lesson }) {
           })}
         </div>
 
+        <CatalogEngagementBar
+          kind="lessons"
+          slug={lesson.slug}
+          viewsCount={lesson.views_count}
+          likesCount={lesson.likes_count}
+          isLiked={lesson.is_liked}
+          onChange={(next) => onEngagementChange?.(lesson.slug, next)}
+        />
+
         {canOpenLesson ? (
           <a
             href={lessonUrl}
             className="lesson-card-v3__btn"
             target="_blank"
             rel="noopener noreferrer"
+            onClick={handleOpen}
           >
             Открыть урок
           </a>
@@ -186,16 +204,36 @@ export default function ReadyLessonsPage() {
   const [taskNumber, setTaskNumber] = useState("");
   const [durationFilter, setDurationFilter] = useState("");
   const [difficulty, setDifficulty] = useState("");
+  const [ordering, setOrdering] = useState("newest");
 
   const [reloadKey, setReloadKey] = useState(0);
   const reloadLessons = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  const handleEngagementChange = useCallback((slug, next) => {
+    setLessons((prev) =>
+      prev.map((item) =>
+        item.slug === slug
+          ? {
+              ...item,
+              views_count: next.views_count,
+              likes_count: next.likes_count,
+              is_liked: next.is_liked,
+            }
+          : item,
+      ),
+    );
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
 
-    fetch("/api/lessons/", { credentials: "same-origin" })
+    const qs = new URLSearchParams();
+    if (ordering && ordering !== "newest") qs.set("ordering", ordering);
+    const url = qs.toString() ? `/api/lessons/?${qs}` : "/api/lessons/";
+
+    fetch(url, { credentials: "same-origin" })
       .then((res) => {
         if (!res.ok) throw new Error("Не удалось загрузить каталог уроков");
         return res.json();
@@ -216,7 +254,7 @@ export default function ReadyLessonsPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, ordering]);
 
   const subjectOptions = useMemo(() => {
     const values = new Set();
@@ -405,6 +443,21 @@ export default function ReadyLessonsPage() {
                   <option value="advanced">Продвинутый</option>
                 </select>
               </label>
+
+              <label className="lessons-filter">
+                <span className="lessons-filter__label">Сортировка</span>
+                <select
+                  className="lessons-filter__control"
+                  value={ordering}
+                  onChange={(e) => setOrdering(e.target.value)}
+                >
+                  {CATALOG_ORDERING_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
 
             {hasActiveFilters ? (
@@ -461,7 +514,11 @@ export default function ReadyLessonsPage() {
             ) : (
               <div className="lessons-library-v3__grid">
                 {filteredLessons.map((lesson) => (
-                  <LessonCard key={lesson.slug || lesson.id} lesson={lesson} />
+                  <LessonCard
+                    key={lesson.slug || lesson.id}
+                    lesson={lesson}
+                    onEngagementChange={handleEngagementChange}
+                  />
                 ))}
               </div>
             )}

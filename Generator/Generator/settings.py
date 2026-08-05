@@ -23,8 +23,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 # .env: в папке Generator/ или в корне проекта (например /opt/generator/.env)
-load_dotenv(BASE_DIR / ".env")
-load_dotenv(BASE_DIR.parent / ".env")
+# override=True — чтобы пароли с "#" из файла не перекрывались старым env shell
+load_dotenv(BASE_DIR / ".env", override=True)
+load_dotenv(BASE_DIR.parent / ".env", override=True)
 
 
 
@@ -467,9 +468,34 @@ if not DEBUG:
     )
 
 # —— Подписка платформы (SaaS). Не путать с биллингом учеников.
+# Временно выключено: поставьте PAYMENTS_ENABLED=true, когда оплата готова.
+_PAYMENTS_ENABLED_RAW = (os.environ.get("PAYMENTS_ENABLED") or "false").strip().lower()
+PAYMENTS_ENABLED = _PAYMENTS_ENABLED_RAW in ("1", "true", "yes", "on")
 PAYMENT_PROVIDER = (os.environ.get("PAYMENT_PROVIDER") or "mock").strip()
 PAYMENT_SECRET_KEY = (os.environ.get("PAYMENT_SECRET_KEY") or "").strip()
 PAYMENT_SHOP_ID = (os.environ.get("PAYMENT_SHOP_ID") or "").strip()
+# Т-Банк интернет-эквайринг (платёжная форма банка)
+# https://developer.tbank.ru/eacq/scenarios/payments/nonPCI/
+def _env_cred(value: str) -> str:
+    value = (value or "").strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1].strip()
+    return value
+
+TBANK_TERMINAL_KEY = _env_cred(os.environ.get("TBANK_TERMINAL_KEY") or PAYMENT_SHOP_ID or "")
+TBANK_PASSWORD = _env_cred(os.environ.get("TBANK_PASSWORD") or PAYMENT_SECRET_KEY or "")
+TBANK_API_URL = (os.environ.get("TBANK_API_URL") or "https://securepay.tinkoff.ru/v2").rstrip("/")
+TBANK_SUCCESS_URL = (os.environ.get("TBANK_SUCCESS_URL") or "").strip()
+TBANK_FAIL_URL = (os.environ.get("TBANK_FAIL_URL") or "").strip()
+TBANK_NOTIFICATION_URL = (os.environ.get("TBANK_NOTIFICATION_URL") or "").strip()
+# false — только для локальной отладки при SSL-перехвате (антивирус/прокси)
+_TBANK_VERIFY_RAW = (os.environ.get("TBANK_VERIFY_SSL") or "true").strip().lower()
+TBANK_VERIFY_SSL = _TBANK_VERIFY_RAW not in ("0", "false", "no", "off")
+# Чек (Receipt) в Init — для онлайн-кассы и тестового сценария Т-Банка
+TBANK_TAXATION = (os.environ.get("TBANK_TAXATION") or "usn_income").strip().lower()
+TBANK_VAT = (os.environ.get("TBANK_VAT") or "none").strip().lower()
+TBANK_FFD_VERSION = (os.environ.get("TBANK_FFD_VERSION") or "1.05").strip()
+TBANK_RECEIPT_EMAIL = (os.environ.get("TBANK_RECEIPT_EMAIL") or "").strip()
 ANON_VARIANTS_MONTHLY_LIMIT = int(os.environ.get("ANON_VARIANTS_MONTHLY_LIMIT", "5"))
 ANON_WORKBOOKS_MONTHLY_LIMIT = int(os.environ.get("ANON_WORKBOOKS_MONTHLY_LIMIT", "3"))
 

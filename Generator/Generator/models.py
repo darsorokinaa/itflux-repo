@@ -1,5 +1,7 @@
 from django.db import models
 from django.db.models import DO_NOTHING, CASCADE
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
+from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
@@ -647,6 +649,13 @@ class Lesson(models.Model):
         verbose_name="Архив",
         help_text="ZIP, RAR или 7Z с материалами урока",
     )
+    views_count = models.PositiveIntegerField("Просмотры", default=0, db_index=True)
+    likes = GenericRelation(
+        "CatalogContentLike",
+        related_query_name="lesson",
+        content_type_field="content_type",
+        object_id_field="object_id",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -745,6 +754,13 @@ class InterestingItem(models.Model):
         help_text="ZIP с index.html и ресурсами интерактива",
     )
     sort_order = models.PositiveIntegerField("Порядок", default=0, db_index=True)
+    views_count = models.PositiveIntegerField("Просмотры", default=0, db_index=True)
+    likes = GenericRelation(
+        "CatalogContentLike",
+        related_query_name="interesting",
+        content_type_field="content_type",
+        object_id_field="object_id",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -769,6 +785,76 @@ class InterestingItem(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class CatalogContentLike(models.Model):
+    """Лайк авторизованного пользователя к Lesson или InterestingItem."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="catalog_content_likes",
+    )
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.PositiveIntegerField(db_index=True)
+    content_object = GenericForeignKey("content_type", "object_id")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Лайк материала каталога"
+        verbose_name_plural = "Лайки материалов каталога"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "content_type", "object_id"],
+                name="unique_catalog_content_like",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["content_type", "object_id"], name="catalog_like_target_idx"),
+        ]
+
+    def __str__(self):
+        return f"like user={self.user_id} {self.content_type_id}:{self.object_id}"
+
+
+class CatalogContentViewDedup(models.Model):
+    """Окно дедупликации просмотров (один раз на user/visitor за 30 минут)."""
+
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.PositiveIntegerField(db_index=True)
+    content_object = GenericForeignKey("content_type", "object_id")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="catalog_content_views",
+    )
+    visitor_key = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Хеш cookie посетителя; IP не храним",
+    )
+    viewed_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        verbose_name = "Просмотр материала каталога"
+        verbose_name_plural = "Просмотры материалов каталога"
+        indexes = [
+            models.Index(
+                fields=["content_type", "object_id", "user", "viewed_at"],
+                name="catalog_view_user_idx",
+            ),
+            models.Index(
+                fields=["content_type", "object_id", "visitor_key", "viewed_at"],
+                name="catalog_view_visitor_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"view {self.content_type_id}:{self.object_id} at {self.viewed_at}"
 
 
 def username_for_created_by(request):

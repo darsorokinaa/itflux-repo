@@ -31,6 +31,9 @@ class LessonCatalogSerializer(serializers.ModelSerializer):
     card_background_image_url = serializers.SerializerMethodField()
     file_url = serializers.SerializerMethodField()
     archive_url = serializers.SerializerMethodField()
+    views_count = serializers.IntegerField(read_only=True)
+    likes_count = serializers.SerializerMethodField()
+    is_liked = serializers.SerializerMethodField()
 
     class Meta:
         model = Lesson
@@ -55,7 +58,16 @@ class LessonCatalogSerializer(serializers.ModelSerializer):
             "card_background_color",
             "file_url",
             "archive_url",
+            "views_count",
+            "likes_count",
+            "is_liked",
         ]
+
+    def get_likes_count(self, obj):
+        return int(getattr(obj, "likes_count", 0) or 0)
+
+    def get_is_liked(self, obj):
+        return bool(getattr(obj, "user_has_liked", False))
 
     def _absolute_file_url(self, obj, field_name: str):
         request = self.context.get("request")
@@ -136,6 +148,9 @@ class InterestingCatalogSerializer(serializers.ModelSerializer):
     cover_image_url = serializers.SerializerMethodField()
     file_url = serializers.SerializerMethodField()
     archive_url = serializers.SerializerMethodField()
+    views_count = serializers.IntegerField(read_only=True)
+    likes_count = serializers.SerializerMethodField()
+    is_liked = serializers.SerializerMethodField()
 
     class Meta:
         model = InterestingItem
@@ -151,7 +166,16 @@ class InterestingCatalogSerializer(serializers.ModelSerializer):
             "cover_image_url",
             "file_url",
             "archive_url",
+            "views_count",
+            "likes_count",
+            "is_liked",
         ]
+
+    def get_likes_count(self, obj):
+        return int(getattr(obj, "likes_count", 0) or 0)
+
+    def get_is_liked(self, obj):
+        return bool(getattr(obj, "user_has_liked", False))
 
     def _absolute_file_url(self, obj, field_name: str):
         request = self.context.get("request")

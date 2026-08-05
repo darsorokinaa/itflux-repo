@@ -123,6 +123,16 @@ urlpatterns = [
     path("api/lessons/", views.api_lessons, name="api_lessons"),
     path("api/lessons/<slug:slug>/view/", views.api_lesson_archive_view, name="api_lesson_archive_view"),
     path(
+        "api/lessons/<slug:slug>/stats/view/",
+        views.api_lesson_stats_view,
+        name="api_lesson_stats_view",
+    ),
+    path(
+        "api/lessons/<slug:slug>/stats/like/",
+        views.api_lesson_stats_like,
+        name="api_lesson_stats_like",
+    ),
+    path(
         "api/lessons/<slug:slug>/archive/<path:asset_path>",
         views.api_lesson_archive_asset,
         name="api_lesson_archive_asset",
@@ -130,6 +140,16 @@ urlpatterns = [
     path("api/lessons/<slug:slug>/", views.api_lesson_detail, name="api_lesson_detail"),
     path("api/interesting/", views.api_interesting, name="api_interesting"),
     path("api/interesting/<slug:slug>/view/", views.api_interesting_view, name="api_interesting_view"),
+    path(
+        "api/interesting/<slug:slug>/stats/view/",
+        views.api_interesting_stats_view,
+        name="api_interesting_stats_view",
+    ),
+    path(
+        "api/interesting/<slug:slug>/stats/like/",
+        views.api_interesting_stats_like,
+        name="api_interesting_stats_like",
+    ),
     path(
         "api/interesting/<slug:slug>/archive/<path:asset_path>",
         views.api_interesting_archive_asset,

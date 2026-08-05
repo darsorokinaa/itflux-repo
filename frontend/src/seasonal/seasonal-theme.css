@@ -593,16 +593,18 @@ html.seasonal-theme-active .cabinet-header {
   }
 }
 
-/* Ряд кнопок оформления — левый нижний угол */
+/* Ряд кнопок оформления — правый нижний угол */
 .seasonal-appearance-fab-dock {
   position: fixed;
-  left: 16px;
+  right: 16px;
+  left: auto;
   bottom: 20px;
   z-index: 1100;
   display: flex;
-  flex-direction: row;
+  flex-direction: row-reverse;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-start;
   gap: 10px;
   max-width: calc(100vw - 32px);
   overflow: visible;
@@ -647,11 +649,12 @@ html.seasonal-theme-active .cabinet-header {
   filter: none;
 }
 
-/* Подсказка сверху и вправо от кнопки — не уезжает за левый край экрана */
+/* Подсказка сверху, выравнивание вправо — не уезжает за правый край */
 .seasonal-appearance-fab[data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
-  left: 0;
+  right: 0;
+  left: auto;
   bottom: calc(100% + 8px);
   transform: none;
   padding: 6px 10px;
@@ -689,18 +692,22 @@ html.seasonal-theme-active .cabinet-header {
 }
 
 @media (max-width: 768px) {
-  .seasonal-appearance-fab {
-    left: 12px;
+  .seasonal-appearance-fab-dock {
+    right: 12px;
     bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .seasonal-appearance-fab {
     width: 48px;
     height: 48px;
   }
 
   .seasonal-appearance-fab[data-tooltip]::after {
-    left: 50%;
+    right: 0;
+    left: auto;
     top: auto;
     bottom: calc(100% + 8px);
-    transform: translateX(-50%);
+    transform: none;
   }
 }
 

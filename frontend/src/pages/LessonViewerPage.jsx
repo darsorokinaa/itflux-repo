@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import DocViewer, { DocViewerRenderers } from "@cyntler/react-doc-viewer";
+import CatalogEngagementBar, {
+  useRegisterCatalogView,
+} from "../components/CatalogEngagementBar";
 import { devApiBase } from "../utils/devApiBase";
 
 export default function LessonViewerPage() {
@@ -8,6 +11,8 @@ export default function LessonViewerPage() {
   const [lesson, setLesson] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const syncedViews = useRegisterCatalogView("lessons", slug, Boolean(slug) && !loading && !error && Boolean(lesson));
 
   useEffect(() => {
     let cancelled = false;
@@ -38,6 +43,12 @@ export default function LessonViewerPage() {
       cancelled = true;
     };
   }, [slug]);
+
+  useEffect(() => {
+    if (typeof syncedViews === "number") {
+      setLesson((prev) => (prev ? { ...prev, views_count: syncedViews } : prev));
+    }
+  }, [syncedViews]);
 
   if (loading) {
     return (
@@ -82,11 +93,6 @@ export default function LessonViewerPage() {
   const isPptx = fileExt.endsWith(".pptx") || fileExt.endsWith(".ppt");
   const isPdf = fileExt.endsWith(".pdf");
 
-  /**
-   * Для встраивания (iframe) нужен тот же origin, иначе X-Frame-Options: SAMEORIGIN
-   * на media блокирует показ. В dev /media проксируется Vite на Django, в проде origin
-   * и так совпадает — поэтому используем относительный путь.
-   */
   const toSameOriginUrl = (u) => {
     try {
       const parsed = new URL(u, window.location.href);
@@ -98,9 +104,38 @@ export default function LessonViewerPage() {
 
   const docs = [{ uri: fileUrl, fileName: lesson.title }];
 
+  const toolbar = (
+    <div className="lesson-viewer-page__toolbar">
+      <Link to="/lessons" className="lesson-viewer-page__back">
+        К каталогу
+      </Link>
+      <h1 className="lesson-viewer-page__title">{lesson.title}</h1>
+      <CatalogEngagementBar
+        kind="lessons"
+        slug={lesson.slug || slug}
+        viewsCount={lesson.views_count}
+        likesCount={lesson.likes_count}
+        isLiked={lesson.is_liked}
+        onChange={(next) =>
+          setLesson((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  views_count: next.views_count,
+                  likes_count: next.likes_count,
+                  is_liked: next.is_liked,
+                }
+              : prev,
+          )
+        }
+      />
+    </div>
+  );
+
   if (isPdf) {
     return (
       <div className="lesson-viewer-page lesson-viewer-page--pdf">
+        {toolbar}
         <iframe
           src={toSameOriginUrl(fileUrl)}
           title={lesson.title}
@@ -112,6 +147,7 @@ export default function LessonViewerPage() {
 
   return (
     <div className="lesson-viewer-page lesson-viewer-page--doc">
+      {toolbar}
       {isLocalhost && isPptx ? (
         <div className="lesson-viewer-page__warn">
           <strong>Внимание:</strong> на localhost встроенный просмотр Office недоступен — скачайте

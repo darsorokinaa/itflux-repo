@@ -1,11 +1,13 @@
 from django.contrib import admin
-from django.db.models import Q
+from django.db.models import Count, Q
 from django import forms
 from django.utils.html import format_html, strip_tags
 from django_ckeditor_5.widgets import CKEditor5Widget
 
 from .models import (
     Announcement,
+    CatalogContentLike,
+    CatalogContentViewDedup,
     Criteria,
     ErrorReport,
     InterestingItem,
@@ -420,6 +422,8 @@ class LessonAdmin(admin.ModelAdmin):
         "difficulty",
         "access_level",
         "status",
+        "views_count",
+        "likes_count_display",
         "updated_at",
     )
     list_filter = (
@@ -435,7 +439,7 @@ class LessonAdmin(admin.ModelAdmin):
     prepopulated_fields = {"slug": ("title",)}
     list_editable = ("status", "access_level")
     ordering = ("-updated_at",)
-    readonly_fields = ("created_at", "updated_at")
+    readonly_fields = ("created_at", "updated_at", "views_count", "likes_count_display")
     fieldsets = (
         (
             None,
@@ -466,10 +470,21 @@ class LessonAdmin(admin.ModelAdmin):
             {"fields": ("cover_image", "file", "archive")},
         ),
         (
+            "Статистика",
+            {"fields": ("views_count", "likes_count_display")},
+        ),
+        (
             "Служебное",
             {"fields": ("created_at", "updated_at")},
         ),
     )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(_likes_count=Count("likes", distinct=True))
+
+    @admin.display(description="Лайки", ordering="_likes_count")
+    def likes_count_display(self, obj):
+        return int(getattr(obj, "_likes_count", 0) or 0)
 
 
 @admin.register(InterestingItem)
@@ -480,6 +495,8 @@ class InterestingItemAdmin(admin.ModelAdmin):
         "tag",
         "status",
         "sort_order",
+        "views_count",
+        "likes_count_display",
         "updated_at",
     )
     list_filter = ("status", "tag")
@@ -487,7 +504,7 @@ class InterestingItemAdmin(admin.ModelAdmin):
     prepopulated_fields = {"slug": ("title",)}
     list_editable = ("status", "sort_order")
     ordering = ("sort_order", "-updated_at")
-    readonly_fields = ("created_at", "updated_at")
+    readonly_fields = ("created_at", "updated_at", "views_count", "likes_count_display")
     fieldsets = (
         (
             None,
@@ -504,8 +521,31 @@ class InterestingItemAdmin(admin.ModelAdmin):
         ),
         ("Описание", {"fields": ("short_description",)}),
         ("Файлы", {"fields": ("cover_image", "file", "archive")}),
+        ("Статистика", {"fields": ("views_count", "likes_count_display")}),
         ("Служебное", {"fields": ("created_at", "updated_at")}),
     )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(_likes_count=Count("likes", distinct=True))
+
+    @admin.display(description="Лайки", ordering="_likes_count")
+    def likes_count_display(self, obj):
+        return int(getattr(obj, "_likes_count", 0) or 0)
+
+
+@admin.register(CatalogContentLike)
+class CatalogContentLikeAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "content_type", "object_id", "created_at")
+    list_filter = ("content_type",)
+    search_fields = ("user__username",)
+    readonly_fields = ("user", "content_type", "object_id", "created_at")
+
+
+@admin.register(CatalogContentViewDedup)
+class CatalogContentViewDedupAdmin(admin.ModelAdmin):
+    list_display = ("id", "content_type", "object_id", "user", "viewed_at")
+    list_filter = ("content_type",)
+    readonly_fields = ("content_type", "object_id", "user", "visitor_key", "viewed_at")
 
 
 @admin.register(Update)

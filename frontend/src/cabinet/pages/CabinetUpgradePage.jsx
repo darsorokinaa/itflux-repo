@@ -10,12 +10,30 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { TEACHERS_TELEGRAM_URL } from "../../config/teacherLinks";
 import {
   changePlan,
+  confirmMockSubscriptionPayment,
   createPayment,
   createReferralLink,
   fetchSubscriptionPlans,
   manageSubscription,
+  syncSubscriptionPayment,
   validatePromoCode,
 } from "../../utils/cabinetAuth";
+
+function isLocalFrontendHost() {
+  const host = window.location.hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
+}
+
+/** Локально банк часто уводит SuccessURL на прод — ждём оплату через GetState. */
+async function pollLocalPaymentUntilPaid(paymentId, { attempts = 45, intervalMs = 2000 } = {}) {
+  let last = null;
+  for (let i = 0; i < attempts; i += 1) {
+    last = await syncSubscriptionPayment(paymentId);
+    if (last?.is_paid) return last;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return last;
+}
 import { CabinetPageHeader, CabinetPageShell } from "../CabinetSectionUi";
 
 const MAIN_SLUGS = ["start", "teacher", "pro", "premium"];
@@ -435,12 +453,14 @@ function PlanCard({
   selecting,
   expanded,
   onToggleFeatures,
+  paymentsEnabled = true,
 }) {
   const highlights = buildHighlights(plan).slice(0, 8);
   const priceMonth = Number(plan.price_month);
   const priceYear = Number(plan.price_year);
   const isContact = plan.cta_type === "contact" || plan.slug === SCHOOL_SLUG;
   const isFree = Boolean(plan.is_free) && !isContact;
+  const paymentBlocked = !paymentsEnabled && !isFree && !isContact;
 
   let priceMain;
   let priceSub = null;
@@ -537,6 +557,10 @@ function PlanCard({
         ) : isCurrent ? (
           <div className="upg-card__current-label" aria-disabled="true">
             Текущий тариф
+          </div>
+        ) : paymentBlocked ? (
+          <div className="upg-card__current-label" aria-disabled="true">
+            Оплата временно недоступна
           </div>
         ) : (
           <button
@@ -697,6 +721,78 @@ export default function CabinetUpgradePage() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Возврат с оплаты: не верь URL — проверяем статус платежа в API
+  useEffect(() => {
+    const status = (searchParams.get("status") || "").toLowerCase();
+    const paymentId = searchParams.get("payment_id");
+    if (!status || !paymentId) return undefined;
+
+    let cancelled = false;
+    const finish = async () => {
+      navigate("/cabinet/upgrade", { replace: true });
+      try {
+        const refreshed = await fetchSubscriptionPlans();
+        if (!cancelled) {
+          setPlansData(refreshed);
+          if (refreshed?.referral?.my_link) setReferralLink(refreshed.referral.my_link);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const applyReturn = async () => {
+      if (status === "fail" || status === "failed" || status === "cancelled") {
+        if (!cancelled) {
+          setNotice("Оплата не завершена. Можно выбрать тариф и попробовать снова.");
+        }
+        await finish();
+        return;
+      }
+
+      try {
+        let payment;
+        if (status === "mock") {
+          payment = await confirmMockSubscriptionPayment(paymentId);
+        } else {
+          // Webhook мог уйти на другой хост — спрашиваем банк GetState и активируем тариф
+          payment = await syncSubscriptionPayment(paymentId);
+        }
+
+        if (cancelled) return;
+
+        if (payment.is_paid) {
+          setNotice(
+            payment.plan_name
+              ? `Оплата прошла успешно. Тариф «${payment.plan_name}» активирован.`
+              : "Оплата прошла успешно. Тариф обновлён.",
+          );
+        } else if (status === "success") {
+          setNotice(
+            "Платёж ещё обрабатывается банком. Обновите страницу через минуту.",
+          );
+        } else {
+          setNotice(
+            "Открылась тестовая страница без формы банка. Перезапустите Django с PAYMENT_PROVIDER=tbank.",
+          );
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setNotice(
+            err?.data?.detail ||
+              "Не удалось проверить оплату. Если вы платили — обновите страницу позже.",
+          );
+        }
+      }
+      await finish();
+    };
+
+    applyReturn();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, navigate]);
+
   const plans = plansData?.plans || [];
   const mainPlans = useMemo(
     () => MAIN_SLUGS.map((slug) => plans.find((p) => p.slug === slug)).filter(Boolean),
@@ -710,6 +806,7 @@ export default function CabinetUpgradePage() {
   const referral = plansData?.referral;
   const billing = plansData?.billing;
   const currentPlan = plans.find((p) => p.slug === currentSlug);
+  const paymentsEnabled = plansData?.payments_enabled !== false;
 
   const yearSavingsLabel = billing?.year_savings_label;
   const showYearSavings = Boolean(yearSavingsLabel) && period === "year";
@@ -808,26 +905,89 @@ export default function CabinetUpgradePage() {
     if (!plan || plan.slug === currentSlug) return;
     if (plan.cta_type === "contact" || plan.slug === SCHOOL_SLUG) return;
 
+    const isFree = Boolean(plan.is_free);
+    if (!paymentsEnabled && !isFree) {
+      setNotice("Оплата временно недоступна. Попробуйте позже.");
+      return;
+    }
+
     setSelecting(plan.slug);
     setNotice("");
     try {
       const result = await changePlan(plan.slug, period);
       if (result.requires_payment) {
-        const promoCode = promoState?.valid ? promoInput.trim() : null;
-        const payment = await createPayment(plan.slug, period, promoCode);
-        if (payment.payment_url) {
-          window.location.href = payment.payment_url;
+        if (!paymentsEnabled) {
+          setNotice("Оплата временно недоступна. Попробуйте позже.");
           return;
         }
-        setNotice("Не удалось получить ссылку на оплату.");
+        const promoCode = promoState?.valid ? promoInput.trim() : null;
+        const payment = await createPayment(plan.slug, period, promoCode);
+        const url = (payment.payment_url || "").trim();
+        if (!url) {
+          setNotice("Не удалось получить ссылку на оплату.");
+          return;
+        }
+        // Относительный mock-URL — формы Т-Банка нет (сервер не на tbank или не перезапущен)
+        const isMockReturn =
+          url.includes("status=mock") || payment.provider === "mock";
+        if (isMockReturn && !url.startsWith("http")) {
+          setNotice(
+            "Сервер вернул тестовый mock вместо формы Т-Банка. Проверьте PAYMENT_PROVIDER=tbank в Generator/.env и перезапустите Django.",
+          );
+          window.location.href = url;
+          return;
+        }
+
+        // Локально: банк часто редиректит Success на прод из настроек терминала.
+        // Остаёмся на этой вкладке, форму открываем рядом, тариф ждём через GetState.
+        if (
+          isLocalFrontendHost() &&
+          payment.provider === "tbank" &&
+          payment.payment_id &&
+          /^https?:\/\//i.test(url)
+        ) {
+          const bankWin = window.open(url, "_blank", "noopener,noreferrer");
+          if (!bankWin) {
+            setNotice(
+              "Разрешите всплывающие окна и нажмите тариф снова — форма банка откроется в новой вкладке.",
+            );
+            return;
+          }
+          setNotice(
+            "Оплатите в вкладке банка. Эта страница сама обновит тариф после оплаты…",
+          );
+          const paid = await pollLocalPaymentUntilPaid(payment.payment_id);
+          if (paid?.is_paid) {
+            setNotice(
+              paid.plan_name
+                ? `Оплата прошла успешно. Тариф «${paid.plan_name}» активирован.`
+                : "Оплата прошла успешно. Тариф обновлён.",
+            );
+            const refreshed = await fetchSubscriptionPlans();
+            setPlansData(refreshed);
+            if (refreshed?.referral?.my_link) setReferralLink(refreshed.referral.my_link);
+          } else {
+            setNotice(
+              "Платёж ещё не подтверждён. Если вы уже оплатили — обновите страницу через минуту.",
+            );
+          }
+          return;
+        }
+
+        window.location.href = url;
+        return;
       } else {
         setNotice("Тариф обновлён.");
         const refreshed = await fetchSubscriptionPlans();
         setPlansData(refreshed);
         setTimeout(() => navigate("/cabinet"), 1200);
       }
-    } catch {
-      setNotice("Не удалось изменить тариф. Попробуйте позже.");
+    } catch (err) {
+      setNotice(
+        err?.data?.detail ||
+          err?.message ||
+          "Не удалось изменить тариф. Попробуйте позже.",
+      );
     } finally {
       setSelecting(null);
     }
@@ -869,6 +1029,12 @@ export default function CabinetUpgradePage() {
       {notice ? (
         <div className="cb-soon-toast" role="status">
           {notice}
+        </div>
+      ) : null}
+
+      {!loading && !paymentsEnabled ? (
+        <div className="cb-soon-toast" role="status">
+          Оплата временно недоступна. Выбрать платный тариф пока нельзя.
         </div>
       ) : null}
 
@@ -996,6 +1162,7 @@ export default function CabinetUpgradePage() {
                 selecting={selecting}
                 expanded={compareOpen}
                 onToggleFeatures={() => setCompareOpen((v) => !v)}
+                paymentsEnabled={paymentsEnabled}
               />
             ))}
           </div>

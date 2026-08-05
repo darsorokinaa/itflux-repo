@@ -3906,15 +3906,77 @@ def api_lessons(request):
             | Q(short_description__icontains=q)
         )
 
-    lessons = list(qs.order_by("-updated_at", "-created_at"))
+    from .engagement import annotate_engagement, apply_catalog_ordering
+
+    qs = annotate_engagement(qs, request)
+    qs = apply_catalog_ordering(
+        qs,
+        request.GET.get("ordering") or "newest",
+        default_order=("-updated_at", "-created_at"),
+    )
+    lessons = list(qs)
 
     serializer = LessonCatalogSerializer(lessons, many=True, context={"request": request})
     return JsonResponse({"lessons": serializer.data, "total": len(serializer.data)})
 
 
+def _lesson_content_access_denied(request, lesson):
+    """None если доступ есть; иначе JsonResponse 403."""
+    if _lesson_viewer_is_teacher_or_admin(request):
+        return None
+    from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
+
+    user = request.user if getattr(request.user, "is_authenticated", False) else None
+    try:
+        SubscriptionAccessService.raise_if_cannot_access_content(user, lesson)
+    except AccessDenied as exc:
+        return JsonResponse({"error": exc.to_dict()}, status=403)
+    return None
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_lesson_stats_view(request, slug):
+    lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
+    denied = _lesson_content_access_denied(request, lesson)
+    if denied:
+        return denied
+    from .engagement import register_view, set_visitor_cookie
+
+    result = register_view(lesson, request)
+    response = JsonResponse(
+        {"views_count": result["views_count"], "counted": result["counted"]}
+    )
+    return set_visitor_cookie(response, result.get("visitor_cookie"))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_lesson_stats_like(request, slug):
+    if not getattr(request.user, "is_authenticated", False):
+        return JsonResponse(
+            {"error": "auth_required", "detail": "Войдите, чтобы поставить лайк"},
+            status=401,
+        )
+    lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
+    denied = _lesson_content_access_denied(request, lesson)
+    if denied:
+        return denied
+    from .engagement import EngagementError, toggle_like
+
+    try:
+        result = toggle_like(lesson, request.user)
+    except EngagementError as exc:
+        return JsonResponse({"error": exc.code, "detail": exc.message}, status=exc.status)
+    return JsonResponse(result)
+
+
 @require_http_methods(["GET"])
 def api_lesson_detail(request, slug):
-    lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
+    from .engagement import annotate_engagement
+
+    qs = annotate_engagement(_visible_lessons_queryset(request), request)
+    lesson = get_object_or_404(qs, slug=slug)
     from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
 
     user = request.user if getattr(request.user, "is_authenticated", False) else None
@@ -4047,14 +4109,56 @@ def api_interesting(request):
             | Q(tag__icontains=q)
         )
 
-    items = list(qs.order_by("sort_order", "-updated_at", "-created_at"))
+    from .engagement import annotate_engagement, apply_catalog_ordering
+
+    qs = annotate_engagement(qs, request)
+    qs = apply_catalog_ordering(
+        qs,
+        request.GET.get("ordering") or "newest",
+        default_order=("sort_order", "-updated_at", "-created_at"),
+    )
+    items = list(qs)
     serializer = InterestingCatalogSerializer(items, many=True, context={"request": request})
     return JsonResponse({"items": serializer.data, "total": len(serializer.data)})
 
 
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_interesting_stats_view(request, slug):
+    item = get_object_or_404(_visible_interesting_queryset(request), slug=slug)
+    from .engagement import register_view, set_visitor_cookie
+
+    result = register_view(item, request)
+    response = JsonResponse(
+        {"views_count": result["views_count"], "counted": result["counted"]}
+    )
+    return set_visitor_cookie(response, result.get("visitor_cookie"))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_interesting_stats_like(request, slug):
+    if not getattr(request.user, "is_authenticated", False):
+        return JsonResponse(
+            {"error": "auth_required", "detail": "Войдите, чтобы поставить лайк"},
+            status=401,
+        )
+    item = get_object_or_404(_visible_interesting_queryset(request), slug=slug)
+    from .engagement import EngagementError, toggle_like
+
+    try:
+        result = toggle_like(item, request.user)
+    except EngagementError as exc:
+        return JsonResponse({"error": exc.code, "detail": exc.message}, status=exc.status)
+    return JsonResponse(result)
+
+
 @require_http_methods(["GET"])
 def api_interesting_detail(request, slug):
-    item = get_object_or_404(_visible_interesting_queryset(request), slug=slug)
+    from .engagement import annotate_engagement
+
+    qs = annotate_engagement(_visible_interesting_queryset(request), request)
+    item = get_object_or_404(qs, slug=slug)
     data = InterestingCatalogSerializer(item, context={"request": request}).data
     return JsonResponse({"item": data})
 
