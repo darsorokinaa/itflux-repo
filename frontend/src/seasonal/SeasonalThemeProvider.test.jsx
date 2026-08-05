@@ -11,6 +11,7 @@ vi.mock("./seasonalThemeApi", async () => {
     fetchSeasonalThemeCurrent: vi.fn(),
     updateSeasonalThemePreference: vi.fn(),
     stopSeasonalThemePreview: vi.fn(),
+    writeGuestPreference: vi.fn(actual.writeGuestPreference),
   };
 });
 
@@ -18,6 +19,10 @@ import {
   fetchSeasonalThemeCurrent,
   updateSeasonalThemePreference,
   buildSeasonalCssVars,
+  readGuestPreference,
+  writeGuestPreference,
+  clearGuestPreference,
+  readDayOverride,
 } from "./seasonalThemeApi";
 
 function Probe() {
@@ -49,6 +54,7 @@ describe("SeasonalThemeProvider", () => {
     vi.clearAllMocks();
     document.documentElement.className = "";
     document.documentElement.removeAttribute("data-seasonal-theme");
+    localStorage.clear();
     window.matchMedia = vi.fn().mockImplementation((query) => ({
       matches: false,
       media: query,
@@ -231,5 +237,211 @@ describe("SeasonalThemeProvider", () => {
 
     await waitFor(() => expect(screen.getByTestId("has-appearance").textContent).toBe("false"));
     expect(document.querySelector(".seasonal-appearance-fab")).toBeNull();
+  });
+
+  it("keeps FAB visibility on excluded route via rawTheme", async () => {
+    fetchSeasonalThemeCurrent.mockResolvedValue({
+      mode: "auto",
+      preference_mode: "auto",
+      theme: {
+        id: 9,
+        name: "Honey",
+        slug: "honey",
+        button_emoji: "🍯",
+        background: { color: "#FFF4D6" },
+        cards: {},
+        surfaces: {},
+        animation: { type: "none", intensity: "minimal", max_elements: 10 },
+        decorations: [],
+        include_routes: [],
+        exclude_routes: ["/cabinet/boards"],
+      },
+      animations_enabled: true,
+      available_themes: [{ id: 9, name: "Honey", slug: "honey", status: "active" }],
+      preview: { active: false },
+    });
+
+    function AppearanceProbe() {
+      const { hasSeasonalAppearance, theme, rawTheme } = useSeasonalTheme();
+      return (
+        <div>
+          <span data-testid="has-appearance">{String(hasSeasonalAppearance)}</span>
+          <span data-testid="effective">{theme?.slug || "none"}</span>
+          <span data-testid="raw">{rawTheme?.slug || "none"}</span>
+        </div>
+      );
+    }
+
+    render(
+      <MemoryRouter initialEntries={["/cabinet/boards/1"]}>
+        <SeasonalThemeProvider>
+          <AppearanceProbe />
+        </SeasonalThemeProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("raw").textContent).toBe("honey"));
+    expect(screen.getByTestId("effective").textContent).toBe("none");
+    expect(screen.getByTestId("has-appearance").textContent).toBe("true");
+  });
+
+  it("preserves selected_theme_id when toggling animations only", async () => {
+    clearGuestPreference();
+    writeGuestPreference.mockClear();
+    const themePayload = {
+      id: 5,
+      name: "Manual",
+      slug: "manual",
+      background: {},
+      cards: {},
+      surfaces: {},
+      animation: { type: "none", intensity: "minimal" },
+      decorations: [],
+      include_routes: [],
+      exclude_routes: [],
+    };
+    fetchSeasonalThemeCurrent.mockResolvedValue({
+      mode: "manual",
+      preference_mode: "manual",
+      theme: themePayload,
+      animations_enabled: true,
+      available_themes: [{ id: 5, name: "Manual" }],
+      preview: { active: false },
+    });
+    updateSeasonalThemePreference.mockResolvedValue({
+      mode: "manual",
+      preference_mode: "manual",
+      theme: themePayload,
+      animations_enabled: false,
+      available_themes: [{ id: 5, name: "Manual" }],
+      preview: { active: false },
+    });
+
+    function PrefProbe() {
+      const { setPreference, animationsEnabled } = useSeasonalTheme();
+      return (
+        <div>
+          <span data-testid="anim">{String(animationsEnabled)}</span>
+          <button type="button" onClick={() => setPreference({ animations_enabled: false })}>
+            toggle
+          </button>
+        </div>
+      );
+    }
+
+    render(
+      <MemoryRouter>
+        <SeasonalThemeProvider>
+          <PrefProbe />
+        </SeasonalThemeProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("anim").textContent).toBe("true"));
+    writeGuestPreference.mockClear();
+    screen.getByText("toggle").click();
+    await waitFor(() => expect(screen.getByTestId("anim").textContent).toBe("false"));
+    expect(updateSeasonalThemePreference).toHaveBeenCalledWith({ animations_enabled: false });
+    expect(writeGuestPreference).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selected_theme_id: 5,
+        animations_enabled: false,
+      }),
+    );
+  });
+
+  it("does not overwrite non-pristine server prefs with guest localStorage", async () => {
+    clearGuestPreference();
+    writeGuestPreference({
+      mode: "default",
+      selected_theme_id: null,
+      animations_enabled: true,
+    });
+    fetchSeasonalThemeCurrent.mockResolvedValue({
+      mode: "manual",
+      preference_mode: "manual",
+      theme: {
+        id: 3,
+        slug: "kept",
+        name: "Kept",
+        background: {},
+        cards: {},
+        surfaces: {},
+        animation: { type: "none", intensity: "minimal" },
+        decorations: [],
+        include_routes: [],
+        exclude_routes: [],
+      },
+      animations_enabled: true,
+      available_themes: [{ id: 3, name: "Kept" }],
+      preview: { active: false },
+    });
+
+    renderWithProvider();
+    await waitFor(() => expect(screen.getByTestId("slug").textContent).toBe("kept"));
+    await waitFor(() => expect(updateSeasonalThemePreference).not.toHaveBeenCalled());
+    expect(readGuestPreference()).toBeNull();
+  });
+
+  it("toggles appearance off for a day without opening a panel", async () => {
+    fetchSeasonalThemeCurrent.mockResolvedValue({
+      mode: "auto",
+      preference_mode: "auto",
+      theme: {
+        id: 2,
+        name: "Медовый Спас",
+        slug: "medovyj-spas",
+        button_emoji: "🍯",
+        background: { color: "#FFF4D6" },
+        cards: {},
+        surfaces: {},
+        animation: { type: "none", intensity: "minimal" },
+        decorations: [],
+        include_routes: [],
+        exclude_routes: [],
+      },
+      animations_enabled: true,
+      user_can_disable: true,
+      available_themes: [{ id: 2, name: "Медовый Спас", slug: "medovyj-spas" }],
+      preview: { active: false },
+    });
+    updateSeasonalThemePreference.mockResolvedValue({
+      mode: "default",
+      preference_mode: "default",
+      theme: null,
+      animations_enabled: true,
+      user_can_disable: true,
+      available_themes: [{ id: 2, name: "Медовый Спас", slug: "medovyj-spas" }],
+      preview: { active: false },
+    });
+
+    function ToggleProbe() {
+      const { toggleAppearance, seasonalEnabled, appearanceTooltip, preferenceMode } = useSeasonalTheme();
+      return (
+        <div>
+          <span data-testid="on">{String(seasonalEnabled)}</span>
+          <span data-testid="tip">{appearanceTooltip}</span>
+          <span data-testid="mode">{preferenceMode}</span>
+          <button type="button" onClick={() => toggleAppearance()}>toggle</button>
+        </div>
+      );
+    }
+
+    render(
+      <MemoryRouter>
+        <SeasonalThemeProvider>
+          <ToggleProbe />
+        </SeasonalThemeProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("on").textContent).toBe("true"));
+    expect(screen.getByTestId("tip").textContent).toBe("Тема: Медовый Спас");
+    expect(document.querySelector(".seasonal-appearance-panel")).toBeNull();
+    screen.getByText("toggle").click();
+    await waitFor(() => expect(screen.getByTestId("mode").textContent).toBe("default"));
+    expect(updateSeasonalThemePreference).toHaveBeenCalledWith({ mode: "default" });
+    expect(readDayOverride()?.mode).toBe("default");
+    expect(screen.getByTestId("tip").textContent).toBe("Включить: Медовый Спас");
   });
 });

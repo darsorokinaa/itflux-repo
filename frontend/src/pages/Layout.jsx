@@ -90,13 +90,8 @@ function Layout() {
     <div
       className={`app-shell${isChromelessPage ? " app-shell--lesson-viewer" : ""}${showMobileTabBar ? " app-shell--has-tabbar" : ""}`}
     >
-      <div
-        className="app-shell-pattern"
-        aria-hidden="true"
-        style={{
-          backgroundImage: `url('${import.meta.env.BASE_URL}img/bg.png')`,
-        }}
-      />
+      {/* Фон-паттерн: по умолчанию скрыт (home.css). Сезонная тема включает через CSS-переменные. */}
+      <div className="app-shell-pattern" aria-hidden="true" />
       <div className="app-shell-content">
       {!isLessonOrHomeworkContext && !isChromelessPage && (!isCabinetArea || pathname === '/cabinet/login') && <Nav />}
 

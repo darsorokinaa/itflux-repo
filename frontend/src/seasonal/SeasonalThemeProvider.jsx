@@ -11,18 +11,20 @@ import { useLocation } from "react-router-dom";
 import {
   buildSeasonalCssVars,
   clearGuestPreference,
+  consumeDayOverrideExpiredFlag,
   fetchSeasonalThemeCurrent,
   isHeavyRoute,
+  readDayOverride,
   readGuestPreference,
   resolveDeviceIntensity,
   themeAppliesToRoute,
   updateSeasonalThemePreference,
+  writeDayOverride,
   writeGuestPreference,
   stopSeasonalThemePreview,
 } from "./seasonalThemeApi";
 import SeasonalThemeEffects from "./SeasonalThemeEffects";
 import SeasonalThemeDecorations from "./SeasonalThemeDecorations";
-import SeasonalAppearancePanel from "./SeasonalAppearancePanel";
 import SeasonalPreviewBanner from "./SeasonalPreviewBanner";
 import SeasonalAppearanceFab from "./SeasonalAppearanceFab";
 import "./seasonal-theme.css";
@@ -59,12 +61,26 @@ function applyCssVars(vars) {
   };
 }
 
+function resolveSelectedThemeId(patch, payload) {
+  if (Object.prototype.hasOwnProperty.call(patch, "selected_theme_id")) {
+    return patch.selected_theme_id ?? null;
+  }
+  return payload?.theme?.id ?? readGuestPreference()?.selected_theme_id ?? null;
+}
+
+function themeLabelFromPayload(payload) {
+  const name =
+    payload?.theme?.name
+    || payload?.available_themes?.[0]?.name
+    || null;
+  return name;
+}
+
 export function SeasonalThemeProvider({ children }) {
   const { pathname } = useLocation();
   const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [panelOpen, setPanelOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(() => detectMobile());
   const [reducedMotion, setReducedMotion] = useState(() => detectReducedMotion());
   const [isLowEnd, setIsLowEnd] = useState(() => detectLowEnd());
@@ -72,15 +88,78 @@ export function SeasonalThemeProvider({ children }) {
     () => typeof document === "undefined" || document.visibilityState === "visible",
   );
   const syncedGuestRef = useRef(false);
+  const dayResetDoneRef = useRef(false);
   const abortRef = useRef(null);
+
+  const setPreference = useCallback(async (patch, { dayOverride = false } = {}) => {
+    const nextGuest = {
+      mode: patch.mode ?? payload?.preference_mode ?? payload?.mode ?? "auto",
+      selected_theme_id: resolveSelectedThemeId(patch, payload),
+      animations_enabled:
+        patch.animations_enabled !== undefined
+          ? patch.animations_enabled
+          : payload?.animations_enabled !== false,
+    };
+    writeGuestPreference(nextGuest);
+    if (dayOverride) {
+      writeDayOverride(nextGuest);
+    }
+    try {
+      const next = await updateSeasonalThemePreference(patch);
+      setPayload(next);
+      if (!dayOverride) clearGuestPreference();
+      return next;
+    } catch (err) {
+      if (err?.status === 401 || err?.status === 403) {
+        writeGuestPreference(nextGuest);
+        const next = await fetchSeasonalThemeCurrent(nextGuest);
+        if (next) setPayload(next);
+        return next;
+      }
+      throw err;
+    }
+  }, [payload]);
 
   const refresh = useCallback(async () => {
     if (abortRef.current) abortRef.current.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     try {
-      const guestPref = readGuestPreference();
-      const data = await fetchSeasonalThemeCurrent(guestPref);
+      const day = readDayOverride();
+      const guestPref = day || readGuestPreference();
+      let data = await fetchSeasonalThemeCurrent(guestPref);
+      if (ctrl.signal.aborted) return data;
+
+      // После истечения суток — вернуть auto (один раз)
+      if (!dayResetDoneRef.current && consumeDayOverrideExpiredFlag()) {
+        dayResetDoneRef.current = true;
+        try {
+          data = await updateSeasonalThemePreference({ mode: "auto" });
+        } catch (err) {
+          if (err?.status === 401 || err?.status === 403) {
+            writeGuestPreference({ mode: "auto", selected_theme_id: null, animations_enabled: true });
+            data = await fetchSeasonalThemeCurrent({ mode: "auto" });
+          } else {
+            throw err;
+          }
+        }
+      } else if (
+        day
+        && data?.preference_mode
+        && data.preference_mode !== day.mode
+      ) {
+        // Авторизованный: API игнорирует query — подтягиваем дневной выбор на сервер
+        try {
+          data = await updateSeasonalThemePreference({
+            mode: day.mode,
+            selected_theme_id: day.selected_theme_id,
+            animations_enabled: day.animations_enabled,
+          });
+        } catch {
+          /* гость — current уже с query */
+        }
+      }
+
       if (ctrl.signal.aborted) return data;
       setPayload(data);
       setError(null);
@@ -88,7 +167,6 @@ export function SeasonalThemeProvider({ children }) {
     } catch (err) {
       if (ctrl.signal.aborted) return null;
       setError(err);
-      // Fallback: не ломаем UI — просто без темы
       setPayload((prev) => prev || {
         mode: "auto",
         theme: null,
@@ -110,27 +188,37 @@ export function SeasonalThemeProvider({ children }) {
     };
   }, [refresh]);
 
-  // Синхронизация guest localStorage → сервер после авторизации
+  // Guest → server только если серверные prefs ещё «чистые»
   useEffect(() => {
     if (syncedGuestRef.current) return;
     if (!payload) return;
-    // Если API вернул preference_mode и пользователь авторизован — guest уже не нужен.
-    // Пытаемся один раз запушить guest prefs, если они отличаются от auto.
+    if (readDayOverride()) {
+      syncedGuestRef.current = true;
+      return;
+    }
     const guest = readGuestPreference();
     if (!guest) {
       syncedGuestRef.current = true;
       return;
     }
-    const serverMode = payload.preference_mode || payload.mode;
-    if (serverMode === "auto" && guest.mode === "auto" && guest.animations_enabled !== false) {
+    if (!payload.preference_mode) {
       syncedGuestRef.current = true;
       return;
     }
-    // Если текущий ответ уже отражает guest (гость) — ок
-    if (payload.mode === guest.mode && !payload.preference_mode) {
+    const serverMode = payload.preference_mode;
+    const serverAnimationsOn = payload.animations_enabled !== false;
+    const serverPristine = serverMode === "auto" && serverAnimationsOn;
+    const guestDiffers =
+      guest.mode !== "auto"
+      || guest.animations_enabled === false
+      || Boolean(guest.selected_theme_id);
+
+    if (!serverPristine || !guestDiffers) {
+      clearGuestPreference();
       syncedGuestRef.current = true;
       return;
     }
+
     let cancelled = false;
     (async () => {
       try {
@@ -144,7 +232,7 @@ export function SeasonalThemeProvider({ children }) {
           clearGuestPreference();
         }
       } catch {
-        // Не авторизован — оставляем guest
+        /* не авторизован */
       } finally {
         syncedGuestRef.current = true;
       }
@@ -175,19 +263,32 @@ export function SeasonalThemeProvider({ children }) {
   const theme = payload?.theme || null;
   const animationsEnabled = payload?.animations_enabled !== false;
   const preview = payload?.preview || { active: false };
+  const preferenceMode = payload?.preference_mode || payload?.mode || "auto";
   const applies = themeAppliesToRoute(theme, pathname);
   const heavy = isHeavyRoute(pathname);
   const effectiveTheme = applies ? theme : null;
   const availableThemes = payload?.available_themes || [];
-  /** Есть что выбирать / отключать — иначе кнопку оформления не показываем. */
   const hasSeasonalAppearance =
     !loading
-    && (availableThemes.length > 0 || Boolean(effectiveTheme) || Boolean(preview?.active));
+    && (availableThemes.length > 0 || Boolean(theme) || Boolean(preview?.active));
+
+  const seasonalEnabled = preferenceMode !== "default" && Boolean(theme);
+  const labelName = themeLabelFromPayload(payload);
+  const appearanceTooltip = seasonalEnabled
+    ? (labelName ? `Тема: ${labelName}` : "Сезонное оформление")
+    : (labelName ? `Включить: ${labelName}` : "Сезонное оформление");
 
   const intensity = resolveDeviceIntensity(effectiveTheme?.animation?.intensity, {
     isMobile,
     prefersReducedMotion: reducedMotion,
     animationsEnabled: animationsEnabled && !heavy && pageVisible,
+  });
+
+  // Для одноразового canvas не гасим интенсивность при скрытии вкладки браузера
+  const effectIntensity = resolveDeviceIntensity(effectiveTheme?.animation?.intensity, {
+    isMobile,
+    prefersReducedMotion: reducedMotion,
+    animationsEnabled: animationsEnabled && !heavy,
   });
 
   const allowBackgroundPattern =
@@ -197,7 +298,7 @@ export function SeasonalThemeProvider({ children }) {
   useEffect(() => {
     const root = document.documentElement;
     if (!effectiveTheme) {
-      root.classList.remove("seasonal-theme-active");
+      root.classList.remove("seasonal-theme-active", "seasonal-has-pattern");
       root.removeAttribute("data-seasonal-theme");
       return undefined;
     }
@@ -208,47 +309,30 @@ export function SeasonalThemeProvider({ children }) {
     }
     const cleanup = applyCssVars(vars);
     root.classList.add("seasonal-theme-active");
+    root.classList.toggle("seasonal-has-pattern", allowBackgroundPattern);
     root.setAttribute("data-seasonal-theme", effectiveTheme.slug || "");
     return () => {
       cleanup();
-      root.classList.remove("seasonal-theme-active");
+      root.classList.remove("seasonal-theme-active", "seasonal-has-pattern");
       root.removeAttribute("data-seasonal-theme");
     };
   }, [effectiveTheme, allowBackgroundPattern]);
 
-  const setPreference = useCallback(async (patch) => {
-    writeGuestPreference({
-      mode: patch.mode ?? payload?.preference_mode ?? payload?.mode ?? "auto",
-      selected_theme_id: patch.selected_theme_id ?? null,
-      animations_enabled:
-        patch.animations_enabled !== undefined
-          ? patch.animations_enabled
-          : payload?.animations_enabled !== false,
-    });
-    try {
-      const next = await updateSeasonalThemePreference(patch);
-      setPayload(next);
-      clearGuestPreference();
-      return next;
-    } catch (err) {
-      // Гость или сеть: сохраняем localStorage и перезапрашиваем current с query
-      if (err?.status === 401 || err?.status === 403) {
-        const guest = {
-          mode: patch.mode ?? payload?.preference_mode ?? payload?.mode ?? "auto",
-          selected_theme_id: patch.selected_theme_id ?? null,
-          animations_enabled:
-            patch.animations_enabled !== undefined
-              ? patch.animations_enabled
-              : payload?.animations_enabled !== false,
-        };
-        writeGuestPreference(guest);
-        const next = await fetchSeasonalThemeCurrent(guest);
-        if (next) setPayload(next);
-        return next;
-      }
-      throw err;
+  const toggleAppearance = useCallback(async () => {
+    const userCanDisable = payload?.user_can_disable !== false;
+    if (seasonalEnabled) {
+      if (!userCanDisable) return payload;
+      return setPreference({ mode: "default" }, { dayOverride: true });
     }
-  }, [payload, refresh]);
+    const first = availableThemes[0];
+    if (first?.id) {
+      return setPreference(
+        { mode: "manual", selected_theme_id: first.id },
+        { dayOverride: true },
+      );
+    }
+    return setPreference({ mode: "auto" }, { dayOverride: true });
+  }, [payload, seasonalEnabled, availableThemes, setPreference]);
 
   const stopPreview = useCallback(async () => {
     try {
@@ -267,20 +351,23 @@ export function SeasonalThemeProvider({ children }) {
       theme: effectiveTheme,
       rawTheme: theme,
       mode: payload?.mode || "auto",
-      preferenceMode: payload?.preference_mode || payload?.mode || "auto",
+      preferenceMode,
       animationsEnabled,
       intensity,
       userCanDisable: payload?.user_can_disable !== false,
       availableThemes,
       hasSeasonalAppearance,
+      seasonalEnabled,
+      appearanceTooltip,
       preview,
       isHeavyRoute: heavy,
       isMobile,
       reducedMotion,
       pageVisible,
-      panelOpen,
-      openAppearancePanel: () => setPanelOpen(true),
-      closeAppearancePanel: () => setPanelOpen(false),
+      panelOpen: false,
+      openAppearancePanel: toggleAppearance,
+      closeAppearancePanel: () => {},
+      toggleAppearance,
       setPreference,
       refresh,
       stopPreview,
@@ -291,39 +378,39 @@ export function SeasonalThemeProvider({ children }) {
       payload,
       effectiveTheme,
       theme,
+      preferenceMode,
       animationsEnabled,
       intensity,
-      preview,
       availableThemes,
       hasSeasonalAppearance,
+      seasonalEnabled,
+      appearanceTooltip,
+      preview,
       heavy,
       isMobile,
       reducedMotion,
       pageVisible,
-      panelOpen,
+      toggleAppearance,
       setPreference,
       refresh,
       stopPreview,
     ],
   );
 
+  // Одноразовый canvas при входе на страницу / смене вкладки приложения.
   const showEffects =
     Boolean(effectiveTheme)
-    && intensity !== "off"
-    && pageVisible
+    && effectIntensity !== "off"
     && !heavy
     && !reducedMotion;
 
   return (
     <SeasonalThemeContext.Provider value={value}>
-      {allowBackgroundPattern ? (
-        <div className="seasonal-page-pattern-layer" aria-hidden="true" />
-      ) : null}
       {children}
       {showEffects ? (
         <SeasonalThemeEffects
           theme={effectiveTheme}
-          intensity={intensity}
+          intensity={effectIntensity}
           isMobile={isMobile}
         />
       ) : null}
@@ -332,20 +419,17 @@ export function SeasonalThemeProvider({ children }) {
           decorations={effectiveTheme.decorations || []}
           intensity={intensity}
           isMobile={isMobile}
-          animationsEnabled={showEffects}
+          animationsEnabled={Boolean(effectiveTheme) && intensity !== "off" && pageVisible}
           pathname={pathname}
         />
       ) : null}
       {preview?.active ? (
         <SeasonalPreviewBanner
-          themeName={preview.theme_name || effectiveTheme?.name || "тема"}
+          themeName={preview.theme_name || theme?.name || "тема"}
           onStop={stopPreview}
         />
       ) : null}
-      {!heavy && !panelOpen && hasSeasonalAppearance ? <SeasonalAppearanceFab /> : null}
-      {panelOpen && hasSeasonalAppearance ? (
-        <SeasonalAppearancePanel onClose={() => setPanelOpen(false)} />
-      ) : null}
+      {!heavy && hasSeasonalAppearance ? <SeasonalAppearanceFab /> : null}
     </SeasonalThemeContext.Provider>
   );
 }
@@ -356,13 +440,17 @@ export function useSeasonalTheme() {
     return {
       loading: false,
       theme: null,
+      rawTheme: null,
       mode: "auto",
       animationsEnabled: true,
       openAppearancePanel: () => {},
       closeAppearancePanel: () => {},
+      toggleAppearance: async () => null,
       setPreference: async () => null,
       availableThemes: [],
       hasSeasonalAppearance: false,
+      seasonalEnabled: false,
+      appearanceTooltip: "Оформление",
       preview: { active: false },
       userCanDisable: true,
     };

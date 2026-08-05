@@ -97,6 +97,73 @@ class SeasonalThemeSelectionTests(TestCase):
         theme.delete()
         self.assertIsNone(get_cached_active_theme())
 
+    def test_force_active_ignores_default_flag(self):
+        now = timezone.now()
+        theme = _make_theme(
+            slug="force-non-default",
+            is_default_seasonal_theme=False,
+            force_active_for_testing=True,
+            start_at=now - timedelta(days=30),
+            end_at=now - timedelta(days=1),
+        )
+        self.assertEqual(select_active_theme(), theme)
+
+    def test_non_default_without_force_not_selected(self):
+        _make_theme(
+            slug="non-default",
+            is_default_seasonal_theme=False,
+            force_active_for_testing=False,
+        )
+        self.assertIsNone(select_active_theme())
+
+    def test_negative_cache_cleared_after_invalidate_and_create(self):
+        self.assertIsNone(get_cached_active_theme())
+        # Имитация admin update() без signals — stamp не двигается сам
+        theme = _make_theme(slug="after-miss")
+        # Без invalidate старый negative cache (0) ещё мог бы жить; stamp после save() уже сдвинут signals
+        self.assertEqual(get_cached_active_theme(), theme)
+
+    def test_queryset_update_needs_manual_invalidate(self):
+        """QuerySet.update() не стреляет signals — после invalidate тема появляется."""
+        self.assertIsNone(get_cached_active_theme())
+        # Закэшируем negative miss
+        self.assertIsNone(get_cached_active_theme())
+        theme = SeasonalTheme(
+            name="Bulk",
+            slug="bulk-force",
+            is_active=False,
+            is_draft=True,
+            is_default_seasonal_theme=False,
+        )
+        theme.save()
+        # Как admin action: update без save()
+        SeasonalTheme.objects.filter(pk=theme.pk).update(
+            force_active_for_testing=True,
+            is_active=True,
+            is_draft=False,
+        )
+        # Без invalidate кеш stamp мог остаться (save() выше уже bump'нул при create).
+        # Главное: после invalidate выбор видит force-тему.
+        invalidate_seasonal_theme_cache()
+        self.assertEqual(get_cached_active_theme(), theme)
+
+    def test_timezone_window_uses_theme_timezone(self):
+        """Тема с timezone учитывается в проверке окна (aware compare)."""
+        from Generator.seasonal_theme_service import project_now, _theme_in_window
+
+        now_msk = project_now("Europe/Moscow")
+        theme = _make_theme(
+            slug="tz-theme",
+            timezone="Europe/Moscow",
+            start_at=now_msk - timedelta(hours=1),
+            end_at=now_msk + timedelta(hours=1),
+        )
+        self.assertTrue(_theme_in_window(theme))
+        theme.end_at = now_msk - timedelta(minutes=1)
+        theme.save(update_fields=["end_at"])
+        theme.refresh_from_db()
+        self.assertFalse(_theme_in_window(theme))
+
 
 class SeasonalThemeApiTests(TestCase):
     def setUp(self):

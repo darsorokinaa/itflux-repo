@@ -9,7 +9,9 @@ export default function SeasonalAppearancePanel({ onClose }) {
     userCanDisable,
     setPreference,
     theme,
+    rawTheme,
   } = useSeasonalTheme();
+  const selectedTheme = rawTheme || theme;
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -58,8 +60,8 @@ export default function SeasonalAppearancePanel({ onClose }) {
               />
               <span>
                 Автоматически
-                {theme && preferenceMode === "auto" ? (
-                  <em className="seasonal-appearance-option__meta"> — {theme.name}</em>
+                {selectedTheme && preferenceMode === "auto" ? (
+                  <em className="seasonal-appearance-option__meta"> — {selectedTheme.name}</em>
                 ) : null}
               </span>
             </label>
@@ -79,7 +81,7 @@ export default function SeasonalAppearancePanel({ onClose }) {
                 <input
                   type="radio"
                   name="seasonal-mode"
-                  checked={preferenceMode === "manual" && theme?.id === item.id}
+                  checked={preferenceMode === "manual" && selectedTheme?.id === item.id}
                   onChange={() =>
                     apply({ mode: "manual", selected_theme_id: item.id })
                   }

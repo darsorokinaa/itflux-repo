@@ -1,12 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
   buildSeasonalCssVars,
   isHeavyRoute,
+  readDayOverride,
   resolveDeviceIntensity,
   themeAppliesToRoute,
+  writeDayOverride,
+  clearDayOverride,
+  DAY_OVERRIDE_MS,
 } from "./seasonalThemeApi";
 
 describe("seasonalThemeApi", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+  afterEach(() => {
+    localStorage.clear();
+  });
   it("builds CSS variables from theme payload", () => {
     const vars = buildSeasonalCssVars({
       background: {
@@ -100,5 +110,15 @@ describe("seasonalThemeApi", () => {
 
   it("applies everywhere when include empty", () => {
     expect(themeAppliesToRoute({ include_routes: [], exclude_routes: [] }, "/pricing")).toBe(true);
+  });
+
+  it("stores day override for 24h", () => {
+    writeDayOverride({ mode: "default", selected_theme_id: null });
+    const day = readDayOverride();
+    expect(day?.mode).toBe("default");
+    expect(day?.expires_at).toBeGreaterThan(Date.now());
+    expect(day?.expires_at).toBeLessThanOrEqual(Date.now() + DAY_OVERRIDE_MS + 1000);
+    clearDayOverride();
+    expect(readDayOverride()).toBeNull();
   });
 });

@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db.models import Q
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.utils import timezone as dj_timezone
@@ -57,17 +58,15 @@ def project_now(tz_name: str | None = None):
 
 
 def invalidate_seasonal_theme_cache(**_kwargs) -> None:
-    cache.delete(CACHE_KEY_ACTIVE)
-    # Удаляем известные payload-ключи по версии через единый stamp
+    # Версионируем ключи через stamp — старые CACHE_KEY_ACTIVE:* перестают читаться
     stamp = cache.get("seasonal_theme:stamp") or 0
-    cache.set("seasonal_theme:stamp", stamp + 1, timeout=None)
-    cache.delete(CACHE_KEY_ACTIVE)
+    cache.set("seasonal_theme:stamp", int(stamp) + 1, timeout=None)
 
 
 def _cache_timeout_for_theme(theme: SeasonalTheme | None) -> int:
-    """TTL кеша: до ближайшего end_at / start_at или 5 минут."""
+    """TTL кеша: до ближайшего end_at / start_at или 5 минут. Negative cache — короткий."""
     if theme is None:
-        return 60
+        return 15
     now = dj_timezone.now()
     candidates = []
     if theme.end_at and theme.end_at > now:
@@ -86,11 +85,13 @@ def _cache_timeout_for_theme(theme: SeasonalTheme | None) -> int:
     return max(30, min(min(candidates), 300))
 
 
-def _theme_in_window(theme: SeasonalTheme, now) -> bool:
+def _theme_in_window(theme: SeasonalTheme, now=None) -> bool:
+    """Проверка окна показа с учётом timezone темы."""
     if theme.force_active_for_testing and theme.is_active and not theme.is_draft:
         return True
     if not theme.is_active or theme.is_draft:
         return False
+    now = now or project_now(getattr(theme, "timezone", None))
     if theme.start_at and now < theme.start_at:
         return False
     if theme.end_at and now > theme.end_at:
@@ -106,32 +107,34 @@ def select_active_theme(*, include_admin_only: bool = False) -> SeasonalTheme | 
     3) start_at DESC (более поздний старт)
     4) id DESC
     """
-    now = dj_timezone.now()
-    qs = SeasonalTheme.objects.filter(is_default_seasonal_theme=True).exclude(is_draft=True)
+    # Основные темы периода + принудительно активированные (даже без is_default)
+    qs = SeasonalTheme.objects.filter(
+        Q(is_default_seasonal_theme=True) | Q(force_active_for_testing=True)
+    ).exclude(is_draft=True)
     if not include_admin_only:
         qs = qs.filter(admin_only=False)
 
-    candidates = []
     for theme in qs.order_by("-priority", "-start_at", "-id"):
-        if _theme_in_window(theme, now):
-            candidates.append(theme)
-            break  # уже отсортировано
-    return candidates[0] if candidates else None
+        if _theme_in_window(theme):
+            return theme
+    return None
 
 
 def get_cached_active_theme(*, include_admin_only: bool = False) -> SeasonalTheme | None:
     stamp = cache.get("seasonal_theme:stamp") or 0
     key = f"{CACHE_KEY_ACTIVE}:admin={int(include_admin_only)}:s={stamp}"
     theme_id = cache.get(key)
-    if theme_id == 0:
-        return None
+
     if theme_id:
         theme = SeasonalTheme.objects.filter(pk=theme_id).first()
-        if theme and _theme_in_window(theme, dj_timezone.now()):
+        if theme and _theme_in_window(theme):
             if include_admin_only or not theme.admin_only:
                 return theme
         # устаревший кеш
         cache.delete(key)
+    elif theme_id == 0:
+        # Короткий negative cache — при протухании TTL ключ исчезнет и будет пересчёт
+        return None
 
     theme = select_active_theme(include_admin_only=include_admin_only)
     timeout = _cache_timeout_for_theme(theme)
@@ -300,6 +303,7 @@ def serialize_theme(request, theme: SeasonalTheme) -> dict:
             "intensity": theme.animation_intensity,
             "max_elements": theme.animation_max_elements,
             "fps_limit": theme.animation_fps_limit,
+            "image_url": media_url(request, theme.animation_image),
         },
         "include_routes": list(theme.include_routes or []),
         "exclude_routes": list(theme.exclude_routes or []),

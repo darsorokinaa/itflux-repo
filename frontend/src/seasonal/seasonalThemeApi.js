@@ -3,6 +3,8 @@
 import { ensureCsrfCookie } from "../utils/cabinetAuth";
 
 const GUEST_PREF_KEY = "seasonal_theme_preference_v1";
+const DAY_OVERRIDE_KEY = "seasonal_theme_day_override_v1";
+export const DAY_OVERRIDE_MS = 24 * 60 * 60 * 1000;
 
 function getCsrfToken() {
   const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
@@ -44,17 +46,98 @@ async function seasonalFetch(path, options = {}) {
   return data;
 }
 
-export function readGuestPreference() {
+function normalizePref(parsed) {
+  if (!parsed || typeof parsed !== "object") return null;
+  return {
+    mode: parsed.mode || "auto",
+    selected_theme_id: parsed.selected_theme_id ?? null,
+    animations_enabled: parsed.animations_enabled !== false,
+  };
+}
+
+/** Дневной выбор (вкл/выкл темы) — действует 24 часа. */
+export function readDayOverride() {
   try {
-    const raw = localStorage.getItem(GUEST_PREF_KEY);
+    const raw = localStorage.getItem(DAY_OVERRIDE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
+    const expiresAt = Number(parsed.expires_at) || 0;
+    if (!expiresAt || Date.now() > expiresAt) {
+      localStorage.removeItem(DAY_OVERRIDE_KEY);
+      markDayOverrideExpired();
+      return null;
+    }
     return {
-      mode: parsed.mode || "auto",
-      selected_theme_id: parsed.selected_theme_id ?? null,
-      animations_enabled: parsed.animations_enabled !== false,
+      ...normalizePref(parsed),
+      expires_at: expiresAt,
     };
+  } catch {
+    return null;
+  }
+}
+
+export function writeDayOverride(pref, { ttlMs = DAY_OVERRIDE_MS } = {}) {
+  try {
+    const expiresAt = Date.now() + Math.max(60_000, ttlMs);
+    localStorage.setItem(
+      DAY_OVERRIDE_KEY,
+      JSON.stringify({
+        mode: pref.mode || "auto",
+        selected_theme_id: pref.selected_theme_id ?? null,
+        animations_enabled: pref.animations_enabled !== false,
+        expires_at: expiresAt,
+        updated_at: Date.now(),
+      }),
+    );
+    return expiresAt;
+  } catch {
+    return null;
+  }
+}
+
+export function clearDayOverride() {
+  try {
+    localStorage.removeItem(DAY_OVERRIDE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+const DAY_EXPIRED_RESET_KEY = "seasonal_theme_day_expired_reset_v1";
+
+/** После истечения дневного выбора — один раз сбросить prefs на auto. */
+export function consumeDayOverrideExpiredFlag() {
+  try {
+    if (!localStorage.getItem(DAY_EXPIRED_RESET_KEY)) return false;
+    localStorage.removeItem(DAY_EXPIRED_RESET_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function markDayOverrideExpired() {
+  try {
+    localStorage.setItem(DAY_EXPIRED_RESET_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readGuestPreference() {
+  try {
+    const day = readDayOverride();
+    if (day) {
+      return {
+        mode: day.mode,
+        selected_theme_id: day.selected_theme_id,
+        animations_enabled: day.animations_enabled,
+      };
+    }
+    const raw = localStorage.getItem(GUEST_PREF_KEY);
+    if (!raw) return null;
+    return normalizePref(JSON.parse(raw));
   } catch {
     return null;
   }

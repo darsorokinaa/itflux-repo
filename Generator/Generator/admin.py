@@ -598,6 +598,7 @@ from .seasonal_theme_models import SeasonalTheme, SeasonalThemeDecoration  # noq
 from .seasonal_theme_service import (  # noqa: E402
     PREVIEW_SESSION_KEY,
     PREVIEW_TOKEN_SESSION_KEY,
+    invalidate_seasonal_theme_cache,
     make_preview_token,
 )
 
@@ -643,6 +644,7 @@ class SeasonalThemeAdmin(admin.ModelAdmin):
         "preview_help",
         "button_icon_preview",
         "background_pattern_preview",
+        "animation_image_preview",
     )
     inlines = [SeasonalThemeDecorationInline]
     fieldsets = (
@@ -695,11 +697,17 @@ class SeasonalThemeAdmin(admin.ModelAdmin):
         (
             "4. Анимация",
             {
+                "description": (
+                    "Загрузите картинку элемента (листочек, снежинка…) — она будет сыпаться по экрану. "
+                    "Тип анимации задаёт характер движения."
+                ),
                 "fields": (
                     "animation_type",
+                    "animation_image",
+                    "animation_image_preview",
                     "animation_intensity",
                     "animation_max_elements",
-                )
+                ),
             },
         ),
         (
@@ -787,6 +795,16 @@ class SeasonalThemeAdmin(admin.ModelAdmin):
             obj.button_icon.url,
         )
 
+    @admin.display(description="Превью элемента анимации")
+    def animation_image_preview(self, obj):
+        if not obj or not obj.animation_image:
+            return "—"
+        return format_html(
+            '<img src="{}" style="width:64px;height:64px;object-fit:contain;border-radius:12px;'
+            'background:#f1f5f9;padding:6px;" alt="">',
+            obj.animation_image.url,
+        )
+
     @admin.action(description="Продублировать выбранные темы")
     def duplicate_themes(self, request, queryset):
         count = 0
@@ -798,11 +816,13 @@ class SeasonalThemeAdmin(admin.ModelAdmin):
     @admin.action(description="Принудительно активировать для теста")
     def activate_for_testing(self, request, queryset):
         updated = queryset.update(force_active_for_testing=True, is_active=True, is_draft=False)
+        invalidate_seasonal_theme_cache()
         self.message_user(request, f"Включено для теста: {updated}")
 
     @admin.action(description="Снять принудительную активацию")
     def disable_testing_force(self, request, queryset):
         updated = queryset.update(force_active_for_testing=False)
+        invalidate_seasonal_theme_cache()
         self.message_user(request, f"Снято: {updated}")
 
     @admin.action(description="Предпросмотр темы (сессия админа)")

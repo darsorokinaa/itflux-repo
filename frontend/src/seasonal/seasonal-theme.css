@@ -6,7 +6,8 @@
   width: 100%;
   height: 100%;
   pointer-events: none;
-  z-index: 40;
+  /* Выше контента кабинета, ниже FAB (1100) и панели */
+  z-index: 1080;
 }
 
 .seasonal-decor-layer {
@@ -96,8 +97,8 @@
   50% { opacity: 1; }
 }
 
-/* Слои фона (снизу вверх): цвет → клеточки → паттерн → блоки контента.
-   Паттерн — отдельный слой НАД сеткой, но ПОД карточками. */
+/* Слои фона (снизу вверх): цвет → клеточки → .app-shell-pattern → контент.
+   Паттерн внутри app-shell (z-index 0) под .app-shell-content (z-index 2). */
 html.seasonal-theme-active,
 html.seasonal-theme-active body {
   background-color: var(--seasonal-page-background, var(--bg-page, #F4F7FB)) !important;
@@ -114,29 +115,29 @@ html.seasonal-theme-active body {
 html.seasonal-theme-active #root {
   background-color: transparent !important;
   background-image: none !important;
-  isolation: isolate;
 }
 
-.seasonal-page-pattern-layer {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background-image: var(--seasonal-page-pattern, none);
-  background-repeat: var(--seasonal-page-pattern-repeat, repeat);
-  background-size: var(--seasonal-page-pattern-size, 240px) auto;
-  background-position: var(--seasonal-page-pattern-position, 0 0);
-  background-attachment: fixed;
+/* Сезонный паттерн через Layout .app-shell-pattern (home.css скрывает его по умолчанию) */
+html.seasonal-theme-active.seasonal-has-pattern .app-shell-pattern {
+  display: block !important;
+  background-image: var(--seasonal-page-pattern, none) !important;
+  background-repeat: var(--seasonal-page-pattern-repeat, repeat) !important;
+  background-size: var(--seasonal-page-pattern-size, 240px) auto !important;
+  background-position: var(--seasonal-page-pattern-position, 0 0) !important;
+  background-attachment: fixed !important;
   opacity: var(--seasonal-page-pattern-opacity, 0.18);
 }
 
 @media (max-width: 768px) {
-  .seasonal-page-pattern-layer {
-    background-image: var(--seasonal-page-pattern-mobile, var(--seasonal-page-pattern, none));
+  html.seasonal-theme-active.seasonal-has-pattern .app-shell-pattern {
+    background-image: var(
+      --seasonal-page-pattern-mobile,
+      var(--seasonal-page-pattern, none)
+    ) !important;
   }
 }
 
-html.seasonal-theme-active[data-seasonal-anim="pattern_drift"] .seasonal-page-pattern-layer {
+html.seasonal-theme-active.seasonal-has-pattern[data-seasonal-anim="pattern_drift"] .app-shell-pattern {
   animation: seasonal-pattern-drift 60s linear infinite;
 }
 
@@ -145,25 +146,33 @@ html.seasonal-theme-active[data-seasonal-anim="pattern_drift"] .seasonal-page-pa
   to { background-position: 240px 240px; }
 }
 
-/* Оболочки прозрачные — виден фон; карточки со своим фоном остаются непрозрачными */
+/* Page roots прозрачные — виден фон; карточки/виджеты остаются непрозрачными */
 html.seasonal-theme-active .app-shell,
 html.seasonal-theme-active .app-shell-content,
+html.seasonal-theme-active .digital-flow-page,
 html.seasonal-theme-active .cabinet-layout,
 html.seasonal-theme-active .cb-layout,
-html.seasonal-theme-active .st-layout {
+html.seasonal-theme-active .st-layout,
+html.seasonal-theme-active .cabinet-main,
+html.seasonal-theme-active .cabinet-content--page,
+html.seasonal-theme-active .cabinet-content--reports {
   background-color: transparent !important;
   background-image: none !important;
 }
 
-/* Контент всегда выше паттерна */
-html.seasonal-theme-active .app-shell,
-html.seasonal-theme-active .cabinet-layout,
-html.seasonal-theme-active .seasonal-appearance-overlay,
-html.seasonal-theme-active .seasonal-appearance-fab {
-  position: relative;
-  z-index: 1;
+@media (max-width: 900px) {
+  html.seasonal-theme-active .cb-layout .cabinet-main,
+  html.seasonal-theme-active .st-layout .cabinet-main,
+  html.seasonal-theme-active .cabinet-layout .cabinet-main,
+  html.seasonal-theme-active .cb-layout .cabinet-content--page,
+  html.seasonal-theme-active .st-layout .cabinet-content--page {
+    background: transparent !important;
+    background-color: transparent !important;
+    background-image: none !important;
+  }
 }
 
+/* Контент выше паттерна; FAB/overlay/cabinet сохраняют свой position: fixed */
 html.seasonal-theme-active .app-shell-content {
   position: relative;
   z-index: 2;
@@ -244,12 +253,54 @@ html.seasonal-theme-active .cabinet-header {
   justify-content: center;
   background: #fff;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
 }
 
 .seasonal-appearance-fab:hover {
   transform: translateY(-2px);
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.22);
+}
+
+.seasonal-appearance-fab:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.seasonal-appearance-fab--off {
+  opacity: 0.72;
+  filter: grayscale(0.35);
+}
+
+.seasonal-appearance-fab--off:hover {
+  opacity: 1;
+  filter: none;
+}
+
+/* Подсказка при наведении — без боковой панели */
+.seasonal-appearance-fab[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #f8fafc;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.22);
+  z-index: 1;
+}
+
+.seasonal-appearance-fab[data-tooltip]:hover::after,
+.seasonal-appearance-fab[data-tooltip]:focus-visible::after {
+  opacity: 1;
 }
 
 .seasonal-appearance-fab__img {
@@ -272,6 +323,13 @@ html.seasonal-theme-active .cabinet-header {
     bottom: calc(72px + env(safe-area-inset-bottom, 0px));
     width: 48px;
     height: 48px;
+  }
+
+  .seasonal-appearance-fab[data-tooltip]::after {
+    left: 50%;
+    top: auto;
+    bottom: calc(100% + 8px);
+    transform: translateX(-50%);
   }
 }
 
@@ -423,7 +481,7 @@ button.cb-more-card {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  html.seasonal-theme-active[data-seasonal-anim="pattern_drift"] .seasonal-page-pattern-layer,
+  html.seasonal-theme-active[data-seasonal-anim="pattern_drift"] .app-shell-pattern,
   .seasonal-decor--sway,
   .seasonal-decor--float,
   .seasonal-decor--twinkle,
@@ -435,10 +493,10 @@ button.cb-more-card {
 /* Тяжёлые страницы: на всякий случай прячем слой, даже если JS не отключил */
 .app-shell--lesson-viewer .seasonal-fx-canvas,
 .app-shell--lesson-viewer .seasonal-decor-layer,
-.app-shell--lesson-viewer .seasonal-page-pattern-layer,
+.app-shell--lesson-viewer .app-shell-pattern,
 .cb-board-editor .seasonal-fx-canvas,
-.cb-board-editor .seasonal-page-pattern-layer,
+.cb-board-editor .app-shell-pattern,
 .video-lesson-page .seasonal-fx-canvas,
-.video-lesson-page .seasonal-page-pattern-layer {
+.video-lesson-page .app-shell-pattern {
   display: none !important;
 }

@@ -192,6 +192,17 @@ class SeasonalTheme(models.Model):
         choices=AnimationType.choices,
         default=AnimationType.NONE,
     )
+    animation_image = models.ImageField(
+        "Картинка элемента анимации",
+        upload_to=seasonal_theme_upload_to,
+        blank=True,
+        null=True,
+        help_text=(
+            "PNG/WebP с прозрачностью: листочек, снежинка, капелька мёда и т.п. "
+            "Именно эта картинка будет сыпаться по экрану. "
+            "Без файла — встроенный рисунок (снег/листья/конфетти)."
+        ),
+    )
     animation_intensity = models.CharField(
         "Интенсивность анимации",
         max_length=16,
@@ -225,7 +236,10 @@ class SeasonalTheme(models.Model):
     force_active_for_testing = models.BooleanField(
         "Принудительно активировать (тест)",
         default=False,
-        help_text="Игнорирует даты; тема становится кандидатом на автовыбор для всех.",
+        help_text=(
+            "Игнорирует даты и флаг «Основная тема периода». "
+            "Тема должна быть не черновиком и с «Разрешена» — тогда она кандидат на автовыбор."
+        ),
     )
     admin_only = models.BooleanField(
         "Только для администраторов",
