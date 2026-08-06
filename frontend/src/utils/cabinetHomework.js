@@ -17,6 +17,18 @@ export function getLkPublicBase() {
  * @typedef {{ lessonToken?: string }} HomeworkLkRequestOpts
  */
 
+/** JWT в заголовках, не в query (Referer / логи / аналитика). */
+export function homeworkAuthHeaders(opts) {
+  const tok = (opts && opts.lessonToken) || "";
+  /** @type {Record<string, string>} */
+  const headers = {};
+  if (tok) {
+    headers.Authorization = `Bearer ${tok}`;
+    headers["X-Lesson-Token"] = tok;
+  }
+  return headers;
+}
+
 /**
  * @param {string} assignmentId
  * @param {string} [lkSubpath] пусто | "save-draft/" | "submit/"
@@ -25,7 +37,6 @@ export function getLkPublicBase() {
  */
 function buildHomeworkApiUrl(assignmentId, lkSubpath, opts) {
   const id = encodeURIComponent(String(assignmentId).trim());
-  const tok = (opts && opts.lessonToken) || "";
   const suffix = String(lkSubpath || "")
     .trim()
     .replace(/^\//, "");
@@ -33,12 +44,8 @@ function buildHomeworkApiUrl(assignmentId, lkSubpath, opts) {
     ? `/api/homework/assignment/${id}/${suffix}`
     : `/api/homework/assignment/${id}/`;
 
-  if (tok) {
-    return `${path}?${new URLSearchParams({ token: tok }).toString()}`;
-  }
-
   const legacyBase = getLkPublicBase();
-  if (legacyBase && typeof window !== "undefined") {
+  if (legacyBase && typeof window !== "undefined" && !(opts && opts.lessonToken)) {
     try {
       const lkOrigin = new URL(legacyBase).origin;
       if (lkOrigin !== window.location.origin) {
@@ -332,14 +339,9 @@ export function homeworkTaskAttachments(result, taskId, taskNumber, tasks) {
  * @param {string} assignmentId
  * @param {HomeworkLkRequestOpts} [opts]
  */
-export function homeworkUploadAnswerUrl(assignmentId, opts) {
+export function homeworkUploadAnswerUrl(assignmentId, _opts) {
   const id = encodeURIComponent(String(assignmentId).trim());
-  const tok = (opts && opts.lessonToken) || "";
-  const base = `/api/homework/assignment/${id}/upload-answer/`;
-  if (tok) {
-    return `${base}?${new URLSearchParams({ token: tok }).toString()}`;
-  }
-  return base;
+  return `/api/homework/assignment/${id}/upload-answer/`;
 }
 
 function readCsrfToken() {
@@ -355,7 +357,7 @@ function readCsrfToken() {
  */
 export async function uploadHomeworkAnswer(assignmentId, formData, opts) {
   await ensureCsrfCookie();
-  const headers = {};
+  const headers = { ...homeworkAuthHeaders(opts) };
   const csrf = readCsrfToken();
   if (csrf) headers["X-CSRFToken"] = csrf;
 
@@ -386,7 +388,7 @@ export async function uploadHomeworkAnswer(assignmentId, formData, opts) {
  */
 export async function deleteHomeworkAnswer(assignmentId, params, opts) {
   await ensureCsrfCookie();
-  const headers = {};
+  const headers = { ...homeworkAuthHeaders(opts) };
   const csrf = readCsrfToken();
   if (csrf) headers["X-CSRFToken"] = csrf;
 
@@ -396,9 +398,6 @@ export async function deleteHomeworkAnswer(assignmentId, params, opts) {
   }
   if (params.taskId != null && String(params.taskId).trim() !== "") {
     qs.set("task_id", String(params.taskId));
-  }
-  if (opts?.lessonToken) {
-    qs.set("token", opts.lessonToken);
   }
 
   const id = encodeURIComponent(String(assignmentId).trim());
@@ -523,7 +522,10 @@ export function buildLiveCheckedHomeworkResult(tasks, userAnswers, scores, check
 export async function saveHomeworkDraft(assignmentId, body, opts) {
   const url = buildHomeworkApiUrl(assignmentId, "save-draft/", opts);
   if (!opts?.lessonToken) await ensureCsrfCookie();
-  const headers = { "Content-Type": "application/json" };
+  const headers = {
+    "Content-Type": "application/json",
+    ...homeworkAuthHeaders(opts),
+  };
   const csrf = readCsrfToken();
   if (csrf) headers["X-CSRFToken"] = csrf;
   const res = await fetch(url, {
@@ -549,7 +551,10 @@ export async function saveHomeworkDraft(assignmentId, body, opts) {
 export async function submitHomework(assignmentId, body, opts) {
   const url = buildHomeworkApiUrl(assignmentId, "submit/", opts);
   if (!opts?.lessonToken) await ensureCsrfCookie();
-  const headers = { "Content-Type": "application/json" };
+  const headers = {
+    "Content-Type": "application/json",
+    ...homeworkAuthHeaders(opts),
+  };
   const csrf = readCsrfToken();
   if (csrf) headers["X-CSRFToken"] = csrf;
   const res = await fetch(url, {
@@ -573,7 +578,11 @@ export async function submitHomework(assignmentId, body, opts) {
  */
 export async function fetchHomeworkAssignment(assignmentId, opts) {
   const url = buildHomeworkApiUrl(assignmentId, "", opts);
-  const res = await fetch(url, { method: "GET", credentials: "include" });
+  const res = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    headers: homeworkAuthHeaders(opts),
+  });
   if (!res.ok) {
     const t = await res.text().catch(() => "");
     const err = new Error(t || `HTTP ${res.status}`);

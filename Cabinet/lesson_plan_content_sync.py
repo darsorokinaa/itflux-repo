@@ -434,13 +434,44 @@ class LessonLearningPlanSyncService:
 
         plan_result = None
         if sync_action == "lesson_and_plan" or resolve_conflict == "lesson_and_plan":
-            plan_result = cls.sync_lesson_to_plan(
-                event,
-                teacher=teacher,
-                mode="update_linked" if event.lesson_plan_item_id else "create_item",
-                student_ids=student_ids,
-                confirm_all_students=confirm_all_students,
-            )
+            try:
+                plan_result = cls.sync_lesson_to_plan(
+                    event,
+                    teacher=teacher,
+                    mode="update_linked" if event.lesson_plan_item_id else "create_item",
+                    student_ids=student_ids,
+                    confirm_all_students=confirm_all_students,
+                )
+            except LessonPlanSyncError as exc:
+                # Тема/описание уже записаны в урок — не откатываем из‑за отсутствия
+                # enrollment / служебного черновика (как в journal_service).
+                soft_codes = {
+                    "no_enrollment",
+                    "draft_plan",
+                    "group_confirm_required",
+                    "alien_plan",
+                    "public_plan",
+                }
+                if getattr(exc, "code", None) not in soft_codes:
+                    raise
+                overrides = list(event.manual_override_fields or [])
+                for field in content_updates:
+                    if field not in overrides:
+                        overrides.append(field)
+                event.manual_override_fields = overrides
+                if event.lesson_plan_item_id:
+                    event.content_source = LessonContentSource.MIXED
+                else:
+                    event.content_source = LessonContentSource.MANUAL
+                event.save(update_fields=[
+                    "manual_override_fields", "content_source", "updated_at",
+                ])
+                plan_result = {
+                    "ok": False,
+                    "plan_updated": False,
+                    "plan_error": exc.code,
+                    "plan_message": exc.message,
+                }
 
         return {
             "ok": True,

@@ -9,20 +9,20 @@ MAX_UPLOAD_BYTES = int(getattr(settings, "CABINET_MAX_UPLOAD_BYTES", 20 * 1024 *
 ALLOWED_UPLOAD_EXTENSIONS = frozenset({
     # documents
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".rtf", ".csv",
-    # images
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".heic", ".heif",
+    # images (без SVG — XSS при inline-preview)
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic", ".heif",
     # audio / video
     ".mp3", ".wav", ".ogg", ".m4a", ".mp4", ".webm", ".mov",
     # archives
     ".zip", ".rar", ".7z", ".tar", ".gz",
-    # code (download-only; not executed)
-    ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".c", ".cpp", ".h", ".cs",
-    ".html", ".css", ".json", ".xml", ".md", ".sql", ".sh",
+    # code as download-only text (без html/js/sh)
+    ".py", ".ts", ".java", ".c", ".cpp", ".h", ".cs",
+    ".css", ".json", ".xml", ".md", ".sql",
 })
 
 ALLOWED_UPLOAD_CONTENT_TYPES = frozenset({
     "application/pdf",
-    "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml", "image/bmp",
+    "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp",
     "image/heic", "image/heif",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -36,8 +36,8 @@ ALLOWED_UPLOAD_CONTENT_TYPES = frozenset({
     "application/x-7z-compressed", "application/gzip", "application/x-tar",
     "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4", "audio/x-m4a",
     "video/mp4", "video/webm", "video/quicktime",
-    "application/json", "application/xml", "text/xml", "text/html", "text/css",
-    "text/javascript", "application/javascript", "text/markdown",
+    "application/json", "application/xml", "text/xml", "text/css",
+    "text/markdown",
     "application/octet-stream",
 })
 
@@ -47,6 +47,8 @@ BLOCKED_UPLOAD_EXTENSIONS = frozenset({
     ".dll", ".sys", ".vbs", ".vbe", ".wsf", ".wsh", ".ps1",
     ".jar", ".apk", ".dmg", ".app", ".deb", ".rpm",
     ".php", ".phtml", ".asp", ".aspx", ".jsp", ".cgi",
+    ".html", ".htm", ".xhtml", ".svg", ".js", ".jsx", ".mjs", ".cjs",
+    ".sh", ".bash", ".zsh",
 })
 
 ALLOWED_IMAGE_EXTENSIONS = frozenset({
@@ -58,8 +60,8 @@ ALLOWED_IMAGE_CONTENT_TYPES = frozenset({
 })
 
 PREVIEWABLE_EXTENSIONS = frozenset({
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg",
-    ".pdf", ".txt", ".md", ".csv", ".json", ".xml", ".html", ".css", ".js", ".py",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
+    ".pdf", ".txt", ".md", ".csv", ".json", ".xml", ".css", ".py",
     ".mp3", ".wav", ".ogg", ".m4a", ".mp4", ".webm",
 })
 

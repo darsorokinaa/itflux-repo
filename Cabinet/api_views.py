@@ -5,6 +5,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -1436,6 +1437,13 @@ class InteractiveAttemptViewSet(TeacherScopedMixin, mixins.CreateModelMixin, vie
         )
 
     def perform_create(self, serializer):
+        teacher = self.get_teacher()
+        assignment = serializer.validated_data.get("assignment")
+        student = serializer.validated_data.get("student")
+        if assignment is None or assignment.teacher_id != teacher.id:
+            raise ValidationError({"assignment": "Нет доступа к назначению."})
+        if student is not None and student.teacher_id != teacher.id:
+            raise ValidationError({"student": "Нет доступа к ученику."})
         attempt = serializer.save()
         if attempt.score_percent is not None:
             attempt.status = "completed"
@@ -1942,6 +1950,49 @@ class MaterialViewSet(
 
     def perform_create(self, serializer):
         serializer.save(teacher=self.get_teacher())
+
+    def _serve_material_file(self, request, *, inline: bool):
+        import mimetypes
+
+        from django.http import FileResponse
+
+        from .files_storage import content_disposition
+        from .subscription_access import AccessDenied, SubscriptionAccessService
+
+        material = self.get_object()
+        try:
+            SubscriptionAccessService.raise_if_cannot_access_content(request.user, material)
+        except AccessDenied as exc:
+            return Response(exc.to_dict(), status=status.HTTP_403_FORBIDDEN)
+        if not material.file:
+            return Response({"detail": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            fh = material.file.open("rb")
+        except Exception:
+            return Response({"detail": "Файл недоступен."}, status=status.HTTP_404_NOT_FOUND)
+        name = material.file.name.split("/")[-1] or "file"
+        content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        if content_type in (
+            "text/html",
+            "image/svg+xml",
+            "text/javascript",
+            "application/javascript",
+        ):
+            inline = False
+            content_type = "application/octet-stream"
+        response = FileResponse(fh, content_type=content_type)
+        response["Content-Disposition"] = content_disposition(name, inline=inline)
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "private, no-store"
+        return response
+
+    @action(detail=True, methods=["get"], url_path="file")
+    def download_file(self, request, pk=None):
+        return self._serve_material_file(request, inline=False)
+
+    @action(detail=True, methods=["get"], url_path="preview")
+    def preview_file(self, request, pk=None):
+        return self._serve_material_file(request, inline=True)
 
     def create(self, request, *args, **kwargs):
         write_serializer = MaterialWriteSerializer(

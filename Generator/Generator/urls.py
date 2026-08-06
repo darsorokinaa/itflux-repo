@@ -10,14 +10,22 @@ from Cabinet import homework_api
 from Cabinet.subscription_api import PaymentWebhookView
 from Cabinet.views import api_teacher_application, api_teacher_community_feedback
 
+# MFA для /admin/ (TOTP). Включение: ADMIN_OTP_REQUIRED=true или prod DEBUG=False.
+if getattr(settings, "ADMIN_OTP_REQUIRED", False):
+    from django_otp.admin import OTPAdminSite
+
+    admin.site.__class__ = OTPAdminSite
+
 
 def media_serve(request, path):
-    """Публичный media. Файлы досок и «Мои файлы» — только через авторизованный API."""
+    """Публичный media. Приватные префиксы кабинета — только через авторизованный API."""
     normalized = (path or "").lstrip("/").replace("\\", "/")
     if (
         normalized.startswith("cabinet/boards/")
         or normalized.startswith("cabinet/boards_private/")
         or normalized.startswith("cabinet/my-files/")
+        or normalized.startswith("cabinet/homework/")
+        or normalized.startswith("cabinet/materials/")
     ):
         return HttpResponseForbidden("Доступ к файлу только через API.")
     return serve(request, path, document_root=settings.MEDIA_ROOT)

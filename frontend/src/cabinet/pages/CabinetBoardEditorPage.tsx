@@ -156,6 +156,22 @@ function boardLog(tag: string, data?: Record<string, unknown>) {
 }
 
 /**
+ * Excalidraw при рисовании мутирует элемент и тот же массив elements in-place
+ * (version++), не создавая новый reference. Сравнение по ссылке пропускает
+ * промежуточные точки штриха — пир видит рисунок только в конце жеста.
+ */
+function boardElementsVersionSum(elements: readonly unknown[] | null | undefined): number {
+  if (!elements?.length) return 0;
+  let sum = 0;
+  for (const raw of elements) {
+    if (raw && typeof raw === "object") {
+      sum += Number((raw as { version?: number }).version) || 0;
+    }
+  }
+  return sum;
+}
+
+/**
  * Excalidraw.updateScene() игнорирует ключ `files` — сцена (`sceneData`)
  * принимает только elements/appState/collaborators/captureUpdate. Файлы
  * регистрируются только через отдельный imperative-метод addFiles(). Без
@@ -363,6 +379,8 @@ export default function CabinetBoardEditorPage() {
   const gestureEndBoundRef = useRef<(() => void) | null>(null);
   const flushPendingRemoteAppliesRef = useRef<() => void>(() => {});
   const lastElementsRef = useRef<readonly unknown[] | null>(null);
+  /** Снимок sum(version) на момент последней локальной публикации — не читать из live-массива. */
+  const lastElementsVersionSumRef = useRef(0);
   const lastFilesRef = useRef<Record<string, unknown> | null>(null);
   const knownElementIdsRef = useRef(new Set<string>());
   const viewerUserIdRef = useRef<number | null>(null);
@@ -712,6 +730,7 @@ export default function CabinetBoardEditorPage() {
     saveRequestedRef.current = false;
     latestSceneRef.current = null;
     lastElementsRef.current = null;
+    lastElementsVersionSumRef.current = 0;
     lastFilesRef.current = null;
     stableFileUrlsRef.current = createStableUrlMap();
     loadedFilesRef.current = new Set();
@@ -1117,8 +1136,12 @@ export default function CabinetBoardEditorPage() {
         scene.appState.viewBackgroundColor = "transparent";
       }
       scene.appState.theme = boardThemeRef.current;
+      const nextVersionSum = boardElementsVersionSum(nextElements);
+      // Ссылка массива часто та же при in-place mutate — смотрим sum(version).
       const elementsChanged = lastElementsRef.current !== elements
-        || nextElements !== elements;
+        || nextElements !== elements
+        || lastElementsVersionSumRef.current !== nextVersionSum
+        || (lastElementsRef.current?.length || 0) !== nextElements.length;
       const filesChanged = lastFilesRef.current !== files;
       const bgChanged =
         latestSceneRef.current?.appState?.viewBackgroundColor !== scene.appState.viewBackgroundColor;
@@ -1133,6 +1156,7 @@ export default function CabinetBoardEditorPage() {
       }
       if (!elementsChanged && !filesChanged && !bgChanged && !gridChanged && !themeChanged) return;
       lastElementsRef.current = nextElements;
+      lastElementsVersionSumRef.current = nextVersionSum;
       lastFilesRef.current = filesAttached;
       markLocalSceneChange();
       safeSetSaveStatus((s) => (s === "dirty" || s === "saving" ? s : "dirty"));

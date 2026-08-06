@@ -1670,6 +1670,47 @@ class StudentMaterialsView(StudentScopedView):
         return Response({"items": all_items[:100]})
 
 
+class StudentMaterialFileView(StudentScopedView):
+    """Скачивание/preview файла материала без публичного /media/."""
+
+    def get(self, request, material_id, action="file"):
+        import mimetypes
+
+        from django.http import FileResponse
+
+        from .files_services import student_can_access_material_file
+        from .files_storage import content_disposition
+
+        students, err = self.student_response_or_error()
+        if err:
+            return err
+        material = Material.objects.filter(pk=material_id).first()
+        if not material or not material.file:
+            return Response({"detail": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
+        if not student_can_access_material_file(request.user, material):
+            return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            fh = material.file.open("rb")
+        except Exception:
+            return Response({"detail": "Файл недоступен."}, status=status.HTTP_404_NOT_FOUND)
+        name = material.file.name.split("/")[-1] or "file"
+        content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        inline = action == "preview"
+        if content_type in (
+            "text/html",
+            "image/svg+xml",
+            "text/javascript",
+            "application/javascript",
+        ):
+            inline = False
+            content_type = "application/octet-stream"
+        response = FileResponse(fh, content_type=content_type)
+        response["Content-Disposition"] = content_disposition(name, inline=inline)
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "private, no-store"
+        return response
+
+
 class StudentProfileView(StudentScopedView):
     def get(self, request):
         students, err = self.student_response_or_error()

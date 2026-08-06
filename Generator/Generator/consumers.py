@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+from urllib.parse import parse_qs
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
@@ -24,6 +25,23 @@ def _get_expected_answer_for_variant_task(variant_id: int, task_number_key: str)
     return expected_answer_for_variant_task(variant_id, task_number_key=task_number_key)
 
 
+def _token_from_scope(scope) -> str:
+    qs = parse_qs((scope.get("query_string") or b"").decode("utf-8", errors="ignore"))
+    for key in ("token", "lesson_token"):
+        values = qs.get(key) or []
+        if values and str(values[0]).strip():
+            return str(values[0]).strip()
+    headers = {
+        k.decode("latin1").lower(): v.decode("latin1")
+        for k, v in (scope.get("headers") or [])
+        if isinstance(k, (bytes, bytearray))
+    }
+    auth = (headers.get("authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return (headers.get("x-lesson-token") or "").strip()
+
+
 class LessonConsumer(AsyncWebsocketConsumer):
     VARIANT_PAYLOAD_KEY = "_lesson_current_variant"
 
@@ -44,9 +62,34 @@ class LessonConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.room_id = self.scope["url_route"]["kwargs"]["room_id"]
         self.group_name = f"lesson_{self.room_id}"
-        # Имя и роль сохраняются после первого join-сообщения
         self._participant_name = ""
         self._participant_role = ""
+        self._jwt_role = ""
+
+        token = _token_from_scope(self.scope)
+        if not token:
+            await self.close(code=4401)
+            return
+        try:
+            normalized = await self._verify_and_normalize_token(token)
+        except Exception:
+            logger.info("lesson_ws rejected: invalid token room=%s", self.room_id)
+            await self.close(code=4401)
+            return
+
+        token_room = str(normalized.get("room_id") or "").strip()
+        if not token_room or token_room != str(self.room_id):
+            await self.close(code=4403)
+            return
+
+        self._jwt_role = str(normalized.get("lesson_type") or "").strip().lower()
+        if self._jwt_role in ("teacher", "tutor", "host"):
+            self._jwt_role = "teacher"
+        else:
+            self._jwt_role = "student"
+        self._participant_role = self._jwt_role
+        self._participant_name = str(normalized.get("participant_name") or "").strip()
+
         if await self._is_lesson_session_closed():
             await self.accept()
             await self.send(
@@ -89,23 +132,42 @@ class LessonConsumer(AsyncWebsocketConsumer):
                     },
                 },
             )
-        await self.channel_layer.group_discard(self.group_name, self.channel_name)
+        if getattr(self, "group_name", None):
+            await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
     async def receive(self, text_data):
         try:
             data = json.loads(text_data)
         except (json.JSONDecodeError, TypeError):
             return
-        # Запоминаем имя/роль из первого join-сообщения
-        if (
-            isinstance(data, dict)
-            and data.get("type") == "join"
-            and not self._participant_name
-        ):
-            self._participant_name = str(data.get("name") or "").strip()
-            self._participant_role = str(data.get("role") or "").strip()
+        if not isinstance(data, dict):
+            return
+
+        # Роль и имя — только из JWT; клиент не может стать учителем через join.
+        if data.get("type") == "join":
+            client_name = str(data.get("name") or "").strip()
+            if client_name and not self._participant_name:
+                self._participant_name = client_name[:200]
+            data["name"] = self._participant_name
+            data["role"] = self._participant_role
+
+        msg_type = str(data.get("type") or "")
+        teacher_only = {
+            "variant",
+            "lesson_end",
+            "lesson_ended",
+            "force_redirect",
+            "teacher_control",
+            "whiteboard_clear",
+            "sync_follow",
+        }
+        if msg_type in teacher_only and self._jwt_role != "teacher":
+            return
+
         normalized_variant = self._normalize_variant_message(data)
         if normalized_variant:
+            if self._jwt_role != "teacher":
+                return
             await self._save_variant(normalized_variant)
         normalized_answer = self._normalize_student_answer_message(data)
         if normalized_answer:
@@ -169,6 +231,13 @@ class LessonConsumer(AsyncWebsocketConsumer):
             "answer": str(payload.get("answer") or ""),
             "payload": payload,
         }
+
+    @database_sync_to_async
+    def _verify_and_normalize_token(self, token: str) -> dict:
+        from .views import normalize_lesson_jwt_payload, verify_lesson_token
+
+        payload = verify_lesson_token(token)
+        return normalize_lesson_jwt_payload(payload)
 
     @database_sync_to_async
     def _is_lesson_session_closed(self):

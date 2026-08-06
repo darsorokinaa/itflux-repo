@@ -35,19 +35,27 @@ echo "=== Загрузка данных в БД ==="
 PGPASSWORD=$(grep PGPASSWORD $APP_DIR/deploy/gunicorn.service | cut -d= -f3) \
     psql -h localhost -U $DB_USER -d $DB_NAME -f $APP_DIR/load_data.sql
 
-echo "=== Создание суперпользователя ==="
-python -c "
-import django, os
-os.environ['DJANGO_SETTINGS_MODULE'] = 'Generator.settings'
+echo "=== Суперпользователь (только через env, без паролей по умолчанию) ==="
+if [ -n "${DJANGO_SUPERUSER_USERNAME:-}" ] && [ -n "${DJANGO_SUPERUSER_PASSWORD:-}" ]; then
+  python -c "
+import os, django
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Generator.settings')
 django.setup()
 from django.contrib.auth.models import User
-if not User.objects.filter(username='admin').exists():
-    User.objects.create_superuser('admin', '', 'admin')
-    print('Суперпользователь создан (логин: admin, пароль: admin)')
-    print('ВАЖНО: смените пароль через /admin/ !')
+username = os.environ['DJANGO_SUPERUSER_USERNAME']
+password = os.environ['DJANGO_SUPERUSER_PASSWORD']
+email = os.environ.get('DJANGO_SUPERUSER_EMAIL', '')
+if User.objects.filter(username=username).exists():
+    print('Суперпользователь уже существует:', username)
 else:
-    print('Суперпользователь уже существует')
+    User.objects.create_superuser(username, email, password)
+    print('Суперпользователь создан:', username)
+    print('Далее: python manage.py setup_admin_totp', username)
 "
+else
+  echo "Пропуск: задайте DJANGO_SUPERUSER_USERNAME и DJANGO_SUPERUSER_PASSWORD, если нужен новый admin."
+  echo "Не создаём admin/admin автоматически."
+fi
 
 echo "=== Установка конфига Nginx ==="
 cp $APP_DIR/deploy/nginx.conf /etc/nginx/sites-available/itflux
@@ -69,5 +77,8 @@ echo ""
 echo "=== Готово! ==="
 echo "Проверьте сайт: http://$DOMAIN"
 echo "Для SSL: certbot --nginx -d $DOMAIN -d www.$DOMAIN"
-echo "После SSL не забудьте поменять пароль admin в /admin/"
+echo "Admin: создайте суперпользователя вручную и включите TOTP:"
+echo "  python manage.py createsuperuser"
+echo "  python manage.py setup_admin_totp <username>"
+echo "Сервис должен работать от User=itflux (см. deploy/gunicorn.service)."
 echo "Cron: crontab -l | grep itflux-cron"

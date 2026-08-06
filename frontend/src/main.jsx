@@ -19,6 +19,11 @@ registerServiceWorker()
 bindPushNavigation()
 startAppUpdateMonitor()
 
+// Метрика — только если согласие уже было дано ранее (не до баннера).
+import('./utils/analytics.js').then((m) => {
+  if (m.hasCookieConsent()) m.initYandexMetrika()
+}).catch(() => {})
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />

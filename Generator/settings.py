@@ -152,6 +152,9 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django_otp",
+    "django_otp.plugins.otp_totp",
+    "django_otp.plugins.otp_static",
 
     # your apps
     "Generator",
@@ -185,12 +188,22 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django_otp.middleware.OTPMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     # manage.py кладёт Generator/ в sys.path → пакет называется Generator (= Generator/Generator/)
     "Generator.middleware.NoStoreApiMiddleware",
     "Generator.middleware.MinimumClientVersionMiddleware",
 ]
+
+# Django admin: требовать TOTP (настроить: python manage.py setup_admin_totp <user>)
+_admin_otp = (os.environ.get("ADMIN_OTP_REQUIRED") or "").strip().lower()
+if _admin_otp in ("1", "true", "yes", "on"):
+    ADMIN_OTP_REQUIRED = True
+elif _admin_otp in ("0", "false", "no", "off"):
+    ADMIN_OTP_REQUIRED = False
+else:
+    ADMIN_OTP_REQUIRED = not DEBUG
 
 # Разрешаем iframe на том же origin (урок встраивает страницу варианта).
 X_FRAME_OPTIONS = "SAMEORIGIN"

@@ -73,19 +73,31 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || "/cabinet";
-  const absolute = new URL(targetUrl, self.location.origin).href;
+  const raw = (event.notification.data && event.notification.data.url) || "/cabinet";
+  let absolute;
+  let safePath = "/cabinet";
+  try {
+    absolute = new URL(raw, self.location.origin);
+    // Только same-origin — иначе open redirect через payload push.
+    if (absolute.origin !== self.location.origin) {
+      absolute = new URL("/cabinet", self.location.origin);
+    }
+    safePath = `${absolute.pathname}${absolute.search}${absolute.hash}` || "/cabinet";
+  } catch {
+    absolute = new URL("/cabinet", self.location.origin);
+    safePath = "/cabinet";
+  }
 
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if (client.url.startsWith(self.location.origin) && "focus" in client) {
-          client.postMessage({ type: "ITFLUX_NOTIFICATION_CLICK", url: targetUrl });
+          client.postMessage({ type: "ITFLUX_NOTIFICATION_CLICK", url: safePath });
           return client.focus();
         }
       }
       if (self.clients.openWindow) {
-        return self.clients.openWindow(absolute);
+        return self.clients.openWindow(absolute.href);
       }
       return undefined;
     }),

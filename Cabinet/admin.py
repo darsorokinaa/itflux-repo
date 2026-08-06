@@ -84,7 +84,11 @@ class ProfileAdmin(admin.ModelAdmin):
     search_fields = ("user__username", "user__email", "name", "surname", "display_name")
     ordering = ("-reg_date",)
     readonly_fields = ("avatar_updated_at",)
-    exclude = ("avatar_encrypted",)
+    exclude = (
+        "avatar_encrypted",
+        "yandex_oauth_token",
+        "yandex_refresh_token",
+    )
 
     @admin.display(boolean=True, description="Аватар")
     def has_avatar_display(self, obj):
@@ -143,9 +147,9 @@ class StudentSubjectAdmin(admin.ModelAdmin):
 
 @admin.register(StudentInvitation)
 class StudentInvitationAdmin(admin.ModelAdmin):
-    list_display = ("token", "teacher", "group", "email", "status", "expires_at", "created_at")
+    list_display = ("id", "teacher", "group", "email", "status", "expires_at", "created_at")
     list_filter = ("status", "direction")
-    search_fields = ("token", "email", "teacher__username", "group__title")
+    search_fields = ("email", "teacher__username", "group__title")
     readonly_fields = ("token", "accepted_at", "created_at", "updated_at")
     ordering = ("-created_at",)
 
@@ -194,7 +198,7 @@ class HomeworkSubmissionAttemptAdmin(admin.ModelAdmin):
 
 @admin.register(TelegramConnectToken)
 class TelegramConnectTokenAdmin(admin.ModelAdmin):
-    list_display = ("token", "user", "expires_at", "used_at", "created_at")
+    list_display = ("id", "user", "expires_at", "used_at", "created_at")
     list_filter = ("used_at",)
     search_fields = ("token", "user__username", "user__email")
     readonly_fields = ("token", "created_at", "used_at")

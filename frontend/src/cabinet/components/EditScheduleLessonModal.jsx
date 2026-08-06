@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import SeriesScopeModal from "./SeriesScopeModal";
+import PlanEditorResourceBlock from "./PlanEditorResourceBlock";
+import PlanItemResourcesPicker from "./PlanItemResourcesPicker";
 import {
+  ensureScheduleEventPlanItem,
   fetchLessonPlan,
   fetchPlanEnrollments,
   fetchStudentSubjects,
@@ -10,8 +13,10 @@ import {
   setScheduleEventPlanSync,
   syncScheduleEventFromPlan,
   syncScheduleEventToPlan,
+  updateLessonPlanItem,
   updateScheduleEventContent,
 } from "../../utils/cabinetAuth";
+import { homeworkResourceRows, planItemForScheduleEvent } from "../planItemAttachments";
 import {
   buildScheduleDateTimePayload,
   eventScheduleDate,
@@ -24,13 +29,29 @@ const CONTENT_SOURCE_LABEL = {
   mixed: "Смешанный источник",
 };
 
+function homeworkStateFromEvent(event) {
+  const planItem = event?.planItem || null;
+  return {
+    planItemId: planItem?.id || event?.lessonPlanItemId || null,
+    homeworkMaterials: planItem?.homeworkMaterials || [],
+    homeworkInteractives: planItem?.homeworkInteractives || [],
+    homeworkDescription: event?.homeworkDescription || planItem?.homeworkDescription || "",
+  };
+}
+
 /** Тема/описание/цель/ДЗ занятия + связь с планом обучения ученика. */
-function PlanSyncSection({ event, disabled, onEventUpdated }) {
+const PlanSyncSection = forwardRef(function PlanSyncSection({ event, disabled, onEventUpdated }, ref) {
+  const initialHw = homeworkStateFromEvent(event);
   const [topic, setTopic] = useState(event.topic || "");
   const [subtopic, setSubtopic] = useState(event.subtopic || "");
   const [description, setDescription] = useState(event.description || "");
   const [goal, setGoal] = useState(event.goal || "");
-  const [homeworkDescription, setHomeworkDescription] = useState(event.homeworkDescription || "");
+  const [homeworkDescription, setHomeworkDescription] = useState(initialHw.homeworkDescription);
+  const [homeworkMaterials, setHomeworkMaterials] = useState(initialHw.homeworkMaterials);
+  const [homeworkInteractives, setHomeworkInteractives] = useState(initialHw.homeworkInteractives);
+  const [planItemId, setPlanItemId] = useState(initialHw.planItemId);
+  const [hwPickerOpen, setHwPickerOpen] = useState(false);
+  const [hwBusy, setHwBusy] = useState(false);
   // Мета синхронизации ведём локально: ответы sync-эндпоинтов приходят сразу,
   // а полноценный рефреш списка занятий на странице расписания — только после
   // закрытия модалки, поэтому статус/ссылку на план обновляем сами.
@@ -40,6 +61,7 @@ function PlanSyncSection({ event, disabled, onEventUpdated }) {
     contentSource: event.contentSource || "manual",
     planSyncEnabled: event.planSyncEnabled !== false,
     planSyncedAt: event.planSyncedAt || null,
+    isAutoMaterialsPlan: Boolean(event.isAutoMaterialsPlan),
   });
   const [conflict, setConflict] = useState(null);
   const [savingContent, setSavingContent] = useState(false);
@@ -51,21 +73,44 @@ function PlanSyncSection({ event, disabled, onEventUpdated }) {
   const [selectedItemId, setSelectedItemId] = useState("");
   const savingRef = useRef(false);
 
+  const hasRealPlanLink = Boolean(syncMeta.linkedPlanId) && !syncMeta.isAutoMaterialsPlan;
+
   useEffect(() => {
+    const hw = homeworkStateFromEvent(event);
     setTopic(event.topic || "");
     setSubtopic(event.subtopic || "");
     setDescription(event.description || "");
     setGoal(event.goal || "");
-    setHomeworkDescription(event.homeworkDescription || "");
+    setHomeworkDescription(hw.homeworkDescription);
+    setHomeworkMaterials(hw.homeworkMaterials);
+    setHomeworkInteractives(hw.homeworkInteractives);
+    setPlanItemId(hw.planItemId);
     setSyncMeta({
       linkedPlanId: event.linkedPlanId || null,
       linkedPlanTitle: event.linkedPlanTitle || "",
       contentSource: event.contentSource || "manual",
       planSyncEnabled: event.planSyncEnabled !== false,
       planSyncedAt: event.planSyncedAt || null,
+      isAutoMaterialsPlan: Boolean(event.isAutoMaterialsPlan),
     });
     setConflict(null);
   }, [event.id]);
+
+  const applyPlanItem = (planItem, eventPatch = {}) => {
+    if (!planItem) return;
+    setPlanItemId(planItem.id || null);
+    setHomeworkMaterials(planItem.homeworkMaterials || []);
+    setHomeworkInteractives(planItem.homeworkInteractives || []);
+    if (planItem.homeworkDescription !== undefined && eventPatch.homeworkDescription === undefined) {
+      setHomeworkDescription(planItem.homeworkDescription || "");
+    }
+    onEventUpdated?.({
+      id: event.id,
+      ...eventPatch,
+      planItem: { ...(event.planItem || {}), ...planItem },
+      lessonPlanItemId: planItem.id,
+    });
+  };
 
   const applyServerEvent = (patch) => {
     if (!patch) return;
@@ -74,12 +119,20 @@ function PlanSyncSection({ event, disabled, onEventUpdated }) {
     if (patch.description !== undefined) setDescription(patch.description || "");
     if (patch.goal !== undefined) setGoal(patch.goal || "");
     if (patch.homeworkDescription !== undefined) setHomeworkDescription(patch.homeworkDescription || "");
+    if (patch.planItem) {
+      setPlanItemId(patch.planItem.id || null);
+      setHomeworkMaterials(patch.planItem.homeworkMaterials || []);
+      setHomeworkInteractives(patch.planItem.homeworkInteractives || []);
+    }
     setSyncMeta((prev) => ({
       linkedPlanId: patch.linkedPlanId !== undefined ? patch.linkedPlanId : prev.linkedPlanId,
       linkedPlanTitle: patch.linkedPlanTitle !== undefined ? patch.linkedPlanTitle : prev.linkedPlanTitle,
       contentSource: patch.contentSource !== undefined ? patch.contentSource : prev.contentSource,
       planSyncEnabled: patch.planSyncEnabled !== undefined ? patch.planSyncEnabled : prev.planSyncEnabled,
       planSyncedAt: patch.planSyncedAt !== undefined ? patch.planSyncedAt : prev.planSyncedAt,
+      isAutoMaterialsPlan: patch.isAutoMaterialsPlan !== undefined
+        ? Boolean(patch.isAutoMaterialsPlan)
+        : prev.isAutoMaterialsPlan,
     }));
     onEventUpdated?.(patch);
   };
@@ -87,7 +140,7 @@ function PlanSyncSection({ event, disabled, onEventUpdated }) {
   const isGroup = Boolean(event.groupId || event.type === "group" || event.type === "group_lesson");
 
   useEffect(() => {
-    if (syncMeta.linkedPlanId || !event.studentId || isGroup) {
+    if (hasRealPlanLink || !event.studentId || isGroup) {
       setPickerItems([]);
       return undefined;
     }
@@ -114,7 +167,7 @@ function PlanSyncSection({ event, disabled, onEventUpdated }) {
     return () => {
       cancelled = true;
     };
-  }, [event.studentId, syncMeta.linkedPlanId, isGroup]);
+  }, [event.studentId, hasRealPlanLink, isGroup]);
 
   const changedContent = () => {
     const patch = {};
@@ -122,28 +175,54 @@ function PlanSyncSection({ event, disabled, onEventUpdated }) {
     if (subtopic !== (event.subtopic || "")) patch.subtopic = subtopic;
     if (description !== (event.description || "")) patch.description = description;
     if (goal !== (event.goal || "")) patch.goal = goal;
-    if (homeworkDescription !== (event.homeworkDescription || "")) patch.homework_description = homeworkDescription;
+    const prevHw = event.homeworkDescription || event.planItem?.homeworkDescription || "";
+    if (homeworkDescription !== prevHw) patch.homework_description = homeworkDescription;
     return patch;
   };
 
+  const defaultSyncAction = () => (hasRealPlanLink ? "lesson_and_plan" : "lesson_only");
+
   const submitContent = async (extra = {}) => {
     const patch = changedContent();
-    if (!Object.keys(patch).length && !Object.keys(extra).length) return;
-    if (savingRef.current) return;
+    if (!Object.keys(patch).length && !Object.keys(extra).length) return null;
+    if (savingRef.current) return null;
     savingRef.current = true;
     setSavingContent(true);
     setSaveOk(false);
-    // По умолчанию пишем и в карточку, и в связанный пункт плана (или создаём пункт).
     const payload = { ...patch, ...extra };
     if (!payload.sync_action && !payload.resolve_conflict) {
-      payload.sync_action = "lesson_and_plan";
+      payload.sync_action = defaultSyncAction();
     }
     try {
       const data = await updateScheduleEventContent(event.id, payload);
       setConflict(null);
-      setPlanNotice("");
+      const planInfo = data?.edit?.plan;
+      if (planInfo && planInfo.plan_updated === false && planInfo.plan_message) {
+        setPlanNotice(planInfo.plan_message);
+      } else {
+        setPlanNotice("");
+      }
       setSaveOk(true);
       applyServerEvent(data?.scheduleEvent);
+      // Черновик ДЗ на пункте плана (в т.ч. авто-черновик материалов).
+      if (patch.homework_description !== undefined) {
+        try {
+          const ensured = await ensureScheduleEventPlanItem(event.id);
+          const item = ensured?.planItem;
+          if (item?.id) {
+            const updated = await updateLessonPlanItem(item.id, {
+              homework_description: homeworkDescription,
+            });
+            applyPlanItem(planItemForScheduleEvent(updated, {
+              lessonNumber: item.lessonNumber,
+              planTitle: item.planTitle,
+            }), { homeworkDescription });
+          }
+        } catch {
+          /* текст уже сохранён в карточке урока */
+        }
+      }
+      return data;
     } catch (err) {
       setSaveOk(false);
       if (err?.status === 409 && err?.data?.conflict) {
@@ -154,11 +233,17 @@ function PlanSyncSection({ event, disabled, onEventUpdated }) {
       } else {
         setPlanNotice(err?.message || "Не удалось сохранить изменения.");
       }
+      throw err;
     } finally {
       savingRef.current = false;
       setSavingContent(false);
     }
   };
+
+  useImperativeHandle(ref, () => ({
+    flush: () => submitContent(),
+    isDirty: () => Object.keys(changedContent()).length > 0,
+  }));
 
   const handleResolveConflict = (choiceId) => submitContent({ resolve_conflict: choiceId });
 
@@ -238,11 +323,127 @@ function PlanSyncSection({ event, disabled, onEventUpdated }) {
     }
   };
 
+  const ensureHwPlanItem = async () => {
+    const data = await ensureScheduleEventPlanItem(event.id);
+    const planItem = data?.planItem || null;
+    if (!planItem?.id) throw new Error("Не удалось подготовить урок для ДЗ");
+    const mapped = {
+      ...planItem,
+      homeworkMaterials: planItem.homeworkMaterials || [],
+      homeworkInteractives: planItem.homeworkInteractives || [],
+    };
+    setPlanItemId(mapped.id);
+    setHomeworkMaterials(mapped.homeworkMaterials);
+    setHomeworkInteractives(mapped.homeworkInteractives);
+    onEventUpdated?.({
+      id: event.id,
+      planItem: { ...(event.planItem || {}), ...mapped },
+      lessonPlanItemId: mapped.id,
+      linkedPlanId: event.linkedPlanId,
+      isAutoMaterialsPlan: event.isAutoMaterialsPlan,
+    });
+    return mapped;
+  };
+
+  const openHomeworkPicker = async () => {
+    setPlanNotice("");
+    setHwBusy(true);
+    try {
+      await ensureHwPlanItem();
+      setHwPickerOpen(true);
+    } catch (err) {
+      setPlanNotice(err?.message || "Не удалось открыть добавление ДЗ");
+    } finally {
+      setHwBusy(false);
+    }
+  };
+
+  const handleAttachHomeworkMaterial = async (material) => {
+    if (!material?.id) return;
+    setHwBusy(true);
+    try {
+      const ensured = await ensureHwPlanItem();
+      const current = (ensured.homeworkMaterials || homeworkMaterials).map((m) => m.id).filter(Boolean);
+      if (!current.includes(material.id)) current.push(material.id);
+      const data = await updateLessonPlanItem(ensured.id, { homework_material_ids: current });
+      applyPlanItem(planItemForScheduleEvent(data, {
+        lessonNumber: ensured.lessonNumber,
+        planTitle: ensured.planTitle,
+      }));
+      setHwPickerOpen(false);
+    } catch (err) {
+      setPlanNotice(err?.message || "Не удалось добавить материал ДЗ");
+      throw err;
+    } finally {
+      setHwBusy(false);
+    }
+  };
+
+  const handleAttachHomeworkInteractive = async (interactive) => {
+    if (!interactive?.id) return;
+    setHwBusy(true);
+    try {
+      const ensured = await ensureHwPlanItem();
+      const current = (ensured.homeworkInteractives || homeworkInteractives).map((i) => i.id).filter(Boolean);
+      if (!current.includes(interactive.id)) current.push(interactive.id);
+      const data = await updateLessonPlanItem(ensured.id, { homework_interactive_ids: current });
+      const fromApi = planItemForScheduleEvent(data, {
+        lessonNumber: ensured.lessonNumber,
+        planTitle: ensured.planTitle,
+      });
+      applyPlanItem(fromApi);
+      setHwPickerOpen(false);
+    } catch (err) {
+      setPlanNotice(err?.message || "Не удалось добавить интерактив в ДЗ");
+      throw err;
+    } finally {
+      setHwBusy(false);
+    }
+  };
+
+  const handleRemoveHomeworkResource = async (row) => {
+    setPlanNotice("");
+    setHwBusy(true);
+    try {
+      const ensured = planItemId
+        ? { id: planItemId, homeworkMaterials, homeworkInteractives }
+        : await ensureHwPlanItem();
+      if (row.materialId) {
+        const nextIds = (ensured.homeworkMaterials || homeworkMaterials)
+          .map((m) => m.id)
+          .filter((id) => Number(id) !== Number(row.materialId));
+        const data = await updateLessonPlanItem(ensured.id, { homework_material_ids: nextIds });
+        applyPlanItem(planItemForScheduleEvent(data, {
+          lessonNumber: ensured.lessonNumber,
+          planTitle: ensured.planTitle,
+        }));
+      } else if (row.interactiveId) {
+        const nextIds = (ensured.homeworkInteractives || homeworkInteractives)
+          .map((i) => i.id)
+          .filter((id) => Number(id) !== Number(row.interactiveId));
+        const data = await updateLessonPlanItem(ensured.id, { homework_interactive_ids: nextIds });
+        applyPlanItem(planItemForScheduleEvent(data, {
+          lessonNumber: ensured.lessonNumber,
+          planTitle: ensured.planTitle,
+        }));
+      }
+    } catch (err) {
+      setPlanNotice(err?.message || "Не удалось убрать материал ДЗ");
+    } finally {
+      setHwBusy(false);
+    }
+  };
+
+  const hwRows = homeworkResourceRows({
+    homeworkMaterials,
+    homeworkInteractives,
+  });
+
   return (
     <section className="cb-sch-form__section cb-sch-form__section--plan-sync">
       <h3>Тема и план обучения</h3>
 
-      {syncMeta.linkedPlanId ? (
+      {hasRealPlanLink ? (
         <div className="cb-sch-plan-status">
           <span className="cb-sch-plan-status__row">
             План: <Link to={`/cabinet/plans/${syncMeta.linkedPlanId}`} target="_blank" rel="noreferrer">
@@ -306,7 +507,9 @@ function PlanSyncSection({ event, disabled, onEventUpdated }) {
 
       {planNotice ? <p className="cb-sch-form__hint" role="status">{planNotice}</p> : null}
       {saveOk && !planNotice ? (
-        <p className="cb-sch-form__hint" role="status">Сохранено. Карточка и план обучения обновлены.</p>
+        <p className="cb-sch-form__hint" role="status">
+          {hasRealPlanLink ? "Сохранено. Карточка и план обучения обновлены." : "Сохранено."}
+        </p>
       ) : null}
 
       <label className="cb-sch-field">
@@ -346,15 +549,22 @@ function PlanSyncSection({ event, disabled, onEventUpdated }) {
           placeholder="Что планируется или что было пройдено на уроке"
         />
       </label>
-      <label className="cb-sch-field">
-        <span>Домашнее задание (черновик)</span>
-        <textarea
-          rows={2}
-          value={homeworkDescription}
-          onChange={(e) => { setHomeworkDescription(e.target.value); setSaveOk(false); }}
-          disabled={disabled}
+
+      <div className="cb-sch-field cb-sch-field--hw-draft">
+        <PlanEditorResourceBlock
+          label="Домашнее задание (черновик)"
+          emptyLabel="ДЗ не задано"
+          actionLabel="Настроить"
+          rows={hwRows}
+          notes={homeworkDescription}
+          notesPlaceholder="Описание ДЗ"
+          alwaysShowNotes
+          onNotesChange={(e) => { setHomeworkDescription(e.target.value); setSaveOk(false); }}
+          onAttach={disabled || hwBusy ? undefined : openHomeworkPicker}
+          onRemove={disabled || hwBusy ? undefined : handleRemoveHomeworkResource}
         />
-      </label>
+        {hwBusy ? <p className="cb-sch-form__hint">Сохранение ДЗ…</p> : null}
+      </div>
 
       {conflict ? (
         <div className="cb-sch-form__conflict" role="alert">
@@ -379,7 +589,7 @@ function PlanSyncSection({ event, disabled, onEventUpdated }) {
             type="button"
             className="cb-btn cb-btn--outline"
             disabled={disabled || savingContent || !Object.keys(changedContent()).length}
-            onClick={() => submitContent()}
+            onClick={() => submitContent().catch(() => {})}
           >
             {savingContent ? "Сохранение…" : "Сохранить тему/описание"}
           </button>
@@ -388,11 +598,14 @@ function PlanSyncSection({ event, disabled, onEventUpdated }) {
             className="cb-btn cb-btn--outline"
             disabled={disabled || savingContent}
             onClick={() => {
+              const hw = homeworkStateFromEvent(event);
               setTopic(event.topic || "");
               setSubtopic(event.subtopic || "");
               setDescription(event.description || "");
               setGoal(event.goal || "");
-              setHomeworkDescription(event.homeworkDescription || "");
+              setHomeworkDescription(hw.homeworkDescription);
+              setHomeworkMaterials(hw.homeworkMaterials);
+              setHomeworkInteractives(hw.homeworkInteractives);
               setConflict(null);
               setPlanNotice("");
               setSaveOk(false);
@@ -402,9 +615,22 @@ function PlanSyncSection({ event, disabled, onEventUpdated }) {
           </button>
         </div>
       )}
+
+      {hwPickerOpen ? (
+        <PlanItemResourcesPicker
+          scope="homework"
+          open
+          initialTab="library"
+          attachedMaterialIds={homeworkMaterials.map((m) => m.id).filter(Boolean)}
+          attachedInteractiveIds={homeworkInteractives.map((i) => i.id).filter(Boolean)}
+          onClose={() => setHwPickerOpen(false)}
+          onAttachMaterial={handleAttachHomeworkMaterial}
+          onAttachInteractive={handleAttachHomeworkInteractive}
+        />
+      ) : null}
     </section>
   );
-}
+});
 
 export default function EditScheduleLessonModal({ event, onClose, onSave, onEventUpdated }) {
   const [date, setDate] = useState(eventScheduleDate(event));
@@ -421,6 +647,7 @@ export default function EditScheduleLessonModal({ event, onClose, onSave, onEven
     event.studentSubjectId ? String(event.studentSubjectId) : "",
   );
   const savingRef = useRef(false);
+  const contentRef = useRef(null);
 
   useEffect(() => {
     setDate(eventScheduleDate(event));
@@ -465,6 +692,15 @@ export default function EditScheduleLessonModal({ event, onClose, onSave, onEven
     && normalizeTimeValue(endTime) === normalizeTimeValue(event.endTime || "15:45")
   );
 
+  const flushContentIfNeeded = async () => {
+    if (!contentRef.current?.isDirty?.()) return;
+    try {
+      await contentRef.current.flush();
+    } catch {
+      throw new Error("Не удалось сохранить тему или описание занятия.");
+    }
+  };
+
   const submitWithScope = async (scope) => {
     if (savingRef.current) return;
     savingRef.current = true;
@@ -489,8 +725,20 @@ export default function EditScheduleLessonModal({ event, onClose, onSave, onEven
     const hasSeries = Boolean(event.seriesId || event.hasOrphanSeries || event.isRecurring);
 
     if (hasSeries) {
-      setScopeTimeChanged(!eventTimesUnchanged());
-      setScopeOpen(true);
+      // Сначала сохраняем тему/ДЗ, чтобы они не потерялись при выборе scope серии.
+      savingRef.current = true;
+      setSaving(true);
+      setError("");
+      try {
+        await flushContentIfNeeded();
+        setScopeTimeChanged(!eventTimesUnchanged());
+        setScopeOpen(true);
+      } catch (err) {
+        setError(err.message || "Не удалось сохранить изменения.");
+      } finally {
+        savingRef.current = false;
+        setSaving(false);
+      }
       return;
     }
 
@@ -498,6 +746,7 @@ export default function EditScheduleLessonModal({ event, onClose, onSave, onEven
     setSaving(true);
     setError("");
     try {
+      await flushContentIfNeeded();
       await onSave(buildPayload());
       onClose();
     } catch (err) {
@@ -562,7 +811,12 @@ export default function EditScheduleLessonModal({ event, onClose, onSave, onEven
               ) : null}
             </section>
 
-            <PlanSyncSection event={event} disabled={saving} onEventUpdated={onEventUpdated} />
+            <PlanSyncSection
+              ref={contentRef}
+              event={event}
+              disabled={saving}
+              onEventUpdated={onEventUpdated}
+            />
 
             <section className="cb-sch-form__section">
               <h3>Время</h3>

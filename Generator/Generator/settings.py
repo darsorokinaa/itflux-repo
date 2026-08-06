@@ -189,6 +189,9 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django_otp',
+    'django_otp.plugins.otp_totp',
+    'django_otp.plugins.otp_static',
     'rest_framework',
     'channels',
     'Generator.apps.GeneratorConfig',
@@ -244,11 +247,21 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",  # 3. Common — один раз
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django_otp.middleware.OTPMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     "Generator.middleware.NoStoreApiMiddleware",
     "Generator.middleware.MinimumClientVersionMiddleware",
 ]
+
+# Django admin TOTP (python manage.py setup_admin_totp <user>)
+_admin_otp = (os.environ.get("ADMIN_OTP_REQUIRED") or "").strip().lower()
+if _admin_otp in ("1", "true", "yes", "on"):
+    ADMIN_OTP_REQUIRED = True
+elif _admin_otp in ("0", "false", "no", "off"):
+    ADMIN_OTP_REQUIRED = False
+else:
+    ADMIN_OTP_REQUIRED = not DEBUG
 
 # Разрешаем встраивать страницы в iframe на том же origin
 # (нужно для /lesson/join/ -> iframe с /<level>/<subject>/variant/<id>/).
@@ -259,8 +272,16 @@ _cors_allowed_list = [o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", 
 if _cors_allowed_list:
     CORS_ALLOW_ALL_ORIGINS = False
     CORS_ALLOWED_ORIGINS = _cors_allowed_list
+elif DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
 else:
-    CORS_ALLOW_ALL_ORIGINS = True
+    # Никогда не открываем все origin в production по умолчанию.
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = []
 
 CORS_ALLOW_CREDENTIALS = True
 

@@ -97,6 +97,18 @@ urlpatterns = [
     path("student/schedule/<int:event_id>/", student_api.StudentScheduleEventDetailView.as_view(), name="student_schedule_detail"),
     path("student/progress/", student_api.StudentProgressView.as_view(), name="student_progress"),
     path("student/materials/", student_api.StudentMaterialsView.as_view(), name="student_materials"),
+    path(
+        "student/materials/<int:material_id>/file/",
+        student_api.StudentMaterialFileView.as_view(),
+        {"action": "file"},
+        name="student_material_file",
+    ),
+    path(
+        "student/materials/<int:material_id>/preview/",
+        student_api.StudentMaterialFileView.as_view(),
+        {"action": "preview"},
+        name="student_material_preview",
+    ),
     path("student/subjects/", student_api.StudentSubjectsView.as_view(), name="student_subjects"),
     path("student/profile/", student_api.StudentProfileView.as_view(), name="student_profile"),
     path("student/notifications/", student_api.StudentNotificationsView.as_view(), name="student_notifications"),

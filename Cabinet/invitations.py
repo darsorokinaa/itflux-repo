@@ -213,6 +213,21 @@ def accept_student_invitation(token: str, user: User):
     if invitation is None:
         raise ValueError("Приглашение недействительно или истекло")
 
+    # Блокируем строку, чтобы два параллельных accept не приняли один токен.
+    # of=("self",) — иначе PostgreSQL ругается на OUTER JOIN от select_related.
+    invitation = (
+        StudentInvitation.objects.select_for_update(of=("self",))
+        .filter(pk=invitation.pk)
+        .first()
+    )
+    if invitation is None or not invitation_is_valid(invitation):
+        raise ValueError("Приглашение недействительно или истекло")
+    if invitation.status != InvitationStatus.PENDING:
+        raise ValueError("Приглашение уже использовано или недоступно")
+    invitation = StudentInvitation.objects.select_related(
+        "teacher", "teacher__profile", "group"
+    ).get(pk=invitation.pk)
+
     first_name = (profile.name or user.first_name or user.username).strip()
     last_name = (profile.surname or user.last_name or "").strip()
     invite_email = (invitation.email or user.email or "").strip().lower()

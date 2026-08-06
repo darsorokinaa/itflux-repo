@@ -3,8 +3,12 @@ import { Outlet, Link, useLocation } from "react-router-dom";
 import Nav from "../components/Nav";
 import MobileTabBar from "../components/MobileTabBar";
 import { SUMMER_CLUB_NAV_LABEL, SUMMER_CLUB_URL } from "../config/summerClub";
-
-const COOKIE_CONSENT_KEY = "cookie_consent_accepted";
+import {
+  hasCookieConsent,
+  initYandexMetrika,
+  setCookieConsentAccepted,
+  trackPageView,
+} from "../utils/analytics";
 
 function Layout() {
   const { pathname, search } = useLocation();
@@ -57,14 +61,25 @@ function Layout() {
       !!query.get("cabinet_assignment")
     );
 
-  const [cookieAccepted, setCookieAccepted] = useState(() => {
-    try { return !!localStorage.getItem(COOKIE_CONSENT_KEY); } catch { return false; }
-  });
+  const [cookieAccepted, setCookieAccepted] = useState(() => hasCookieConsent());
 
   function acceptCookies() {
-    try { localStorage.setItem(COOKIE_CONSENT_KEY, "1"); } catch { /* ignore */ }
+    setCookieConsentAccepted();
     setCookieAccepted(true);
+    initYandexMetrika();
   }
+
+  useEffect(() => {
+    if (cookieAccepted) {
+      initYandexMetrika();
+    }
+  }, [cookieAccepted]);
+
+  useEffect(() => {
+    if (cookieAccepted) {
+      trackPageView(`${pathname}${search || ""}`);
+    }
+  }, [pathname, search, cookieAccepted]);
 
   useEffect(() => {
     const run = () => {

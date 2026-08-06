@@ -5891,9 +5891,17 @@ def api_lesson_homework_upload_answer(request, aid: int):
 def api_lesson_verify(request):
     """
     Проверка JWT из ЛК без HTML-страницы (для SPA на /lesson/join/).
-    GET ?token=...
+    Предпочтительно: Authorization: Bearer … или X-Lesson-Token (не в query — меньше утечек).
+    GET ?token=… поддерживается для обратной совместимости.
     """
-    token = (request.GET.get("token") or "").strip()
+    token = ""
+    auth = (request.headers.get("Authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+    if not token:
+        token = (request.headers.get("X-Lesson-Token") or "").strip()
+    if not token:
+        token = (request.GET.get("token") or "").strip()
     if not token:
         return JsonResponse({"ok": False, "error": "Параметр token не передан"}, status=400)
     try:

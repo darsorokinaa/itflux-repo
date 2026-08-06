@@ -1239,18 +1239,77 @@ def submission_file_url(submission: HomeworkSubmission, *, for_student: bool = T
     return ""
 
 
+def student_can_access_material_file(user, material: Material) -> bool:
+    """Ученик может скачать файл материала только если он выдан ему в кабинете."""
+    if not user or not getattr(user, "is_authenticated", False) or not material:
+        return False
+    from .models import (
+        DirectMaterialAssignment,
+        Homework,
+        LessonAssignment,
+        Student,
+    )
+
+    student_ids = list(Student.objects.filter(user=user).values_list("id", flat=True))
+    if not student_ids:
+        return False
+    if material.teacher_id and not Student.objects.filter(
+        id__in=student_ids, teacher_id=material.teacher_id
+    ).exists():
+        return False
+    if DirectMaterialAssignment.objects.filter(
+        student_id__in=student_ids, material=material
+    ).exists():
+        return True
+    if LessonAssignment.objects.filter(
+        student_id__in=student_ids, lesson__materials=material
+    ).exists():
+        return True
+    if LessonAssignment.objects.filter(
+        group__students__id__in=student_ids, lesson__materials=material
+    ).exists():
+        return True
+    hw_qs = Homework.objects.filter(
+        Q(student_id__in=student_ids) | Q(group__students__id__in=student_ids)
+    )
+    if hw_qs.filter(lesson_plan_item__homework_materials=material).exists():
+        return True
+    if hw_qs.filter(lesson_plan_item__materials=material).exists():
+        return True
+    if hw_qs.filter(lesson__materials=material).exists():
+        return True
+    return False
+
+
+def _legacy_material_file_api_url(material: Material, *, for_student: bool, inline: bool) -> str:
+    """Авторизованный URL для Material.file без публичного /media/."""
+    if not material or not material.pk:
+        return ""
+    action = "preview" if inline else "file"
+    if for_student:
+        return f"/api/cabinet/student/materials/{material.pk}/{action}/"
+    return f"/api/cabinet/materials/{material.pk}/{action}/"
+
+
 def material_file_url(material: Material, *, for_student: bool = False) -> str:
     if material.cabinet_file_id:
         if for_student:
             return f"/api/cabinet/student/files/shared/{material.cabinet_file_id}/download/"
         return f"/api/cabinet/files/{material.cabinet_file_id}/download/"
     if material.file:
-        # Файлы из my-files нельзя отдавать как публичный /media/
+        # Приватные префиксы нельзя отдавать как публичный /media/
         name = material.file.name or ""
         if name.startswith("cabinet/my-files/"):
             if material.cabinet_file_id:
                 return material_file_url(material, for_student=for_student)
             return ""
+        if (
+            name.startswith("cabinet/materials/")
+            or name.startswith("cabinet/homework/")
+            or name.startswith("cabinet/boards/")
+            or name.startswith("cabinet/boards_private/")
+        ):
+            return _legacy_material_file_api_url(material, for_student=for_student, inline=False)
         return material.file.url
     return ""
 
@@ -1269,6 +1328,12 @@ def material_view_url(material: Material, *, for_student: bool = False) -> str:
         if name.startswith("cabinet/my-files/") or name.startswith("cabinet/boards_private/"):
             # Без cabinet_file публичный media недоступен — вернём пусто.
             return ""
+        if (
+            name.startswith("cabinet/materials/")
+            or name.startswith("cabinet/homework/")
+            or name.startswith("cabinet/boards/")
+        ):
+            return _legacy_material_file_api_url(material, for_student=for_student, inline=True)
         return material.file.url
     return (material.external_url or "").strip()
 
@@ -1281,6 +1346,10 @@ def is_blocked_media_url(url: str) -> bool:
     return (
         "/media/cabinet/my-files/" in path
         or "/media/cabinet/boards_private/" in path
+        or "/media/cabinet/homework/" in path
+        or "/media/cabinet/materials/" in path
         or path.startswith("cabinet/my-files/")
         or path.startswith("cabinet/boards_private/")
+        or path.startswith("cabinet/homework/")
+        or path.startswith("cabinet/materials/")
     )

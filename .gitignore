@@ -30,9 +30,12 @@ Generator/media/pdfs/*.pdf
 *.sqlite3
 db.sqlite3
 dumps/
+deploy/dumps/
 *.dump
+*.rdb
 Generator/media/cabinet/
 Generator/media/lesson_attachments/
+generatordb_*.dump
 
 # Локальный скрипт импорта (не коммитить)
 import_tasks_universal.py

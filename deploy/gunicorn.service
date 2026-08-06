@@ -4,8 +4,11 @@ After=network.target postgresql.service
 # С Redis-слоем каналов раскомментируйте: Wants=redis.service
 
 [Service]
-User=root
-Group=root
+# Не запускать от root. Создайте пользователя один раз:
+#   sudo useradd --system --home /opt/itfluxacademy --shell /usr/sbin/nologin itflux
+#   sudo chown -R itflux:itflux /opt/itfluxacademy/itflux
+User=itflux
+Group=itflux
 WorkingDirectory=/opt/itfluxacademy/itflux
 
 RuntimeDirectory=itflux
@@ -13,6 +16,7 @@ LogsDirectory=itflux
 
 # Секреты и production-env ТОЛЬКО через EnvironmentFile (не коммитить реальные значения).
 # Скопируйте deploy/.env.production.example → /etc/itflux/itflux.env и заполните на сервере.
+# Права: sudo chown root:itflux /etc/itflux/itflux.env && sudo chmod 640 /etc/itflux/itflux.env
 EnvironmentFile=-/etc/itflux/itflux.env
 
 # WSGI (Gunicorn) не обрабатывает WebSocket: комната урока (/ws/lesson/…) не работает.
@@ -29,13 +33,19 @@ Environment="DJANGO_SETTINGS_MODULE=Generator.settings"
 Environment="DEBUG=false"
 # Несекретные defaults (переопределяются EnvironmentFile при необходимости)
 Environment="CHANNEL_LAYER_BACKEND=inmemory"
-Environment="ITFLUX_PUBLIC_HOME_URL=https://tes.itflux.ru"
+Environment="ITFLUX_PUBLIC_HOME_URL=https://test.itflux.ru"
+Environment="ADMIN_OTP_REQUIRED=true"
 
 # Обязательные переменные задайте в /etc/itflux/itflux.env:
 #   SECRET_KEY, DJANGO_ALLOWED_HOSTS, PGDATABASE, PGUSER, PGPASSWORD, PGHOST, PGPORT,
 #   LESSON_SECRET, LK_PUBLIC_URL, LK_LESSON_NOTIFY_URL,
 #   JITSI_*, VAPID_*, TELEGRAM_*, PAYMENT_* (не mock в production)
 
+# Harden process
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
 Restart=always
 RestartSec=3
 

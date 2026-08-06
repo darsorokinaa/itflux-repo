@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 MAX_WS_TEXT_BYTES = 2_000_000
 CURSOR_MIN_INTERVAL_SEC = 0.035  # ~28 Hz
-SCENE_LIVE_MIN_INTERVAL_SEC = 0.025
+SCENE_LIVE_MIN_INTERVAL_SEC = 0.012  # ~80 Hz max relay
 # Защита от раздувания буфера при очень быстром штрихе.
 MAX_BUFFERED_OPS = 800
 

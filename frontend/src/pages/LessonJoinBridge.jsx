@@ -1,11 +1,17 @@
 import { useLayoutEffect, useEffect, useState } from "react";
+import {
+  getStoredLessonToken,
+  readAndStoreLessonTokenFromUrl,
+  stripSensitiveParamsFromUrl,
+} from "../utils/sensitiveUrl";
 
 /**
  * Ссылка из ЛК: /lesson/join/?token=JWT
  * 1) Нормализуем путь со слэшем.
- * 2) Проверяем токен через /api/lesson/verify/ (тот же секрет, что в ЛК).
- * 3) Один раз перезагружаем страницу — если nginx отдаёт HTML Django, откроется lesson_room.html.
- * 4) Если снова SPA — показываем подсказку по nginx и данные комнаты (токен уже валиден).
+ * 2) Сразу убираем token из адресной строки (sessionStorage).
+ * 3) Проверяем токен через /api/lesson/verify/.
+ * 4) Один раз перезагружаем страницу — если nginx отдаёт HTML Django, откроется lesson_room.html.
+ * 5) Если снова SPA — подсказка по nginx (токен уже валиден).
  */
 export default function LessonJoinBridge() {
   const [status, setStatus] = useState("init");
@@ -16,14 +22,20 @@ export default function LessonJoinBridge() {
     if (url.pathname === "/lesson/join") {
       url.pathname = "/lesson/join/";
       window.location.replace(url.toString());
+      return;
     }
+    // Сохраняем JWT, но не убираем из URL до reload — Django lesson_room
+    // читает ?token= при первой отдаче HTML/WS.
+    readAndStoreLessonTokenFromUrl();
   }, []);
 
   useEffect(() => {
     const url = new URL(window.location.href);
-    if (url.pathname !== "/lesson/join/") return undefined;
+    if (url.pathname !== "/lesson/join/" && url.pathname !== "/lesson/join") {
+      return undefined;
+    }
 
-    const token = url.searchParams.get("token")?.trim() ?? "";
+    const token = getStoredLessonToken() || readAndStoreLessonTokenFromUrl();
     if (!token) {
       setStatus("no_token");
       return undefined;
@@ -32,7 +44,14 @@ export default function LessonJoinBridge() {
     let cancelled = false;
     setStatus("verifying");
 
-    fetch(`/api/lesson/verify/?token=${encodeURIComponent(token)}`)
+    fetch("/api/lesson/verify/", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Lesson-Token": token,
+      },
+      credentials: "same-origin",
+    })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (cancelled) return;
@@ -49,9 +68,12 @@ export default function LessonJoinBridge() {
           } catch {
             /* ignore */
           }
+          // Token остаётся в URL на reload для Django-шаблона комнаты.
           window.location.reload();
           return;
         }
+        // Остались в SPA — убираем секрет из адресной строки.
+        stripSensitiveParamsFromUrl();
         setStatus("still_spa");
         try {
           const cached = sessionStorage.getItem("lesson_join_last_ok");

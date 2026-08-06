@@ -28,6 +28,18 @@ function boardWsLog(tag: string, data?: Record<string, unknown>) {
   console.debug(`[board-ws] ${tag} ${json}`);
 }
 
+/**
+ * Excalidraw мутирует элементы in-place. Для diff нужна копия полей версии,
+ * иначе prev и next — одни и те же объекты с уже новым version.
+ */
+function snapshotElementsForDiff(elements: unknown[] | null | undefined): unknown[] | null {
+  if (!Array.isArray(elements)) return null;
+  return elements.map((raw) => {
+    if (!raw || typeof raw !== "object") return raw;
+    return { ...(raw as Record<string, unknown>) };
+  });
+}
+
 export type CollabPeer = {
   clientId: string;
   userId?: number | null;
@@ -113,10 +125,11 @@ export function createBoardCollabSession(
   let cursorRaf: number | null = null;
   let pendingCursor: { x: number; y: number; tool?: string } | null = null;
   let lastCursorSentAt = 0;
+  let lastLiveSentAt = 0;
   let reconnectAttempt = 0;
   const CURSOR_MIN_INTERVAL_MS = 40; // ~25 Hz max
-  /** Throttle промежуточных live-кадров (~30–60 мс). Финал — flushLiveNow(). */
-  const LIVE_PUBLISH_INTERVAL_MS = 33;
+  /** Throttle промежуточных live-кадров (~16 мс). Финал — flushLiveNow(). */
+  const LIVE_PUBLISH_INTERVAL_MS = 16;
   const peers = new Map<string, CollabPeer>();
   const selfRole = opts.role || "";
   const seenEventKeys = new Map<string, number>();
@@ -379,7 +392,6 @@ export function createBoardCollabSession(
         version: built.version,
       });
       sendRaw(payload);
-      lastPublishedElements = pendingLive.elements;
     } else {
       boardWsLog("send scene_live", {
         elementCount: built.scene.elements?.length || 0,
@@ -392,9 +404,12 @@ export function createBoardCollabSession(
         version: built.version,
         scene: built.scene,
       });
-      lastPublishedElements = built.scene.elements;
     }
+    // Снимок, не live-ссылка: Excalidraw мутирует элементы in-place (version++),
+    // иначе следующий diff сравнивает массив сам с собой и ops пустые.
+    lastPublishedElements = snapshotElementsForDiff(pendingLive.elements);
     pendingLive = null;
+    lastLiveSentAt = Date.now();
   };
 
   const flushCursor = () => {
@@ -427,7 +442,12 @@ export function createBoardCollabSession(
       };
       pendingVersion = version;
       if (liveTimer != null) return;
-      liveTimer = window.setTimeout(flushLive, LIVE_PUBLISH_INTERVAL_MS);
+      const elapsed = Date.now() - lastLiveSentAt;
+      if (elapsed >= LIVE_PUBLISH_INTERVAL_MS) {
+        flushLive();
+        return;
+      }
+      liveTimer = window.setTimeout(flushLive, LIVE_PUBLISH_INTERVAL_MS - elapsed);
     },
     /** Сразу отправить накопленный live (конец штриха / pointerup) — без debounce. */
     flushLiveNow() {
@@ -439,7 +459,7 @@ export function createBoardCollabSession(
     },
     /** После полного resync — база для следующего diff. */
     resetPublishBase(elements: unknown[] | null | undefined) {
-      lastPublishedElements = Array.isArray(elements) ? elements : null;
+      lastPublishedElements = snapshotElementsForDiff(elements);
     },
     applyOpsLocally(local: CollabScene, ops: BoardSceneOpsPayload): CollabScene {
       return applyBoardOps(local, ops);

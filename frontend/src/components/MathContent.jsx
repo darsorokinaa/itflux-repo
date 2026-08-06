@@ -13,6 +13,7 @@ import { formatProgTaskSheetHtml, convertLatexTextCommandsHtml } from "../utils/
 import { formatFipiUnicodeMathHtml } from "../utils/formatFipiUnicodeMathHtml";
 import { parseTaskHtmlFragment } from "../utils/parseTaskHtmlFragment";
 import { repairOrphanSpanTags } from "../utils/repairTaskHtmlSpans";
+import { sanitizeTaskHtml } from "../utils/sanitizeTaskHtml";
 
 /** Снять слои &lt;…&gt; если HTML целиком попал в БД как экранированный текст. */
 function decodeHtmlEntityLayersIfStoredEscaped(raw) {
@@ -1424,11 +1425,13 @@ function MathContentInner({
     // размонтирует всё дерево при выбросе из эффекта → пустой экран).
     try {
       if (plainHtml) {
-        el.innerHTML = prepareBankTaskDisplayHtml(decoded, {
-          ogeMathChoiceEnhance,
-          progTaskSheet,
-          taskNumber,
-        });
+        el.innerHTML = sanitizeTaskHtml(
+          prepareBankTaskDisplayHtml(decoded, {
+            ogeMathChoiceEnhance,
+            progTaskSheet,
+            taskNumber,
+          }),
+        );
       } else {
       const normalized = normalizeEscapedTaskSymbols(decoded);
       const afterFipiMath = repairFipiSpanAndLogicMarkup(normalized);
@@ -1472,7 +1475,9 @@ function MathContentInner({
         const formatted = formatOgeMathChoiceTaskHtml(afterMatch);
         piped = formatted && formatted.trim() ? formatted : afterMatch;
       }
-      el.innerHTML = convertLogicSpansInsideMathDelimitersToTex(repairOrphanSpanTags(piped));
+      el.innerHTML = sanitizeTaskHtml(
+        convertLogicSpansInsideMathDelimitersToTex(repairOrphanSpanTags(piped)),
+      );
       reinjectMathEnvTexFromRaw(el, decoded);
       repairBrokenBackendArrayTables(el);
       if (shouldNormalizeTables) {
@@ -1516,7 +1521,7 @@ function MathContentInner({
       // а не пустую страницу.
       console.error("MATH_CONTENT_RENDER_ERR:", err);
       try {
-        el.innerHTML = decoded || s;
+        el.innerHTML = sanitizeTaskHtml(decoded || s);
         unwrapBackendMathSpans(el);
       } catch {
         el.textContent = s;

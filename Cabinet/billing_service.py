@@ -3881,10 +3881,12 @@ def student_billing_view(student_user: User) -> list[dict]:
     return result
 
 
-def event_billing_badge(event: ScheduleEvent) -> list[dict]:
+def event_billing_badge(event: ScheduleEvent, student_ids=None) -> list[dict]:
     records = EventBillingRecord.objects.filter(event=event).select_related(
         "student", "package"
     )
+    if student_ids is not None:
+        records = records.filter(student_id__in=list(student_ids))
     if not records.exists():
         return []
     badges = []

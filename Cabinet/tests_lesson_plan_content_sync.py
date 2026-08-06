@@ -169,6 +169,22 @@ class LessonPlanContentSyncServiceTests(TestCase):
         self.assertIn("topic", event.manual_override_fields)
         self.assertEqual(event.content_source, LessonContentSource.MIXED)
 
+    # 5b. Без enrollment тема всё равно сохраняется в карточке (soft-fail плана).
+    def test_edit_topic_without_enrollment_keeps_lesson(self):
+        other = _make_student(self.teacher, username="lp_no_plan", first="Пётр", last="БезПлана")
+        event = self._make_event(student=other)
+        result = LessonLearningPlanSyncService.apply_lesson_edit(
+            event,
+            {"topic": "Тема только в карточке"},
+            teacher=self.teacher,
+            sync_action="lesson_and_plan",
+        )
+        event.refresh_from_db()
+        self.assertEqual(event.topic, "Тема только в карточке")
+        self.assertIn("topic", event.manual_override_fields)
+        self.assertFalse((result.get("plan") or {}).get("plan_updated", True))
+        self.assertEqual((result.get("plan") or {}).get("plan_error"), "no_enrollment")
+
     # 6. Изменение пункта плана обновляет будущий урок.
     def test_plan_item_edit_propagates_to_future_lesson(self):
         event = self._make_event(student=self.student)

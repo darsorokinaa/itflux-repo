@@ -835,6 +835,7 @@ class BillingEventBadgeView(APIView):
     def get(self, request, event_id):
         event = get_object_or_404(ScheduleEvent, pk=event_id)
         profile = getattr(request.user, "profile", None)
+        student_ids = None
         if profile and profile.role == Profile.Role.TEACHER:
             if event.owner_id != request.user.id:
                 return Response({"detail": "Нет доступа"}, status=403)
@@ -843,10 +844,16 @@ class BillingEventBadgeView(APIView):
                 not event.student_id or event.student.user_id != request.user.id
             ):
                 return Response({"detail": "Нет доступа"}, status=403)
+            # Ученик видит только свои биллинговые записи, не одногруппников.
+            from .models import Student
+
+            student_ids = list(
+                Student.objects.filter(user=request.user).values_list("id", flat=True)
+            )
         else:
             return Response({"detail": "Нет доступа"}, status=403)
         ensure_event_billing_records(event)
-        return Response({"badges": event_billing_badge(event)})
+        return Response({"badges": event_billing_badge(event, student_ids=student_ids)})
 
 
 class BillingBulkFinalizeView(APIView):

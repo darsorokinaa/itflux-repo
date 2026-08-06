@@ -7,11 +7,18 @@
 import urllib.request, urllib.parse, re, html, sys, os
 from http.cookiejar import CookieJar
 
-BASE = "https://generatorexams.replit.app"
-ADMIN_USER = "admin"
-ADMIN_PASS = "admin"
+BASE = os.environ.get("SYNC_PROD_BASE", "https://generatorexams.replit.app").rstrip("/")
+ADMIN_USER = os.environ.get("SYNC_PROD_ADMIN_USER", "")
+ADMIN_PASS = os.environ.get("SYNC_PROD_ADMIN_PASS", "")
 LOAD_DATA_PATH = os.path.join(os.path.dirname(__file__), "load_data.sql")
-DEV_DB = "postgresql://postgres:password@helium/heliumdb?sslmode=disable"
+DEV_DB = os.environ.get("SYNC_DEV_DB_URL", "")
+if not ADMIN_USER or not ADMIN_PASS:
+    raise SystemExit(
+        "Set SYNC_PROD_ADMIN_USER and SYNC_PROD_ADMIN_PASS in the environment "
+        "(do not hardcode credentials in the repository)."
+    )
+if not DEV_DB:
+    raise SystemExit("Set SYNC_DEV_DB_URL in the environment.")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "Generator"))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "Generator.settings")

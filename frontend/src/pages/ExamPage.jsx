@@ -581,12 +581,48 @@ function ExamPage() {
   const navigate = useNavigate();
   const lessonEmbedParams = useMemo(() => {
     const sp = new URLSearchParams(location.search);
+    let token = (sp.get("lesson_token") || sp.get("token") || "").trim();
+    if (token) {
+      try {
+        sessionStorage.setItem("itflux_lesson_token", token);
+      } catch {
+        /* ignore */
+      }
+    } else {
+      try {
+        token = (sessionStorage.getItem("itflux_lesson_token") || "").trim();
+      } catch {
+        token = "";
+      }
+    }
     return {
       embed: sp.get("lesson_embed") === "1",
-      token: (sp.get("lesson_token") || "").trim(),
+      token,
       student: sp.get("lesson_student") === "1",
     };
   }, [location.search]);
+
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      let changed = false;
+      for (const key of ["lesson_token", "token"]) {
+        if (url.searchParams.has(key)) {
+          url.searchParams.delete(key);
+          changed = true;
+        }
+      }
+      if (changed) {
+        window.history.replaceState(
+          window.history.state,
+          "",
+          `${url.pathname}${url.search}${url.hash}`,
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const homeworkQuery = useMemo(() => {
     const sp = new URLSearchParams(location.search);
     const embed = sp.get("lesson_embed") === "1";

@@ -969,6 +969,14 @@
       const lessonPageRoot = document.getElementById('lesson-page-root');
 
       const lessonPageToken = "{{ lesson_token|default:''|escapejs }}" || String(qs.get('token') || '').trim();
+      // Убираем JWT из адресной строки после чтения (история / Referer / аналитика).
+      try {
+        if (lessonPageToken && qs.has("token")) {
+          const clean = new URL(window.location.href);
+          clean.searchParams.delete("token");
+          window.history.replaceState(window.history.state, "", clean.pathname + clean.search + clean.hash);
+        }
+      } catch (_) { /* ignore */ }
       const cabinetAssignmentFromServer = "{{ cabinet_assignment|default:''|escapejs }}".trim();
       const cabinetSessionFromServer = "{{ cabinet_session|default:''|escapejs }}".trim();
       const homeworkModeFromServer = "{{ homework_mode|yesno:'true,false' }}" === "true";
@@ -1092,7 +1100,12 @@
       }
 
       const wsProto = location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(`${wsProto}://${location.host}/ws/lesson/${encodeURIComponent(roomId)}/`);
+      const wsTokenQ = lessonPageToken
+        ? `?token=${encodeURIComponent(lessonPageToken)}`
+        : "";
+      const ws = new WebSocket(
+        `${wsProto}://${location.host}/ws/lesson/${encodeURIComponent(roomId)}/${wsTokenQ}`
+      );
       const me = participantName || (isTeacher ? "Учитель" : "Ученик");
       const participants = { [me]: isTeacher ? "teacher" : "student" };
       const cursors = {}; // { name: {x, y, role} }

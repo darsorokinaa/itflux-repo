@@ -18,3 +18,5 @@ PyJWT==2.12.1
 pywebpush>=2.0.1
 Pillow>=10.0.0
 channels_redis
+django-otp>=1.5.0
+qrcode>=8.0
