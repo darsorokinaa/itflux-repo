@@ -34,8 +34,30 @@ function asEl(raw: unknown): El | null {
   return el;
 }
 
+/** Длина points — иначе при shared array-ref между snapshot и live elKey мог совпасть. */
+function pointsSig(el: El): string {
+  const pts = el.points;
+  if (!Array.isArray(pts)) return "0";
+  const last = pts.length ? pts[pts.length - 1] : null;
+  const lx = Array.isArray(last) ? Number(last[0]) || 0 : 0;
+  const ly = Array.isArray(last) ? Number(last[1]) || 0 : 0;
+  return `${pts.length}:${lx}:${ly}`;
+}
+
 function elKey(el: El): string {
-  return `${el.id}:${Number(el.version) || 0}:${Number(el.versionNonce) || 0}:${Number(el.updated) || 0}:${el.isDeleted ? 1 : 0}`;
+  return `${el.id}:${Number(el.version) || 0}:${Number(el.versionNonce) || 0}:${Number(el.updated) || 0}:${el.isDeleted ? 1 : 0}:${pointsSig(el)}`;
+}
+
+/** Глубокая копия элемента для WS: points не должны делить ref с Excalidraw in-place mutate. */
+export function cloneBoardElement(el: Record<string, unknown>): Record<string, unknown> {
+  const copy: Record<string, unknown> = { ...el };
+  if (Array.isArray(el.points)) {
+    copy.points = el.points.map((p) => (Array.isArray(p) ? [p[0], p[1]] : p));
+  }
+  if (el.customData && typeof el.customData === "object") {
+    copy.customData = { ...(el.customData as Record<string, unknown>) };
+  }
+  return copy;
 }
 
 /** Diff previous → next: только изменившиеся/новые/удалённые элементы. */
@@ -58,11 +80,11 @@ export function diffBoardElements(
   for (const [id, el] of nextMap) {
     const was = prevMap.get(id);
     if (!was) {
-      ops.push({ op: "upsert", element: { ...el } });
+      ops.push({ op: "upsert", element: cloneBoardElement(el) });
       continue;
     }
     if (elKey(was) !== elKey(el)) {
-      ops.push({ op: "upsert", element: { ...el } });
+      ops.push({ op: "upsert", element: cloneBoardElement(el) });
     }
   }
   for (const [id, was] of prevMap) {
@@ -84,9 +106,9 @@ export function shouldPublishFullScene(
   opsCount: number,
 ): boolean {
   if (opsCount <= 0) return false;
-  if (elementCount <= FULL_SCENE_ELEMENT_THRESHOLD && opsCount <= FULL_SCENE_OPS_THRESHOLD) {
-    return false;
-  }
+  // Штрих/несколько правок — всегда ops, никогда полный snapshot на каждый кадр.
+  if (opsCount <= FULL_SCENE_OPS_THRESHOLD) return false;
+  if (elementCount <= FULL_SCENE_ELEMENT_THRESHOLD) return false;
   // Много мелких правок — ops выгоднее; полная сцена только если ops почти = вся сцена.
   return opsCount >= Math.max(FULL_SCENE_OPS_THRESHOLD, Math.floor(elementCount * 0.45));
 }

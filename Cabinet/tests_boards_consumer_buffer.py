@@ -124,3 +124,94 @@ class SendOrBufferSceneTests(IsolatedAsyncioTestCase):
         # Должны уйти оба клиента (c1 с накопленным a2, c2 с b).
         self.assertEqual(consumer.channel_layer.group_send.call_count, before + 2)
         self.assertEqual(consumer._pending_scene_by_client, {})
+
+
+class ViewportRelayTests(IsolatedAsyncioTestCase):
+    async def test_viewport_update_is_relayed_and_stored_shared(self):
+        from Cabinet.board_viewport_store import get_teacher_viewport, reset_viewport_store_for_tests
+
+        reset_viewport_store_for_tests()
+        consumer = _make_consumer()
+        consumer.user = type("U", (), {"id": 9})()
+        consumer.client_id = "teacher-1"
+        consumer.display_name = "Учитель"
+        consumer.role = "teacher"
+        consumer.permission = "owner"
+        consumer.board_id = "board-vp-1"
+        consumer.can_edit = True
+        consumer._last_viewport_at = 0.0
+
+        await consumer.receive(
+            text_data=(
+                '{"type":"viewport_update","client_id":"teacher-1",'
+                '"scrollX":120.5,"scrollY":-40,"zoom":1.25,"seq":3}'
+            )
+        )
+        self.assertEqual(consumer.channel_layer.group_send.call_count, 1)
+        event = consumer.channel_layer.group_send.call_args.args[1]
+        payload = event["payload"]
+        self.assertEqual(payload["type"], "viewport_update")
+        self.assertEqual(payload["scrollX"], 120.5)
+        self.assertEqual(payload["scrollY"], -40)
+        self.assertEqual(payload["zoom"], 1.25)
+        cached = get_teacher_viewport("board-vp-1")
+        self.assertIsNotNone(cached)
+        self.assertEqual(cached["type"], "viewport_state")
+        self.assertEqual(cached["scrollX"], 120.5)
+
+    async def test_viewport_request_sends_cached_state_from_store(self):
+        from Cabinet.board_viewport_store import reset_viewport_store_for_tests, set_teacher_viewport
+
+        reset_viewport_store_for_tests()
+        consumer = _make_consumer()
+        consumer.user = type("U", (), {"id": 2})()
+        consumer.client_id = "student-1"
+        consumer.display_name = "Ученик"
+        consumer.role = "student"
+        consumer.permission = "edit"
+        consumer.board_id = "board-vp-2"
+        consumer.can_edit = True
+        consumer.send = AsyncMock()
+        set_teacher_viewport(
+            "board-vp-2",
+            {
+                "type": "viewport_state",
+                "client_id": "teacher-1",
+                "scrollX": 10,
+                "scrollY": 20,
+                "zoom": 1,
+                "seq": 1,
+                "role": "teacher",
+            },
+        )
+        await consumer.receive(text_data='{"type":"viewport_request","client_id":"student-1"}')
+        self.assertTrue(consumer.send.called)
+        sent = consumer.send.call_args.kwargs.get("text_data") or consumer.send.call_args.args[0]
+        import json
+
+        data = json.loads(sent)
+        self.assertEqual(data["type"], "viewport_state")
+        self.assertEqual(data["scrollX"], 10)
+    async def test_sync_probe_echoes_ack_to_sender(self):
+        consumer = _make_consumer()
+        consumer.user = type("U", (), {"id": 1})()
+        consumer.client_id = "c1"
+        consumer.display_name = "A"
+        consumer.role = "teacher"
+        consumer.permission = "owner"
+        consumer.board_id = "board-probe"
+        consumer.can_edit = True
+        consumer.send = AsyncMock()
+        await consumer.receive(
+            text_data='{"type":"sync_probe","client_id":"c1","probe_id":"p1","t_sent":1000}'
+        )
+        self.assertTrue(consumer.send.called)
+        import json
+
+        ack = json.loads(consumer.send.call_args.kwargs.get("text_data") or consumer.send.call_args.args[0])
+        self.assertEqual(ack["type"], "sync_probe_ack")
+        self.assertTrue(ack.get("echo"))
+        self.assertEqual(ack["probe_id"], "p1")
+        self.assertIn("t_server", ack)
+        # Также ретрансляция пирам.
+        self.assertTrue(consumer.channel_layer.group_send.called)

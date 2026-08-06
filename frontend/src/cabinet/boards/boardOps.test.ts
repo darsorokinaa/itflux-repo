@@ -40,8 +40,21 @@ describe("boardOps", () => {
     expect(b).toBeTruthy();
   });
 
+  it("diffBoardElements ловит рост points при том же version (защита shared-ref)", () => {
+    const prev = [{ id: "s", version: 1, points: [[0, 0]] }];
+    const next = [{ id: "s", version: 1, points: [[0, 0], [1, 1], [2, 2]] }];
+    const ops = diffBoardElements(prev, next);
+    expect(ops).toHaveLength(1);
+    expect(ops[0].op).toBe("upsert");
+    const el = (ops[0] as { element: { points: unknown[] } }).element;
+    expect(el.points).toHaveLength(3);
+    // deep clone — не тот же массив
+    expect(el.points).not.toBe(next[0].points);
+  });
+
   it("shouldPublishFullScene не требует full на мелких правках", () => {
     expect(shouldPublishFullScene(20, 3)).toBe(false);
+    expect(shouldPublishFullScene(200, 3)).toBe(false);
     expect(shouldPublishFullScene(200, 120)).toBe(true);
   });
 

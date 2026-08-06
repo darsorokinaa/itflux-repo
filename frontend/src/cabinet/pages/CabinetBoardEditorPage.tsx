@@ -68,12 +68,19 @@ import {
   type CollabPeer,
   type CollabScene,
   type RemoteCursor,
+  type TeacherViewport,
 } from "../boards/boardCollab";
 import { applyBoardOps, coalesceBoardOps, type BoardElementOp } from "../boards/boardOps";
 import {
   filterUnauthorizedMutations,
   stampElementOwnership,
 } from "../boards/boardOwnership";
+import {
+  isNewerViewport,
+  viewportAppStatePatch,
+  viewportDriftTooFar,
+  zoomValueOf,
+} from "../boards/boardViewport";
 import {
   createBoardLoadMetrics,
   estimateSceneBytes,
@@ -362,6 +369,8 @@ export default function CabinetBoardEditorPage() {
   const burgerOpenRef = useRef(true);
   const hadSelectionRef = useRef(false);
   const applyingRemoteRef = useRef(false);
+  /** Generation counter: overlapping remote applies must not clear the flag early. */
+  const applyingRemoteGenRef = useRef(0);
   /** Sync-гард только на onChange от updateScene(collaborators); не держит publishLive. */
   const applyingCollaboratorsRef = useRef(false);
   /**
@@ -372,7 +381,7 @@ export default function CabinetBoardEditorPage() {
    */
   const isDrawingGestureRef = useRef(false);
   const pendingRemoteOpsQueueRef = useRef<Array<{ ops: BoardSceneOpsPayload; meta: { version?: number } }>>([]);
-  const pendingRemoteSceneRef = useRef<{ scene: CollabScene; meta: { fromSaved?: boolean; version?: number; cleared?: boolean } } | null>(null);
+  const pendingRemoteSceneRef = useRef<{ scene: CollabScene; meta: { fromSaved?: boolean; version?: number; cleared?: boolean; lite?: boolean } } | null>(null);
   const pendingResyncRef = useRef(false);
   /** Файлы, догруженные во время локального жеста — применяем на pointerup, не revoke. */
   const pendingHydrateFilesRef = useRef<Record<string, unknown> | null>(null);
@@ -389,6 +398,14 @@ export default function CabinetBoardEditorPage() {
   const saverRef = useRef<{ schedule: () => void; flush: () => Promise<void>; cancel: () => void } | null>(null);
   const collabRef = useRef<ReturnType<typeof createBoardCollabSession> | null>(null);
   const remoteCursorsRef = useRef(new Map<string, RemoteCursor>());
+  const lastTeacherViewportRef = useRef<TeacherViewport | null>(null);
+  const followingTeacherRef = useRef(false);
+  const applyingViewportRef = useRef(false);
+  const remoteApplyRafRef = useRef<number | null>(null);
+  const pendingRemoteOpsFrameRef = useRef<Array<{ ops: BoardSceneOpsPayload; meta: { version?: number } }>>([]);
+  const pendingRemoteSceneFrameRef = useRef<{ scene: CollabScene; meta: { fromSaved?: boolean; version?: number; cleared?: boolean; lite?: boolean } } | null>(null);
+  const cursorApplyRafRef = useRef<number | null>(null);
+  const [followingTeacher, setFollowingTeacher] = useState(false);
   const boardNamesRef = useRef({ owner: "", student: "" });
   const uploadingFileIdsRef = useRef(new Set<string>());
   /** Постоянные API URL вне Excalidraw — BinaryFileData не сохраняет itfluxStableURL. */
@@ -708,6 +725,13 @@ export default function CabinetBoardEditorPage() {
         window.removeEventListener("pointercancel", gestureEndBoundRef.current);
         gestureEndBoundRef.current = null;
       }
+      isDrawingGestureRef.current = false;
+      pendingRemoteOpsQueueRef.current = [];
+      pendingRemoteSceneRef.current = null;
+      pendingResyncRef.current = false;
+      pendingHydrateFilesRef.current = null;
+      pendingRemoteOpsFrameRef.current = [];
+      pendingRemoteSceneFrameRef.current = null;
       saverRef.current?.cancel();
     };
   }, []);
@@ -738,6 +762,16 @@ export default function CabinetBoardEditorPage() {
     uploadingFileIdsRef.current = new Set();
     imageUploadStatusRef.current = "idle";
     setImageUploadStatus("idle");
+    isDrawingGestureRef.current = false;
+    pendingRemoteOpsQueueRef.current = [];
+    pendingRemoteSceneRef.current = null;
+    pendingResyncRef.current = false;
+    pendingHydrateFilesRef.current = null;
+    pendingRemoteOpsFrameRef.current = [];
+    pendingRemoteSceneFrameRef.current = null;
+    lastTeacherViewportRef.current = null;
+    followingTeacherRef.current = false;
+    setFollowingTeacher(false);
     metricsRef.current = createBoardLoadMetrics();
     setLoading(true);
     setLoadPhase("loading_scene");
@@ -1084,16 +1118,70 @@ export default function CabinetBoardEditorPage() {
 
   const clearApplyingRemoteSoon = useCallback(() => {
     // Снимаем флаг ПОСЛЕ следующего кадра, не на микротаске: onChange от
-    // updateScene у Excalidraw не гарантированно синхронный (иногда уходит
-    // за пределы текущего таска). При микротаске флаг снимался раньше, чем
-    // реально прилетал echo-onChange от applyMerged — тот проходил как
-    // «настоящее» локальное изменение, запускал autosave, сервер рассылал
-    // новый scene_saved, applyMerged срабатывал снова — самоподдерживающийся
-    // цикл автосохранений примерно раз в секунду даже без единого действия
-    // пользователя (наблюдалось: version доски росла без остановки).
+    // updateScene у Excalidraw не гарантированно синхронный. Generation
+    // counter: быстрые подряд apply (ops+hydrate) не должны снять флаг
+    // раньше последнего updateScene.
+    const gen = (applyingRemoteGenRef.current += 1);
     requestAnimationFrame(() => {
-      applyingRemoteRef.current = false;
+      requestAnimationFrame(() => {
+        if (applyingRemoteGenRef.current === gen) {
+          applyingRemoteRef.current = false;
+        }
+      });
     });
+  }, []);
+
+  const resetCollabTransientState = useCallback(() => {
+    isDrawingGestureRef.current = false;
+    pendingRemoteOpsQueueRef.current = [];
+    pendingRemoteSceneRef.current = null;
+    pendingResyncRef.current = false;
+    pendingHydrateFilesRef.current = null;
+    pendingRemoteOpsFrameRef.current = [];
+    pendingRemoteSceneFrameRef.current = null;
+    if (remoteApplyRafRef.current != null) {
+      window.cancelAnimationFrame(remoteApplyRafRef.current);
+      remoteApplyRafRef.current = null;
+    }
+    if (cursorApplyRafRef.current != null) {
+      window.cancelAnimationFrame(cursorApplyRafRef.current);
+      cursorApplyRafRef.current = null;
+    }
+    if (gestureEndBoundRef.current) {
+      window.removeEventListener("pointerup", gestureEndBoundRef.current);
+      window.removeEventListener("pointercancel", gestureEndBoundRef.current);
+      gestureEndBoundRef.current = null;
+    }
+    applyingRemoteRef.current = false;
+    applyingCollaboratorsRef.current = false;
+    applyingViewportRef.current = false;
+    followingTeacherRef.current = false;
+    setFollowingTeacher(false);
+  }, []);
+
+  /** Не даём lite/scene_saved затереть pending cleared во время жеста. */
+  const queuePendingRemoteScene = useCallback((
+    target: "gesture" | "frame",
+    scene: CollabScene,
+    meta: { fromSaved?: boolean; version?: number; cleared?: boolean; lite?: boolean },
+  ) => {
+    const slot = target === "gesture" ? pendingRemoteSceneRef : pendingRemoteSceneFrameRef;
+    const prev = slot.current;
+    if (prev?.meta?.cleared && meta.lite && !meta.cleared) {
+      // Sticky clear: lite только подтягивает version.
+      slot.current = {
+        scene: prev.scene,
+        meta: {
+          ...prev.meta,
+          version: typeof meta.version === "number" ? meta.version : prev.meta.version,
+        },
+      };
+      return;
+    }
+    if (prev?.meta?.cleared && !meta.cleared && meta.fromSaved) {
+      return;
+    }
+    slot.current = { scene, meta };
   }, []);
 
   const handleChange = useCallback(
@@ -1216,6 +1304,29 @@ export default function CabinetBoardEditorPage() {
       queueMicrotask(() => {
         applyingCollaboratorsRef.current = false;
       });
+    };
+
+    const scheduleCollaboratorsApply = () => {
+      if (cursorApplyRafRef.current != null) return;
+      cursorApplyRafRef.current = window.requestAnimationFrame(() => {
+        cursorApplyRafRef.current = null;
+        applyCollaborators();
+      });
+    };
+
+    const publishOwnViewportNow = (immediate = false) => {
+      if (!canManage || !apiRef.current) return;
+      const app = apiRef.current.getAppState?.() || {};
+      collabRef.current?.publishViewport(
+        {
+          scrollX: Number(app.scrollX) || 0,
+          scrollY: Number(app.scrollY) || 0,
+          zoom: zoomValueOf(app.zoom),
+          width: Number(app.width) || undefined,
+          height: Number(app.height) || undefined,
+        },
+        { immediate },
+      );
     };
 
     const handleRemoteOpsNow = (ops: BoardSceneOpsPayload, meta: { version?: number }) => {
@@ -1570,9 +1681,32 @@ export default function CabinetBoardEditorPage() {
           })();
         };
 
-    const handleRemoteSceneNow = (scene: CollabScene, meta: { fromSaved?: boolean; version?: number; cleared?: boolean }) => {
+    const handleRemoteSceneNow = (scene: CollabScene, meta: { fromSaved?: boolean; version?: number; cleared?: boolean; lite?: boolean }) => {
           if (!apiRef.current) return;
           if (boardIdRef.current !== boardId) return;
+
+          // Lite scene_saved: только синхронизация version — без updateScene полной доски.
+          if (meta.fromSaved && meta.lite && !meta.cleared) {
+            if (typeof meta.version === "number") {
+              if (meta.version === lastSaveServerVersionRef.current) {
+                versionRef.current = meta.version;
+                if (!dirtyRef.current && localRevisionRef.current <= lastSavedRevisionRef.current) {
+                  safeSetSaveStatus("saved");
+                  setConflict(false);
+                }
+                setBoard((prev) => (prev ? { ...prev, version: meta.version! } : prev));
+                return;
+              }
+              if (meta.version < versionRef.current) return;
+              versionRef.current = meta.version;
+              setBoard((prev) => (prev ? { ...prev, version: meta.version! } : prev));
+              if (!dirtyRef.current) {
+                safeSetSaveStatus("saved");
+                setConflict(false);
+              }
+            }
+            return;
+          }
 
           rememberStableUrls(
             stableFileUrlsRef.current,
@@ -1776,6 +1910,45 @@ export default function CabinetBoardEditorPage() {
     };
     flushPendingRemoteAppliesRef.current = flushPendingRemoteApplies;
 
+    /** Один apply на кадр: иначе очередь updateScene растёт и штрихи «догоняют» минутами. */
+    const flushRemoteFrame = () => {
+      remoteApplyRafRef.current = null;
+      if (isDrawingGestureRef.current) return;
+      const opsQueue = pendingRemoteOpsFrameRef.current;
+      pendingRemoteOpsFrameRef.current = [];
+      const scenePending = pendingRemoteSceneFrameRef.current;
+      pendingRemoteSceneFrameRef.current = null;
+      if (opsQueue.length) {
+        const mergedOps: BoardElementOp[] = [];
+        let files: Record<string, unknown> = {};
+        let appStatePatch: Record<string, unknown> = {};
+        let version: number | undefined;
+        for (const { ops, meta } of opsQueue) {
+          mergedOps.push(...(ops.ops || []));
+          files = { ...files, ...(ops.files || {}) };
+          appStatePatch = { ...appStatePatch, ...(ops.appStatePatch || {}) };
+          if (typeof meta.version === "number") version = meta.version;
+        }
+        handleRemoteOpsNow(
+          {
+            ops: coalesceBoardOps(mergedOps),
+            files,
+            appStatePatch,
+          },
+          { version },
+        );
+      }
+      if (scenePending) {
+        // Lite/saved/clear и scene_live — всегда merge (не дропать при чужих ops).
+        handleRemoteSceneNow(scenePending.scene, scenePending.meta);
+      }
+    };
+
+    const scheduleRemoteFrame = () => {
+      if (remoteApplyRafRef.current != null) return;
+      remoteApplyRafRef.current = window.requestAnimationFrame(flushRemoteFrame);
+    };
+
     const session = createBoardCollabSession(
       boardId,
       displayName,
@@ -1784,19 +1957,47 @@ export default function CabinetBoardEditorPage() {
           if (status === "open") {
             metricsRef.current.wsConnectedAt = performance.now();
             setLoadPhase(hostReadyRef.current ? "ready" : "connecting");
+            // Учитель сразу отдаёт viewport — ученик может включить follow без ожидания pan.
+            if (canManage) {
+              window.setTimeout(() => publishOwnViewportNow(true), 80);
+            } else {
+              collabRef.current?.requestViewport();
+            }
+            // Автозамер RTT при включённой диагностике (localStorage / DEV).
+            try {
+              const dbg =
+                Boolean(import.meta.env?.DEV)
+                || window.localStorage?.getItem("itflux_board_sync_debug") === "1";
+              if (dbg) {
+                window.setTimeout(() => {
+                  void collabRef.current?.runSyncProbe()?.then((r) => {
+                    // eslint-disable-next-line no-console
+                    console.info("[board-ws] sync_probe", r);
+                  });
+                }, 200);
+              }
+            } catch {
+              /* ignore */
+            }
           } else if (status === "closed") {
             metricsRef.current.reconnectCount += 1;
             setLoadPhase("reconnecting");
           }
           setCollabStatus(status === "connecting" ? "connecting" : status);
         },
-        onPeersChange: setCollabPeers,
+        onPeersChange: (peers) => {
+          setCollabPeers(peers);
+          if (canManage && peers.length) {
+            publishOwnViewportNow(true);
+          }
+        },
         onRemoteOps: (ops, meta) => {
           if (isDrawingGestureRef.current) {
             pendingRemoteOpsQueueRef.current.push({ ops, meta });
             return;
           }
-          handleRemoteOpsNow(ops, meta);
+          pendingRemoteOpsFrameRef.current.push({ ops, meta });
+          scheduleRemoteFrame();
         },
         onRemoteFileAdd: (files, elements) => {
           if (isDrawingGestureRef.current) {
@@ -1838,14 +2039,34 @@ export default function CabinetBoardEditorPage() {
           } else {
             remoteCursorsRef.current.set(clientId, cursor);
           }
-          applyCollaborators();
+          scheduleCollaboratorsApply();
+        },
+        onRemoteViewport: (vp) => {
+          if (!isNewerViewport(lastTeacherViewportRef.current, vp)) return;
+          lastTeacherViewportRef.current = vp;
+          if (followingTeacherRef.current) {
+            applyingViewportRef.current = true;
+            apiRef.current?.updateScene?.({
+              appState: viewportAppStatePatch(vp),
+              captureUpdate: CaptureUpdateAction.NEVER,
+            });
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                applyingViewportRef.current = false;
+              });
+            });
+          }
+        },
+        onViewportRequest: () => {
+          if (canManage) publishOwnViewportNow(true);
         },
         onRemoteScene: (scene, meta) => {
           if (isDrawingGestureRef.current) {
-            pendingRemoteSceneRef.current = { scene, meta };
+            queuePendingRemoteScene("gesture", scene, meta);
             return;
           }
-          handleRemoteSceneNow(scene, meta);
+          queuePendingRemoteScene("frame", scene, meta);
+          scheduleRemoteFrame();
         },
       },
       { role },
@@ -1857,6 +2078,7 @@ export default function CabinetBoardEditorPage() {
       session.close();
       collabRef.current = null;
       remoteCursorsRef.current.clear();
+      resetCollabTransientState();
       setCollabPeers([]);
       setCollabStatus("off");
     };
@@ -1869,9 +2091,83 @@ export default function CabinetBoardEditorPage() {
     collaborative,
     excalidrawReady,
     loading,
+    queuePendingRemoteScene,
+    resetCollabTransientState,
     safeSetSaveStatus,
     showNotice,
   ]);
+
+  const applyTeacherViewport = useCallback((vp: TeacherViewport, opts: { notice?: boolean } = {}) => {
+    const api = apiRef.current;
+    if (!api) return;
+    applyingViewportRef.current = true;
+    api.updateScene?.({
+      appState: viewportAppStatePatch(vp),
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+    // Снимаем флаг после кадра — onScrollChange от нашего apply не должен гасить follow.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        applyingViewportRef.current = false;
+      });
+    });
+    if (opts.notice) {
+      showNotice("Перешли к области учителя");
+    }
+  }, [showNotice]);
+
+  const stopFollowTeacher = useCallback((reason?: string) => {
+    if (!followingTeacherRef.current) return;
+    followingTeacherRef.current = false;
+    setFollowingTeacher(false);
+    if (reason) showNotice(reason);
+  }, [showNotice]);
+
+  const startFollowTeacher = useCallback(() => {
+    followingTeacherRef.current = true;
+    setFollowingTeacher(true);
+    const cached = lastTeacherViewportRef.current;
+    if (cached) {
+      applyTeacherViewport(cached);
+    } else {
+      showNotice("Ожидаем положение учителя…");
+    }
+    collabRef.current?.requestViewport();
+  }, [applyTeacherViewport, showNotice]);
+
+  /** Вернуться к последнему viewport учителя (без постоянного слежения). */
+  const returnToTeacherViewport = useCallback(() => {
+    const cached = lastTeacherViewportRef.current;
+    if (!cached) {
+      collabRef.current?.requestViewport();
+      showNotice("Курсор/область учителя пока не известны");
+      return;
+    }
+    applyTeacherViewport(cached, { notice: true });
+  }, [applyTeacherViewport, showNotice]);
+
+  const handleScrollChange = useCallback((scrollX: number, scrollY: number, zoom: number) => {
+    // Учитель публикует viewport отдельно от курсора и сцены.
+    if (canManageRefLocal.current) {
+      const api = apiRef.current;
+      const app = api?.getAppState?.() || {};
+      collabRef.current?.publishViewport({
+        scrollX,
+        scrollY,
+        zoom,
+        width: Number(app.width) || undefined,
+        height: Number(app.height) || undefined,
+      });
+      return;
+    }
+    // Ученик в follow: ручной pan/zoom отключает слежение.
+    if (!followingTeacherRef.current || applyingViewportRef.current) return;
+    const target = lastTeacherViewportRef.current;
+    if (!target) return;
+    if (viewportDriftTooFar({ scrollX, scrollY, zoom }, target)) {
+      stopFollowTeacher("Слежение отключено — вы переместили доску");
+    }
+  }, [stopFollowTeacher]);
 
   const handlePointerSceneMove = useCallback((x: number, y: number, tool: string) => {
     if (!collaborative && !canEdit) return;
@@ -1915,30 +2211,6 @@ export default function CabinetBoardEditorPage() {
     if (!collaborative && !canEdit) return;
     collabRef.current?.flushLiveNow();
   }, [canEdit, collaborative]);
-
-  /** Клик по аватарке участника — центрируем холст на его последнем курсоре (как в Miro). */
-  const jumpToPeer = useCallback((clientId: string | null) => {
-    if (!clientId) return;
-    const api = apiRef.current;
-    const cursor = remoteCursorsRef.current.get(clientId);
-    if (!api || !cursor) {
-      showNotice("Курсор участника пока не виден");
-      return;
-    }
-    const appState = api.getAppState?.() || {};
-    const rawZoom = appState.zoom;
-    const zoom = typeof rawZoom === "number"
-      ? rawZoom
-      : Number((rawZoom as { value?: number } | undefined)?.value) || 1;
-    const width = Number(appState.width) || (editorRootRef.current?.clientWidth || window.innerWidth);
-    const height = Number(appState.height) || (editorRootRef.current?.clientHeight || window.innerHeight);
-    api.updateScene?.({
-      appState: {
-        scrollX: width / (2 * zoom) - cursor.x,
-        scrollY: height / (2 * zoom) - cursor.y,
-      },
-    });
-  }, [showNotice]);
 
   const generateIdForFile = useCallback(async (_file: File) => {
     if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -2399,21 +2671,48 @@ export default function CabinetBoardEditorPage() {
               aria-label={collabTitle}
             >
               {collabParticipants.map((person) => (
-                <button
+                <span
                   key={person.key}
-                  type="button"
-                  className={[
-                    "cb-board-editor__avatar",
-                    person.clientId ? "cb-board-editor__avatar--clickable" : "",
-                  ].filter(Boolean).join(" ")}
+                  className="cb-board-editor__avatar"
                   style={{ backgroundColor: person.color }}
-                  title={person.clientId ? `Перейти к ${person.name}` : person.name}
-                  disabled={!person.clientId}
-                  onClick={() => jumpToPeer(person.clientId)}
+                  title={person.name}
                 >
                   {person.initials}
-                </button>
+                </span>
               ))}
+            </div>
+          ) : null}
+          {collaborative && !canManage ? (
+            <div className="cb-board-editor__follow" role="group" aria-label="Слежение за учителем">
+              {followingTeacher ? (
+                <button
+                  type="button"
+                  className="cb-board-editor__follow-btn cb-board-editor__follow-btn--active"
+                  onClick={() => stopFollowTeacher("Слежение выключено")}
+                  title="Прекратить слежение"
+                >
+                  Слежение включено
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="cb-board-editor__follow-btn"
+                  onClick={startFollowTeacher}
+                  title="Перейти к текущей области учителя и следовать за ним"
+                >
+                  Следовать за учителем
+                </button>
+              )}
+              {!followingTeacher ? (
+                <button
+                  type="button"
+                  className="cb-board-editor__follow-btn cb-board-editor__follow-btn--ghost"
+                  onClick={returnToTeacherViewport}
+                  title="Один раз перейти к области учителя"
+                >
+                  Вернуться к учителю
+                </button>
+              ) : null}
             </div>
           ) : null}
           {saveStatus === "error" ? (
@@ -2640,6 +2939,7 @@ export default function CabinetBoardEditorPage() {
           onPointerSceneMove={handlePointerSceneMove}
           onPointerSceneDown={handlePointerSceneDown}
           onPointerSceneUp={handlePointerSceneUp}
+          onScrollChange={handleScrollChange}
           generateIdForFile={generateIdForFile}
         />
       </div>

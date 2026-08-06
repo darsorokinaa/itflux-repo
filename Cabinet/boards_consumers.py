@@ -12,12 +12,14 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
 
 from .boards_api import board_collab_group_name
+from .board_viewport_store import get_teacher_viewport, set_teacher_viewport
 
 logger = logging.getLogger(__name__)
 
 MAX_WS_TEXT_BYTES = 2_000_000
 CURSOR_MIN_INTERVAL_SEC = 0.035  # ~28 Hz
-SCENE_LIVE_MIN_INTERVAL_SEC = 0.012  # ~80 Hz max relay
+SCENE_LIVE_MIN_INTERVAL_SEC = 0.020  # ~50 Hz max relay — не копить очередь
+VIEWPORT_MIN_INTERVAL_SEC = 0.045  # ~22 Hz
 # Защита от раздувания буфера при очень быстром штрихе.
 MAX_BUFFERED_OPS = 800
 
@@ -75,10 +77,13 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
         self.user = self.scope.get("user")
         self._last_cursor_at = 0.0
         self._last_scene_live_at = 0.0
+        self._last_viewport_at = 0.0
         # Per-client буфер: иначе ops ученика в том же 25ms-окне затирали
         # pending учителя (и наоборот) — штрихи/элементы пропадали у пиров.
         self._pending_scene_by_client: dict[str, dict] = {}
         self._scene_flush_task = None
+        self._pending_viewport_event = None
+        self._viewport_flush_task = None
 
         if not self.user or not self.user.is_authenticated:
             await self.close(code=4401)
@@ -123,14 +128,24 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                 pass
         pending_map = getattr(self, "_pending_scene_by_client", None) or {}
         if pending_map and getattr(self, "group_name", None):
-            # Последние buffered кадры — отдать пирам перед выходом.
+            # Последние buffered кадры — coalesce + отдать пирам (как _flush_all_pending).
             try:
-                for event in pending_map.values():
-                    await self.channel_layer.group_send(self.group_name, event)
+                self._pending_scene_by_client = pending_map
+                await self._flush_all_pending()
             except Exception:
                 logger.debug("board collab flush on disconnect failed", exc_info=True)
         self._pending_scene_by_client = {}
         self._scene_flush_task = None
+        # Сбросить pending viewport.
+        vp_task = getattr(self, "_viewport_flush_task", None)
+        if vp_task and not vp_task.done():
+            vp_task.cancel()
+            try:
+                await vp_task
+            except asyncio.CancelledError:
+                pass
+        self._pending_viewport_event = None
+        self._viewport_flush_task = None
         if getattr(self, "group_name", None):
             if self.client_id:
                 await self.channel_layer.group_send(
@@ -293,9 +308,14 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
         if msg_type == "join":
             self.client_id = str(data.get("client_id") or "")[:64]
             self.display_name = str(data.get("display_name") or "")[:120]
-            role = str(data.get("role") or self.role or "")[:32]
-            if role in ("teacher", "student", "viewer"):
-                self.role = role
+            # Роль только из ACL (permission), не из клиента — иначе ученик
+            # может прислать role=teacher и стать follow-target.
+            if self.permission == "owner":
+                self.role = "teacher"
+            elif self.can_edit:
+                self.role = "student"
+            else:
+                self.role = "viewer"
             if _board_debug_enabled():
                 logger.info(
                     "board_ws join board=%s user=%s client=%s role=%s",
@@ -318,6 +338,13 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                     },
                 },
             )
+            # Shared Redis/L1 viewport — доступен с любого ASGI worker.
+            cached = await database_sync_to_async(get_teacher_viewport)(str(self.board_id))
+            if cached and cached.get("client_id") != self.client_id:
+                try:
+                    await self.send(text_data=json.dumps(cached, ensure_ascii=False))
+                except Exception:
+                    logger.debug("board collab viewport_state send failed", exc_info=True)
             return
 
         if msg_type in ("scene_live", "scene_ops"):
@@ -517,6 +544,164 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             )
             return
 
+        if msg_type in ("viewport_update", "viewport"):
+            # Viewport — отдельный realtime-поток. Без БД и без scene-буфера.
+            # Throttle с latest-wins буфером: не дропаем финальный pan/zoom.
+            try:
+                scroll_x = float(data.get("scrollX"))
+                scroll_y = float(data.get("scrollY"))
+                raw_zoom = data.get("zoom")
+                if isinstance(raw_zoom, dict):
+                    raw_zoom = raw_zoom.get("value")
+                zoom = float(raw_zoom)
+            except (TypeError, ValueError, AttributeError):
+                return
+            if zoom <= 0 or zoom > 100:
+                return
+            width = data.get("width")
+            height = data.get("height")
+            try:
+                width = float(width) if width is not None else None
+                height = float(height) if height is not None else None
+            except (TypeError, ValueError):
+                width = None
+                height = None
+            payload = {
+                "type": "viewport_update",
+                "client_id": str(data.get("client_id") or self.client_id)[:64],
+                "user_id": self.user.id,
+                "display_name": self.display_name,
+                "role": self.role,
+                "scrollX": scroll_x,
+                "scrollY": scroll_y,
+                "zoom": zoom,
+                "seq": data.get("seq"),
+                "t_sent": data.get("t_sent"),
+            }
+            if width is not None:
+                payload["width"] = width
+            if height is not None:
+                payload["height"] = height
+            force = bool(data.get("immediate") or data.get("force"))
+            event = {"type": "board.collab", "payload": payload}
+            now = time.monotonic()
+            elapsed = now - self._last_viewport_at
+            if force or elapsed >= VIEWPORT_MIN_INTERVAL_SEC:
+                task = getattr(self, "_viewport_flush_task", None)
+                if task and not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                self._pending_viewport_event = None
+                self._viewport_flush_task = None
+                self._last_viewport_at = time.monotonic()
+                if self.role == "teacher" or self.permission == "owner":
+                    state = {**payload, "type": "viewport_state"}
+                    await database_sync_to_async(set_teacher_viewport)(str(self.board_id), state)
+                await self.channel_layer.group_send(self.group_name, event)
+                return
+
+            self._pending_viewport_event = event
+            if self._viewport_flush_task is None or self._viewport_flush_task.done():
+                delay = max(0.0, VIEWPORT_MIN_INTERVAL_SEC - elapsed)
+
+                async def _flush_vp(d: float):
+                    try:
+                        if d > 0:
+                            await asyncio.sleep(d)
+                        pending = self._pending_viewport_event
+                        self._pending_viewport_event = None
+                        self._viewport_flush_task = None
+                        if not pending:
+                            return
+                        self._last_viewport_at = time.monotonic()
+                        pl = pending.get("payload") or {}
+                        if self.role == "teacher" or self.permission == "owner":
+                            state = {**pl, "type": "viewport_state"}
+                            await database_sync_to_async(set_teacher_viewport)(
+                                str(self.board_id), state
+                            )
+                        await self.channel_layer.group_send(self.group_name, pending)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.debug("board viewport flush failed", exc_info=True)
+                        self._viewport_flush_task = None
+
+                self._viewport_flush_task = asyncio.create_task(_flush_vp(delay))
+            return
+
+        if msg_type == "viewport_request":
+            # Отдать кэш напрямую запросившему; плюс broadcast request учителю.
+            # Сначала flush pending viewport учителя в store, если есть.
+            pending_vp = getattr(self, "_pending_viewport_event", None)
+            if pending_vp and (self.role == "teacher" or self.permission == "owner"):
+                pl = pending_vp.get("payload") or {}
+                state = {**pl, "type": "viewport_state"}
+                await database_sync_to_async(set_teacher_viewport)(str(self.board_id), state)
+            cached = await database_sync_to_async(get_teacher_viewport)(str(self.board_id))
+            if cached:
+                try:
+                    await self.send(text_data=json.dumps(cached, ensure_ascii=False))
+                except Exception:
+                    pass
+            await self.channel_layer.group_send(
+                self.group_name,
+                {
+                    "type": "board.collab",
+                    "payload": {
+                        "type": "viewport_request",
+                        "client_id": str(data.get("client_id") or self.client_id)[:64],
+                    },
+                },
+            )
+            return
+
+        if msg_type == "sync_probe":
+            # Измерение RTT: сервер штампует t_server и ретранслирует пирам
+            # (и эхо отправителю с echo=true для одностороннего замера без 2-го клиента).
+            t_server = int(time.time() * 1000)
+            probe = {
+                "type": "sync_probe",
+                "client_id": str(data.get("client_id") or self.client_id)[:64],
+                "probe_id": str(data.get("probe_id") or "")[:64],
+                "t_sent": data.get("t_sent"),
+                "t_server": t_server,
+            }
+            # Эхо отправителю — можно замерить client→server→client без пира.
+            try:
+                await self.send(
+                    text_data=json.dumps({**probe, "type": "sync_probe_ack", "echo": True}, ensure_ascii=False)
+                )
+            except Exception:
+                pass
+            await self.channel_layer.group_send(
+                self.group_name,
+                {"type": "board.collab", "payload": probe},
+            )
+            return
+
+        if msg_type == "sync_probe_ack":
+            # Ответ пира на probe — ретранслируем инициатору.
+            await self.channel_layer.group_send(
+                self.group_name,
+                {
+                    "type": "board.collab",
+                    "payload": {
+                        "type": "sync_probe_ack",
+                        "client_id": str(data.get("client_id") or self.client_id)[:64],
+                        "probe_id": str(data.get("probe_id") or "")[:64],
+                        "t_sent": data.get("t_sent"),
+                        "t_server": data.get("t_server"),
+                        "t_recv": data.get("t_recv"),
+                        "echo": False,
+                    },
+                },
+            )
+            return
+
         if msg_type == "active_tool_change":
             await self.channel_layer.group_send(
                 self.group_name,
@@ -565,13 +750,19 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                 "file_add",
                 "cursor",
                 "cursor_move",
+                "viewport_update",
                 "presence_join",
                 "active_tool_change",
+                "sync_probe",
             )
             and payload.get("client_id")
             and payload.get("client_id") == self.client_id
         ):
             return
+        # viewport_request нужен только учителю (ответит свежим viewport).
+        if payload.get("type") == "viewport_request" and self.role not in ("teacher",) and self.permission != "owner":
+            return
+        # sync_probe_ack с echo=False — доставляем всем, инициатор отфильтрует по probe_id.
         try:
             await self.send(text_data=json.dumps(payload, ensure_ascii=False))
         except Exception:

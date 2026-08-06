@@ -586,6 +586,59 @@ a.cb-board-card {
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
+.cb-board-editor__follow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  flex-wrap: wrap;
+}
+
+.cb-board-editor__follow-btn {
+  appearance: none;
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.cb-board-editor__follow-btn:hover,
+.cb-board-editor__follow-btn:focus-visible {
+  background: rgba(37, 99, 235, 0.14);
+}
+
+.cb-board-editor__follow-btn--active {
+  border-color: rgba(21, 128, 61, 0.45);
+  background: rgba(21, 128, 61, 0.12);
+  color: #15803d;
+}
+
+.cb-board-editor__follow-btn--ghost {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: transparent;
+  color: inherit;
+  font-weight: 500;
+}
+
+.cb-board-editor--dark .cb-board-editor__follow-btn {
+  border-color: rgba(147, 197, 253, 0.35);
+  background: rgba(59, 130, 246, 0.12);
+  color: #93c5fd;
+}
+
+.cb-board-editor--dark .cb-board-editor__follow-btn--active {
+  border-color: rgba(74, 222, 128, 0.4);
+  background: rgba(22, 163, 74, 0.18);
+  color: #86efac;
+}
+
 .cb-board-editor__btn {
   min-height: 32px;
   padding: 0 0.7rem;

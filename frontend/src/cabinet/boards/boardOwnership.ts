@@ -38,7 +38,8 @@ export function stampElementOwnership(
 ): unknown[] {
   if (!userId) return elements as unknown[];
   const ownership = role === "teacher" ? "teacher" : "student";
-  return (elements as El[]).map((el) => {
+  let changed = false;
+  const out = (elements as El[]).map((el) => {
     if (!el || typeof el !== "object" || !el.id) return el;
     if (prevIds.has(el.id)) return el;
     const data = (el.customData && typeof el.customData === "object")
@@ -48,8 +49,13 @@ export function stampElementOwnership(
     data[OWNER_KEY] = userId;
     data[OWNER_ROLE_KEY] = role || "student";
     data[OWNERSHIP] = ownership;
-    return { ...el, customData: data };
+    // Мутируем live-объект Excalidraw: иначе shallow-copy «замораживает»
+    // штрих на первой точке, а пир видит точки рывками.
+    (el as El).customData = data;
+    changed = true;
+    return el;
   });
+  return changed ? out : (elements as unknown[]);
 }
 
 /**

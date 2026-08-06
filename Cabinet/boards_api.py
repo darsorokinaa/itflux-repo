@@ -1010,13 +1010,19 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Доска не найдена."}, status=status.HTTP_404_NOT_FOUND)
 
         if touches_scene:
+            scene_norm = rewrite_scene_asset_urls(board, normalize_scene_data(board.scene_data))
+            elements = scene_norm.get("elements") if isinstance(scene_norm, dict) else None
+            element_count = len(elements) if isinstance(elements, list) else 0
+            # Lite: пиры уже на live-ops — не гоняем полный JSON сцены/files по WS.
+            # Полный snapshot остаётся в REST; reconnect делает snapshot_request/fetch.
             broadcast_board_collab_event(
                 board.id,
                 {
                     "type": "scene_saved",
                     "board_id": str(board.id),
                     "version": board.version,
-                    "scene": rewrite_scene_asset_urls(board, normalize_scene_data(board.scene_data)),
+                    "lite": True,
+                    "element_count": element_count,
                     "user_id": request.user.id,
                     "display_name": (
                         getattr(getattr(request.user, "profile", None), "display_name", None)
