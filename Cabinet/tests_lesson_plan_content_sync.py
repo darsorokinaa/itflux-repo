@@ -169,9 +169,11 @@ class LessonPlanContentSyncServiceTests(TestCase):
         self.assertIn("topic", event.manual_override_fields)
         self.assertEqual(event.content_source, LessonContentSource.MIXED)
 
-    # 5b. Без enrollment тема всё равно сохраняется в карточке (soft-fail плана).
-    def test_edit_topic_without_enrollment_keeps_lesson(self):
+    # 5b. Без enrollment тема сохраняется в карточке, а ученику автоматически
+    # заводится план обучения, чтобы тема не потерялась.
+    def test_edit_topic_without_enrollment_autocreates_plan(self):
         other = _make_student(self.teacher, username="lp_no_plan", first="Пётр", last="БезПлана")
+        self.assertFalse(LessonPlanEnrollment.objects.filter(student=other).exists())
         event = self._make_event(student=other)
         result = LessonLearningPlanSyncService.apply_lesson_edit(
             event,
@@ -181,9 +183,40 @@ class LessonPlanContentSyncServiceTests(TestCase):
         )
         event.refresh_from_db()
         self.assertEqual(event.topic, "Тема только в карточке")
-        self.assertIn("topic", event.manual_override_fields)
-        self.assertFalse((result.get("plan") or {}).get("plan_updated", True))
-        self.assertEqual((result.get("plan") or {}).get("plan_error"), "no_enrollment")
+        self.assertTrue((result.get("plan") or {}).get("plan_updated"))
+
+        enrollment = LessonPlanEnrollment.objects.filter(student=other).select_related("plan").first()
+        self.assertIsNotNone(enrollment)
+        self.assertEqual(enrollment.plan.status, PlanStatus.PUBLISHED)
+        self.assertIsNotNone(event.lesson_plan_item_id)
+        self.assertEqual(event.lesson_plan_item.plan_id, enrollment.plan_id)
+        self.assertEqual(event.lesson_plan_item.topic, "Тема только в карточке")
+
+    # 5c. Автосозданный план наследует предмет/направление занятия.
+    def test_autocreated_plan_uses_event_student_subject(self):
+        from Cabinet.models import StudentSubject
+
+        other = _make_student(self.teacher, username="lp_no_plan_subj", first="Анна", last="БезПлана")
+        student_subject = StudentSubject.objects.create(
+            student=other, subject="math", title="Математика (ОГЭ)", direction=Direction.OGE,
+        )
+        event = self._make_event(student=other)
+        event.student_subject = student_subject
+        event.save(update_fields=["student_subject"])
+
+        result = LessonLearningPlanSyncService.create_plan_item_from_lesson(
+            event, teacher=self.teacher, title="Тема из карточки",
+        )
+        self.assertTrue(result["ok"])
+        event.refresh_from_db()
+        item = event.lesson_plan_item
+        self.assertIsNotNone(item)
+        self.assertEqual(item.plan.subject, "math")
+        self.assertEqual(item.plan.direction, Direction.OGE)
+
+        enrollment = LessonPlanEnrollment.objects.get(student=other)
+        self.assertEqual(enrollment.student_subject_id, student_subject.id)
+        self.assertEqual(enrollment.plan_id, item.plan_id)
 
     # 6. Изменение пункта плана обновляет будущий урок.
     def test_plan_item_edit_propagates_to_future_lesson(self):
@@ -323,6 +356,89 @@ class LessonPlanContentSyncServiceTests(TestCase):
             LessonLearningPlanSyncService.create_plan_item_from_lesson(event, teacher=self.teacher)
         self.assertEqual(ctx.exception.code, "group_confirm_required")
 
+    # 14b. Групповой урок без единого участника — явная ошибка, а не fake-success.
+    def test_group_lesson_no_participants_raises_no_targets(self):
+        group = StudentGroup.objects.create(teacher=self.teacher, title="Пустая группа", status="active")
+        event = self._make_event(group=group, event_type="group_lesson")
+
+        with self.assertRaises(LessonPlanSyncError) as ctx:
+            LessonLearningPlanSyncService.create_plan_item_from_lesson(
+                event, teacher=self.teacher, confirm_all_students=True,
+            )
+        self.assertEqual(ctx.exception.code, "no_targets")
+
+    # 14c. Групповой урок: правка связанной темы долетает до пунктов ВСЕХ участников.
+    def test_group_lesson_update_linked_syncs_all_participants_items(self):
+        group = StudentGroup.objects.create(teacher=self.teacher, title="Группа", status="active")
+        second_student = _make_student(self.teacher, username="lp_group_second", first="Ольга", last="Вторая")
+        group.students.add(self.student, second_student)
+
+        second_plan = LessonPlan.objects.create(
+            teacher=self.teacher, title="План второго ученика", direction=Direction.OGE,
+            subject=PlanSubject.INFORMATICS, exam_type=ExamType.OGE, status=PlanStatus.PUBLISHED,
+        )
+        LessonPlanEnrollment.objects.create(
+            teacher=self.teacher, plan=second_plan, student=second_student,
+            format=PlanFormat.INDIVIDUAL, status=EnrollmentStatus.ACTIVE,
+        )
+
+        event = self._make_event(group=group, event_type="group_lesson")
+        LessonLearningPlanSyncService.create_plan_item_from_lesson(
+            event, teacher=self.teacher, confirm_all_students=True, title="Тема группы",
+        )
+        event.refresh_from_db()
+        self.assertIsNotNone(event.lesson_plan_item_id)
+        # У обоих участников должен появиться свой пункт плана для этого урока.
+        self.assertEqual(event.plan_items.count(), 2)
+
+        event.topic = "Обновлённая тема группы"
+        event.save(update_fields=["topic"])
+        LessonLearningPlanSyncService.sync_lesson_to_plan(
+            event, teacher=self.teacher, mode="update_linked", confirm_all_students=True,
+        )
+
+        for item in event.plan_items.all():
+            item.refresh_from_db()
+            self.assertEqual(item.topic, "Обновлённая тема группы")
+
+    # 14d. null явно очищает content-поле, а не пропускается молча.
+    def test_apply_lesson_edit_null_clears_field(self):
+        event = self._make_event(student=self.student)
+        LessonLearningPlanSyncService.link_plan_item(event, self.item1, teacher=self.teacher)
+        event.subtopic = "Старая подтема"
+        event.save(update_fields=["subtopic"])
+
+        LessonLearningPlanSyncService.apply_lesson_edit(
+            event, {"subtopic": None}, teacher=self.teacher, sync_action="lesson_only",
+        )
+        event.refresh_from_db()
+        self.assertEqual(event.subtopic, "")
+
+    # 14e. Перестановка тем подтягивает и текст ДЗ, а не только тему/описание.
+    def test_reorder_updates_homework_description(self):
+        now = timezone.now()
+        event1 = self._make_event(student=self.student, starts_at=now + timedelta(days=1))
+        self.item1.homework_description = "Решить №5-10"
+        self.item1.save(update_fields=["homework_description"])
+
+        LessonLearningPlanSyncService.reorder_future_lessons_from_plan(self.enrollment, teacher=self.teacher)
+        event1.refresh_from_db()
+        self.assertEqual(event1.homework_description, "Решить №5-10")
+
+    # 14f. Черновик-заглушка материалов теряет scheduled_event при реальной привязке,
+    # а легитимные пункты других участников группы — нет (см. 14c).
+    def test_link_plan_item_clears_draft_materials_placeholder(self):
+        from Cabinet.plan_schedule import ensure_event_plan_item
+
+        event = self._make_event(student=self.student)
+        draft_item, _ = ensure_event_plan_item(event, teacher=self.teacher)
+        self.assertEqual(draft_item.scheduled_event_id, event.pk)
+
+        LessonLearningPlanSyncService.link_plan_item(event, self.item1, teacher=self.teacher)
+        draft_item.refresh_from_db()
+        self.assertIsNone(draft_item.scheduled_event_id)
+        self.assertEqual(self.item1.scheduled_event_id, event.pk)
+
     # 15. Синхронизация не вызывает бесконечные повторные обновления (guard).
     def test_sync_guard_prevents_reentrancy(self):
         event = self._make_event(student=self.student)
@@ -413,6 +529,7 @@ class LessonPlanContentSyncApiTests(TestCase):
         res = self.client.post(url, {"topic": "Конфликтная тема"}, format="json")
         self.assertEqual(res.status_code, 409, res.content)
         self.assertTrue(res.data.get("conflict"))
+        self.assertEqual(res.data.get("code"), "conflict")
 
         res2 = self.client.post(
             url,
@@ -430,3 +547,19 @@ class LessonPlanContentSyncApiTests(TestCase):
         self.event.refresh_from_db()
         self.assertEqual(self.event.location, "Кабинет 5")
         self.assertEqual(self.event.topic, "Множества")
+
+    def test_detach_material_with_local_prefixed_id_not_404(self):
+        """Фронтенд всегда шлёт id вида local-<pk> — удаление файла не должно 404-ить."""
+        material = Material.objects.create(teacher=self.teacher, title="Файл к уроку")
+        LessonLearningPlanSyncService.attach_material(
+            self.event, teacher=self.teacher, material_id=material.id,
+            source=ScheduleMaterialSource.LESSON_MANUAL,
+        )
+        url = f"/api/cabinet/schedule/local-{self.event.pk}/event-materials/"
+        res = self.client.post(
+            url, {"action": "detach", "material_id": material.id}, format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertFalse(
+            ScheduleEventMaterial.objects.filter(event=self.event, material=material).exists()
+        )

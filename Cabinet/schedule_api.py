@@ -130,6 +130,18 @@ class ScheduleSeriesViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
 class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
     serializer_class = ScheduleEventSerializer
 
+    def get_object(self):
+        """Фронтенд везде оперирует id вида "local-42" — принимаем оба формата,
+        иначе DRF не находит объект по нечисловому pk и отдаёт 404."""
+        from .schedule_events import parse_local_event_id
+
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        raw_pk = self.kwargs.get(lookup_url_kwarg)
+        numeric_pk = parse_local_event_id(raw_pk)
+        if numeric_pk is not None:
+            self.kwargs[lookup_url_kwarg] = numeric_pk
+        return super().get_object()
+
     def get_queryset(self):
         qs = ScheduleEvent.objects.filter(owner=self.get_teacher()).select_related(
             "student", "student_subject", "group", "lesson", "series",
@@ -227,7 +239,7 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
         from .lesson_plan_content_sync import LessonPlanSyncConflict, LessonPlanSyncError
         if isinstance(exc, LessonPlanSyncConflict):
             return Response(
-                {"detail": exc.message, **exc.extra},
+                {"detail": exc.message, "code": exc.code, **exc.extra},
                 status=status.HTTP_409_CONFLICT,
             )
         if isinstance(exc, LessonPlanSyncError):

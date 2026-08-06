@@ -676,6 +676,15 @@ def update_event(event, *, changed_by, data, notify=True):
         else:
             event.student_subject_id = int(ss_val)
     event.save()
+    if any(f in data for f in ("topic", "subtopic", "description", "goal", "homework_description")):
+        # PATCH может менять тему в обход LessonLearningPlanSyncService —
+        # не даём журналу застревать на устаревшей теме (см. journal_service).
+        try:
+            from .journal_service import sync_planned_topic_from_event
+
+            sync_planned_topic_from_event(event)
+        except Exception:
+            pass
     if time_changed:
         from .models import EventReminderLog
 

@@ -19,9 +19,13 @@ from django.db.models import Max, Q
 from django.utils import timezone
 
 from .choices import (
+    Direction,
     EnrollmentStatus,
+    ExamType,
     LessonContentSource,
+    PlanFormat,
     PlanItemStatus,
+    PlanStatus,
     ScheduleMaterialSource,
 )
 from .models import (
@@ -97,6 +101,17 @@ class LessonLearningPlanSyncService:
         if item.scheduled_event_id in (None, event.pk):
             item.scheduled_event = event
             item.save(update_fields=["scheduled_event", "updated_at"])
+        # Черновик-заглушка "Материалы: ..." из ensure_event_plan_item (см.
+        # plan_schedule.ensure_event_plan_item) мог раньше указывать на это же
+        # событие через scheduled_event — снимаем эту связь при появлении
+        # настоящей, иначе resolve_plan_item_for_event видит >1 совпадение и
+        # уходит в неоднозначный slot-резолвинг вместо явной FK-связи. Пункты
+        # других участников группового урока (свой, легитимный item на event)
+        # не трогаем.
+        LessonPlanItem.objects.filter(
+            scheduled_event=event,
+            plan__description=AUTO_MATERIALS_PLAN_DESCRIPTION,
+        ).exclude(pk=item.pk).update(scheduled_event=None, updated_at=timezone.now())
 
         event.content_source = LessonContentSource.PLAN
         event.plan_sync_enabled = True
@@ -110,6 +125,7 @@ class LessonLearningPlanSyncService:
             update_fields.append("plan_synced_at")
 
         event.save(update_fields=list(dict.fromkeys(update_fields)))
+        cls._sync_journal_topic(event)
         return event
 
     @classmethod
@@ -204,7 +220,11 @@ class LessonLearningPlanSyncService:
                 if item is None:
                     raise LessonPlanSyncError("Урок не связан с пунктом плана.", code="no_plan_item")
                 cls._assert_teacher_owns_item(item, teacher)
-                # Для группового — подтверждение даже при update linked, если трогаем чужие планы
+                items_to_update = [item]
+                # Групповой урок: у каждого участника свой пункт плана (свой enrollment),
+                # созданный ранее для этого же события (scheduled_event=event) —
+                # иначе правка темы долетает только до первого/связанного ученика,
+                # а остальные пункты плана группы остаются со старой темой.
                 if event.group_id:
                     cls._resolve_sync_targets(
                         event,
@@ -212,8 +232,17 @@ class LessonLearningPlanSyncService:
                         student_ids=student_ids,
                         confirm_all_students=confirm_all_students,
                     )
-                cls._copy_event_fields_to_item(event, item)
-                result = {"ok": True, "items": [{"id": item.pk, "plan_id": item.plan_id}]}
+                    linked_ids = {i.pk for i in items_to_update}
+                    for other_item in event.plan_items.select_related("plan").all():
+                        if other_item.pk not in linked_ids:
+                            items_to_update.append(other_item)
+                            linked_ids.add(other_item.pk)
+                for target_item in items_to_update:
+                    cls._copy_event_fields_to_item(event, target_item)
+                result = {
+                    "ok": True,
+                    "items": [{"id": i.pk, "plan_id": i.plan_id} for i in items_to_update],
+                }
 
             if item is not None:
                 cls._push_event_materials_to_plan(event, item, material_ids=material_ids)
@@ -222,6 +251,7 @@ class LessonLearningPlanSyncService:
                 event.content_source = LessonContentSource.PLAN
                 event.plan_synced_at = timezone.now()
                 event.save(update_fields=["content_source", "plan_synced_at", "updated_at"])
+                cls._sync_journal_topic(event)
 
             return {**result, "mode": mode, "plan_updated": True}
         finally:
@@ -266,6 +296,7 @@ class LessonLearningPlanSyncService:
                 if event.lesson_plan_item_id != item.id:
                     event.lesson_plan_item = item
                 event.save()
+                cls._sync_journal_topic(event)
                 updated_ids.append(event.pk)
 
             return {"ok": True, "updated_event_ids": updated_ids, "count": len(updated_ids)}
@@ -316,11 +347,15 @@ class LessonLearningPlanSyncService:
             updated_ids = []
             for ev, item in zip(future_events[:pair_count], plan_items[:pair_count]):
                 ev.lesson_plan_item = item
-                cls._copy_item_fields_to_event(ev, item, force_fields=("topic", "subtopic", "description", "goal"))
+                cls._copy_item_fields_to_event(
+                    ev, item,
+                    force_fields=("topic", "subtopic", "description", "goal", "homework_description"),
+                )
                 cls._sync_plan_materials_onto_event(ev, item)
                 ev.content_source = LessonContentSource.PLAN
                 ev.plan_synced_at = timezone.now()
                 ev.save()
+                cls._sync_journal_topic(ev)
                 if item.scheduled_event_id in (None, ev.pk):
                     item.scheduled_event = ev
                     item.save(update_fields=["scheduled_event", "updated_at"])
@@ -386,14 +421,14 @@ class LessonLearningPlanSyncService:
             event.content_source = LessonContentSource.PLAN
             event.plan_synced_at = timezone.now()
             event.save()
+            cls._sync_journal_topic(event)
             return {"ok": True, "action": "restore_from_plan", "event_id": event.pk}
 
-        # Применить правки к уроку
+        # Применить правки к уроку. content-поля не nullable в модели — явный
+        # null означает "очистить", а не "оставить как было".
         update_fields = []
         for field, value in content_updates.items():
-            if value is None:
-                continue
-            setattr(event, field, value if not isinstance(value, str) else value)
+            setattr(event, field, value if value is not None else "")
             update_fields.append(field)
 
         if sync_action == "disable_sync":
@@ -431,6 +466,7 @@ class LessonLearningPlanSyncService:
 
         if update_fields:
             event.save(update_fields=list(dict.fromkeys(update_fields + ["updated_at"])))
+            cls._sync_journal_topic(event)
 
         plan_result = None
         if sync_action == "lesson_and_plan" or resolve_conflict == "lesson_and_plan":
@@ -451,6 +487,7 @@ class LessonLearningPlanSyncService:
                     "group_confirm_required",
                     "alien_plan",
                     "public_plan",
+                    "no_targets",
                 }
                 if getattr(exc, "code", None) not in soft_codes:
                     raise
@@ -496,6 +533,7 @@ class LessonLearningPlanSyncService:
                 event.content_source = LessonContentSource.PLAN
                 event.plan_synced_at = timezone.now()
                 event.save()
+                cls._sync_journal_topic(event)
             else:
                 event.save(update_fields=["plan_sync_enabled", "updated_at"])
         else:
@@ -588,6 +626,19 @@ class LessonLearningPlanSyncService:
         return deleted
 
     # ── Внутренние хелперы ────────────────────────────────────────────────
+
+    @classmethod
+    def _sync_journal_topic(cls, event: ScheduleEvent) -> None:
+        """Подтягивает актуальную тему карточки/плана в ещё не финализированный
+        журнал (см. journal_service.sync_planned_topic_from_event). Без этого
+        journal.planned_topic остаётся "замороженным" на моменте создания записи
+        и расходится с темой в календаре/плане после последующих правок."""
+        try:
+            from .journal_service import sync_planned_topic_from_event
+
+            sync_planned_topic_from_event(event)
+        except Exception:
+            logger.exception("Не удалось синхронизировать тему в журнал для события %s", event.pk)
 
     @classmethod
     def _assert_teacher_owns_event(cls, event, teacher):
@@ -693,6 +744,14 @@ class LessonLearningPlanSyncService:
                         code="alien_students",
                     )
 
+            if not chosen:
+                # Иначе синхронизация «успешно» завершается без единого созданного
+                # пункта плана — тема остаётся только в карточке урока молча.
+                raise LessonPlanSyncError(
+                    "В группе нет учеников для синхронизации с планом.",
+                    code="no_targets",
+                )
+
             enrollments = []
             for sid in chosen:
                 enrollment = LessonPlanEnrollment.objects.filter(
@@ -701,6 +760,8 @@ class LessonLearningPlanSyncService:
                 ).exclude(
                     status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED],
                 ).select_related("plan").order_by("-created_at").first()
+                if enrollment is None:
+                    enrollment = cls._auto_create_enrollment(event, teacher=teacher, student_id=sid)
                 if enrollment is None:
                     raise LessonPlanSyncError(
                         f"У ученика #{sid} нет активного плана обучения.",
@@ -731,12 +792,67 @@ class LessonLearningPlanSyncService:
                 ).exclude(
                     status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED],
                 ).select_related("plan").order_by("-created_at").first()
+        if enrollment is None and event.student_id:
+            # У ученика вообще нет плана обучения — не блокируем добавление темы
+            # из карточки урока, а заводим план автоматически по предмету занятия.
+            enrollment = cls._auto_create_enrollment(event, teacher=teacher, student_id=event.student_id)
         if enrollment is None:
             raise LessonPlanSyncError(
                 "У ученика нет активного плана обучения. Назначьте план или сохраните данные только в уроке.",
                 code="no_enrollment",
             )
         return [enrollment]
+
+    @classmethod
+    def _auto_create_enrollment(
+        cls, event: ScheduleEvent, *, teacher, student_id: int,
+    ) -> Optional[LessonPlanEnrollment]:
+        """Создаёт план обучения и назначение для ученика «на лету».
+
+        Срабатывает, когда учитель добавляет тему в карточку урока, а у ученика
+        ещё нет ни одного плана обучения — вместо ошибки заводим план по
+        предмету занятия (или общий, если предмет не указан) и сразу назначаем
+        его ученику, чтобы тема не потерялась.
+        """
+        from .plan_subjects import get_plan_subject_label
+
+        student = Student.objects.filter(pk=student_id, teacher=teacher).first()
+        if student is None:
+            return None
+
+        student_subject = event.student_subject if event.student_subject_id else None
+        if student_subject is not None:
+            subject_code = (student_subject.subject or "").strip() or "other"
+            direction_code = student_subject.direction or Direction.OTHER
+            subject_label = (
+                (student_subject.title or "").strip()
+                or get_plan_subject_label(subject_code)
+                or subject_code
+            )
+        else:
+            subject_code = "other"
+            direction_code = Direction.OTHER
+            subject_label = "Общий"
+
+        plan_title = f"План: {student.full_name} — {subject_label}".strip()[:255]
+        plan = LessonPlan.objects.create(
+            teacher=teacher,
+            title=plan_title,
+            direction=direction_code,
+            subject=subject_code,
+            exam_type=ExamType.NONE,
+            status=PlanStatus.PUBLISHED,
+            lessons_count=0,
+        )
+        enrollment = LessonPlanEnrollment.objects.create(
+            teacher=teacher,
+            plan=plan,
+            student=student,
+            student_subject=student_subject,
+            format=PlanFormat.INDIVIDUAL,
+            status=EnrollmentStatus.ACTIVE,
+        )
+        return enrollment
 
     @classmethod
     def _create_item_on_enrollment(
@@ -767,7 +883,7 @@ class LessonLearningPlanSyncService:
             plan=plan,
             order=max_order + 1,
             title=item_title or f"Урок {max_order + 1}",
-            topic=topic[:255],
+            topic=topic[:500],
             subtopic=(event.subtopic or "")[:255],
             goal=event.goal or "",
             description=event.description or "",
@@ -822,7 +938,7 @@ class LessonLearningPlanSyncService:
 
     @classmethod
     def _copy_event_fields_to_item(cls, event: ScheduleEvent, item: LessonPlanItem) -> None:
-        item.topic = (event.topic or "")[:255]
+        item.topic = (event.topic or "")[:500]
         item.subtopic = (event.subtopic or "")[:255]
         item.description = event.description or ""
         item.goal = event.goal or ""

@@ -83,6 +83,9 @@ def resolve_event_students(event: ScheduleEvent) -> list[Student]:
 def planned_topic_for_event(event: ScheduleEvent) -> str:
     """Планируемая тема из карточки урока / пункта плана / каталожного урока.
 
+    Использует тот же резолвинг пункта плана (явная связь → слот в enrollment),
+    что и календарь (schedule_events.schedule_event_to_json) — иначе тема,
+    видимая учителю в карточке урока, расходится с журналом.
     Не подставляет имя ученика/группы (часто лежит в event.title / item.title).
     """
     audience_names = {
@@ -101,7 +104,12 @@ def planned_topic_for_event(event: ScheduleEvent) -> str:
     topic = _clean(getattr(event, "topic", None) or "")
     if topic:
         return topic
+
     item = getattr(event, "lesson_plan_item", None)
+    if item is None:
+        from .plan_schedule import resolve_plan_item_for_event
+
+        item, _lesson_number = resolve_plan_item_for_event(event)
     if item is not None:
         topic = _clean(item.topic or "")
         if topic:
@@ -118,6 +126,30 @@ def planned_topic_for_event(event: ScheduleEvent) -> str:
         if topic:
             return topic
     return ""
+
+
+def sync_planned_topic_from_event(event: ScheduleEvent) -> bool:
+    """Подтягивает изменившуюся тему карточки/плана в ещё не финализированный журнал.
+
+    Без этого journal.planned_topic замораживается на моменте создания записи
+    журнала и расходится с темой, которую учитель видит в календаре или плане
+    после последующих правок (см. LessonLearningPlanSyncService).
+    Не трогает журнал, если факт по теме уже проставлен или журнал завершён/отменён —
+    там источником истины становится сам журнал.
+    """
+    journal = LessonJournal.objects.filter(schedule_event_id=event.pk).first()
+    if journal is None:
+        return False
+    if journal.actual_topic:
+        return False
+    if journal.status not in (JournalStatus.DRAFT, JournalStatus.REOPENED):
+        return False
+    planned = planned_topic_for_event(event)
+    if journal.planned_topic == planned:
+        return False
+    journal.planned_topic = planned
+    journal.save(update_fields=["planned_topic", "updated_at"])
+    return True
 
 
 def attendance_to_delivery_status(attendance: str) -> str:
@@ -989,6 +1021,7 @@ def _sync_planned_topic_to_lesson_and_plan(journal: LessonJournal, teacher: User
             "group_confirm_required",
             "alien_plan",
             "public_plan",
+            "no_targets",
         }:
             return {
                 "synced": True,

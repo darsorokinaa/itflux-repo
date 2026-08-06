@@ -710,6 +710,59 @@ class JournalHomeworkResultTests(JournalTestBase):
 
 
 class JournalTopicsSyncTests(JournalTestBase):
+    def test_planned_topic_resolves_plan_slot_without_explicit_link(self):
+        """Журнал должен видеть ту же тему, что и календарь (slot-резолвинг),
+        даже если event.topic пуст и нет явной FK lesson_plan_item."""
+        plan = LessonPlan.objects.create(
+            teacher=self.teacher, title="План", direction=Direction.OGE,
+            subject=PlanSubject.INFORMATICS, exam_type=ExamType.OGE, status=PlanStatus.PUBLISHED,
+        )
+        LessonPlanEnrollment.objects.create(
+            teacher=self.teacher, plan=plan, student=self.student,
+            format=PlanFormat.INDIVIDUAL, status=EnrollmentStatus.ACTIVE,
+        )
+        LessonPlanItem.objects.create(plan=plan, order=1, title="Слот 1", topic="Тема из слота плана")
+        event = self._individual_event()
+        event.topic = ""
+        event.save(update_fields=["topic"])
+
+        journal = get_or_create_journal(event, self.teacher)
+        self.assertEqual(journal.planned_topic, "Тема из слота плана")
+
+    def test_calendar_topic_edit_syncs_existing_draft_journal(self):
+        """Правка темы в карточке урока (lesson_and_plan) не должна замораживать
+        journal.planned_topic на моменте создания записи журнала."""
+        from Cabinet.lesson_plan_content_sync import LessonLearningPlanSyncService
+
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        self.assertEqual(journal.planned_topic, "Системы счисления")
+
+        LessonLearningPlanSyncService.apply_lesson_edit(
+            event, {"topic": "Новая тема из календаря"},
+            teacher=self.teacher, sync_action="lesson_and_plan",
+        )
+        journal.refresh_from_db()
+        self.assertEqual(journal.planned_topic, "Новая тема из календаря")
+
+    def test_finalized_journal_not_overwritten_by_calendar_edit(self):
+        """Если факт по теме уже проставлен (или журнал завершён), календарь
+        больше не должен молча переписывать журнал."""
+        from Cabinet.lesson_plan_content_sync import LessonLearningPlanSyncService
+
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        journal.actual_topic = "Уже проведено по факту"
+        journal.save(update_fields=["actual_topic"])
+
+        LessonLearningPlanSyncService.apply_lesson_edit(
+            event, {"topic": "Попытка переписать после факта"},
+            teacher=self.teacher, sync_action="lesson_and_plan",
+        )
+        journal.refresh_from_db()
+        self.assertEqual(journal.planned_topic, "Системы счисления")
+        self.assertEqual(journal.actual_topic, "Уже проведено по факту")
+
     def test_create_journal_keeps_actual_topic_empty(self):
         event = self._individual_event()
         journal = get_or_create_journal(event, self.teacher)

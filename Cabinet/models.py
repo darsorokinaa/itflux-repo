@@ -883,7 +883,13 @@ class LessonPlanItem(models.Model):
     )
     order = models.PositiveIntegerField("Порядок", default=0)
     title = models.CharField("Название", max_length=255)
-    topic = models.CharField("Тема", max_length=255, blank=True)
+    topic = models.CharField(
+        "Тема",
+        max_length=500,
+        blank=True,
+        help_text="500 симв. — совпадает с ScheduleEvent.topic/LessonJournal.planned_topic, "
+        "чтобы синхронизация урок↔план↔журнал не обрезала тему.",
+    )
     subtopic = models.CharField("Подтема", max_length=255, blank=True)
     task_number = models.CharField("Номер задания", max_length=32, blank=True)
     goal = models.TextField("Цель занятия", blank=True)
@@ -1964,7 +1970,10 @@ class ScheduleEvent(models.Model):
         "Поля с ручным переопределением",
         default=list,
         blank=True,
-        help_text="Список полей (topic, subtopic, description, goal), которые не синхронизируются из плана",
+        help_text=(
+            "Список полей (topic, subtopic, description, goal, homework_description), "
+            "которые не синхронизируются из плана"
+        ),
     )
     plan_synced_at = models.DateTimeField(
         "Последняя синхронизация с планом",
