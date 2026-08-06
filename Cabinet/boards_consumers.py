@@ -718,6 +718,45 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             )
             return
 
+        if msg_type == "paper_style":
+            # Оформление бумаги (клетки/линии/точки/цвет) — без БД, сразу пирам.
+            style = str(data.get("style") or "none")[:16]
+            if style not in ("none", "cells", "ruled", "dots", "lines"):
+                style = "none"
+            if style == "lines":
+                style = "cells"
+            bg = str(data.get("bgColor") or "#ffffff")[:32]
+            await self.channel_layer.group_send(
+                self.group_name,
+                {
+                    "type": "board.collab",
+                    "payload": {
+                        "type": "paper_style",
+                        "client_id": str(data.get("client_id") or self.client_id)[:64],
+                        "user_id": self.user.id,
+                        "display_name": self.display_name,
+                        "role": self.role,
+                        "style": style,
+                        "bgColor": bg,
+                    },
+                },
+            )
+            return
+
+        if msg_type == "paper_request":
+            # Учитель ответит publishPaperStyle (как viewport_request).
+            await self.channel_layer.group_send(
+                self.group_name,
+                {
+                    "type": "board.collab",
+                    "payload": {
+                        "type": "paper_request",
+                        "client_id": str(data.get("client_id") or self.client_id)[:64],
+                    },
+                },
+            )
+            return
+
         if msg_type == "snapshot_request":
             # Клиент после reconnect запрашивает REST snapshot сам; здесь только ack.
             # Оставляем тип для совместимости протокола — без тяжёлой работы в consumer.
@@ -754,13 +793,16 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                 "presence_join",
                 "active_tool_change",
                 "sync_probe",
+                "paper_style",
             )
             and payload.get("client_id")
             and payload.get("client_id") == self.client_id
         ):
             return
-        # viewport_request нужен только учителю (ответит свежим viewport).
+        # viewport_request / paper_request нужны только учителю (ответит свежим состоянием).
         if payload.get("type") == "viewport_request" and self.role not in ("teacher",) and self.permission != "owner":
+            return
+        if payload.get("type") == "paper_request" and self.role not in ("teacher",) and self.permission != "owner":
             return
         # sync_probe_ack с echo=False — доставляем всем, инициатор отфильтрует по probe_id.
         try:

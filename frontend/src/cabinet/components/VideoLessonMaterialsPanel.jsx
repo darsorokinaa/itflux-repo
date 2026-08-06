@@ -70,8 +70,12 @@ function MaterialRow({
   const menuOpen = menuKey === row.key;
 
   return (
-    <li className="vl-mat-item">
-      <div className="vl-mat-item__main">
+    <li className={`vl-mat-item${showing ? " is-showing" : ""}`}>
+      <button
+        type="button"
+        className="vl-mat-item__main vl-mat-item__main--button"
+        onClick={() => onOpen(row)}
+      >
         <span className="vl-mat-item__icon" aria-hidden="true">
           <CabinetIcon name={kindIcon(row.kind)} />
         </span>
@@ -86,29 +90,8 @@ function MaterialRow({
             ) : null}
           </div>
         </div>
-      </div>
+      </button>
       <div className="vl-mat-item__actions">
-        {(row.url || row.kind === "board" || row.text) ? (
-          <button
-            type="button"
-            className="video-lesson-btn video-lesson-btn--primary"
-            onClick={() => onOpen(row)}
-          >
-            Открыть
-          </button>
-        ) : null}
-        {canManage && presentable ? (
-          <button
-            type="button"
-            className="video-lesson-btn video-lesson-btn--primary"
-            disabled={presentBusy}
-            aria-pressed={showing}
-            title={showing ? "Скрыть от ученика" : "Показать ученику"}
-            onClick={() => onToggleVisibility(row, showing)}
-          >
-            {presentBusy ? "…" : (showing ? "Скрыть" : "Показать")}
-          </button>
-        ) : null}
         <div className="vl-mat-item__menu-wrap">
           <button
             type="button"
@@ -122,6 +105,18 @@ function MaterialRow({
           </button>
           {menuOpen ? (
             <div className="vl-dropdown" role="menu">
+              {(row.url || row.kind === "board" || row.text) ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuKey("");
+                    onOpen(row);
+                  }}
+                >
+                  Открыть
+                </button>
+              ) : null}
               {row.url ? (
                 <button
                   type="button"

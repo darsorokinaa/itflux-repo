@@ -1,9 +1,9 @@
-import { useMemo } from "react";
-
 /**
  * Таблица live-ответов учеников по material session (не variant).
- * state.answers / state.fields: { [userId]: { [itemId]: { value, status, updated_at } } }
+ * state.answers / state.fields: { [userId]: { [itemId]: { value, status, updated_at, typing } } }
  */
+import { useMemo } from "react";
+
 export function buildMaterialAnswerRows(state, presence = []) {
   const answers = state?.answers && typeof state.answers === "object" ? state.answers : {};
   const fields = state?.fields && typeof state.fields === "object" ? state.fields : {};
@@ -16,7 +16,6 @@ export function buildMaterialAnswerRows(state, presence = []) {
   for (const userId of userIds) {
     const ansBucket = answers[userId] && typeof answers[userId] === "object" ? answers[userId] : {};
     const fieldBucket = fields[userId] && typeof fields[userId] === "object" ? fields[userId] : {};
-    // Legacy flat row? skip teacher-looking buckets without nested values.
     const sample = Object.values(ansBucket)[0];
     if (sample && typeof sample === "object" && !("value" in sample) && !("author_id" in sample)) {
       continue;
@@ -26,19 +25,28 @@ export function buildMaterialAnswerRows(state, presence = []) {
     if (!entries.length) continue;
     let latest = 0;
     let answering = false;
-    const preview = entries.slice(0, 6).map(([id, row]) => {
+    let typing = false;
+    const preview = entries.slice(0, 8).map(([id, row]) => {
       const ts = Date.parse(row.updated_at || row.updatedAt || "") || 0;
       if (ts > latest) latest = ts;
       if (row.status === "draft") answering = true;
+      if (row.typing) typing = true;
       const val = row.value;
       const text = val == null ? "—" : (typeof val === "string" ? val : JSON.stringify(val));
-      return { id, text: text.slice(0, 120), status: row.status || "draft" };
+      return {
+        id,
+        text: text.slice(0, 120),
+        status: row.status || "draft",
+        typing: Boolean(row.typing),
+        attempt: row.attempt || 1,
+      };
     });
     rows.push({
       userId,
       name: names.get(String(userId)) || `Ученик ${userId}`,
       count: entries.length,
       answering,
+      typing,
       latestAt: latest || null,
       preview,
       status: answering ? "draft" : (entries.some(([, r]) => r.status === "submitted") ? "submitted" : "draft"),
@@ -62,6 +70,9 @@ export default function LiveMaterialAnswersTable({
   presence = [],
   loading = false,
   compact = false,
+  onCheckAnswer = null,
+  onShowHint = null,
+  onResetAnswer = null,
 }) {
   const rows = useMemo(() => buildMaterialAnswerRows(state, presence), [state, presence]);
 
@@ -90,6 +101,7 @@ export default function LiveMaterialAnswersTable({
               <th>Статус</th>
               <th>Ответы</th>
               <th>Обновлено</th>
+              {(onCheckAnswer || onShowHint || onResetAnswer) ? <th>Действия</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -97,7 +109,9 @@ export default function LiveMaterialAnswersTable({
               <tr key={row.userId}>
                 <td>{row.name}</td>
                 <td>
-                  {row.answering ? (
+                  {row.typing ? (
+                    <span className="video-lesson-live-answers__ok">печатает…</span>
+                  ) : row.answering ? (
                     <span className="video-lesson-live-answers__ok">отвечает сейчас</span>
                   ) : row.status === "submitted" ? (
                     "отправлено"
@@ -111,6 +125,7 @@ export default function LiveMaterialAnswersTable({
                       <li key={p.id}>
                         <span className="video-lesson-live-answers__q">{p.id}</span>
                         <span className="video-lesson-live-answers__a">{p.text}</span>
+                        {p.typing ? <span className="video-lesson-live-answers__ok"> · …</span> : null}
                       </li>
                     ))}
                     {row.count > row.preview.length ? (
@@ -119,6 +134,27 @@ export default function LiveMaterialAnswersTable({
                   </ul>
                 </td>
                 <td>{formatTime(row.latestAt)}</td>
+                {(onCheckAnswer || onShowHint || onResetAnswer) ? (
+                  <td>
+                    <div className="video-lesson-live-answers__actions">
+                      {onCheckAnswer ? (
+                        <button type="button" className="video-lesson-btn video-lesson-btn--ghost" onClick={() => onCheckAnswer(row)}>
+                          Проверить
+                        </button>
+                      ) : null}
+                      {onShowHint ? (
+                        <button type="button" className="video-lesson-btn video-lesson-btn--ghost" onClick={() => onShowHint(row)}>
+                          Подсказка
+                        </button>
+                      ) : null}
+                      {onResetAnswer ? (
+                        <button type="button" className="video-lesson-btn video-lesson-btn--ghost" onClick={() => onResetAnswer(row)}>
+                          Сбросить
+                        </button>
+                      ) : null}
+                    </div>
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>

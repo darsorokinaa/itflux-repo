@@ -38,6 +38,9 @@ CONTENT_ACTIONS = frozenset({
     "text_note_added",
     "text_note_updated",
     "text_note_deleted",
+    "cell_updated",
+    "sheet_changed",
+    "selection_changed",
 })
 
 # В режиме следования за учителем ученик может отвечать, но не рисовать
@@ -52,6 +55,21 @@ FOLLOW_MODE_CONTENT_ACTIONS = frozenset({
     "cards_flipped",
     "state_updated",
 })
+
+COLLAB_PERMISSION_ACTIONS = {
+    "answers_only": FOLLOW_MODE_CONTENT_ACTIONS | frozenset({"cursor", "pointer"}),
+    "annotate": FOLLOW_MODE_CONTENT_ACTIONS | frozenset({
+        "annotation_added", "annotation_updated", "annotation_deleted",
+        "text_note_added", "text_note_updated", "text_note_deleted",
+        "cursor", "pointer", "annotation_preview",
+    }) | NAVIGATION_ACTIONS,
+    "edit_content": CONTENT_ACTIONS | NAVIGATION_ACTIONS | EPHEMERAL_ACTIONS | frozenset({
+        "cell_updated", "sheet_changed", "selection_changed",
+    }),
+    "full": CONTENT_ACTIONS | NAVIGATION_ACTIONS | EPHEMERAL_ACTIONS | frozenset({
+        "cell_updated", "sheet_changed", "selection_changed",
+    }),
+}
 
 MAX_ANNOTATIONS = 500
 MAX_POINTS_PER_STROKE = 800
@@ -95,6 +113,7 @@ class MaterialCollaborationAdapter:
         interaction_mode: str,
         can_collaborate: bool,
         can_browse_independently: bool = False,
+        collaboration_permission: str = "annotate",
     ) -> frozenset[str]:
         if role in ("teacher", "staff", "coteacher"):
             return self.supported_actions | EPHEMERAL_ACTIONS
@@ -105,8 +124,13 @@ class MaterialCollaborationAdapter:
         }
         allowed = set(follow_actions)
         if interaction_mode == "collaborative" and can_collaborate:
-            allowed |= set(self.student_content_actions) | set(EPHEMERAL_ACTIONS)
-            allowed |= NAVIGATION_ACTIONS & self.supported_actions
+            perm_actions = COLLAB_PERMISSION_ACTIONS.get(
+                (collaboration_permission or "annotate").strip().lower(),
+                COLLAB_PERMISSION_ACTIONS["annotate"],
+            )
+            allowed |= set(perm_actions) & (self.supported_actions | EPHEMERAL_ACTIONS | self.student_content_actions)
+            if collaboration_permission in ("edit_content", "full", "annotate"):
+                allowed |= NAVIGATION_ACTIONS & self.supported_actions
         elif can_browse_independently:
             allowed |= NAVIGATION_ACTIONS & self.supported_actions
         return frozenset(allowed & (self.supported_actions | EPHEMERAL_ACTIONS))
@@ -433,6 +457,41 @@ class MaterialCollaborationAdapter:
         notes = self._ensure_list(state, "notes")
         state["notes"] = [n for n in notes if n.get("id") != note_id]
 
+    def _apply_cell_updated(self, state, *, payload, author_id, author_role):
+        sheet_id = str(payload.get("sheetId") or payload.get("sheet_id") or "sheet-1")[:64]
+        cell = str(payload.get("cell") or "").upper()[:16]
+        if not cell:
+            raise MaterialCollaborationError("cell обязателен", code="invalid_cell")
+        sheets = self._ensure_dict(state, "sheets")
+        sheet = sheets.get(sheet_id)
+        if not isinstance(sheet, dict):
+            sheet = {"cells": {}}
+            sheets[sheet_id] = sheet
+        cells = sheet.get("cells")
+        if not isinstance(cells, dict):
+            cells = {}
+            sheet["cells"] = cells
+        value = payload.get("value")
+        if isinstance(value, str):
+            value = value[:MAX_FIELD_VALUE_LEN]
+        cells[cell] = {
+            "value": value,
+            "formula": payload.get("formula"),
+            "author_id": author_id,
+            "author_role": author_role,
+            "revision": int(payload.get("revision") or 0),
+            "updated_at": payload.get("updated_at") or payload.get("updatedAt"),
+        }
+        state["activeSheetId"] = sheet_id
+        state["activeCell"] = cell
+
+    def _apply_sheet_changed(self, state, *, payload, author_id, author_role):
+        state["activeSheetId"] = str(payload.get("sheetId") or payload.get("sheet_id") or "")[:64]
+
+    def _apply_selection_changed(self, state, *, payload, author_id, author_role):
+        state["selection"] = payload.get("selection") or payload.get("range")
+        state["activeCell"] = str(payload.get("cell") or payload.get("activeCell") or state.get("activeCell") or "")[:16]
+
 
 class PdfMaterialAdapter(MaterialCollaborationAdapter):
     resource_kind = "pdf"
@@ -533,6 +592,27 @@ class LinkMaterialAdapter(EmbedMaterialAdapter):
     resource_kind = "link"
 
 
+class SpreadsheetMaterialAdapter(MaterialCollaborationAdapter):
+    resource_kind = "spreadsheet"
+    supported_actions = frozenset({
+        "cell_updated", "sheet_changed", "selection_changed",
+        "annotation_added", "annotation_updated", "annotation_deleted",
+        "viewport_changed", "scrolled", "zoom_changed",
+    })
+    student_content_actions = frozenset({
+        "cell_updated", "sheet_changed", "selection_changed",
+        "annotation_added", "annotation_updated", "annotation_deleted",
+    })
+
+    def initial_state(self) -> dict:
+        state = super().initial_state()
+        state["sheets"] = {"sheet-1": {"cells": {}}}
+        state["activeSheetId"] = "sheet-1"
+        state["activeCell"] = ""
+        state["selection"] = None
+        return state
+
+
 ADAPTERS: dict[str, MaterialCollaborationAdapter] = {
     "pdf": PdfMaterialAdapter(),
     "presentation": PresentationMaterialAdapter(),
@@ -547,6 +627,7 @@ ADAPTERS: dict[str, MaterialCollaborationAdapter] = {
     "embed": EmbedMaterialAdapter(),
     "notes": NotesMaterialAdapter(),
     "link": LinkMaterialAdapter(),
+    "spreadsheet": SpreadsheetMaterialAdapter(),
 }
 
 EXCLUDED_PRESENT_KINDS = frozenset({"board", "variant"})
@@ -602,9 +683,13 @@ def infer_resource_kind(
         return "image"
     if any(url_l.endswith(ext) for ext in (".ppt", ".pptx", ".odp", ".key")):
         return "presentation"
+    if any(url_l.endswith(ext) for ext in (".xls", ".xlsx", ".ods", ".csv")):
+        return "spreadsheet"
 
     if mt == "presentation":
         return "presentation"
+    if mt == "spreadsheet" or rk == "spreadsheet":
+        return "spreadsheet"
     if mt == "worksheet":
         return "workbook"
     if mt == "lesson":

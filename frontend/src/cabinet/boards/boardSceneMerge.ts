@@ -151,6 +151,7 @@ const LOCAL_UI_KEYS = [
   "editingLinearElementId",
   "activeTool",
   "penMode",
+  "penDetected",
   "viewModeEnabled",
   "openMenu",
   "openSidebar",

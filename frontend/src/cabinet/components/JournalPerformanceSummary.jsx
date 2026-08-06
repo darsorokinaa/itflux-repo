@@ -313,92 +313,141 @@ function MiniHwBars({ byStatus }) {
   );
 }
 
-function CompactSummary({ summary, detailsHref, loading }) {
+function CompactSummary({
+  summary,
+  detailsHref,
+  loading,
+  errorsCount = null,
+  onOpenErrors,
+}) {
   if (loading) {
-    return <section className="jg-summary jg-summary--compact jg-summary--loading">Загрузка сводки…</section>;
+    return (
+      <section className="jg-kpi jg-kpi--loading" aria-busy="true" aria-label="Краткая сводка">
+        <div className="jg-kpi__skeleton" />
+        <div className="jg-kpi__skeleton" />
+        <div className="jg-kpi__skeleton" />
+        <div className="jg-kpi__skeleton" />
+      </section>
+    );
   }
   if (!summary) return null;
 
   const lesson = summary.lesson_work || {};
   const homework = summary.homework || {};
   const attendance = summary.attendance || {};
-  const series = summary.score_series || [];
-
   const trend = summary.trend || "flat";
   const trendText = trendLabel(trend, summary.trend_delta);
 
+  const avgResult = summary.composite_index;
+  const avgHint =
+    avgResult == null
+      ? "Недостаточно данных"
+      : `Динамика по урокам: ${trendText}`;
+
+  const attendanceTotal = Number(attendance.total_lessons || 0);
+  const attendancePresent =
+    Number(attendance.present || 0) + Number(attendance.late || 0);
+  const attendanceHint = attendanceTotal
+    ? `${attendancePresent} из ${attendanceTotal} уроков`
+    : "Уроков пока нет";
+
+  const hwAssigned = Number(homework.assigned_count || 0);
+  const hwHint =
+    hwAssigned === 0
+      ? "Домашние задания не выдавались"
+      : `${Number(homework.checked_count || 0)} проверено · ${fmtPct(homework.avg_score ?? homework.completion_percent)} средний результат`;
+
+  const errorsValue = errorsCount == null ? "—" : String(errorsCount);
+  const errorsHint =
+    errorsCount == null
+      ? "Загрузка…"
+      : errorsCount === 0
+        ? "Повторяющихся ошибок нет"
+        : "Можно собрать работу над ошибками";
+
+  const cards = [
+    {
+      key: "avg",
+      label: "Средний результат",
+      value: fmtPct(avgResult),
+      hint: avgHint,
+      tone: avgResult == null ? "muted" : Number(avgResult) >= 70 ? "success" : Number(avgResult) >= 40 ? "warn" : "danger",
+    },
+    {
+      key: "attendance",
+      label: "Посещаемость",
+      value: fmtPct(attendance.attendance_rate_percent),
+      hint: attendanceHint,
+      tone: "info",
+    },
+    {
+      key: "homework",
+      label: "Домашние задания",
+      value: hwAssigned === 0 ? "0" : String(hwAssigned),
+      valueSuffix: hwAssigned === 0 ? "выдано" : "выдано",
+      hint: hwHint,
+      tone: "info",
+    },
+  ];
+
+  if (onOpenErrors) {
+    cards.push({
+      key: "errors",
+      label: "Ошибки",
+      value: errorsValue,
+      hint: errorsHint,
+      tone: errorsCount > 0 ? "warn" : "muted",
+      clickable: true,
+      onClick: onOpenErrors,
+    });
+  } else {
+    cards.push({
+      key: "lessons",
+      label: "Динамика по урокам",
+      value: lesson.avg_score != null ? fmtPct(lesson.avg_score) : "—",
+      hint: lesson.scored_lessons
+        ? `${lesson.scored_lessons} оценённых уроков`
+        : "Мало данных для динамики",
+      tone: "muted",
+    });
+  }
+
   return (
-    <section className="jg-summary jg-summary--compact" aria-label="Краткая сводка успеваемости">
-      <div className="jg-summary-compact__main">
-        <div className="jg-summary-compact__metrics" role="list">
-          <div className="jg-summary-compact__metric jg-summary-compact__metric--index" role="listitem">
-            <span>Индекс</span>
-            <strong>{fmtPct(summary.composite_index)}</strong>
-          </div>
-          <div className="jg-summary-compact__metric" role="listitem">
-            <span>Урок</span>
-            <strong>{fmtPct(lesson.avg_score)}</strong>
-          </div>
-          <div className="jg-summary-compact__metric" role="listitem">
-            <span>ДЗ</span>
-            <strong>{fmtPct(homework.avg_score ?? homework.completion_percent)}</strong>
-          </div>
-          <div className="jg-summary-compact__metric" role="listitem">
-            <span>Посещ.</span>
-            <strong>{fmtPct(attendance.attendance_rate_percent)}</strong>
-          </div>
-        </div>
-        <div className="jg-summary-compact__charts">
-          <div className="jg-summary-compact__spark">
-            <div className="jg-summary-compact__spark-head">
-              <span>Урок</span>
-              <em className={`jg-summary-compact__trend jg-summary-compact__trend--${trend}`}>
-                {trendText}
-              </em>
-            </div>
-            <MiniSparkline series={series} valueKey="overall_score" color="#2f6fed" />
-          </div>
-          <div className="jg-summary-compact__spark jg-summary-compact__spark--teal">
-            <div className="jg-summary-compact__spark-head">
-              <span>Вариант</span>
-              <em className="jg-summary-compact__trend">
-                {lesson.avg_variant_score != null ? fmtPct(lesson.avg_variant_score) : "—"}
-              </em>
-            </div>
-            <MiniSparkline series={series} valueKey="variant_score" color="#0d9488" />
-          </div>
-          <div className="jg-summary-compact__spark jg-summary-compact__spark--ring">
-            <div className="jg-summary-compact__spark-head">
-              <span>Посещ.</span>
-            </div>
-            <MiniRing
-              value={attendance.attendance_rate_percent}
-              color="#2f6fed"
-              label={`Посещаемость ${fmtPct(attendance.attendance_rate_percent)}`}
-            />
-          </div>
-          <div className="jg-summary-compact__spark jg-summary-compact__spark--hw">
-            <div className="jg-summary-compact__spark-head">
-              <span>ДЗ</span>
-              <em className="jg-summary-compact__trend">
-                {(homework.avg_score ?? homework.completion_percent) != null
-                  ? fmtPct(homework.avg_score ?? homework.completion_percent)
-                  : "—"}
-              </em>
-            </div>
-            <MiniHwBars byStatus={homework.by_status} />
-          </div>
-        </div>
+    <section className="jg-kpi" aria-label="Краткая сводка успеваемости">
+      <div className="jg-kpi__grid" role="list">
+        {cards.map((card) => {
+          const Tag = card.clickable ? "button" : "div";
+          return (
+            <Tag
+              key={card.key}
+              type={card.clickable ? "button" : undefined}
+              role="listitem"
+              className={`jg-kpi__card jg-kpi__card--${card.tone}${card.clickable ? " is-clickable" : ""}`}
+              onClick={card.clickable ? card.onClick : undefined}
+            >
+              <span className="jg-kpi__label">{card.label}</span>
+              <strong className="jg-kpi__value">
+                {card.value}
+                {card.valueSuffix ? (
+                  <span className="jg-kpi__suffix">{card.valueSuffix}</span>
+                ) : null}
+              </strong>
+              <span className="jg-kpi__hint">{card.hint}</span>
+            </Tag>
+          );
+        })}
       </div>
       {detailsHref ? (
-        <a
-          className="jg-summary-compact__more"
-          href={detailsHref}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Подробнее
-        </a>
+        <div className="jg-kpi__actions">
+          <a
+            className="jg-btn jg-btn--secondary"
+            href={detailsHref}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Подробная статистика
+          </a>
+        </div>
       ) : null}
     </section>
   );
@@ -433,7 +482,17 @@ function FullSummary({ summary, scopeType, loading }) {
 
   const hwBars = (homework.by_status || []).map((row) => ({
     key: row.status,
-    label: row.label,
+    label: /[А-Яа-яЁё]/.test(String(row.label || ""))
+      ? row.label
+      : (
+          {
+            full: "Выполнено полностью",
+            partial: "Частично",
+            not_done: "Не выполнено",
+            not_assigned: "Не задавалось",
+            not_reviewed: "Не проверено",
+          }[row.status] || row.label || row.status
+        ),
     count: row.count,
     tone:
       row.status === "full"
@@ -654,6 +713,8 @@ export default function JournalPerformanceSummary({
   loading,
   variant = "full",
   detailsHref = "",
+  errorsCount = null,
+  onOpenErrors,
 }) {
   if (variant === "compact") {
     return (
@@ -661,6 +722,8 @@ export default function JournalPerformanceSummary({
         summary={summary}
         detailsHref={detailsHref}
         loading={loading}
+        errorsCount={errorsCount}
+        onOpenErrors={onOpenErrors}
       />
     );
   }

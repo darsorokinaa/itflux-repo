@@ -93,6 +93,16 @@ export type CollabMessage =
   | { type: "cursor"; client_id: string; user_id?: number; display_name?: string; role?: string; x?: number; y?: number; tool?: string }
   | { type: "active_tool_change"; client_id: string; user_id?: number; display_name?: string; tool?: string }
   | {
+      type: "paper_style";
+      client_id: string;
+      user_id?: number;
+      display_name?: string;
+      role?: string;
+      style: string;
+      bgColor: string;
+    }
+  | { type: "paper_request"; client_id: string }
+  | {
       type: "viewport_update";
       client_id: string;
       user_id?: number;
@@ -172,6 +182,10 @@ type Handlers = {
   onResyncNeeded?: () => void;
   /** Учитель: ответить актуальным viewport новому участнику. */
   onViewportRequest?: (fromClientId: string) => void;
+  /** Бумага (клетки/линии/точки/цвет) — shared appearance. */
+  onRemotePaperStyle?: (paper: { style: string; bgColor: string }) => void;
+  /** Учитель: отдать текущую бумагу запросившему. */
+  onPaperRequest?: (fromClientId: string) => void;
   onSyncProbeResult?: (result: SyncProbeResult) => void;
 };
 
@@ -405,6 +419,19 @@ export function createBoardCollabSession(
       if (data.type === "viewport_request") {
         if (data.client_id === clientId) return;
         handlers.onViewportRequest?.(data.client_id);
+        return;
+      }
+      if (data.type === "paper_style") {
+        if (data.client_id === clientId) return;
+        handlers.onRemotePaperStyle?.({
+          style: String(data.style || "none"),
+          bgColor: String(data.bgColor || "#ffffff"),
+        });
+        return;
+      }
+      if (data.type === "paper_request") {
+        if (data.client_id === clientId) return;
+        handlers.onPaperRequest?.(data.client_id);
         return;
       }
       if (data.type === "sync_probe") {
@@ -764,6 +791,18 @@ export function createBoardCollabSession(
     /** Запросить актуальный viewport учителя (при включении слежения). */
     requestViewport() {
       sendRaw({ type: "viewport_request", client_id: clientId });
+    },
+    /** Бумага доски (клетки / линии / точки / цвет) — сразу всем пирам. */
+    publishPaperStyle(paper: { style: string; bgColor: string }) {
+      sendRaw({
+        type: "paper_style",
+        client_id: clientId,
+        style: String(paper.style || "none").slice(0, 16),
+        bgColor: String(paper.bgColor || "#ffffff").slice(0, 32),
+      });
+    },
+    requestPaperStyle() {
+      sendRaw({ type: "paper_request", client_id: clientId });
     },
     /**
      * Измерить RTT комнаты (server echo). Без второго клиента.

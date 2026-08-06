@@ -367,6 +367,13 @@ class VideoMeetingPresentView(APIView):
                 )
         except VideoMeetingError as exc:
             return _error_response(exc)
+        broadcast_material_event(
+            meeting.uuid,
+            {
+                "type": "resource.presented",
+                "presented": presented,
+            },
+        )
         return Response({"success": True, "presented": presented})
 
     def delete(self, request, meeting_uuid):
@@ -375,6 +382,13 @@ class VideoMeetingPresentView(APIView):
             clear_presented(meeting=meeting, user=request.user)
         except VideoMeetingError as exc:
             return _error_response(exc)
+        broadcast_material_event(
+            meeting.uuid,
+            {
+                "type": "resource.cleared",
+                "presented": None,
+            },
+        )
         return Response({"success": True, "presented": None})
 
 
@@ -494,6 +508,7 @@ class VideoMeetingMaterialPermissionView(APIView):
                     session_id=session_id,
                     collaborative_scope=data.get("collaborativeScope") or data.get("collaborative_scope"),
                     collaborative_user_ids=data.get("collaborativeUserIds") or data.get("collaborative_user_ids"),
+                    collaboration_permission=data.get("collaborationPermission") or data.get("collaboration_permission"),
                 )
             else:
                 raise VideoMeetingError("Укажите mode или followPolicy", code="invalid", status=400)
@@ -510,6 +525,7 @@ class VideoMeetingMaterialPermissionView(APIView):
                 "controller_user_id": session.controller_id,
                 "collaborative_scope": session.collaborative_scope,
                 "collaborative_user_ids": list(session.collaborative_user_ids or []),
+                "collaboration_permission": getattr(session, "collaboration_permission", None) or "annotate",
                 "independent_user_ids": list(session.independent_user_ids or []),
                 "version": session.version,
                 "materialSession": serialized,

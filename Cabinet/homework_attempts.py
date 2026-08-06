@@ -85,11 +85,13 @@ def snapshot_on_review(submission: HomeworkSubmission, *, checked: bool) -> Home
 def serialize_attempts(submission: HomeworkSubmission) -> list[dict]:
     rows = []
     for a in submission.attempts.all().order_by("attempt_number"):
+        status_key = a.status or SubmissionStatus.SUBMITTED
         rows.append(
             {
                 "id": a.id,
                 "attempt_number": a.attempt_number,
-                "status": a.status,
+                "status": status_key,
+                "status_label": dict(SubmissionStatus.choices).get(status_key, status_key),
                 "score": float(a.score) if a.score is not None else None,
                 "teacher_comment": a.teacher_comment or "",
                 "submitted_at": a.submitted_at.isoformat() if a.submitted_at else None,

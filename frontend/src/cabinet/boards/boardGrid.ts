@@ -90,3 +90,35 @@ export function dotsOverlayStyle(
 ): { backgroundSize: string; backgroundPosition: string } {
   return paperOverlayStyle("dots", appState);
 }
+
+/** Payload для live-синхронизации бумаги учитель↔ученик. */
+export type PaperStylePayload = {
+  style: BoardGridStyle;
+  bgColor: string;
+};
+
+export function paperStyleFromAppState(
+  appState: Record<string, unknown> | null | undefined,
+): PaperStylePayload {
+  return {
+    style: normalizeGridStyle(appState?.[GRID_STYLE_KEY], appState?.gridModeEnabled),
+    bgColor: resolveBoardBgColor(appState),
+  };
+}
+
+export function normalizePaperStylePayload(raw: unknown): PaperStylePayload | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const style = normalizeGridStyle(
+    o.style ?? o.gridStyle ?? o[GRID_STYLE_KEY],
+    o.gridModeEnabled,
+  );
+  let bg =
+    typeof o.bgColor === "string" && o.bgColor
+      ? o.bgColor
+      : typeof o[BG_COLOR_KEY] === "string"
+        ? String(o[BG_COLOR_KEY])
+        : "#ffffff";
+  if (bg === "transparent") bg = "#ffffff";
+  return { style, bgColor: bg };
+}

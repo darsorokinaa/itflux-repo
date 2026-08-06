@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   gridAppStatePatch,
   normalizeGridStyle,
+  normalizePaperStylePayload,
   paperOverlayStyle,
+  paperStyleFromAppState,
   resolveBoardBgColor,
   usesPaperOverlay,
 } from "./boardGrid";
@@ -29,6 +31,21 @@ describe("boardGrid", () => {
 
   it("resolveBoardBgColor не берёт transparent", () => {
     expect(resolveBoardBgColor({ viewBackgroundColor: "transparent", itfluxBgColor: "#abc" })).toBe("#abc");
+  });
+
+  it("normalizePaperStylePayload и paperStyleFromAppState", () => {
+    expect(normalizePaperStylePayload({ style: "cells", bgColor: "#fafafa" })).toEqual({
+      style: "cells",
+      bgColor: "#fafafa",
+    });
+    expect(normalizePaperStylePayload({ itfluxGridStyle: "ruled", itfluxBgColor: "#eee" })).toEqual({
+      style: "ruled",
+      bgColor: "#eee",
+    });
+    expect(normalizePaperStylePayload(null)).toBeNull();
+    expect(
+      paperStyleFromAppState({ itfluxGridStyle: "dots", itfluxBgColor: "#fff", viewBackgroundColor: "transparent" }),
+    ).toEqual({ style: "dots", bgColor: "#fff" });
   });
 
   it("paperOverlayStyle для линий письма и клеток", () => {

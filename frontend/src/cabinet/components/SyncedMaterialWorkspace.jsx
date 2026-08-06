@@ -3,6 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MaterialCollabBar from "./MaterialCollabBar";
 import InteractivePlayer from "./InteractivePlayer";
 import { fetchInteractive, fetchMeetingMaterialInteractive } from "../../utils/cabinetAuth";
+import {
+  THROTTLE,
+  createHtmlLessonBridge,
+  htmlEventToMaterialOp,
+  getCapabilitiesForKind,
+} from "../materials/collab";
+import SpreadsheetMaterialView from "./SpreadsheetMaterialView";
 
 const PEN_COLORS = ["#e11d48", "#2563eb", "#16a34a", "#ca8a04", "#7c3aed", "#0f172a"];
 const WIDTHS = [2, 3, 5, 8];
@@ -74,6 +81,8 @@ function resourceTypeLabel(kind) {
     file: "Файл",
     embed: "Страница",
     link: "Ссылка",
+    board: "Доска",
+    spreadsheet: "Таблица",
   };
   return map[kind] || "Материал";
 }
@@ -94,7 +103,13 @@ function viewerSrc(url, { page, showPdf } = {}) {
   if (!raw) return "";
   if (!showPdf) return raw;
   const base = raw.split("#")[0];
+  // Include page in src for first load only; subsequent page changes update
+  // iframe location hash without remounting (see page sync effect).
   return `${base}#page=${page || 1}`;
+}
+
+function frameBaseKey(url) {
+  return String(url || "").split("#")[0];
 }
 
 function distToSegment(px, py, x1, y1, x2, y2) {
@@ -156,11 +171,19 @@ export default function SyncedMaterialWorkspace({
   onClearOwnAnnotations,
   onInteractiveOp,
   remoteApplyGuard = null,
+  collaborationPermission = "answers_only",
+  followingTeacher = true,
+  onFollowBreak = null,
+  onFollowReturn = null,
+  onFollowStatusChange = null,
+  onConfigurePermissions = null,
 }) {
   const stageRef = useRef(null);
   const hitRef = useRef(null);
   const drawingRef = useRef(null);
   const interactiveRootRef = useRef(null);
+  const iframeRef = useRef(null);
+  const htmlBridgeRef = useRef(null);
   const undoStackRef = useRef([]);
   const redoStackRef = useRef([]);
   const fieldDebounceRef = useRef(new Map());
@@ -173,26 +196,110 @@ export default function SyncedMaterialWorkspace({
   const [customColor, setCustomColor] = useState(prefs.color);
   const [interactive, setInteractive] = useState(null);
   const [interactiveError, setInteractiveError] = useState("");
+  const [localBrowsingAway, setLocalBrowsingAway] = useState(false);
+  const [localPage, setLocalPage] = useState(null);
+
+  const url = material?.openUrl || material?.url || "";
+  const text = material?.contentText || material?.text || "";
+  const kind = material?.type || material?.kind || "file";
+  const isBoard =
+    kind === "board"
+    || Boolean(material?.boardId)
+    || /\/cabinet\/boards\//i.test(String(url));
+  const isSpreadsheet = kind === "spreadsheet" || /\.(xls|xlsx|ods|csv)(\?|$)/i.test(String(url).split("?")[0]);
+  const capabilities = useMemo(() => getCapabilitiesForKind(isSpreadsheet ? "spreadsheet" : kind), [kind, isSpreadsheet]);
 
   const isCollaborative = interactionMode === "collaborative";
   const independent = followPolicy === "independent";
   // strict follow: навигация за учителем, ответы доступны.
-  const followMode = !canManage && !independent && !isCollaborative;
+  const followMode = !canManage && !independent && !isCollaborative && !localBrowsingAway;
   const locked = followMode;
-  const contentLocked = !canManage && !canEditContent && !followMode && !independent;
-  const canAnswer = canManage || canEditContent || followMode || independent;
-  const showTools = canManage || isCollaborative;
-  const canNavigate = (canManage && isController) || independent || isCollaborative;
+  const contentLocked = !canManage && !canEditContent && !followMode && !independent && !localBrowsingAway;
+  const canAnswer = canManage || canEditContent || followMode || independent || localBrowsingAway || isCollaborative;
+  // На доске Excalidraw рисование — внутри iframe; overlay «Перо» только мешает стилусу.
+  const showTools = (canManage || (isCollaborative && ["annotate", "edit_content", "full"].includes(collaborationPermission))) && !isBoard;
+  const canNavigate = ((canManage && isController) || independent || isCollaborative || localBrowsingAway) && !isBoard;
   const drawToolActive = tool === "pen" || tool === "highlighter" || tool === "pointer" || tool === "eraser";
   const toolsCaptureInput = showTools && drawToolActive && (canManage || !contentLocked || tool === "pointer");
+  const effectivelyFollowing = canManage || (!localBrowsingAway && followingTeacher && !independent);
 
   const annotations = useMemo(
     () => (Array.isArray(state?.annotations) ? state.annotations : []),
     [state],
   );
-  const page = Number(state?.page || 1);
+  const teacherPage = Number(state?.page || 1);
+  const page = localBrowsingAway && localPage != null ? localPage : teacherPage;
   const zoom = Number(state?.zoom || 1);
   const scroll = Number(state?.scroll || 0);
+
+  const showImage = isImageUrl(url, kind);
+  const showPdf = isPdfUrl(url, kind) && !isSpreadsheet;
+  const frameSrc = viewerSrc(url, { page: teacherPage, showPdf });
+  const showInteractive = Boolean(material?.interactiveId);
+  const isHtmlLesson = Boolean(
+    !showInteractive && !showImage && !showPdf && !isBoard && !isSpreadsheet && url
+    && (kind === "embed" || kind === "link" || material?.htmlLesson),
+  );
+
+  // Teacher page change while browsing away → auto-return to teacher.
+  useEffect(() => {
+    if (canManage || !localBrowsingAway) return;
+    setLocalBrowsingAway(false);
+    setLocalPage(null);
+    onFollowStatusChange?.(true);
+    onFollowReturn?.();
+  }, [teacherPage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setLocalBrowsingAway(false);
+    setLocalPage(null);
+  }, [material?.openUrl, material?.interactiveId]);
+
+  // Update PDF page via hash without remounting iframe.
+  useEffect(() => {
+    if (!showPdf || !iframeRef.current) return;
+    const base = frameBaseKey(url);
+    if (!base) return;
+    try {
+      const win = iframeRef.current.contentWindow;
+      if (win) {
+        // Same-origin preview APIs can take hash; cross-origin may throw — then reload src.
+        try {
+          const next = `${base}#page=${page}`;
+          if (iframeRef.current.src !== next) {
+            iframeRef.current.src = next;
+          }
+        } catch {
+          iframeRef.current.src = `${base}#page=${page}`;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [page, showPdf, url]);
+
+  const breakFollowAndNavigate = useCallback((nextPage) => {
+    if (canManage || isCollaborative || independent) {
+      if (remoteApplyGuard?.isRemote?.()) return;
+      onStatePatch?.({ action: "page_changed", payload: { page: nextPage } });
+      return;
+    }
+    if (!localBrowsingAway) {
+      setLocalBrowsingAway(true);
+      onFollowStatusChange?.(false);
+      onFollowBreak?.();
+    }
+    setLocalPage(nextPage);
+  }, [canManage, isCollaborative, independent, localBrowsingAway, onFollowBreak, onFollowStatusChange, onStatePatch, remoteApplyGuard]);
+
+  const returnToTeacher = useCallback(() => {
+    setLocalBrowsingAway(false);
+    setLocalPage(null);
+    onFollowStatusChange?.(true);
+    onFollowReturn?.();
+  }, [onFollowReturn, onFollowStatusChange]);
+
+  // HTML lesson postMessage bridge — attached after iframe mounts via frameSrc effect below.
 
   useEffect(() => {
     saveToolPrefs({ color: penColor, width: penWidth });
@@ -231,6 +338,49 @@ export default function SyncedMaterialWorkspace({
     if (remoteApplyGuard?.isRemote?.()) return;
     onStatePatch?.({ action, payload });
   }, [onStatePatch, remoteApplyGuard]);
+
+  // HTML lesson postMessage bridge
+  useEffect(() => {
+    if (!isHtmlLesson) {
+      htmlBridgeRef.current?.destroy?.();
+      htmlBridgeRef.current = null;
+      return undefined;
+    }
+    const frame = iframeRef.current;
+    if (!frame) return undefined;
+    const bridge = createHtmlLessonBridge({
+      iframe: frame,
+      onEvent: (msg) => {
+        if (remoteApplyGuard?.isRemote?.()) return;
+        const op = htmlEventToMaterialOp(msg);
+        if (!op) return;
+        if (op.action === "field_changed" || op.action === "answer_selected") {
+          onInteractiveOp?.(op);
+        } else if (canManage || isCollaborative) {
+          patchState(op.action, op.payload);
+        } else if (op.action === "page_changed") {
+          breakFollowAndNavigate(Number(op.payload?.page) || 1);
+        }
+      },
+    });
+    htmlBridgeRef.current = bridge;
+    bridge.requestState();
+    return () => {
+      bridge.destroy();
+      htmlBridgeRef.current = null;
+    };
+  }, [isHtmlLesson, url, canManage, isCollaborative, onInteractiveOp, patchState, remoteApplyGuard, breakFollowAndNavigate]);
+
+  useEffect(() => {
+    if (!htmlBridgeRef.current || !effectivelyFollowing) return;
+    htmlBridgeRef.current.applyRemote({
+      page: teacherPage,
+      zoom,
+      scroll,
+      mode: isCollaborative ? "collaborative" : "follow",
+      permissions: collaborationPermission,
+    });
+  }, [teacherPage, zoom, scroll, effectivelyFollowing, isCollaborative, collaborationPermission]);
 
   const toNorm = useCallback((clientX, clientY) => {
     const el = stageRef.current;
@@ -416,7 +566,7 @@ export default function SyncedMaterialWorkspace({
             ? "answer_selected"
             : "field_changed",
         );
-      }, 120));
+      }, THROTTLE.ANSWER_DEBOUNCE_MS));
     };
 
     root.addEventListener("input", onInput, true);
@@ -494,14 +644,6 @@ export default function SyncedMaterialWorkspace({
     }
   }, [onDrawComplete, onEraseAnnotation]);
 
-  const url = material?.openUrl || material?.url || "";
-  const text = material?.contentText || material?.text || "";
-  const kind = material?.type || material?.kind || "file";
-  const showImage = isImageUrl(url, kind);
-  const showPdf = isPdfUrl(url, kind);
-  const frameSrc = viewerSrc(url, { page, showPdf });
-  const showInteractive = Boolean(material?.interactiveId);
-
   const allStrokes = useMemo(() => {
     const map = new Map();
     for (const a of annotations) {
@@ -527,20 +669,24 @@ export default function SyncedMaterialWorkspace({
       <MaterialCollabBar
         canManage={canManage}
         title={material?.title}
-        typeLabel={resourceTypeLabel(kind)}
+        typeLabel={resourceTypeLabel(isSpreadsheet ? "spreadsheet" : kind)}
         interactionMode={interactionMode}
         followPolicy={followPolicy}
         syncStatus={syncStatus}
         collaborative={isCollaborative}
+        collaborationPermission={collaborationPermission}
         isController={isController}
         controllerLabel={controllerLabel}
+        localBrowsingAway={localBrowsingAway}
         onToggleCollaborative={onToggleCollaborative}
+        onConfigurePermissions={onConfigurePermissions}
         onAllowIndependent={onAllowIndependent}
-        onReturnToLeader={onReturnToLeader}
+        onReturnToLeader={canManage ? onReturnToLeader : returnToTeacher}
         onTransferControl={onTransferControl}
         onClose={onCloseForAll}
-        notice={notice}
+        notice={notice || (localBrowsingAway && !canManage ? "Вы временно не следуете за учителем" : "")}
         presenceLabel={presenceLabel}
+        capabilities={capabilities}
         tools={showTools ? (
           <div className="vl-collab-tools" role="toolbar" aria-label="Инструменты">
             <button type="button" className={tool === "hand" ? "is-active" : ""} onClick={() => setTool("hand")} title="Курсор / просмотр">Курсор</button>
@@ -617,7 +763,7 @@ export default function SyncedMaterialWorkspace({
         }}
       />
       <div
-        className={`video-lesson-workspace__stage${contentLocked ? " is-locked" : ""}${cursorClass}`}
+        className={`video-lesson-workspace__stage${contentLocked ? " is-locked" : ""}${cursorClass}${isBoard ? " video-lesson-workspace__stage--board" : ""}`}
         ref={stageRef}
       >
         <div
@@ -634,16 +780,27 @@ export default function SyncedMaterialWorkspace({
               <p className="vl-empty__title">Интерактив недоступен</p>
               <p className="vl-empty__text">{interactiveError}</p>
             </div>
+          ) : isSpreadsheet ? (
+            <SpreadsheetMaterialView
+              url={url}
+              state={state}
+              canEdit={canManage || (isCollaborative && ["edit_content", "full"].includes(collaborationPermission))}
+              onCellUpdate={(payload) => patchState("cell_updated", payload)}
+              onSheetChange={(sheetId) => patchState("sheet_changed", { sheetId })}
+              onSelectionChange={(payload) => patchState("selection_changed", payload)}
+              remoteApplyGuard={remoteApplyGuard}
+            />
           ) : text && !url ? (
             <div className="video-lesson-workspace__text">{text}</div>
           ) : showImage && url ? (
             <img src={url} alt={material?.title || ""} className="vl-synced-image" draggable={false} />
           ) : frameSrc ? (
             <iframe
-              key={`${frameSrc.split("#")[0]}|${page}`}
+              ref={iframeRef}
+              key={frameBaseKey(frameSrc)}
               title={material?.title || "Материал"}
               src={frameSrc}
-              className="video-lesson-workspace__frame"
+              className={`video-lesson-workspace__frame${isBoard ? " video-lesson-workspace__frame--board" : ""}`}
               allow="camera; microphone; display-capture; autoplay; clipboard-read; clipboard-write; fullscreen"
             />
           ) : (
@@ -652,6 +809,14 @@ export default function SyncedMaterialWorkspace({
               <p className="vl-empty__text">Файл нельзя открыть напрямую. Закройте и откройте материал снова.</p>
             </div>
           )}
+          {!canManage && localBrowsingAway ? (
+            <div className="vl-follow-banner" role="status">
+              <span>Вы временно не следуете за учителем</span>
+              <button type="button" className="video-lesson-btn video-lesson-btn--primary" onClick={returnToTeacher}>
+                Вернуться к учителю
+              </button>
+            </div>
+          ) : null}
         </div>
         <svg className="vl-synced-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
           {allStrokes

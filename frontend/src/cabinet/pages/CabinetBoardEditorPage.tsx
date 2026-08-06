@@ -56,6 +56,7 @@ import {
   GRID_STYLE_KEY,
   gridAppStatePatch,
   normalizeGridStyle,
+  normalizePaperStylePayload,
   paperOverlayStyle,
   resolveBoardBgColor,
   usesPaperOverlay,
@@ -264,6 +265,11 @@ function applyRemoteSceneToApi(
       selectedGroupIds: local.selectedGroupIds,
       // Keep local UI theme — remote scene shouldn't flip chrome.
       theme: local.theme === "dark" ? "dark" : "light",
+      // Стилус/инструмент — локальные: иначе remote/save сбрасывают penMode
+      // и на планшете ломается рисование пером (palm rejection / tool).
+      ...(local.activeTool != null ? { activeTool: local.activeTool } : {}),
+      ...(typeof local.penMode === "boolean" ? { penMode: local.penMode } : {}),
+      ...(typeof local.penDetected === "boolean" ? { penDetected: local.penDetected } : {}),
     },
     files: scene.files || {},
     // Remote updates must not enter local undo stack (Excalidraw 0.18+).
@@ -348,7 +354,7 @@ export default function CabinetBoardEditorPage() {
   hostReadyRef.current = hostReady;
   const [exportOpen, setExportOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [burgerOpen, setBurgerOpen] = useState(true);
+  const [burgerOpen, setBurgerOpen] = useState(false);
   const [accessOpen, setAccessOpen] = useState(false);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [clearLoading, setClearLoading] = useState(false);
@@ -366,7 +372,7 @@ export default function CabinetBoardEditorPage() {
   const gridStyleRef = useRef<BoardGridStyle>("none");
   const bgColorRef = useRef("#ffffff");
   const boardThemeRef = useRef<"light" | "dark">("light");
-  const burgerOpenRef = useRef(true);
+  const burgerOpenRef = useRef(false);
   const hadSelectionRef = useRef(false);
   const applyingRemoteRef = useRef(false);
   /** Generation counter: overlapping remote applies must not clear the flag early. */
@@ -948,10 +954,8 @@ export default function CabinetBoardEditorPage() {
       setHasSelection(selected);
       if (selected) {
         setBurgerOpen(false);
-      } else {
-        // Снятие выделения → снова панель настроек холста
-        setBurgerOpen(true);
       }
+      // Не открываем панель холста автоматически — чище рабочая область.
       hadSelectionRef.current = selected;
     }
 
@@ -960,6 +964,47 @@ export default function CabinetBoardEditorPage() {
       setBoardTheme(nextTheme);
     }
   }, []);
+
+  /** Применить бумагу от учителя/пира (CSS-оверлей + appState). */
+  const applyRemotePaperStyle = useCallback((raw: { style?: string; bgColor?: string } | Record<string, unknown>) => {
+    const paper = normalizePaperStylePayload(raw);
+    if (!paper) return;
+    if (paper.style === gridStyleRef.current && paper.bgColor === bgColorRef.current) return;
+    setGridStyle(paper.style);
+    gridStyleRef.current = paper.style;
+    setBgColor(paper.bgColor);
+    bgColorRef.current = paper.bgColor;
+    const patch = gridAppStatePatch(paper.style, paper.bgColor);
+    apiRef.current?.updateScene?.({
+      appState: patch,
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+    if (latestSceneRef.current) {
+      latestSceneRef.current = {
+        ...latestSceneRef.current,
+        appState: { ...latestSceneRef.current.appState, ...patch },
+      };
+    }
+    if (usesPaperOverlay(paper.style)) {
+      window.requestAnimationFrame(() => {
+        syncPaperOverlay(apiRef.current?.getAppState?.() || { zoom: { value: 1 }, scrollX: 0, scrollY: 0 });
+      });
+    }
+  }, [syncPaperOverlay]);
+
+  const applyRemotePaperStyleRef = useRef(applyRemotePaperStyle);
+  applyRemotePaperStyleRef.current = applyRemotePaperStyle;
+
+  const publishOwnPaperStyle = useCallback(() => {
+    if (!canEdit && !canManage) return;
+    collabRef.current?.publishPaperStyle({
+      style: gridStyleRef.current,
+      bgColor: bgColorRef.current,
+    });
+  }, [canEdit, canManage]);
+
+  const publishOwnPaperStyleRef = useRef(publishOwnPaperStyle);
+  publishOwnPaperStyleRef.current = publishOwnPaperStyle;
 
   const publishLiveScene = useCallback((scene: BoardScenePayload) => {
     const files = attachStableUrls(
@@ -1803,6 +1848,10 @@ export default function CabinetBoardEditorPage() {
             latestSceneRef.current = payload;
             lastElementsRef.current = elements;
             lastFilesRef.current = displayFiles;
+            // Бумага из полной сцены (если пришла) — как у учителя.
+            if (appStateIn && (GRID_STYLE_KEY in appStateIn || BG_COLOR_KEY in appStateIn)) {
+              applyRemotePaperStyleRef.current(appStateIn);
+            }
             if (meta.fromSaved) {
               if (!dirtyRef.current) {
                 safeSetSaveStatus("saved");
@@ -1960,8 +2009,10 @@ export default function CabinetBoardEditorPage() {
             // Учитель сразу отдаёт viewport — ученик может включить follow без ожидания pan.
             if (canManage) {
               window.setTimeout(() => publishOwnViewportNow(true), 80);
+              window.setTimeout(() => publishOwnPaperStyleRef.current(), 100);
             } else {
               collabRef.current?.requestViewport();
+              collabRef.current?.requestPaperStyle();
             }
             // Автозамер RTT при включённой диагностике (localStorage / DEV).
             try {
@@ -1989,6 +2040,7 @@ export default function CabinetBoardEditorPage() {
           setCollabPeers(peers);
           if (canManage && peers.length) {
             publishOwnViewportNow(true);
+            publishOwnPaperStyleRef.current();
           }
         },
         onRemoteOps: (ops, meta) => {
@@ -2059,6 +2111,12 @@ export default function CabinetBoardEditorPage() {
         },
         onViewportRequest: () => {
           if (canManage) publishOwnViewportNow(true);
+        },
+        onRemotePaperStyle: (paper) => {
+          applyRemotePaperStyleRef.current(paper);
+        },
+        onPaperRequest: () => {
+          if (canManage || canEdit) publishOwnPaperStyleRef.current();
         },
         onRemoteScene: (scene, meta) => {
           if (isDrawingGestureRef.current) {
@@ -2310,6 +2368,9 @@ export default function CabinetBoardEditorPage() {
       safeSetSaveStatus("dirty");
       debouncedSaver.schedule();
     }
+    if (canEdit) {
+      collabRef.current?.publishPaperStyle({ style: gridStyleRef.current, bgColor: color });
+    }
   };
 
   const applyGridStyle = (style: BoardGridStyle) => {
@@ -2327,6 +2388,9 @@ export default function CabinetBoardEditorPage() {
         safeSetSaveStatus("dirty");
         debouncedSaver.schedule();
       }
+    }
+    if (canEdit) {
+      collabRef.current?.publishPaperStyle({ style, bgColor: bgColorRef.current });
     }
     if (usesPaperOverlay(style)) {
       // Дать React отрисовать оверлей, затем синхронизировать смещение
@@ -2653,14 +2717,21 @@ export default function CabinetBoardEditorPage() {
           >
             <CabinetIcon name="arrowLeft" />
           </button>
-          <input
-            className="cb-board-editor__title"
-            value={title}
-            onChange={handleTitleChange}
-            disabled={!canManage}
-            aria-label="Название доски"
-          />
-          {statusLabel ? <span className={statusClass}>{statusLabel}</span> : null}
+          {canManage ? (
+            <input
+              className="cb-board-editor__title"
+              value={title}
+              onChange={handleTitleChange}
+              aria-label="Название доски"
+            />
+          ) : (
+            <h1 className="cb-board-editor__title cb-board-editor__title--readonly" title={title}>
+              {title || "Доска"}
+            </h1>
+          )}
+          {statusLabel ? (
+            <span className={statusClass} aria-live="polite">{statusLabel}</span>
+          ) : null}
           {collaborative && collabParticipants.length > 0 ? (
             <div
               className={[
@@ -2689,18 +2760,18 @@ export default function CabinetBoardEditorPage() {
                   type="button"
                   className="cb-board-editor__follow-btn cb-board-editor__follow-btn--active"
                   onClick={() => stopFollowTeacher("Слежение выключено")}
-                  title="Прекратить слежение"
+                  title="Слежение включено — нажмите, чтобы выключить"
                 >
-                  Слежение включено
+                  Слежение
                 </button>
               ) : (
                 <button
                   type="button"
                   className="cb-board-editor__follow-btn"
                   onClick={startFollowTeacher}
-                  title="Перейти к текущей области учителя и следовать за ним"
+                  title="Следовать за областью учителя"
                 >
-                  Следовать за учителем
+                  Следить
                 </button>
               )}
               {!followingTeacher ? (
@@ -2710,7 +2781,7 @@ export default function CabinetBoardEditorPage() {
                   onClick={returnToTeacherViewport}
                   title="Один раз перейти к области учителя"
                 >
-                  Вернуться к учителю
+                  К учителю
                 </button>
               ) : null}
             </div>
@@ -2727,11 +2798,12 @@ export default function CabinetBoardEditorPage() {
             <div className="cb-board-editor__menu">
               <button
                 type="button"
-                className="cb-board-editor__action"
+                className="cb-board-editor__iconbtn"
                 onClick={() => { setExportOpen((v) => !v); setMoreOpen(false); }}
+                aria-label="Экспорт"
+                title="Экспорт"
               >
                 <CabinetIcon name="export" />
-                <span>Экспорт</span>
               </button>
               {exportOpen ? (
                 <div className="cb-board-editor__menu-panel" role="menu">
@@ -2744,55 +2816,51 @@ export default function CabinetBoardEditorPage() {
             </div>
           ) : null}
 
-          {canManage ? (
-            <button
-              type="button"
-              className="cb-board-editor__action cb-board-editor__desktop-only"
-              onClick={() => setAccessOpen(true)}
-            >
-              <CabinetIcon name="settings" />
-              <span>Настройки доступа</span>
-            </button>
-          ) : null}
-
           <button
             type="button"
-            className="cb-board-editor__action"
+            className="cb-board-editor__iconbtn"
             onClick={toggleFullscreen}
             aria-label="Полный экран"
+            title="Полный экран"
           >
             <CabinetIcon name="expand" />
-            <span className="cb-board-editor__desktop-only">Полный экран</span>
           </button>
 
-          {canEdit ? (
-            <>
-              <span className="cb-board-editor__sep cb-board-editor__desktop-only" aria-hidden="true" />
-              <button
-                type="button"
-                className="cb-board-editor__action cb-board-editor__action--danger cb-board-editor__desktop-only"
-                onClick={requestClear}
-                aria-label="Очистить доску"
-                title="Очистить доску"
-              >
-                <CabinetIcon name="trash" />
-              </button>
-            </>
-          ) : null}
-
-          <div className="cb-board-editor__menu cb-board-editor__mobile-only">
+          <div className="cb-board-editor__menu">
             <button
               type="button"
-              className="cb-board-editor__action"
+              className="cb-board-editor__iconbtn"
               onClick={() => { setMoreOpen((v) => !v); setExportOpen(false); }}
+              aria-label="Ещё"
+              title="Ещё"
+              aria-expanded={moreOpen}
             >
-              <span>Ещё</span>
+              <CabinetIcon name="more" />
             </button>
             {moreOpen ? (
               <div className="cb-board-editor__menu-panel" role="menu">
-                {canEdit ? <button type="button" onClick={() => { setMoreOpen(false); requestClear(); }}>Очистить доску</button> : null}
-                {canManage ? <button type="button" onClick={() => { setMoreOpen(false); setAccessOpen(true); }}>Настройки доступа</button> : null}
-                <button type="button" onClick={() => { setMoreOpen(false); void handleSaveAsCopy(); }}>Создать копию</button>
+                {canManage ? (
+                  <button type="button" onClick={() => { setMoreOpen(false); setAccessOpen(true); }}>
+                    Настройки доступа
+                  </button>
+                ) : null}
+                {canEdit ? (
+                  <button type="button" onClick={() => { setMoreOpen(false); requestClear(); }}>
+                    Очистить доску
+                  </button>
+                ) : null}
+                <button type="button" onClick={() => { setMoreOpen(false); void handleSaveAsCopy(); }}>
+                  Создать копию
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreOpen(false);
+                    showNotice("Отмена: Ctrl+Z · Повтор: Ctrl+Shift+Z · Удалить: Delete · Рука: пробел");
+                  }}
+                >
+                  Горячие клавиши
+                </button>
               </div>
             ) : null}
           </div>
@@ -2846,39 +2914,39 @@ export default function CabinetBoardEditorPage() {
                   Тёмная
                 </button>
               </div>
-              <p className="cb-board-burger__label">Бумага</p>
-              <div className="cb-board-burger__row cb-board-burger__row--wrap">
-                <button
-                  type="button"
-                  className={gridStyle === "none" ? "is-active" : ""}
-                  onClick={() => applyGridStyle("none")}
-                >
-                  Чистая
-                </button>
-                <button
-                  type="button"
-                  className={gridStyle === "cells" ? "is-active" : ""}
-                  onClick={() => applyGridStyle("cells")}
-                >
-                  Клетки
-                </button>
-                <button
-                  type="button"
-                  className={gridStyle === "ruled" ? "is-active" : ""}
-                  onClick={() => applyGridStyle("ruled")}
-                >
-                  Линии
-                </button>
-                <button
-                  type="button"
-                  className={gridStyle === "dots" ? "is-active" : ""}
-                  onClick={() => applyGridStyle("dots")}
-                >
-                  Точки
-                </button>
-              </div>
               {canEdit ? (
                 <>
+                  <p className="cb-board-burger__label">Бумага</p>
+                  <div className="cb-board-burger__row cb-board-burger__row--wrap">
+                    <button
+                      type="button"
+                      className={gridStyle === "none" ? "is-active" : ""}
+                      onClick={() => applyGridStyle("none")}
+                    >
+                      Чистая
+                    </button>
+                    <button
+                      type="button"
+                      className={gridStyle === "cells" ? "is-active" : ""}
+                      onClick={() => applyGridStyle("cells")}
+                    >
+                      Клетки
+                    </button>
+                    <button
+                      type="button"
+                      className={gridStyle === "ruled" ? "is-active" : ""}
+                      onClick={() => applyGridStyle("ruled")}
+                    >
+                      Линии
+                    </button>
+                    <button
+                      type="button"
+                      className={gridStyle === "dots" ? "is-active" : ""}
+                      onClick={() => applyGridStyle("dots")}
+                    >
+                      Точки
+                    </button>
+                  </div>
                   <p className="cb-board-burger__label">Цвет фона</p>
                   <label className="cb-board-burger__color">
                     <input
@@ -2889,27 +2957,11 @@ export default function CabinetBoardEditorPage() {
                     <span>{bgColor === "transparent" ? "#ffffff" : bgColor}</span>
                   </label>
                 </>
-              ) : null}
-              <button
-                type="button"
-                className="cb-board-burger__item"
-                onClick={() => {
-                  showNotice("Отмена: Ctrl+Z · Повтор: Ctrl+Shift+Z · Удалить: Delete · Рука: пробел");
-                }}
-              >
-                Горячие клавиши
-              </button>
-              {canEdit ? (
-                <button
-                  type="button"
-                  className="cb-board-burger__item cb-board-burger__item--danger"
-                  onClick={() => {
-                    requestClear();
-                  }}
-                >
-                  Очистить доску
-                </button>
-              ) : null}
+              ) : (
+                <p className="cb-board-burger__hint">
+                  Оформление бумаги совпадает с учителем
+                </p>
+              )}
             </div>
           ) : null}
         </div>

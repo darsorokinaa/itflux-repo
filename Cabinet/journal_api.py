@@ -61,12 +61,20 @@ from .journal_service import (
     update_journal,
     update_lesson_topics,
 )
+from .homework_from_review import HomeworkFromReviewError
 from .models import ScheduleEvent, Student, StudentGroup
 from .permissions import IsCabinetStudent, IsCabinetTeacher
+from .student_errors import collect_student_errors, create_homework_from_student_errors
 
 
 def _err(exc: Exception) -> Response:
     if isinstance(exc, JournalError):
+        return Response({"detail": exc.message, "code": exc.code}, status=exc.status)
+    raise exc
+
+
+def _hw_err(exc: Exception) -> Response:
+    if isinstance(exc, HomeworkFromReviewError):
         return Response({"detail": exc.message, "code": exc.code}, status=exc.status)
     raise exc
 
@@ -486,6 +494,100 @@ class JournalStudentView(APIView):
                     for r in records
                 ],
             }
+        )
+
+
+class JournalStudentErrorsView(APIView):
+    """Банк ошибок ученика: задачи с ошибками по предметам."""
+
+    permission_classes = [IsAuthenticated, IsCabinetTeacher]
+
+    def get(self, request, student_id: int):
+        student = get_object_or_404(Student, pk=student_id, teacher=request.user)
+        include_partial = str(request.query_params.get("include_partial", "1")).lower() not in (
+            "0",
+            "false",
+            "no",
+        )
+        summary_only = str(request.query_params.get("summary", "")).lower() in (
+            "1",
+            "true",
+            "yes",
+        ) or str(request.query_params.get("include_details", "1")).lower() in (
+            "0",
+            "false",
+            "no",
+        )
+        try:
+            data = collect_student_errors(
+                teacher=request.user,
+                student=student,
+                include_partial=include_partial,
+                include_details=not summary_only,
+            )
+        except HomeworkFromReviewError as exc:
+            return _hw_err(exc)
+        return Response(data)
+
+
+class JournalStudentErrorsHomeworkView(APIView):
+    """Составить работу над ошибками и выдать как ДЗ."""
+
+    permission_classes = [IsAuthenticated, IsCabinetTeacher]
+
+    def post(self, request, student_id: int):
+        student = get_object_or_404(Student, pk=student_id, teacher=request.user)
+        payload = request.data if isinstance(request.data, dict) else {}
+        try:
+            result = create_homework_from_student_errors(
+                teacher=request.user,
+                student=student,
+                title=payload.get("title") or "",
+                description=payload.get("description") or "",
+                due_at=payload.get("due_at"),
+                mode=payload.get("mode") or "assign",
+                comment=payload.get("comment") or "",
+                generator_task_ids=payload.get("generator_task_ids"),
+                selected_tasks=payload.get("selected_tasks"),
+                idempotency_key=payload.get("idempotency_key") or "",
+            )
+        except HomeworkFromReviewError as exc:
+            return _hw_err(exc)
+
+        homeworks_payload = []
+        for item in result.get("homeworks") or []:
+            hw = item["homework"]
+            homeworks_payload.append(
+                {
+                    "id": hw.id,
+                    "title": hw.title,
+                    "status": hw.status,
+                    "due_at": hw.due_at.isoformat() if hw.due_at else None,
+                    "subject": item.get("subject"),
+                    "level": item.get("level"),
+                    "tasks_count": item.get("tasks_count"),
+                    "created": item.get("created"),
+                    "homework_url": f"/cabinet/homework/{hw.id}",
+                }
+            )
+
+        primary = result["homework"]
+        return Response(
+            {
+                "id": primary.id,
+                "title": primary.title,
+                "status": primary.status,
+                "due_at": primary.due_at.isoformat() if primary.due_at else None,
+                "homework_url": f"/cabinet/homework/{primary.id}",
+                "created": result.get("created"),
+                "idempotent": result.get("idempotent"),
+                "notified": result.get("notified"),
+                "tasks_count": result.get("tasks_count"),
+                "count": result.get("count"),
+                "message": result.get("message"),
+                "homeworks": homeworks_payload,
+            },
+            status=status.HTTP_201_CREATED if result.get("created") else status.HTTP_200_OK,
         )
 
 

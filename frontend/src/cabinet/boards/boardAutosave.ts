@@ -45,6 +45,9 @@ const TRANSIENT_APP_STATE_KEYS = new Set([
   "height",
   "userToFollow",
   "followedBy",
+  // Локальный режим стилуса — не персистить и не раздавать пирам.
+  "penMode",
+  "penDetected",
 ]);
 
 export function sanitizeAppState(appState: Record<string, unknown> | null | undefined): Record<string, unknown> {

@@ -1,5 +1,14 @@
 /** Компактная панель синхронизации активного материала. */
 
+import { COLLAB_PERMISSIONS } from "../materials/collab/constants";
+
+const PERMISSION_LABELS = {
+  [COLLAB_PERMISSIONS.ANSWERS_ONLY]: "Только ответы",
+  [COLLAB_PERMISSIONS.ANNOTATE]: "Комментарии и рисование",
+  [COLLAB_PERMISSIONS.EDIT_CONTENT]: "Редактирование содержимого",
+  [COLLAB_PERMISSIONS.FULL]: "Полный совместный доступ",
+};
+
 export default function MaterialCollabBar({
   canManage,
   title,
@@ -8,9 +17,12 @@ export default function MaterialCollabBar({
   followPolicy = "strict",
   syncStatus = "synced",
   collaborative = false,
+  collaborationPermission = COLLAB_PERMISSIONS.ANNOTATE,
   isController = true,
   controllerLabel = "",
+  localBrowsingAway = false,
   onToggleCollaborative,
+  onConfigurePermissions,
   onAllowIndependent,
   onReturnToLeader,
   onTransferControl,
@@ -19,21 +31,26 @@ export default function MaterialCollabBar({
   tools = null,
   notice = "",
   presenceLabel = "",
+  capabilities = null,
 }) {
   const statusLabel = {
     synced: "Синхронизировано",
-    reconnecting: "Подключение восстанавливается",
-    offline: "Ученик не подключён",
+    reconnecting: "Соединение восстанавливается",
+    offline: "Соединение потеряно",
     error: "Ошибка синхронизации",
     saved: "Состояние сохранено",
   }[syncStatus] || "Синхронизировано";
 
   const independent = followPolicy === "independent";
-  const modeLabel = collaborative || interactionMode === "collaborative"
-    ? "Совместная работа (рисование)"
-    : (independent
-      ? (canManage ? "Самостоятельный просмотр" : "Самостоятельный режим")
-      : (canManage ? "Ученики следуют за вами" : "Вы следуете за учителем"));
+  const isCollab = collaborative || interactionMode === "collaborative";
+
+  const modeLabel = isCollab
+    ? `Совместная работа · ${PERMISSION_LABELS[collaborationPermission] || collaborationPermission}`
+    : (localBrowsingAway
+      ? "Временно не следуете за учителем"
+      : (independent
+        ? (canManage ? "Самостоятельный просмотр" : "Самостоятельный режим")
+        : (canManage ? "Ученики следуют за вами" : "Следовать за учителем")));
 
   return (
     <div className="vl-collab-bar">
@@ -43,7 +60,9 @@ export default function MaterialCollabBar({
           <span className="vl-collab-bar__meta">
             {typeLabel || "Материал"}
             {" · "}
-            {modeLabel}
+            <span className={`vl-collab-bar__mode${isCollab ? " is-collab" : " is-follow"}`}>
+              {modeLabel}
+            </span>
             {" · "}
             <span className={`vl-collab-bar__sync is-${syncStatus}`}>{statusLabel}</span>
             {presenceLabel ? ` · ${presenceLabel}` : ""}
@@ -51,14 +70,49 @@ export default function MaterialCollabBar({
           </span>
         </div>
         {notice ? <p className="vl-collab-bar__notice">{notice}</p> : null}
-        {!canManage && !independent ? (
-          <p className="vl-collab-bar__notice">Вы следуете за учителем · можно отвечать на текущем слайде</p>
+        {!canManage && !independent && !localBrowsingAway && !isCollab ? (
+          <p className="vl-collab-bar__notice">Режим: следовать за учителем · можно отвечать на задания</p>
+        ) : null}
+        {capabilities?.cellEditing ? (
+          <p className="vl-collab-bar__notice">Таблица: изменения ячеек синхронизируются операциями</p>
         ) : null}
       </div>
       <div className="vl-collab-bar__actions">
         {tools}
         {canManage ? (
           <>
+            <div className="vl-collab-bar__mode-switch" role="group" aria-label="Режим работы">
+              <button
+                type="button"
+                className={`video-lesson-btn${!isCollab ? " video-lesson-btn--primary" : " video-lesson-btn--ghost"}`}
+                disabled={!isController || !isCollab}
+                onClick={() => onToggleCollaborative?.(false)}
+                title="Вернуть режим следования за учителем"
+              >
+                Следовать за учителем
+              </button>
+              <button
+                type="button"
+                className={`video-lesson-btn${isCollab ? " video-lesson-btn--primary" : " video-lesson-btn--secondary"}`}
+                disabled={!isController}
+                onClick={() => {
+                  if (isCollab) onConfigurePermissions?.();
+                  else onToggleCollaborative?.(true);
+                }}
+              >
+                {isCollab ? "Настроить права" : "Включить совместную работу"}
+              </button>
+            </div>
+            {isCollab ? (
+              <button
+                type="button"
+                className="video-lesson-btn video-lesson-btn--secondary"
+                disabled={!isController}
+                onClick={() => onToggleCollaborative?.(false)}
+              >
+                Завершить совместную работу
+              </button>
+            ) : null}
             <button
               type="button"
               className="video-lesson-btn video-lesson-btn--secondary"
@@ -68,15 +122,6 @@ export default function MaterialCollabBar({
             >
               {independent ? "Вернуть к моему экрану" : "Разрешить самостоятельный просмотр"}
             </button>
-            <label className="vl-collab-bar__toggle">
-              <input
-                type="checkbox"
-                checked={Boolean(collaborative || interactionMode === "collaborative")}
-                onChange={(e) => onToggleCollaborative?.(e.target.checked)}
-                disabled={!isController}
-              />
-              <span>Рисование вместе</span>
-            </label>
             {onTransferControl ? (
               <button
                 type="button"
@@ -89,29 +134,25 @@ export default function MaterialCollabBar({
           </>
         ) : (
           <span className="vl-collab-bar__student-mode">
-            {independent
-              ? "Самостоятельный просмотр"
-              : "Вы следуете за учителем · можно отвечать"}
+            {localBrowsingAway
+              ? (
+                <button type="button" className="video-lesson-btn video-lesson-btn--primary" onClick={() => onReturnToLeader?.()}>
+                  Вернуться к учителю
+                </button>
+              )
+              : (isCollab
+                ? `Совместная работа · ${PERMISSION_LABELS[collaborationPermission] || ""}`
+                : (independent ? "Самостоятельный просмотр" : "Вы следуете за учителем"))}
           </span>
         )}
         {canManage && onClose ? (
-          <button
-            type="button"
-            className="video-lesson-btn video-lesson-btn--secondary"
-            onClick={onClose}
-          >
+          <button type="button" className="video-lesson-btn video-lesson-btn--secondary" onClick={onClose}>
             Закрыть для всех
           </button>
         ) : null}
-        {onCloseLocal ? (
-          <button
-            type="button"
-            className="video-lesson-icon-btn"
-            aria-label="Закрыть материал"
-            title="Закрыть"
-            onClick={onCloseLocal}
-          >
-            ×
+        {!canManage && onCloseLocal ? (
+          <button type="button" className="video-lesson-btn video-lesson-btn--ghost" onClick={onCloseLocal}>
+            Свернуть
           </button>
         ) : null}
       </div>

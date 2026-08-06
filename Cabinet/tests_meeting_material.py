@@ -697,3 +697,135 @@ class MeetingMaterialSessionApiTests(TestCase):
         session = MeetingMaterialSession.objects.get(pk=session_id)
         self.assertEqual(session.version, before)
         self.assertEqual(result["operation"]["type"], "material.annotation_preview")
+
+
+class MeetingMaterialCollabPermissionTests(MeetingMaterialSessionApiTests):
+    def test_student_cannot_enable_collaborative(self):
+        open_res = self._open()
+        session_id = open_res.data["materialSession"]["sessionId"]
+        self.client.force_login(self.student_user)
+        res = self.client.post(
+            f"/api/video-meetings/{self.meeting.uuid}/material-session/permission/",
+            {"sessionId": session_id, "mode": "collaborative", "collaborationPermission": "full"},
+            format="json",
+        )
+        self.assertIn(res.status_code, (403, 400))
+
+    def test_answers_only_blocks_annotations(self):
+        from Cabinet.meeting_material_session import set_interaction_mode
+
+        open_res = self._open()
+        session_id = open_res.data["materialSession"]["sessionId"]
+        set_interaction_mode(
+            meeting=self.meeting,
+            user=self.teacher,
+            mode="collaborative",
+            session_id=session_id,
+            collaboration_permission="answers_only",
+        )
+        self.meeting.refresh_from_db()
+        with self.assertRaises(VideoMeetingError) as ctx:
+            apply_material_operation(
+                meeting=self.meeting,
+                user=self.student_user,
+                action="annotation_added",
+                payload={"annotation": {"id": "x1", "points": [[0, 0], [0.1, 0.1]]}},
+                operation_id="ann-denied",
+                session_id=session_id,
+            )
+        self.assertEqual(ctx.exception.code, "forbidden")
+
+    def test_idempotent_operation_ids(self):
+        open_res = self._open()
+        session_id = open_res.data["materialSession"]["sessionId"]
+        self.meeting.refresh_from_db()
+        kwargs = dict(
+            meeting=self.meeting,
+            user=self.teacher,
+            action="page_changed",
+            payload={"page": 3},
+            operation_id="same-op-id",
+            session_id=session_id,
+        )
+        first = apply_material_operation(**kwargs)
+        second = apply_material_operation(**kwargs)
+        self.assertFalse(first.get("duplicate"))
+        self.assertTrue(second.get("duplicate"))
+        self.assertEqual(first["version"], second["version"])
+
+    def test_spreadsheet_cell_ops(self):
+        self.client.force_login(self.teacher)
+        res = self.client.post(
+            f"/api/video-meetings/{self.meeting.uuid}/material-session/",
+            {
+                "resourceKind": "spreadsheet",
+                "title": "Таблица",
+                "url": "https://example.com/sheet.xlsx",
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        session_id = res.data["materialSession"]["sessionId"]
+        from Cabinet.meeting_material_session import set_interaction_mode
+
+        set_interaction_mode(
+            meeting=self.meeting,
+            user=self.teacher,
+            mode="collaborative",
+            session_id=session_id,
+            collaboration_permission="edit_content",
+        )
+        self.meeting.refresh_from_db()
+        result = apply_material_operation(
+            meeting=self.meeting,
+            user=self.student_user,
+            action="cell_updated",
+            payload={"sheetId": "sheet-1", "cell": "B7", "value": "125", "revision": 1},
+            operation_id="cell-1",
+            session_id=session_id,
+        )
+        cells = result["session"].current_state["sheets"]["sheet-1"]["cells"]
+        self.assertEqual(cells["B7"]["value"], "125")
+
+    def test_student_answers_isolated(self):
+        self.client.force_login(self.teacher)
+        open_res = self.client.post(
+            f"/api/video-meetings/{self.meeting.uuid}/material-session/",
+            {
+                "resourceKind": "interactive",
+                "title": "Интерактив",
+                "url": "",
+            },
+            format="json",
+        )
+        self.assertEqual(open_res.status_code, 200, open_res.content)
+        session_id = open_res.data["materialSession"]["sessionId"]
+        self.meeting.refresh_from_db()
+        apply_material_operation(
+            meeting=self.meeting,
+            user=self.student_user,
+            action="field_changed",
+            payload={"fieldId": "task-5", "value": "42"},
+            operation_id="ans-1",
+            session_id=session_id,
+        )
+        session = MeetingMaterialSession.objects.get(pk=session_id)
+        bucket = session.current_state["fields"][str(self.student_user.pk)]
+        self.assertEqual(bucket["task-5"]["value"], "42")
+        with self.assertRaises(VideoMeetingError):
+            apply_material_operation(
+                meeting=self.meeting,
+                user=self.outsider,
+                action="field_changed",
+                payload={"fieldId": "task-5", "value": "hack"},
+                operation_id="ans-hack",
+                session_id=session_id,
+            )
+
+
+class InferResourceKindTests(TestCase):
+    def test_spreadsheet_from_url(self):
+        self.assertEqual(
+            infer_resource_kind(url="https://cdn.example.com/a.xlsx"),
+            "spreadsheet",
+        )

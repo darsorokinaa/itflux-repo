@@ -2832,7 +2832,13 @@ def build_journal_entries_feed(
                     "title": r.journal.actual_topic or r.journal.planned_topic or "Урок",
                     "subject": "",
                     "status": r.publish_status,
+                    "status_label": dict(RecordPublishStatus.choices).get(
+                        r.publish_status, "Урок"
+                    ),
                     "attendance": r.attendance_status,
+                    "attendance_label": dict(AttendanceStatus.choices).get(
+                        r.attendance_status, ""
+                    ),
                     "score": score,
                     "score_percent": score,
                     "max_score": 100,

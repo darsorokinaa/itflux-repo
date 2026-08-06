@@ -192,6 +192,7 @@ def serialize_material_session(
         "controllerUserId": session.controller_id,
         "collaborativeScope": session.collaborative_scope,
         "collaborativeUserIds": list(session.collaborative_user_ids or []),
+        "collaborationPermission": getattr(session, "collaboration_permission", None) or "annotate",
         "independentUserIds": list(session.independent_user_ids or []),
         "version": session.version,
         "openedAt": session.opened_at.isoformat() if session.opened_at else None,
@@ -510,6 +511,7 @@ def set_interaction_mode(
     session_id=None,
     collaborative_scope: str | None = None,
     collaborative_user_ids: list | None = None,
+    collaboration_permission: str | None = None,
 ) -> MeetingMaterialSession:
     assert_can_manage_meeting(user, meeting)
     meeting.refresh_from_db(fields=["status"])
@@ -552,13 +554,21 @@ def set_interaction_mode(
             session.collaborative_scope = MeetingMaterialCollaborativeScope.SELECTED
             if "collaborative_scope" not in update_fields:
                 update_fields.append("collaborative_scope")
+    if collaboration_permission is not None:
+        from .meeting_material_models import MeetingMaterialCollaborationPermission
+        perm = (collaboration_permission or "").strip().lower()
+        if perm not in MeetingMaterialCollaborationPermission.values:
+            raise VideoMeetingError("Некорректные права совместной работы", code="invalid_permission", status=400)
+        session.collaboration_permission = perm
+        update_fields.append("collaboration_permission")
 
     session.save(update_fields=update_fields)
     logger.info(
-        "material_permission_changed meeting=%s session=%s mode=%s user=%s",
+        "material_permission_changed meeting=%s session=%s mode=%s perm=%s user=%s",
         meeting.uuid,
         session.pk,
         mode,
+        getattr(session, "collaboration_permission", ""),
         user.pk,
     )
     return session
@@ -757,6 +767,7 @@ def apply_material_operation(
             interaction_mode=session.interaction_mode,
             can_collaborate=can_collab,
             can_browse_independently=can_browse,
+            collaboration_permission=getattr(session, "collaboration_permission", None) or "annotate",
         )
 
         if action not in allowed:
@@ -857,10 +868,13 @@ def sync_state_payload(meeting: VideoMeeting, user: User) -> dict:
     can_collab = bool(
         session and user_can_collaborate(session, user, access.role)
     )
+    from .meeting_present import serialize_presented
     return {
         "type": "material.sync_state",
         "meetingUuid": str(meeting.uuid),
         "role": access.role,
         "canCollaborate": can_collab,
+        "server_revision": session.version if session else 0,
         "materialSession": serialize_material_session(session, user=user, include_state=True),
+        "presented": serialize_presented(meeting, user=user),
     }

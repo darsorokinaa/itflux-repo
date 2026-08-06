@@ -133,6 +133,16 @@ urlpatterns = [
     path("journal/lessons/<int:lesson_id>/bulk/", journal_api.JournalLessonBulkView.as_view(), name="journal_lesson_bulk"),
     path("journal/students/", journal_api.JournalStudentsSummaryView.as_view(), name="journal_students_summary"),
     path("journal/students/<int:student_id>/", journal_api.JournalStudentView.as_view(), name="journal_student"),
+    path(
+        "journal/students/<int:student_id>/errors/",
+        journal_api.JournalStudentErrorsView.as_view(),
+        name="journal_student_errors",
+    ),
+    path(
+        "journal/students/<int:student_id>/errors/create-homework/",
+        journal_api.JournalStudentErrorsHomeworkView.as_view(),
+        name="journal_student_errors_homework",
+    ),
     path("journal/groups/<int:group_id>/", journal_api.JournalGroupView.as_view(), name="journal_group"),
     path("journal/attendance/", journal_api.JournalAttendanceView.as_view(), name="journal_attendance"),
     path("journal/analytics/", journal_api.JournalAnalyticsView.as_view(), name="journal_analytics"),

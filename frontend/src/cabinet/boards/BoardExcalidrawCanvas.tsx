@@ -188,8 +188,45 @@ function BoardExcalidrawInner({
     // Только холст: клик по тулбару/панелям не должен блокировать remote-sync.
     const target = e.target as HTMLElement | null;
     if (!target?.closest?.("canvas.excalidraw__canvas")) return;
+
+    // Стилус: включить penMode (палец = pan, перо = рисование). Excalidraw
+    // делает это сам, но remote updateScene может сбросить флаги до первого
+    // полного цикла — дублируем явно.
+    if (e.pointerType === "pen") {
+      const current = apiRef.current;
+      const appState = current?.getAppState?.() || {};
+      if (!appState.penMode || !appState.penDetected) {
+        try {
+          current?.updateScene?.({
+            appState: { penMode: true, penDetected: true },
+            captureUpdate: "NEVER",
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
     onPointerSceneDownRef.current?.();
   }, [onPointerSceneDownRef]);
+
+  // iOS/iPadOS: без preventDefault на touchmove страница/iframe могут
+  // перехватывать жест стилуса даже при touch-action: none у потомков.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return undefined;
+
+    const onTouchMove = (ev: TouchEvent) => {
+      const t = ev.target as HTMLElement | null;
+      if (!t?.closest?.("canvas.excalidraw__canvas")) return;
+      if (ev.cancelable) ev.preventDefault();
+    };
+
+    host.addEventListener("touchmove", onTouchMove, { passive: false });
+    return () => {
+      host.removeEventListener("touchmove", onTouchMove);
+    };
+  }, []);
 
   const handleHostPointerUp = useCallback(() => {
     onPointerSceneUpRef.current?.();

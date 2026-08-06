@@ -1618,6 +1618,14 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* Доска Excalidraw в iframe: родитель не должен перехватывать стилус/touch. */
+.video-lesson-workspace__stage--board {
+  overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: auto;
+}
+
 .video-lesson-workspace__frame {
   width: 100%;
   height: 100%;
@@ -1626,6 +1634,11 @@
   display: block;
   background: #fff;
   flex: 1 1 auto;
+}
+
+.video-lesson-workspace__frame--board {
+  touch-action: none;
+  overscroll-behavior: none;
 }
 
 .video-lesson-workspace__text {
@@ -1779,10 +1792,6 @@ body.vl-room-fullscreen .student-cabinet-nav {
     min-height: 44px;
     height: 44px;
     font-size: 0.9rem;
-  }
-
-  .video-lesson-workspace__stage {
-    touch-action: none;
   }
 
   .video-lesson-page--workspace .video-lesson-workspace {
@@ -2171,4 +2180,243 @@ body.vl-room-fullscreen .student-cabinet-nav {
 
 .vl-synced-hit--pointer {
   cursor: cell;
+}
+
+/* Follow banner, collab permissions, teacher panel, spreadsheet */
+.vl-mat-item__main--button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  flex: 1 1 auto;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  color: inherit;
+}
+
+.vl-mat-item.is-showing {
+  outline: 1px solid rgba(37, 99, 235, 0.35);
+  border-radius: 10px;
+}
+
+.vl-follow-banner {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #f8fafc;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+}
+
+.vl-collab-bar__mode.is-collab {
+  color: #0f766e;
+  font-weight: 600;
+}
+
+.vl-collab-bar__mode.is-follow {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.vl-collab-bar__mode-switch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vl-collab-perm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.45);
+  padding: 16px;
+}
+
+.vl-collab-perm-modal__card {
+  width: min(440px, 100%);
+  background: #fff;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.25);
+}
+
+.vl-collab-perm-modal__card h3 {
+  margin: 0 0 8px;
+}
+
+.vl-collab-perm-modal__options {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.vl-teacher-panel {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 40;
+  width: min(280px, calc(100vw - 24px));
+  max-height: min(42vh, 320px);
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  padding: 10px 12px;
+}
+
+.vl-teacher-panel__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.vl-teacher-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.vl-teacher-panel__list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.vl-teacher-panel__list .is-follow {
+  color: #15803d;
+}
+
+.vl-teacher-panel__list .is-away {
+  color: #b45309;
+}
+
+.vl-teacher-panel__empty {
+  color: #64748b;
+}
+
+.vl-teacher-panel__diag {
+  margin: 8px 0 0;
+  max-height: 140px;
+  overflow: auto;
+  font-size: 0.7rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.vl-spreadsheet {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  min-height: 240px;
+}
+
+.vl-spreadsheet__toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.vl-spreadsheet__sheets {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.vl-spreadsheet__sheets button.is-active {
+  font-weight: 700;
+}
+
+.vl-spreadsheet__hint {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.vl-spreadsheet__editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+}
+
+.vl-spreadsheet__editor label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+
+.vl-spreadsheet__value {
+  flex: 1 1 180px;
+}
+
+.vl-spreadsheet__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.vl-spreadsheet__table th,
+.vl-spreadsheet__table td {
+  border: 1px solid #e2e8f0;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.vl-spreadsheet__table tr.is-active {
+  background: #eff6ff;
+}
+
+.video-lesson-live-answers__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+@media (max-width: 760px) {
+  .vl-teacher-panel {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-height: 38dvh;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .video-lesson-page,
+  .video-lesson-workspace {
+    min-height: 100dvh;
+  }
+
+  .vl-collab-bar__actions {
+    flex-wrap: wrap;
+  }
+
+  .vl-collab-bar .video-lesson-btn {
+    min-height: 40px;
+  }
 }

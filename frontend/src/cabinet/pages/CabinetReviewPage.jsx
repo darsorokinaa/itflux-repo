@@ -11,7 +11,6 @@ import {
 } from "../CabinetSectionUi";
 import { deleteHomework, fetchReviewItems, normalizeCabinetList } from "../../utils/cabinetAuth";
 import HomeworkCopyModal from "../components/HomeworkCopyModal";
-import HomeworkFromReviewModal from "../components/HomeworkFromReviewModal";
 
 const FILTERS = [
   { id: "inbox", label: "К проверке" },
@@ -149,13 +148,11 @@ function groupWorksBy(items, keyFn, titleFn, sortTitles = true) {
   return groups;
 }
 
-function ReviewWorksGrid({ items, deletingId, onOpen, onDeleteRequest, onCopyRequest, onAssignHomework }) {
+function ReviewWorksGrid({ items, deletingId, onOpen, onDeleteRequest, onCopyRequest }) {
   if (!items.length) return null;
   return (
     <div className="cb-hw-grid">
-      {items.map((item) => {
-        const canAssign = Boolean(item.homeworkId) && !item.awaitingSubmission;
-        return (
+      {items.map((item) => (
           <CabinetHomeworkCard
             key={item.id}
             coverType={item.coverType}
@@ -171,11 +168,9 @@ function ReviewWorksGrid({ items, deletingId, onOpen, onDeleteRequest, onCopyReq
             overflowCount={item.overflowCount}
             actionLabel={deletingId === item.id ? "Удаление…" : item.actionLabel}
             onAction={() => onOpen(item)}
-            secondaryActionLabel={canAssign ? "Задать ДЗ" : (item.homeworkId ? "Скопировать" : undefined)}
+            secondaryActionLabel={item.homeworkId ? "Скопировать" : undefined}
             onSecondaryAction={
-              canAssign
-                ? () => onAssignHomework?.(item)
-                : (item.homeworkId ? () => onCopyRequest?.(item) : undefined)
+              item.homeworkId ? () => onCopyRequest?.(item) : undefined
             }
             dangerActionLabel={item.homeworkId ? "Удалить ДЗ" : undefined}
             onDangerAction={
@@ -186,8 +181,7 @@ function ReviewWorksGrid({ items, deletingId, onOpen, onDeleteRequest, onCopyReq
             dangerActionDisabled={Boolean(item.homeworkId) && !item.canDeleteHomework}
             dangerActionDisabledHint="Проверенное и принятое ДЗ удалить нельзя"
           />
-        );
-      })}
+      ))}
     </div>
   );
 }
@@ -198,7 +192,6 @@ function ReviewGroupedSections({
   onOpen,
   onDeleteRequest,
   onCopyRequest,
-  onAssignHomework,
   emptyTitle,
   emptyText,
 }) {
@@ -231,7 +224,6 @@ function ReviewGroupedSections({
             onOpen={onOpen}
             onDeleteRequest={onDeleteRequest}
             onCopyRequest={onCopyRequest}
-            onAssignHomework={onAssignHomework}
           />
         </section>
       ))}
@@ -250,7 +242,6 @@ export default function CabinetReviewPage() {
   const [deletingId, setDeletingId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [copyTarget, setCopyTarget] = useState(null);
-  const [assignTarget, setAssignTarget] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -448,7 +439,6 @@ export default function CabinetReviewPage() {
                   onOpen={openItem}
                   onDeleteRequest={setDeleteTarget}
                   onCopyRequest={setCopyTarget}
-          onAssignHomework={setAssignTarget}
                 />
               ) : (
                 <p className="cb-review-inbox__empty">Пока нет сданных работ</p>
@@ -467,7 +457,6 @@ export default function CabinetReviewPage() {
                   onOpen={openItem}
                   onDeleteRequest={setDeleteTarget}
                   onCopyRequest={setCopyTarget}
-          onAssignHomework={setAssignTarget}
                 />
               ) : (
                 <p className="cb-review-inbox__empty">Нет выданных заданий без ответа</p>
@@ -482,7 +471,6 @@ export default function CabinetReviewPage() {
           onOpen={openItem}
           onDeleteRequest={setDeleteTarget}
           onCopyRequest={setCopyTarget}
-          onAssignHomework={setAssignTarget}
           emptyTitle="Нет работ по ученикам"
           emptyText="Когда появятся работы с указанным учеником, они сгруппируются здесь."
         />
@@ -493,7 +481,6 @@ export default function CabinetReviewPage() {
           onOpen={openItem}
           onDeleteRequest={setDeleteTarget}
           onCopyRequest={setCopyTarget}
-          onAssignHomework={setAssignTarget}
           emptyTitle="Нет работ по группам"
           emptyText="Работы, привязанные к группе, появятся здесь."
         />
@@ -510,7 +497,6 @@ export default function CabinetReviewPage() {
           onOpen={openItem}
           onDeleteRequest={setDeleteTarget}
           onCopyRequest={setCopyTarget}
-          onAssignHomework={setAssignTarget}
         />
       )}
 
@@ -544,18 +530,6 @@ export default function CabinetReviewPage() {
           }}
         />
       ) : null}
-
-      <HomeworkFromReviewModal
-        open={Boolean(assignTarget?.id)}
-        reviewId={assignTarget?.id}
-        preselectIncorrect
-        onClose={() => setAssignTarget(null)}
-        onDone={(result) => {
-          setAssignTarget(null);
-          window.dispatchEvent(new Event("cabinet:nav-counts-refresh"));
-          if (result?.message) setError(null);
-        }}
-      />
     </CabinetPageShell>
   );
 }

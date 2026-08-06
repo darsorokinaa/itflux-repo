@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import CabinetIcon from "../CabinetIcons";
 import { openLessonSummaryTab } from "../journal/openLessonSummary";
 import { updateJournalLessonTopics } from "../../utils/cabinetAuth";
 
@@ -29,16 +28,16 @@ const ATTENDANCE_TONE = {
   not_marked: "muted",
 };
 
-const PLANNED_EMPTY = "Тема не запланирована";
-const ACTUAL_EMPTY = "Фактическая тема не указана";
+const PLANNED_EMPTY = "Не указана";
+const ACTUAL_EMPTY = "Не указана";
 
 function formatDate(iso) {
-  if (!iso) return "—";
+  if (!iso) return "Дата не указана";
   const d = new Date(`${iso}T00:00:00`);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("ru-RU", {
     day: "numeric",
-    month: "short",
+    month: "long",
     year: "numeric",
   }).replace(/\s*г\.?\s*$/u, "");
 }
@@ -77,45 +76,6 @@ function scoreTone(value) {
   return "danger";
 }
 
-function collectDetailFields(lesson, student = null) {
-  const fields = [];
-  const push = (label, value) => {
-    const text = String(value || "").trim();
-    if (text) fields.push({ label, value: text });
-  };
-
-  const time = formatLessonTime(lesson);
-  if (time) push("Время", time);
-
-  push("Итог", lesson.lesson_summary);
-  push("Пройденный материал", lesson.material_covered);
-  push("Повторить", lesson.material_to_repeat);
-  push("План на следующий урок", lesson.next_lesson_plan);
-
-  const rec = (student?.recommendation || lesson.recommendation || "").trim();
-  const journalRec = (lesson.recommendations || "").trim();
-  if (rec) push("Рекомендация", rec);
-  else if (journalRec) push("Рекомендация", journalRec);
-
-  push("Сильные стороны", student?.strengths || lesson.strengths);
-  push("Трудности", student?.difficulties || lesson.difficulties);
-
-  const criteria = student?.criterion_scores || lesson.criterion_scores || [];
-  if (criteria.length) {
-    const lines = criteria
-      .map((s) => {
-        const title = s.criterion_title || s.title || "Критерий";
-        if (s.is_not_applicable) return `${title}: не оценивалось`;
-        if (s.value == null || s.value === "") return null;
-        return `${title}: ${s.value}`;
-      })
-      .filter(Boolean);
-    if (lines.length) push("Критерии", lines.join(" · "));
-  }
-
-  return fields;
-}
-
 function lessonSortKey(lesson) {
   const start = lesson?.starts_at || lesson?.started_at || "";
   const date = lesson?.lesson_date || "";
@@ -130,12 +90,38 @@ function sortLessonsNewestFirst(lessons) {
 function topicFieldsFromLesson(lesson) {
   const planned = (lesson.planned_topic ?? "").trim();
   const actual = (lesson.actual_topic ?? "").trim();
-  // Fallback for older payloads that only had combined topic
   const legacy = (lesson.topic || "").trim();
   return {
     plannedTopic: planned || (!actual && legacy ? legacy : planned),
     actualTopic: actual,
   };
+}
+
+function lessonStatusMeta(lesson, attendance) {
+  const status = String(lesson.status || "").toLowerCase();
+  if (status === "completed") {
+    return { label: "Проведён", tone: "success" };
+  }
+  if (
+    attendance === "absent_unexcused" ||
+    attendance === "absent_excused" ||
+    attendance === "cancelled_by_student"
+  ) {
+    return {
+      label: ATTENDANCE_RU[attendance] || "Пропущен",
+      tone: ATTENDANCE_TONE[attendance] || "muted",
+    };
+  }
+  if (attendance === "cancelled_by_teacher") {
+    return { label: "Отменён", tone: "muted" };
+  }
+  if (lesson.starts_at) {
+    const start = new Date(lesson.starts_at).getTime();
+    if (Number.isFinite(start) && start > Date.now()) {
+      return { label: "Запланирован", tone: "info" };
+    }
+  }
+  return { label: "Ожидается", tone: "warning" };
 }
 
 function flattenRows(scopeType, lessons) {
@@ -155,7 +141,9 @@ function flattenRows(scopeType, lessons) {
         scoreRaw: lesson.overall_score,
         comment: lesson.teacher_comment || "",
         attendance: lesson.attendance_status,
-        details: collectDetailFields(lesson, lesson),
+        status: lesson.status,
+        homeworkId: lesson.homework_id || null,
+        canOpenOutcomes: Boolean(lesson.schedule_event_id) && String(lesson.status || "") === "completed",
       };
     });
   }
@@ -164,58 +152,41 @@ function flattenRows(scopeType, lessons) {
   for (const lesson of ordered) {
     const topics = topicFieldsFromLesson(lesson);
     const students = lesson.students || [];
+    const base = {
+      scheduleEventId: lesson.schedule_event_id,
+      lessonDate: lesson.lesson_date,
+      lessonTime: formatLessonTime(lesson),
+      plannedTopic: topics.plannedTopic,
+      actualTopic: topics.actualTopic,
+      status: lesson.status,
+      homeworkId: lesson.homework_id || null,
+      canOpenOutcomes: Boolean(lesson.schedule_event_id) && String(lesson.status || "") === "completed",
+    };
     if (!students.length) {
       rows.push({
+        ...base,
         key: `lesson-${lesson.id}`,
-        scheduleEventId: lesson.schedule_event_id,
-        lessonDate: lesson.lesson_date,
-        lessonTime: formatLessonTime(lesson),
-        plannedTopic: topics.plannedTopic,
-        actualTopic: topics.actualTopic,
         studentName: null,
         scoreDisplay: lesson.avg_overall_display || null,
         scoreRaw: lesson.avg_overall,
         comment: "",
         attendance: null,
-        details: collectDetailFields(lesson),
       });
       continue;
     }
     for (const s of students) {
       rows.push({
+        ...base,
         key: String(s.record_id),
-        scheduleEventId: lesson.schedule_event_id,
-        lessonDate: lesson.lesson_date,
-        lessonTime: formatLessonTime(lesson),
-        plannedTopic: topics.plannedTopic,
-        actualTopic: topics.actualTopic,
         studentName: s.student_name || null,
         scoreDisplay: s.overall_score_display || null,
         scoreRaw: s.overall_score,
         comment: s.teacher_comment || "",
         attendance: s.attendance_status,
-        details: collectDetailFields(lesson, s),
       });
     }
   }
   return rows;
-}
-
-function AttendanceBadge({ status }) {
-  if (!status || status === "not_marked") return <span className="jg-muted">—</span>;
-  const tone = ATTENDANCE_TONE[status] || "muted";
-  return (
-    <span className={`jg-chip jg-chip--${tone}`}>
-      {ATTENDANCE_RU[status] || status}
-    </span>
-  );
-}
-
-function ScoreChip({ display, raw }) {
-  if (!display) return <span className="jg-muted">—</span>;
-  const value = parseScoreValue(display, raw);
-  const tone = scoreTone(value);
-  return <span className={`jg-score-chip jg-score-chip--${tone}`}>{display}</span>;
 }
 
 function TopicInlineField({
@@ -229,7 +200,7 @@ function TopicInlineField({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value || "");
-  const [status, setStatus] = useState("idle"); // idle | saving | saved | error
+  const [status, setStatus] = useState("idle");
   const [error, setError] = useState("");
   const inputRef = useRef(null);
 
@@ -299,7 +270,7 @@ function TopicInlineField({
         <div className="jg-topic-field__actions">
           <button
             type="button"
-            className="jg-topic-field__btn jg-topic-field__btn--primary"
+            className="jg-btn jg-btn--primary jg-btn--sm"
             disabled={status === "saving"}
             onClick={() => void save()}
           >
@@ -307,7 +278,7 @@ function TopicInlineField({
           </button>
           <button
             type="button"
-            className="jg-topic-field__btn"
+            className="jg-btn jg-btn--ghost jg-btn--sm"
             disabled={status === "saving"}
             onClick={cancel}
           >
@@ -339,72 +310,95 @@ function TopicInlineField({
   );
 }
 
-function JournalRow({ row, showStudentName, onOpenLesson, onTopicsSaved }) {
+function LessonRow({ row, showStudentName, onTopicsSaved }) {
+  const status = lessonStatusMeta(row, row.attendance);
+  const scoreValue = parseScoreValue(row.scoreDisplay, row.scoreRaw);
+  const canOutcomes = Boolean(row.scheduleEventId);
+
   const openSummary = () => {
-    if (row.scheduleEventId) {
-      openLessonSummaryTab(row.scheduleEventId);
-      return;
-    }
-    onOpenLesson?.(row.scheduleEventId);
+    if (!row.scheduleEventId) return;
+    openLessonSummaryTab(row.scheduleEventId);
   };
 
   return (
-    <div className="jg-row">
-      <div className="jg-row__main">
-        <div className="jg-cell jg-cell--date">
-          <span className="jg-date-main">{formatDate(row.lessonDate)}</span>
-          {row.lessonTime ? <span className="jg-sub">{row.lessonTime}</span> : null}
-        </div>
-        <div className="jg-cell jg-cell--topic">
-          <div className="jg-topic-stack">
-            <TopicInlineField
-              label="Планируемая тема"
-              emptyLabel={PLANNED_EMPTY}
-              value={row.plannedTopic}
-              fieldKey="planned_topic"
-              scheduleEventId={row.scheduleEventId}
-              onSaved={onTopicsSaved}
-            />
-            <TopicInlineField
-              label="Фактическая тема"
-              emptyLabel={ACTUAL_EMPTY}
-              value={row.actualTopic}
-              fieldKey="actual_topic"
-              scheduleEventId={row.scheduleEventId}
-              onSaved={onTopicsSaved}
-            />
-          </div>
-          {showStudentName && row.studentName ? (
-            <span className="jg-sub">{row.studentName}</span>
-          ) : null}
-        </div>
-        <div className="jg-cell jg-cell--score">
-          <ScoreChip display={row.scoreDisplay} raw={row.scoreRaw} />
-        </div>
-        <div className="jg-cell jg-cell--comment">
-          {row.comment.trim() ? row.comment : <span className="jg-muted">—</span>}
-        </div>
-        <div className="jg-cell jg-cell--extra">
-          <AttendanceBadge status={row.attendance} />
-        </div>
-        <div className="jg-cell jg-cell--action">
-          <button
-            type="button"
-            className="jg-outcomes-btn"
-            title="Открыть подробные итоги в новой вкладке"
-            onClick={openSummary}
-          >
-            <CabinetIcon name="note" />
-            <span>Итоги</span>
-          </button>
-        </div>
-      </div>
-    </div>
+    <tr className="jg-data-table__row">
+      <td>
+        <div className="jg-data-table__strong">{formatDate(row.lessonDate)}</div>
+        {row.lessonTime ? <div className="jg-data-table__muted">{row.lessonTime}</div> : null}
+      </td>
+      {showStudentName ? (
+        <td>{row.studentName || "—"}</td>
+      ) : null}
+      <td>
+        <span className={`jg-status-badge jg-status-badge--${status.tone}`}>
+          {status.label}
+        </span>
+      </td>
+      <td>
+        <TopicInlineField
+          label="Планируемая"
+          emptyLabel={PLANNED_EMPTY}
+          value={row.plannedTopic}
+          fieldKey="planned_topic"
+          scheduleEventId={row.scheduleEventId}
+          onSaved={onTopicsSaved}
+        />
+      </td>
+      <td>
+        <TopicInlineField
+          label="Фактическая"
+          emptyLabel={ACTUAL_EMPTY}
+          value={row.actualTopic}
+          fieldKey="actual_topic"
+          scheduleEventId={row.scheduleEventId}
+          onSaved={onTopicsSaved}
+        />
+      </td>
+      <td>
+        <span className={`jg-score-chip jg-score-chip--${scoreTone(scoreValue)}`}>
+          {row.scoreDisplay || "Нет результата"}
+        </span>
+      </td>
+      <td>
+        {row.attendance && row.attendance !== "not_marked"
+          ? ATTENDANCE_RU[row.attendance] || row.attendance
+          : "Не отмечено"}
+      </td>
+      <td>
+        <span className={row.comment.trim() ? undefined : "jg-data-table__muted"}>
+          {row.comment.trim() || "—"}
+        </span>
+      </td>
+      <td className="jg-data-table__actions">
+        <button
+          type="button"
+          className="jg-btn jg-btn--secondary jg-btn--sm"
+          disabled={!canOutcomes}
+          title={canOutcomes ? "Открыть урок" : "Урок ещё не привязан к расписанию"}
+          onClick={openSummary}
+        >
+          Открыть
+        </button>
+        <button
+          type="button"
+          className="jg-btn jg-btn--primary jg-btn--sm"
+          disabled={!row.canOpenOutcomes}
+          title={
+            row.canOpenOutcomes
+              ? "Посмотреть итоги урока"
+              : "Итоги появятся после проведения урока"
+          }
+          onClick={openSummary}
+        >
+          Итоги
+        </button>
+      </td>
+    </tr>
   );
 }
 
 /**
- * Таблица журнала: дата → темы → результат % → комментарий → статус → итоги.
+ * Список уроков в таблице с границами.
  */
 export default function JournalLessonsTable({
   scopeType,
@@ -446,49 +440,75 @@ export default function JournalLessonsTable({
 
   if (loading) {
     return (
-      <div className="jg-lessons-wrap">
-        <h2 className="jg-lessons-wrap__title">Таблица уроков</h2>
-        <div className="jg-empty">Загрузка…</div>
-      </div>
+      <section className="jg-lessons-section">
+        <header className="jg-section-head">
+          <div>
+            <h2>Список уроков</h2>
+            <p>Краткая лента уроков ученика или группы</p>
+          </div>
+        </header>
+        <div className="jg-state jg-state--compact">Загрузка уроков…</div>
+      </section>
     );
   }
 
   if (!rows.length) {
     return (
-      <div className="jg-lessons-wrap">
-        <h2 className="jg-lessons-wrap__title">Таблица уроков</h2>
-        <div className="jg-empty">Записей за выбранный период пока нет</div>
-      </div>
+      <section className="jg-lessons-section">
+        <header className="jg-section-head">
+          <div>
+            <h2>Список уроков</h2>
+            <p>Краткая лента уроков ученика или группы</p>
+          </div>
+        </header>
+        <div className="jg-state">
+          <h3>Пока нет проведённых уроков</h3>
+          <p>
+            После первого урока здесь появятся темы, посещаемость, домашние задания и результаты.
+          </p>
+        </div>
+      </section>
     );
   }
 
   return (
-    <div className="jg-lessons-wrap">
-      <h2 className="jg-lessons-wrap__title">Таблица уроков</h2>
-      <div className="jg-grid-head" role="row">
-        <div className="jg-cell jg-cell--date">Дата</div>
-        <div className="jg-cell jg-cell--topic">Темы урока</div>
-        <div className="jg-cell jg-cell--score">Результат</div>
-        <div className="jg-cell jg-cell--comment">Комментарий</div>
-        <div className="jg-cell jg-cell--extra">Статус</div>
-        <div className="jg-cell jg-cell--action" />
-      </div>
+    <section className="jg-lessons-section">
+      <header className="jg-section-head">
+        <div>
+          <h2>Список уроков</h2>
+          <p>Темы, посещаемость и результаты. Подробности открываются из строки.</p>
+        </div>
+        <span className="jg-section-head__count">{rows.length}</span>
+      </header>
 
-      <div className="jg-grid-body">
-        {rows.map((row) => (
-          <JournalRow
-            key={row.key}
-            row={row}
-            showStudentName={showStudentName}
-            onOpenLesson={onOpenLesson}
-            onTopicsSaved={handleTopicsSaved}
-          />
-        ))}
+      <div className="jg-data-table-wrap">
+        <table className="jg-data-table">
+          <thead>
+            <tr>
+              <th>Дата</th>
+              {showStudentName ? <th>Ученик</th> : null}
+              <th>Статус</th>
+              <th>Планируемая тема</th>
+              <th>Фактическая тема</th>
+              <th>Результат</th>
+              <th>Посещаемость</th>
+              <th>Комментарий</th>
+              <th>Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <LessonRow
+                key={row.key}
+                row={row}
+                showStudentName={showStudentName}
+                onTopicsSaved={handleTopicsSaved}
+                onOpenLesson={onOpenLesson}
+              />
+            ))}
+          </tbody>
+        </table>
       </div>
-
-      <div className="jg-list-end">
-        Других записей за выбранный период нет
-      </div>
-    </div>
+    </section>
   );
 }

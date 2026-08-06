@@ -1,5 +1,7 @@
 /** WebSocket-синхронизация материалов видеоурока (не доска / не вариант). */
 
+import { THROTTLE } from "./materials/collab/constants";
+
 export function inferSyncResourceKind(row) {
   if (!row) return null;
   const kind = String(row.kind || "").toLowerCase();
@@ -16,6 +18,7 @@ export function inferSyncResourceKind(row) {
   if (url.endsWith(".pdf")) return "pdf";
   if (/\.(png|jpe?g|gif|webp|svg)$/.test(url)) return "image";
   if (/\.(ppt|pptx|odp|key)$/.test(url)) return "presentation";
+  if (/\.(xls|xlsx|ods|csv)$/.test(url) || kind === "spreadsheet") return "spreadsheet";
   if (kind === "library_lesson" || kind === "linked_lesson") return "embed";
   if (kind === "file") return "file";
   if (kind === "link") return "link";
@@ -66,19 +69,7 @@ function throttle(fn, waitMs) {
 
 /**
  * @param {string} meetingUuid
- * @param {{
- *   onSyncState?: (payload: any) => void,
- *   onOpened?: (payload: any) => void,
- *   onClosed?: (payload: any) => void,
- *   onPermissionChanged?: (payload: any) => void,
- *   onOperation?: (payload: any) => void,
- *   onCursor?: (payload: any) => void,
- *   onAnnotationPreview?: (payload: any) => void,
- *   onPresenceJoin?: (payload: any) => void,
- *   onPresenceLeave?: (payload: any) => void,
- *   onError?: (payload: any) => void,
- *   onStatus?: (status: 'connecting'|'open'|'closed'|'error') => void,
- * }} handlers
+ * @param {object} handlers
  */
 export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
   let socket = null;
@@ -90,10 +81,36 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
   const seenOperationIds = new Set();
   let lastPresenceReplyAt = 0;
   const knownPeers = new Set();
+  let lastPingAt = 0;
+  let lastPongAt = 0;
+  let eventsLastMinute = 0;
+  let eventsWindowStart = Date.now();
+  const pendingOps = new Map();
+
+  const markSeen = (opId) => {
+    if (!opId) return false;
+    if (seenOperationIds.has(opId)) return true;
+    seenOperationIds.add(opId);
+    if (seenOperationIds.size > 500) {
+      const first = seenOperationIds.values().next().value;
+      seenOperationIds.delete(first);
+    }
+    return false;
+  };
+
+  const bumpEventCount = () => {
+    const now = Date.now();
+    if (now - eventsWindowStart > 60_000) {
+      eventsWindowStart = now;
+      eventsLastMinute = 0;
+    }
+    eventsLastMinute += 1;
+  };
 
   const send = (payload) => {
     if (!socket || socket.readyState !== WebSocket.OPEN) return false;
     socket.send(JSON.stringify(payload));
+    bumpEventCount();
     return true;
   };
 
@@ -107,7 +124,8 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
   const startHeartbeat = () => {
     stopHeartbeat();
     heartbeatTimer = window.setInterval(() => {
-      send({ type: "ping", t: Date.now() });
+      lastPingAt = Date.now();
+      send({ type: "ping", t: lastPingAt });
     }, 25000);
   };
 
@@ -119,7 +137,11 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     socket.onopen = () => {
       handlers.onStatus?.("open");
       startHeartbeat();
-      send({ type: "material.request_sync" });
+      send({
+        type: "material.request_sync",
+        client_revision: version || 0,
+        session_id: sessionId,
+      });
     };
 
     socket.onmessage = (event) => {
@@ -130,12 +152,20 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
         return;
       }
       if (!data || typeof data !== "object") return;
+      bumpEventCount();
 
-      if (data.type === "material.sync_state") {
+      if (data.type === "pong") {
+        lastPongAt = Date.now();
+        handlers.onPong?.({ pingAt: data.t, pongAt: lastPongAt });
+        return;
+      }
+
+      if (data.type === "material.sync_state" || data.type === "STATE_SNAPSHOT" || data.type === "SYNC_RESPONSE") {
         const ms = data.materialSession;
-        sessionId = ms?.sessionId || null;
-        version = ms?.version || 0;
+        sessionId = ms?.sessionId || sessionId;
+        version = ms?.version || data.server_revision || version;
         handlers.onSyncState?.(data);
+        if (data.presented !== undefined) handlers.onPresented?.(data.presented);
         return;
       }
       if (data.type === "material.opened") {
@@ -150,6 +180,14 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
         handlers.onClosed?.(data);
         return;
       }
+      if (data.type === "resource.presented" || data.type === "RESOURCE_PRESENTED") {
+        handlers.onPresented?.(data.presented || data.payload || data);
+        return;
+      }
+      if (data.type === "resource.cleared" || data.type === "RESOURCE_CLEARED") {
+        handlers.onPresented?.(null);
+        return;
+      }
       if (data.type === "material.permission_changed" || data.type === "control.transferred") {
         if (data.materialSession?.version) version = data.materialSession.version;
         handlers.onPermissionChanged?.(data);
@@ -157,14 +195,8 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       }
       if (data.type === "material.operation") {
         const opId = data.operation_id || data.operationId;
-        if (opId) {
-          if (seenOperationIds.has(opId)) return;
-          seenOperationIds.add(opId);
-          if (seenOperationIds.size > 500) {
-            const first = seenOperationIds.values().next().value;
-            seenOperationIds.delete(first);
-          }
-        }
+        if (markSeen(opId)) return;
+        pendingOps.delete(opId);
         if (data.version) version = data.version;
         handlers.onOperation?.(data);
         return;
@@ -175,6 +207,10 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       }
       if (data.type === "material.cursor" || data.type === "material.pointer") {
         handlers.onCursor?.(data);
+        return;
+      }
+      if (data.type === "material.follow_status" || data.type === "FOLLOW_TEACHER_CHANGED") {
+        handlers.onFollowStatus?.(data);
         return;
       }
       if (data.type === "material.presence_join") {
@@ -201,8 +237,11 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
         handlers.onError?.(data);
         return;
       }
-      if (data.type === "material.operation_ack" && data.version) {
-        version = data.version;
+      if (data.type === "material.operation_ack") {
+        if (data.version) version = data.version;
+        const opId = data.operation_id || data.operationId;
+        if (opId) pendingOps.delete(opId);
+        handlers.onOperationAck?.(data);
       }
     };
 
@@ -220,15 +259,25 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
 
   connect();
 
-  const sendCursor = throttle((x, y, pointer = false) => {
+  const sendCursorThrottled = throttle((x, y) => {
     send({
-      type: pointer ? "material.pointer" : "material.cursor",
-      action: pointer ? "pointer" : "cursor",
+      type: "material.cursor",
+      action: "cursor",
       session_id: sessionId,
       operation_id: newId(),
       payload: { x, y },
     });
-  }, 50);
+  }, THROTTLE.CURSOR_MS);
+
+  const sendPointerThrottled = throttle((x, y) => {
+    send({
+      type: "material.pointer",
+      action: "pointer",
+      session_id: sessionId,
+      operation_id: newId(),
+      payload: { x, y },
+    });
+  }, THROTTLE.POINTER_MS);
 
   const sendAnnotationPreview = throttle((annotation) => {
     send({
@@ -239,13 +288,27 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       payload: { annotation },
       base_version: version,
     });
-  }, 40);
+  }, THROTTLE.ANNOTATION_PREVIEW_MS);
 
   return {
     getVersion: () => version,
     getSessionId: () => sessionId,
     isOpen: () => Boolean(socket && socket.readyState === WebSocket.OPEN),
-    requestSync: () => send({ type: "material.request_sync" }),
+    getDiagnostics: () => ({
+      connected: Boolean(socket && socket.readyState === WebSocket.OPEN),
+      sessionId,
+      serverRevision: version,
+      lastPingAt,
+      lastPongAt,
+      pendingOps: pendingOps.size,
+      eventsLastMinute,
+      peerCount: knownPeers.size,
+    }),
+    requestSync: () => send({
+      type: "material.request_sync",
+      client_revision: version || 0,
+      session_id: sessionId,
+    }),
     openMaterial: (payload) => send({
       type: "material.open",
       ...payload,
@@ -255,15 +318,37 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       type: "material.close",
       session_id: sessionId,
     }),
-    setPermission: ({ mode, collaborativeScope, collaborativeUserIds, sessionId: sid } = {}) => send({
+    setPermission: ({
+      mode,
+      collaborativeScope,
+      collaborativeUserIds,
+      collaborationPermission,
+      sessionId: sid,
+    } = {}) => send({
       type: "material.set_permission",
       session_id: sid || sessionId,
       mode,
       collaborative_scope: collaborativeScope,
       collaborative_user_ids: collaborativeUserIds,
+      collaboration_permission: collaborationPermission,
+    }),
+    sendFollowStatus: ({ following, materialId } = {}) => send({
+      type: "material.follow_status",
+      session_id: sessionId,
+      payload: {
+        following: Boolean(following),
+        material_id: materialId || null,
+      },
     }),
     sendOperation: ({ action, payload, operationId } = {}) => {
       const opId = operationId || newId();
+      // Pre-register so broadcast echo is ignored.
+      markSeen(opId);
+      pendingOps.set(opId, { action, at: Date.now() });
+      if (pendingOps.size > 200) {
+        const first = pendingOps.keys().next().value;
+        pendingOps.delete(first);
+      }
       const ok = send({
         type: "material.operation",
         session_id: sessionId,
@@ -271,11 +356,12 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
         action,
         payload: payload || {},
         base_version: version,
+        client_revision: version,
       });
       return { ok, operationId: opId };
     },
-    sendCursor: (x, y) => sendCursor(x, y, false),
-    sendPointer: (x, y) => sendCursor(x, y, true),
+    sendCursor: (x, y) => sendCursorThrottled(x, y),
+    sendPointer: (x, y) => sendPointerThrottled(x, y),
     sendAnnotationPreview,
     close: () => {
       closed = true;
@@ -294,15 +380,21 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
 /** Флаг удалённого обновления — чтобы не эхоить page_changed обратно. */
 export function createRemoteApplyGuard() {
   let remote = false;
+  let token = 0;
   return {
     run(fn) {
       remote = true;
+      const my = ++token;
       try {
         return fn();
       } finally {
-        // Микротаск: обработчики React успеют отработать в том же тике.
+        // Double rAF + microtask: covers React commit + layout scroll handlers.
         queueMicrotask(() => {
-          remote = false;
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              if (token === my) remote = false;
+            });
+          });
         });
       }
     },

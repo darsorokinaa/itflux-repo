@@ -155,7 +155,35 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
             await self._handle_operation(data)
             return
 
+        if msg_type in ("material.follow_status", "FOLLOW_TEACHER_CHANGED"):
+            await self._handle_follow_status(data)
+            return
+
         await self._send_error("Неизвестный тип сообщения", code="unknown_type")
+
+    async def _handle_follow_status(self, data: dict):
+        payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+        following = payload.get("following")
+        if following is None:
+            following = data.get("following", True)
+        await self._broadcast({
+            "type": "material.follow_status",
+            "lesson_id": str(self.meeting_uuid),
+            "user_id": self.user.pk,
+            "author_id": self.user.pk,
+            "author_role": self.role,
+            "display_name": self.display_name,
+            "payload": {
+                "following": bool(following),
+                "material_id": payload.get("material_id") or payload.get("materialId"),
+            },
+        })
+        logger.info(
+            "material_follow_status meeting=%s user=%s following=%s",
+            self.meeting_uuid,
+            self.user.pk,
+            bool(following),
+        )
 
     async def meeting_material_event(self, event):
         payload = event.get("payload")
@@ -382,6 +410,7 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
             session_id=data.get("session_id") or data.get("sessionId"),
             collaborative_scope=data.get("collaborative_scope") or data.get("collaborativeScope"),
             collaborative_user_ids=data.get("collaborative_user_ids") or data.get("collaborativeUserIds"),
+            collaboration_permission=data.get("collaboration_permission") or data.get("collaborationPermission"),
         )
 
     @database_sync_to_async

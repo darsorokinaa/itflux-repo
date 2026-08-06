@@ -1,15 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   fetchGroups,
   fetchJournalGroup,
   fetchJournalStudent,
+  fetchJournalStudentErrorsSummary,
   fetchStudents,
   normalizeCabinetList,
 } from "../../utils/cabinetAuth";
+import JournalAttentionBlock, {
+  buildJournalAttentionItems,
+} from "../components/JournalAttentionBlock";
 import JournalEntriesFeed from "../components/JournalEntriesFeed";
 import JournalLessonsTable from "../components/JournalLessonsTable";
 import JournalPerformanceSummary from "../components/JournalPerformanceSummary";
+import JournalStudentErrorsPanel from "../components/JournalStudentErrorsPanel";
 import { openLessonSummaryTab } from "../journal/openLessonSummary";
 import { usePageTitle } from "../hooks/usePageTitle";
 import "../styles/journal.css";
@@ -18,20 +23,39 @@ function studentLabel(s) {
   return s.full_name || `${s.first_name || ""} ${s.last_name || ""}`.trim() || `Ученик #${s.id}`;
 }
 
+function initialsFromName(name) {
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!parts.length) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] || ""}${parts[parts.length - 1][0] || ""}`.toUpperCase();
+}
+
 export default function CabinetJournalPage() {
   const [params, setParams] = useSearchParams();
   const groupId = params.get("group") ? Number(params.get("group")) : null;
   const studentId = params.get("student") ? Number(params.get("student")) : null;
   const eventParam = params.get("event");
   const scopeMode = groupId ? "group" : "student";
+  const tabParam = params.get("tab");
+  const activeTab = scopeMode === "student" && tabParam === "errors" ? "errors" : "journal";
 
   const [groups, setGroups] = useState([]);
   const [students, setStudents] = useState([]);
   const [lessons, setLessons] = useState([]);
   const [summary, setSummary] = useState(null);
   const [scopeTitle, setScopeTitle] = useState("");
+  const [studentMeta, setStudentMeta] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [errorsCount, setErrorsCount] = useState(null);
+  const [entriesSummary, setEntriesSummary] = useState(null);
+  const [entriesFilterPreset, setEntriesFilterPreset] = useState(null);
+
+  const lessonsRef = useRef(null);
+  const feedRef = useRef(null);
 
   const setScope = useCallback((next) => {
     const p = new URLSearchParams(params);
@@ -46,6 +70,15 @@ export default function CabinetJournalPage() {
       p.delete("student");
     }
     p.delete("event");
+    if (next.tab === "errors") p.set("tab", "errors");
+    else if (next.tab === "journal" || next.clearTab) p.delete("tab");
+    setParams(p, { replace: true });
+  }, [params, setParams]);
+
+  const setTab = useCallback((tab) => {
+    const p = new URLSearchParams(params);
+    if (tab === "errors") p.set("tab", "errors");
+    else p.delete("tab");
     setParams(p, { replace: true });
   }, [params, setParams]);
 
@@ -81,6 +114,8 @@ export default function CabinetJournalPage() {
       setLessons([]);
       setSummary(null);
       setScopeTitle("");
+      setStudentMeta(null);
+      setErrorsCount(null);
       return;
     }
     setLoading(true);
@@ -91,14 +126,17 @@ export default function CabinetJournalPage() {
         setLessons(data.lessons || []);
         setSummary(data.summary || null);
         setScopeTitle(data.group?.title || "");
+        setStudentMeta(null);
+        setErrorsCount(null);
       } else {
         const data = await fetchJournalStudent(studentId);
         setLessons(data.lessons || []);
         setSummary(data.summary || null);
         setScopeTitle(data.student?.full_name || "");
+        setStudentMeta(data.student || null);
       }
     } catch (err) {
-      setError(err?.message || "Ошибка загрузки журнала");
+      setError(err?.message || "Не удалось загрузить журнал");
       setLessons([]);
       setSummary(null);
     } finally {
@@ -110,6 +148,25 @@ export default function CabinetJournalPage() {
     void loadJournal();
   }, [loadJournal]);
 
+  // Лёгкий счётчик ошибок для бейджа вкладки (без тяжёлых деталей)
+  useEffect(() => {
+    if (!studentId || scopeMode !== "student") {
+      setErrorsCount(null);
+      return undefined;
+    }
+    let cancelled = false;
+    fetchJournalStudentErrorsSummary(studentId)
+      .then((data) => {
+        if (!cancelled) setErrorsCount(Number(data?.total_errors) || 0);
+      })
+      .catch(() => {
+        if (!cancelled) setErrorsCount(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [studentId, scopeMode]);
+
   useEffect(() => {
     if (!eventParam) return;
     openLessonSummaryTab(eventParam);
@@ -119,11 +176,19 @@ export default function CabinetJournalPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventParam]);
 
+  useEffect(() => {
+    if (scopeMode === "group" && tabParam === "errors") {
+      const p = new URLSearchParams(params);
+      p.delete("tab");
+      setParams(p, { replace: true });
+    }
+  }, [scopeMode, tabParam, params, setParams]);
+
   const switchMode = (mode) => {
     if (mode === "group") {
       const next = groupId || groups[0]?.id;
-      if (next) setScope({ group: next });
-      else setScope({});
+      if (next) setScope({ group: next, clearTab: true });
+      else setScope({ clearTab: true });
       return;
     }
     const next = studentId || students[0]?.id;
@@ -137,7 +202,7 @@ export default function CabinetJournalPage() {
       return;
     }
     const id = Number(value);
-    if (scopeMode === "group") setScope({ group: id });
+    if (scopeMode === "group") setScope({ group: id, clearTab: true });
     else setScope({ student: id });
   };
 
@@ -159,82 +224,205 @@ export default function CabinetJournalPage() {
   const journalTitle = scopeTitle || (scopeMode === "group" ? "Группа" : "Ученик");
   usePageTitle(journalTitle);
 
-  return (
-    <div className="jg-page">
-      <header className="jg-toolbar">
-        <div className="jg-toolbar__title-block">
-          <span className="jg-toolbar__eyebrow">Журнал</span>
-          <h1 className="jg-toolbar__title">{journalTitle}</h1>
-        </div>
+  const detailsHref = groupId
+    ? `/cabinet/journal/analytics?group=${groupId}`
+    : studentId
+      ? `/cabinet/journal/analytics?student=${studentId}`
+      : "";
 
-        <div className="jg-scope">
-          <div className="jg-seg" role="tablist" aria-label="Тип журнала">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={scopeMode === "student"}
-              className={`jg-seg__btn${scopeMode === "student" ? " is-active" : ""}`}
-              onClick={() => switchMode("student")}
-            >
-              Ученик
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={scopeMode === "group"}
-              className={`jg-seg__btn${scopeMode === "group" ? " is-active" : ""}`}
-              onClick={() => switchMode("group")}
-            >
-              Группа
-            </button>
+  const attentionItems = useMemo(
+    () =>
+      buildJournalAttentionItems({
+        summary,
+        lessons,
+        entriesSummary,
+        errorsCount: errorsCount || 0,
+        scopeMode,
+      }),
+    [summary, lessons, entriesSummary, errorsCount, scopeMode],
+  );
+
+  const onAttentionAction = (item) => {
+    if (item.action === "errors") {
+      setTab("errors");
+      return;
+    }
+    if (item.action === "analytics" && detailsHref) {
+      window.open(detailsHref, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (item.action === "lessons") {
+      lessonsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (item.action === "pending_review") {
+      setEntriesFilterPreset({ entry_type: "homework", reviewed: "no", overdue: false });
+      feedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (item.action === "overdue") {
+      setEntriesFilterPreset({ entry_type: "homework", overdue: true, reviewed: "" });
+      feedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  const subtitle =
+    scopeMode === "group"
+      ? "Журнал группы"
+      : studentMeta?.direction
+        ? `Журнал ученика · ${studentMeta.direction}`
+        : "Журнал ученика";
+
+  return (
+    <div className="jg-page jg-page--v2">
+      <header className="jg-hero">
+        <div className="jg-hero__toolbar">
+          <div className="jg-hero__controls">
+            <div className="jg-seg jg-seg--solid" role="tablist" aria-label="Тип журнала">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scopeMode === "student"}
+                className={`jg-seg__btn${scopeMode === "student" ? " is-active" : ""}`}
+                onClick={() => switchMode("student")}
+              >
+                Ученик
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scopeMode === "group"}
+                className={`jg-seg__btn${scopeMode === "group" ? " is-active" : ""}`}
+                onClick={() => switchMode("group")}
+              >
+                Группа
+              </button>
+            </div>
+
+            <label className="jg-hero__select-wrap">
+              <span className="jg-sr-only">
+                {scopeMode === "group" ? "Группа" : "Ученик"}
+              </span>
+              <select
+                className="jg-hero__select"
+                value={selectValue}
+                onChange={(e) => onSelectChange(e.target.value)}
+                aria-label={scopeMode === "group" ? "Выбор группы" : "Выбор ученика"}
+              >
+                <option value="">{selectPlaceholder}</option>
+                {selectOptions.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
-          <label className="jg-scope__select-wrap">
-            <span className="jg-sr-only">
-              {scopeMode === "group" ? "Группа" : "Ученик"}
-            </span>
-            <select
-              className="jg-scope__select"
-              value={selectValue}
-              onChange={(e) => onSelectChange(e.target.value)}
-            >
-              <option value="">{selectPlaceholder}</option>
-              {selectOptions.map((opt) => (
-                <option key={opt.id} value={opt.id}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {(groupId || studentId) && activeTab === "journal" && !loading ? (
+            <JournalAttentionBlock
+              variant="hero"
+              items={attentionItems}
+              onAction={onAttentionAction}
+            />
+          ) : null}
+        </div>
+
+        <div className="jg-hero__identity">
+          <div className="jg-hero__avatar" aria-hidden="true">
+            {initialsFromName(journalTitle)}
+          </div>
+          <div className="jg-hero__text">
+            <p className="jg-hero__eyebrow">Журнал</p>
+            <h1 className="jg-hero__title">{journalTitle}</h1>
+            <p className="jg-hero__subtitle">{subtitle}</p>
+          </div>
         </div>
       </header>
 
-      {error ? <div className="jl-error">{error}</div> : null}
+      {scopeMode === "student" && studentId ? (
+        <div className="jg-primary-tabs-wrap">
+          <div className="jg-primary-tabs" role="tablist" aria-label="Разделы журнала ученика">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "journal"}
+              className={`jg-primary-tabs__btn${activeTab === "journal" ? " is-active" : ""}`}
+              onClick={() => setTab("journal")}
+            >
+              <span className="jg-primary-tabs__icon" aria-hidden="true">📘</span>
+              <span>Журнал</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "errors"}
+              className={`jg-primary-tabs__btn jg-primary-tabs__btn--errors${activeTab === "errors" ? " is-active" : ""}${errorsCount > 0 ? " has-errors" : ""}`}
+              onClick={() => setTab("errors")}
+            >
+              <span className="jg-primary-tabs__icon" aria-hidden="true">⚠</span>
+              <span>Ошибки ученика</span>
+              <span className={`jg-primary-tabs__badge${errorsCount > 0 ? " is-alert" : ""}`}>
+                {errorsCount == null ? "…" : errorsCount}
+              </span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="jg-state jg-state--error" role="alert">
+          <h2>Не удалось загрузить журнал</h2>
+          <p>{error}</p>
+          <button type="button" className="jg-btn jg-btn--primary" onClick={() => void loadJournal()}>
+            Повторить
+          </button>
+        </div>
+      ) : null}
 
       {!groupId && !studentId ? (
-        <div className="jg-empty">Выберите ученика или группу</div>
+        <div className="jg-state">
+          <h2>Выберите ученика или группу</h2>
+          <p>Журнал покажет уроки, домашние задания, посещаемость и результаты.</p>
+        </div>
+      ) : activeTab === "errors" && studentId ? (
+        <div className="jg-page__content">
+          <JournalStudentErrorsPanel
+            studentId={studentId}
+            studentName={scopeTitle}
+            onErrorsCountChange={setErrorsCount}
+          />
+        </div>
       ) : (
         <div className="jg-page__content">
+          <div ref={lessonsRef}>
+            <JournalLessonsTable
+              scopeType={scopeMode}
+              lessons={lessons}
+              loading={loading}
+              onOpenLesson={openLesson}
+            />
+          </div>
+
+          <div ref={feedRef}>
+            <JournalEntriesFeed
+              studentId={studentId}
+              groupId={groupId}
+              filterPreset={entriesFilterPreset}
+              onFilterPresetConsumed={() => setEntriesFilterPreset(null)}
+              onSummaryChange={setEntriesSummary}
+            />
+          </div>
+
           <JournalPerformanceSummary
             summary={summary}
             scopeType={scopeMode}
             loading={loading && !summary}
             variant="compact"
-            detailsHref={
-              groupId
-                ? `/cabinet/journal/analytics?group=${groupId}`
-                : studentId
-                  ? `/cabinet/journal/analytics?student=${studentId}`
-                  : ""
-            }
+            detailsHref={detailsHref}
+            errorsCount={errorsCount}
+            onOpenErrors={scopeMode === "student" ? () => setTab("errors") : undefined}
           />
-          <JournalLessonsTable
-            scopeType={scopeMode}
-            lessons={lessons}
-            loading={loading}
-            onOpenLesson={openLesson}
-          />
-          <JournalEntriesFeed studentId={studentId} groupId={groupId} />
         </div>
       )}
     </div>

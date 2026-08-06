@@ -24,6 +24,13 @@ class MeetingMaterialFollowPolicy(models.TextChoices):
     INDEPENDENT = "independent", "Самостоятельный просмотр"
 
 
+class MeetingMaterialCollaborationPermission(models.TextChoices):
+    ANSWERS_ONLY = "answers_only", "Только ответы"
+    ANNOTATE = "annotate", "Комментарии и рисование"
+    EDIT_CONTENT = "edit_content", "Редактирование содержимого"
+    FULL = "full", "Полный совместный доступ"
+
+
 class MeetingMaterialSession(models.Model):
     """
     Активный (или недавно закрытый) материал, синхронизируемый между
@@ -119,6 +126,13 @@ class MeetingMaterialSession(models.Model):
         default=list,
         blank=True,
         help_text="Используется при scope=selected; пустой список при scope=all означает всех учеников урока",
+    )
+    collaboration_permission = models.CharField(
+        "Уровень прав совместной работы",
+        max_length=32,
+        choices=MeetingMaterialCollaborationPermission.choices,
+        default=MeetingMaterialCollaborationPermission.ANNOTATE,
+        help_text="answers_only | annotate | edit_content | full",
     )
     independent_user_ids = models.JSONField(
         "User id в самостоятельном просмотре",

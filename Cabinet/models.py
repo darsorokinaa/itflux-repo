@@ -3876,7 +3876,9 @@ from .files_models import (  # noqa: E402
 
 # ── Синхронные материалы видеоурока (см. meeting_material_models.py) ──────────
 from .meeting_material_models import (  # noqa: E402
+    MeetingMaterialCollaborationPermission,
     MeetingMaterialCollaborativeScope,
+    MeetingMaterialFollowPolicy,
     MeetingMaterialInteractionMode,
     MeetingMaterialSession,
     MeetingMaterialWork,

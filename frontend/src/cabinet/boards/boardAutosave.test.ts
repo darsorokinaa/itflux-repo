@@ -39,6 +39,14 @@ describe("boardAutosave", () => {
     expect(sanitizeAppState({ collaborators: {}, viewBackgroundColor: "#eee" })).toEqual({
       viewBackgroundColor: "#eee",
     });
+    expect(
+      sanitizeAppState({
+        viewBackgroundColor: "#fff",
+        penMode: true,
+        penDetected: true,
+        activeTool: { type: "freedraw" },
+      }),
+    ).toEqual({ viewBackgroundColor: "#fff" });
   });
 
   it("saveStatusLabel возвращает русские статусы", () => {

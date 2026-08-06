@@ -60,6 +60,14 @@ import {
   createRemoteApplyGuard,
   inferSyncResourceKind,
 } from "../meetingMaterialCollab";
+import {
+  applyMaterialOperation,
+  canSendMaterialAction,
+  COLLAB_PERMISSIONS,
+  defaultCollabPermissionForKind,
+  isFollowContentAction,
+  isNavigationAction,
+} from "../materials/collab";
 import { useFloatingDrag } from "../useFloatingDrag";
 import "../styles/video-meeting.css";
 import "../styles/live-variant-answers.css";
@@ -88,7 +96,7 @@ function formatWhen(startsAt, endsAt) {
 }
 
 const STATUS_POLL_MS = 12000;
-const PRESENT_POLL_MS = 2500;
+const PRESENT_POLL_MS = 10000;
 const LIVE_ANSWERS_POLL_MS = 2000;
 
 function getCsrfToken() {
@@ -240,10 +248,15 @@ export default function VideoMeetingPage() {
   const [remoteCursors, setRemoteCursors] = useState([]);
   const [remotePreviews, setRemotePreviews] = useState({});
   const [materialPresence, setMaterialPresence] = useState([]);
+  const [followByUser, setFollowByUser] = useState({});
+  const [collabPermOpen, setCollabPermOpen] = useState(false);
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [diagSnapshot, setDiagSnapshot] = useState(null);
   const materialCollabRef = useRef(null);
   const remoteCursorTimersRef = useRef(new Map());
   const remoteApplyGuardRef = useRef(createRemoteApplyGuard());
   const seenOpIdsRef = useRef(new Set());
+  const followingTeacherRef = useRef(true);
   const [materialsToast, setMaterialsToast] = useState("");
   const [mobilePane, setMobilePane] = useState("call"); // call | materials
   const [roomFullscreen, setRoomFullscreen] = useState(false);
@@ -1181,6 +1194,27 @@ export default function VideoMeetingPage() {
       },
       onSyncState: (payload) => {
         remoteGuard.run(() => applyMaterialSession(payload?.materialSession || null));
+        if (Object.prototype.hasOwnProperty.call(payload || {}, "presented")) {
+          setPresented(payload.presented || null);
+        }
+      },
+      onPresented: (presentedPayload) => {
+        setPresented(presentedPayload || null);
+        if (presentedPayload && !canManageRef.current) {
+          setWorkspaceMaterial({
+            kind: presentedPayload.kind,
+            title: presentedPayload.title,
+            url: presentedPayload.openUrl,
+            boardId: presentedPayload.boardId,
+            homeworkId: presentedPayload.homeworkId,
+          });
+          setMaterialSession(null);
+          setFocusCall(false);
+          setMobilePane("materials");
+        }
+        if (!presentedPayload && !canManageRef.current) {
+          setWorkspaceMaterial((prev) => (prev?.kind === "board" || prev?.kind === "variant" ? null : prev));
+        }
       },
       onOpened: (payload) => {
         remoteGuard.run(() => applyMaterialSession(payload?.materialSession || {
@@ -1214,6 +1248,10 @@ export default function VideoMeetingPage() {
               ...(payload.materialSession || {}),
               interactionMode: mode || prev?.interactionMode,
               followPolicy: follow || payload.materialSession?.followPolicy || prev?.followPolicy,
+              collaborationPermission:
+                payload.materialSession?.collaborationPermission
+                || payload.collaboration_permission
+                || prev?.collaborationPermission,
             };
           });
         });
@@ -1223,9 +1261,9 @@ export default function VideoMeetingPage() {
           } else if (follow === "strict") {
             showMaterialNotice("Учитель вернул вас к своему экрану");
           } else if (mode === "collaborative") {
-            showMaterialNotice("Преподаватель разрешил совместную работу с материалом");
+            showMaterialNotice("Преподаватель включил совместную работу");
           } else if (mode === "view_only") {
-            showMaterialNotice("Совместное рисование выключено");
+            showMaterialNotice("Совместная работа выключена · следуйте за учителем");
           }
         }
       },
@@ -1242,70 +1280,22 @@ export default function VideoMeetingPage() {
         remoteGuard.run(() => {
           setMaterialSession((prev) => {
             if (!prev) return prev;
-            const nextState = { ...(prev.state || {}) };
-            const action = op.action;
-            const payload = op.payload || {};
-            if (action === "page_changed") nextState.page = payload.page;
-            if (action === "zoom_changed") nextState.zoom = payload.zoom;
-            if (action === "scrolled") {
-              nextState.scroll = payload.scroll;
-              nextState.scrollX = payload.scrollX ?? payload.scroll_x;
-            }
-            if (action === "tab_changed") nextState.tab = payload.tab;
-            if (action === "annotation_added" || action === "annotation_updated") {
-              const ann = payload.annotation || payload;
-              const list = Array.isArray(nextState.annotations) ? [...nextState.annotations] : [];
-              const idx = list.findIndex((a) => a.id === ann.id);
-              if (idx >= 0) list[idx] = { ...list[idx], ...ann };
-              else list.push(ann);
-              nextState.annotations = list;
-              setRemotePreviews((rp) => {
-                if (!ann?.id || !rp[ann.id]) return rp;
-                const next = { ...rp };
-                delete next[ann.id];
-                return next;
-              });
-            }
-            if (action === "annotation_deleted") {
-              const id = payload.id || payload.annotation_id;
-              nextState.annotations = (nextState.annotations || []).filter((a) => a.id !== id);
-            }
-            if (action === "answer_selected") {
-              nextState.answers = {
-                ...(nextState.answers || {}),
-                [payload.questionId || payload.question_id || payload.fieldId]: {
-                  value: payload.value,
-                  author_id: op.author_id,
-                  author_role: op.author_role,
-                },
-              };
-            }
-            if (action === "field_changed") {
-              nextState.fields = {
-                ...(nextState.fields || {}),
-                [payload.fieldId || payload.field_id]: {
-                  value: payload.value,
-                  author_id: op.author_id,
-                  author_role: op.author_role,
-                },
-              };
-            }
-            if (action === "item_moved" || action === "item_selected") {
-              const itemId = payload.itemId || payload.item_id;
-              if (itemId) {
-                nextState.items = {
-                  ...(nextState.items || {}),
-                  [itemId]: {
-                    ...(payload || {}),
-                    author_id: op.author_id,
-                    author_role: op.author_role,
-                  },
-                };
+            const nextState = applyMaterialOperation(prev.state || {}, {
+              action: op.action,
+              payload: op.payload || {},
+              authorId: op.author_id,
+              authorRole: op.author_role,
+            });
+            if (op.action === "annotation_added" || op.action === "annotation_updated") {
+              const ann = op.payload?.annotation || op.payload;
+              if (ann?.id) {
+                setRemotePreviews((rp) => {
+                  if (!rp[ann.id]) return rp;
+                  const next = { ...rp };
+                  delete next[ann.id];
+                  return next;
+                });
               }
-            }
-            if (action === "pair_connected" || action === "pair_disconnected" || action === "cards_flipped") {
-              nextState.pairs = Array.isArray(payload.pairs) ? payload.pairs : (nextState.pairs || []);
-              if (payload.cards) nextState.cards = payload.cards;
             }
             return { ...prev, state: nextState, version: op.version || prev.version };
           });
@@ -1341,6 +1331,17 @@ export default function VideoMeetingPage() {
           timers.delete(key);
         }, 1800));
       },
+      onFollowStatus: (payload) => {
+        const userId = payload.user_id || payload.author_id;
+        if (userId == null) return;
+        const following = payload.payload?.following ?? payload.following;
+        setFollowByUser((prev) => ({ ...prev, [String(userId)]: Boolean(following) }));
+        setMaterialPresence((prev) => prev.map((p) => (
+          Number(p.userId) === Number(userId)
+            ? { ...p, following: Boolean(following) }
+            : p
+        )));
+      },
       onPresenceJoin: (payload) => {
         const userId = payload.user_id || payload.author_id;
         if (userId == null) return;
@@ -1358,6 +1359,7 @@ export default function VideoMeetingPage() {
             userId,
             displayName: payload.display_name || "Участник",
             role: payload.author_role,
+            following: true,
           }];
         });
       },
@@ -1365,6 +1367,11 @@ export default function VideoMeetingPage() {
         const userId = payload.user_id || payload.author_id;
         setMaterialPresence((prev) => prev.filter((p) => Number(p.userId) !== Number(userId)));
         setRemoteCursors((prev) => prev.filter((c) => Number(c.authorId) !== Number(userId)));
+        setFollowByUser((prev) => {
+          const next = { ...prev };
+          delete next[String(userId)];
+          return next;
+        });
       },
       onError: (err) => {
         if (err?.code === "forbidden" || err?.code === "view_only" || err?.code === "nav_locked") {
@@ -1591,13 +1598,22 @@ export default function VideoMeetingPage() {
     if (!meetingUuid || !materialSession?.sessionId) return;
     const mode = enabled ? "collaborative" : "view_only";
     const prevMode = materialSession.interactionMode || "view_only";
-    // Оптимистично — чтобы чекбокс не «прыгал».
-    setMaterialSession((prev) => (prev ? { ...prev, interactionMode: mode } : prev));
+    const permission = enabled
+      ? (materialSession.collaborationPermission
+        || defaultCollabPermissionForKind(materialSession.material?.type)
+        || COLLAB_PERMISSIONS.ANNOTATE)
+      : materialSession.collaborationPermission;
+    setMaterialSession((prev) => (prev ? {
+      ...prev,
+      interactionMode: mode,
+      collaborationPermission: permission,
+    } : prev));
+    if (enabled) setCollabPermOpen(true);
     try {
-      // REST подтверждает режим и сам рассылает событие ученикам.
       const data = await setMeetingMaterialPermission(meetingUuid, {
         sessionId: materialSession.sessionId,
         mode,
+        collaborationPermission: permission,
       });
       if (data?.materialSession) {
         applyMaterialSession(data.materialSession);
@@ -1605,6 +1621,22 @@ export default function VideoMeetingPage() {
     } catch (err) {
       setMaterialSession((prev) => (prev ? { ...prev, interactionMode: prevMode } : prev));
       setError(err?.message || "Не удалось изменить режим");
+    }
+  }, [applyMaterialSession, materialSession, meetingUuid]);
+
+  const onSetCollaborationPermission = useCallback(async (permission) => {
+    if (!meetingUuid || !materialSession?.sessionId) return;
+    setMaterialSession((prev) => (prev ? { ...prev, collaborationPermission: permission } : prev));
+    try {
+      const data = await setMeetingMaterialPermission(meetingUuid, {
+        sessionId: materialSession.sessionId,
+        mode: "collaborative",
+        collaborationPermission: permission,
+      });
+      if (data?.materialSession) applyMaterialSession(data.materialSession);
+      setCollabPermOpen(false);
+    } catch (err) {
+      setError(err?.message || "Не удалось изменить права");
     }
   }, [applyMaterialSession, materialSession, meetingUuid]);
 
@@ -1995,45 +2027,83 @@ export default function VideoMeetingPage() {
             onReturnToLeader={() => void onReturnToLeader()}
             onTransferControl={() => void onTransferControl()}
             onStatePatch={({ action, payload }) => {
-              if (!canManage && materialSession.interactionMode !== "collaborative") return;
+              const collabPerm = materialSession.collaborationPermission
+                || defaultCollabPermissionForKind(materialSession.material?.type);
+              const allowed = canSendMaterialAction({
+                action,
+                canManage,
+                isController: Number(materialSession.controllerUserId) === Number(detail?.viewerUserId)
+                  || canManage,
+                interactionMode: materialSession.interactionMode,
+                collaborationPermission: collabPerm,
+                followingTeacher: followingTeacherRef.current,
+                localBrowsingAway: !followingTeacherRef.current,
+              });
+              // Local browse-away navigation stays local (not sent).
+              if (!canManage && isNavigationAction(action) && !followingTeacherRef.current
+                && materialSession.interactionMode !== "collaborative") {
+                return;
+              }
+              if (!allowed && !(canManage || isFollowContentAction(action))) return;
               if (remoteApplyGuardRef.current.isRemote()) return;
-              materialCollabRef.current?.sendOperation({ action, payload });
+              const { operationId } = materialCollabRef.current?.sendOperation({ action, payload }) || {};
+              if (operationId) {
+                seenOpIdsRef.current.add(operationId);
+              }
               setMaterialSession((prev) => {
                 if (!prev) return prev;
                 return {
                   ...prev,
-                  state: {
-                    ...(prev.state || {}),
-                    ...payload,
-                    ...(action === "page_changed" ? { page: payload.page } : {}),
-                    ...(action === "zoom_changed" ? { zoom: payload.zoom } : {}),
-                    ...(action === "scrolled" ? { scroll: payload.scroll } : {}),
-                  },
+                  state: applyMaterialOperation(prev.state || {}, {
+                    action,
+                    payload,
+                    authorId: detail?.viewerUserId,
+                    authorRole: canManage ? "teacher" : "student",
+                  }),
                 };
               });
             }}
             onSendCursor={(x, y) => materialCollabRef.current?.sendCursor(x, y)}
             onSendPointer={(x, y) => materialCollabRef.current?.sendPointer(x, y)}
             onDrawPreview={(stroke) => {
-              if (!canManage && materialSession.interactionMode !== "collaborative") return;
+              const collabPerm = materialSession.collaborationPermission || COLLAB_PERMISSIONS.ANNOTATE;
+              if (!canManage && !(
+                materialSession.interactionMode === "collaborative"
+                && ["annotate", "edit_content", "full"].includes(collabPerm)
+              )) return;
               materialCollabRef.current?.sendAnnotationPreview(stroke);
             }}
             onDrawComplete={(stroke) => {
-              if (!canManage && materialSession.interactionMode !== "collaborative") return;
-              materialCollabRef.current?.sendOperation({
+              const collabPerm = materialSession.collaborationPermission || COLLAB_PERMISSIONS.ANNOTATE;
+              if (!canManage && !(
+                materialSession.interactionMode === "collaborative"
+                && ["annotate", "edit_content", "full"].includes(collabPerm)
+              )) return;
+              const { operationId } = materialCollabRef.current?.sendOperation({
                 action: "annotation_added",
                 payload: { annotation: stroke },
-              });
+              }) || {};
+              if (operationId) seenOpIdsRef.current.add(operationId);
               setMaterialSession((prev) => {
                 if (!prev) return prev;
-                const list = Array.isArray(prev.state?.annotations) ? [...prev.state.annotations] : [];
-                if (!list.some((a) => a.id === stroke.id)) list.push(stroke);
-                return { ...prev, state: { ...(prev.state || {}), annotations: list } };
+                return {
+                  ...prev,
+                  state: applyMaterialOperation(prev.state || {}, {
+                    action: "annotation_added",
+                    payload: { annotation: stroke },
+                    authorId: detail?.viewerUserId,
+                    authorRole: canManage ? "teacher" : "student",
+                  }),
+                };
               });
             }}
             onEraseAnnotation={(ann) => {
               if (!ann?.id) return;
-              if (!canManage && materialSession.interactionMode !== "collaborative") return;
+              const collabPerm = materialSession.collaborationPermission || COLLAB_PERMISSIONS.ANNOTATE;
+              if (!canManage && !(
+                materialSession.interactionMode === "collaborative"
+                && ["annotate", "edit_content", "full"].includes(collabPerm)
+              )) return;
               materialCollabRef.current?.sendOperation({
                 action: "annotation_deleted",
                 payload: { id: ann.id },
@@ -2042,19 +2112,25 @@ export default function VideoMeetingPage() {
                 if (!prev) return prev;
                 return {
                   ...prev,
-                  state: {
-                    ...(prev.state || {}),
-                    annotations: (prev.state?.annotations || []).filter((a) => a.id !== ann.id),
-                  },
+                  state: applyMaterialOperation(prev.state || {}, {
+                    action: "annotation_deleted",
+                    payload: { id: ann.id },
+                    authorId: detail?.viewerUserId,
+                    authorRole: canManage ? "teacher" : "student",
+                  }),
                 };
               });
             }}
             onClearOwnAnnotations={() => {
-              if (!canManage && materialSession.interactionMode !== "collaborative") return;
+              const collabPerm = materialSession.collaborationPermission || COLLAB_PERMISSIONS.ANNOTATE;
+              if (!canManage && !(
+                materialSession.interactionMode === "collaborative"
+                && ["annotate", "edit_content", "full"].includes(collabPerm)
+              )) return;
               const anns = materialSession.state?.annotations || [];
               const mine = canManage
                 ? anns.filter((a) => a.author_role === "teacher" || a.author_role === "staff" || !a.author_role)
-                : anns;
+                : anns.filter((a) => Number(a.author_id) === Number(detail?.viewerUserId));
               for (const ann of mine) {
                 materialCollabRef.current?.sendOperation({
                   action: "annotation_deleted",
@@ -2063,71 +2139,72 @@ export default function VideoMeetingPage() {
               }
               setMaterialSession((prev) => {
                 if (!prev) return prev;
-                const kept = canManage
-                  ? (prev.state?.annotations || []).filter((a) => a.author_role === "student")
-                  : (prev.state?.annotations || []).filter((a) => a.author_role === "teacher" || a.author_role === "staff");
-                return { ...prev, state: { ...(prev.state || {}), annotations: kept } };
-              });
-            }}
-            onInteractiveOp={({ action, payload }) => {
-              // Follow (view_only): ответы/поля разрешены; навигация — нет (сервер тоже режет).
-              const contentActions = new Set([
-                "answer_selected",
-                "field_changed",
-                "item_moved",
-                "item_selected",
-                "pair_connected",
-                "pair_disconnected",
-                "cards_flipped",
-                "state_updated",
-              ]);
-              const isCollab = materialSession.interactionMode === "collaborative";
-              if (!canManage && !isCollab && !contentActions.has(action)) return;
-              if (remoteApplyGuardRef.current.isRemote()) return;
-              materialCollabRef.current?.sendOperation({ action, payload });
-              setMaterialSession((prev) => {
-                if (!prev) return prev;
-                const nextState = { ...(prev.state || {}) };
-                const uid = String(detail?.viewerUserId ?? "self");
-                const itemId = payload.fieldId || payload.questionId;
-                if (action === "field_changed" && itemId) {
-                  const root = { ...(nextState.fields || {}) };
-                  const bucket = { ...(root[uid] || {}) };
-                  bucket[itemId] = {
-                    value: payload.value,
-                    status: payload.status || "draft",
-                    author_id: detail?.viewerUserId,
-                  };
-                  root[uid] = bucket;
-                  nextState.fields = root;
-                }
-                if (action === "answer_selected" && itemId) {
-                  const root = { ...(nextState.answers || {}) };
-                  const bucket = { ...(root[uid] || {}) };
-                  bucket[itemId] = {
-                    value: payload.value,
-                    status: payload.status || "draft",
-                    author_id: detail?.viewerUserId,
-                  };
-                  root[uid] = bucket;
-                  nextState.answers = root;
+                let nextState = prev.state || {};
+                for (const ann of mine) {
+                  nextState = applyMaterialOperation(nextState, {
+                    action: "annotation_deleted",
+                    payload: { id: ann.id },
+                    authorId: detail?.viewerUserId,
+                    authorRole: canManage ? "teacher" : "student",
+                  });
                 }
                 return { ...prev, state: nextState };
               });
             }}
+            onInteractiveOp={({ action, payload }) => {
+              // Follow (view_only): ответы/поля разрешены; навигация — нет (сервер тоже режет).
+              if (!canManage && !isFollowContentAction(action)
+                && materialSession.interactionMode !== "collaborative") return;
+              if (remoteApplyGuardRef.current.isRemote()) return;
+              const { operationId } = materialCollabRef.current?.sendOperation({ action, payload }) || {};
+              if (operationId) seenOpIdsRef.current.add(operationId);
+              setMaterialSession((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  state: applyMaterialOperation(prev.state || {}, {
+                    action,
+                    payload,
+                    authorId: detail?.viewerUserId,
+                    authorRole: canManage ? "teacher" : "student",
+                  }),
+                };
+              });
+            }}
+            collaborationPermission={
+              materialSession.collaborationPermission
+              || defaultCollabPermissionForKind(materialSession.material?.type)
+            }
+            followingTeacher={followingTeacherRef.current}
+            onFollowStatusChange={(following) => {
+              followingTeacherRef.current = following;
+              materialCollabRef.current?.sendFollowStatus({
+                following,
+                materialId: materialSession.material?.id,
+              });
+            }}
+            onConfigurePermissions={() => setCollabPermOpen(true)}
           />
         ) : null}
 
         {workspaceMaterial && !syncedWorkspaceOpen && showJitsi ? (
           <section className="video-lesson-workspace video-lesson-workspace--no-bar" aria-label="Просмотр материала">
-            <div className="video-lesson-workspace__stage">
+            <div
+              className={[
+                "video-lesson-workspace__stage",
+                workspaceMaterial.kind === "board" ? "video-lesson-workspace__stage--board" : "",
+              ].filter(Boolean).join(" ")}
+            >
               {workspaceMaterial.text && !workspaceMaterial.url ? (
                 <div className="video-lesson-workspace__text">{workspaceMaterial.text}</div>
               ) : workspaceMaterial.embed && workspaceMaterial.url ? (
                 <iframe
                   title={workspaceMaterial.title}
                   src={workspaceMaterial.url}
-                  className="video-lesson-workspace__frame"
+                  className={[
+                    "video-lesson-workspace__frame",
+                    workspaceMaterial.kind === "board" ? "video-lesson-workspace__frame--board" : "",
+                  ].filter(Boolean).join(" ")}
                   allow="camera; microphone; display-capture; autoplay; clipboard-read; clipboard-write; fullscreen"
                 />
               ) : (
@@ -2428,6 +2505,71 @@ export default function VideoMeetingPage() {
         }}
         onConfirm={onFinish}
       />
+
+      {collabPermOpen ? (
+        <div className="vl-collab-perm-modal" role="dialog" aria-modal="true" aria-label="Права совместной работы">
+          <div className="vl-collab-perm-modal__card">
+            <h3>Права ученика</h3>
+            <p>Выберите, что ученик может делать в режиме совместной работы. Максимальные права не выдаются по умолчанию.</p>
+            <div className="vl-collab-perm-modal__options">
+              {[
+                [COLLAB_PERMISSIONS.ANSWERS_ONLY, "Только вводить ответы"],
+                [COLLAB_PERMISSIONS.ANNOTATE, "Комментировать и рисовать"],
+                [COLLAB_PERMISSIONS.EDIT_CONTENT, "Редактировать содержимое"],
+                [COLLAB_PERMISSIONS.FULL, "Полный совместный доступ"],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`video-lesson-btn${(materialSession?.collaborationPermission || COLLAB_PERMISSIONS.ANNOTATE) === value ? " video-lesson-btn--primary" : " video-lesson-btn--secondary"}`}
+                  onClick={() => void onSetCollaborationPermission(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button type="button" className="video-lesson-btn video-lesson-btn--ghost" onClick={() => setCollabPermOpen(false)}>
+              Закрыть
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {canManage && materialSession ? (
+        <aside className="vl-teacher-panel" aria-label="Панель учителя">
+          <div className="vl-teacher-panel__head">
+            <strong>Участники материала</strong>
+            <button
+              type="button"
+              className="video-lesson-btn video-lesson-btn--ghost"
+              onClick={() => {
+                setDiagSnapshot(materialCollabRef.current?.getDiagnostics?.() || null);
+                setDiagOpen((v) => !v);
+              }}
+            >
+              Диагностика
+            </button>
+          </div>
+          <ul className="vl-teacher-panel__list">
+            {materialPresence.filter((p) => p.role === "student").map((p) => (
+              <li key={p.userId}>
+                <span>{p.displayName}</span>
+                <span className={p.following === false || followByUser[String(p.userId)] === false ? "is-away" : "is-follow"}>
+                  {p.following === false || followByUser[String(p.userId)] === false
+                    ? "смотрит сам"
+                    : "следует за вами"}
+                </span>
+              </li>
+            ))}
+            {!materialPresence.some((p) => p.role === "student") ? (
+              <li className="vl-teacher-panel__empty">Ученики ещё не подключены к материалу</li>
+            ) : null}
+          </ul>
+          {diagOpen && detail?.viewerIsStaff ? (
+            <pre className="vl-teacher-panel__diag">{JSON.stringify(diagSnapshot || materialCollabRef.current?.getDiagnostics?.() || {}, null, 2)}</pre>
+          ) : null}
+        </aside>
+      ) : null}
 
       <PlanItemResourcesPicker
         scope={resourcePicker === "homework" ? "homework" : "lesson"}

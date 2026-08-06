@@ -1855,6 +1855,24 @@ export function fetchJournalStudent(studentId) {
   return cabinetFetch(`/journal/students/${studentId}/`, { method: "GET" });
 }
 
+export function fetchJournalStudentErrors(studentId, params = {}) {
+  return cabinetFetch(
+    buildCabinetQueryPath(`/journal/students/${studentId}/errors/`, params),
+    { method: "GET" },
+  );
+}
+
+export function fetchJournalStudentErrorsSummary(studentId) {
+  return fetchJournalStudentErrors(studentId, { summary: 1 });
+}
+
+export function createHomeworkFromStudentErrors(studentId, payload = {}) {
+  return cabinetFetch(`/journal/students/${studentId}/errors/create-homework/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function fetchJournalStudentsSummary() {
   return cabinetFetch("/journal/students/", { method: "GET" });
 }
