@@ -33,8 +33,8 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--issuer",
-            default="ITFlux Admin",
-            help="Имя сервиса в Authenticator (по умолчанию ITFlux Admin)",
+            default="ITFlux",
+            help="Имя сервиса в Authenticator (по умолчанию ITFlux)",
         )
         parser.add_argument(
             "--qr-file",
@@ -98,9 +98,10 @@ class Command(BaseCommand):
         # Authenticator apps expect Base32 without '=' padding.
         # device.key is hex — do NOT paste it into Authenticator.
         secret_b32 = b32encode(device.bin_key).decode("ascii").rstrip("=")
-        issuer = (options["issuer"] or "ITFlux Admin").replace(":", "")
+        issuer = (options["issuer"] or "ITFlux").replace(":", "")
         label = f"{issuer}:{username}"
         # Build otpauth ourselves so the URL is QR-safe (no wrapped hex, no padding).
+        # Use quote (not '+') — Google Authenticator is picky about issuer encoding.
         query = urlencode(
             {
                 "secret": secret_b32,
@@ -108,7 +109,8 @@ class Command(BaseCommand):
                 "algorithm": "SHA1",
                 "digits": str(device.digits),
                 "period": str(device.step),
-            }
+            },
+            quote_via=quote,
         )
         config_url = f"otpauth://totp/{quote(label)}?{query}"
 
