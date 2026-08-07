@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 import HeroSection from "../components/HeroSection";
 import { type LevelId } from "../data/levels";
-import { countAvailableSubjectIds } from "../data/subjects";
 import { formatTasksCount } from "../utils/formatTasksCount";
 import { formatIntRu } from "../utils/formatIntRu";
 
@@ -74,7 +73,10 @@ export default function HomePage() {
   const [stats, setStats] = useState<PlatformStats | null>(null);
   const heroTasksCountLabel =
     stats != null && stats.total_tasks > 0 ? formatIntRu(stats.total_tasks) : "11 667";
-  const heroSubjectsCountLabel = formatIntRu(countAvailableSubjectIds());
+  const heroSubjectsCountLabel =
+    stats != null && typeof stats.subjects_count === "number" && stats.subjects_count > 0
+      ? formatIntRu(stats.subjects_count)
+      : "…";
   const heroGeneratedVariantsCountLabel =
     stats != null && stats.generated_variants_count >= 0
       ? formatIntRu(stats.generated_variants_count)

@@ -2459,12 +2459,8 @@ def api_generator_overview(request):
 def api_platform_stats(request):
     """GET /api/platform-stats/ — агрегаты для главной: задачи, предметы, варианты, суммы по уровням."""
     total_tasks = Task.active_objects.count()
-    subjects_count = (
-        Task.active_objects.filter(task__subject_id__isnull=False)
-        .values("task__subject_id")
-        .distinct()
-        .count()
-    )
+    # Счётчик предметов на hero — из таблицы Subject, не из distinct по задачам.
+    subjects_count = Subject.objects.count()
     generated_variants_count = Variant.objects.count()
 
     tasks_by_level = {}
