@@ -150,13 +150,52 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("Не удалось напечатать ASCII QR."))
 
         out_path = Path(qr_file).expanduser()
+        png_ok = False
         try:
-            img = qr.make_image(fill_color="black", back_color="white")
+            img = self._make_qr_image(qr)
             img.save(out_path)
-            self.stdout.write(self.style.SUCCESS(f"QR сохранён в файл: {out_path.resolve()}"))
+            png_ok = True
+            self.stdout.write(self.style.SUCCESS(f"QR PNG: {out_path.resolve()}"))
+        except Exception as exc:
+            self.stdout.write(self.style.WARNING(f"PNG недоступен ({exc}); сохраняю SVG."))
+
+        svg_path = out_path.with_suffix(".svg")
+        try:
+            svg_path.write_text(self._qr_to_svg(qr), encoding="utf-8")
+            self.stdout.write(self.style.SUCCESS(f"QR SVG: {svg_path.resolve()}"))
             self.stdout.write(
-                "Откройте PNG на другом устройстве / скачайте через scp и отсканируйте."
+                "Откройте PNG/SVG на телефоне или другом экране и отсканируйте. "
+                "Не копируйте URL в онлайн-генератор QR — перенос строки ломает код."
             )
         except Exception as exc:
-            self.stdout.write(self.style.WARNING(f"Не удалось сохранить PNG: {exc}"))
+            if not png_ok:
+                self.stdout.write(self.style.WARNING(f"Не удалось сохранить QR-файл: {exc}"))
         self.stdout.write("")
+
+    @staticmethod
+    def _make_qr_image(qr):
+        """Prefer Pillow; fall back to pure-Python PNG factory if installed."""
+        try:
+            return qr.make_image(fill_color="black", back_color="white")
+        except Exception:
+            import qrcode.image.pure
+
+            return qr.make_image(image_factory=qrcode.image.pure.PyPNGImage)
+
+    @staticmethod
+    def _qr_to_svg(qr, scale: int = 8) -> str:
+        """Minimal SVG QR — no Pillow/pypng required."""
+        matrix = qr.get_matrix()
+        n = len(matrix)
+        size = n * scale
+        parts = [
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" '
+            f'viewBox="0 0 {n} {n}" shape-rendering="crispEdges">',
+            '<rect width="100%" height="100%" fill="#fff"/>',
+        ]
+        for y, row in enumerate(matrix):
+            for x, cell in enumerate(row):
+                if cell:
+                    parts.append(f'<rect x="{x}" y="{y}" width="1" height="1" fill="#000"/>')
+        parts.append("</svg>")
+        return "\n".join(parts)
