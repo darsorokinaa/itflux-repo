@@ -2385,6 +2385,57 @@ def create_package(
 
 
 @transaction.atomic
+def create_package_and_cover_past(
+    *,
+    teacher: User,
+    student: Student,
+    cover_past_unpaid: bool = False,
+    event_billing_ids: Optional[list] = None,
+    created_by: Optional[User] = None,
+    **package_kwargs,
+) -> dict:
+    """
+    Создать абонемент и опционально задним числом покрыть неоплаченные уроки.
+    cover_past_unpaid=True без event_billing_ids → select_earliest по остатку.
+    """
+    package = create_package(
+        teacher=teacher,
+        student=student,
+        created_by=created_by or teacher,
+        **package_kwargs,
+    )
+    covered = None
+    if cover_past_unpaid:
+        account = package.billing_account
+        try:
+            covered = charge_multiple_lessons_from_package(
+                teacher=teacher,
+                account=account,
+                package=package,
+                event_billing_ids=event_billing_ids,
+                select_earliest=not bool(event_billing_ids),
+                comment="Покрытие прошлых уроков новым абонементом",
+            )
+        except BillingError as exc:
+            if exc.code == "NOTHING_TO_CHARGE":
+                covered = {
+                    "charged_count": 0,
+                    "remaining_units": package.remaining_units,
+                    "package": package,
+                    "results": [],
+                    "message": "Неоплаченных уроков для покрытия нет",
+                }
+            else:
+                raise
+        package.refresh_from_db()
+    return {
+        "package": package,
+        "covered": covered,
+        "covered_count": (covered or {}).get("charged_count") or 0,
+    }
+
+
+@transaction.atomic
 def reverse_transaction(
     *,
     teacher: User,
@@ -2720,6 +2771,162 @@ def preview_finalize(event: ScheduleEvent, teacher: User, student: Optional[Stud
     return out
 
 
+_SCHEME_LABELS = {
+    BillingType.PER_LESSON: "Разово за урок",
+    BillingType.PER_MINUTE: "За минуту",
+    BillingType.PER_HOUR: "Почасовая",
+    BillingType.PACKAGE_LESSONS: "Абонемент",
+    BillingType.PACKAGE_MINUTES: "Абонемент (минуты)",
+    BillingType.MONTHLY_FIXED: "Фикс за месяц",
+    BillingType.MANUAL: "Вручную",
+}
+
+
+def _scheme_label(settings, package=None) -> str:
+    if package and settings.billing_type in (
+        BillingType.PACKAGE_LESSONS,
+        BillingType.PACKAGE_MINUTES,
+        BillingType.PER_LESSON,
+        BillingType.MANUAL,
+    ):
+        if settings.billing_type in (BillingType.PACKAGE_LESSONS, BillingType.PACKAGE_MINUTES):
+            return _SCHEME_LABELS.get(settings.billing_type, "Абонемент")
+        return "Абонемент / разово"
+    return _SCHEME_LABELS.get(settings.billing_type, settings.get_billing_type_display())
+
+
+def build_account_ui_meta(
+    *,
+    has_tariff: bool,
+    needs_decision: bool,
+    unpaid_count: int,
+    unpaid_amount: Decimal,
+    balance: dict,
+    package,
+    settings,
+    credit: Decimal,
+) -> dict:
+    """Статус и ближайшие действия для UI списка/карточки ученика."""
+    debt = D(unpaid_amount) if unpaid_amount > 0 else D(balance.get("debt") or 0)
+    low_pkg = False
+    if package:
+        thr_l = D_units(settings.low_balance_threshold_lessons or 2)
+        thr_m = D_units(settings.low_balance_threshold_minutes or 120)
+        if package.unit_type == PackageUnitType.LESSON and package.remaining_units <= thr_l:
+            low_pkg = True
+        elif package.unit_type == PackageUnitType.MINUTE and package.remaining_units <= thr_m:
+            low_pkg = True
+
+    suggested: list[str] = []
+
+    if not has_tariff and unpaid_count <= 0 and debt <= 0:
+        return {
+            "status_kind": "not_configured",
+            "status_mod": "muted",
+            "headline": "Не настроено",
+            "detail": "Условия оплаты не заданы",
+            "primary_action": "setup",
+            "primary_label": "Настроить условия",
+            "suggested_actions": ["setup", "payment", "package"],
+        }
+
+    if needs_decision or (not has_tariff and unpaid_count > 0):
+        return {
+            "status_kind": "needs_decision",
+            "status_mod": "warn",
+            "headline": "Есть проведённые уроки без схемы оплаты",
+            "detail": f"Неоплаченных уроков: {unpaid_count}" if unpaid_count else "Требуется оформление",
+            "primary_action": "setup",
+            "primary_label": "Настроить условия",
+            "suggested_actions": ["setup", "payment", "package", "open"],
+        }
+
+    if debt > 0 or unpaid_count > 0:
+        money = f"{debt:,.0f}".replace(",", "\u00a0") if debt == int(debt) else str(debt)
+        if unpaid_count:
+            mod10, mod100 = unpaid_count % 10, unpaid_count % 100
+            if mod10 == 1 and mod100 != 11:
+                lessons_word = f"{unpaid_count} урок"
+            elif 2 <= mod10 <= 4 and not (12 <= mod100 <= 14):
+                lessons_word = f"{unpaid_count} урока"
+            else:
+                lessons_word = f"{unpaid_count} уроков"
+            headline = f"Долг {money} ₽ · {lessons_word}"
+        else:
+            headline = f"Долг {money} ₽"
+        suggested = ["payment"]
+        if package and D_units(package.remaining_units) > 0:
+            suggested.append("charge_package")
+        suggested.extend(["package", "open"])
+        return {
+            "status_kind": "debt",
+            "status_mod": "alert",
+            "headline": headline,
+            "detail": "Есть проведённые неоплаченные уроки",
+            "primary_action": "payment",
+            "primary_label": "Добавить оплату",
+            "suggested_actions": suggested,
+        }
+
+    if low_pkg and package:
+        rem = package.remaining_units
+        return {
+            "status_kind": "ending",
+            "status_mod": "warn",
+            "headline": f"Абонемент заканчивается · осталось {rem}",
+            "detail": "Стоит продлить или создать новый",
+            "primary_action": "package",
+            "primary_label": "Продлить абонемент",
+            "suggested_actions": ["package", "payment", "open"],
+        }
+
+    if package:
+        rem = package.remaining_units
+        unit = "занятий" if package.unit_type != PackageUnitType.MINUTE else "мин"
+        return {
+            "status_kind": "package_ok",
+            "status_mod": "ok",
+            "headline": f"Осталось {rem} {unit}",
+            "detail": "Активный абонемент",
+            "primary_action": "open",
+            "primary_label": "Открыть",
+            "suggested_actions": ["open", "payment", "package"],
+        }
+
+    if credit > 0:
+        money = f"{credit:,.0f}".replace(",", " ") if credit == int(credit) else f"{credit}"
+        return {
+            "status_kind": "prepaid",
+            "status_mod": "ok",
+            "headline": f"Разовая оплата: урок оплачен заранее",
+            "detail": f"Аванс {money} ₽",
+            "primary_action": "open",
+            "primary_label": "Открыть",
+            "suggested_actions": ["open", "payment", "package"],
+        }
+
+    if has_tariff:
+        return {
+            "status_kind": "configured",
+            "status_mod": "muted",
+            "headline": "Условия заданы",
+            "detail": "Долгов нет",
+            "primary_action": "open",
+            "primary_label": "Открыть",
+            "suggested_actions": ["open", "payment", "package"],
+        }
+
+    return {
+        "status_kind": "ok",
+        "status_mod": "ok",
+        "headline": "Всё оплачено",
+        "detail": "",
+        "primary_action": "open",
+        "primary_label": "Открыть",
+        "suggested_actions": ["open", "payment"],
+    }
+
+
 def serialize_account(account: BillingAccount, *, include_history: bool = False) -> dict:
     reconcile_package_payments(account)
     settings = account.settings
@@ -2846,6 +3053,26 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
     else:
         status_label = "условия заданы"
 
+    credit = D(balance.get("credit") or 0)
+    ui = build_account_ui_meta(
+        has_tariff=has_tariff,
+        needs_decision=needs,
+        unpaid_count=unpaid_count,
+        unpaid_amount=D(unpaid_amount),
+        balance=balance,
+        package=package,
+        settings=settings,
+        credit=credit,
+    )
+    scheme_label = _scheme_label(settings, package)
+
+    packages_qs = LessonPackage.objects.filter(
+        billing_account=account,
+    ).exclude(status=PackageStatus.CANCELLED).order_by("-created_at")[:20]
+    packages_list = [
+        serialize_package(p, include_history=False, reconcile=False) for p in packages_qs
+    ]
+
     data = {
         "id": account.id,
         "student_id": account.student_id,
@@ -2859,6 +3086,21 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
         "is_active": account.is_active,
         "student_billing_notifications": account.student_billing_notifications,
         "billing_type": settings.billing_type,
+        "scheme_label": scheme_label,
+        "status_kind": ui["status_kind"],
+        "status_mod": ui["status_mod"],
+        "headline": ui["headline"],
+        "status_detail": ui["detail"],
+        "primary_action": ui["primary_action"],
+        "primary_label": ui["primary_label"],
+        "suggested_actions": ui["suggested_actions"],
+        "debt_amount": str(D(unpaid_amount) if unpaid_amount > 0 else balance["debt"]),
+        "credit_amount": str(credit),
+        "packages": packages_list,
+        "packages_summary": {
+            "active_count": sum(1 for p in packages_list if p.get("status") == PackageStatus.ACTIVE),
+            "ending_count": sum(1 for p in packages_list if p.get("display_status") == "ending"),
+        },
         "default_lesson_price": (
             str(settings.default_lesson_price) if settings.default_lesson_price is not None else None
         ),
@@ -3447,9 +3689,11 @@ def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
         "low_packages": low_packages,
         "active_packages": LessonPackage.objects.filter(
             billing_account__teacher=teacher, status=PackageStatus.ACTIVE
-        ).count(),
+        ).exclude(billing_account__student__status=StudentStatus.ARCHIVED).count(),
+        "ending_packages": low_packages,
         "needs_decision": needs_decision,
         "awaiting_payment_count": awaiting_count,
+        "expected_amount": str(D(expected)),
         "today_received": str(D(today_paid)),
     }
 

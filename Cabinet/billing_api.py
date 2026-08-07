@@ -33,6 +33,7 @@ from .billing_service import (
     create_adjustment,
     cancel_package,
     create_package,
+    create_package_and_cover_past,
     create_refund,
     dashboard_planned_income_details,
     dashboard_received_details,
@@ -352,9 +353,13 @@ class BillingPackagesView(APIView):
         student = get_object_or_404(Student, pk=data.get("student_id"), teacher=request.user)
         try:
             await_payment = bool(data.get("await_payment")) or data.get("create_payment") is False
-            package = create_package(
-                teacher=request.user,
-                student=student,
+            cover_past = bool(
+                data.get("cover_past_unpaid")
+                or data.get("cover_past")
+                or data.get("settle_unpaid")
+            )
+            event_billing_ids = data.get("event_billing_ids") or data.get("lesson_ids")
+            package_kwargs = dict(
                 title=data.get("title") or "Абонемент",
                 unit_type=data.get("unit_type") or "lesson",
                 total_units=_dec(data.get("total_units")),
@@ -362,7 +367,6 @@ class BillingPackagesView(APIView):
                 starts_at=parse_date(data["starts_at"]) if data.get("starts_at") else None,
                 expires_at=parse_date(data["expires_at"]) if data.get("expires_at") else None,
                 auto_use=bool(data.get("auto_use", True)),
-                created_by=request.user,
                 bonus_units=_dec(data.get("bonus_units"), Decimal("0")),
                 create_payment_tx=not await_payment,
                 notes=data.get("notes") or data.get("comment") or "",
@@ -371,6 +375,26 @@ class BillingPackagesView(APIView):
                     if data.get("lesson_duration_minutes") not in (None, "")
                     else None
                 ),
+            )
+            if cover_past:
+                result = create_package_and_cover_past(
+                    teacher=request.user,
+                    student=student,
+                    cover_past_unpaid=True,
+                    event_billing_ids=event_billing_ids,
+                    created_by=request.user,
+                    **package_kwargs,
+                )
+                package = result["package"]
+                payload = serialize_package(package)
+                payload["covered_past_count"] = result["covered_count"]
+                payload["covered_past_message"] = (result.get("covered") or {}).get("message") or ""
+                return Response(payload, status=201)
+            package = create_package(
+                teacher=request.user,
+                student=student,
+                created_by=request.user,
+                **package_kwargs,
             )
         except BillingError as exc:
             return _err(exc)

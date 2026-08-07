@@ -362,11 +362,50 @@ function debtLabel(amount, currency) {
 /** Состояние строки ученика во вкладке «Оплаты» — тот же смысл, что resolveAccountState. */
 export function resolvePaymentsRowState(account) {
   const currency = account.currency || "RUB";
-  const unpaidAmount = Number(account.unpaid_lessons_amount || account.balance?.debt || 0);
+  const unpaidAmount = Number(
+    account.debt_amount ?? account.unpaid_lessons_amount ?? account.balance?.debt ?? 0,
+  );
   const unpaidCount = Number(account.unpaid_lessons_count || 0);
   const pkg = account.package;
   const remaining = pkg ? Number(pkg.remaining_units || 0) : 0;
   const state = resolveAccountState(account);
+  const apiKind = account.status_kind;
+  const apiHeadline = account.headline;
+  const scheme = account.scheme_label || formatPaymentTerms(account);
+  const primaryAction = account.primary_action || state.primaryAction;
+  const primaryLabel = account.primary_label || state.primaryLabel;
+  const suggested = account.suggested_actions || [];
+
+  // Prefer server-computed headline when available.
+  if (apiKind && apiHeadline) {
+    const modMap = {
+      alert: "debt",
+      warn: "warn",
+      ok: "ok",
+      muted: "muted",
+    };
+    const balanceMod = modMap[account.status_mod] || (apiKind === "debt" ? "debt" : "muted");
+    let balanceText = apiHeadline;
+    if (apiKind === "debt" && unpaidAmount > 0) {
+      balanceText = debtLabel(unpaidAmount, currency) || apiHeadline;
+    } else if (pkg && (apiKind === "package_ok" || apiKind === "ending")) {
+      balanceText = remainingLessonsLabel(remaining);
+    } else if (apiKind === "prepaid") {
+      balanceText = formatMoney(account.credit_amount || account.balance?.credit, currency);
+    }
+    return {
+      subtitle: [scheme, account.status_detail || apiHeadline].filter(Boolean).join(" · "),
+      statusText: apiHeadline,
+      balanceText,
+      balanceMod,
+      kind: apiKind,
+      scheme,
+      primaryAction,
+      primaryLabel,
+      suggestedActions: suggested,
+      actionNeedsAttention: ["debt", "needs_decision", "ending", "not_configured"].includes(apiKind),
+    };
+  }
 
   if (unpaidAmount > 0 || unpaidCount > 0) {
     const sub = unpaidCount > 0
@@ -386,9 +425,15 @@ export function resolvePaymentsRowState(account) {
             ? `Абонемент закончился · ${unpaidCount} неоплаченных урока`
             : (!pkg ? `Абонемента нет · ${unpaidCount} неоплаченных урока` : `${unpaidCount} неоплаченных урока`))
           : sub),
+      statusText: state.headline,
       balanceText: debtLabel(unpaidAmount, currency) || "Стоимость не указана",
       balanceMod: "debt",
       kind: state.kind,
+      scheme,
+      primaryAction: state.primaryAction,
+      primaryLabel: state.primaryLabel,
+      suggestedActions: ["payment", "package", "open"],
+      actionNeedsAttention: true,
     };
   }
 
@@ -397,28 +442,78 @@ export function resolvePaymentsRowState(account) {
     const endingMin = pkg.unit_type === "minute" && remaining > 0 && remaining <= 120;
     if (remaining <= 0 || pkg.display_status === "completed") {
       return {
-        subtitle: "Занятия закончились",
+        subtitle: `${scheme} · Занятия закончились`,
+        statusText: "Занятия закончились",
         balanceText: "Занятия закончились",
         balanceMod: "warn",
         kind: state.kind,
+        scheme,
+        primaryAction: "package",
+        primaryLabel: "Создать абонемент",
+        suggestedActions: ["package", "payment", "open"],
+        actionNeedsAttention: true,
       };
     }
     return {
       subtitle: `Абонемент: ${formatUnits(pkg.total_units, pkg.unit_type)} · осталось ${formatUnits(pkg.remaining_units, pkg.unit_type)}`,
+      statusText: ending || endingMin ? "Абонемент заканчивается" : remainingLessonsLabel(remaining),
       balanceText: ending || endingMin
         ? remainingLessonsLabel(remaining)
         : (pkg.display_status === "awaiting_payment" ? "Ожидает оплаты" : "Оплачено"),
       balanceMod: ending || endingMin ? "warn" : (pkg.display_status === "awaiting_payment" ? "muted" : "ok"),
       kind: state.kind,
+      scheme,
+      primaryAction: state.primaryAction,
+      primaryLabel: state.primaryLabel,
+      suggestedActions: ending || endingMin ? ["package", "open"] : ["open", "payment"],
+      actionNeedsAttention: ending || endingMin,
     };
   }
 
   return {
-    subtitle: state.detail || "Абонемента нет",
+    subtitle: state.detail || scheme || "Абонемента нет",
+    statusText: state.headline || "Абонемента нет",
     balanceText: state.headline || "Абонемента нет",
     balanceMod: state.mod === "alert" ? "debt" : (state.mod === "ok" ? "ok" : "muted"),
     kind: state.kind,
+    scheme,
+    primaryAction: state.primaryAction,
+    primaryLabel: state.primaryLabel,
+    suggestedActions: state.primaryAction === "setup" ? ["setup", "payment"] : ["open", "payment"],
+    actionNeedsAttention: state.kind === "not_configured" || state.kind === "needs_decision",
   };
+}
+
+export function accountMatchesTab(account, tab) {
+  const kind = account.status_kind || resolvePaymentsRowState(account).kind;
+  const unpaid = Number(account.unpaid_lessons_count || 0) > 0
+    || Number(account.debt_amount || account.unpaid_lessons_amount || 0) > 0;
+  const hasPkg = Boolean(account.package)
+    || (account.packages || []).some((p) => p.status === "active" || p.display_status === "active" || p.display_status === "ending");
+  const isPerLesson = ["per_lesson", "per_minute", "per_hour"].includes(account.billing_type)
+    && !account.package;
+
+  switch (tab) {
+    case "action":
+      return ["debt", "needs_decision", "ending", "not_configured", "low_package"].includes(kind)
+        || unpaid;
+    case "debts":
+      return unpaid || kind === "debt";
+    case "packages":
+      return hasPkg || ["package_lessons", "package_minutes"].includes(account.billing_type);
+    case "oneshot":
+      return isPerLesson || kind === "prepaid" || kind === "configured";
+    case "all":
+    default:
+      return true;
+  }
+}
+
+export function statusModClass(mod) {
+  if (mod === "alert" || mod === "debt") return "pay-status--debt";
+  if (mod === "warn") return "pay-status--warn";
+  if (mod === "ok") return "pay-status--ok";
+  return "pay-status--muted";
 }
 
 export function formatPaymentTerms(account) {

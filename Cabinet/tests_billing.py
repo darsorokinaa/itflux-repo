@@ -26,6 +26,7 @@ from Cabinet.billing_service import (
     cancel_package,
     compute_account_balance,
     create_package,
+    create_package_and_cover_past,
     dashboard_summary,
     finalize_event_billing,
     get_or_create_billing_account,
@@ -1308,3 +1309,112 @@ class PackageSettleDebtTests(BillingTestBase):
             ).count(),
             1,
         )
+
+
+class BillingUiMetaAndCoverPastTests(BillingTestBase):
+    def _past_event(self, days_ago=1, minutes=60):
+        starts = timezone.now() - timedelta(days=days_ago, hours=1)
+        ends = starts + timedelta(minutes=minutes)
+        return ScheduleEvent.objects.create(
+            owner=self.teacher,
+            title="Урок",
+            starts_at=starts,
+            ends_at=ends,
+            student=self.student,
+            event_type=ScheduleEvent.EventType.INDIVIDUAL_LESSON,
+            status=ScheduleEvent.Status.PLANNED,
+        )
+
+    def test_serialize_account_exposes_ui_meta(self):
+        data = serialize_account(self.account)
+        self.assertIn("scheme_label", data)
+        self.assertIn("status_kind", data)
+        self.assertIn("primary_action", data)
+        self.assertIn("suggested_actions", data)
+        self.assertIn("headline", data)
+        self.assertIn("packages", data)
+        self.assertEqual(data["scheme_label"], "Разово за урок")
+
+    def test_dashboard_has_ending_and_expected(self):
+        dash = dashboard_summary(self.teacher)
+        self.assertIn("ending_packages", dash)
+        self.assertIn("expected_amount", dash)
+        self.assertIn("expected_incoming", dash)
+        self.assertIn("debt_total", dash)
+
+    def test_create_package_covers_past_unpaid(self):
+        for i in range(2):
+            event = self._past_event(days_ago=i + 1)
+            finalize_event_billing(
+                event=event,
+                teacher=self.teacher,
+                financial_action="charge",
+                idempotency_key=f"cover-past-{i}",
+            )
+        result = create_package_and_cover_past(
+            teacher=self.teacher,
+            student=self.student,
+            cover_past_unpaid=True,
+            title="Cover8",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("8"),
+            purchase_amount=Decimal("8000"),
+        )
+        self.assertEqual(result["covered_count"], 2)
+        pkg = result["package"]
+        pkg.refresh_from_db()
+        self.assertEqual(pkg.remaining_units, Decimal("6.00"))
+        unpaid = EventBillingRecord.objects.filter(
+            billing_account=self.account,
+            financial_status=FinancialStatus.AWAITING_PAYMENT,
+        ).count()
+        self.assertEqual(unpaid, 0)
+
+    def test_create_package_future_only_leaves_debt(self):
+        event = self._past_event(days_ago=2)
+        finalize_event_billing(
+            event=event,
+            teacher=self.teacher,
+            financial_action="charge",
+            idempotency_key="future-only-1",
+        )
+        result = create_package_and_cover_past(
+            teacher=self.teacher,
+            student=self.student,
+            cover_past_unpaid=False,
+            title="FutureOnly",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("4"),
+            purchase_amount=Decimal("4000"),
+        )
+        self.assertEqual(result["covered_count"], 0)
+        unpaid = EventBillingRecord.objects.filter(
+            billing_account=self.account,
+            financial_status=FinancialStatus.AWAITING_PAYMENT,
+        ).count()
+        self.assertEqual(unpaid, 1)
+
+    def test_api_package_cover_past(self):
+        event = self._past_event(days_ago=1)
+        finalize_event_billing(
+            event=event,
+            teacher=self.teacher,
+            financial_action="charge",
+            idempotency_key="api-cover-1",
+        )
+        resp = self.client.post(
+            "/api/cabinet/billing/packages/",
+            {
+                "student_id": self.student.id,
+                "title": "API Cover",
+                "unit_type": "lesson",
+                "total_units": "5",
+                "purchase_amount": "5000",
+                "cover_past_unpaid": True,
+                "await_payment": False,
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data.get("covered_past_count"), 1)
+        self.assertEqual(Decimal(resp.data["remaining_units"]), Decimal("4.00"))

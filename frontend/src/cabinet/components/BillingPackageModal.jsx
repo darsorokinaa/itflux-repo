@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import CabinetModal from "./CabinetModal";
-import { createBillingPackage } from "../../utils/cabinetAuth";
-import { formatMoney, formatUnits } from "../billing/billingFormat";
+import { createBillingPackage, fetchUnresolvedBillingLessons } from "../../utils/cabinetAuth";
+import { formatLessonWhen, formatMoney, formatUnits } from "../billing/billingFormat";
 import "../styles/payments.css";
 
 const LESSON_PRESETS = [4, 8, 12];
@@ -26,6 +26,8 @@ export default function BillingPackageModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [createdPkg, setCreatedPkg] = useState(null);
+  const [unpaidLessons, setUnpaidLessons] = useState([]);
+  const [coverPast, setCoverPast] = useState("future");
 
   const unitsNum = Number(totalUnits) || 0;
   const amountNum = Number(amount) || 0;
@@ -33,6 +35,11 @@ export default function BillingPackageModal({
   const perUnit = useMemo(
     () => (unitsNum > 0 && amountNum > 0 ? amountNum / unitsNum : (unitNum || null)),
     [unitsNum, amountNum, unitNum],
+  );
+
+  const studentUnpaid = useMemo(
+    () => unpaidLessons.filter((l) => String(l.student_id) === String(studentId)),
+    [unpaidLessons, studentId],
   );
 
   const setTotalUnitsAndRecalc = (value, { keepUnit = false } = {}) => {
@@ -61,7 +68,16 @@ export default function BillingPackageModal({
     setExpiresAt("");
     setError("");
     setCreatedPkg(null);
+    setCoverPast("future");
+    fetchUnresolvedBillingLessons()
+      .then((list) => setUnpaidLessons(Array.isArray(list) ? list : []))
+      .catch(() => setUnpaidLessons([]));
   }, [open, defaultStudentId]);
+
+  useEffect(() => {
+    if (studentUnpaid.length > 0) setCoverPast("past");
+    else setCoverPast("future");
+  }, [studentId, studentUnpaid.length]);
 
   if (!open) return null;
 
@@ -90,6 +106,12 @@ export default function BillingPackageModal({
               <span>Статус</span>
               <strong>{createdPkg.display_status_label || "Ожидает оплаты"}</strong>
             </li>
+            {createdPkg.covered_past_count ? (
+              <li>
+                <span>Покрыто прошлых</span>
+                <strong>{createdPkg.covered_past_count}</strong>
+              </li>
+            ) : null}
           </ul>
           <div className="pay-actions">
             <button type="button" className="pay-btn pay-btn--primary" onClick={onClose}>
@@ -121,7 +143,7 @@ export default function BillingPackageModal({
       const title = amountNum > 0
         ? `${unitsNum} занятий · ${formatMoney(amountNum)}`
         : `Абонемент на ${unitsNum} занятий${durationLabel ? ` по ${durationLabel}` : ""}`;
-      const pkg = await createBillingPackage({
+      const payload = {
         student_id: Number(studentId),
         title: title || autoTitle,
         unit_type: "lesson",
@@ -132,7 +154,11 @@ export default function BillingPackageModal({
         lesson_duration_minutes: duration ? Number(duration) : null,
         auto_use: true,
         await_payment: true,
-      });
+      };
+      if (coverPast === "past" && studentUnpaid.length > 0) {
+        payload.cover_past_unpaid = true;
+      }
+      const pkg = await createBillingPackage(payload);
       setCreatedPkg(pkg);
       onDone?.(pkg);
     } catch (err) {
@@ -286,6 +312,41 @@ export default function BillingPackageModal({
             <input className="pay-input" type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
           </div>
         </div>
+
+        {studentUnpaid.length > 0 ? (
+          <div className="pay-field">
+            <label>Есть {studentUnpaid.length} неоплаченных прошлых уроков</label>
+            <div className="pay-cover-choice">
+              <label className={coverPast === "past" ? "is-active" : ""}>
+                <input
+                  type="radio"
+                  name="pkg-cover"
+                  checked={coverPast === "past"}
+                  onChange={() => setCoverPast("past")}
+                />
+                <span>
+                  <strong>Покрыть прошлые этим абонементом</strong>
+                  <em>
+                    {studentUnpaid.slice(0, 3).map((l) => formatLessonWhen(l.event_starts_at)).join(", ")}
+                    {studentUnpaid.length > 3 ? "…" : ""}
+                  </em>
+                </span>
+              </label>
+              <label className={coverPast === "future" ? "is-active" : ""}>
+                <input
+                  type="radio"
+                  name="pkg-cover"
+                  checked={coverPast === "future"}
+                  onChange={() => setCoverPast("future")}
+                />
+                <span>
+                  <strong>Только будущие уроки</strong>
+                  <em>Долг по прошлым останется — погасите отдельно</em>
+                </span>
+              </label>
+            </div>
+          </div>
+        ) : null}
 
         <div className="pay-actions">
           <button type="button" className="pay-btn" onClick={onClose} disabled={busy}>Отмена</button>

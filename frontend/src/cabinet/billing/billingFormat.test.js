@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  accountMatchesTab,
   billingTypeLabel,
   compactLessonBillingLabel,
   financialStatusLabel,
@@ -10,6 +11,8 @@ import {
   formatUnits,
   isBillingConfigured,
   resolveAccountState,
+  resolvePaymentsRowState,
+  statusModClass,
   transactionTypeLabel,
 } from "./billingFormat";
 
@@ -133,5 +136,34 @@ describe("billingFormat", () => {
       financial_status: "not_charged",
       price_source_label: "Абонемент",
     })).toContain("Абонемент");
+  });
+
+  it("uses server ui meta for payments row", () => {
+    const row = resolvePaymentsRowState({
+      status_kind: "debt",
+      status_mod: "alert",
+      headline: "Долг 3 200 ₽ · 2 урока",
+      status_detail: "Есть проведённые неоплаченные уроки",
+      scheme_label: "Разово за урок",
+      debt_amount: "3200",
+      unpaid_lessons_count: 2,
+      primary_action: "payment",
+      primary_label: "Добавить оплату",
+      suggested_actions: ["payment", "package"],
+      currency: "RUB",
+    });
+    expect(row.kind).toBe("debt");
+    expect(row.statusText).toContain("Долг");
+    expect(row.actionNeedsAttention).toBe(true);
+    expect(statusModClass("alert")).toBe("pay-status--debt");
+  });
+
+  it("filters accounts by tab", () => {
+    const debtAcc = { status_kind: "debt", unpaid_lessons_count: 2, debt_amount: "1000" };
+    const pkgAcc = { status_kind: "package_ok", package: { remaining_units: 3 }, billing_type: "package_lessons" };
+    expect(accountMatchesTab(debtAcc, "debts")).toBe(true);
+    expect(accountMatchesTab(debtAcc, "action")).toBe(true);
+    expect(accountMatchesTab(pkgAcc, "packages")).toBe(true);
+    expect(accountMatchesTab(pkgAcc, "debts")).toBe(false);
   });
 });
