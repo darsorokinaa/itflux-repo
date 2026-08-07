@@ -2008,6 +2008,7 @@ def api_tasks(request, level, subject):
             subject=subject_instance,
             level=level_instance,
         )
+        .select_related("part")
         .annotate(count_task=Count("task", filter=count_task_filter))
         .order_by('task_number')
     )
@@ -2088,6 +2089,7 @@ def api_tasks(request, level, subject):
                     "task_number": tl.task_number,
                     "task_title": tl.task_title,
                     "part": tl.part_id,
+                    "part_title": (tl.part.part_title if tl.part_id else None),
                 }
                 for tl in tasklists
             ],
@@ -2107,7 +2109,7 @@ def api_tasks(request, level, subject):
         task_group__in=groups,
         task__is_active=True,
         **_gm_extra,
-    ).select_related("task_group", "task", "task__task")
+    ).select_related("task_group", "task", "task__task", "task__task__part")
 
     group_dict = {}
     grouped_tasklist_ids = set(linked_tasklist_ids)
@@ -2141,6 +2143,7 @@ def api_tasks(request, level, subject):
             "task_number": member.task_number,
             "task_title": tl.task_title if tl else "",
             "part": tl.part_id if tl else None,
+            "part_title": (tl.part.part_title if tl and tl.part_id else None),
             "count_task": tasklist_counts.get(tl_id, 0),
         })
         if tl_id:
@@ -2164,6 +2167,7 @@ def api_tasks(request, level, subject):
             "task_number": t.task_number,
             "task_title": t.task_title,
             "part": t.part_id,
+            "part_title": (t.part.part_title if t.part_id else None),
             "count_task": t.count_task,
         })
 
@@ -2200,6 +2204,7 @@ def api_tasks(request, level, subject):
                 "task_number": t.task_number,
                 "task_title": t.task_title,
                 "part": t.part_id,
+                "part_title": (t.part.part_title if t.part_id else None),
                 "count_task": t.count_task,
             })
 
@@ -3287,6 +3292,8 @@ def api_task_tags_set(request, task_id):
 @require_http_methods(["GET"])
 def api_criteria(request, level, subject):
     """Критерии по task_list_id или по (subject, level, task_number). Criteria привязаны к TaskList (номер задания)."""
+    from .criteria_scoring import build_criteria_payload
+
     subject_instance = get_subject_for_api(subject)
     level_instance = get_object_or_404(Level, level=level)
 
@@ -3314,12 +3321,26 @@ def api_criteria(request, level, subject):
             pass
 
     if not tl_ids:
-        return JsonResponse({"criteria": []})
+        return JsonResponse({
+            "scoring_mode": "single",
+            "criteria": [],
+            "axes": [],
+            "max_score": 1,
+        })
 
     criteria_list = list(
         Criteria.objects.filter(task_number_id__in=tl_ids)
-        .order_by("-criteria_score", "id")
-        .values("id", "criteria_text", "criteria_score")
+        .order_by("axis_order", "-criteria_score", "id")
+        .values(
+            "id",
+            "criteria_text",
+            "criteria_score",
+            "axis_code",
+            "axis_title",
+            "axis_order",
+            "axis_max",
+            "is_gate",
+        )
     )
     for c in criteria_list:
         c["criteria_text"] = process_latex(str(c.get("criteria_text") or ""), for_browser=True)
@@ -3327,7 +3348,8 @@ def api_criteria(request, level, subject):
     max_score = TaskList.objects.filter(id__in=tl_ids).order_by("-max_score").values_list("max_score", flat=True).first()
     max_score = max_score if max_score is not None else 1
 
-    return JsonResponse({"criteria": criteria_list, "max_score": max_score})
+    payload = build_criteria_payload(criteria_list, max_score=max_score)
+    return JsonResponse(payload)
 
 
 def _variant_detail_payload(request, variant, *, include_answers=True):
@@ -3335,7 +3357,7 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
     contents = (
         VariantContent.objects
         .filter(variant=variant)
-        .select_related("task", "task__task", "task__subtopic")
+        .select_related("task", "task__task", "task__task__part", "task__subtopic")
         .order_by("order")
     )
 
@@ -3371,6 +3393,11 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
             "task_title": task_list.task_title if task_list else "",
             "text": process_latex(str(item.task.task_template or ""), for_browser=True),
             "part": task_list.part_id if task_list else None,
+            "part_title": (
+                task_list.part.part_title
+                if task_list and task_list.part_id
+                else None
+            ),
             "subdivision": (task_list.subdivision or "").strip() or None,
             "subtopic_id": st.id if st else None,
             "subtopic_title": (st.title or "").strip() if st else "",

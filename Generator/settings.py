@@ -299,6 +299,10 @@ REST_FRAMEWORK = {
 
 # CORS / CSRF — см. блок production hardening ниже
 CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5000",
+    "http://127.0.0.1:5000",
+    "http://localhost:5001",
+    "http://127.0.0.1:5001",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
@@ -327,6 +331,10 @@ if _cors_env:
     CORS_ALLOWED_ORIGINS = _cors_env
 elif DEBUG:
     CORS_ALLOWED_ORIGINS = [
+        "http://localhost:5000",
+        "http://127.0.0.1:5000",
+        "http://localhost:5001",
+        "http://127.0.0.1:5001",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]

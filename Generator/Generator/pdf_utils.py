@@ -15,7 +15,10 @@ from .models import TaskPreview
 
 
 def _title_is_part_2(title: str) -> bool:
+    """Часть 2 и устная/говорение — задания с критериями (не краткий ответ)."""
     t = (title or "").lower()
+    if any(key in t for key in ("говорен", "устн", "speaking", "oral")):
+        return True
     return "часть" in t and "2" in t and "12" not in t and "21" not in t
 
 

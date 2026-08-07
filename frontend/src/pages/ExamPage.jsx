@@ -24,6 +24,13 @@ import {
   truthTableAnswerMaxChars,
 } from "../utils/truthTable";
 import { checkVariantAnswerOnServer } from "../utils/examAnswerCheck";
+import {
+  axesNeedScoreMatrix,
+  axesScoreRows,
+  computeAxesTaskScore,
+  findAxisLevel,
+} from "../utils/criteriaAxesScore";
+import { inferExamTaskPart } from "../utils/examTaskPart";
 import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
 import { getShareablePageUrl } from "../utils/shareablePageUrl";
 import {
@@ -472,13 +479,16 @@ const SUBJECT_BADGE_NAMES = {
   math_base: "Математика",
 };
 
-function examHeroExamBadge(mode, levelKey) {
+function examHeroExamBadge(mode, levelKey, part2Label = "Часть 2") {
   const lk = String(levelKey || "").toLowerCase();
   const L =
     LEVEL_NAMES[lk] ||
     (levelKey != null && levelKey !== "" ? String(levelKey).toUpperCase() : "—");
   if (mode === "part1") return `${L} · Часть 1`;
-  if (mode === "part2") return `${L} · Часть 2`;
+  if (mode === "part2") return `${L} · ${part2Label}`;
+  if (/^part\d+$/.test(String(mode || "")) && mode !== "part1") {
+    return `${L} · ${part2Label}`;
+  }
   if (mode === "test") return `${L} · Тренировка`;
   return `${L} · Полный вариант`;
 }
@@ -712,6 +722,8 @@ function ExamPage() {
   const [criteriaByTaskList, setCriteriaByTaskList] = useState({});
   // Выбранный критерий: { taskId: criterionId }
   const [selectedCriterionByTask, setSelectedCriterionByTask] = useState({});
+  // Многоосевая рубрика: { taskId: { axisCode: score } }
+  const [selectedAxesByTask, setSelectedAxesByTask] = useState({});
 
   const timerStore = useMemo(() => createExamVariantTimerStore(), []);
 
@@ -823,12 +835,12 @@ function ExamPage() {
     setError(null);
     setVariant(null);
     const idWanted = String(variant_id);
-    const apiBase = devApiBase();
-    const variantUrl = `${apiBase}/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/variant/${encodeURIComponent(String(variant_id))}/`;
+    // Через Vite-прокси (/api → Django), без прямого :8000 — иначе CORS на :5001 режет ответ как Failed to fetch.
+    const variantUrl = `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/variant/${encodeURIComponent(String(variant_id))}/`;
     setVariantLoadingUrl(variantUrl);
     const ac = new AbortController();
     fetch(variantUrl, {
-      credentials: apiBase ? "omit" : "same-origin",
+      credentials: "same-origin",
       signal: ac.signal,
     })
       .then(async (res) => {
@@ -870,7 +882,12 @@ function ExamPage() {
       })
       .catch((err) => {
         if (err?.name === "AbortError") return;
-        setError(err.message || "Ошибка загрузки варианта");
+        const raw = err?.message || "";
+        setError(
+          raw === "Failed to fetch"
+            ? "Не удалось связаться с сервером. Проверьте, что бэкенд запущен, и обновите страницу."
+            : raw || "Ошибка загрузки варианта"
+        );
         setVariantLoadingUrl("");
       });
     return () => ac.abort();
@@ -1413,15 +1430,20 @@ function ExamPage() {
       if (task.task_list_id != null) params.set("task_list_id", task.task_list_id);
       if (task.number != null) params.set("task_number", task.number);
       fetch(`/api/${level}/${subject}/criteria/?${params.toString()}`)
-        .then((res) => (res.ok ? res.json() : { criteria: [], max_score: null }))
+        .then((res) => (res.ok ? res.json() : { criteria: [], max_score: null, axes: [], scoring_mode: "single" }))
         .then((data) => setCriteriaByTaskList((prev) => ({
           ...prev,
           [cacheKey]: {
             criteria: data.criteria || [],
+            axes: data.axes || [],
+            scoring_mode: data.scoring_mode || "single",
             max_score: data.max_score != null ? data.max_score : (task.max_score ?? 3),
           },
         })))
-        .catch(() => setCriteriaByTaskList((prev) => ({ ...prev, [cacheKey]: { criteria: [], max_score: task.max_score ?? 3 } })));
+        .catch(() => setCriteriaByTaskList((prev) => ({
+          ...prev,
+          [cacheKey]: { criteria: [], axes: [], scoring_mode: "single", max_score: task.max_score ?? 3 },
+        })));
     }
   }
 
@@ -1429,6 +1451,33 @@ function ExamPage() {
     setSelectedCriterionByTask((prev) => ({ ...prev, [taskId]: criterion.id }));
     const score = Math.min(criterion.criteria_score ?? 0, maxScore);
     setScores((prev) => ({ ...prev, [taskId]: Math.max(0, score) }));
+  }
+
+  function selectAxisLevel(task, axisCode, score, levelId) {
+    const tid = task.id;
+    const cacheKey = getCriteriaCacheKey(task);
+    const cache = cacheKey != null ? criteriaByTaskList[cacheKey] : null;
+    const axes = cache?.axes || [];
+    const maxScore = cache?.max_score != null
+      ? cache.max_score
+      : (task.max_score ?? 3);
+    setSelectedAxesByTask((prev) => {
+      const nextAxes = { ...(prev[tid] || {}), [axisCode]: Number(score) };
+      const result = computeAxesTaskScore(axes, nextAxes);
+      queueMicrotask(() => {
+        setScores((scoresPrev) => ({
+          ...scoresPrev,
+          [tid]: Math.min(result.total, maxScore),
+        }));
+        if (result.complete) {
+          setSelectedCriterionByTask((critPrev) => ({
+            ...critPrev,
+            [tid]: levelId ?? `axes:${tid}`,
+          }));
+        }
+      });
+      return { ...prev, [tid]: nextAxes };
+    });
   }
 
   const homeworkLkOpts = useMemo(
@@ -1632,18 +1681,21 @@ function ExamPage() {
     );
   }
 
-  // Fallback: если part не задан, определяем по номеру
-  const inferPart = (t) => {
-    if (t.part === 1 || t.part === 2) return t.part;
-    const n = t.number;
-    if (level === "oge" && isMathLikeSubject(subject)) return n <= 19 ? 1 : 2;
-    if (level === "ege" && isMathLikeSubject(subject)) return n <= 11 ? 1 : 2;
-    if (level === "oge" && subject === "inf") return n <= 15 ? 1 : 2;
-    if (level === "ege" && subject === "inf") return n <= 27 ? 1 : 2;
-    return n <= 19 ? 1 : 2;
-  };
+  // Говорение / part_id≥3 / «Часть 2» → критерии учителя (логически часть 2).
+  const inferPart = (t) => inferExamTaskPart(t, level, subject);
   const part1Tasks = tasksFilteredByAuthor.filter((t) => inferPart(t) === 1);
   const part2Tasks = tasksFilteredByAuthor.filter((t) => inferPart(t) === 2);
+  const part2SectionTitle = (() => {
+    const titles = [
+      ...new Set(
+        part2Tasks
+          .map((t) => String(t.part_title || "").trim())
+          .filter(Boolean)
+      ),
+    ];
+    if (titles.length === 1) return titles[0];
+    return "Часть 2";
+  })();
 
   // Связанные задания 19–21 — только для ЕГЭ информатика; для математики всё как обычные задания
   const LINKED_19_21 = [19, 20, 21];
@@ -1733,7 +1785,14 @@ function ExamPage() {
         : null;
     return sum + (cached ?? getTaskMaxScore(t));
   }, 0);
-  const part2EvaluatedCount = part2Tasks.filter((t) => selectedCriterionByTask[t.id] != null).length;
+  const part2EvaluatedCount = part2Tasks.filter((t) => {
+    const key = getCriteriaCacheKey(t);
+    const cache = key != null ? criteriaByTaskList[key] : null;
+    if (cache?.scoring_mode === "axes") {
+      return computeAxesTaskScore(cache.axes || [], selectedAxesByTask[t.id] || {}).complete;
+    }
+    return selectedCriterionByTask[t.id] != null;
+  }).length;
   const part2SummaryBarPct =
     part2MaxAggregate > 0
       ? Math.min(100, (part2ScoreSum / part2MaxAggregate) * 100)
@@ -2001,8 +2060,8 @@ function ExamPage() {
           })()
         : mode === "part1"
           ? `Вариант № ${variant.id} · Часть 1`
-          : mode === "part2"
-            ? `Вариант № ${variant.id} · Часть 2`
+          : mode === "part2" || (/^part\d+$/.test(String(mode || "")) && mode !== "part1")
+            ? `Вариант № ${variant.id} · ${part2SectionTitle}`
             : `Вариант № ${variant.id}`;
   const ruTasksWord = (n) => {
     const k = n % 10;
@@ -2092,8 +2151,222 @@ function ExamPage() {
 
   function renderEv2CriteriaPanel(task) {
     const cacheKey = getCriteriaCacheKey(task);
-    const criteriaList = (criteriaByTaskList[cacheKey]?.criteria) ?? [];
-    const maxSc = (criteriaByTaskList[cacheKey]?.max_score) ?? getTaskMaxScore(task);
+    const cache = criteriaByTaskList[cacheKey] || {};
+    const criteriaList = cache.criteria ?? [];
+    const axes = cache.axes ?? [];
+    const maxSc = cache.max_score ?? getTaskMaxScore(task);
+    const scoringMode = cache.scoring_mode || "single";
+
+    if (scoringMode === "axes" && axes.length > 0) {
+      const selected = selectedAxesByTask[task.id] || {};
+      const result = computeAxesTaskScore(axes, selected);
+      const disabled = isHomework && (hRead || numLocked(task.number));
+      const useScoreMatrix = axesNeedScoreMatrix(axes);
+      const scoreResult = (
+        <div className="score-result">
+          Балл за задание:{" "}
+          <span id={`ev2-selected-score-${task.id}`} className="score-result__value">
+            {result.complete || Object.keys(selected).length > 0 ? result.total : "—"}
+          </span>
+          {" / "}
+          {maxSc}
+        </div>
+      );
+
+      if (useScoreMatrix) {
+        const rows = axesScoreRows(axes);
+        return (
+          <div className="ev2-criteria-panel ev2-criteria-panel--axes-table">
+            <div className="ev2-crit-table-wrap">
+              <table className="ev2-crit-table">
+                <thead>
+                  <tr>
+                    <th scope="col" className="ev2-crit-table__score-col">
+                      Баллы
+                    </th>
+                    {axes.map((axis) => (
+                      <th key={axis.code} scope="col">
+                        <span className="ev2-crit-table__axis">{axis.title || axis.code}</span>
+                        <span className="ev2-crit-table__axis-max">макс. {axis.max_score ?? 0}</span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((sc) => (
+                    <tr key={sc}>
+                      <th scope="row" className="ev2-crit-table__score-col">
+                        {sc}
+                      </th>
+                      {axes.map((axis) => {
+                        const lv = findAxisLevel(axis, sc);
+                        if (!lv) {
+                          return (
+                            <td key={axis.code} className="ev2-crit-table__empty">
+                              —
+                            </td>
+                          );
+                        }
+                        const checked = selected[axis.code] === sc;
+                        const radioName = `ev2-axis-${task.id}-${axis.code}`;
+                        return (
+                          <td
+                            key={axis.code}
+                            className={`ev2-crit-table__cell${checked ? " is-selected" : ""}`}
+                            data-score={sc === 0 ? "0" : undefined}
+                          >
+                            <label className="ev2-crit-table__pick">
+                              <input
+                                type="radio"
+                                name={radioName}
+                                value={String(sc)}
+                                className="criterion-card__input"
+                                checked={checked}
+                                disabled={disabled}
+                                onChange={() => {
+                                  if (disabled) return;
+                                  selectAxisLevel(task, axis.code, sc, lv.id);
+                                }}
+                              />
+                              <span className="ev2-crit-table__cell-badge">{sc}</span>
+                              <span className="ev2-crit-table__cell-text">
+                                <MathContent html={lv.criteria_text || ""} className="ev2-crit-math" />
+                              </span>
+                            </label>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {scoreResult}
+          </div>
+        );
+      }
+
+      // Одна ось (задание 1) — компактные карточки, без тяжёлой таблицы
+      if (axes.length === 1) {
+        const axis = axes[0];
+        const levels = [...(axis.levels || [])].sort(
+          (a, b) => Number(b.criteria_score ?? 0) - Number(a.criteria_score ?? 0)
+        );
+        const radioName = `ev2-axis-${task.id}-${axis.code}`;
+        return (
+          <div className="ev2-criteria-panel ev2-criteria-panel--axes-cards">
+            <div className="ev2-axis-cards-head">
+              <span className="ev2-axis-cards-head__title">{axis.title || axis.code}</span>
+              <span className="ev2-axis-cards-head__max">макс. {axis.max_score ?? 0}</span>
+            </div>
+            <div className="ev2-axis-cards" role="radiogroup" aria-label={axis.title || axis.code}>
+              {levels.map((lv) => {
+                const sc = Number(lv.criteria_score ?? 0);
+                const checked = selected[axis.code] === sc;
+                return (
+                  <label
+                    key={lv.id}
+                    className={`ev2-axis-card${checked ? " is-selected" : ""}`}
+                    data-score={sc === 0 ? "0" : undefined}
+                  >
+                    <input
+                      type="radio"
+                      name={radioName}
+                      value={String(sc)}
+                      className="criterion-card__input"
+                      checked={checked}
+                      disabled={disabled}
+                      onChange={() => {
+                        if (disabled) return;
+                        selectAxisLevel(task, axis.code, sc, lv.id);
+                      }}
+                    />
+                    <span className="ev2-axis-card__score">{formatRuBalls(sc)}</span>
+                    <span className="ev2-axis-card__text">
+                      <MathContent html={lv.criteria_text || ""} className="ev2-crit-math" />
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            {scoreResult}
+          </div>
+        );
+      }
+
+      // Несколько бинарных осей: строки = критерии, столбцы = баллы
+      const binaryScores = axesScoreRows(axes);
+      return (
+        <div className="ev2-criteria-panel ev2-criteria-panel--axes-table">
+          <div className="ev2-crit-table-wrap">
+            <table className="ev2-crit-table ev2-crit-table--binary">
+              <thead>
+                <tr>
+                  <th scope="col" className="ev2-crit-table__axis-col">
+                    Критерий
+                  </th>
+                  {binaryScores.map((sc) => (
+                    <th key={sc} scope="col" className="ev2-crit-table__score-head">
+                      {formatRuBalls(sc)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {axes.map((axis) => {
+                  const radioName = `ev2-axis-${task.id}-${axis.code}`;
+                  return (
+                    <tr key={axis.code}>
+                      <th scope="row" className="ev2-crit-table__axis-col">
+                        {axis.title || axis.code}
+                      </th>
+                      {binaryScores.map((sc) => {
+                        const lv = findAxisLevel(axis, sc);
+                        if (!lv) {
+                          return (
+                            <td key={sc} className="ev2-crit-table__empty">
+                              —
+                            </td>
+                          );
+                        }
+                        const checked = selected[axis.code] === sc;
+                        return (
+                          <td
+                            key={sc}
+                            className={`ev2-crit-table__cell${checked ? " is-selected" : ""}`}
+                            data-score={sc === 0 ? "0" : undefined}
+                          >
+                            <label className="ev2-crit-table__pick">
+                              <input
+                                type="radio"
+                                name={radioName}
+                                value={String(sc)}
+                                className="criterion-card__input"
+                                checked={checked}
+                                disabled={disabled}
+                                onChange={() => {
+                                  if (disabled) return;
+                                  selectAxisLevel(task, axis.code, sc, lv.id);
+                                }}
+                              />
+                              <span className="ev2-crit-table__cell-text">
+                                <MathContent html={lv.criteria_text || ""} className="ev2-crit-math" />
+                              </span>
+                            </label>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {scoreResult}
+        </div>
+      );
+    }
+
     if (criteriaList.length === 0) {
       return <p className="ev2-criteria-empty">Критерии не заданы для этого задания</p>;
     }
@@ -2492,7 +2765,7 @@ function ExamPage() {
                       {examHeroSubjectBadge(subject, location.state?.subjectName)}
                     </span>
                     <span className="exam-edu-hero__badge exam-edu-hero__badge--exam">
-                      {examHeroExamBadge(mode, level)}
+                      {examHeroExamBadge(mode, level, part2SectionTitle)}
                     </span>
                   </div>
                   <h1 className="exam-edu-hero__title">{heroTitle}</h1>
@@ -2941,8 +3214,12 @@ function ExamPage() {
             {part2Tasks.length > 0 && (
               <>
                 <div className="exam-edu-section-head">
-                  <h2 className="exam-edu-section-title">Часть 2</h2>
-                  <span className="exam-edu-section-chip">Развернутый ответ</span>
+                  <h2 className="exam-edu-section-title">{part2SectionTitle}</h2>
+                  <span className="exam-edu-section-chip">
+                    {/говорен|устн/i.test(part2SectionTitle)
+                      ? "Критерии учителя"
+                      : "Развернутый ответ"}
+                  </span>
                 </div>
 
                 {showLinkedGroup && (
@@ -3182,7 +3459,7 @@ function ExamPage() {
                 <div className="ev2-p2-summary">
                   <div className="ev2-p2-summary__left">
                     <div className="ev2-p2-summary__headline">
-                      <span className="ev2-p2-summary__title">Итого за часть 2</span>
+                      <span className="ev2-p2-summary__title">Итого за {part2SectionTitle}</span>
                       <span className="ev2-p2-summary__meta">
                         {" "}
                         · {part2EvaluatedCount} заданий оценено

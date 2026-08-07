@@ -267,13 +267,22 @@ class VariantContentAdmin(admin.ModelAdmin):
 
 @admin.register(Criteria)
 class CriteriaAdmin(admin.ModelAdmin):
-    list_display = ("id", "task_number", "criteria_score")
-    list_filter = ("task_number__subject", "task_number__level")
-    list_editable = ("criteria_score",)
-    search_fields = ("criteria_text",)
+    list_display = (
+        "id",
+        "task_number",
+        "axis_code",
+        "axis_title",
+        "axis_order",
+        "criteria_score",
+        "axis_max",
+        "is_gate",
+    )
+    list_filter = ("task_number__subject", "task_number__level", "axis_code", "is_gate")
+    list_editable = ("criteria_score", "axis_order", "is_gate")
+    search_fields = ("criteria_text", "axis_code", "axis_title")
     list_select_related = ("task_number__subject", "task_number__level")
     raw_id_fields = ("task_number",)
-    ordering = ("task_number", "id")
+    ordering = ("task_number", "axis_order", "-criteria_score", "id")
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         if db_field.name == "criteria_text":

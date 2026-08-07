@@ -538,10 +538,40 @@ class Criteria(models.Model):
     task_number = models.ForeignKey(TaskList, on_delete=CASCADE)
     criteria_text = CKEditor5Field()
     criteria_score = models.IntegerField(default=0)
+    # Многоосевая рубрика (говорение ЕГЭ и т.п.). Пустой axis_code = legacy single-режим.
+    axis_code = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        verbose_name="Код оси",
+        help_text="Пусто — старый режим одной карточки. Иначе: phonetics, q1, content…",
+    )
+    axis_title = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        verbose_name="Название оси",
+    )
+    axis_order = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name="Порядок оси",
+    )
+    axis_max = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name="Макс. балл оси",
+        help_text="0 — взять max(criteria_score) по уровням оси.",
+    )
+    is_gate = models.BooleanField(
+        default=False,
+        verbose_name="Gate-ось",
+        help_text="Если по этой оси 0 баллов — всё задание обнуляется (как содержание в задании 4 устной части).",
+    )
 
     class Meta:
         verbose_name = "Критерий"
         verbose_name_plural = "Критерии"
+        ordering = ("task_number", "axis_order", "-criteria_score", "id")
 
 
 class ErrorReport(models.Model):

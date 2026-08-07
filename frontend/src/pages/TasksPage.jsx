@@ -73,8 +73,17 @@ function itemsIncludeTaskNumber(items, n) {
 
 const PART_VARIANT_HINTS = {
   1: "Краткие ответы и базовая экзаменационная часть.",
-  2: "Задания с развёрнутым ответом и практической проверкой.",
+  2: "Задания с развёрнутым ответом: учитель выбирает критерии и ставит баллы.",
 };
+
+function partTitleFromTasks(items, partNum, getPart, getTitle) {
+  for (const item of items) {
+    if (Number(getPart(item)) !== Number(partNum)) continue;
+    const title = getTitle(item);
+    if (title) return title;
+  }
+  return "";
+}
 
 function collectAvailableParts(items, getPart) {
   const parts = new Set();
@@ -485,7 +494,17 @@ function TasksPage() {
       return;
     }
     const payload = buildVariantPayload(items);
-    if (warnEmptyVariantPayload(items, `Часть ${partNum}`)) return;
+    const emptyLabel =
+      partTitleFromTasks(
+        items,
+        partNum,
+        getItemPart,
+        (item) =>
+          item.type === "linked_group" || item.type === "group"
+            ? item.tasks?.[0]?.part_title
+            : item.part_title
+      ) || `Часть ${partNum}`;
+    if (warnEmptyVariantPayload(items, emptyLabel)) return;
     setSubmitBlock1(true);
     postVariant(payload, `part${partNum}`)
       .catch(handleVariantGenerationError)
@@ -937,13 +956,21 @@ function TasksPage() {
   const hasMultipleVariantParts = variantPartsAvailable.length > 1;
   const countTasksInPart = (partNum) =>
     tasksForVariant.filter((item) => getItemPart(item) === partNum && matchesSearch(item)).length;
-  const variantPartsLabel = variantPartsAvailable
-    .map((partNum) => `часть ${partNum}`)
-    .join(" + ");
+  const labelForPartNum = (partNum) =>
+    partTitleFromTasks(
+      tasksForVariant,
+      partNum,
+      getItemPart,
+      (item) =>
+        item.type === "linked_group" || item.type === "group"
+          ? item.tasks?.[0]?.part_title
+          : item.part_title
+    ) || `Часть ${partNum}`;
+  const variantPartsLabel = variantPartsAvailable.map(labelForPartNum).join(" + ");
   const variantModeDescription = hasMultipleVariantParts
-    ? `Часть ${variantPartsAvailable.join(", часть ")} или полный вариант в формате ${formatExamLevelRu(level)}.`
+    ? `${variantPartsAvailable.map(labelForPartNum).join(", ")} или полный вариант в формате ${formatExamLevelRu(level)}.`
     : variantPartsAvailable.length === 1
-      ? `Вариант по части ${variantPartsAvailable[0]} в формате ${formatExamLevelRu(level)}.`
+      ? `Вариант «${labelForPartNum(variantPartsAvailable[0])}» в формате ${formatExamLevelRu(level)}.`
       : `Экзаменационный вариант в формате ${formatExamLevelRu(level)}.`;
   const selectedLevelLabel =
     String(level || "").toLowerCase() === "vpr"
@@ -1123,6 +1150,22 @@ function TasksPage() {
                   {variantPartsAvailable.map((partNum) => {
                     const choice = `part${partNum}`;
                     const partBlocked = submitBlock1 || (partNum === 1 && subject === "inf" && level === "ege");
+                    const partTitle = partTitleFromTasks(
+                      tasksForVariant,
+                      partNum,
+                      getItemPart,
+                      (item) =>
+                        item.type === "linked_group" || item.type === "group"
+                          ? item.tasks?.[0]?.part_title
+                          : item.part_title
+                    );
+                    const partLabel = partTitle || `Часть ${partNum}`;
+                    const isSpeaking = /говорен|устн|speaking|oral/i.test(partLabel);
+                    const hint =
+                      PART_VARIANT_HINTS[partNum] ||
+                      (isSpeaking
+                        ? "Устная часть: учитель выбирает критерии и ставит баллы."
+                        : `Задания «${partLabel}».`);
                     return (
                       <button
                         key={choice}
@@ -1135,14 +1178,12 @@ function TasksPage() {
                         }}
                         aria-pressed={prepVariantChoice === choice}
                       >
-                        <div className={`tasks-prep-format-mark tasks-prep-format-mark--p${partNum}`}>
-                          {partNum}
+                        <div className={`tasks-prep-format-mark tasks-prep-format-mark--p${Math.min(partNum, 2)}`}>
+                          {isSpeaking ? "У" : partNum}
                         </div>
                         <div>
-                          <span className="tasks-prep-format-title">Часть {partNum}</span>
-                          <p className="tasks-prep-format-text">
-                            {PART_VARIANT_HINTS[partNum] || `Задания части ${partNum}.`}
-                          </p>
+                          <span className="tasks-prep-format-title">{partLabel}</span>
+                          <p className="tasks-prep-format-text">{hint}</p>
                         </div>
                         <span className="tasks-prep-format-meta">
                           {countTasksInPart(partNum)}

@@ -143,7 +143,12 @@ function formatRuBalls(n: number): string {
 }
 
 function taskExamPart(task: WorkbookTask): 1 | 2 | null {
+  const title = String((task as { part_title?: string | null }).part_title || "").toLowerCase();
+  if (/говорен|устн|speaking|oral/.test(title)) return 2;
+  if (/часть\s*2\b/.test(title)) return 2;
+  if (/часть\s*1\b/.test(title)) return 1;
   if (task.part === 1 || task.part === 2) return task.part;
+  if (typeof task.part === "number" && task.part >= 3) return 2;
   const n = task.task_number;
   if (n != null && n >= 1 && n <= 12) return 1;
   if (n != null && n >= 13) return 2;

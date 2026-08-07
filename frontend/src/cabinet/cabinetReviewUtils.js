@@ -4,22 +4,7 @@ import {
   formatCorrectAnswerPlain,
 } from "../utils/examAnswerCheck";
 
-export function isMathLikeSubject(subject) {
-  const s = String(subject || "").toLowerCase();
-  return s === "math" || s === "math_base";
-}
-
-export function inferExamTaskPart(task, level, subject) {
-  if (task.part === 1 || task.part === 2) return task.part;
-  const n = Number(task.number);
-  const lv = String(level || "").toLowerCase();
-  const sub = String(subject || "").toLowerCase();
-  if (lv === "oge" && isMathLikeSubject(sub)) return n <= 19 ? 1 : 2;
-  if (lv === "ege" && isMathLikeSubject(sub)) return n <= 11 ? 1 : 2;
-  if (lv === "oge" && sub === "inf") return n <= 15 ? 1 : 2;
-  if (lv === "ege" && sub === "inf") return n <= 27 ? 1 : 2;
-  return n <= 19 ? 1 : 2;
-}
+export { inferExamTaskPart, isMathLikeSubject } from "../utils/examTaskPart";
 
 function answerValue(raw) {
   if (raw == null) return "";

@@ -274,7 +274,12 @@ if _cors_allowed_list:
     CORS_ALLOWED_ORIGINS = _cors_allowed_list
 elif DEBUG:
     CORS_ALLOW_ALL_ORIGINS = False
+    # Vite в репо: 5001 (и иногда 5000 / 5173). CSRF_TRUSTED_ORIGINS уже включает эти порты.
     CORS_ALLOWED_ORIGINS = [
+        "http://localhost:5000",
+        "http://127.0.0.1:5000",
+        "http://localhost:5001",
+        "http://127.0.0.1:5001",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]
