@@ -1,18 +1,18 @@
-"""Сид устной части ЕГЭ по английскому (демо-КИМ 2026): TaskList, Criteria, тестовые Task."""
+"""Сид критериев устной части ЕГЭ по английскому (демо-КИМ 2026).
+
+Только Criteria для уже существующих TaskList 1–4 (eng/ege).
+Subject / TaskList / Task / Variant не создаёт.
+"""
 
 from __future__ import annotations
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from Generator.models import Criteria, Level, Part, Subject, Task, TaskList, Variant, VariantContent
+from Generator.models import Criteria, Level, Subject, TaskList
 
 SUBJECT_SHORT = "eng"
-SUBJECT_NAME = "Английский язык"
 LEVEL = "ege"
-PART_TITLE = "Говорение"
-# Старое имя сида — переносим TaskList на «Говорение».
-LEGACY_PART_TITLES = ("Часть 3", "Часть 4", "Устная часть")
 
 
 def _upsert_level_row(axis_meta: dict, score: int, text: str, task_list: TaskList) -> Criteria:
@@ -211,187 +211,74 @@ def _seed_task4(tl: TaskList) -> None:
         _upsert_level_row(language, score, text, tl)
 
 
-TASK_SPECS = (
-    {
-        "number": 1,
-        "title": "Чтение текста вслух",
-        "max_score": 1,
-        "seed_criteria": _seed_task1,
-        "template": (
-            "<p><strong>Task 1.</strong> Imagine that you are preparing a project with your friend. "
-            "You have found some interesting material for the presentation and you want to read this "
-            "text to your friend. You have 1.5 minutes to read the text silently, then be ready to "
-            "read it out aloud. You will not have more than 1.5 minutes to read it.</p>"
-            "<p>Snowflakes are ice crystals which fall through the Earth’s atmosphere as snow. "
-            "People like to think that every snowflake has a unique shape. However, it’s not true. "
-            "While snowflakes may look different, they can still be classified into eight groups "
-            "and about eighty different variants…</p>"
-        ),
-    },
-    {
-        "number": 2,
-        "title": "Условный диалог-расспрос",
-        "max_score": 4,
-        "seed_criteria": _seed_task2,
-        "template": (
-            "<p><strong>Task 2.</strong> Study the advertisement. You are going to ask four direct questions "
-            "based on the key words. You have 1.5 minutes to think over your questions.</p>"
-            "<p><em>Demo placeholder:</em> ask about price, location, opening hours and age restrictions.</p>"
-        ),
-    },
-    {
-        "number": 3,
-        "title": "Интервью",
-        "max_score": 5,
-        "seed_criteria": _seed_task3,
-        "template": (
-            "<p><strong>Task 3.</strong> You are going to take part in an interview. "
-            "Give full and accurate answers to five questions (2–3 communicative phrases each).</p>"
-            "<p><em>Demo placeholder:</em> topic — free-time activities and hobbies.</p>"
-        ),
-    },
-    {
-        "number": 4,
-        "title": "Проектная работа (выбор иллюстраций)",
-        "max_score": 10,
-        "seed_criteria": _seed_task4,
-        "template": (
-            "<p><strong>Task 4.</strong> Imagine that you and your friend are doing a school project "
-            "“Ideal weekend”. You have found some photos to illustrate it but for technical reasons "
-            "you cannot send them now. Leave a voice message to your friend explaining your choice "
-            "of the photos and sharing some ideas about the project.</p>"
-            "<p>In 2.5 minutes be ready to:</p>"
-            "<ul>"
-            "<li>explain the choice of the illustrations for the project by briefly describing them "
-            "and noting the differences;</li>"
-            "<li>mention the advantages (1–2) of the two ways to spend the weekend;</li>"
-            "<li>mention the disadvantages (1–2) of the two ways to spend the weekend;</li>"
-            "<li>express your opinion on the subject of the project — say which way of spending "
-            "the weekend presented in the pictures you prefer and why.</li>"
-            "</ul>"
-            "<p>You will speak for not more than 3 minutes (12–15 sentences). You have to talk continuously.</p>"
-        ),
-    },
+CRITERIA_SPECS = (
+    {"number": 1, "seed_criteria": _seed_task1},
+    {"number": 2, "seed_criteria": _seed_task2},
+    {"number": 3, "seed_criteria": _seed_task3},
+    {"number": 4, "seed_criteria": _seed_task4},
 )
 
 
 class Command(BaseCommand):
-    help = "Сидит устную часть ЕГЭ eng: TaskList 1–4, критерии осей, тесто-задания"
-
-    def add_arguments(self, parser):
-        parser.add_argument(
-            "--with-demo-variant",
-            action="store_true",
-            help="Создать Variant с 4 демо-заданиями для локальной проверки UI",
-        )
+    help = "Сидит только критерии устной части ЕГЭ eng для существующих TaskList 1–4"
 
     @transaction.atomic
     def handle(self, *args, **options):
-        subject, _ = Subject.objects.get_or_create(
-            subject_short=SUBJECT_SHORT,
-            defaults={"subject_name": SUBJECT_NAME},
-        )
-        if subject.subject_name != SUBJECT_NAME:
-            subject.subject_name = SUBJECT_NAME
-            subject.save(update_fields=["subject_name"])
+        try:
+            subject = Subject.objects.get(subject_short=SUBJECT_SHORT)
+        except Subject.DoesNotExist as exc:
+            raise CommandError(
+                f"Subject «{SUBJECT_SHORT}» не найден. Создайте предмет и TaskList 1–4 вручную."
+            ) from exc
 
-        level, _ = Level.objects.get_or_create(level=LEVEL, defaults={"level_rus": "ЕГЭ"})
-        part, _ = Part.objects.get_or_create(part_title=PART_TITLE)
+        try:
+            level = Level.objects.get(level=LEVEL)
+        except Level.DoesNotExist as exc:
+            raise CommandError(f"Level «{LEVEL}» не найден.") from exc
 
-        # Перенос с ошибочных «Часть 3/4» → «Говорение» (критерии как у части 2).
-        moved = (
-            TaskList.objects.filter(
-                subject=subject,
-                level=level,
-                part__part_title__in=LEGACY_PART_TITLES,
-            )
-            .exclude(part=part)
-            .update(part=part)
-        )
-        if moved:
-            self.stdout.write(self.style.WARNING(f"Moved {moved} TaskList(s) → «{PART_TITLE}»"))
+        seeded = 0
+        missing = []
 
-        created_tls = 0
-        created_tasks = 0
-        demo_tasks = []
-
-        for spec in TASK_SPECS:
-            tl, tl_created = TaskList.objects.get_or_create(
-                subject=subject,
-                level=level,
-                task_number=spec["number"],
-                defaults={
-                    "part": part,
-                    "task_title": spec["title"],
-                    "max_score": spec["max_score"],
-                },
-            )
-            if tl_created:
-                created_tls += 1
-            else:
-                tl.part = part
-                tl.task_title = spec["title"]
-                tl.max_score = spec["max_score"]
-                tl.save()
-
-            # Удаляем старые single-критерии без оси для этих TaskList (чистый сид осей).
-            Criteria.objects.filter(task_number=tl, axis_code="").delete()
-            spec["seed_criteria"](tl)
-
-            task = (
-                Task.objects.filter(task=tl, created_by="SEED_ENG_SPEAKING", is_active=True)
+        for spec in CRITERIA_SPECS:
+            tl = (
+                TaskList.objects.filter(
+                    subject=subject,
+                    level=level,
+                    task_number=spec["number"],
+                )
                 .order_by("id")
                 .first()
             )
-            if not task:
-                task = Task.objects.create(
-                    task=tl,
-                    quick_level=level,
-                    task_template=spec["template"],
-                    answer="",
-                    max_score=spec["max_score"],
-                    created_by="SEED_ENG_SPEAKING",
-                    is_active=True,
-                    author="ФИПИ · демо 2026",
-                )
-                created_tasks += 1
-            else:
-                task.task_template = spec["template"]
-                task.max_score = spec["max_score"]
-                task.quick_level = level
-                task.save()
-            demo_tasks.append(task)
+            if not tl:
+                missing.append(str(spec["number"]))
+                continue
 
-        criteria_count = Criteria.objects.filter(task_number__subject=subject, task_number__level=level).count()
+            # Старые single-критерии без оси — убираем, оставляем осевую рубрику.
+            Criteria.objects.filter(task_number=tl, axis_code="").delete()
+            spec["seed_criteria"](tl)
+            seeded += 1
+            count = Criteria.objects.filter(task_number=tl).count()
+            self.stdout.write(f"TaskList #{spec['number']} id={tl.id}: criteria={count}")
+
+        if missing:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"Пропущены номера без TaskList: {', '.join(missing)}"
+                )
+            )
+
+        if seeded == 0:
+            raise CommandError(
+                "Не найден ни один TaskList eng/ege 1–4 — критерии не записаны."
+            )
+
+        total = Criteria.objects.filter(
+            task_number__subject=subject,
+            task_number__level=level,
+            task_number__task_number__in=[s["number"] for s in CRITERIA_SPECS],
+        ).count()
         self.stdout.write(
             self.style.SUCCESS(
-                f"eng/ege speaking: TaskList +{created_tls}, Tasks +{created_tasks}, "
-                f"Criteria total={criteria_count}"
+                f"eng/ege speaking: критерии обновлены для {seeded} TaskList, всего Criteria={total}"
             )
         )
-
-        if options.get("with_demo_variant"):
-            variant = (
-                Variant.objects.filter(
-                    var_subject=subject,
-                    level=level,
-                    created_by="SEED_ENG_SPEAKING",
-                )
-                .order_by("-id")
-                .first()
-            )
-            if not variant:
-                variant = Variant.objects.create(
-                    var_subject=subject,
-                    level=level,
-                    created_by="SEED_ENG_SPEAKING",
-                    content={str(t.task_id): 1 for t in demo_tasks},
-                )
-            VariantContent.objects.filter(variant=variant).delete()
-            for order, task in enumerate(demo_tasks, start=1):
-                VariantContent.objects.create(variant=variant, task=task, order=order)
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f"Demo variant id={variant.id} → /{LEVEL}/{SUBJECT_SHORT}/variant/{variant.id}/"
-                )
-            )
