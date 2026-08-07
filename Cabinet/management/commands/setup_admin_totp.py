@@ -1,5 +1,8 @@
 """Создать/показать TOTP-устройство для входа в Django admin."""
 
+from base64 import b32encode
+from urllib.parse import parse_qs, urlparse
+
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 
@@ -7,7 +10,7 @@ from django.core.management.base import BaseCommand, CommandError
 class Command(BaseCommand):
     help = (
         "Создаёт подтверждённое TOTP-устройство для staff/superuser и печатает "
-        "секрет / otpauth URL для приложения-аутентификатора."
+        "Base32-секрет / otpauth URL для приложения-аутентификатора."
     )
 
     def add_arguments(self, parser):
@@ -53,10 +56,16 @@ class Command(BaseCommand):
         except Exception:
             config_url = ""
 
+        # Authenticator apps expect Base32; device.key is hex and will be rejected.
+        secret_b32 = b32encode(device.bin_key).decode("ascii").rstrip("=")
+        if not secret_b32 and config_url:
+            secret_b32 = (parse_qs(urlparse(config_url).query).get("secret") or [""])[0]
+
         self.stdout.write(self.style.SUCCESS(f"TOTP создан для {username} (device id={device.pk})"))
-        self.stdout.write(f"Secret: {device.key}")
+        self.stdout.write(f"Secret (Base32 для Authenticator): {secret_b32}")
         if config_url:
             self.stdout.write(f"otpauth URL:\n{config_url}")
         self.stdout.write(
-            "Добавьте секрет в Google Authenticator / Authy, затем войдите в /admin/ с кодом."
+            "Введите Base32-секрет в Google Authenticator / Authy "
+            "(не hex из БД), затем войдите в /admin/ с 6-значным кодом."
         )
