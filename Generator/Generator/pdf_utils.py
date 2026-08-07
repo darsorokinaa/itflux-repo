@@ -34,6 +34,7 @@ SUBJECT_GENITIVE = {
     "lit": "литературе",
     "geo": "географии",
     "eng": "английскому языку",
+    "eng_speaking": "английскому языку (устная часть)",
     "chem": "химии",
 }
 
@@ -49,6 +50,7 @@ EXAM_DURATION_MINUTES = {
     ("ege", "lit"): 235,
     ("ege", "geo"): 180,
     ("ege", "eng"): 180,
+    ("ege", "eng_speaking"): 17,
     ("ege", "chem"): 210,
     ("oge", "inf"): 150,
     ("oge", "math"): 235,
@@ -600,6 +602,7 @@ _SUBJECT_NOMINATIVE = {
     "lit": "Литература",
     "geo": "География",
     "eng": "Английский язык",
+    "eng_speaking": "Английский язык (устная часть)",
     "chem": "Химия",
 }
 

@@ -1,6 +1,6 @@
 """Сид критериев устной части ЕГЭ по английскому (демо-КИМ 2026).
 
-Только Criteria для уже существующих TaskList 1–4 (eng/ege).
+Только Criteria для уже существующих TaskList 1–4 (eng_speaking/ege).
 Subject / TaskList / Task / Variant не создаёт.
 """
 
@@ -11,7 +11,7 @@ from django.db import transaction
 
 from Generator.models import Criteria, Level, Subject, TaskList
 
-SUBJECT_SHORT = "eng"
+SUBJECT_SHORT = "eng_speaking"
 LEVEL = "ege"
 
 
@@ -220,7 +220,7 @@ CRITERIA_SPECS = (
 
 
 class Command(BaseCommand):
-    help = "Сидит только критерии устной части ЕГЭ eng для существующих TaskList 1–4"
+    help = "Сидит только критерии устной части ЕГЭ eng_speaking для существующих TaskList 1–4"
 
     @transaction.atomic
     def handle(self, *args, **options):
@@ -228,7 +228,7 @@ class Command(BaseCommand):
             subject = Subject.objects.get(subject_short=SUBJECT_SHORT)
         except Subject.DoesNotExist as exc:
             raise CommandError(
-                f"Subject «{SUBJECT_SHORT}» не найден. Создайте предмет и TaskList 1–4 вручную."
+                f"Subject «{SUBJECT_SHORT}» не найден. Нужен предмет eng_speaking и TaskList 1–4."
             ) from exc
 
         try:
@@ -269,7 +269,7 @@ class Command(BaseCommand):
 
         if seeded == 0:
             raise CommandError(
-                "Не найден ни один TaskList eng/ege 1–4 — критерии не записаны."
+                "Не найден ни один TaskList eng_speaking/ege 1–4 — критерии не записаны."
             )
 
         total = Criteria.objects.filter(
@@ -279,6 +279,6 @@ class Command(BaseCommand):
         ).count()
         self.stdout.write(
             self.style.SUCCESS(
-                f"eng/ege speaking: критерии обновлены для {seeded} TaskList, всего Criteria={total}"
+                f"eng_speaking/ege: критерии обновлены для {seeded} TaskList, всего Criteria={total}"
             )
         )

@@ -26,7 +26,7 @@ export function inferExamTaskPart(task, level, subject) {
   const n = Number(task?.number);
   const lv = String(level || "").toLowerCase();
   const sub = String(subject || "").toLowerCase();
-  if (lv === "ege" && sub === "eng") return 2;
+  if (lv === "ege" && (sub === "eng" || sub === "eng_speaking")) return 2;
   if (lv === "oge" && isMathLikeSubject(sub)) return n <= 19 ? 1 : 2;
   if (lv === "ege" && isMathLikeSubject(sub)) return n <= 11 ? 1 : 2;
   if (lv === "oge" && sub === "inf") return n <= 15 ? 1 : 2;

@@ -8,9 +8,9 @@ describe("inferExamTaskPart", () => {
   });
 
   it("maps speaking titles and part_id >= 3 to criteria part", () => {
-    expect(inferExamTaskPart({ part: 3, part_title: "Говорение", number: 1 }, "ege", "eng")).toBe(2);
-    expect(inferExamTaskPart({ part: 4, part_title: "Устная часть", number: 2 }, "ege", "eng")).toBe(2);
-    expect(inferExamTaskPart({ part: 3, number: 1 }, "ege", "eng")).toBe(2);
+    expect(inferExamTaskPart({ part: 3, part_title: "Говорение", number: 1 }, "ege", "eng_speaking")).toBe(2);
+    expect(inferExamTaskPart({ part: 4, part_title: "Устная часть", number: 2 }, "ege", "eng_speaking")).toBe(2);
+    expect(inferExamTaskPart({ part: 3, number: 1 }, "ege", "eng_speaking")).toBe(2);
   });
 
   it("uses title over misleading part id", () => {

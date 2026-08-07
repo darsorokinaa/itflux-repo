@@ -91,7 +91,10 @@ class CriteriaScoringUnitTests(TestCase):
 class CriteriaApiAxesTests(TestCase):
     def setUp(self):
         self.client = Client()
-        self.subject = Subject.objects.create(subject_short="eng", subject_name="Английский язык")
+        self.subject = Subject.objects.create(
+            subject_short="eng_speaking",
+            subject_name="Английский язык (устная часть)",
+        )
         self.level = Level.objects.create(level="ege", level_rus="ЕГЭ")
         self.part = Part.objects.create(part_title="Говорение")
         self.tl = TaskList.objects.create(
@@ -134,7 +137,7 @@ class CriteriaApiAxesTests(TestCase):
         )
 
     def test_api_returns_axes_mode(self):
-        url = f"/api/ege/eng/criteria/?task_list_id={self.tl.id}"
+        url = f"/api/ege/eng_speaking/criteria/?task_list_id={self.tl.id}"
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
