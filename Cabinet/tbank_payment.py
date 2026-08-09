@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 TBANK_API_DEFAULT = "https://securepay.tinkoff.ru/v2"
 
 # Статусы эквайринга → внутренние
-_PAID_STATUSES = frozenset({"CONFIRMED", "AUTHORIZED"})
+# AUTHORIZED (двухстадийная) не активирует подписку — ждём CONFIRMED.
+_PAID_STATUSES = frozenset({"CONFIRMED"})
 _FAILED_STATUSES = frozenset({"REJECTED", "AUTH_FAIL"})
 _CANCELLED_STATUSES = frozenset({"CANCELED", "CANCELLED", "DEADLINE_EXPIRED", "REVERSED"})
 _REFUNDED_STATUSES = frozenset({"REFUNDED", "PARTIAL_REFUNDED", "PARTIAL_REFUNDED_AUTHORIZED"})
@@ -222,6 +223,8 @@ def _notification_url() -> str | None:
 
 def _order_id_for_payment(payment) -> str:
     """Уникальный OrderId; webhook парсит id платежа до первого '-'."""
+    if getattr(payment, "order_id", None):
+        return str(payment.order_id)
     return f"{payment.pk}-{uuid.uuid4().hex[:8]}"
 
 
@@ -231,17 +234,22 @@ def _payment_id_from_order_id(order_id) -> int:
     return int(head)
 
 
+def customer_key_for_teacher(teacher) -> str:
+    """Стабильный CustomerKey для COF (без ПДн карты)."""
+    return f"teacher_{int(getattr(teacher, 'pk', 0) or 0)}"
+
+
 def _safe_description(plan, billing_period: str) -> str:
     period_label = "год" if billing_period == "year" else "месяц"
     name = re.sub(r"[«»\"']", "", str(getattr(plan, "name", "") or "tariff"))
-    text = f"ITFlux: tarif {name} / {period_label}"
+    text = f"Цифровой поток - тариф:  {name} / {period_label}"
     return text[:250]
 
 
 def _item_name(plan, billing_period: str) -> str:
     period_label = "год" if billing_period == "year" else "месяц"
     name = str(getattr(plan, "name", "") or "Подписка").strip()
-    text = f"Подписка ITFlux «{name}» на {period_label}"
+    text = f"Цифровой поток - тариф: «{name}» на {period_label}"
     return text[:128]
 
 
@@ -310,9 +318,21 @@ def map_tbank_status(status: str) -> str:
 
 
 class TBankPaymentProvider(PaymentProviderInterface):
-    """Готовая платёжная форма Т-Банка (non-PCI redirect)."""
+    """Готовая платёжная форма Т-Банка (non-PCI redirect) + COF Charge."""
 
-    def create_checkout(self, payment, plan) -> str:
+    def _init_payment(
+        self,
+        payment,
+        plan,
+        *,
+        recurrent_parent: bool = True,
+        include_return_urls: bool = True,
+    ) -> dict[str, Any]:
+        """
+        POST /v2/Init.
+        recurrent_parent=True → CustomerKey + Recurrent=Y (родительский платёж для RebillId).
+        Для дочернего автопродления: recurrent_parent=False, затем /v2/Charge.
+        """
         terminal = _terminal_key()
         password = _password()
         if not terminal or not password:
@@ -324,17 +344,20 @@ class TBankPaymentProvider(PaymentProviderInterface):
         amount = payment.final_amount if payment.final_amount is not None else payment.amount
         kopecks = amount_to_kopecks(amount)
         order_id = _order_id_for_payment(payment)
+        customer_key = (getattr(payment, "customer_key", None) or "").strip() or customer_key_for_teacher(
+            payment.teacher
+        )
 
         body: dict[str, Any] = {
             "TerminalKey": terminal,
             "Amount": kopecks,
             "OrderId": order_id,
             "Description": _safe_description(plan, payment.billing_period),
-            "SuccessURL": _success_url(payment),
-            "FailURL": _fail_url(payment),
-            # Чек для онлайн-кассы / тестового сценария «Формирование чека»
             "Receipt": build_receipt(payment, plan, amount_kopecks=kopecks),
         }
+        if include_return_urls:
+            body["SuccessURL"] = _success_url(payment)
+            body["FailURL"] = _fail_url(payment)
         notification_url = _notification_url()
         if notification_url:
             body["NotificationURL"] = notification_url
@@ -342,13 +365,21 @@ class TBankPaymentProvider(PaymentProviderInterface):
         if email:
             body["DATA"] = {"Email": email}
 
+        # Официально: Recurrent=Y + CustomerKey → RebillId после AUTHORIZED/CONFIRMED.
+        # Документация: https://developer.tbank.ru/eacq/api/init
+        if recurrent_parent:
+            body["CustomerKey"] = customer_key
+            body["Recurrent"] = "Y"
+
         body["Token"] = build_tbank_token(body, password=password)
 
         logger.info(
-            "T-Bank Init URLs payment_id=%s SuccessURL=%s FailURL=%s NotificationURL=%s",
+            "payment_init_started payment_id=%s order_id=%s recurrent_parent=%s "
+            "SuccessURL=%s NotificationURL=%s",
             payment.pk,
-            body.get("SuccessURL"),
-            body.get("FailURL"),
+            order_id,
+            recurrent_parent,
+            body.get("SuccessURL") or "(none)",
             body.get("NotificationURL") or "(omitted)",
         )
 
@@ -367,15 +398,17 @@ class TBankPaymentProvider(PaymentProviderInterface):
                 f"и перезапустите Django. Детали: {exc}"
             ) from exc
         except Exception as exc:
-            logger.exception("T-Bank Init request failed")
+            logger.exception("payment_init_failed payment_id=%s", payment.pk)
             raise ValueError(f"Не удалось связаться с Т-Банком: {exc}") from exc
 
         if not data.get("Success"):
             details = (data.get("Details") or "").strip()
             message = (data.get("Message") or "Init rejected").strip()
             error_code = data.get("ErrorCode")
-            logger.error("T-Bank Init error: %s", data)
-            # 204/205 — почти всегда неверная пара TerminalKey/Password
+            logger.error("payment_init_failed payment_id=%s data=%s", payment.pk, data)
+            payment.error_code = str(error_code or "")
+            payment.error_message = (details or message)[:512]
+            payment.save(update_fields=["error_code", "error_message", "updated_at"])
             if str(error_code) in ("204", "205") or "токен" in details.lower():
                 raise ValueError(
                     "Т-Банк отклонил платёж: неверный TerminalKey или Password. "
@@ -388,10 +421,10 @@ class TBankPaymentProvider(PaymentProviderInterface):
                 f"Т-Банк отклонил платёж: [{error_code}] {details or message}"
             )
 
-        payment_url = (data.get("PaymentURL") or "").strip()
         provider_payment_id = str(data.get("PaymentId") or "")
-        if not payment_url or not provider_payment_id:
-            raise ValueError("Т-Банк не вернул PaymentURL/PaymentId")
+        payment_url = (data.get("PaymentURL") or "").strip()
+        if not provider_payment_id:
+            raise ValueError("Т-Банк не вернул PaymentId")
 
         meta = dict(payment.metadata or {})
         meta.update(
@@ -401,15 +434,122 @@ class TBankPaymentProvider(PaymentProviderInterface):
                 "plan_slug": getattr(plan, "slug", None) or meta.get("plan_slug"),
                 "billing_period": payment.billing_period,
                 "amount_kopecks": kopecks,
+                "recurrent_parent": recurrent_parent,
             }
         )
         payment.provider_payment_id = provider_payment_id
         payment.provider = "tbank"
+        payment.order_id = order_id
+        payment.customer_key = customer_key
         payment.metadata = meta
+        payment.error_code = ""
+        payment.error_message = ""
         payment.save(
-            update_fields=["provider_payment_id", "provider", "metadata", "updated_at"]
+            update_fields=[
+                "provider_payment_id",
+                "provider",
+                "order_id",
+                "customer_key",
+                "metadata",
+                "error_code",
+                "error_message",
+                "updated_at",
+            ]
         )
+        logger.info(
+            "payment_init_success payment_id=%s provider_payment_id=%s",
+            payment.pk,
+            provider_payment_id,
+        )
+        return {
+            "payment_url": payment_url,
+            "provider_payment_id": provider_payment_id,
+            "order_id": order_id,
+            "raw": data,
+        }
+
+    def create_checkout(self, payment, plan) -> str:
+        """Init родительского платежа → PaymentURL для редиректа."""
+        result = self._init_payment(payment, plan, recurrent_parent=True, include_return_urls=True)
+        payment_url = (result.get("payment_url") or "").strip()
+        if not payment_url:
+            raise ValueError("Т-Банк не вернул PaymentURL")
         return payment_url
+
+    def charge_recurrent(self, payment, plan, *, rebill_id: str) -> dict[str, Any]:
+        """
+        Автопродление: Init (дочерний) → Charge(PaymentId, RebillId).
+        Документация: https://developer.tbank.ru/eacq/api/charge
+        """
+        rebill_id = str(rebill_id or "").strip()
+        if not rebill_id:
+            raise ValueError("RebillId не задан — нельзя провести автопродление")
+
+        init = self._init_payment(
+            payment, plan, recurrent_parent=False, include_return_urls=False
+        )
+        provider_payment_id = init["provider_payment_id"]
+
+        terminal = _terminal_key()
+        password = _password()
+        body: dict[str, Any] = {
+            "TerminalKey": terminal,
+            "PaymentId": str(provider_payment_id),
+            "RebillId": rebill_id,
+        }
+        body["Token"] = build_tbank_token(body, password=password)
+
+        logger.info(
+            "auto_renew_started payment_id=%s provider_payment_id=%s",
+            payment.pk,
+            provider_payment_id,
+        )
+        try:
+            response = requests.post(
+                f"{_api_base()}/Charge",
+                json=body,
+                timeout=30,
+                verify=_ssl_verify(),
+            )
+            data = response.json()
+        except Exception as exc:
+            logger.exception("auto_renew_failed payment_id=%s charge_request", payment.pk)
+            payment.error_code = "charge_network"
+            payment.error_message = str(exc)[:512]
+            payment.status = payment.Status.FAILED
+            payment.save(
+                update_fields=["status", "error_code", "error_message", "updated_at"]
+            )
+            raise ValueError(f"Charge failed: {exc}") from exc
+
+        if not data.get("Success"):
+            details = (data.get("Details") or "").strip()
+            message = (data.get("Message") or "Charge rejected").strip()
+            error_code = str(data.get("ErrorCode") or "")
+            logger.error(
+                "auto_renew_failed payment_id=%s data=%s", payment.pk, data
+            )
+            payment.error_code = error_code
+            payment.error_message = (details or message)[:512]
+            payment.status = payment.Status.FAILED
+            payment.save(
+                update_fields=["status", "error_code", "error_message", "updated_at"]
+            )
+            raise ValueError(f"Charge rejected: [{error_code}] {details or message}")
+
+        meta = dict(payment.metadata or {})
+        meta["tbank_status"] = data.get("Status")
+        meta["charge"] = True
+        payment.metadata = meta
+        payment.rebill_id = rebill_id
+        payment.is_recurrent = True
+        payment.save(update_fields=["metadata", "rebill_id", "is_recurrent", "updated_at"])
+        return {
+            "provider_payment_id": provider_payment_id,
+            "provider_status": data.get("Status"),
+            "mapped_status": map_tbank_status(data.get("Status") or ""),
+            "raw": data,
+        }
 
     def check_status(self, payment) -> dict:
         terminal = _terminal_key()
@@ -463,6 +603,14 @@ class TBankPaymentProvider(PaymentProviderInterface):
         mapped = map_tbank_status(provider_status)
         provider_payment_id = str(payload.get("PaymentId") or "")
         event_id = f"tbank_{provider_payment_id}_{provider_status}"
+        rebill_id = str(payload.get("RebillId") or "").strip()
+        amount_raw = payload.get("Amount")
+        try:
+            amount_kopecks = int(amount_raw) if amount_raw is not None else None
+        except (TypeError, ValueError):
+            amount_kopecks = None
+        pan = str(payload.get("Pan") or payload.get("CardPan") or "").strip()
+        customer_key = str(payload.get("CustomerKey") or "").strip()
 
         return {
             "payment_id": payment_id,
@@ -470,4 +618,10 @@ class TBankPaymentProvider(PaymentProviderInterface):
             "event_id": event_id,
             "provider_payment_id": provider_payment_id,
             "provider_status": provider_status,
+            "rebill_id": rebill_id,
+            "amount_kopecks": amount_kopecks,
+            "pan_mask": pan,
+            "customer_key": customer_key,
+            "error_code": str(payload.get("ErrorCode") or ""),
+            "error_message": str(payload.get("Message") or payload.get("Details") or "")[:512],
         }

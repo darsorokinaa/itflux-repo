@@ -502,16 +502,17 @@ class InterestingItemAdmin(admin.ModelAdmin):
         "id",
         "title",
         "tag",
+        "access_level",
         "status",
         "sort_order",
         "views_count",
         "likes_count_display",
         "updated_at",
     )
-    list_filter = ("status", "tag")
+    list_filter = ("status", "access_level", "tag")
     search_fields = ("title", "slug", "short_description", "tag")
     prepopulated_fields = {"slug": ("title",)}
-    list_editable = ("status", "sort_order")
+    list_editable = ("status", "access_level", "sort_order")
     ordering = ("sort_order", "-updated_at")
     readonly_fields = ("created_at", "updated_at", "views_count", "likes_count_display")
     fieldsets = (
@@ -524,6 +525,7 @@ class InterestingItemAdmin(admin.ModelAdmin):
                     "tag",
                     "accent_color",
                     "status",
+                    "access_level",
                     "sort_order",
                 )
             },

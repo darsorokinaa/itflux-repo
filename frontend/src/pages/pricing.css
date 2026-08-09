@@ -170,6 +170,10 @@
   flex: 1;
 }
 
+.pricing-card__list:has(+ .pricing-card__caveat) {
+  margin-bottom: 0.35rem;
+}
+
 .pricing-card__list li {
   position: relative;
   padding: 0.28rem 0 0.28rem 1.1rem;
@@ -186,6 +190,13 @@
   height: 0.45rem;
   border-radius: 50%;
   background: var(--pricing-accent);
+}
+
+.pricing-card__caveat {
+  margin: 0 0 1.25rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--pricing-muted);
 }
 
 .pricing-card__cta {

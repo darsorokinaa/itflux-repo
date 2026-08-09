@@ -1,16 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import InteractiveEditorPreview from "../components/InteractiveEditorPreview";
-import InteractiveEditorSettings from "../components/InteractiveEditorSettings";
+import AppearanceSettings from "../components/AppearanceSettings";
+import FlashcardsEditor from "../components/FlashcardsEditor";
+import {
+  BuilderSection,
+  InteractiveAdvancedSettings,
+  InteractiveBasicSettings,
+} from "../components/InteractiveEditorSettings";
 import InteractiveImageField from "../components/InteractiveImageField";
 import QuizEditor from "../components/QuizEditor";
 import WheelEditor from "../components/WheelEditor";
 import { CabinetPageShell } from "../CabinetSectionUi";
 import { useInteractiveAppearanceCatalog } from "../interactiveAppearance";
 import {
+  INTERACTIVE_TYPE_LIST,
   createEmptyInteractive,
   getInteractiveDisplayTitle,
+  getItemCount,
+  getTypeMeta,
   isInteractiveTypeAvailable,
+  switchInteractiveType,
 } from "../interactivesData";
 import {
   buildInteractiveWritePayload,
@@ -151,177 +161,6 @@ function UndoRemoveToast({ label, onUndo, onDismiss }) {
         Отменить
       </button>
     </div>
-  );
-}
-
-function FlashcardsEditor({
-  data,
-  onCardsChange,
-  onImageUpload,
-  imageUploading,
-  openIndex,
-  setOpenIndex,
-  isMobile,
-}) {
-  const [dragIndex, setDragIndex] = useState(null);
-  const [overIndex, setOverIndex] = useState(null);
-  const [undoRemove, setUndoRemove] = useState(null);
-
-  const updateCard = (index, field, value) => {
-    const cards = [...data.cards];
-    cards[index] = { ...cards[index], [field]: value };
-    onCardsChange(cards);
-  };
-
-  const addCard = () => {
-    onCardsChange([...data.cards, {
-      front: "",
-      back: "",
-      front_image_url: "",
-      back_image_url: "",
-      hint: "",
-      explanation: "",
-    }]);
-    setOpenIndex(data.cards.length);
-  };
-
-  const duplicateCard = (index) => {
-    const cards = [...data.cards];
-    cards.splice(index + 1, 0, { ...cards[index] });
-    onCardsChange(cards);
-    setOpenIndex(index + 1);
-  };
-
-  const removeCard = (index) => {
-    if (data.cards.length <= 1) return;
-    const item = data.cards[index];
-    onCardsChange(data.cards.filter((_, i) => i !== index));
-    setOpenIndex((prev) => (prev >= index ? Math.max(0, prev - 1) : prev));
-    setUndoRemove({ item, index });
-  };
-
-  const restoreCard = () => {
-    if (!undoRemove) return;
-    const cards = [...data.cards];
-    cards.splice(undoRemove.index, 0, undoRemove.item);
-    onCardsChange(cards);
-    setOpenIndex(undoRemove.index);
-    setUndoRemove(null);
-  };
-
-  const moveCard = (from, to) => {
-    onCardsChange(reorderList(data.cards, from, to));
-    setOpenIndex(to);
-  };
-
-  return (
-    <section className="ix-ed-panel ix-ed-panel--work">
-      <header className="ix-ed-panel__head ix-ed-panel__head--row">
-        <div>
-          <h2 className="ix-ed-panel__title">Карточки</h2>
-          <p className="ix-ed-panel__hint">Главный рабочий блок: термины, ответы и пояснения.</p>
-        </div>
-        <button type="button" className="cb-btn cb-btn--primary cb-btn--sm cb-btn--pill" onClick={addCard}>
-          + Добавить
-        </button>
-      </header>
-      <div className="ix-ed-panel__body ix-ed-panel__body--stack">
-        {(data.cards || []).map((card, index) => {
-          const summary = card.front && card.back
-            ? `${card.front} → ${card.back}`
-            : card.front || card.back || "Пустая карточка";
-          const hint = card.hint ? `Подсказка: ${card.hint}` : "";
-          return (
-            <EditorItemShell
-              key={index}
-              index={index}
-              title={`Карточка ${index + 1}`}
-              summary={summary}
-              hint={hint}
-              open={openIndex === index}
-              onToggle={() => setOpenIndex(openIndex === index ? -1 : index)}
-              onDuplicate={() => duplicateCard(index)}
-              onRemove={() => removeCard(index)}
-              canRemove={data.cards.length > 1}
-              onMoveUp={() => moveCard(index, index - 1)}
-              onMoveDown={() => moveCard(index, index + 1)}
-              canMoveUp={index > 0}
-              canMoveDown={index < data.cards.length - 1}
-              dragging={dragIndex === index}
-              dragOver={overIndex === index && dragIndex !== index}
-              onDragStart={(e) => {
-                e.dataTransfer.setData("text/plain", String(index));
-                e.dataTransfer.effectAllowed = "move";
-                setDragIndex(index);
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setOverIndex(index);
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                const from = Number(e.dataTransfer.getData("text/plain"));
-                moveCard(from, index);
-                setDragIndex(null);
-                setOverIndex(null);
-              }}
-              onDragEnd={() => {
-                setDragIndex(null);
-                setOverIndex(null);
-              }}
-              isMobile={isMobile}
-            >
-              <div className="ix-ed-fields">
-                <label className="ix-ed-field">
-                  <span>Лицевая сторона</span>
-                  <input value={card.front} placeholder="Термин" onChange={(e) => updateCard(index, "front", e.target.value)} />
-                </label>
-                <InteractiveImageField
-                  label="Картинка (лицевая)"
-                  value={card.front_image_url || ""}
-                  uploading={imageUploading}
-                  onUpload={async (file) => {
-                    const url = await onImageUpload(file);
-                    updateCard(index, "front_image_url", url);
-                  }}
-                  onClear={() => updateCard(index, "front_image_url", "")}
-                />
-                <label className="ix-ed-field">
-                  <span>Обратная сторона</span>
-                  <input value={card.back} placeholder="Ответ" onChange={(e) => updateCard(index, "back", e.target.value)} />
-                </label>
-                <InteractiveImageField
-                  label="Картинка (обратная)"
-                  value={card.back_image_url || ""}
-                  uploading={imageUploading}
-                  onUpload={async (file) => {
-                    const url = await onImageUpload(file);
-                    updateCard(index, "back_image_url", url);
-                  }}
-                  onClear={() => updateCard(index, "back_image_url", "")}
-                />
-                <label className="ix-ed-field">
-                  <span>Подсказка</span>
-                  <input value={card.hint} placeholder="Необязательно" onChange={(e) => updateCard(index, "hint", e.target.value)} />
-                </label>
-                <label className="ix-ed-field ix-ed-field--wide">
-                  <span>Пояснение</span>
-                  <input value={card.explanation} placeholder="Необязательно" onChange={(e) => updateCard(index, "explanation", e.target.value)} />
-                </label>
-              </div>
-            </EditorItemShell>
-          );
-        })}
-      </div>
-      {undoRemove ? (
-        <UndoRemoveToast
-          key={`card-${undoRemove.index}-${undoRemove.item?.front || ""}`}
-          label="Карточка удалена"
-          onUndo={restoreCard}
-          onDismiss={() => setUndoRemove(null)}
-        />
-      ) : null}
-    </section>
   );
 }
 
@@ -542,38 +381,28 @@ function SequenceEditor({
   };
 
   return (
-    <section className="ix-ed-panel ix-ed-panel--work">
-      <header className="ix-ed-panel__head ix-ed-panel__head--row">
-        <div>
-          <h2 className="ix-ed-panel__title">Порядок</h2>
-          <p className="ix-ed-panel__hint">Шаги, которые ученик расставит по порядку.</p>
-        </div>
-        <button type="button" className="cb-btn cb-btn--primary cb-btn--sm cb-btn--pill" onClick={addStep}>
-          + Добавить
-        </button>
-      </header>
-      <div className="ix-ed-panel__body ix-ed-panel__body--stack">
+    <BuilderSection
+      title="Содержимое"
+      hint="Правильная последовательность — ученик расставит шаги"
+      meta={
+        <>
+          <span className="ix-builder-section__count">{(data.steps || []).length}</span>
+          <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={addStep}>
+            + Добавить
+          </button>
+        </>
+      }
+    >
+      <div className="ix-card-list">
         {(data.steps || []).map((step, index) => (
-          <EditorItemShell
+          <article
             key={index}
-            index={index}
-            title={`Шаг ${index + 1}`}
-            summary={step.text || "Пустой шаг"}
-            open={openIndex === index}
-            onToggle={() => setOpenIndex(openIndex === index ? -1 : index)}
-            onDuplicate={() => duplicateStep(index)}
-            onRemove={() => removeStep(index)}
-            canRemove={data.steps.length > 1}
-            onMoveUp={() => moveStep(index, index - 1)}
-            onMoveDown={() => moveStep(index, index + 1)}
-            canMoveUp={index > 0}
-            canMoveDown={index < data.steps.length - 1}
-            dragging={dragIndex === index}
-            dragOver={overIndex === index && dragIndex !== index}
-            onDragStart={(e) => {
-              e.dataTransfer.setData("text/plain", String(index));
-              setDragIndex(index);
-            }}
+            className={[
+              "ix-card-row",
+              openIndex === index ? "is-open" : "",
+              dragIndex === index ? "is-dragging" : "",
+              overIndex === index && dragIndex !== index ? "is-over" : "",
+            ].filter(Boolean).join(" ")}
             onDragOver={(e) => { e.preventDefault(); setOverIndex(index); }}
             onDrop={(e) => {
               e.preventDefault();
@@ -581,34 +410,74 @@ function SequenceEditor({
               setDragIndex(null);
               setOverIndex(null);
             }}
-            onDragEnd={() => { setDragIndex(null); setOverIndex(null); }}
-            isMobile={isMobile}
           >
-            <div className="ix-ed-fields">
-              <label className="ix-ed-field ix-ed-field--wide">
-                <span>Текст</span>
-                <input value={step.text} onChange={(e) => updateStep(index, "text", e.target.value)} />
-              </label>
-              <InteractiveImageField
-                label="Картинка"
-                value={step.image_url || ""}
-                uploading={imageUploading}
-                onUpload={async (file) => {
-                  const url = await onImageUpload(file);
-                  updateStep(index, "image_url", url);
-                }}
-                onClear={() => updateStep(index, "image_url", "")}
+            <div className="ix-card-row__bar ix-sequence-row__bar">
+              <span className="ix-sequence-row__num">{index + 1}</span>
+              {!isMobile ? (
+                <button
+                  type="button"
+                  className="ix-card-row__drag"
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("text/plain", String(index));
+                    setDragIndex(index);
+                  }}
+                  onDragEnd={() => { setDragIndex(null); setOverIndex(null); }}
+                  aria-label="Перетащить"
+                >
+                  ⋮⋮
+                </button>
+              ) : null}
+              <input
+                className="ix-wheel-row__input"
+                value={step.text || ""}
+                placeholder={`Этап ${index + 1}`}
+                onChange={(e) => updateStep(index, "text", e.target.value)}
               />
-              <label className="ix-ed-field">
-                <span>Позиция</span>
-                <input type="number" min={1} value={step.position} onChange={(e) => updateStep(index, "position", e.target.value)} />
-              </label>
-              <label className="ix-ed-field ix-ed-field--wide">
-                <span>Пояснение</span>
-                <input value={step.explanation} onChange={(e) => updateStep(index, "explanation", e.target.value)} />
-              </label>
+              <div className="ix-card-row__actions">
+                <button
+                  type="button"
+                  className="ix-card-row__edit"
+                  onClick={() => setOpenIndex(openIndex === index ? -1 : index)}
+                >
+                  {openIndex === index ? "Свернуть" : "Ещё"}
+                </button>
+                <button
+                  type="button"
+                  className="ix-ed-icon-btn"
+                  aria-label="Удалить"
+                  disabled={data.steps.length <= 1}
+                  onClick={() => removeStep(index)}
+                >
+                  ×
+                </button>
+              </div>
             </div>
-          </EditorItemShell>
+            {openIndex === index ? (
+              <div className="ix-card-row__editor">
+                <div className="ix-ed-fields">
+                  <InteractiveImageField
+                    compact
+                    label="Картинка"
+                    value={step.image_url || ""}
+                    uploading={imageUploading}
+                    onUpload={async (file) => {
+                      const url = await onImageUpload(file);
+                      updateStep(index, "image_url", url);
+                    }}
+                    onClear={() => updateStep(index, "image_url", "")}
+                  />
+                  <label className="ix-ed-field ix-ed-field--wide">
+                    <span>Пояснение</span>
+                    <input value={step.explanation || ""} onChange={(e) => updateStep(index, "explanation", e.target.value)} />
+                  </label>
+                </div>
+                <div className="ix-sequence-row__tools">
+                  <button type="button" className="ix-ed-link-btn" onClick={() => duplicateStep(index)}>Дублировать</button>
+                </div>
+              </div>
+            ) : null}
+          </article>
         ))}
       </div>
       {undoRemove ? (
@@ -619,7 +488,57 @@ function SequenceEditor({
           onDismiss={() => setUndoRemove(null)}
         />
       ) : null}
-    </section>
+    </BuilderSection>
+  );
+}
+
+const TYPE_SIDEBAR_ICONS = {
+  wheel: "🎡",
+  flashcards: "🃏",
+  sequence: "🔢",
+  quiz: "❓",
+  matching: "🔗",
+};
+
+const DEFAULT_CREATE_TYPE = "wheel";
+
+function InteractiveTypeSidebar({ currentType, onSelect, locked = false }) {
+  return (
+    <aside className="ix-ed-sidebar panel" aria-label="Тип интерактива">
+      <div className="ix-ed-sidebar__scroll">
+        <p className="ix-ed-sidebar__caption">Тип интерактива</p>
+        {INTERACTIVE_TYPE_LIST.map((typeId) => {
+          const meta = getTypeMeta(typeId);
+          const available = isInteractiveTypeAvailable(typeId);
+          const active = currentType === typeId;
+          const disabled = locked || !available;
+          return (
+            <button
+              key={typeId}
+              type="button"
+              className={`ix-ed-type-btn${active ? " is-active" : ""}${!available ? " is-soon" : ""}`}
+              disabled={disabled && !active}
+              aria-pressed={active}
+              onClick={() => {
+                if (disabled || active) return;
+                onSelect(typeId);
+              }}
+            >
+              <span className="ix-ed-type-btn__icon" aria-hidden="true">
+                {TYPE_SIDEBAR_ICONS[typeId] || "✦"}
+              </span>
+              <span className="ix-ed-type-btn__copy">
+                <strong>{meta.label}</strong>
+                <span>{available ? meta.description : "Скоро"}</span>
+              </span>
+            </button>
+          );
+        })}
+        {locked ? (
+          <p className="ix-ed-sidebar__note">Тип зафиксирован для опубликованного интерактива</p>
+        ) : null}
+      </div>
+    </aside>
   );
 }
 
@@ -628,13 +547,19 @@ export default function CabinetInteractiveEditorPage() {
   const navigate = useNavigate();
   const isEdit = Boolean(id);
   const isMobile = useMediaQuery("(max-width: 768px)");
+  const isNarrow = useMediaQuery("(max-width: 1100px)");
+
+  const resolvedCreateType = useMemo(() => {
+    if (isEdit) return null;
+    const candidate = type && INTERACTIVE_TYPE_LIST.includes(type) ? type : DEFAULT_CREATE_TYPE;
+    if (!isInteractiveTypeAvailable(candidate)) return DEFAULT_CREATE_TYPE;
+    return candidate;
+  }, [isEdit, type]);
 
   const newInteractive = useMemo(() => {
-    if (isEdit) return null;
-    if (!type || !["flashcards", "matching", "sequence", "quiz", "wheel"].includes(type)) return null;
-    if (!isInteractiveTypeAvailable(type)) return null;
-    return createEmptyInteractive(type);
-  }, [isEdit, type]);
+    if (isEdit || !resolvedCreateType) return null;
+    return createEmptyInteractive(resolvedCreateType);
+  }, [isEdit, resolvedCreateType]);
 
   const [data, setData] = useState(newInteractive);
   const [loading, setLoading] = useState(isEdit);
@@ -645,7 +570,9 @@ export default function CabinetInteractiveEditorPage() {
   const [publishError, setPublishError] = useState("");
   const [imageError, setImageError] = useState("");
   const [openItemIndex, setOpenItemIndex] = useState(0);
-  const { catalog } = useInteractiveAppearanceCatalog();
+  const { catalog, loading: appearanceCatalogLoading } = useInteractiveAppearanceCatalog();
+  /** Не сбрасывать форму при смене типа через сайдбар (URL :type обновляется сами). */
+  const skipCreateTypeSyncRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -670,6 +597,11 @@ export default function CabinetInteractiveEditorPage() {
           if (!cancelled) setLoading(false);
         });
       return () => { cancelled = true; };
+    }
+    if (skipCreateTypeSyncRef.current) {
+      skipCreateTypeSyncRef.current = false;
+      setLoading(false);
+      return undefined;
     }
     setData(newInteractive);
     setOpenItemIndex(0);
@@ -795,10 +727,12 @@ export default function CabinetInteractiveEditorPage() {
   }
 
   if (!data) {
-    return <Navigate to="/cabinet/interactives/new" replace />;
+    return <Navigate to={`/cabinet/interactives/new/${DEFAULT_CREATE_TYPE}`} replace />;
   }
 
   const subtitle = editorTypeSubtitle(data.type);
+  const typeLocked = isEdit && (data.status === "published" || data.status === "assigned");
+  const isCreateFlow = !isEdit;
 
   const onChange = (field, value) => {
     setData((prev) => ({ ...prev, [field]: value }));
@@ -808,6 +742,28 @@ export default function CabinetInteractiveEditorPage() {
   const onParamsChange = (params) => {
     setData((prev) => ({ ...prev, params }));
     setSaved(false);
+  };
+
+  const handleTypeSelect = (nextType) => {
+    if (!nextType || nextType === data.type || typeLocked) return;
+    if (!isInteractiveTypeAvailable(nextType)) return;
+    const hasContent = getItemCount(data) > 1
+      || Boolean(String(data.title || "").trim())
+      || Boolean(String(data.topic || "").trim());
+    if (hasContent) {
+      const ok = window.confirm(
+        "Сменить тип? Контент текущего формата будет сброшен, общие настройки сохранятся."
+      );
+      if (!ok) return;
+    }
+    setData((prev) => switchInteractiveType(prev, nextType));
+    setOpenItemIndex(0);
+    setSaved(false);
+    setPublishError("");
+    if (isCreateFlow) {
+      skipCreateTypeSyncRef.current = true;
+      navigate(`/cabinet/interactives/new/${nextType}`, { replace: true });
+    }
   };
 
   const handlePublish = async () => {
@@ -821,7 +777,7 @@ export default function CabinetInteractiveEditorPage() {
 
   const goToLaunch = async () => {
     let targetId = data?.id || (isEdit ? id : null);
-    if (!targetId) {
+    if (!targetId || String(targetId).startsWith("i")) {
       setSaving(true);
       try {
         const apiData = await createInteractive(buildInteractiveWritePayload(data, "draft"));
@@ -845,19 +801,29 @@ export default function CabinetInteractiveEditorPage() {
   };
 
   return (
-    <CabinetPageShell className="cb-section--interactive-editor ix-ed-page">
-      <header className="ix-ed-topbar">
+    <CabinetPageShell className="cb-section--interactive-editor ix-ed-page ix-ed-page--builder">
+      <div className="ix-builder-shell">
+      <header className="ix-ed-topbar ix-ed-topbar--sticky">
         <div className="ix-ed-topbar__left">
-          <Link to="/cabinet/interactives" className="ix-ed-back">← Назад</Link>
+          <Link to="/cabinet/interactives" className="ix-ed-back" aria-label="Назад">←</Link>
           <div className="ix-ed-topbar__copy">
-            <p className="ix-ed-topbar__title">{getInteractiveDisplayTitle(data)}</p>
+            <p className="ix-ed-topbar__title">
+              {isCreateFlow ? "Создание интерактива" : getInteractiveDisplayTitle(data)}
+            </p>
             <p className="ix-ed-topbar__subtitle">
-              Редактор интерактива · {subtitle}
+              {data.status === "published" || data.status === "assigned" ? "Опубликован" : "Черновик"}
+              {" · "}
+              {subtitle}
+              {isCreateFlow && String(data.title || "").trim()
+                ? ` · ${String(data.title).trim()}`
+                : null}
             </p>
           </div>
         </div>
         <div className="ix-ed-topbar__actions ix-ed-topbar__actions--desktop">
-          <button type="button" className="cb-btn cb-btn--ghost" onClick={goToLaunch} disabled={saving}>Предпросмотр</button>
+          <button type="button" className="cb-btn cb-btn--ghost" onClick={goToLaunch} disabled={saving}>
+            Предпросмотр
+          </button>
           <button type="button" className="cb-btn cb-btn--outline" onClick={() => persist("draft")} disabled={saving}>
             {saving ? "Сохранение…" : "Сохранить"}
           </button>
@@ -871,16 +837,40 @@ export default function CabinetInteractiveEditorPage() {
       {publishError ? <p className="ix-ed-error" role="alert">{publishError}</p> : null}
       {imageError ? <p className="ix-ed-error" role="alert">{imageError}</p> : null}
 
-      <div className="ix-ed-layout">
-        <div className="ix-ed-layout__main">
-          <InteractiveEditorSettings
-            data={data}
-            onChange={onChange}
-            onParamsChange={onParamsChange}
-            typeLocked
-            onPublish={() => persist("published")}
-            onUnpublish={() => persist("draft")}
+      {isNarrow ? (
+        <div className="ix-ed-type-strip" role="tablist" aria-label="Тип интерактива">
+          {INTERACTIVE_TYPE_LIST.map((typeId) => {
+            const meta = getTypeMeta(typeId);
+            const available = isInteractiveTypeAvailable(typeId);
+            const active = data.type === typeId;
+            return (
+              <button
+                key={typeId}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                className={`ix-ed-type-chip${active ? " is-active" : ""}`}
+                disabled={(typeLocked || !available) && !active}
+                onClick={() => handleTypeSelect(typeId)}
+              >
+                {TYPE_SIDEBAR_ICONS[typeId] || "✦"} {meta.shortLabel || meta.label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      <div className="ix-ed-layout ix-ed-layout--builder">
+        {!isNarrow ? (
+          <InteractiveTypeSidebar
+            currentType={data.type}
+            onSelect={handleTypeSelect}
+            locked={typeLocked}
           />
+        ) : null}
+
+        <div className="ix-ed-layout__main">
+          <InteractiveBasicSettings data={data} onChange={onChange} />
 
           {data.type === "flashcards" ? (
             <FlashcardsEditor
@@ -935,9 +925,44 @@ export default function CabinetInteractiveEditorPage() {
               openIndex={openItemIndex}
               setOpenIndex={setOpenItemIndex}
               isMobile={isMobile}
-              EditorItemShell={EditorItemShell}
             />
           ) : null}
+
+          <BuilderSection title="Оформление" hint="Фоны и стили из каталога сервера" collapsible defaultOpen>
+            <AppearanceSettings
+              data={data}
+              onChange={onChange}
+              catalog={catalog}
+              catalogLoading={appearanceCatalogLoading}
+              compact
+              showTitle={false}
+              showBackground
+              showCardStyles
+              showSounds={false}
+            />
+          </BuilderSection>
+
+          <BuilderSection title="Звук" hint="Звуковые пакеты с сервера — только прослушивание в редакторе" collapsible defaultOpen={false}>
+            <AppearanceSettings
+              data={data}
+              onChange={onChange}
+              catalog={catalog}
+              catalogLoading={appearanceCatalogLoading}
+              compact
+              showTitle={false}
+              showBackground={false}
+              showCardStyles={false}
+              showSounds
+            />
+          </BuilderSection>
+
+          <InteractiveAdvancedSettings
+            data={data}
+            onChange={onChange}
+            onParamsChange={onParamsChange}
+            onPublish={() => persist("published")}
+            onUnpublish={() => persist("draft")}
+          />
 
           {isMobile ? (
             <InteractiveEditorPreview data={data} catalog={catalog} />
@@ -956,6 +981,7 @@ export default function CabinetInteractiveEditorPage() {
         <button type="button" className="cb-btn cb-btn--primary cb-btn--pill" onClick={handlePublish} disabled={saving}>
           {saving ? "…" : "Опубликовать"}
         </button>
+      </div>
       </div>
     </CabinetPageShell>
   );

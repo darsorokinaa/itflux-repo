@@ -29,6 +29,7 @@ from .billing_service import (
     build_reminder_text,
     charge_lesson_from_package,
     charge_multiple_lessons_from_package,
+    consume_package_manual,
     check_package_for_planning,
     create_adjustment,
     cancel_package,
@@ -498,6 +499,39 @@ class BillingPackageAdjustView(APIView):
         except BillingError as exc:
             return _err(exc)
         return Response(serialize_package(package))
+
+
+class BillingPackageConsumeView(APIView):
+    """Списать занятия из абонемента без урока в расписании (вручную)."""
+
+    permission_classes = [IsAuthenticated, IsCabinetTeacher]
+
+    def post(self, request, package_id):
+        package = get_object_or_404(
+            LessonPackage, pk=package_id, billing_account__teacher=request.user
+        )
+        data = request.data or {}
+        try:
+            result = consume_package_manual(
+                teacher=request.user,
+                package=package,
+                units=_dec(data.get("units") or data.get("units_delta") or 1),
+                comment=data.get("comment") or "",
+            )
+        except BillingError as exc:
+            return _err(exc)
+        return Response(
+            {
+                "message": result["message"],
+                "units": str(result["units"]),
+                "remaining_units": str(result["remaining_units"]),
+                "package": serialize_package(result["package"]),
+                "transaction": serialize_transaction(result["transaction"]),
+                "account": serialize_account(
+                    result["package"].billing_account, include_history=True
+                ),
+            }
+        )
 
 
 class BillingPackageSettleUnpaidView(APIView):

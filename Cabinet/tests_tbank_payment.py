@@ -59,7 +59,7 @@ class TBankHelpersTests(TestCase):
 
     def test_map_statuses(self):
         self.assertEqual(map_tbank_status("CONFIRMED"), "paid")
-        self.assertEqual(map_tbank_status("AUTHORIZED"), "paid")
+        self.assertEqual(map_tbank_status("AUTHORIZED"), "pending")
         self.assertEqual(map_tbank_status("REJECTED"), "failed")
         self.assertEqual(map_tbank_status("CANCELED"), "cancelled")
         self.assertEqual(map_tbank_status("NEW"), "pending")
@@ -134,7 +134,7 @@ class TBankCheckoutFlowTests(TestCase):
             plan=self.pro,
             billing_period="month",
         )
-        self.assertEqual(result["amount"], "2990")
+        self.assertEqual(result["amount"], "2990.00")
         self.assertEqual(result["billing_period"], "month")
         self.assertTrue(str(result["payment_url"]).startswith("https://securepay.tinkoff.ru/"))
         payment = Payment.objects.get(pk=result["payment_id"])
@@ -163,7 +163,7 @@ class TBankCheckoutFlowTests(TestCase):
             plan=self.pro,
             billing_period="year",
         )
-        self.assertEqual(result["amount"], "29900")
+        self.assertEqual(result["amount"], "29900.00")
         body = mock_post.call_args.kwargs.get("json") or mock_post.call_args[1].get("json")
         self.assertEqual(body["Amount"], 2990000)
 

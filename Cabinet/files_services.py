@@ -53,6 +53,17 @@ class FileServiceError(Exception):
 
 
 def get_quota_bytes(user) -> int:
+    """Лимит хранилища: актуальный тариф подписки, иначе ручная квота / settings."""
+    try:
+        from .subscription_service import SubscriptionLimitService
+
+        sub = SubscriptionLimitService.get_or_create_subscription(user, apply_promo=False)
+        plan = getattr(sub, "plan", None)
+        mb = int(getattr(plan, "max_storage_mb", 0) or 0) if plan else 0
+        if mb > 0:
+            return mb * 1024 * 1024
+    except Exception:
+        pass
     try:
         quota = user.storage_quota
         return quota.effective_quota_bytes()
@@ -70,20 +81,34 @@ def get_quota_info(user) -> dict:
     used = calc_usage_bytes(user)
     limit = get_quota_bytes(user)
     percent = round((used / limit) * 100, 1) if limit else 0
+    over = used > limit > 0
     return {
         "used_bytes": used,
         "limit_bytes": limit,
         "available_bytes": max(0, limit - used),
         "percent": percent,
         "warning": percent >= 90,
+        "over_limit": over,
     }
 
 
 def assert_quota_allows(user, additional_bytes: int) -> None:
     info = get_quota_info(user)
     if info["used_bytes"] + int(additional_bytes or 0) > info["limit_bytes"]:
+        used_gb = round(info["used_bytes"] / (1024 * 1024 * 1024), 2)
+        limit_gb = round(info["limit_bytes"] / (1024 * 1024 * 1024), 2)
+        if info.get("over_limit") and not additional_bytes:
+            msg = (
+                f"Использовано {used_gb} ГБ из {limit_gb} ГБ. "
+                "Новые файлы нельзя загружать, пока объём не станет меньше лимита."
+            )
+        else:
+            msg = (
+                f"Недостаточно места в хранилище (использовано {used_gb} ГБ из {limit_gb} ГБ). "
+                "Удалите ненужные файлы или повысьте тариф."
+            )
         raise FileServiceError(
-            "Недостаточно места в хранилище. Удалите ненужные файлы или очистите корзину.",
+            msg,
             code="QUOTA_EXCEEDED",
             status=400,
             extra=info,

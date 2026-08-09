@@ -231,11 +231,26 @@ export function getCachedAppearanceCatalog() {
 
 export function backgroundPreviewStyle(item) {
   if (!item) return undefined;
-  if (item.background_image_url) {
-    return backgroundImageStyle(
-      item.background_image_url,
-      item.text_tone === "light" ? "light" : "dark",
-    );
+  const imageUrl = interactiveMediaUrl(item.background_image_url);
+  if (imageUrl) {
+    // Картинка с API + подложка (css_background / тон), если media недоступна.
+    const tone = item.text_tone === "light" ? "light" : "dark";
+    const overlay = tone === "light"
+      ? "rgba(15, 23, 42, 0.45)"
+      : "rgba(255, 255, 255, 0.08)";
+    const fallbackColor = tone === "light" ? "#1E293B" : "#E8EDF4";
+    const layers = [`linear-gradient(${overlay}, ${overlay})`, `url("${imageUrl}")`];
+    if (item.css_background && item.css_background.includes("gradient")) {
+      layers.push(item.css_background);
+    }
+    return {
+      backgroundImage: layers.join(", "),
+      backgroundColor: item.css_background && !item.css_background.includes("gradient")
+        ? item.css_background
+        : fallbackColor,
+      backgroundSize: "cover",
+      backgroundPosition: "center",
+    };
   }
   if (item.slug === "grid-blue" && item.css_background) {
     return {

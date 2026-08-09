@@ -34,30 +34,67 @@ function formatPrice(value) {
 function PlanFeatures({ plan }) {
   const l = plan.limits || {};
   const f = plan.features || {};
-  const rows = [
-    l.students != null && `До ${l.students} учеников`,
-    l.groups != null && `До ${l.groups} групп`,
-    l.variants_monthly != null
-      ? `Варианты: ${l.variants_monthly}/мес`
-      : "Варианты без лимита",
-    l.workbooks_monthly != null
-      ? `Тетради: ${l.workbooks_monthly}/мес`
-      : "Тетради без лимита",
-    f.extended_library && "Расширенная библиотека",
-    f.simulators && "Симуляторы",
-    f.analytics && "Аналитика",
-    f.priority_support && "Приоритетная поддержка",
-    f.multi_teacher && "Несколько учителей",
-    f.team_roles && "Роли в команде",
-    plan.monthly_library_promise && "Не менее 5 новых материалов в месяц",
-  ].filter(Boolean);
+
+  let rows = [];
+  let caveat = null;
+
+  if (plan.slug === "start") {
+    rows = [
+      l.students != null && `до ${l.students} учеников`,
+      "домашние задания и проверка",
+      l.variants_monthly != null && `${l.variants_monthly} вариантов в месяц`,
+      l.workbooks_monthly != null && `${l.workbooks_monthly} рабочих тетрадей в месяц`,
+      "бесплатные материалы",
+    ].filter(Boolean);
+    caveat = "Без расписания, журнала и видеозанятий.";
+  } else if (plan.slug === "teacher") {
+    rows = [
+      l.students != null && `до ${l.students} активных учеников`,
+      "расписание и журнал",
+      "видеозанятия прямо на платформе",
+      "ДЗ и проверка",
+      l.variants_monthly != null && `${l.variants_monthly} вариантов в месяц`,
+      l.workbooks_monthly != null && `${l.workbooks_monthly} рабочих тетрадей`,
+      "расширенная библиотека",
+    ].filter(Boolean);
+  } else if (plan.slug === "pro") {
+    rows = [
+      l.students != null && `до ${l.students} активных учеников`,
+      "расписание, журнал и видеозанятия",
+      l.variants_monthly == null ? "генератор вариантов без лимита" : `${l.variants_monthly} вариантов в месяц`,
+      l.workbooks_monthly == null ? "рабочие тетради без лимита" : `${l.workbooks_monthly} тетрадей в месяц`,
+      l.interactives == null ? "интерактивы без лимита" : `${l.interactives} интерактивов в месяц`,
+      "полная основная библиотека",
+      f.simulators && "симуляторы",
+    ].filter(Boolean);
+  } else if (plan.slug === "premium") {
+    rows = [
+      l.students != null && `до ${l.students} активных учеников`,
+      "группы без лимита",
+      "полная библиотека и Premium-материалы",
+      "симуляторы и межпредметные проекты",
+      "генератор и тетради без лимита",
+      f.priority_support && "приоритетная поддержка",
+    ].filter(Boolean);
+  } else {
+    rows = [
+      l.students != null && `До ${l.students} учеников`,
+      l.groups != null && `До ${l.groups} групп`,
+      f.multi_teacher && "Несколько учителей",
+      f.team_roles && "Роли в команде",
+      f.priority_support && "Приоритетная поддержка",
+    ].filter(Boolean);
+  }
 
   return (
-    <ul className="pricing-card__list">
-      {rows.map((row) => (
-        <li key={row}>{row}</li>
-      ))}
-    </ul>
+    <>
+      <ul className="pricing-card__list">
+        {rows.map((row) => (
+          <li key={row}>{row}</li>
+        ))}
+      </ul>
+      {caveat ? <p className="pricing-card__caveat">{caveat}</p> : null}
+    </>
   );
 }
 
@@ -98,7 +135,8 @@ export default function PricingPage() {
         <p className="pricing-hero__brand">Цифровой поток</p>
         <h1 className="pricing-hero__title">Тарифы для учителей</h1>
         <p className="pricing-hero__lead">
-          Выберите уровень доступа к кабинету и библиотеке. Без ИИ-кредитов и скрытых лимитов на витрине.
+          «Старт» — чтобы познакомиться. «Учитель» — чтобы вести занятия. Дальше —
+          больше лимитов и вся библиотека.
         </p>
         <div className="pricing-period" role="group" aria-label="Период оплаты">
           <button
@@ -219,7 +257,17 @@ export default function PricingPage() {
             </thead>
             <tbody>
               <tr>
-                <td>Ученики</td>
+                <td>Цена / мес</td>
+                {plans.map((p) => (
+                  <td key={p.slug}>
+                    {p.cta_type === "contact" || p.slug === "school"
+                      ? "По запросу"
+                      : formatPrice(p.price_month)}
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td>Активные ученики</td>
                 {plans.map((p) => (
                   <td key={p.slug}>{p.limits?.students ?? "—"}</td>
                 ))}
@@ -227,24 +275,74 @@ export default function PricingPage() {
               <tr>
                 <td>Группы</td>
                 {plans.map((p) => (
-                  <td key={p.slug}>{p.limits?.groups ?? "—"}</td>
-                ))}
-              </tr>
-              <tr>
-                <td>Библиотека</td>
-                {plans.map((p) => (
                   <td key={p.slug}>
-                    {["Free", "Учитель", "Профи", "Премиум", "Школа"][
-                      p.content_access_rank ?? 0
-                    ] || "—"}
+                    {p.limits?.groups == null ? "Без лимита" : p.limits.groups}
                   </td>
                 ))}
               </tr>
               <tr>
-                <td>Несколько учителей</td>
+                <td>Генератор вариантов</td>
                 {plans.map((p) => (
-                  <td key={p.slug}>{p.features?.multi_teacher ? "Да" : "—"}</td>
+                  <td key={p.slug}>
+                    {p.limits?.variants_monthly == null
+                      ? "Без лимита"
+                      : `${p.limits.variants_monthly}/мес`}
+                  </td>
                 ))}
+              </tr>
+              <tr>
+                <td>Рабочие тетради</td>
+                {plans.map((p) => (
+                  <td key={p.slug}>
+                    {p.limits?.workbooks_monthly == null
+                      ? "Без лимита"
+                      : `${p.limits.workbooks_monthly}/мес`}
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td>Интерактивы</td>
+                {plans.map((p) => (
+                  <td key={p.slug}>
+                    {p.limits?.interactives == null
+                      ? "Без лимита"
+                      : `${p.limits.interactives}/мес`}
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td>Расписание / журнал / видео</td>
+                {plans.map((p) => (
+                  <td key={p.slug}>{(p.content_access_rank ?? 0) >= 1 ? "✓" : "—"}</td>
+                ))}
+              </tr>
+              <tr>
+                <td>Библиотека</td>
+                {plans.map((p) => {
+                  const labels = [
+                    "Бесплатные",
+                    "Расширенная",
+                    "Полная",
+                    "Premium",
+                    "Корпоративная",
+                  ];
+                  return (
+                    <td key={p.slug}>
+                      {labels[p.content_access_rank ?? 0] || "—"}
+                    </td>
+                  );
+                })}
+              </tr>
+              <tr>
+                <td>Хранилище</td>
+                {plans.map((p) => {
+                  const mb = p.limits?.storage_mb;
+                  let label = "—";
+                  if (mb != null) {
+                    label = mb >= 1024 ? `${Math.round(mb / 1024)} ГБ` : `${mb} МБ`;
+                  }
+                  return <td key={p.slug}>{label}</td>;
+                })}
               </tr>
             </tbody>
           </table>

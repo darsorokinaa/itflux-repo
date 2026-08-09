@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 import {
   backgroundPreviewStyle,
+  compressBackgroundImage,
   resolveInteractiveAppearance,
   useInteractiveAppearanceCatalog,
 } from "../interactiveAppearance";
 import {
   INTERACTIVE_SOUND_EVENTS,
+  isInteractiveSoundPreviewPlaying,
   previewInteractiveSound,
   readInteractiveSoundFile,
+  stopInteractiveSoundPreview,
 } from "../interactiveSounds";
 import "../styles/interactive-appearance.css";
 
@@ -20,9 +23,33 @@ function BackgroundOption({ item, selected, onSelect }) {
       className={`ix-appearance__option${selected ? " is-selected" : ""}`}
       onClick={() => onSelect(item.slug)}
       aria-pressed={selected}
+      title={item.name}
     >
-      <span className="ix-appearance__swatch" style={style} />
+      <span className="ix-appearance__swatch" style={style}>
+        {selected ? <span className="ix-appearance__check" aria-hidden="true">✓</span> : null}
+      </span>
       <span className="ix-appearance__label">{item.name}</span>
+    </button>
+  );
+}
+
+function CustomBackgroundOption({ selected, imageUrl, inputId }) {
+  return (
+    <button
+      type="button"
+      className={`ix-appearance__option ix-appearance__option--custom${selected ? " is-selected" : ""}`}
+      onClick={() => document.getElementById(inputId)?.click()}
+      aria-pressed={selected}
+      title="Свой фон"
+    >
+      <span
+        className="ix-appearance__swatch ix-appearance__swatch--custom"
+        style={imageUrl ? { backgroundImage: `url(${imageUrl})` } : undefined}
+      >
+        {!imageUrl ? <span className="ix-appearance__swatch-plus">+</span> : null}
+        {selected ? <span className="ix-appearance__check" aria-hidden="true">✓</span> : null}
+      </span>
+      <span className="ix-appearance__label">Свой фон</span>
     </button>
   );
 }
@@ -34,17 +61,60 @@ function CardStyleOption({ item, selected, onSelect }) {
       className={`ix-appearance__option${selected ? " is-selected" : ""}`}
       onClick={() => onSelect(item.slug)}
       aria-pressed={selected}
+      title={item.name}
     >
       <span className={`ix-appearance__card-preview ${item.css_class}`}>
-        Aa
+        {selected ? <span className="ix-appearance__check" aria-hidden="true">✓</span> : "Aa"}
       </span>
-      <span className="ix-appearance__label">{item.name}</span>
     </button>
   );
 }
 
+function SoundPackCard({
+  item,
+  selected,
+  playing,
+  onSelect,
+  onTogglePreview,
+}) {
+  const hasBackgroundTrack = Boolean(item?.sounds?.background);
+  return (
+    <div className={`ix-appearance__sound-card${selected ? " is-selected" : ""}`}>
+      <button
+        type="button"
+        className="ix-appearance__sound-card__main"
+        onClick={onSelect}
+        aria-pressed={selected}
+      >
+        <span className="ix-appearance__sound-card__title">{item.name}</span>
+        {item.description ? (
+          <span className="ix-appearance__sound-card__desc">{item.description}</span>
+        ) : null}
+        {hasBackgroundTrack ? (
+          <span className="ix-appearance__sound-card__badge">Трек с сервера</span>
+        ) : (
+          <span className="ix-appearance__sound-card__badge ix-appearance__sound-card__badge--synth">
+            Синтез эффектов
+          </span>
+        )}
+      </button>
+      <button
+        type="button"
+        className="ix-appearance__sound-card__play"
+        aria-label={playing ? "Пауза" : "Прослушать"}
+        onClick={(e) => {
+          e.stopPropagation();
+          onTogglePreview();
+        }}
+      >
+        {playing ? "❚❚" : "▶"}
+      </button>
+    </div>
+  );
+}
+
 function SoundFileRow({ event, value, onUpload, onRemove, onPreview }) {
-  const inputId = `ix-sound-${event.id}`;
+  const inputId = useId();
 
   return (
     <div className="ix-appearance__sound-file">
@@ -94,17 +164,65 @@ function SoundFileRow({ event, value, onUpload, onRemove, onPreview }) {
   );
 }
 
-export default function AppearanceSettings({ data, onChange, compact = false }) {
-  const { catalog } = useInteractiveAppearanceCatalog();
+export default function AppearanceSettings({
+  data,
+  onChange,
+  compact = false,
+  showTitle = true,
+  showBackground = true,
+  showCardStyles = true,
+  showSounds = true,
+  catalog: catalogProp = null,
+  catalogLoading = false,
+}) {
+  const hook = useInteractiveAppearanceCatalog();
+  const catalog = catalogProp || hook.catalog;
+  const loading = catalogProp ? catalogLoading : hook.loading;
   const appearance = resolveInteractiveAppearance(data, catalog);
   const [soundError, setSoundError] = useState("");
+  const [bgError, setBgError] = useState("");
+  const [previewSlug, setPreviewSlug] = useState("");
+  const customBgInputId = useId();
+  const hasCustomBg = Boolean(data.backgroundImage);
+
+  useEffect(() => () => stopInteractiveSoundPreview(), []);
 
   const setSlug = (field, slug) => onChange(field, slug);
 
-  const handleSoundPack = (slug) => {
+  const handleLibraryBackground = (slug) => {
+    setSlug("backgroundSlug", slug);
+    if (data.backgroundImage) onChange("backgroundImage", null);
+  };
+
+  const handleCustomBackground = async (file) => {
+    try {
+      setBgError("");
+      const dataUrl = await compressBackgroundImage(file);
+      onChange("backgroundImage", dataUrl);
+      onChange("backgroundImageTone", data.backgroundImageTone || "light");
+    } catch (err) {
+      setBgError(err?.message || "Не удалось загрузить фон");
+    }
+  };
+
+  const soundPacks = (catalog.sound_packs || []).filter((item) => item.slug !== "silent");
+
+  const selectSoundPack = (slug) => {
+    onChange("soundEnabled", true);
     onChange("soundPackSlug", slug);
-    const pack = catalog.sound_packs.find((item) => item.slug === slug);
-    previewInteractiveSound(pack, "flip");
+  };
+
+  const togglePackPreview = (pack) => {
+    const eventName = pack?.sounds?.background ? "background" : "flip";
+    const result = previewInteractiveSound(pack, eventName);
+    if (result === "playing") setPreviewSlug(pack.slug);
+    else if (result === "paused") setPreviewSlug("");
+    else {
+      setPreviewSlug(pack.slug);
+      window.setTimeout(() => {
+        setPreviewSlug((cur) => (cur === pack.slug ? "" : cur));
+      }, 400);
+    }
   };
 
   const customSounds = data.customSounds || {};
@@ -140,108 +258,161 @@ export default function AppearanceSettings({ data, onChange, compact = false }) 
 
   return (
     <div className={`ix-appearance${compact ? " ix-appearance--compact" : " cb-interactive-editor__common"}`}>
-      {!compact ? (
-        <h2 className="cb-interactive-editor__section-title">Оформление и звук</h2>
-      ) : (
-        <h3 className="ix-appearance__section-title ix-appearance__section-title--lead">Оформление и звук</h3>
-      )}
-
-      <section>
-        <h3 className="ix-appearance__section-title">Фон</h3>
-        {catalog.backgrounds.length === 0 ? (
-          <p className="ix-bg-upload-hint">Нет фонов в каталоге. Добавьте их в админке.</p>
+      {showTitle ? (
+        !compact ? (
+          <h2 className="cb-interactive-editor__section-title">Оформление и звук</h2>
         ) : (
-          <div className="ix-appearance__grid">
+          <h3 className="ix-appearance__section-title ix-appearance__section-title--lead">Оформление и звук</h3>
+        )
+      ) : null}
+
+      {showBackground ? (
+        <section>
+          <h3 className="ix-appearance__section-title">Фон</h3>
+          {loading ? <p className="ix-bg-upload-hint">Загрузка фонов с сервера…</p> : null}
+          {!loading && catalog.backgrounds.length === 0 && !hasCustomBg ? (
+            <p className="ix-bg-upload-hint">Нет фонов в каталоге. Добавьте их в админке или загрузите свой.</p>
+          ) : null}
+          <div className="ix-appearance__grid ix-appearance__grid--tiles">
             {catalog.backgrounds.map((item) => (
               <BackgroundOption
                 key={item.slug}
                 item={item}
-                selected={appearance.background?.slug === item.slug}
-                onSelect={(slug) => setSlug("backgroundSlug", slug)}
+                selected={!hasCustomBg && appearance.background?.slug === item.slug}
+                onSelect={handleLibraryBackground}
+              />
+            ))}
+            <CustomBackgroundOption
+              selected={hasCustomBg}
+              imageUrl={data.backgroundImage}
+              inputId={customBgInputId}
+            />
+          </div>
+          <input
+            id={customBgInputId}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="ix-bg-upload-input"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleCustomBackground(file);
+              e.target.value = "";
+            }}
+          />
+          {hasCustomBg ? (
+            <div className="ix-appearance__custom-bg-tools">
+              <label className="ix-ed-field ix-ed-field--inline">
+                <span>Тон текста на фоне</span>
+                <select
+                  value={data.backgroundImageTone || "light"}
+                  onChange={(e) => onChange("backgroundImageTone", e.target.value)}
+                >
+                  <option value="light">Светлый текст</option>
+                  <option value="dark">Тёмный текст</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                className="cb-btn cb-btn--ghost cb-btn--sm"
+                onClick={() => onChange("backgroundImage", null)}
+              >
+                Убрать свой фон
+              </button>
+            </div>
+          ) : null}
+          <label className="ix-appearance__toggle">
+            <input
+              type="checkbox"
+              checked={data.params?.autoTextBackdrop !== false}
+              onChange={(e) => onChange("params", {
+                ...(data.params || {}),
+                autoTextBackdrop: e.target.checked,
+              })}
+            />
+            <span>Автоматическая подложка для текста</span>
+          </label>
+          {data.params?.autoTextBackdrop === false ? (
+            <p className="ix-appearance__sound-hint ix-appearance__contrast-hint">
+              Подложка отключена. При слабом контрасте текст может сливаться с фоном — проверьте предпросмотр.
+            </p>
+          ) : null}
+          {bgError ? <p className="ix-appearance__sound-file__error">{bgError}</p> : null}
+        </section>
+      ) : null}
+
+      {showCardStyles ? (
+        <section>
+          <h3 className="ix-appearance__section-title">Цвет карточки</h3>
+          <div className="ix-appearance__grid ix-appearance__grid--swatches">
+            {catalog.card_styles.map((item) => (
+              <CardStyleOption
+                key={item.slug}
+                item={item}
+                selected={appearance.cardStyle?.slug === item.slug}
+                onSelect={(slug) => setSlug("cardStyleSlug", slug)}
               />
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      ) : null}
 
-      <section>
-        <h3 className="ix-appearance__section-title">Карточки и поля</h3>
-        <div className="ix-appearance__grid">
-          {catalog.card_styles.map((item) => (
-            <CardStyleOption
-              key={item.slug}
-              item={item}
-              selected={appearance.cardStyle?.slug === item.slug}
-              onSelect={(slug) => setSlug("cardStyleSlug", slug)}
-            />
-          ))}
-        </div>
-      </section>
+      {showSounds ? (
+        <>
+          <section>
+            <h3 className="ix-appearance__section-title">Фоновая музыка и звуки</h3>
+            <p className="ix-appearance__sound-hint">
+              Пакеты из каталога сервера. ▶ — только прослушивание, без автозапуска в редакторе.
+            </p>
+            {loading ? <p className="ix-bg-upload-hint">Загрузка звуков с сервера…</p> : null}
+            <div className="ix-appearance__sound-row">
+              <button
+                type="button"
+                className={`ix-appearance__sound-btn${data.soundEnabled === false ? " is-selected" : ""}`}
+                onClick={() => {
+                  stopInteractiveSoundPreview();
+                  setPreviewSlug("");
+                  onChange("soundEnabled", false);
+                }}
+              >
+                Без музыки
+              </button>
+              {soundPacks.map((item) => (
+                <SoundPackCard
+                  key={item.slug}
+                  item={item}
+                  selected={data.soundEnabled !== false && appearance.soundPack?.slug === item.slug}
+                  playing={
+                    previewSlug === item.slug
+                    || isInteractiveSoundPreviewPlaying(item?.sounds?.background)
+                  }
+                  onSelect={() => selectSoundPack(item.slug)}
+                  onTogglePreview={() => togglePackPreview(item)}
+                />
+              ))}
+            </div>
+          </section>
 
-      <section>
-        <h3 className="ix-appearance__section-title">Звуковой пакет</h3>
-        <div className="ix-appearance__sound-row">
-          {catalog.sound_packs.map((item) => (
-            <button
-              key={item.slug}
-              type="button"
-              className={`ix-appearance__sound-btn${
-                appearance.soundPack?.slug === item.slug ? " is-selected" : ""
-              }`}
-              onClick={() => handleSoundPack(item.slug)}
-            >
-              {item.name}
-              {item.sounds && Object.keys(item.sounds).length > 0 ? (
-                <small> · файлы</small>
-              ) : null}
-            </button>
-          ))}
-        </div>
-        <label className="ix-appearance__toggle">
-          <input
-            type="checkbox"
-            checked={data.soundEnabled !== false}
-            onChange={(e) => onChange("soundEnabled", e.target.checked)}
-          />
-          <span>Звук</span>
-        </label>
-        <label className="ix-appearance__toggle">
-          <input
-            type="checkbox"
-            checked={data.params?.autoTextBackdrop !== false}
-            onChange={(e) => onChange("params", {
-              ...(data.params || {}),
-              autoTextBackdrop: e.target.checked,
-            })}
-          />
-          <span>Автоматическая подложка для текста</span>
-        </label>
-        {data.params?.autoTextBackdrop === false ? (
-          <p className="ix-appearance__sound-hint ix-appearance__contrast-hint">
-            Подложка отключена. При слабом контрасте текст может сливаться с фоном — проверьте предпросмотр.
-          </p>
-        ) : null}
-      </section>
-
-      <section>
-        <h3 className="ix-appearance__section-title">Свои звуки</h3>
-        <p className="ix-appearance__sound-hint">
-          mp3, wav, ogg — до 600 КБ. Перекрывают звук пакета для этого интерактива.
-        </p>
-        {soundError ? <p className="ix-appearance__sound-file__error">{soundError}</p> : null}
-        <div className="ix-appearance__sound-files">
-          {INTERACTIVE_SOUND_EVENTS.map((event) => (
-            <SoundFileRow
-              key={event.id}
-              event={event}
-              value={customSounds[event.id]}
-              onUpload={(file) => handleSoundUpload(event.id, file)}
-              onRemove={() => removeCustomSound(event.id)}
-              onPreview={() => previewCustomSound(event.id)}
-            />
-          ))}
-        </div>
-      </section>
+          <section>
+            <h3 className="ix-appearance__section-title">Свои звуки</h3>
+            <p className="ix-appearance__sound-hint">
+              mp3, wav, ogg — до 600 КБ. Перекрывают звук пакета. Можно загрузить свой фоновый трек.
+            </p>
+            {soundError ? <p className="ix-appearance__sound-file__error">{soundError}</p> : null}
+            <div className="ix-appearance__sound-files">
+              {INTERACTIVE_SOUND_EVENTS.map((event) => (
+                <SoundFileRow
+                  key={event.id}
+                  event={event}
+                  value={customSounds[event.id]}
+                  onUpload={(file) => handleSoundUpload(event.id, file)}
+                  onRemove={() => removeCustomSound(event.id)}
+                  onPreview={() => previewCustomSound(event.id)}
+                />
+              ))}
+            </div>
+          </section>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -1116,6 +1116,21 @@ class LessonPlanEnrollmentWriteSerializer(serializers.ModelSerializer):
         return data
 
 
+def _safe_media_url(file_field):
+    """Вернуть URL только если файл реально есть в storage (избегаем битых ссылок)."""
+    if not file_field:
+        return ""
+    try:
+        name = file_field.name
+        if not name:
+            return ""
+        if hasattr(file_field, "storage") and not file_field.storage.exists(name):
+            return ""
+        return file_field.url or ""
+    except Exception:
+        return ""
+
+
 class InteractiveBackgroundSerializer(serializers.ModelSerializer):
     background_image_url = serializers.SerializerMethodField()
 
@@ -1132,9 +1147,7 @@ class InteractiveBackgroundSerializer(serializers.ModelSerializer):
         ]
 
     def get_background_image_url(self, obj):
-        if obj.background_image:
-            return obj.background_image.url
-        return ""
+        return _safe_media_url(obj.background_image)
 
 
 class InteractiveCardStyleSerializer(serializers.ModelSerializer):
@@ -1161,8 +1174,9 @@ class InteractiveSoundPackSerializer(serializers.ModelSerializer):
         }
         result = {}
         for key, field in mapping.items():
-            if field:
-                result[key] = field.url
+            url = _safe_media_url(field)
+            if url:
+                result[key] = url
         return result
 
 

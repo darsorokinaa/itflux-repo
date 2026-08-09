@@ -6,12 +6,11 @@ from django.utils import timezone
 
 from Cabinet.choices import StudentStatus
 from Cabinet.interactive_appearance import seed_interactive_appearance
+from Cabinet.interactive_seed import seed_demo_interactives
 from Cabinet.models import (
-    FlashcardItem,
     Homework,
     HomeworkSubmission,
     HomeworkTask,
-    Interactive,
     Lesson,
     LessonPlan,
     LessonPlanItem,
@@ -273,6 +272,10 @@ class Command(BaseCommand):
             },
         )
 
+        ix_result = seed_demo_interactives(user, assign_to_student=True)
+
         self.stdout.write(self.style.SUCCESS(
-            f"Тестовые данные созданы для учителя «{username}» (пароль: demo12345 при первом создании)"
+            f"Тестовые данные созданы для учителя «{username}» "
+            f"(пароль: demo12345 при первом создании). "
+            f"Интерактивы: новых {ix_result['created']}, всего {ix_result['total']}."
         ))

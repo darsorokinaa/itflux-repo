@@ -62,7 +62,15 @@ class ScheduleSeriesViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         return ScheduleEventSeriesSerializer
 
     def perform_create(self, serializer):
+        from rest_framework.exceptions import PermissionDenied
+
+        from .subscription_access import AccessDenied, SubscriptionAccessService
+
         teacher = self.get_teacher()
+        try:
+            SubscriptionAccessService.raise_if_cannot_use_schedule(teacher)
+        except AccessDenied as exc:
+            raise PermissionDenied(detail=exc.to_dict()) from exc
         data = serializer.validated_data
         student_ids = data.pop("student_ids", None)
         extra_student_ids = data.pop("extra_student_ids", None)
@@ -159,7 +167,15 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
         return qs.order_by("starts_at")
 
     def perform_create(self, serializer):
+        from .subscription_access import AccessDenied, SubscriptionAccessService
+
         teacher = self.get_teacher()
+        try:
+            SubscriptionAccessService.raise_if_cannot_use_schedule(teacher)
+        except AccessDenied as exc:
+            from rest_framework.exceptions import PermissionDenied
+
+            raise PermissionDenied(detail=exc.to_dict()) from exc
         data = serializer.validated_data
         student_ids = self.request.data.get("student_ids")
         extra_student_ids = self.request.data.get("extra_student_ids")

@@ -5,7 +5,6 @@ import InteractiveAssignModal from "../components/InteractiveAssignModal";
 import {
   InteractivesEmptyState,
   InteractiveActivityCard,
-  TypeSelectModal,
 } from "../components/InteractivesUi";
 import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -82,7 +81,6 @@ export default function CabinetInteractivesPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [showTypeModal, setShowTypeModal] = useState(false);
   const [assignTarget, setAssignTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -153,7 +151,19 @@ export default function CabinetInteractivesPage() {
     refresh();
   }, [refresh]);
 
-  const openCreateFlow = () => setShowTypeModal(true);
+  const openCreateFlow = () => {
+    if (!subscription.loading && !subscription.canCreateInteractive) {
+      handleApiLimitError({
+        code: "INTERACTIVE_LIMIT_REACHED",
+        current: subscription.usage.interactives,
+        limit: subscription.limits.interactives,
+        recommended_plan: "teacher",
+      });
+      return;
+    }
+    // Тип выбирается в сайдбаре билдера — без отдельного шага/модалки.
+    navigate("/cabinet/interactives/new/wheel");
+  };
 
   const handleTypeSelect = (type) => {
     if (!isInteractiveTypeAvailable(type)) {
@@ -169,7 +179,7 @@ export default function CabinetInteractivesPage() {
       });
       return;
     }
-    navigate(`/cabinet/interactives/new/${type}`);
+    navigate(type ? `/cabinet/interactives/new/${type}` : "/cabinet/interactives/new/wheel");
   };
 
   const openInteractive = (item) => {
@@ -453,13 +463,6 @@ export default function CabinetInteractivesPage() {
 
         {renderCatalogBody()}
       </section>
-
-      {showTypeModal ? (
-        <TypeSelectModal
-          onClose={() => setShowTypeModal(false)}
-          onSelect={handleTypeSelect}
-        />
-      ) : null}
 
       {assignTarget ? (
         <InteractiveAssignModal

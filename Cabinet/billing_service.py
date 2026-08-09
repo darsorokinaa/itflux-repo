@@ -2603,6 +2603,66 @@ def create_adjustment(
 
 
 @transaction.atomic
+def consume_package_manual(
+    *,
+    teacher: User,
+    package: LessonPackage,
+    units: Decimal,
+    comment: str = "",
+) -> dict:
+    """
+    Списать единицы абонемента без привязки к уроку в расписании.
+
+    Нужно, когда занятие прошло вне кабинета, было пропущено и списано
+    устно/в другом месте, или нужна ручная корректировка остатка.
+    """
+    if package.billing_account.teacher_id != teacher.id:
+        raise BillingError("FORBIDDEN", "Нет доступа", 403)
+    note = (comment or "").strip()
+    if not note:
+        raise BillingError(
+            "COMMENT_REQUIRED",
+            "Укажите причину списания (например: урок вне расписания или пропуск)",
+        )
+    units = abs(D_units(units))
+    if units <= 0:
+        raise BillingError("INVALID_UNITS", "Количество единиц должно быть больше 0")
+    account = package.billing_account
+    student = account.student
+    locked = LessonPackage.objects.select_for_update().get(pk=package.pk)
+    if locked.status == PackageStatus.FROZEN:
+        raise BillingError("PACKAGE_FROZEN", "Сначала разморозьте абонемент")
+    if locked.remaining_units <= 0:
+        raise BillingError("PACKAGE_INACTIVE", "Абонемент неактивен или исчерпан")
+    # Истёкший / исчерпанный с остатком — разрешаем ручное списание.
+    if locked.status in (PackageStatus.EXPIRED, PackageStatus.EXHAUSTED):
+        locked.status = PackageStatus.ACTIVE
+        locked.save(update_fields=["status", "updated_at"])
+    elif locked.status != PackageStatus.ACTIVE:
+        raise BillingError("PACKAGE_INACTIVE", "Абонемент неактивен")
+    tx = consume_package(
+        package=locked,
+        units=units,
+        account=account,
+        student=student,
+        created_by=teacher,
+        comment=note,
+    )
+    locked.refresh_from_db()
+    unit_label = "занятий" if locked.unit_type == "lesson" else "минут"
+    return {
+        "package": locked,
+        "transaction": tx,
+        "remaining_units": locked.remaining_units,
+        "units": units,
+        "message": (
+            f"Списано {units} {unit_label} из абонемента. "
+            f"Остаток: {locked.remaining_units}."
+        ),
+    }
+
+
+@transaction.atomic
 def adjust_package(
     *,
     teacher: User,

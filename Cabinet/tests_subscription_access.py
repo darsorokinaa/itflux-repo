@@ -27,7 +27,7 @@ def _ensure_plans():
         ("start", "Старт", 0, 0, True, "register"),
         ("teacher", "Учитель", 1990, 1, False, "checkout"),
         ("pro", "Профи", 2990, 2, False, "checkout"),
-        ("premium", "Премиум", 4990, 3, False, "checkout"),
+        ("premium", "Премиум", 3990, 3, False, "checkout"),
         ("school", "Школа", 0, 4, False, "contact"),
     ]
     for i, (slug, name, price, rank, is_free, cta) in enumerate(specs):
@@ -238,7 +238,13 @@ class PromoReserveTests(TestCase):
         self.assertEqual(self.promo.uses_count, 0)
 
         PaymentProviderService.handle_webhook(
-            {"payment_id": result["payment_id"], "status": "paid", "event_id": "promo-paid-1"}
+            {
+                "payment_id": result["payment_id"],
+                "status": "paid",
+                "event_id": "promo-paid-1",
+            },
+            provider_name="mock",
+            skip_provider_parse=True,
         )
         usage.refresh_from_db()
         self.promo.refresh_from_db()

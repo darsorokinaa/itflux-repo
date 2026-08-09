@@ -831,3 +831,40 @@
     justify-items: start;
   }
 }
+
+.td-sub-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 18px;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: var(--td-radius-lg);
+  border: 1px solid rgba(224, 230, 241, 0.95);
+  background: linear-gradient(135deg, rgba(255, 252, 247, 0.95), rgba(240, 246, 255, 0.9));
+  box-shadow: var(--td-shadow);
+}
+
+.td-sub-banner__body {
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.td-sub-banner__body strong {
+  display: block;
+  font-size: 1rem;
+  color: var(--td-ink);
+}
+
+.td-sub-banner__body p {
+  margin: 4px 0 0;
+  color: var(--td-muted, #5b6472);
+  font-size: 0.92rem;
+}
+
+.td-sub-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

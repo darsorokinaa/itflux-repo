@@ -172,13 +172,16 @@ function sanitizeJitsiEvent(event) {
   return safe;
 }
 
-export function registerJoinDiagnostics(api, { onMediaWarning } = {}) {
+export function registerJoinDiagnostics(api, { onMediaWarning, diagnostics } = {}) {
   const events = [
     "videoConferenceJoined",
     "videoConferenceLeft",
     "readyToClose",
+    "participantJoined",
+    "participantLeft",
     "participantRoleChanged",
     "passwordRequired",
+    "conferenceFailed",
     "cameraError",
     "micError",
     "browserSupport",
@@ -197,10 +200,19 @@ export function registerJoinDiagnostics(api, { onMediaWarning } = {}) {
             message: event?.message,
             isFatal: event?.isFatal,
           });
-        } else if (eventName === "peerConnectionFailure") {
-          console.error("[Jitsi] peerConnectionFailure", sanitizeJitsiEvent(event));
+        } else if (eventName === "peerConnectionFailure" || eventName === "conferenceFailed") {
+          console.error(`[Jitsi] ${eventName}`, sanitizeJitsiEvent(event));
         } else {
           console.info(`[Jitsi event] ${eventName}`, sanitizeJitsiEvent(event));
+        }
+        if (eventName === "videoConferenceJoined") {
+          console.info("[Jitsi] conference identity", {
+            eventRoomName: event?.roomName || null,
+            configuredRoomName: diagnostics?.roomName || null,
+            meetingUuid: diagnostics?.meetingUuid || null,
+            role: diagnostics?.role || null,
+            domain: diagnostics?.domain || null,
+          });
         }
         if (eventName === "errorOccurred") {
           const blob = [event?.type, event?.name, event?.message].filter(Boolean).join(" · ");
@@ -218,7 +230,17 @@ export function registerJoinDiagnostics(api, { onMediaWarning } = {}) {
           }
         }
         if (eventName === "passwordRequired") {
-          onMediaWarning?.("Сервер запрашивает пароль/авторизацию для комнаты.");
+          // На своём Jitsi с JWT это почти всегда token-auth, а не пароль комнаты.
+          onMediaWarning?.(
+            diagnostics?.authMode === "jwt"
+              ? "Jitsi запросил авторизацию (JWT). Обновите страницу урока — не вводите пароль вручную и не открывайте сырую ссылку Jitsi без токена."
+              : "Сервер запрашивает пароль/авторизацию для комнаты.",
+          );
+        }
+        if (eventName === "conferenceFailed") {
+          onMediaWarning?.(
+            event?.error || "Не удалось подключиться к конференции (conferenceFailed).",
+          );
         }
       });
     } catch (error) {
@@ -280,6 +302,7 @@ function wireParticipantListeners(api, {
   onBecameModerator,
   onAudioMuteStatusChanged,
   subject,
+  diagnostics,
 }) {
   const bump = () => {
     try {
@@ -309,8 +332,11 @@ function wireParticipantListeners(api, {
     }
     console.info("[Jitsi] videoConferenceJoined", {
       roomName: event?.roomName,
+      configuredRoomName: diagnostics?.roomName || null,
       participantId: event?.id,
       participantCount,
+      role: diagnostics?.role || null,
+      meetingUuid: diagnostics?.meetingUuid || null,
     });
     applySubject();
     onJoined?.(event);
@@ -345,7 +371,7 @@ function wireParticipantListeners(api, {
     });
   }
 
-  registerJoinDiagnostics(api, { onMediaWarning });
+  registerJoinDiagnostics(api, { onMediaWarning, diagnostics });
 }
 
 export function createJitsiIframeEmbed(config, container, {
@@ -388,6 +414,7 @@ export function createJitsiIframeEmbed(config, container, {
     mode: "iframe",
     hasJwt: Boolean(config.jwt),
     authMode: config.authMode || "",
+    diagnostics: config.diagnostics || null,
   });
 
   if (!config.jwt && config.authMode === "jwt") {
@@ -480,10 +507,29 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     hasJwt: Boolean(config.jwt),
     authMode: config.authMode || "",
     subject,
+    diagnostics: config.diagnostics || null,
   });
 
+  if (!config.jwt && config.authMode === "jwt") {
+    const err = new Error("Backend не вернул JWT для Jitsi");
+    err.code = "jwt_missing";
+    err.category = "jwt_missing";
+    throw err;
+  }
+
   const api = new JitsiMeetExternalAPI(domain, options);
-  wireParticipantListeners(api, { ...hooks, subject });
+  wireParticipantListeners(api, {
+    ...hooks,
+    subject,
+    diagnostics: {
+      ...(config.diagnostics || {}),
+      roomName,
+      domain,
+      meetingUuid: config.meeting?.uuid,
+      authMode: config.authMode || "",
+      role: config.meeting?.role || config.diagnostics?.role || "",
+    },
+  });
 
   let conferenceJoined = false;
   const joined = await new Promise((resolve) => {

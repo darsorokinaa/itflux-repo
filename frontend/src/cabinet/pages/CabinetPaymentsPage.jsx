@@ -74,7 +74,7 @@ function debtLabel(amount, currency) {
   return `−${formatted}`;
 }
 
-function AddMenu({ onPayment, onPackage, onMore }) {
+function AddMenu({ onPayment, onPackage, onCharge, onMore }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -99,6 +99,9 @@ function AddMenu({ onPayment, onPackage, onMore }) {
           </button>
           <button type="button" role="menuitem" onClick={() => { setOpen(false); onPackage(); }}>
             Создать абонемент
+          </button>
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); onCharge?.(); }}>
+            Списать из абонемента
           </button>
           <button type="button" role="menuitem" onClick={() => { setOpen(false); onMore?.(); }}>
             Другая операция…
@@ -308,10 +311,16 @@ function CabinetPaymentsPageInner() {
     await refreshDrawer();
   };
 
-  const openChargeFromPackage = (account, lessonIds = null) => {
-    if (account && account !== drawerAccount) setDrawerAccount(account);
+  const openChargeFromPackage = async (account, lessonIds = null) => {
     setChargeLessonIds(lessonIds);
     setChargeOpen(true);
+    if (!account?.id) return;
+    if (account === drawerAccount && (account.available_packages || []).length) {
+      return;
+    }
+    setDrawerAccount(account);
+    const data = await fetchBillingAccount(account.id).catch(() => account);
+    if (data) setDrawerAccount(data);
   };
 
   const openTerms = (accountOrId) => {
@@ -348,6 +357,7 @@ function CabinetPaymentsPageInner() {
         <AddMenu
           onPayment={() => openWizard(null, "lessons")}
           onPackage={() => openWizard(null, "package_buy")}
+          onCharge={() => openWizard(null, "package_charge")}
           onMore={() => openWizard(null, null)}
         />
       </header>

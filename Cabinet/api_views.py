@@ -1349,6 +1349,7 @@ class InteractiveViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
+        SubscriptionLimitService.consume_interactive_creation(self.get_teacher())
         headers = self.get_success_headers({"pk": serializer.instance.pk})
         return self._detail_response(
             serializer.instance,

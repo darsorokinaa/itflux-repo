@@ -234,9 +234,8 @@ def schedule_event_to_json(event):
             "joinStateLabel": ui_state_message(join_state),
             "pageUrl": f"/cabinet/meetings/{meeting.uuid}",
         }
-        # Постоянная ссылка на страницу платформы на всём жизненном цикле комнаты.
-        if not link:
-            link = video_meeting_json["pageUrl"]
+        # Всегда внутренняя страница конференции — не сырой Jitsi URL без JWT.
+        link = video_meeting_json["pageUrl"]
 
     recurrence = None
     series_id = None

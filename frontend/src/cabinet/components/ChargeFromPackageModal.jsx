@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   chargeAccountFromPackage,
+  consumeBillingPackage,
   markEventBillingPaid,
   previewAccountChargeFromPackage,
 } from "../../utils/cabinetAuth";
 import { formatLessonWhen, formatMoney, formatUnits } from "../billing/billingFormat";
 
 /**
- * Модалка: списать неоплаченные уроки из абонемента (в т.ч. задним числом).
+ * Модалка: списать из абонемента неоплаченные уроки или вручную
+ * (урок вне расписания / пропуск, уже учтённый устно).
  */
 export default function ChargeFromPackageModal({
   open,
@@ -20,8 +22,10 @@ export default function ChargeFromPackageModal({
   const packages = account?.available_packages || [];
   const currency = account?.currency || "RUB";
 
+  const [mode, setMode] = useState("lessons"); // lessons | manual
   const [selectedIds, setSelectedIds] = useState([]);
   const [packageId, setPackageId] = useState("");
+  const [units, setUnits] = useState("1");
   const [comment, setComment] = useState("");
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -36,9 +40,12 @@ export default function ChargeFromPackageModal({
     setError("");
     setPreview(null);
     setComment("");
+    setUnits("1");
     setMarkPaidId(null);
     const pkgs = account?.available_packages || [];
     setPackageId(pkgs[0]?.id || "");
+    const hasUnpaid = (account?.unpaid_lessons || []).length > 0;
+    setMode(hasUnpaid ? "lessons" : "manual");
     if (initialLessonIds?.length) {
       setSelectedIds(initialLessonIds.map(String));
     } else {
@@ -141,6 +148,36 @@ export default function ChargeFromPackageModal({
     }
   };
 
+  const confirmManual = async () => {
+    if (!packageId) {
+      setError("Выберите абонемент");
+      return;
+    }
+    const unitsNum = Number(units);
+    if (!unitsNum || unitsNum <= 0) {
+      setError("Укажите количество занятий");
+      return;
+    }
+    if (!String(comment || "").trim()) {
+      setError("Укажите причину списания");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const result = await consumeBillingPackage(packageId, {
+        units: String(unitsNum),
+        comment: comment.trim(),
+      });
+      onDone?.(result);
+      onClose?.();
+    } catch (err) {
+      setError(err.message || "Не удалось списать из абонемента");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const submitMarkPaid = async () => {
     if (!markPaidId) return;
     setBusy(true);
@@ -208,85 +245,166 @@ export default function ChargeFromPackageModal({
           )}
 
           <section className="pay-drawer-section">
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-              <h3 style={{ margin: 0 }}>Неоплаченные уроки</h3>
-              <button
-                type="button"
-                className="pay-btn pay-btn--ghost"
-                disabled={busy || !packageId}
-                onClick={selectEarliest}
-              >
-                Выбрать наиболее ранние
-              </button>
+            <h3>Что списать</h3>
+            <div className="pay-cover-choice">
+              <label className={mode === "lessons" ? "is-active" : ""}>
+                <input
+                  type="radio"
+                  name="charge-mode"
+                  checked={mode === "lessons"}
+                  disabled={unpaid.length === 0}
+                  onChange={() => {
+                    setMode("lessons");
+                    setPreview(null);
+                    setError("");
+                  }}
+                />
+                <span>
+                  <strong>Неоплаченные уроки из расписания</strong>
+                  <em>
+                    {unpaid.length > 0
+                      ? `Погасить задолженность по ${unpaid.length} урокам`
+                      : "Неоплаченных уроков нет"}
+                  </em>
+                </span>
+              </label>
+              <label className={mode === "manual" ? "is-active" : ""}>
+                <input
+                  type="radio"
+                  name="charge-mode"
+                  checked={mode === "manual"}
+                  onChange={() => {
+                    setMode("manual");
+                    setPreview(null);
+                    setError("");
+                  }}
+                />
+                <span>
+                  <strong>Без урока в расписании</strong>
+                  <em>Урок прошёл в другом месте или пропуск, который нужно списать</em>
+                </span>
+              </label>
             </div>
-            {unpaid.length === 0 ? (
-              <p className="pay-hint">Неоплаченных уроков нет</p>
-            ) : (
-              <ul className="pay-unpaid-list pay-unpaid-list--selectable">
-                {unpaid.map((lesson) => {
-                  const id = String(lesson.id);
-                  const checked = selectedIds.includes(id);
-                  const due = Number(lesson.due_amount || 0);
-                  return (
-                    <li key={id}>
-                      <label className="pay-unpaid-check">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggle(id)}
-                        />
-                        <div>
-                          <strong>{formatLessonWhen(lesson.event_starts_at)}</strong>
-                          <span>
-                            {lesson.event_title || "Урок"}
-                            {" · "}
-                            {lesson.duration_minutes || 60}
-                            {" мин"}
-                          </span>
-                          {lesson.unpaid_reason ? (
-                            <span className="pay-hint">{lesson.unpaid_reason}</span>
-                          ) : null}
-                        </div>
-                      </label>
-                      <div className="pay-unpaid-list__right">
-                        {due > 0 ? (
-                          <span className="pay-balance pay-balance--debt">
-                            −{formatMoney(due, currency).replace(/^-/, "")}
-                          </span>
-                        ) : (
-                          <span className="pay-balance pay-balance--muted">—</span>
-                        )}
-                        <button
-                          type="button"
-                          className="pay-btn pay-btn--ghost"
-                          onClick={() => {
-                            setMarkPaidId(id);
-                            setMarkAmount(due > 0 ? String(due) : "");
-                            setMarkComment("");
-                          }}
-                        >
-                          Оплатить отдельно
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
           </section>
 
+          {mode === "lessons" ? (
+            <section className="pay-drawer-section">
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                <h3 style={{ margin: 0 }}>Неоплаченные уроки</h3>
+                <button
+                  type="button"
+                  className="pay-btn pay-btn--ghost"
+                  disabled={busy || !packageId || unpaid.length === 0}
+                  onClick={selectEarliest}
+                >
+                  Выбрать наиболее ранние
+                </button>
+              </div>
+              {unpaid.length === 0 ? (
+                <p className="pay-hint">Неоплаченных уроков нет — выберите списание без урока.</p>
+              ) : (
+                <ul className="pay-unpaid-list pay-unpaid-list--selectable">
+                  {unpaid.map((lesson) => {
+                    const id = String(lesson.id);
+                    const checked = selectedIds.includes(id);
+                    const due = Number(lesson.due_amount || 0);
+                    return (
+                      <li key={id}>
+                        <label className="pay-unpaid-check">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggle(id)}
+                          />
+                          <div>
+                            <strong>{formatLessonWhen(lesson.event_starts_at)}</strong>
+                            <span>
+                              {lesson.event_title || "Урок"}
+                              {" · "}
+                              {lesson.duration_minutes || 60}
+                              {" мин"}
+                            </span>
+                            {lesson.unpaid_reason ? (
+                              <span className="pay-hint">{lesson.unpaid_reason}</span>
+                            ) : null}
+                          </div>
+                        </label>
+                        <div className="pay-unpaid-list__right">
+                          {due > 0 ? (
+                            <span className="pay-balance pay-balance--debt">
+                              −{formatMoney(due, currency).replace(/^-/, "")}
+                            </span>
+                          ) : (
+                            <span className="pay-balance pay-balance--muted">—</span>
+                          )}
+                          <button
+                            type="button"
+                            className="pay-btn pay-btn--ghost"
+                            onClick={() => {
+                              setMarkPaidId(id);
+                              setMarkAmount(due > 0 ? String(due) : "");
+                              setMarkComment("");
+                            }}
+                          >
+                            Оплатить отдельно
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          ) : (
+            <section className="pay-drawer-section">
+              <h3>Сколько списать</h3>
+              <div className="pay-chip-row">
+                {[1, 2, 3].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    className={`pay-chip${units === String(n) ? " pay-chip--active" : ""}`}
+                    onClick={() => setUnits(String(n))}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+              <input
+                className="pay-input"
+                type="number"
+                min="0.5"
+                step="0.5"
+                value={units}
+                onChange={(e) => setUnits(e.target.value)}
+                style={{ marginTop: 8 }}
+              />
+              {selectedPackage ? (
+                <p className="pay-hint" style={{ marginTop: 8 }}>
+                  После списания останется{" "}
+                  {formatUnits(
+                    Math.max(0, Number(selectedPackage.remaining_units || 0) - Number(units || 0)),
+                    selectedPackage.unit_type,
+                  )}
+                </p>
+              ) : null}
+            </section>
+          )}
+
           <section className="pay-drawer-section">
-            <h3>Комментарий</h3>
+            <h3>Комментарий{mode === "manual" ? " *" : ""}</h3>
             <textarea
               className="pay-input"
               rows={2}
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              placeholder="Необязательно"
+              placeholder={mode === "manual"
+                ? "Например: урок у другого преподавателя / пропуск 12.03"
+                : "Необязательно"}
             />
           </section>
 
-          {preview ? (
+          {mode === "lessons" && preview ? (
             <section className="pay-drawer-section">
               <p className="pay-confirm-box">
                 {preview.message || `Будет списано: ${preview.lessons_count} занятий. Остаток после списания: ${preview.remaining_after}.`}
@@ -347,24 +465,37 @@ export default function ChargeFromPackageModal({
           ) : null}
 
           <div className="pay-drawer-actions">
-            <button
-              type="button"
-              className="pay-btn"
-              disabled={busy || !selectedIds.length || !packageId}
-              onClick={runPreview}
-            >
-              Рассчитать
-            </button>
-            <button
-              type="button"
-              className="pay-btn pay-btn--primary"
-              disabled={busy || !selectedIds.length || !packageId || packages.length === 0}
-              onClick={confirmCharge}
-            >
-              {preview
-                ? `Подтвердить списание (${selectedLessons.length})`
-                : "Списать из абонемента"}
-            </button>
+            {mode === "lessons" ? (
+              <>
+                <button
+                  type="button"
+                  className="pay-btn"
+                  disabled={busy || !selectedIds.length || !packageId}
+                  onClick={runPreview}
+                >
+                  Рассчитать
+                </button>
+                <button
+                  type="button"
+                  className="pay-btn pay-btn--primary"
+                  disabled={busy || !selectedIds.length || !packageId || packages.length === 0}
+                  onClick={confirmCharge}
+                >
+                  {preview
+                    ? `Подтвердить списание (${selectedLessons.length})`
+                    : "Списать из абонемента"}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="pay-btn pay-btn--primary"
+                disabled={busy || !packageId || packages.length === 0}
+                onClick={confirmManual}
+              >
+                {busy ? "Списываем…" : `Списать ${units || "—"} из абонемента`}
+              </button>
+            )}
           </div>
         </div>
       </div>

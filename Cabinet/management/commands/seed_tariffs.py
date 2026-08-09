@@ -3,6 +3,12 @@ python manage.py seed_tariffs
 
 Создаёт или обновляет тарифные планы по ТЗ.
 Безопасно запускать повторно — обновляет по slug, не дублирует.
+
+Позиционирование:
+  Старт   — ознакомительный тариф («Мне вообще подходит Поток?»)
+  Учитель — полноценный кабинет для регулярной работы
+  Профи   — без лимитов + основная библиотека
+  Премиум — весь контент и максимум возможностей
 """
 
 from decimal import Decimal
@@ -16,24 +22,25 @@ TARIFFS = [
         "slug": "start",
         "name": "Старт",
         "description": (
-            "Бесплатный старт: кабинет, базовые материалы, ученики и группы "
-            "в пределах лимита."
+            "Бесплатный ознакомительный тариф: несколько учеников, "
+            "домашние задания, проверка работ и пробные лимиты генератора и тетрадей. "
+            "Рабочая платформа начинается с тарифа «Учитель»."
         ),
-        "short_description": "Бесплатно для знакомства с платформой",
+        "short_description": "Для знакомства с платформой",
         "badge_text": "",
         "price_month": Decimal("0"),
         "price_year": Decimal("0"),
         "max_students": 5,
         "max_groups": 2,
         "max_lessons": 10,
-        "max_interactives": 5,
-        "max_variants_monthly": 30,
-        "max_workbooks_monthly": 10,
+        "max_interactives": 3,
+        "max_variants_monthly": 20,
+        "max_workbooks_monthly": 5,
         "content_access_rank": 0,
         "monthly_library_promise": False,
         "cta_type": TariffPlan.CtaType.REGISTER,
         "ai_requests_monthly_limit": 10,
-        "max_storage_mb": 256,
+        "max_storage_mb": 512,
         "has_homework": True,
         "has_review": True,
         "has_basic_notifications": False,
@@ -56,24 +63,24 @@ TARIFFS = [
         "slug": "teacher",
         "name": "Учитель",
         "description": (
-            "Для репетитора и школьного учителя: больше учеников, "
-            "библиотека уровня «Учитель», уведомления."
+            "Полноценный кабинет преподавателя: расписание, журнал, "
+            "видеозанятия и регулярная работа с учениками."
         ),
-        "short_description": "Для активной практики с учениками",
+        "short_description": "Для регулярной работы с учениками",
         "badge_text": "",
         "price_month": Decimal("1990"),
         "price_year": Decimal("19900"),
         "max_students": 10,
         "max_groups": 5,
         "max_lessons": 50,
-        "max_interactives": 30,
+        "max_interactives": 10,
         "max_variants_monthly": 100,
-        "max_workbooks_monthly": 40,
+        "max_workbooks_monthly": 30,
         "content_access_rank": 1,
         "monthly_library_promise": True,
         "cta_type": TariffPlan.CtaType.CHECKOUT,
         "ai_requests_monthly_limit": 150,
-        "max_storage_mb": 2048,
+        "max_storage_mb": 1024,
         "has_homework": True,
         "has_review": True,
         "has_basic_notifications": True,
@@ -96,24 +103,24 @@ TARIFFS = [
         "slug": "pro",
         "name": "Профи",
         "description": (
-            "Для опытных преподавателей: расширенная библиотека, симуляторы, "
-            "аналитика и больше лимитов."
+            "Активная работа без лимитов на генератор, тетради и интерактивы "
+            "плюс полная основная библиотека и симуляторы."
         ),
-        "short_description": "Оптимальный выбор для большинства",
+        "short_description": "Для активной работы без лимитов",
         "badge_text": "Рекомендуем",
         "price_month": Decimal("2990"),
         "price_year": Decimal("29900"),
-        "max_students": 40,
-        "max_groups": 15,
+        "max_students": 20,
+        "max_groups": 10,
         "max_lessons": 200,
-        "max_interactives": 150,
-        "max_variants_monthly": 300,
-        "max_workbooks_monthly": 100,
+        "max_interactives": None,
+        "max_variants_monthly": None,
+        "max_workbooks_monthly": None,
         "content_access_rank": 2,
         "monthly_library_promise": True,
         "cta_type": TariffPlan.CtaType.CHECKOUT,
         "ai_requests_monthly_limit": 700,
-        "max_storage_mb": 10240,
+        "max_storage_mb": 3072,
         "has_homework": True,
         "has_review": True,
         "has_basic_notifications": True,
@@ -136,24 +143,24 @@ TARIFFS = [
         "slug": "premium",
         "name": "Премиум",
         "description": (
-            "Максимум материалов и приоритетная поддержка для тех, "
-            "кто ведёт большую нагрузку."
+            "Весь контент платформы: Premium-материалы, межпредметные проекты "
+            "и максимальные возможности кабинета."
         ),
-        "short_description": "Полный доступ к библиотеке",
+        "short_description": "Весь контент и максимум возможностей",
         "badge_text": "",
-        "price_month": Decimal("4990"),
-        "price_year": Decimal("49900"),
-        "max_students": 100,
-        "max_groups": 30,
+        "price_month": Decimal("3990"),
+        "price_year": Decimal("39900"),
+        "max_students": 30,
+        "max_groups": None,
         "max_lessons": 500,
-        "max_interactives": 400,
+        "max_interactives": None,
         "max_variants_monthly": None,
         "max_workbooks_monthly": None,
         "content_access_rank": 3,
         "monthly_library_promise": True,
         "cta_type": TariffPlan.CtaType.CHECKOUT,
         "ai_requests_monthly_limit": 2000,
-        "max_storage_mb": 30720,
+        "max_storage_mb": 10240,
         "has_homework": True,
         "has_review": True,
         "has_basic_notifications": True,
@@ -184,9 +191,9 @@ TARIFFS = [
         "price_month": Decimal("0"),
         "price_year": Decimal("0"),
         "max_students": 500,
-        "max_groups": 100,
+        "max_groups": None,
         "max_lessons": 2000,
-        "max_interactives": 2000,
+        "max_interactives": None,
         "max_variants_monthly": None,
         "max_workbooks_monthly": None,
         "content_access_rank": 4,
@@ -229,12 +236,13 @@ class Command(BaseCommand):
             action = "Создан" if created else "Обновлён"
             self.stdout.write(f"  {action}: {plan.name} ({slug})")
 
-        # Deactivate legacy repetitor if still present (subscriptions remapped in migration).
-        legacy = TariffPlan.objects.filter(slug="repetitor").first()
-        if legacy:
-            legacy.is_active = False
-            legacy.is_public = False
-            legacy.save(update_fields=["is_active", "is_public", "updated_at"])
-            self.stdout.write("  Деактивирован legacy: repetitor")
+        # Deactivate legacy plans if still present (subscriptions remapped in migration).
+        for legacy_slug in ("repetitor", "profi"):
+            legacy = TariffPlan.objects.filter(slug=legacy_slug).first()
+            if legacy:
+                legacy.is_active = False
+                legacy.is_public = False
+                legacy.save(update_fields=["is_active", "is_public", "updated_at"])
+                self.stdout.write(f"  Деактивирован legacy: {legacy_slug}")
 
         self.stdout.write(self.style.SUCCESS(f"\nГотово: {len(TARIFFS)} тарифов."))

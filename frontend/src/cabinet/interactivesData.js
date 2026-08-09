@@ -316,6 +316,55 @@ export function sortInteractives(items, sortId) {
   return list.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 }
 
+/** Общие поля, которые сохраняем при смене типа в билдере. */
+const SHARED_INTERACTIVE_FIELDS = [
+  "id",
+  "title",
+  "subject",
+  "exam",
+  "topic",
+  "subtopic",
+  "taskNumber",
+  "difficulty",
+  "instruction",
+  "status",
+  "access",
+  "usedIn",
+  "results",
+  "backgroundSlug",
+  "cardStyleSlug",
+  "soundPackSlug",
+  "soundEnabled",
+  "backgroundImage",
+  "backgroundImageTone",
+  "customSounds",
+];
+
+/**
+ * Смена типа на одной странице: контент типа сбрасывается, общие настройки остаются.
+ */
+export function switchInteractiveType(prev, nextType) {
+  if (!prev || !nextType || prev.type === nextType) return prev;
+  if (!isInteractiveTypeAvailable(nextType)) return prev;
+  const next = createEmptyInteractive(nextType);
+  const shared = {};
+  for (const key of SHARED_INTERACTIVE_FIELDS) {
+    if (prev[key] !== undefined) shared[key] = prev[key];
+  }
+  // Клиентский черновой id (i…) не переносим — для сохранённых оставляем числовой.
+  if (!prev.id || String(prev.id).startsWith("i")) {
+    delete shared.id;
+  }
+  return {
+    ...next,
+    ...shared,
+    type: nextType,
+    instruction: prev.instruction || next.instruction || "",
+    params: { ...next.params, ...(prev.params || {}) },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export function createEmptyInteractive(type) {
   const base = {
     id: `i${Date.now()}`,

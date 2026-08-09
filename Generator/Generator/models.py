@@ -619,7 +619,7 @@ class Lesson(models.Model):
         ARCHIVED = "archived", "Архив"
 
     class AccessLevel(models.TextChoices):
-        FREE = "free", "Бесплатный"
+        FREE = "free", "Бесплатный (Старт)"
         TEACHER = "teacher", "Учитель"
         PROFESSIONAL = "professional", "Профи"
         PREMIUM = "premium", "Премиум"
@@ -660,10 +660,12 @@ class Lesson(models.Model):
         db_index=True,
     )
     access_level = models.CharField(
+        "Доступно с тарифа",
         max_length=20,
         choices=AccessLevel.choices,
         default=AccessLevel.FREE,
         db_index=True,
+        help_text="Минимальный тариф, с которого материал доступен",
     )
     published_at = models.DateTimeField(null=True, blank=True, db_index=True)
     is_new = models.BooleanField(default=False)
@@ -739,6 +741,13 @@ class InterestingItem(models.Model):
         PUBLISHED = "published", "Опубликован"
         ARCHIVED = "archived", "Архив"
 
+    class AccessLevel(models.TextChoices):
+        FREE = "free", "Бесплатный (Старт)"
+        TEACHER = "teacher", "Учитель"
+        PROFESSIONAL = "professional", "Профи"
+        PREMIUM = "premium", "Премиум"
+        CORPORATE = "corporate", "Корпоративный"
+
     title = models.CharField("Название", max_length=255, db_index=True)
     slug = models.SlugField("Slug", max_length=255, unique=True, db_index=True)
     short_description = models.TextField("Краткое описание", blank=True, default="")
@@ -761,6 +770,13 @@ class InterestingItem(models.Model):
         max_length=20,
         choices=Status.choices,
         default=Status.DRAFT,
+        db_index=True,
+    )
+    access_level = models.CharField(
+        "Доступно с тарифа",
+        max_length=20,
+        choices=AccessLevel.choices,
+        default=AccessLevel.FREE,
         db_index=True,
     )
     cover_image = models.ImageField(
@@ -800,6 +816,7 @@ class InterestingItem(models.Model):
         verbose_name_plural = "Интересное"
         indexes = [
             models.Index(fields=["status", "sort_order"], name="interesting_status_order_idx"),
+            models.Index(fields=["status", "access_level"], name="interesting_status_access_idx"),
         ]
 
     def save(self, *args, **kwargs):

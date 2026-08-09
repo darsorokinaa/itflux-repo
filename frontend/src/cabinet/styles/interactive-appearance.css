@@ -37,14 +37,104 @@
 }
 
 .ix-appearance__option.is-selected {
-  border-color: #2563EB;
+  border-color: #5867e8;
 }
 
 .ix-appearance__swatch {
-  height: 64px;
+  position: relative;
+  height: 72px;
   border-radius: 12px;
   border: 1px solid rgba(15, 23, 42, 0.08);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  background-size: cover;
+  background-position: center;
+}
+
+.ix-appearance__swatch--custom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #f5f7fa;
+  background-size: cover;
+  background-position: center;
+  border-style: dashed;
+}
+
+.ix-appearance__swatch-plus {
+  font-size: 1.4rem;
+  font-weight: 500;
+  color: #5867e8;
+  line-height: 1;
+}
+
+.ix-appearance__check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #5867e8;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.ix-appearance__grid--tiles {
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 12px;
+}
+
+.ix-appearance__grid--swatches {
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 10px;
+}
+
+.ix-appearance__grid--swatches .ix-appearance__option {
+  border-width: 2px;
+  border-radius: 12px;
+}
+
+.ix-appearance__grid--swatches .ix-appearance__card-preview {
+  position: relative;
+  height: 44px;
+  border-radius: 10px;
+}
+
+.ix-appearance__custom-bg-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.ix-appearance--compact {
+  gap: 16px;
+}
+
+.ix-appearance--compact .ix-appearance__section-title {
+  font-size: 0.875rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.ix-appearance__sound-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ix-appearance__sound-btn {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 48px;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 0.875rem;
 }
 
 .ix-appearance__card-preview {
@@ -115,7 +205,7 @@
 
 .ix-appearance__sound-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
 }
 
@@ -123,21 +213,24 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
-  border-radius: 999px;
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  border-radius: 12px;
   border: 1px solid #CBD5E1;
   background: #FFFFFF;
   color: #334155;
-  font-size: 0.8rem;
+  font-size: 0.875rem;
   font-weight: 700;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
 }
 
 .ix-appearance__sound-btn.is-selected {
-  border-color: #2563EB;
-  background: #EFF6FF;
-  color: #1D4ED8;
+  border-color: #5867e8;
+  background: #eef0ff;
+  color: #3d4cc7;
 }
 
 .ix-appearance__sound-btn small {
@@ -528,4 +621,72 @@
   border: 1px solid #E7E5E4;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
   border-radius: 12px;
+}
+
+.ix-appearance__sound-card {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  border: 1px solid #E2E6EC;
+  border-radius: 12px;
+  background: #FFFFFF;
+  overflow: hidden;
+}
+
+.ix-appearance__sound-card.is-selected {
+  border-color: #5867e8;
+  background: #eef0ff;
+}
+
+.ix-appearance__sound-card__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 14px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.ix-appearance__sound-card__title {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #172033;
+}
+
+.ix-appearance__sound-card__desc {
+  font-size: 0.75rem;
+  color: #697386;
+}
+
+.ix-appearance__sound-card__badge {
+  margin-top: 4px;
+  font-size: 0.6875rem;
+  font-weight: 650;
+  color: #5867e8;
+}
+
+.ix-appearance__sound-card__badge--synth {
+  color: #697386;
+}
+
+.ix-appearance__sound-card__play {
+  width: 52px;
+  border: none;
+  border-left: 1px solid #E2E6EC;
+  background: #F8F9FB;
+  color: #172033;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.ix-appearance__sound-card__play:hover {
+  background: #eef0ff;
+  color: #5867e8;
 }

@@ -4,7 +4,9 @@ import {
   formatCorrectAnswerPlain,
 } from "../utils/examAnswerCheck";
 
-export { inferExamTaskPart, isMathLikeSubject } from "../utils/examTaskPart";
+import { inferExamTaskPart, isMathLikeSubject } from "../utils/examTaskPart";
+
+export { inferExamTaskPart, isMathLikeSubject };
 
 function answerValue(raw) {
   if (raw == null) return "";

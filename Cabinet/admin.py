@@ -67,6 +67,7 @@ from .models import (
     StudentInvitation,
     StudentNotifyOverride,
     StudentSubject,
+    SubscriptionPlanChange,
     TariffPlan,
     TeacherApplication,
     TeacherCommunityFeedback,
@@ -844,9 +845,52 @@ class TeacherSubscriptionAdmin(admin.ModelAdmin):
                 "cancelled_at",
             ),
         }),
-        ("Отложенная смена", {"fields": ("scheduled_plan", "scheduled_change_at")}),
+        ("Платёжный метод (T-Bank COF)", {
+            "fields": (
+                "tbank_customer_key",
+                "tbank_rebill_id",
+                "payment_method_mask",
+                "last_renewal_attempt_at",
+                "last_renewal_error",
+            ),
+        }),
+        ("Отложенная смена", {
+            "fields": ("scheduled_plan", "scheduled_change_at", "prepaid_until"),
+        }),
         ("Служебное", {"fields": ("created_at", "updated_at")}),
     )
+
+
+@admin.register(SubscriptionPlanChange)
+class SubscriptionPlanChangeAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "teacher",
+        "from_plan",
+        "to_plan",
+        "status",
+        "reason",
+        "effective_at",
+        "requested_at",
+        "applied_at",
+    )
+    list_filter = ("status", "reason", "to_plan", "from_plan")
+    search_fields = ("teacher__username", "teacher__email")
+    readonly_fields = (
+        "teacher",
+        "subscription",
+        "from_plan",
+        "to_plan",
+        "requested_at",
+        "created_at",
+        "updated_at",
+        "selected_student_ids",
+        "selected_group_ids",
+        "metadata",
+        "payment",
+    )
+    ordering = ("-requested_at",)
+    date_hierarchy = "requested_at"
 
 
 @admin.register(AIUsage)
@@ -876,8 +920,8 @@ class PromoCodeUsageInline(admin.TabularInline):
 @admin.register(PromoCode)
 class PromoCodeAdmin(admin.ModelAdmin):
     list_display = (
-        "code", "discount_type", "discount_value", "bonus_days",
-        "uses_count", "max_uses", "is_active", "valid_from", "valid_until", "created_at",
+        "code", "discount_type", "discount_value", "is_active",
+        "valid_from", "valid_until", "uses_display", "created_at",
     )
     list_filter = ("discount_type", "is_active", "first_payment_only", "stackable_with_referral")
     search_fields = ("code", "description")
@@ -896,6 +940,11 @@ class PromoCodeAdmin(admin.ModelAdmin):
     )
     inlines = [PromoCodeUsageInline]
 
+    @admin.display(description="Used / Limit")
+    def uses_display(self, obj):
+        limit = obj.max_uses if obj.max_uses is not None else "∞"
+        return f"{obj.uses_count} / {limit}"
+
 
 @admin.register(PromoCodeUsage)
 class PromoCodeUsageAdmin(admin.ModelAdmin):
@@ -910,12 +959,12 @@ class PromoCodeUsageAdmin(admin.ModelAdmin):
 class PaymentAdmin(admin.ModelAdmin):
     list_display = (
         "teacher", "plan", "final_amount", "amount", "currency",
-        "status", "provider", "billing_period", "paid_at", "created_at",
+        "status", "provider", "is_recurrent", "billing_period", "paid_at", "created_at",
     )
-    list_filter = ("status", "provider", "currency", "billing_period")
+    list_filter = ("status", "provider", "currency", "billing_period", "is_recurrent")
     search_fields = (
         "teacher__username", "teacher__email",
-        "provider_payment_id", "idempotency_key",
+        "provider_payment_id", "idempotency_key", "order_id", "rebill_id",
     )
     readonly_fields = ("created_at", "updated_at", "idempotency_key")
     ordering = ("-created_at",)
@@ -948,7 +997,10 @@ class AnonymousUsageAdmin(admin.ModelAdmin):
 
 @admin.register(TeacherMonthlyUsage)
 class TeacherMonthlyUsageAdmin(admin.ModelAdmin):
-    list_display = ("teacher", "period_start", "variants_created", "workbooks_created", "updated_at")
+    list_display = (
+        "teacher", "period_start", "variants_created", "workbooks_created",
+        "interactives_created", "updated_at",
+    )
     list_filter = ("period_start",)
     search_fields = ("teacher__username", "teacher__email")
 
@@ -956,33 +1008,36 @@ class TeacherMonthlyUsageAdmin(admin.ModelAdmin):
 @admin.register(ReferralReward)
 class ReferralRewardAdmin(admin.ModelAdmin):
     list_display = (
-        "referrer", "referred_user", "reward_plan", "reward_months",
-        "status", "granted_at", "created_at",
+        "referrer", "referred_user", "reward_type", "reward_days",
+        "status", "granted_at", "applied_at", "created_at",
     )
-    list_filter = ("status",)
+    list_filter = ("status", "reward_type")
     search_fields = ("referrer__username", "referred_user__username")
-    readonly_fields = ("created_at", "granted_at")
+    readonly_fields = ("created_at", "granted_at", "applied_at")
 
 
 class ReferralLinkRegistrationInline(admin.TabularInline):
     model = ReferralLinkRegistration
     extra = 0
-    readonly_fields = ("user", "reward_plan", "reward_months", "expires_at", "registered_at")
+    readonly_fields = (
+        "user", "invitee_discount_eligible", "invitee_discount_percent",
+        "registered_at",
+    )
     can_delete = False
 
 
 @admin.register(ReferralLink)
 class ReferralLinkAdmin(admin.ModelAdmin):
     list_display = (
-        "code", "title", "reward_plan", "reward_months",
+        "code", "title", "owner",
         "registrations_count", "max_registrations", "is_active", "valid_until", "created_at",
     )
-    list_filter = ("is_active", "reward_plan")
+    list_filter = ("is_active",)
     search_fields = ("code", "title", "description", "owner__username", "owner__email")
     readonly_fields = ("registrations_count", "created_at", "updated_at")
     fieldsets = (
         (None, {"fields": ("code", "title", "owner", "description", "is_active")}),
-        ("Бонус", {"fields": ("reward_plan", "reward_months")}),
+        ("Legacy", {"fields": ("reward_plan", "reward_months"), "classes": ("collapse",)}),
         ("Ограничения", {"fields": ("max_registrations", "valid_from", "valid_until")}),
         ("Статистика", {"fields": ("registrations_count", "created_at", "updated_at")}),
     )
@@ -991,10 +1046,17 @@ class ReferralLinkAdmin(admin.ModelAdmin):
 
 @admin.register(ReferralLinkRegistration)
 class ReferralLinkRegistrationAdmin(admin.ModelAdmin):
-    list_display = ("referral_link", "user", "reward_plan", "reward_months", "expires_at", "registered_at")
-    list_filter = ("reward_plan", "registered_at")
+    list_display = (
+        "referral_link", "user", "invitee_discount_eligible",
+        "invitee_discount_percent", "registered_at",
+    )
+    list_filter = ("invitee_discount_eligible", "registered_at")
     search_fields = ("referral_link__code", "user__username", "user__email")
-    readonly_fields = ("referral_link", "user", "reward_plan", "reward_months", "expires_at", "registered_at")
+    readonly_fields = (
+        "referral_link", "user", "reward_plan", "reward_months", "expires_at",
+        "invitee_discount_percent", "invitee_discount_eligible",
+        "invitee_discount_used_at", "invitee_discount_payment", "registered_at",
+    )
     ordering = ("-registered_at",)
 
 

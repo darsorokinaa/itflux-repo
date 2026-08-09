@@ -175,6 +175,8 @@ class SubscriptionLimitService:
     @staticmethod
     def can_create_group(teacher: User) -> bool:
         plan = SubscriptionLimitService.get_current_plan(teacher)
+        if plan.max_groups is None:
+            return True
         usage = SubscriptionLimitService.get_usage(teacher)
         return usage["groups"] < plan.max_groups
 
@@ -187,8 +189,13 @@ class SubscriptionLimitService:
     @staticmethod
     def can_create_interactive(teacher: User) -> bool:
         plan = SubscriptionLimitService.get_current_plan(teacher)
-        usage = SubscriptionLimitService.get_usage(teacher)
-        return usage["interactives"] < plan.max_interactives
+        limit = plan.max_interactives
+        if limit is None:
+            return True
+        from .subscription_access import SubscriptionAccessService
+
+        usage = SubscriptionAccessService.get_teacher_monthly_usage(teacher)
+        return usage.interactives_created < limit
 
     @staticmethod
     def can_use_ai(teacher: User, cost_units: int = 1) -> bool:
@@ -219,6 +226,8 @@ class SubscriptionLimitService:
     @staticmethod
     def raise_if_group_limit_reached(teacher: User):
         plan = SubscriptionLimitService.get_current_plan(teacher)
+        if plan.max_groups is None:
+            return
         usage = SubscriptionLimitService.get_usage(teacher)
         if usage["groups"] >= plan.max_groups:
             raise LimitExceeded(
@@ -245,15 +254,35 @@ class SubscriptionLimitService:
     @staticmethod
     def raise_if_interactive_limit_reached(teacher: User):
         plan = SubscriptionLimitService.get_current_plan(teacher)
-        usage = SubscriptionLimitService.get_usage(teacher)
-        if usage["interactives"] >= plan.max_interactives:
+        limit = plan.max_interactives
+        if limit is None:
+            return
+        from .subscription_access import SubscriptionAccessService
+
+        usage = SubscriptionAccessService.get_teacher_monthly_usage(teacher)
+        if usage.interactives_created >= limit:
             raise LimitExceeded(
                 code="INTERACTIVE_LIMIT_REACHED",
-                message="Лимит интерактивов исчерпан",
-                limit=plan.max_interactives,
-                current=usage["interactives"],
+                message="Лимит создания интерактивов на этот месяц исчерпан",
+                limit=limit,
+                current=usage.interactives_created,
                 recommended_plan=_get_next_plan_slug(plan.slug),
             )
+
+    @staticmethod
+    @transaction.atomic
+    def consume_interactive_creation(teacher: User):
+        """Увеличивает месячный счётчик созданных интерактивов."""
+        from django.db.models import F
+        from django.utils import timezone
+
+        from .subscription_access import SubscriptionAccessService
+
+        usage = SubscriptionAccessService.get_teacher_monthly_usage(teacher)
+        type(usage).objects.filter(pk=usage.pk).update(
+            interactives_created=F("interactives_created") + 1,
+            updated_at=timezone.now(),
+        )
 
     @staticmethod
     def raise_if_ai_limit_reached(teacher: User, cost_units: int = 1):
@@ -298,15 +327,23 @@ class PromoCodeService:
         Проверяет промокод для учителя. Не применяет — только валидирует.
         Возвращает объект PromoCode или выбрасывает PromoCodeError.
         """
+        from django.utils import timezone as tz
+
         from .models import PromoCode, PromoCodeUsage
 
         try:
             promo = PromoCode.objects.get(code__iexact=code_str.strip())
         except PromoCode.DoesNotExist:
-            raise PromoCodeError("PROMO_NOT_FOUND", "Промокод не найден")
+            raise PromoCodeError("PROMO_NOT_FOUND", "Промокод не найден.")
 
-        if not promo.is_valid_now():
-            raise PromoCodeError("PROMO_EXPIRED", "Промокод недействителен или истёк")
+        if not promo.is_active:
+            raise PromoCodeError("PROMO_INACTIVE", "Промокод больше не действует.")
+
+        now = tz.now()
+        if promo.valid_from and now < promo.valid_from:
+            raise PromoCodeError("PROMO_NOT_STARTED", "Промокод пока недоступен.")
+        if promo.valid_until and now > promo.valid_until:
+            raise PromoCodeError("PROMO_EXPIRED", "Срок действия промокода истёк.")
 
         # Глобальный лимит с учётом активных резервов (uses_count растёт только после оплаты).
         if promo.max_uses is not None:
@@ -315,9 +352,8 @@ class PromoCodeService:
                 status=PromoCodeUsage.Status.RESERVED,
             ).count()
             if int(promo.uses_count or 0) + reserved >= promo.max_uses:
-                raise PromoCodeError("PROMO_EXPIRED", "Промокод недействителен или истёк")
+                raise PromoCodeError("PROMO_LIMIT", "Промокод уже использован.")
 
-        # Проверка лимита на пользователя (applied + активные reserve)
         user_uses = PromoCodeUsage.objects.filter(
             promo_code=promo,
             teacher=teacher,
@@ -327,12 +363,14 @@ class PromoCodeService:
             ],
         ).count()
         if user_uses >= promo.max_uses_per_user:
-            raise PromoCodeError("PROMO_ALREADY_USED", "Промокод уже был использован")
+            raise PromoCodeError("PROMO_ALREADY_USED", "Промокод уже использован.")
 
-        # Проверка применимости к тарифу
         if plan_slug and promo.applicable_plans.exists():
             if not promo.applicable_plans.filter(slug=plan_slug).exists():
-                raise PromoCodeError("PROMO_NOT_APPLICABLE", "Промокод не применим к этому тарифу")
+                raise PromoCodeError(
+                    "PROMO_NOT_APPLICABLE",
+                    "Промокод не действует для этого тарифа.",
+                )
 
         if getattr(promo, "first_payment_only", False):
             from .models import Payment
@@ -340,7 +378,7 @@ class PromoCodeService:
             if Payment.objects.filter(teacher=teacher, status=Payment.Status.PAID).exists():
                 raise PromoCodeError(
                     "PROMO_FIRST_PAYMENT_ONLY",
-                    "Промокод действует только на первый платёж",
+                    "Промокод действует только на первый платёж.",
                 )
 
         return promo
@@ -349,34 +387,18 @@ class PromoCodeService:
     def calculate_discount(promo, original_amount) -> dict:
         """Рассчитывает скидку. Возвращает итоговую сумму и размер скидки."""
         from decimal import Decimal
-        from .models import PromoCode
 
-        amount = Decimal(str(original_amount))
-        discount_value = promo.discount_value
+        from .pricing_service import _q, promo_discount_breakdown
 
-        if promo.discount_type == PromoCode.DiscountType.PERCENT:
-            discount = (amount * discount_value / 100).quantize(Decimal("0.01"))
-            final = max(Decimal("0"), amount - discount)
-        elif promo.discount_type == PromoCode.DiscountType.FIXED:
-            discount = min(amount, discount_value)
-            final = max(Decimal("0"), amount - discount)
-        elif promo.discount_type == PromoCode.DiscountType.FREE_MONTHS:
-            discount = amount
-            final = Decimal("0")
-        elif promo.discount_type == PromoCode.DiscountType.BONUS_DAYS:
-            discount = Decimal("0")
-            final = amount
-        else:
-            discount = Decimal("0")
-            final = amount
-
+        breakdown = promo_discount_breakdown(promo, original_amount)
+        amount = _q(original_amount)
         return {
             "original_amount": str(amount),
-            "discount": str(discount),
-            "final_amount": str(final),
-            "discount_type": promo.discount_type,
-            "discount_value": str(promo.discount_value),
-            "bonus_days": int(getattr(promo, "bonus_days", 0) or 0),
+            "discount": str(breakdown["discount"]),
+            "final_amount": str(breakdown["final_amount"]),
+            "discount_type": breakdown["discount_type"],
+            "discount_value": breakdown["discount_value"],
+            "bonus_days": breakdown["bonus_days"],
         }
 
     @staticmethod

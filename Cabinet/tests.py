@@ -2030,20 +2030,32 @@ class ReferralLinkTests(TestCase):
         from decimal import Decimal
         from Cabinet.models import ReferralLink, TariffPlan
 
+        self.start_plan, _ = TariffPlan.objects.get_or_create(
+            slug="start",
+            defaults={
+                "name": "Старт",
+                "price_month": Decimal("0"),
+                "is_free": True,
+                "sort_order": 0,
+            },
+        )
         self.pro_plan, _ = TariffPlan.objects.get_or_create(
             slug="pro",
             defaults={
                 "name": "Профи",
-                "price_month": Decimal("1990"),
+                "price_month": Decimal("2990"),
                 "max_students": 60,
                 "sort_order": 2,
             },
         )
+        self.owner = User.objects.create_user("ref_owner", "owner@test.ru", "pass")
+        Profile.objects.filter(user=self.owner).update(role=Profile.Role.TEACHER)
         self.referral = ReferralLink.objects.create(
             code="PARTNER3M",
             title="Партнёрская ссылка",
+            owner=self.owner,
             reward_plan=self.pro_plan,
-            reward_months=3,
+            reward_months=0,
         )
 
     def test_referral_preview(self):
@@ -2054,58 +2066,49 @@ class ReferralLinkTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         data = response.json()
         self.assertTrue(data["valid"])
-        self.assertEqual(data["reward_months"], 3)
-        self.assertEqual(data["reward_plan"]["slug"], "pro")
+        self.assertEqual(data["invitee_discount_percent"], 50)
+        self.assertEqual(data["referrer_bonus_days"], 14)
 
     def test_teacher_registration_applies_referral_bonus(self):
-        from django.test import Client
-        from Cabinet.models import TeacherSubscription
+        from Cabinet.models import ReferralLinkRegistration, TeacherSubscription
+        from Cabinet.referral_service import ReferralService
 
-        client = Client()
-        response = client.post(
-            "/api/cabinet/register/",
-            data={
-                "email": "ref_teacher@test.ru",
-                "password": "StrongPass123!",
-                "password_confirm": "StrongPass123!",
-                "role": "teacher",
-                "referral_code": "PARTNER3M",
-            },
-            content_type="application/json",
+        user = User.objects.create_user("ref_teacher", "ref_teacher@test.ru", "StrongPass123!")
+        Profile.objects.filter(user=user).update(role=Profile.Role.TEACHER)
+        TeacherSubscription.objects.get_or_create(
+            teacher=user,
+            defaults={"plan": self.start_plan, "status": "active"},
         )
-        self.assertEqual(response.status_code, 201, response.content)
-        data = response.json()
-        self.assertTrue(data.get("referral_applied"))
-        self.assertEqual(data["referral_reward"]["plan_slug"], "pro")
-        self.assertEqual(data["referral_reward"]["reward_months"], 3)
+        result = ReferralService.apply_on_registration(user, "PARTNER3M")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["invitee_discount_percent"], 50)
 
-        user_id = data["user"]["id"]
-        from django.contrib.auth.models import User
-        user = User.objects.get(pk=user_id)
+        reg = ReferralLinkRegistration.objects.get(user=user)
+        self.assertTrue(reg.invitee_discount_eligible)
         sub = TeacherSubscription.objects.get(teacher=user)
-        self.assertEqual(sub.plan.slug, "pro")
-        self.assertEqual(sub.status, "trial")
-        self.assertIsNotNone(sub.expires_at)
+        self.assertNotEqual(sub.source, "referral")
 
         self.referral.refresh_from_db()
         self.assertEqual(self.referral.registrations_count, 1)
 
     def test_referral_code_forces_teacher_registration(self):
         from django.test import Client
+        from unittest.mock import patch
         from Cabinet.models import ReferralLinkRegistration
 
         client = Client()
-        response = client.post(
-            "/api/cabinet/register/",
-            data={
-                "email": "ref_student@test.ru",
-                "password": "StrongPass123!",
-                "password_confirm": "StrongPass123!",
-                "role": "student",
-                "referral_code": "PARTNER3M",
-            },
-            content_type="application/json",
-        )
+        with patch("Cabinet.views.rate_limit_check", return_value=True):
+            response = client.post(
+                "/api/cabinet/register/",
+                data={
+                    "email": "ref_student@test.ru",
+                    "password": "StrongPass123!",
+                    "password_confirm": "StrongPass123!",
+                    "role": "student",
+                    "referral_code": "PARTNER3M",
+                },
+                content_type="application/json",
+            )
         self.assertEqual(response.status_code, 201, response.content)
         data = response.json()
         self.assertEqual(data["user"]["role"], "teacher")

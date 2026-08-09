@@ -708,7 +708,7 @@ def apply_material_operation(
             raise VideoMeetingError("Сессия материала не совпадает", code="session_mismatch", status=409)
         role = access.role
         can_collab = user_can_collaborate(session, user, role)
-        if role == "student" and action not in ("cursor", "pointer") and not can_collab:
+        if role == "student" and action not in ("cursor", "pointer", "student_viewport") and not can_collab:
             raise VideoMeetingError("Режим просмотра: действие запрещено", code="view_only", status=403)
         if role not in ("teacher", "coteacher", "staff", "student"):
             raise VideoMeetingError("Нет прав", code="forbidden", status=403)

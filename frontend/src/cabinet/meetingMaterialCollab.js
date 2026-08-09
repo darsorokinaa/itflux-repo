@@ -209,6 +209,10 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
         handlers.onCursor?.(data);
         return;
       }
+      if (data.type === "material.student_viewport") {
+        handlers.onStudentViewport?.(data);
+        return;
+      }
       if (data.type === "material.follow_status" || data.type === "FOLLOW_TEACHER_CHANGED") {
         handlers.onFollowStatus?.(data);
         return;
@@ -290,6 +294,16 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     });
   }, THROTTLE.ANNOTATION_PREVIEW_MS);
 
+  const sendStudentViewportThrottled = throttle((payload) => {
+    send({
+      type: "material.student_viewport",
+      action: "student_viewport",
+      session_id: sessionId,
+      operation_id: newId(),
+      payload: payload || {},
+    });
+  }, THROTTLE.SCROLL_MS);
+
   return {
     getVersion: () => version,
     getSessionId: () => sessionId,
@@ -363,6 +377,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     sendCursor: (x, y) => sendCursorThrottled(x, y),
     sendPointer: (x, y) => sendPointerThrottled(x, y),
     sendAnnotationPreview,
+    sendStudentViewport: (payload) => sendStudentViewportThrottled(payload),
     close: () => {
       closed = true;
       if (reconnectTimer) window.clearTimeout(reconnectTimer);

@@ -299,6 +299,11 @@ urlpatterns = [
         name="billing_package_adjust",
     ),
     path(
+        "billing/packages/<uuid:package_id>/consume/",
+        billing_api.BillingPackageConsumeView.as_view(),
+        name="billing_package_consume",
+    ),
+    path(
         "billing/packages/<uuid:package_id>/settle-unpaid/",
         billing_api.BillingPackageSettleUnpaidView.as_view(),
         name="billing_package_settle_unpaid",
@@ -397,6 +402,11 @@ urlpatterns = [
     path("usage/variant-check/", subscription_api.VariantUsageCheckView.as_view(), name="usage_variant_check"),
     path("content/access-check/", subscription_api.ContentAccessCheckView.as_view(), name="content_access_check"),
     path("subscription/change-plan/", subscription_api.SubscriptionChangePlanView.as_view(), name="subscription_change_plan"),
+    path(
+        "subscription/cancel-pending-plan/",
+        subscription_api.SubscriptionCancelPendingPlanView.as_view(),
+        name="subscription_cancel_pending_plan",
+    ),
     path("subscription/manage/", subscription_api.SubscriptionManageView.as_view(), name="subscription_manage"),
     path("subscription/create-payment/", subscription_api.SubscriptionCreatePaymentView.as_view(), name="subscription_create_payment"),
     path(

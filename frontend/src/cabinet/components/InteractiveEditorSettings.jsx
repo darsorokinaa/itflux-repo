@@ -1,5 +1,4 @@
 import { useState } from "react";
-import AppearanceSettings from "./AppearanceSettings";
 import {
   ACCESS_OPTIONS,
   getStatusMeta,
@@ -8,19 +7,45 @@ import {
   DIFFICULTY_CHIPS,
   EXAM_CHIPS,
   SUBJECT_CHIPS,
-  TYPE_SEGMENTS,
 } from "../interactivesEditorUtils";
 
-function EditorAccordion({ title, children, defaultOpen = false }) {
+export function BuilderSection({
+  title,
+  hint,
+  meta,
+  collapsible = false,
+  defaultOpen = true,
+  children,
+  className = "",
+}) {
   const [open, setOpen] = useState(defaultOpen);
+  const showBody = !collapsible || open;
+
   return (
-    <div className="ix-ed-accordion">
-      <button type="button" className="ix-ed-accordion__head" onClick={() => setOpen((v) => !v)}>
-        <span>{title}</span>
-        <span aria-hidden="true">{open ? "▾" : "▸"}</span>
-      </button>
-      {open ? <div className="ix-ed-accordion__body">{children}</div> : null}
-    </div>
+    <section className={`ix-builder-section ${className}`.trim()}>
+      <header className="ix-builder-section__head">
+        <div className="ix-builder-section__titles">
+          {collapsible ? (
+            <button
+              type="button"
+              className="ix-builder-section__toggle"
+              onClick={() => setOpen((v) => !v)}
+              aria-expanded={open}
+            >
+              <h2 className="ix-builder-section__title">{title}</h2>
+              <span className="ix-builder-section__chevron" aria-hidden="true">
+                {open ? "▾" : "▸"}
+              </span>
+            </button>
+          ) : (
+            <h2 className="ix-builder-section__title">{title}</h2>
+          )}
+          {hint ? <p className="ix-builder-section__hint">{hint}</p> : null}
+        </div>
+        {meta ? <div className="ix-builder-section__meta">{meta}</div> : null}
+      </header>
+      {showBody ? <div className="ix-builder-section__body">{children}</div> : null}
+    </section>
   );
 }
 
@@ -65,12 +90,15 @@ function ChipGroup({ options, value, onChange, ariaLabel }) {
   );
 }
 
-function ToggleRow({ label, checked, onChange }) {
+function ToggleRow({ label, description, checked, onChange }) {
   return (
-    <label className="ix-ed-toggle">
+    <label className="ix-ed-toggle ix-ed-toggle--row">
+      <span className="ix-ed-toggle__copy">
+        <span className="ix-ed-toggle__label">{label}</span>
+        {description ? <span className="ix-ed-toggle__desc">{description}</span> : null}
+      </span>
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       <span className="ix-ed-toggle__track" aria-hidden="true" />
-      <span>{label}</span>
     </label>
   );
 }
@@ -93,13 +121,39 @@ function AccessCards({ value, onChange }) {
   );
 }
 
-export default function InteractiveEditorSettings({
+/** Блок 1: название и инструкция — главный вход в сценарий. */
+export function InteractiveBasicSettings({ data, onChange }) {
+  return (
+    <BuilderSection title="Основное" hint="Назовите интерактив и подскажите ученику, что делать">
+      <label className="ix-ed-field ix-ed-field--hero">
+        <span>Название интерактива</span>
+        <input
+          value={data.title}
+          onChange={(e) => onChange("title", e.target.value)}
+          placeholder="Например: Логические операции"
+        />
+      </label>
+
+      <label className="ix-ed-field ix-ed-field--wide">
+        <span>Инструкция ученику</span>
+        <textarea
+          rows={2}
+          value={data.instruction}
+          onChange={(e) => onChange("instruction", e.target.value)}
+          placeholder="Короткая подсказка перед началом"
+        />
+      </label>
+    </BuilderSection>
+  );
+}
+
+/** Блок «Дополнительно»: предмет, доступ, тумблеры. */
+export function InteractiveAdvancedSettings({
   data,
   onChange,
   onParamsChange,
   onPublish,
   onUnpublish,
-  typeLocked = true,
 }) {
   const statusMeta = getStatusMeta(data.status);
   const isPublished = data.status === "published" || data.status === "assigned";
@@ -111,23 +165,14 @@ export default function InteractiveEditorSettings({
   };
 
   return (
-    <section className="ix-ed-panel">
-      <header className="ix-ed-panel__head">
-        <h2 className="ix-ed-panel__title">Главное</h2>
-        <p className="ix-ed-panel__hint">Название, тема и ключевые параметры</p>
-      </header>
-
-      <div className="ix-ed-panel__body">
-        <label className="ix-ed-field ix-ed-field--hero">
-          <span>Название интерактива</span>
-          <input
-            value={data.title}
-            onChange={(e) => onChange("title", e.target.value)}
-            placeholder="Например: Логические операции"
-          />
-        </label>
-
-        <label className="ix-ed-field ix-ed-field--hero">
+    <BuilderSection
+      title="Дополнительные настройки"
+      hint="Предмет, доступ и поведение на уроке"
+      collapsible
+      defaultOpen={false}
+    >
+      <div className="ix-ed-extra">
+        <label className="ix-ed-field">
           <span>Тема</span>
           <input
             value={data.topic}
@@ -135,27 +180,6 @@ export default function InteractiveEditorSettings({
             placeholder="О чём это задание"
           />
         </label>
-
-        <div className="ix-ed-field">
-          <span>Тип интерактива</span>
-          {data.type === "wheel" ? (
-            <span className="ix-ed-type-badge">Колесо фортуны</span>
-          ) : (
-            <SegmentedControl
-              options={TYPE_SEGMENTS}
-              value={data.type}
-              onChange={(type) => onChange("type", type)}
-              disabled={typeLocked}
-              ariaLabel="Тип интерактива"
-            />
-          )}
-          {typeLocked && data.type !== "wheel" ? (
-            <p className="ix-ed-field__note">Тип задаётся при создании</p>
-          ) : null}
-          {typeLocked && data.type === "wheel" ? (
-            <p className="ix-ed-field__note">Случайное колесо</p>
-          ) : null}
-        </div>
 
         <div className="ix-ed-field ix-ed-field--secondary">
           <span>Предмет</span>
@@ -195,6 +219,20 @@ export default function InteractiveEditorSettings({
           />
         </div>
 
+        <label className="ix-ed-field">
+          <span>Подтема</span>
+          <input value={data.subtopic} onChange={(e) => onChange("subtopic", e.target.value)} />
+        </label>
+        <label className="ix-ed-field">
+          <span>№ задания</span>
+          <input value={data.taskNumber} onChange={(e) => onChange("taskNumber", e.target.value)} />
+        </label>
+
+        <div className="ix-ed-field">
+          <span>Доступ</span>
+          <AccessCards value={data.access} onChange={(val) => onChange("access", val)} />
+        </div>
+
         <div className="ix-ed-status-row">
           <span className={`ix-status-badge ix-status-badge--${statusMeta.tone}`}>
             {statusMeta.label}
@@ -209,125 +247,107 @@ export default function InteractiveEditorSettings({
             </button>
           )}
         </div>
-      </div>
 
-      <EditorAccordion title="Дополнительно">
-        <div className="ix-ed-extra">
-          <label className="ix-ed-field">
-            <span>Подтема</span>
-            <input value={data.subtopic} onChange={(e) => onChange("subtopic", e.target.value)} />
-          </label>
-          <label className="ix-ed-field">
-            <span>№ задания</span>
-            <input value={data.taskNumber} onChange={(e) => onChange("taskNumber", e.target.value)} />
-          </label>
-
-          <div className="ix-ed-field">
-            <span>Доступ</span>
-            <AccessCards value={data.access} onChange={(val) => onChange("access", val)} />
-          </div>
-
-          <label className="ix-ed-field ix-ed-field--wide">
-            <span>Инструкция для ученика</span>
-            <textarea
-              rows={2}
-              value={data.instruction}
-              onChange={(e) => onChange("instruction", e.target.value)}
-              placeholder="Короткая подсказка перед началом"
-            />
-          </label>
-
-          <div className="ix-ed-toggles">
-            <ToggleRow
-              label={data.type === "quiz" ? "Перемешивать вопросы" : "Перемешивать"}
-              checked={
-                data.type === "matching"
-                  ? data.shufflePairs !== false
-                  : params.shuffleQuestions !== false
-              }
-              onChange={(v) => {
-                if (data.type === "matching") onChange("shufflePairs", v);
-                else setParam("shuffleQuestions", v);
-              }}
-            />
-            {data.type === "quiz" ? (
-              <>
-                <ToggleRow
-                  label="Перемешивать варианты"
-                  checked={params.shuffleOptions !== false}
-                  onChange={(v) => setParam("shuffleOptions", v)}
-                />
-                <ToggleRow
-                  label="Показывать правильный ответ сразу"
-                  checked={params.showCorrectImmediately === true}
-                  onChange={(v) => setParam("showCorrectImmediately", v)}
-                />
-                <ToggleRow
-                  label="Показывать ответы в конце"
-                  checked={params.showAnswersAtEnd !== false}
-                  onChange={(v) => setParam("showAnswersAtEnd", v)}
-                />
-              </>
-            ) : (
+        <div className="ix-ed-toggles">
+          <ToggleRow
+            label={data.type === "quiz" ? "Перемешивать вопросы" : "Перемешивать"}
+            description="Менять порядок при каждом запуске"
+            checked={
+              data.type === "matching"
+                ? data.shufflePairs !== false
+                : params.shuffleQuestions !== false
+            }
+            onChange={(v) => {
+              if (data.type === "matching") onChange("shufflePairs", v);
+              else setParam("shuffleQuestions", v);
+            }}
+          />
+          {data.type === "quiz" ? (
+            <>
               <ToggleRow
-                label="Показывать ответы"
+                label="Перемешивать варианты"
+                checked={params.shuffleOptions !== false}
+                onChange={(v) => setParam("shuffleOptions", v)}
+              />
+              <ToggleRow
+                label="Показывать правильный ответ сразу"
+                checked={params.showCorrectImmediately === true}
+                onChange={(v) => setParam("showCorrectImmediately", v)}
+              />
+              <ToggleRow
+                label="Показывать ответы в конце"
                 checked={params.showAnswersAtEnd !== false}
                 onChange={(v) => setParam("showAnswersAtEnd", v)}
               />
-            )}
+            </>
+          ) : (
             <ToggleRow
-              label="Пояснение после ответа"
-              checked={params.showExplanationAfterAnswer !== false}
-              onChange={(v) => setParam("showExplanationAfterAnswer", v)}
+              label="Показывать ответы"
+              checked={params.showAnswersAtEnd !== false}
+              onChange={(v) => setParam("showAnswersAtEnd", v)}
             />
+          )}
+          <ToggleRow
+            label="Пояснение после ответа"
+            checked={params.showExplanationAfterAnswer !== false}
+            onChange={(v) => setParam("showExplanationAfterAnswer", v)}
+          />
+          <ToggleRow
+            label="Разрешить повтор"
+            description="Ученик может пройти ещё раз"
+            checked={params.allowRetry !== false}
+            onChange={(v) => setParam("allowRetry", v)}
+          />
+          {data.type === "quiz" ? (
             <ToggleRow
-              label="Разрешить повтор"
-              checked={params.allowRetry !== false}
-              onChange={(v) => setParam("allowRetry", v)}
+              label="Записывать результат"
+              checked={params.recordInReport !== false}
+              onChange={(v) => setParam("recordInReport", v)}
             />
-            {data.type === "quiz" ? (
-              <ToggleRow
-                label="Записывать результат"
-                checked={params.recordInReport !== false}
-                onChange={(v) => setParam("recordInReport", v)}
-              />
-            ) : null}
-            {data.type === "matching" ? (
-              <ToggleRow
-                label="Результат сразу"
-                checked={data.showResultImmediately !== false}
-                onChange={(v) => onChange("showResultImmediately", v)}
-              />
-            ) : null}
-            {data.type === "sequence" ? (
-              <>
-                <ToggleRow
-                  label="Несколько попыток"
-                  checked={data.allowMultipleAttempts !== false}
-                  onChange={(v) => onChange("allowMultipleAttempts", v)}
-                />
-                <ToggleRow
-                  label="Ответ при ошибке"
-                  checked={data.showAnswerOnError !== false}
-                  onChange={(v) => onChange("showAnswerOnError", v)}
-                />
-              </>
-            ) : null}
-          </div>
-
-          <label className="ix-ed-field">
-            <span>Количество попыток (0 — без лимита)</span>
-            <input
-              type="number"
-              min={0}
-              value={params.maxAttempts || 0}
-              onChange={(e) => setParam("maxAttempts", Number(e.target.value) || 0)}
+          ) : null}
+          {data.type === "matching" ? (
+            <ToggleRow
+              label="Результат сразу"
+              checked={data.showResultImmediately !== false}
+              onChange={(v) => onChange("showResultImmediately", v)}
             />
-          </label>
-
-          <AppearanceSettings data={data} onChange={onChange} compact />
+          ) : null}
+          {data.type === "sequence" ? (
+            <>
+              <ToggleRow
+                label="Несколько попыток"
+                checked={data.allowMultipleAttempts !== false}
+                onChange={(v) => onChange("allowMultipleAttempts", v)}
+              />
+              <ToggleRow
+                label="Ответ при ошибке"
+                checked={data.showAnswerOnError !== false}
+                onChange={(v) => onChange("showAnswerOnError", v)}
+              />
+            </>
+          ) : null}
         </div>
-      </EditorAccordion>
-    </section>
+
+        <label className="ix-ed-field">
+          <span>Количество попыток (0 — без лимита)</span>
+          <input
+            type="number"
+            min={0}
+            value={params.maxAttempts || 0}
+            onChange={(e) => setParam("maxAttempts", Number(e.target.value) || 0)}
+          />
+        </label>
+      </div>
+    </BuilderSection>
+  );
+}
+
+/** @deprecated используйте InteractiveBasicSettings + InteractiveAdvancedSettings */
+export default function InteractiveEditorSettings(props) {
+  return (
+    <>
+      <InteractiveBasicSettings data={props.data} onChange={props.onChange} />
+      <InteractiveAdvancedSettings {...props} />
+    </>
   );
 }

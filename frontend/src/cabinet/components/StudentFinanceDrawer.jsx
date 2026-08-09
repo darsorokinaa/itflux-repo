@@ -54,7 +54,9 @@ export default function StudentFinanceDrawer({
   const needPackage = !pkg
     || Number(pkg.remaining_units || 0) <= 0
     || ["completed", "expired", "exhausted"].includes(pkg.display_status || pkg.status);
-  const canSettle = unpaid.length > 0 && (account.available_packages || []).length > 0;
+  const hasPackageBalance = (account.available_packages || []).length > 0
+    || (packages.length > 0 && packages.some((p) => Number(p.remaining_units || 0) > 0));
+  const canSettle = unpaid.length > 0 && hasPackageBalance;
   const debt = Number(account.debt_amount ?? summary.debt_amount ?? account.unpaid_lessons_amount ?? 0);
   const credit = Number(account.credit_amount ?? account.balance?.credit ?? 0);
 
@@ -190,14 +192,14 @@ export default function StudentFinanceDrawer({
                   </div>
                 ))
               )}
-              {canSettle ? (
+              {hasPackageBalance ? (
                 <button
                   type="button"
                   className="pay-btn pay-btn--secondary"
                   style={{ marginTop: 10 }}
                   onClick={() => onChargeFromPackage?.(account)}
                 >
-                  Покрыть прошлые уроки абонементом
+                  {canSettle ? "Списать из абонемента" : "Списать занятие из абонемента"}
                 </button>
               ) : null}
             </section>

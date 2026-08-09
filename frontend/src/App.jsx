@@ -383,7 +383,14 @@ function App() {
             />
             <Route path="boards" element={<CabinetBoardsPage />} />
             <Route path="files" element={<CabinetFilesPage />} />
-            <Route path="review/:reviewId" element={<CabinetReviewDetailPage />} />
+            <Route
+              path="review/:reviewId"
+              element={(
+                <ErrorBoundary>
+                  <CabinetReviewDetailPage />
+                </ErrorBoundary>
+              )}
+            />
             <Route path="review" element={<CabinetReviewPage />} />
             <Route path="homework/:homeworkId/edit" element={<CabinetHomeworkEditPage />} />
             <Route path="journal" element={<CabinetJournalPage />} />

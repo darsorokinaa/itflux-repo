@@ -140,7 +140,7 @@ function mapTodayLesson(ev, now) {
 }
 
 export default function CabinetDashboard() {
-  const { user, currentPlan, subscriptionLoading } = useOutletContext();
+  const { user, currentPlan, subscription, subscriptionLoading } = useOutletContext();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -154,6 +154,7 @@ export default function CabinetDashboard() {
   const [journalDash, setJournalDash] = useState(null);
   const firstName = displayName(user).split(" ")[0];
   const planName = currentPlan?.name || "";
+  const subBanner = subscription?.banner || null;
 
   const openHomeworkAssign = async () => {
     setAssignLoading(true);
@@ -378,6 +379,33 @@ export default function CabinetDashboard() {
           <Link to="/cabinet/students?invite=1" className="td-button td-button-glass">Добавить ученика</Link>
         </div>
       </div>
+
+      {subBanner ? (
+        <aside className="td-sub-banner" role="status">
+          <div className="td-sub-banner__body">
+            <strong>
+              {subBanner.auto_renew
+                ? `Автопродление через ${subBanner.days_remaining} ${pluralRu(subBanner.days_remaining, "день", "дня", "дней")}`
+                : `${subBanner.plan_name} заканчивается через ${subBanner.days_remaining} ${pluralRu(subBanner.days_remaining, "день", "дня", "дней")}`}
+            </strong>
+            <p>
+              {subBanner.auto_renew
+                ? `${new Date(subBanner.expires_at).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })} будет списано ${Number(subBanner.next_charge_amount).toLocaleString("ru-RU")} ₽.`
+                : `Подписка действует до ${new Date(subBanner.expires_at).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}.`}
+            </p>
+          </div>
+          <div className="td-sub-banner__actions">
+            {!subBanner.auto_renew ? (
+              <Link to="/cabinet/upgrade" className="td-button td-button-primary">
+                Продлить
+              </Link>
+            ) : null}
+            <Link to="/cabinet/upgrade" className="td-button td-button-glass">
+              Управление подпиской
+            </Link>
+          </div>
+        </aside>
+      ) : null}
 
       <div className="td-workspace">
         <section className="td-main-column">

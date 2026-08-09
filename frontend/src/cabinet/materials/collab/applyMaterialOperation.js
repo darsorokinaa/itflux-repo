@@ -73,8 +73,12 @@ function normalizeAnnotation(payload, authorId, authorRole) {
   const cleanPoints = [];
   for (const point of points.slice(0, MAX_POINTS_PER_STROKE)) {
     if (!Array.isArray(point) || point.length < 2) continue;
-    cleanPoints.push([Number(point[0]), Number(point[1])]);
+    const x = Math.min(1, Math.max(0, Number(point[0])));
+    const y = Math.min(1, Math.max(0, Number(point[1])));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    cleanPoints.push([x, y]);
   }
+  const coordSpace = annotation.coordSpace || annotation.coord_space || null;
   return {
     id: annId,
     tool: String(annotation.tool || "pen").slice(0, 32),
@@ -87,6 +91,7 @@ function normalizeAnnotation(payload, authorId, authorRole) {
     author_role: authorRole,
     created_at: annotation.created_at || annotation.createdAt,
     version: Number(annotation.version) || 1,
+    ...(coordSpace ? { coordSpace: String(coordSpace).slice(0, 32) } : {}),
   };
 }
 

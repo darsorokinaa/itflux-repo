@@ -5,9 +5,17 @@ import InteractivePlayer from "./InteractivePlayer";
 import { fetchInteractive, fetchMeetingMaterialInteractive } from "../../utils/cabinetAuth";
 import {
   THROTTLE,
+  VIEWPORT_THROTTLE_MS,
+  COORD_SPACE_CONTENT_V1,
   createHtmlLessonBridge,
   htmlEventToMaterialOp,
   getCapabilitiesForKind,
+  getMaterialViewportTransform,
+  clientToContentNorm,
+  getVisibleContentViewport,
+  pxWidthToNorm,
+  resolveStrokeWidthPx,
+  isContentCoordSpace,
 } from "../materials/collab";
 import SpreadsheetMaterialView from "./SpreadsheetMaterialView";
 
@@ -177,8 +185,12 @@ export default function SyncedMaterialWorkspace({
   onFollowReturn = null,
   onFollowStatusChange = null,
   onConfigurePermissions = null,
+  studentViewports = {},
+  onSendStudentViewport = null,
 }) {
   const stageRef = useRef(null);
+  const surfaceRef = useRef(null);
+  const mediaRef = useRef(null);
   const hitRef = useRef(null);
   const drawingRef = useRef(null);
   const interactiveRootRef = useRef(null);
@@ -187,6 +199,7 @@ export default function SyncedMaterialWorkspace({
   const undoStackRef = useRef([]);
   const redoStackRef = useRef([]);
   const fieldDebounceRef = useRef(new Map());
+  const transformRef = useRef(null);
   const prefs = useMemo(() => loadToolPrefs(), []);
   const [localStroke, setLocalStroke] = useState(null);
   const [localPointer, setLocalPointer] = useState(null);
@@ -198,6 +211,10 @@ export default function SyncedMaterialWorkspace({
   const [interactiveError, setInteractiveError] = useState("");
   const [localBrowsingAway, setLocalBrowsingAway] = useState(false);
   const [localPage, setLocalPage] = useState(null);
+  const [surfaceSize, setSurfaceSize] = useState({ width: 1, height: 1 });
+  const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [showStudentViewport, setShowStudentViewport] = useState(true);
+  const [studentPreviewMode, setStudentPreviewMode] = useState(false);
 
   const url = material?.openUrl || material?.url || "";
   const text = material?.contentText || material?.text || "";
@@ -382,16 +399,65 @@ export default function SyncedMaterialWorkspace({
     });
   }, [teacherPage, zoom, scroll, effectivelyFollowing, isCollaborative, collaborationPermission]);
 
-  const toNorm = useCallback((clientX, clientY) => {
-    const el = stageRef.current;
-    if (!el) return null;
-    const rect = el.getBoundingClientRect();
-    if (!rect.width || !rect.height) return null;
-    return {
-      x: Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)),
-      y: Math.min(1, Math.max(0, (clientY - rect.top) / rect.height)),
+  const materialKindForTransform = showImage ? "image" : showPdf ? "pdf" : kind;
+
+  const refreshTransform = useCallback(() => {
+    const surface = surfaceRef.current;
+    if (!surface) {
+      transformRef.current = null;
+      return null;
+    }
+    const media = mediaRef.current || iframeRef.current || null;
+    const tx = getMaterialViewportTransform({
+      surfaceEl: surface,
+      mediaEl: media,
+      kind: materialKindForTransform,
+      zoom,
+    });
+    transformRef.current = tx;
+    if (tx?.renderedWidth && tx?.renderedHeight) {
+      setSurfaceSize((prev) => {
+        if (
+          Math.abs(prev.width - tx.renderedWidth) < 0.5
+          && Math.abs(prev.height - tx.renderedHeight) < 0.5
+        ) {
+          return prev;
+        }
+        return { width: tx.renderedWidth, height: tx.renderedHeight };
+      });
+    }
+    return tx;
+  }, [materialKindForTransform, zoom]);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    const surface = surfaceRef.current;
+    if (!stage && !surface) return undefined;
+    refreshTransform();
+    const ro = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(() => { refreshTransform(); })
+      : null;
+    if (ro) {
+      if (stage) ro.observe(stage);
+      if (surface) ro.observe(surface);
+      const media = mediaRef.current || iframeRef.current;
+      if (media) ro.observe(media);
+    }
+    const onWin = () => refreshTransform();
+    window.addEventListener("resize", onWin);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", onWin);
     };
-  }, []);
+  }, [refreshTransform, url, showImage, showPdf, showInteractive, isSpreadsheet, text, page]);
+
+  const toNorm = useCallback((clientX, clientY) => {
+    const tx = transformRef.current || refreshTransform();
+    if (!tx) return null;
+    return clientToContentNorm(clientX, clientY, tx);
+  }, [refreshTransform]);
+
+  const contentWidthForStroke = surfaceSize.width || transformRef.current?.renderedWidth || 1000;
 
   const handlePointerMove = useCallback((e) => {
     if (!toolsCaptureInput) return;
@@ -427,6 +493,7 @@ export default function SyncedMaterialWorkspace({
     } catch {
       /* ignore */
     }
+    refreshTransform();
     const p = toNorm(e.clientX, e.clientY);
     if (!p) return;
     if (tool === "pointer") {
@@ -440,7 +507,10 @@ export default function SyncedMaterialWorkspace({
         if (!canManage && currentUserId != null && Number(ann.author_id) !== Number(currentUserId)) {
           return false;
         }
-        return strokeNearPoint(ann, p.x, p.y, Math.max(0.015, (Number(ann.width) || 3) / 400));
+        const thresh = isContentCoordSpace(ann)
+          ? Math.max(0.012, Number(ann.width) || 0.003)
+          : Math.max(0.015, (Number(ann.width) || 3) / 400);
+        return strokeNearPoint(ann, p.x, p.y, thresh);
       });
       if (hit?.id) {
         onEraseAnnotation?.(hit);
@@ -449,11 +519,14 @@ export default function SyncedMaterialWorkspace({
       }
       return;
     }
+    const uiWidth = tool === "highlighter" ? Math.max(12, penWidth * 3) : penWidth;
+    const normWidth = pxWidthToNorm(uiWidth, contentWidthForStroke);
     const stroke = {
       id: `ann-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       tool: tool === "highlighter" ? "highlighter" : "pen",
       color: tool === "highlighter" ? "rgba(250, 204, 21, 0.55)" : penColor,
-      width: tool === "highlighter" ? Math.max(12, penWidth * 3) : penWidth,
+      width: normWidth,
+      coordSpace: COORD_SPACE_CONTENT_V1,
       points: [[p.x, p.y], [p.x + 0.0001, p.y]],
       page,
       created_at: Date.now(),
@@ -465,6 +538,7 @@ export default function SyncedMaterialWorkspace({
   }, [
     annotations,
     canManage,
+    contentWidthForStroke,
     currentUserId,
     onDrawPreview,
     onEraseAnnotation,
@@ -472,6 +546,7 @@ export default function SyncedMaterialWorkspace({
     page,
     penColor,
     penWidth,
+    refreshTransform,
     toNorm,
     tool,
     toolsCaptureInput,
@@ -525,6 +600,108 @@ export default function SyncedMaterialWorkspace({
     const max = Math.max(1, el.scrollHeight - el.clientHeight);
     el.scrollTop = scroll * max;
   }, [scroll, canManage, canNavigate, material?.openUrl, material?.contentText]);
+
+  // Student → teacher: report visible content viewport (normalized).
+  useEffect(() => {
+    if (canManage || !onSendStudentViewport) return undefined;
+    let timer = null;
+    const emit = () => {
+      const stage = stageRef.current;
+      const surface = surfaceRef.current;
+      if (!stage || !surface) return;
+      refreshTransform();
+      const viewport = getVisibleContentViewport(stage, surface);
+      onSendStudentViewport({
+        materialId: material?.id || material?.materialId || null,
+        page,
+        viewport,
+        zoom,
+        following: Boolean(effectivelyFollowing && !localBrowsingAway),
+        scroll,
+      });
+    };
+    const schedule = () => {
+      if (timer) return;
+      timer = window.setTimeout(() => {
+        timer = null;
+        emit();
+      }, VIEWPORT_THROTTLE_MS);
+    };
+    emit();
+    const stage = stageRef.current;
+    stage?.addEventListener("scroll", schedule, { passive: true });
+    const ro = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(schedule)
+      : null;
+    if (ro && stage) ro.observe(stage);
+    if (ro && surfaceRef.current) ro.observe(surfaceRef.current);
+    window.addEventListener("resize", schedule);
+    return () => {
+      if (timer) window.clearTimeout(timer);
+      stage?.removeEventListener("scroll", schedule);
+      ro?.disconnect();
+      window.removeEventListener("resize", schedule);
+    };
+  }, [
+    canManage,
+    effectivelyFollowing,
+    localBrowsingAway,
+    material?.id,
+    material?.materialId,
+    onSendStudentViewport,
+    page,
+    refreshTransform,
+    scroll,
+    zoom,
+    url,
+    surfaceSize.width,
+    surfaceSize.height,
+  ]);
+
+  const studentOptions = useMemo(() => {
+    return (presence || [])
+      .filter((p) => {
+        const role = String(p.role || p.authorRole || p.author_role || "").toLowerCase();
+        if (role === "teacher" || role === "staff" || role === "coteacher") return false;
+        if (currentUserId != null && Number(p.userId ?? p.user_id) === Number(currentUserId)) return false;
+        return role === "student" || !role;
+      })
+      .map((p) => ({
+        id: String(p.userId ?? p.user_id ?? p.authorId ?? ""),
+        name: p.displayName || p.display_name || "Ученик",
+        following: p.following !== false,
+      }))
+      .filter((p) => p.id);
+  }, [presence, currentUserId]);
+
+  useEffect(() => {
+    if (!canManage) return;
+    if (selectedStudentId && studentOptions.some((s) => s.id === selectedStudentId)) return;
+    if (studentOptions.length) setSelectedStudentId(studentOptions[0].id);
+    else setSelectedStudentId("");
+  }, [canManage, selectedStudentId, studentOptions]);
+
+  const selectedStudentViewport = selectedStudentId
+    ? studentViewports?.[selectedStudentId] || null
+    : null;
+  const selectedStudentMeta = studentOptions.find((s) => s.id === selectedStudentId) || null;
+  const selectedFollowing = selectedStudentViewport?.following
+    ?? selectedStudentMeta?.following
+    ?? true;
+
+  const studentPreviewStyle = useMemo(() => {
+    if (!canManage || !studentPreviewMode || !selectedStudentViewport?.viewport) return undefined;
+    const vp = selectedStudentViewport.viewport;
+    const left = Number(vp.left) || 0;
+    const top = Number(vp.top) || 0;
+    const width = Math.max(0.05, Number(vp.width) || 1);
+    const height = Math.max(0.05, Number(vp.height) || 1);
+    const scale = Math.min(1 / width, 1 / height);
+    return {
+      transform: `scale(${scale}) translate(${-left * 100}%, ${-top * 100}%)`,
+      transformOrigin: "top left",
+    };
+  }, [canManage, studentPreviewMode, selectedStudentViewport]);
 
   // Синхронизация интерактивных полей внутри корневого контейнера (input/select/checkbox).
   useEffect(() => {
@@ -762,53 +939,196 @@ export default function SyncedMaterialWorkspace({
           else onCloseLocal?.();
         }}
       />
+      {canManage && studentOptions.length > 0 ? (
+        <div className="vl-student-viewport-bar" role="group" aria-label="Область просмотра ученика">
+          <label className="vl-student-viewport-bar__select">
+            Ученик:
+            <select
+              value={selectedStudentId}
+              onChange={(e) => {
+                setSelectedStudentId(e.target.value);
+                setStudentPreviewMode(false);
+              }}
+            >
+              {studentOptions.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="vl-student-viewport-bar__check">
+            <input
+              type="checkbox"
+              checked={showStudentViewport}
+              onChange={(e) => setShowStudentViewport(e.target.checked)}
+            />
+            Показать область ученика
+          </label>
+          <button
+            type="button"
+            className={`vl-student-viewport-bar__preview${studentPreviewMode ? " is-active" : ""}`}
+            onClick={() => setStudentPreviewMode((v) => !v)}
+            disabled={!selectedStudentViewport?.viewport}
+          >
+            {studentPreviewMode ? "Обычный вид" : "Как видит ученик"}
+          </button>
+          {selectedStudentMeta ? (
+            <span className="vl-student-viewport-bar__status">
+              {selectedFollowing
+                ? `${selectedStudentMeta.name} следует за вами`
+                : `${selectedStudentMeta.name} смотрит самостоятельно`}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       <div
-        className={`video-lesson-workspace__stage${contentLocked ? " is-locked" : ""}${cursorClass}${isBoard ? " video-lesson-workspace__stage--board" : ""}`}
+        className={`video-lesson-workspace__stage${contentLocked ? " is-locked" : ""}${cursorClass}${isBoard ? " video-lesson-workspace__stage--board" : ""}${studentPreviewMode ? " is-student-preview" : ""}`}
         ref={stageRef}
       >
         <div
           className={`vl-synced-content${toolsCaptureInput ? " is-tools-active" : ""}`}
-          style={zoom !== 1 ? { transform: `scale(${zoom})`, transformOrigin: "top center" } : undefined}
+          style={
+            studentPreviewStyle
+              || (zoom !== 1 ? { transform: `scale(${zoom})`, transformOrigin: "top center" } : undefined)
+          }
           ref={interactiveRootRef}
         >
-          {showInteractive && interactive ? (
-            <div className="vl-synced-interactive">
-              <InteractivePlayer interactive={interactive} bare playing />
-            </div>
-          ) : showInteractive && interactiveError ? (
-            <div className="vl-empty">
-              <p className="vl-empty__title">Интерактив недоступен</p>
-              <p className="vl-empty__text">{interactiveError}</p>
-            </div>
-          ) : isSpreadsheet ? (
-            <SpreadsheetMaterialView
-              url={url}
-              state={state}
-              canEdit={canManage || (isCollaborative && ["edit_content", "full"].includes(collaborationPermission))}
-              onCellUpdate={(payload) => patchState("cell_updated", payload)}
-              onSheetChange={(sheetId) => patchState("sheet_changed", { sheetId })}
-              onSelectionChange={(payload) => patchState("selection_changed", payload)}
-              remoteApplyGuard={remoteApplyGuard}
-            />
-          ) : text && !url ? (
-            <div className="video-lesson-workspace__text">{text}</div>
-          ) : showImage && url ? (
-            <img src={url} alt={material?.title || ""} className="vl-synced-image" draggable={false} />
-          ) : frameSrc ? (
-            <iframe
-              ref={iframeRef}
-              key={frameBaseKey(frameSrc)}
-              title={material?.title || "Материал"}
-              src={frameSrc}
-              className={`video-lesson-workspace__frame${isBoard ? " video-lesson-workspace__frame--board" : ""}`}
-              allow="camera; microphone; display-capture; autoplay; clipboard-read; clipboard-write; fullscreen"
-            />
-          ) : (
-            <div className="vl-empty">
-              <p className="vl-empty__title">Материал недоступен</p>
-              <p className="vl-empty__text">Файл нельзя открыть напрямую. Закройте и откройте материал снова.</p>
-            </div>
-          )}
+          <div
+            className={`vl-material-surface${showImage ? " vl-material-surface--image" : " vl-material-surface--fill"}`}
+            ref={surfaceRef}
+          >
+            {showInteractive && interactive ? (
+              <div className="vl-synced-interactive">
+                <InteractivePlayer interactive={interactive} bare playing />
+              </div>
+            ) : showInteractive && interactiveError ? (
+              <div className="vl-empty">
+                <p className="vl-empty__title">Интерактив недоступен</p>
+                <p className="vl-empty__text">{interactiveError}</p>
+              </div>
+            ) : isSpreadsheet ? (
+              <SpreadsheetMaterialView
+                url={url}
+                state={state}
+                canEdit={canManage || (isCollaborative && ["edit_content", "full"].includes(collaborationPermission))}
+                onCellUpdate={(payload) => patchState("cell_updated", payload)}
+                onSheetChange={(sheetId) => patchState("sheet_changed", { sheetId })}
+                onSelectionChange={(payload) => patchState("selection_changed", payload)}
+                remoteApplyGuard={remoteApplyGuard}
+              />
+            ) : text && !url ? (
+              <div className="video-lesson-workspace__text">{text}</div>
+            ) : showImage && url ? (
+              <img
+                ref={mediaRef}
+                src={url}
+                alt={material?.title || ""}
+                className="vl-synced-image"
+                draggable={false}
+                onLoad={() => refreshTransform()}
+              />
+            ) : frameSrc ? (
+              <iframe
+                ref={(el) => {
+                  iframeRef.current = el;
+                  mediaRef.current = el;
+                }}
+                key={frameBaseKey(frameSrc)}
+                title={material?.title || "Материал"}
+                src={frameSrc}
+                className={`video-lesson-workspace__frame${isBoard ? " video-lesson-workspace__frame--board" : ""}`}
+                allow="camera; microphone; display-capture; autoplay; clipboard-read; clipboard-write; fullscreen"
+              />
+            ) : (
+              <div className="vl-empty">
+                <p className="vl-empty__title">Материал недоступен</p>
+                <p className="vl-empty__text">Файл нельзя открыть напрямую. Закройте и откройте материал снова.</p>
+              </div>
+            )}
+
+            <svg className="vl-synced-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
+              {allStrokes
+                .filter((a) => !a.page || Number(a.page) === page)
+                .map((ann) => {
+                  const pts = (ann.points || [])
+                    .filter((p) => Array.isArray(p) && p.length >= 2)
+                    .map((p) => `${Number(p[0])},${Number(p[1])}`)
+                    .join(" ");
+                  if (!pts) return null;
+                  const px = resolveStrokeWidthPx(ann, surfaceSize.width);
+                  return (
+                    <polyline
+                      key={ann.id}
+                      points={pts}
+                      fill="none"
+                      stroke={ann.color || "#e11d48"}
+                      strokeWidth={px}
+                      strokeOpacity={ann.tool === "highlighter" ? 0.65 : 1}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  );
+                })}
+              {canManage && showStudentViewport && selectedStudentViewport?.viewport
+              && (!selectedStudentViewport.page || Number(selectedStudentViewport.page) === page) ? (
+                <rect
+                  className="vl-student-viewport-frame"
+                  x={Number(selectedStudentViewport.viewport.left) || 0}
+                  y={Number(selectedStudentViewport.viewport.top) || 0}
+                  width={Math.max(0.02, Number(selectedStudentViewport.viewport.width) || 0)}
+                  height={Math.max(0.02, Number(selectedStudentViewport.viewport.height) || 0)}
+                  fill="none"
+                  stroke="rgba(37, 99, 235, 0.85)"
+                  strokeWidth={1.5}
+                  strokeDasharray="4 3"
+                  vectorEffect="non-scaling-stroke"
+                />
+              ) : null}
+            </svg>
+
+            {canManage && showStudentViewport && selectedStudentViewport?.viewport
+            && (!selectedStudentViewport.page || Number(selectedStudentViewport.page) === page) ? (
+              <div
+                className="vl-student-viewport-label"
+                style={{
+                  left: `${(Number(selectedStudentViewport.viewport.left) || 0) * 100}%`,
+                  top: `${(Number(selectedStudentViewport.viewport.top) || 0) * 100}%`,
+                }}
+              >
+                Видимая область: {selectedStudentMeta?.name || "ученик"}
+              </div>
+            ) : null}
+
+            {localPointer && tool === "pointer" ? (
+              <div
+                className="vl-local-pointer"
+                style={{ left: `${localPointer.x * 100}%`, top: `${localPointer.y * 100}%` }}
+                aria-hidden="true"
+              />
+            ) : null}
+            {remoteCursors.map((cursor) => (
+              <div
+                key={cursor.clientId || cursor.authorId || `${cursor.x}-${cursor.y}`}
+                className={`vl-remote-cursor ${roleCursorClass(cursor.authorRole || cursor.role)}`}
+                style={{ left: `${cursor.x * 100}%`, top: `${cursor.y * 100}%` }}
+                aria-hidden="true"
+              >
+                <span className="vl-remote-cursor__dot" />
+                <span className="vl-remote-cursor__label">{cursor.displayName || "Участник"}</span>
+              </div>
+            ))}
+            {toolsCaptureInput ? (
+              <div
+                ref={hitRef}
+                className={`vl-synced-hit vl-synced-hit--${tool}`}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
+                role="presentation"
+              />
+            ) : null}
+          </div>
           {!canManage && localBrowsingAway ? (
             <div className="vl-follow-banner" role="status">
               <span>Вы временно не следуете за учителем</span>
@@ -818,60 +1138,6 @@ export default function SyncedMaterialWorkspace({
             </div>
           ) : null}
         </div>
-        <svg className="vl-synced-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
-          {allStrokes
-            .filter((a) => !a.page || Number(a.page) === page)
-            .map((ann) => {
-              const pts = (ann.points || [])
-                .filter((p) => Array.isArray(p) && p.length >= 2)
-                .map((p) => `${Number(p[0])},${Number(p[1])}`)
-                .join(" ");
-              if (!pts) return null;
-              const px = Math.max(2, Number(ann.width) || 3);
-              return (
-                <polyline
-                  key={ann.id}
-                  points={pts}
-                  fill="none"
-                  stroke={ann.color || "#e11d48"}
-                  strokeWidth={px}
-                  strokeOpacity={ann.tool === "highlighter" ? 0.65 : 1}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  vectorEffect="non-scaling-stroke"
-                />
-              );
-            })}
-        </svg>
-        {localPointer && tool === "pointer" ? (
-          <div
-            className="vl-local-pointer"
-            style={{ left: `${localPointer.x * 100}%`, top: `${localPointer.y * 100}%` }}
-            aria-hidden="true"
-          />
-        ) : null}
-        {remoteCursors.map((cursor) => (
-          <div
-            key={cursor.clientId || cursor.authorId || `${cursor.x}-${cursor.y}`}
-            className={`vl-remote-cursor ${roleCursorClass(cursor.authorRole || cursor.role)}`}
-            style={{ left: `${cursor.x * 100}%`, top: `${cursor.y * 100}%` }}
-            aria-hidden="true"
-          >
-            <span className="vl-remote-cursor__dot" />
-            <span className="vl-remote-cursor__label">{cursor.displayName || "Участник"}</span>
-          </div>
-        ))}
-        {toolsCaptureInput ? (
-          <div
-            ref={hitRef}
-            className={`vl-synced-hit vl-synced-hit--${tool}`}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerUp}
-            role="presentation"
-          />
-        ) : null}
       </div>
     </section>
   );

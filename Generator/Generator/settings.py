@@ -494,7 +494,7 @@ if not DEBUG:
     )
 
 # —— Подписка платформы (SaaS). Не путать с биллингом учеников.
-# Временно выключено: поставьте PAYMENTS_ENABLED=true, когда оплата готова.
+# Оплата тарифов: PAYMENTS_ENABLED=true|false (см. Generator/.env).
 _PAYMENTS_ENABLED_RAW = (os.environ.get("PAYMENTS_ENABLED") or "false").strip().lower()
 PAYMENTS_ENABLED = _PAYMENTS_ENABLED_RAW in ("1", "true", "yes", "on")
 PAYMENT_PROVIDER = (os.environ.get("PAYMENT_PROVIDER") or "mock").strip()

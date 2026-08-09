@@ -144,6 +144,33 @@ def _subscription_payload(sub: TeacherSubscription) -> dict:
             "change_at": sub.scheduled_change_at.isoformat(),
         }
 
+    next_charge = None
+    plan = sub.plan
+    is_paid_plan = bool(
+        plan and not plan.is_free and plan.slug != "start" and sub.is_valid()
+    )
+    from .subscription_downgrade import DowngradeService, is_free_plan
+
+    pending_change = DowngradeService.payload_for_subscription(sub)
+    next_plan = DowngradeService.effective_next_plan(sub) if is_paid_plan else None
+    if is_paid_plan and sub.auto_renew and sub.expires_at and next_plan and not is_free_plan(next_plan):
+        from .pricing_service import base_plan_price
+
+        amount = base_plan_price(next_plan, sub.billing_period or "month")
+        next_charge = {
+            "at": sub.expires_at.isoformat(),
+            "amount": str(amount),
+            "currency": next_plan.currency,
+            "plan_slug": next_plan.slug,
+            "plan_name": next_plan.name,
+            "has_payment_method": bool(sub.tbank_rebill_id),
+            "payment_method_mask": sub.payment_method_mask or None,
+        }
+
+    from .subscription_lifecycle import subscription_banner_payload
+
+    banner = subscription_banner_payload(sub)
+
     return {
         "status": sub.status,
         "source": getattr(sub, "source", "self"),
@@ -168,8 +195,14 @@ def _subscription_payload(sub: TeacherSubscription) -> dict:
         "launch_promo_active": launch_promo_active,
         "plan_name": sub.plan.name if sub.plan_id else None,
         "plan_slug": sub.plan.slug if sub.plan_id else None,
+        "plan_price_month": str(plan.price_month) if plan else None,
         "scheduled_plan": scheduled,
+        "pending_plan_change": pending_change,
         "latest_payment": payment_state,
+        "next_charge": next_charge,
+        "has_payment_method": bool(getattr(sub, "tbank_rebill_id", "")),
+        "payment_method_mask": getattr(sub, "payment_method_mask", "") or None,
+        "banner": banner,
     }
 
 
@@ -188,24 +221,12 @@ def _anonymous_payload() -> dict:
 
 
 def _referral_program_payload(user) -> dict:
-    from .referral_service import get_default_reward_plan
-
-    reward_plan = get_default_reward_plan()
-    # Условия из дефолтов модели / активных ссылок (не хардкод витрины).
-    sample_link = (
-        ReferralLink.objects.filter(is_active=True)
-        .order_by("-created_at")
-        .first()
+    from .pricing_service import (
+        REFERRAL_INVITEE_DISCOUNT_PERCENT,
+        REFERRAL_REFERRER_BONUS_DAYS,
+        is_referral_discount_eligible,
     )
-    invitee_months = (
-        sample_link.reward_months
-        if sample_link
-        else ReferralLink._meta.get_field("reward_months").default
-    )
-    # Награда рефереру за оплату приглашённого — см. ReferralReward.reward_months default.
-    from .models import ReferralReward
-
-    referrer_months = ReferralReward._meta.get_field("reward_months").default
+    from .referral_service import ReferralService
 
     my_link = (
         ReferralLink.objects.filter(owner=user, is_active=True)
@@ -217,38 +238,49 @@ def _referral_program_payload(user) -> dict:
         link_payload = {
             "code": my_link.code,
             "url": f"/cabinet/login?ref={my_link.code}",
-            "reward_months": my_link.reward_months,
-            "reward_plan_name": (
-                my_link.reward_plan.name
-                if my_link.reward_plan_id
-                else (reward_plan.name if reward_plan else None)
-            ),
         }
 
+    stats = ReferralService.referrer_stats(user)
     return {
         "enabled": True,
         "description": (
-            "Приглашайте коллег: приглашённый получает бонусный доступ при регистрации, "
-            "а вы — награду после его первой успешной оплаты."
+            "Приглашайте коллег. Поделитесь персональной ссылкой. "
+            "Коллеге — 50% на первый месяц. Вам — 14 дней подписки после его первой оплаты."
         ),
         "invitee": {
-            "months": invitee_months,
-            "plan_slug": reward_plan.slug if reward_plan else None,
-            "plan_name": reward_plan.name if reward_plan else None,
+            "discount_percent": float(REFERRAL_INVITEE_DISCOUNT_PERCENT),
+            "label": "50% скидка на первый месяц любого платного тарифа",
         },
         "referrer": {
-            "months": referrer_months,
-            "plan_slug": reward_plan.slug if reward_plan else None,
-            "plan_name": reward_plan.name if reward_plan else None,
+            "bonus_days": REFERRAL_REFERRER_BONUS_DAYS,
+            "label": (
+                f"{REFERRAL_REFERRER_BONUS_DAYS} дней текущего тарифа бесплатно "
+                "после первой успешной оплаты коллеги"
+            ),
         },
+        "my_discount": {
+            "eligible": is_referral_discount_eligible(user),
+            "percent": float(REFERRAL_INVITEE_DISCOUNT_PERCENT),
+            "message": (
+                "Ваша скидка по приглашению — 50% на первый месяц любого платного тарифа."
+                if is_referral_discount_eligible(user)
+                else None
+            ),
+        },
+        "stats": {
+            "invited": stats["invited"],
+            "paid": stats["paid"],
+            "bonus_days": stats["bonus_days_total"],
+            "bonus_days_available": stats["bonus_days_available"],
+        },
+        "history": stats["history"],
         "my_link": link_payload,
     }
 
 
 def _get_or_create_teacher_referral_link(user) -> ReferralLink:
-    from .referral_service import get_default_reward_plan
-    import secrets
     import re
+    import secrets
 
     existing = (
         ReferralLink.objects.filter(owner=user, is_active=True)
@@ -267,8 +299,8 @@ def _get_or_create_teacher_referral_link(user) -> ReferralLink:
         code=code,
         title=f"Ссылка {user.get_full_name() or user.username}",
         owner=user,
-        reward_plan=get_default_reward_plan(),
-        reward_months=ReferralLink._meta.get_field("reward_months").default,
+        reward_plan=None,
+        reward_months=0,
         is_active=True,
     )
 
@@ -298,18 +330,22 @@ class SubscriptionUsageView(APIView):
     permission_classes = [IsCabinetTeacher]
 
     def get(self, request):
-        sub = SubscriptionLimitService.get_or_create_subscription(request.user)
-        plan = sub.plan
+        # Сначала эффективный план (может демотировать истёкший → Старт).
+        SubscriptionLimitService.get_or_create_subscription(request.user)
+        plan = SubscriptionLimitService.get_current_plan(request.user)
+        sub = (
+            TeacherSubscription.objects.select_related("plan", "scheduled_plan")
+            .get(teacher=request.user)
+        )
+        # После возможной демоции plan на подписке должен совпадать с effective.
+        if sub.plan_id != plan.pk:
+            sub.plan = plan
         usage = SubscriptionLimitService.get_usage(request.user)
         monthly = SubscriptionAccessService.get_teacher_monthly_usage(request.user)
 
         return Response({
-            "plan": {"name": plan.name, "slug": plan.slug},
-            "subscription": {
-                "status": sub.status,
-                "source": getattr(sub, "source", "self"),
-                "expires_at": sub.expires_at.isoformat() if sub.expires_at else None,
-            },
+            "plan": _plan_short(plan),
+            "subscription": _subscription_payload(sub),
             "limits": {
                 "students": plan.max_students,
                 "groups": plan.max_groups,
@@ -322,7 +358,7 @@ class SubscriptionUsageView(APIView):
                 "students": usage["students"],
                 "groups": usage["groups"],
                 "lessons": usage["lessons"],
-                "interactives": usage["interactives"],
+                "interactives": monthly.interactives_created,
                 "variants": monthly.variants_created,
                 "workbooks": monthly.workbooks_created,
             },
@@ -333,6 +369,9 @@ class SubscriptionUsageView(APIView):
                 "advanced_notifications": plan.has_advanced_notifications,
                 "extended_library": plan.has_extended_library,
                 "multi_teacher": plan.has_multi_teacher,
+                "mass_actions": getattr(plan, "has_mass_actions", False),
+                "analytics": getattr(plan, "has_analytics", False),
+                "simulators": getattr(plan, "has_simulators", False),
             },
         })
 
@@ -347,12 +386,14 @@ class SubscriptionPlansView(APIView):
             TariffPlan.objects.filter(is_active=True)
             .order_by("sort_order", "price_month")
         )
+        SubscriptionLimitService.get_or_create_subscription(request.user)
         current_plan = SubscriptionLimitService.get_current_plan(request.user)
-        sub = SubscriptionLimitService.get_or_create_subscription(request.user)
         sub = (
             TeacherSubscription.objects.select_related("plan", "scheduled_plan")
-            .get(pk=sub.pk)
+            .get(teacher=request.user)
         )
+        if sub.plan_id != current_plan.pk:
+            sub.plan = current_plan
 
         paid_plans = [p for p in plans if not _plan_is_free(p) and p.cta_type != TariffPlan.CtaType.CONTACT]
         year_savings = None
@@ -522,6 +563,22 @@ class SubscriptionManageView(APIView):
                         {"detail": "Подписка истекла. Сначала выберите и оплатите тариф."},
                         status=400,
                     )
+                if _plan_is_free(sub.plan) or (sub.plan and sub.plan.slug == "start"):
+                    return Response(
+                        {"detail": "Автопродление доступно только для платного тарифа."},
+                        status=400,
+                    )
+                if not (sub.tbank_rebill_id or "").strip():
+                    return Response(
+                        {
+                            "detail": (
+                                "Нет сохранённого способа оплаты. "
+                                "Оплатите тариф ещё раз — карта сохранится для автопродления."
+                            ),
+                            "code": "NO_PAYMENT_METHOD",
+                        },
+                        status=400,
+                    )
                 sub.auto_renew = True
                 # Возобновление: снимаем отмену, если период ещё действует.
                 if sub.cancelled_at and (
@@ -545,9 +602,14 @@ class SubscriptionManageView(APIView):
                 })
             sub.auto_renew = False
             sub.save(update_fields=["auto_renew", "updated_at"])
+            ends_note = (
+                f" Тариф продолжит действовать до {sub.expires_at.date().isoformat()}."
+                if sub.expires_at and sub.expires_at > now
+                else ""
+            )
             return Response({
                 "ok": True,
-                "message": "Автопродление отключено.",
+                "message": f"Автопродление отключено.{ends_note}",
                 "subscription": _subscription_payload(sub),
             })
 
@@ -570,6 +632,32 @@ class SubscriptionManageView(APIView):
             return _set_auto_renew(False)
 
         if action == "cancel":
+            # Переход на Старт после окончания оплаченного периода (= downgrade на start).
+            start_plan = TariffPlan.objects.filter(slug="start", is_active=True).first()
+            if (
+                start_plan
+                and sub.is_valid()
+                and sub.expires_at
+                and sub.expires_at > now
+                and not _plan_is_free(sub.plan)
+            ):
+                from .subscription_downgrade import DowngradeService
+
+                try:
+                    DowngradeService.schedule(request.user, start_plan)
+                except ValueError as exc:
+                    return Response({"detail": str(exc)}, status=400)
+                sub = TeacherSubscription.objects.select_related("plan", "scheduled_plan").get(
+                    pk=sub.pk
+                )
+                return Response({
+                    "ok": True,
+                    "message": (
+                        "После окончания текущего периода будет активирован тариф «Старт». "
+                        f"Доступ сохранится до {sub.expires_at.date().isoformat()}."
+                    ),
+                    "subscription": _subscription_payload(sub),
+                })
             if sub.cancelled_at and not sub.auto_renew:
                 return Response({
                     "ok": True,
@@ -578,11 +666,8 @@ class SubscriptionManageView(APIView):
                 })
             sub.auto_renew = False
             sub.cancelled_at = sub.cancelled_at or now
-            # Доступ сохраняем до конца оплаченного периода.
-            # Статус CANCELLED ставим только если срока уже нет.
             if not sub.expires_at or sub.expires_at <= now:
                 sub.status = TeacherSubscription.Status.CANCELLED
-                start_plan = TariffPlan.objects.filter(slug="start", is_active=True).first()
                 if start_plan and sub.plan_id != start_plan.pk and not _plan_is_free(sub.plan):
                     sub.plan = start_plan
                     sub.expires_at = None
@@ -611,6 +696,15 @@ class SubscriptionManageView(APIView):
                 "current_slug": sub.plan.slug if sub.plan_id else None,
             })
 
+        if action == "cancel_pending_plan":
+            from .subscription_downgrade import DowngradeService
+
+            result = DowngradeService.cancel(request.user)
+            sub = TeacherSubscription.objects.select_related("plan", "scheduled_plan").get(
+                pk=sub.pk
+            )
+            return Response({**result, "subscription": _subscription_payload(sub)})
+
         return Response(
             {
                 "detail": (
@@ -626,8 +720,14 @@ class SubscriptionChangePlanView(APIView):
     permission_classes = [IsCabinetTeacher]
 
     def post(self, request):
-        slug = request.data.get("plan_slug")
+        from .subscription_downgrade import DowngradeService, is_downgrade, is_free_plan
+
+        slug = request.data.get("plan_slug") or request.data.get("plan")
         billing_period = request.data.get("billing_period", "month")
+        preview_only = str(request.data.get("preview") or "").lower() in ("1", "true", "yes")
+        confirm = str(request.data.get("confirm") or "").lower() in ("1", "true", "yes")
+        student_ids = request.data.get("student_ids")
+        group_ids = request.data.get("group_ids")
 
         plan = TariffPlan.objects.filter(slug=slug, is_active=True).first()
         if not plan:
@@ -640,21 +740,72 @@ class SubscriptionChangePlanView(APIView):
                 "plan": _plan_short(plan),
             })
 
-        if _plan_is_free(plan):
-            sub = SubscriptionLimitService.get_or_create_subscription(request.user)
+        sub = SubscriptionLimitService.get_or_create_subscription(request.user)
+        current = sub.plan
+
+        # Preview downgrade
+        if preview_only or (
+            is_downgrade(current, plan)
+            and sub.is_valid()
+            and sub.expires_at
+            and sub.expires_at > timezone.now()
+            and not confirm
+        ):
+            preview = DowngradeService.preview(request.user, plan)
+            if preview["can_schedule"] or preview_only:
+                return Response({
+                    "ok": True,
+                    "requires_downgrade_confirm": preview["can_schedule"],
+                    "requires_payment": False,
+                    "preview": preview,
+                    "plan": _plan_short(plan),
+                })
+
+        # Schedule confirmed downgrade (включая Старт).
+        if (
+            is_downgrade(current, plan)
+            and sub.is_valid()
+            and sub.expires_at
+            and sub.expires_at > timezone.now()
+        ):
+            try:
+                result = DowngradeService.schedule(
+                    request.user,
+                    plan,
+                    student_ids=student_ids,
+                    group_ids=group_ids,
+                )
+            except ValueError as exc:
+                return Response({"detail": str(exc), "code": "DOWNGRADE_INVALID"}, status=400)
+            sub = TeacherSubscription.objects.select_related("plan", "scheduled_plan").get(
+                teacher=request.user
+            )
+            return Response({
+                "ok": True,
+                "scheduled": True,
+                "requires_payment": False,
+                "plan": _plan_short(plan),
+                "subscription": _subscription_payload(sub),
+                **result,
+            })
+
+        # Мгновенный Старт только если нет оплаченного периода.
+        if is_free_plan(plan):
             sub.plan = plan
             sub.billing_period = billing_period
             sub.status = TeacherSubscription.Status.ACTIVE
             sub.source = TeacherSubscription.Source.SELF
             sub.expires_at = None
             sub.auto_renew = False
+            sub.scheduled_plan = None
+            sub.scheduled_change_at = None
             sub.save()
             return Response({
                 "ok": True,
                 "plan": _plan_short(plan),
                 "requires_payment": False,
+                "subscription": _subscription_payload(sub),
             })
-
 
         return Response({
             "ok": False,
@@ -664,12 +815,28 @@ class SubscriptionChangePlanView(APIView):
         })
 
 
+class SubscriptionCancelPendingPlanView(APIView):
+    permission_classes = [IsCabinetTeacher]
+
+    def post(self, request):
+        from .subscription_downgrade import DowngradeService
+
+        result = DowngradeService.cancel(request.user)
+        sub = TeacherSubscription.objects.select_related("plan", "scheduled_plan").get(
+            teacher=request.user
+        )
+        return Response({
+            **result,
+            "subscription": _subscription_payload(sub),
+        })
+
+
 class SubscriptionCreatePaymentView(APIView):
     permission_classes = [IsCabinetTeacher]
 
     def post(self, request):
         from .payment_service import PaymentProviderService
-        from .subscription_service import PromoCodeError, PromoCodeService
+        from .subscription_service import PromoCodeError
 
         if not getattr(settings, "PAYMENTS_ENABLED", False):
             return Response(
@@ -680,27 +847,30 @@ class SubscriptionCreatePaymentView(APIView):
                 status=503,
             )
 
-        slug = request.data.get("plan_slug")
-        billing_period = request.data.get("billing_period", "month")
+        slug = request.data.get("plan_slug") or request.data.get("plan")
+        billing_period = (request.data.get("billing_period") or "month").strip().lower()
+        if billing_period in ("monthly", "month"):
+            billing_period = "month"
+        elif billing_period in ("yearly", "year", "annual"):
+            billing_period = "year"
         promo_code = (request.data.get("promo_code") or "").strip()
         idempotency_key = (request.data.get("idempotency_key") or "").strip() or None
+        # Frontend не передаёт amount — цена только на backend.
+        # auto_renew / consent — опционально.
+        consent = request.data.get("auto_renew")
+        if consent is None:
+            consent = request.data.get("consent_auto_renew")
+        discount_info = None
+        if isinstance(consent, bool):
+            discount_info = {"auto_renew": consent}
+        elif str(consent or "").strip().lower() in ("1", "true", "yes", "on"):
+            discount_info = {"auto_renew": True}
 
         plan = TariffPlan.objects.filter(slug=slug, is_active=True).first()
         if not plan:
             return Response({"detail": "Тарифный план не найден."}, status=404)
         if getattr(plan, "cta_type", "") == TariffPlan.CtaType.CONTACT:
             return Response({"detail": "Тариф оформляется по заявке.", "code": "CONTACT_ONLY"}, status=400)
-
-        discount_info = None
-        if promo_code:
-            try:
-                promo = PromoCodeService.validate(request.user, promo_code, slug)
-                discount_info = PromoCodeService.calculate_discount(
-                    promo,
-                    plan.price_year if billing_period == "year" else plan.price_month,
-                )
-            except PromoCodeError as exc:
-                return Response(exc.to_dict(), status=400)
 
         try:
             result = PaymentProviderService.create_payment(
@@ -711,6 +881,8 @@ class SubscriptionCreatePaymentView(APIView):
                 discount_info=discount_info,
                 idempotency_key=idempotency_key,
             )
+        except PromoCodeError as exc:
+            return Response(exc.to_dict(), status=400)
         except ValueError as exc:
             return Response({"detail": str(exc), "code": "PAYMENT_UNAVAILABLE"}, status=503)
         except NotImplementedError as exc:
@@ -781,8 +953,10 @@ class SubscriptionPaymentStatusView(APIView):
 
     @staticmethod
     def _payload(payment: Payment) -> dict:
+        from .subscription_service import SubscriptionLimitService
+
         plan = payment.plan
-        return {
+        payload = {
             "payment_id": payment.pk,
             "status": payment.status,
             "provider": payment.provider,
@@ -793,27 +967,38 @@ class SubscriptionPaymentStatusView(APIView):
             "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
             "is_paid": payment.status == Payment.Status.PAID,
         }
+        if payment.status == Payment.Status.PAID:
+            # Актуальный тариф после активации — для мгновенного обновления UI.
+            sub = SubscriptionLimitService.get_or_create_subscription(
+                payment.teacher, apply_promo=False
+            )
+            sub = (
+                TeacherSubscription.objects.select_related("plan", "scheduled_plan")
+                .filter(pk=sub.pk)
+                .first()
+            )
+            if sub:
+                effective = SubscriptionLimitService.get_current_plan(payment.teacher)
+                payload["subscription"] = _subscription_payload(sub)
+                payload["current_plan"] = _plan_short(effective)
+                payload["current_slug"] = effective.slug
+                payload["plan_slug"] = effective.slug
+                payload["plan_name"] = effective.name
+        return payload
 
 
 class PromoCodeValidateView(APIView):
     permission_classes = [IsCabinetTeacher]
 
     def post(self, request):
-        from .subscription_service import PromoCodeError, PromoCodeService
+        from .pricing_service import calculate_subscription_price, price_payload
+        from .subscription_service import PromoCodeError
 
         code_str = (request.data.get("code") or "").strip()
         plan_slug = (request.data.get("plan_slug") or "").strip() or None
         billing_period = (request.data.get("billing_period") or "month").strip()
         if billing_period not in ("month", "year"):
             billing_period = "month"
-
-        if not code_str:
-            return Response({"detail": "Укажите промокод."}, status=400)
-
-        try:
-            promo = PromoCodeService.validate(request.user, code_str, plan_slug)
-        except PromoCodeError as exc:
-            return Response(exc.to_dict(), status=400)
 
         if plan_slug:
             plan = TariffPlan.objects.filter(slug=plan_slug, is_active=True).first()
@@ -822,22 +1007,33 @@ class PromoCodeValidateView(APIView):
                 TariffPlan.objects.filter(is_active=True, is_recommended=True).first()
                 or SubscriptionLimitService.get_current_plan(request.user)
             )
+        if not plan:
+            return Response({"detail": "Тарифный план не найден."}, status=404)
 
-        discount_info = {}
-        if plan:
-            amount = plan.price_year if billing_period == "year" else plan.price_month
-            discount_info = PromoCodeService.calculate_discount(promo, amount)
+        if not code_str:
+            return Response({"detail": "Укажите промокод.", "code": "PROMO_EMPTY"}, status=400)
 
-        return Response({
+        try:
+            calc = calculate_subscription_price(
+                request.user,
+                plan,
+                billing_period=billing_period,
+                promo_code=code_str,
+                validate_promo=True,
+            )
+        except PromoCodeError as exc:
+            return Response(exc.to_dict(), status=400)
+
+        payload = {
             "valid": True,
-            "code": promo.code,
-            "discount_type": promo.discount_type,
-            "discount_value": str(promo.discount_value),
-            "bonus_days": getattr(promo, "bonus_days", 0),
+            "code": code_str,
             "billing_period": billing_period,
-            "plan_slug": plan.slug if plan else None,
-            **discount_info,
-        })
+            "plan_slug": plan.slug,
+            **price_payload(calc),
+        }
+        if calc.get("message"):
+            payload["message"] = calc["message"]
+        return Response(payload)
 
 
 class PaymentWebhookView(APIView):

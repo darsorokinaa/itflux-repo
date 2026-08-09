@@ -782,3 +782,83 @@ class VideoMeetingApiTests(TestCase):
             ReviewItem.objects.filter(teacher=self.teacher)
         )
         self.assertFalse(filtered.filter(pk=orphan.pk).exists())
+
+    def test_domain_with_https_normalized_for_jwt_sub(self):
+        from Cabinet.jitsi_service import get_jitsi_domain, get_jitsi_sub, normalize_jitsi_host
+
+        self.assertEqual(normalize_jitsi_host("https://Lesson.Example.test/path"), "lesson.example.test")
+        self.assertEqual(normalize_jitsi_host("lesson.example.test:443"), "lesson.example.test")
+        with self.settings(
+            JITSI_DOMAIN="https://meet.example.test/",
+            JITSI_SUB="https://meet.example.test",
+            JITSI_AUTH_MODE="jwt",
+        ):
+            self.assertEqual(get_jitsi_domain(), "meet.example.test")
+            self.assertEqual(get_jitsi_sub(), "meet.example.test")
+            meeting = self._create_meeting()
+            start_meeting(meeting=meeting, user=self.teacher)
+            self.client.force_login(self.teacher)
+            res = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/")
+            self.assertEqual(res.status_code, 200, res.content)
+            self.assertEqual(res.data["domain"], "meet.example.test")
+            payload = decode_jitsi_jwt_unsafe_for_tests(res.data["jwt"])
+            self.assertEqual(payload["sub"], "meet.example.test")
+            self.assertEqual(payload["room"], res.data["roomName"])
+
+    def test_auto_jwt_mode_requires_token_even_if_auth_mode_none(self):
+        """Свой домен + APP_ID/SECRET → JWT обязателен, даже при AUTH_MODE=none."""
+        with self.settings(
+            JITSI_DOMAIN="meet.example.test",
+            JITSI_AUTH_MODE="none",
+            JITSI_APP_ID="itflux-test",
+            JITSI_APP_SECRET="test-secret-not-for-production-32b",
+            JITSI_SUB="meet.example.test",
+        ):
+            meeting = self._create_meeting()
+            start_meeting(meeting=meeting, user=self.teacher)
+            self.client.force_login(self.student_user)
+            res = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/")
+            self.assertEqual(res.status_code, 200, res.content)
+            self.assertEqual(res.data["authMode"], "jwt")
+            self.assertTrue(res.data["jwt"])
+            self.assertEqual(res.data["passwordRequired"], False)
+            self.assertIsNone(res.data["conferencePassword"])
+            self.assertEqual(res.data["diagnostics"]["roomName"], res.data["roomName"])
+            self.assertEqual(res.data["diagnostics"]["jwtRoom"], res.data["roomName"])
+
+    def test_invite_reuses_existing_conference_room(self):
+        meeting, created = get_or_create_meeting_for_event(event=self.event, created_by=self.teacher)
+        self.assertTrue(created)
+        room = meeting.room_name
+        again, created_again = get_or_create_meeting_for_event(event=self.event, created_by=self.teacher)
+        self.assertFalse(created_again)
+        self.assertEqual(again.pk, meeting.pk)
+        self.assertEqual(again.room_name, room)
+        start_meeting(meeting=meeting, user=self.teacher)
+        from Cabinet.video_meeting_service import build_join_config
+
+        teacher_cfg = build_join_config(meeting=meeting, user=self.teacher)
+        student_cfg = build_join_config(meeting=meeting, user=self.student_user)
+        self.assertEqual(teacher_cfg["roomName"], student_cfg["roomName"])
+        self.assertEqual(teacher_cfg["roomName"], room)
+        self.assertEqual(teacher_cfg["diagnostics"]["jwtRoom"], student_cfg["diagnostics"]["jwtRoom"])
+        self.assertEqual(teacher_cfg["diagnostics"]["jwtRoom"], room)
+
+    def test_different_lessons_get_different_rooms(self):
+        m1, _ = get_or_create_meeting_for_event(event=self.event, created_by=self.teacher)
+        other = create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": "Другой урок",
+                "starts_at": self.starts + timedelta(days=1),
+                "ends_at": self.ends + timedelta(days=1),
+                "event_type": "individual_lesson",
+                "format": "online",
+                "notify_participants": False,
+            },
+            student_ids=[self.student.pk],
+            notify=False,
+        )
+        m2, _ = get_or_create_meeting_for_event(event=other, created_by=self.teacher)
+        self.assertNotEqual(m1.room_name, m2.room_name)
+        self.assertNotEqual(m1.uuid, m2.uuid)

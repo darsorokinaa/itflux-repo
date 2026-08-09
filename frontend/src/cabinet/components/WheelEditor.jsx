@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { BuilderSection } from "./InteractiveEditorSettings";
 import {
   createEmptySegment,
   duplicateWheelSegment,
@@ -7,29 +8,6 @@ import {
   SPIN_DURATION_CHIPS,
   WHEEL_SEGMENT_COLORS,
 } from "../wheelUtils";
-
-function EditorAccordion({ title, children, defaultOpen = false }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="ix-ed-accordion">
-      <button type="button" className="ix-ed-accordion__head" onClick={() => setOpen((v) => !v)}>
-        <span>{title}</span>
-        <span aria-hidden="true">{open ? "▾" : "▸"}</span>
-      </button>
-      {open ? <div className="ix-ed-accordion__body">{children}</div> : null}
-    </div>
-  );
-}
-
-function ToggleRow({ label, checked, onChange }) {
-  return (
-    <label className="ix-ed-toggle">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <span className="ix-ed-toggle__track" aria-hidden="true" />
-      <span>{label}</span>
-    </label>
-  );
-}
 
 function ColorPalette({ value, onChange }) {
   return (
@@ -65,13 +43,15 @@ export default function WheelEditor({
   data,
   onSegmentsChange,
   onSettingsChange,
-  EditorItemShell,
   openIndex,
   setOpenIndex,
   isMobile,
 }) {
   const segments = data.segments || [];
   const settings = normalizeWheelSettings(data.wheelSettings);
+  const [dragIndex, setDragIndex] = useState(null);
+  const [overIndex, setOverIndex] = useState(null);
+  const [menuIndex, setMenuIndex] = useState(null);
 
   const updateSegment = (index, field, value) => {
     const next = segments.map((item, i) => (i === index ? { ...item, [field]: value } : item));
@@ -79,23 +59,25 @@ export default function WheelEditor({
   };
 
   const addSegment = () => {
-    const next = [...segments, createEmptySegment(segments.length + 1)];
-    onSegmentsChange(next.map((item, i) => ({ ...item, order: i + 1 })));
-    setOpenIndex(next.length - 1);
-  };
-
-  const removeSegment = (index) => {
-    const next = segments.filter((_, i) => i !== index).map((item, i) => ({ ...item, order: i + 1 }));
-    onSegmentsChange(next);
-    setOpenIndex(Math.max(0, index - 1));
+    onSegmentsChange([...segments, createEmptySegment(segments.length + 1)]);
+    setOpenIndex(segments.length);
   };
 
   const duplicateSegment = (index) => {
     onSegmentsChange(duplicateWheelSegment(segments, index));
-    setOpenIndex(segments.length);
+    setOpenIndex(index + 1);
+    setMenuIndex(null);
+  };
+
+  const removeSegment = (index) => {
+    if (segments.length <= 2) return;
+    onSegmentsChange(segments.filter((_, i) => i !== index));
+    setOpenIndex((prev) => (prev >= index ? Math.max(0, prev - 1) : prev));
+    setMenuIndex(null);
   };
 
   const moveSegment = (from, to) => {
+    if (to < 0 || to >= segments.length || from === to) return;
     onSegmentsChange(reorderWheelSegments(segments, from, to));
     setOpenIndex(to);
   };
@@ -106,116 +88,228 @@ export default function WheelEditor({
 
   return (
     <>
-      <section className="ix-ed-panel">
-        <header className="ix-ed-panel__head">
-          <h2 className="ix-ed-panel__title">Сектора</h2>
-          <p className="ix-ed-panel__hint">Минимум 2 сектора для публикации</p>
-        </header>
-        <div className="ix-ed-panel__body">
-          <div className="ix-ed-items">
-            {segments.map((segment, index) => (
-              <EditorItemShell
-                key={segment.id}
-                index={index}
-                title={`Сектор ${index + 1}`}
-                summary={segment.title?.trim() || "Без названия"}
-                hint={`${segment.points ?? 1} б.`}
-                open={openIndex === index}
-                onToggle={() => setOpenIndex(openIndex === index ? -1 : index)}
-                onDuplicate={() => duplicateSegment(index)}
-                onRemove={() => removeSegment(index)}
-                canRemove={segments.length > 0}
-                onMoveUp={() => moveSegment(index, index - 1)}
-                onMoveDown={() => moveSegment(index, index + 1)}
-                canMoveUp={index > 0}
-                canMoveDown={index < segments.length - 1}
-                isMobile={isMobile}
-              >
-                <div className="ix-ed-fields">
-                  <label className="ix-ed-field ix-ed-field--wide">
-                    <span>Название</span>
+      <BuilderSection
+        title="Содержимое"
+        hint="Секторы колеса — минимум 2 для публикации"
+        meta={
+          <>
+            <span className="ix-builder-section__count">{segments.length}</span>
+            <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={addSegment}>
+              + Добавить
+            </button>
+          </>
+        }
+      >
+        {segments.length === 0 ? (
+          <div className="ix-builder-empty">
+            <p className="ix-builder-empty__title">Секторов пока нет</p>
+            <p className="ix-builder-empty__text">Добавьте задания или варианты для колеса</p>
+            <button type="button" className="cb-btn cb-btn--primary" onClick={addSegment}>
+              + Добавить сектор
+            </button>
+          </div>
+        ) : (
+          <div className="ix-card-list ix-wheel-rows">
+            {segments.map((segment, index) => {
+              const open = openIndex === index;
+              return (
+                <article
+                  key={segment.id || index}
+                  className={[
+                    "ix-card-row",
+                    open ? "is-open" : "",
+                    dragIndex === index ? "is-dragging" : "",
+                    overIndex === index && dragIndex !== index ? "is-over" : "",
+                  ].filter(Boolean).join(" ")}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setOverIndex(index);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    moveSegment(Number(e.dataTransfer.getData("text/plain")), index);
+                    setDragIndex(null);
+                    setOverIndex(null);
+                  }}
+                >
+                  <div className="ix-card-row__bar ix-wheel-row__bar">
+                    {!isMobile ? (
+                      <button
+                        type="button"
+                        className="ix-card-row__drag"
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("text/plain", String(index));
+                          e.dataTransfer.effectAllowed = "move";
+                          setDragIndex(index);
+                        }}
+                        onDragEnd={() => {
+                          setDragIndex(null);
+                          setOverIndex(null);
+                        }}
+                        aria-label="Перетащить"
+                      >
+                        ⋮⋮
+                      </button>
+                    ) : null}
+                    <span
+                      className="ix-wheel-row__swatch"
+                      style={{ background: segment.color || "#5867e8" }}
+                      aria-hidden="true"
+                    />
                     <input
-                      value={segment.title}
+                      className="ix-wheel-row__input"
+                      value={segment.title || ""}
+                      placeholder="Введите текст задания"
                       onChange={(e) => updateSegment(index, "title", e.target.value)}
-                      placeholder="Название сектора"
                     />
-                  </label>
-                  <label className="ix-ed-field ix-ed-field--wide">
-                    <span>Описание</span>
-                    <input
-                      value={segment.description}
-                      onChange={(e) => updateSegment(index, "description", e.target.value)}
-                      placeholder="Необязательно"
-                    />
-                  </label>
-                  <div className="ix-ed-field">
-                    <span>Цвет</span>
-                    <ColorPalette
-                      value={segment.color}
-                      onChange={(color) => updateSegment(index, "color", color)}
-                    />
+                    <div className="ix-card-row__actions">
+                      <button
+                        type="button"
+                        className="ix-card-row__edit"
+                        onClick={() => setOpenIndex(open ? -1 : index)}
+                      >
+                        {open ? "Свернуть" : "Ещё"}
+                      </button>
+                      <div className={`ix-card-row__menu${menuIndex === index ? " is-open" : ""}`}>
+                        <button
+                          type="button"
+                          className="ix-ed-icon-btn"
+                          aria-label="Меню"
+                          onClick={() => setMenuIndex(menuIndex === index ? null : index)}
+                        >
+                          ⋯
+                        </button>
+                        {menuIndex === index ? (
+                          <div className="ix-card-row__menu-pop">
+                            <button type="button" onClick={() => { moveSegment(index, index - 1); setMenuIndex(null); }} disabled={index === 0}>
+                              Выше
+                            </button>
+                            <button type="button" onClick={() => { moveSegment(index, index + 1); setMenuIndex(null); }} disabled={index >= segments.length - 1}>
+                              Ниже
+                            </button>
+                            <button type="button" onClick={() => duplicateSegment(index)}>
+                              Дублировать
+                            </button>
+                            {segments.length > 2 ? (
+                              <button type="button" className="danger" onClick={() => removeSegment(index)}>
+                                Удалить
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
-                  <div className="ix-ed-field">
-                    <span>Баллы</span>
-                    <PointsStepper
-                      value={segment.points}
-                      onChange={(points) => updateSegment(index, "points", points)}
-                    />
-                  </div>
-                </div>
-              </EditorItemShell>
+                  {open ? (
+                    <div className="ix-card-row__editor">
+                      <div className="ix-ed-fields">
+                        <label className="ix-ed-field ix-ed-field--wide">
+                          <span>Описание</span>
+                          <input
+                            value={segment.description || ""}
+                            onChange={(e) => updateSegment(index, "description", e.target.value)}
+                            placeholder="Необязательно"
+                          />
+                        </label>
+                        <div className="ix-ed-field">
+                          <span>Цвет</span>
+                          <ColorPalette
+                            value={segment.color}
+                            onChange={(color) => updateSegment(index, "color", color)}
+                          />
+                        </div>
+                        <div className="ix-ed-field">
+                          <span>Баллы</span>
+                          <PointsStepper
+                            value={segment.points}
+                            onChange={(points) => updateSegment(index, "points", points)}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </BuilderSection>
+
+      <BuilderSection title="Настройки колеса" hint="Поведение при запуске" collapsible defaultOpen={false}>
+        <div className="ix-ed-toggles">
+          <label className="ix-ed-toggle ix-ed-toggle--row">
+            <span className="ix-ed-toggle__copy">
+              <span className="ix-ed-toggle__label">Перемешивать сектора</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={settings.shuffle_segments === true}
+              onChange={(e) => setSetting("shuffle_segments", e.target.checked)}
+            />
+            <span className="ix-ed-toggle__track" aria-hidden="true" />
+          </label>
+          <label className="ix-ed-toggle ix-ed-toggle--row">
+            <span className="ix-ed-toggle__copy">
+              <span className="ix-ed-toggle__label">Разрешить повторное выпадение</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={settings.allow_repeat !== false}
+              onChange={(e) => setSetting("allow_repeat", e.target.checked)}
+            />
+            <span className="ix-ed-toggle__track" aria-hidden="true" />
+          </label>
+          <label className="ix-ed-toggle ix-ed-toggle--row">
+            <span className="ix-ed-toggle__copy">
+              <span className="ix-ed-toggle__label">Удалять сектор после выпадения</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={settings.remove_after_spin === true}
+              onChange={(e) => setSetting("remove_after_spin", e.target.checked)}
+            />
+            <span className="ix-ed-toggle__track" aria-hidden="true" />
+          </label>
+          <label className="ix-ed-toggle ix-ed-toggle--row">
+            <span className="ix-ed-toggle__copy">
+              <span className="ix-ed-toggle__label">Результат в модальном окне</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={settings.show_result_modal !== false}
+              onChange={(e) => setSetting("show_result_modal", e.target.checked)}
+            />
+            <span className="ix-ed-toggle__track" aria-hidden="true" />
+          </label>
+          <label className="ix-ed-toggle ix-ed-toggle--row">
+            <span className="ix-ed-toggle__copy">
+              <span className="ix-ed-toggle__label">Звук вращения</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={settings.sound_enabled !== false}
+              onChange={(e) => setSetting("sound_enabled", e.target.checked)}
+            />
+            <span className="ix-ed-toggle__track" aria-hidden="true" />
+          </label>
+        </div>
+        <div className="ix-ed-field">
+          <span>Длительность вращения</span>
+          <div className="ix-ed-chips">
+            {SPIN_DURATION_CHIPS.map((chip) => (
+              <button
+                key={chip.value}
+                type="button"
+                className={`ix-ed-chip${settings.spin_duration === chip.value ? " is-active" : ""}`}
+                onClick={() => setSetting("spin_duration", chip.value)}
+              >
+                {chip.label}
+              </button>
             ))}
           </div>
-          <button type="button" className="cb-btn cb-btn--outline ix-ed-add-btn" onClick={addSegment}>
-            + Добавить сектор
-          </button>
         </div>
-      </section>
-
-      <EditorAccordion title="Дополнительно">
-        <div className="ix-ed-wheel-settings">
-          <ToggleRow
-            label="Перемешивать сектора"
-            checked={settings.shuffle_segments === true}
-            onChange={(v) => setSetting("shuffle_segments", v)}
-          />
-          <ToggleRow
-            label="Разрешить повторное выпадение"
-            checked={settings.allow_repeat !== false}
-            onChange={(v) => setSetting("allow_repeat", v)}
-          />
-          <ToggleRow
-            label="Удалять сектор после выпадения"
-            checked={settings.remove_after_spin === true}
-            onChange={(v) => setSetting("remove_after_spin", v)}
-          />
-          <ToggleRow
-            label="Показывать результат в модальном окне"
-            checked={settings.show_result_modal !== false}
-            onChange={(v) => setSetting("show_result_modal", v)}
-          />
-          <ToggleRow
-            label="Звук вращения"
-            checked={settings.sound_enabled !== false}
-            onChange={(v) => setSetting("sound_enabled", v)}
-          />
-          <div className="ix-ed-field">
-            <span>Длительность вращения</span>
-            <div className="ix-ed-chips">
-              {SPIN_DURATION_CHIPS.map((chip) => (
-                <button
-                  key={chip.value}
-                  type="button"
-                  className={`ix-ed-chip${settings.spin_duration === chip.value ? " is-active" : ""}`}
-                  onClick={() => setSetting("spin_duration", chip.value)}
-                >
-                  {chip.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </EditorAccordion>
+      </BuilderSection>
     </>
   );
 }

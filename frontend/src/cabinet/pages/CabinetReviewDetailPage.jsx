@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import MathContent from "../../components/MathContent";
 import TaskFileAttachment from "../../components/TaskFileAttachment";
 import {
@@ -291,6 +291,7 @@ export default function CabinetReviewDetailPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setNotFound(false);
     try {
       const data = await fetchReviewItem(reviewId);
       setReview(data);
@@ -299,8 +300,14 @@ export default function CabinetReviewDetailPage() {
       setScores(form.scores);
       setTaskComments(form.taskComments);
       setManualStats(form.manualStats);
-    } catch {
+    } catch (err) {
+      console.error("REVIEW_DETAIL_LOAD_FAILED", {
+        reviewId,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      setReview(null);
       setNotFound(true);
+      setError(err instanceof Error ? err.message : "Не удалось загрузить работу");
     } finally {
       setLoading(false);
     }
@@ -594,7 +601,29 @@ export default function CabinetReviewDetailPage() {
   }
 
   if (notFound || !review) {
-    return <Navigate to="/cabinet/review" replace />;
+    return (
+      <CabinetPageShell className="cb-section--review">
+        <CabinetPageHeader title="Проверка" />
+        <p className="cb-inline-error" role="alert">
+          {error || "Не удалось открыть работу ученика."}
+        </p>
+        <p className="cabinet-auth-muted">
+          Попробуйте обновить страницу. Если проблема повторится — вернитесь к списку работ.
+        </p>
+        <div className="cb-review-detail__footer" style={{ justifyContent: "flex-start", gap: 12 }}>
+          <button
+            type="button"
+            className="cb-review-detail__btn cb-review-detail__btn--ghost"
+            onClick={() => load()}
+          >
+            Повторить
+          </button>
+          <Link to="/cabinet/review" className="cb-review-detail__btn cb-review-detail__btn--primary">
+            Назад к проверке
+          </Link>
+        </div>
+      </CabinetPageShell>
+    );
   }
 
   if (review.source_type !== "homework") {

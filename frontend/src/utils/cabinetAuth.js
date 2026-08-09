@@ -1262,11 +1262,26 @@ export function fetchLibraryNewThisMonth() {
   return cabinetFetch("/library/new-this-month/", { method: "GET" });
 }
 
-export function changePlan(planSlug, billingPeriod = "month") {
+export function changePlan(planSlug, billingPeriod = "month", extra = {}) {
   return cabinetFetch("/subscription/change-plan/", {
     method: "POST",
-    body: JSON.stringify({ plan_slug: planSlug, billing_period: billingPeriod }),
+    body: JSON.stringify({
+      plan_slug: planSlug,
+      billing_period: billingPeriod,
+      ...extra,
+    }),
   });
+}
+
+export function cancelPendingPlanChange() {
+  return cabinetFetch("/subscription/cancel-pending-plan/", {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function previewPlanChange(planSlug, billingPeriod = "month") {
+  return changePlan(planSlug, billingPeriod, { preview: true });
 }
 
 export function createPayment(planSlug, billingPeriod = "month", promoCode = null) {
@@ -1662,6 +1677,14 @@ export function extendBillingPackage(packageId, payload) {
 
 export function adjustBillingPackage(packageId, payload) {
   return cabinetFetch(`/billing/packages/${packageId}/adjust/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Списать занятия из абонемента без урока в расписании. */
+export function consumeBillingPackage(packageId, payload) {
+  return cabinetFetch(`/billing/packages/${packageId}/consume/`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

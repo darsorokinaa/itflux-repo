@@ -4116,6 +4116,20 @@ def _visible_interesting_queryset(request):
     return qs.filter(status=InterestingItem.Status.PUBLISHED)
 
 
+def _interesting_content_access_denied(request, item):
+    """None если доступ есть; иначе JsonResponse 403."""
+    if _lesson_viewer_is_teacher_or_admin(request):
+        return None
+    from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
+
+    user = request.user if getattr(request.user, "is_authenticated", False) else None
+    try:
+        SubscriptionAccessService.raise_if_cannot_access_content(user, item)
+    except AccessDenied as exc:
+        return JsonResponse({"error": exc.to_dict()}, status=403)
+    return None
+
+
 @require_http_methods(["GET"])
 def api_interesting(request):
     qs = _visible_interesting_queryset(request)
@@ -4149,6 +4163,9 @@ def api_interesting(request):
 @require_http_methods(["POST"])
 def api_interesting_stats_view(request, slug):
     item = get_object_or_404(_visible_interesting_queryset(request), slug=slug)
+    denied = _interesting_content_access_denied(request, item)
+    if denied:
+        return denied
     from .engagement import register_view, set_visitor_cookie
 
     result = register_view(item, request)
@@ -4167,6 +4184,9 @@ def api_interesting_stats_like(request, slug):
             status=401,
         )
     item = get_object_or_404(_visible_interesting_queryset(request), slug=slug)
+    denied = _interesting_content_access_denied(request, item)
+    if denied:
+        return denied
     from .engagement import EngagementError, toggle_like
 
     try:
@@ -4182,13 +4202,42 @@ def api_interesting_detail(request, slug):
 
     qs = annotate_engagement(_visible_interesting_queryset(request), request)
     item = get_object_or_404(qs, slug=slug)
+    from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
+
+    user = request.user if getattr(request.user, "is_authenticated", False) else None
+    access = SubscriptionAccessService.serialize_access_gate(user, item)
     data = InterestingCatalogSerializer(item, context={"request": request}).data
+    data["access"] = access
+    if not access["allowed"] and not _lesson_viewer_is_teacher_or_admin(request):
+        data["locked"] = True
+        return JsonResponse(
+            {
+                "item": data,
+                "upgrade_required": True,
+                **AccessDenied(
+                    "CONTENT_ACCESS_DENIED",
+                    "Материал доступен на более высоком тарифе",
+                    feature="content",
+                    min_plan=access["min_plan"],
+                ).to_dict(),
+            },
+            status=403 if request.GET.get("enforce") == "1" else 200,
+        )
     return JsonResponse({"item": data})
 
 
 @require_http_methods(["GET"])
 def api_interesting_view(request, slug):
     item = get_object_or_404(_visible_interesting_queryset(request), slug=slug)
+
+    if not _lesson_viewer_is_teacher_or_admin(request):
+        from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
+
+        user = request.user if getattr(request.user, "is_authenticated", False) else None
+        try:
+            SubscriptionAccessService.raise_if_cannot_access_content(user, item)
+        except AccessDenied as exc:
+            return JsonResponse({"error": exc.to_dict()}, status=403)
 
     from .lesson_archive import (
         archive_base_dir,
@@ -4235,6 +4284,15 @@ def api_interesting_archive_asset(request, slug, asset_path):
     item = get_object_or_404(_visible_interesting_queryset(request), slug=slug)
     if not item.archive:
         raise Http404("Архив не найден")
+
+    if not _lesson_viewer_is_teacher_or_admin(request):
+        from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
+
+        user = request.user if getattr(request.user, "is_authenticated", False) else None
+        try:
+            SubscriptionAccessService.raise_if_cannot_access_content(user, item)
+        except AccessDenied as exc:
+            return JsonResponse({"error": exc.to_dict()}, status=403)
 
     from .lesson_archive import (
         archive_asset_response,

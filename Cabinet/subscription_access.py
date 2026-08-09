@@ -132,6 +132,27 @@ class SubscriptionAccessService:
             return CONTENT_ACCESS_RANK[ContentAccessLevel.CORPORATE]
         return 0
 
+    @staticmethod
+    def can_use_schedule(user) -> bool:
+        """Расписание и видеозанятия через него — с тарифа «Учитель»."""
+        plan = SubscriptionAccessService.get_effective_plan(user)
+        if not plan:
+            return False
+        if getattr(plan, "is_free", False) or plan.slug == "start":
+            return False
+        return True
+
+    @staticmethod
+    def raise_if_cannot_use_schedule(user):
+        if SubscriptionAccessService.can_use_schedule(user):
+            return
+        raise AccessDenied(
+            code="SCHEDULE_REQUIRES_PAID_PLAN",
+            message="Расписание доступно начиная с тарифа «Учитель».",
+            feature="schedule",
+            min_plan="teacher",
+        )
+
     # ── Content access ───────────────────────────────────────────────────────
 
     @staticmethod

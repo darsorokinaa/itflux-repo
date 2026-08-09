@@ -162,10 +162,62 @@ export function stopInteractiveBackgroundSound() {
   backgroundAudio = null;
 }
 
+let previewClipAudio = null;
+
+/** Остановить короткое прослушивание в редакторе (не фоновый loop плеера). */
+export function stopInteractiveSoundPreview() {
+  if (!previewClipAudio) return;
+  previewClipAudio.pause();
+  previewClipAudio.currentTime = 0;
+  previewClipAudio = null;
+}
+
+/**
+ * Короткое прослушивание пакета в редакторе.
+ * Если есть фоновый трек с бэкенда — играет его (можно pause тем же вызовом),
+ * иначе — эффект flip/синтез. Не запускает loop на всю страницу редактора.
+ */
 export function previewInteractiveSound(soundPackOrAppearance, eventName = "flip") {
   const appearance = soundPackOrAppearance?.soundEnabled !== undefined
     ? soundPackOrAppearance
     : { soundEnabled: true, soundPack: soundPackOrAppearance };
   if (appearance.soundPack?.slug === "silent" && !appearance.customSounds) return;
+
+  const bgUrl = resolveSoundUrl(appearance, "background");
+  const preferBackground = eventName === "background"
+    || (eventName === "flip" && bgUrl && !appearance.customSounds?.[eventName]);
+
+  if (preferBackground && bgUrl) {
+    const src = interactiveMediaUrl(bgUrl) || bgUrl;
+    const current = previewClipAudio?.getAttribute("data-preview-url") || "";
+    if (previewClipAudio && !previewClipAudio.paused && current === src) {
+      stopInteractiveSoundPreview();
+      return "paused";
+    }
+    stopInteractiveSoundPreview();
+    stopInteractiveBackgroundSound();
+    previewClipAudio = new Audio(src);
+    previewClipAudio.setAttribute("data-preview-url", src);
+    previewClipAudio.loop = false;
+    previewClipAudio.volume = 0.35;
+    previewClipAudio.onended = () => {
+      previewClipAudio = null;
+    };
+    unlockInteractiveAudio().then(() => {
+      previewClipAudio?.play()?.catch(() => {});
+    });
+    return "playing";
+  }
+
+  stopInteractiveSoundPreview();
   playInteractiveSound({ ...appearance, soundEnabled: true }, eventName);
+  return "played";
+}
+
+export function isInteractiveSoundPreviewPlaying(url) {
+  if (!previewClipAudio || previewClipAudio.paused) return false;
+  if (!url) return true;
+  const current = previewClipAudio.getAttribute("data-preview-url") || "";
+  const src = interactiveMediaUrl(url) || url;
+  return current === src;
 }

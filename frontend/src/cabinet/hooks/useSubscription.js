@@ -2,14 +2,24 @@
  * useSubscription — хук для работы с тарифной системой.
  *
  * Возвращает:
- *   currentPlan, limits, usage, features, loading
+ *   currentPlan, limits, usage, features, loading, subscription
  *   canCreateStudent, canCreateGroup, canCreateLesson, canCreateInteractive, canUseAI
  *   refreshUsage()
- *   handleLimitError(error, openModal) — открывает нужный upgrade modal
+ *
+ * После оплаты / смены тарифа вызывайте notifySubscriptionChanged() —
+ * все инстансы хука (сайдбар, главная, лимиты) обновятся.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { fetchSubscriptionUsage } from "../../utils/cabinetAuth";
+
+export const SUBSCRIPTION_CHANGED_EVENT = "cabinet:subscription-changed";
+
+/** Сообщить всему кабинету, что тариф/подписка изменились. */
+export function notifySubscriptionChanged() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(SUBSCRIPTION_CHANGED_EVENT));
+}
 
 const INITIAL_STATE = {
   currentPlan: null,
@@ -31,8 +41,10 @@ const INITIAL_STATE = {
 export function useSubscription() {
   const [state, setState] = useState(INITIAL_STATE);
 
-  const load = useCallback(async () => {
-    setState((s) => ({ ...s, loading: true, error: null }));
+  const load = useCallback(async ({ soft = false } = {}) => {
+    if (!soft) {
+      setState((s) => ({ ...s, loading: true, error: null }));
+    }
     try {
       const data = await fetchSubscriptionUsage();
       setState({
@@ -45,11 +57,27 @@ export function useSubscription() {
         error: null,
       });
     } catch (err) {
-      setState((s) => ({ ...s, loading: false, error: err.message || "Ошибка загрузки тарифа" }));
+      setState((s) => ({
+        ...s,
+        loading: false,
+        error: err.message || "Ошибка загрузки тарифа",
+      }));
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    const onChanged = () => {
+      void load({ soft: true });
+    };
+    window.addEventListener(SUBSCRIPTION_CHANGED_EVENT, onChanged);
+    return () => {
+      window.removeEventListener(SUBSCRIPTION_CHANGED_EVENT, onChanged);
+    };
+  }, [load]);
 
   const { limits, usage } = state;
 

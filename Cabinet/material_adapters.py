@@ -21,6 +21,7 @@ EPHEMERAL_ACTIONS = frozenset({
     "pointer",
     "drag_preview",
     "annotation_preview",
+    "student_viewport",
 })
 
 CONTENT_ACTIONS = frozenset({
@@ -57,11 +58,13 @@ FOLLOW_MODE_CONTENT_ACTIONS = frozenset({
 })
 
 COLLAB_PERMISSION_ACTIONS = {
-    "answers_only": FOLLOW_MODE_CONTENT_ACTIONS | frozenset({"cursor", "pointer"}),
+    "answers_only": FOLLOW_MODE_CONTENT_ACTIONS | frozenset({
+        "cursor", "pointer", "student_viewport",
+    }),
     "annotate": FOLLOW_MODE_CONTENT_ACTIONS | frozenset({
         "annotation_added", "annotation_updated", "annotation_deleted",
         "text_note_added", "text_note_updated", "text_note_deleted",
-        "cursor", "pointer", "annotation_preview",
+        "cursor", "pointer", "annotation_preview", "student_viewport",
     }) | NAVIGATION_ACTIONS,
     "edit_content": CONTENT_ACTIONS | NAVIGATION_ACTIONS | EPHEMERAL_ACTIONS | frozenset({
         "cell_updated", "sheet_changed", "selection_changed",
@@ -121,6 +124,7 @@ class MaterialCollaborationAdapter:
         follow_actions = (FOLLOW_MODE_CONTENT_ACTIONS & self.student_content_actions) | {
             "cursor",
             "pointer",
+            "student_viewport",
         }
         allowed = set(follow_actions)
         if interaction_mode == "collaborative" and can_collaborate:
@@ -214,8 +218,14 @@ class MaterialCollaborationAdapter:
         for point in points[:MAX_POINTS_PER_STROKE]:
             if not isinstance(point, (list, tuple)) or len(point) < 2:
                 continue
-            clean_points.append([float(point[0]), float(point[1])])
-        return {
+            try:
+                x = float(point[0])
+                y = float(point[1])
+            except (TypeError, ValueError):
+                continue
+            clean_points.append([max(0.0, min(1.0, x)), max(0.0, min(1.0, y))])
+        coord_space = annotation.get("coordSpace") or annotation.get("coord_space")
+        result = {
             "id": ann_id,
             "tool": str(annotation.get("tool") or "pen")[:32],
             "color": str(annotation.get("color") or "#e11d48")[:32],
@@ -228,6 +238,9 @@ class MaterialCollaborationAdapter:
             "created_at": annotation.get("created_at") or annotation.get("createdAt"),
             "version": int(annotation.get("version") or 1),
         }
+        if coord_space:
+            result["coordSpace"] = str(coord_space)[:32]
+        return result
 
     def _apply_annotation_added(self, state, *, payload, author_id, author_role):
         annotations = self._ensure_list(state, "annotations")

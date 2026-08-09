@@ -18,12 +18,34 @@ class JitsiConfigError(Exception):
     """Некорректная или неполная конфигурация Jitsi."""
 
 
+def normalize_jitsi_host(value: str | None) -> str:
+    """Hostname без схемы/пути/порта-хвоста — для External API и JWT `sub`."""
+    host = (value or "").strip()
+    if not host:
+        return ""
+    # https://lesson.example/ → lesson.example
+    if "://" in host:
+        host = host.split("://", 1)[1]
+    host = host.split("/")[0].strip()
+    host = host.rstrip(".")
+    # [IPv6]:port не трогаем подробно; для обычных доменов снимаем :port
+    if host.count(":") == 1 and not host.startswith("["):
+        host = host.split(":", 1)[0]
+    return host.lower()
+
+
 def get_jitsi_domain() -> str:
-    return (getattr(settings, "JITSI_DOMAIN", "") or "meet.jit.si").strip()
+    return normalize_jitsi_host(getattr(settings, "JITSI_DOMAIN", "") or "") or "meet.jit.si"
+
+
+def get_jitsi_sub() -> str:
+    """JWT `sub` должен совпадать с VirtualHost Prosody (= домен без https://)."""
+    explicit = normalize_jitsi_host(getattr(settings, "JITSI_SUB", "") or "")
+    return explicit or get_jitsi_domain()
 
 
 def _is_public_jitsi_domain(domain: str | None = None) -> bool:
-    host = (domain or get_jitsi_domain()).rstrip(".").lower()
+    host = normalize_jitsi_host(domain or get_jitsi_domain())
     return host in {"meet.jit.si", "8x8.vc"}
 
 
@@ -104,7 +126,7 @@ def generate_jitsi_jwt(
         raise JitsiConfigError("JITSI_APP_ID и JITSI_APP_SECRET обязательны при JITSI_AUTH_MODE=jwt")
 
     domain = get_jitsi_domain()
-    sub = (getattr(settings, "JITSI_SUB", "") or "").strip() or domain
+    sub = get_jitsi_sub()
     aud = (getattr(settings, "JITSI_AUD", "") or "").strip() or "jitsi"
     ttl = int(getattr(settings, "JITSI_TOKEN_TTL_SECONDS", 7200) or 7200)
     ttl = max(60, min(ttl, 86400))
@@ -141,15 +163,19 @@ def generate_jitsi_jwt(
         },
     }
 
+    # Не логируем APP_SECRET / сырой JWT.
     logger.info(
-        "Creating Jitsi token",
-        extra={
-            "room_name": room_name,
-            "user_id": user.pk,
-            "is_moderator": bool(is_moderator),
-            "token_expiration": datetime.fromtimestamp(exp, tz=dt_timezone.utc).isoformat(),
-            "has_display_name": bool(display_name),
-        },
+        "jitsi_jwt_created user_id=%s is_moderator=%s room=%s domain=%s "
+        "jwt_aud=%s jwt_iss=%s jwt_sub=%s jwt_room=%s jwt_exp=%s",
+        user.pk,
+        bool(is_moderator),
+        room_name,
+        domain,
+        aud,
+        app_id,
+        sub,
+        room_name,
+        datetime.fromtimestamp(exp, tz=dt_timezone.utc).isoformat(),
     )
     return jwt.encode(payload, app_secret, algorithm="HS256")
 

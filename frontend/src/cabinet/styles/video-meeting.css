@@ -2000,7 +2000,39 @@ body.vl-room-fullscreen .student-cabinet-nav {
   width: 100%;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
   position: relative;
+}
+
+.vl-material-surface {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.vl-material-surface--fill {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.vl-material-surface--fill > .video-lesson-workspace__frame,
+.vl-material-surface--fill > .vl-synced-interactive,
+.vl-material-surface--fill > .video-lesson-workspace__text {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.vl-material-surface--image {
+  display: inline-block;
+  width: auto;
+  height: auto;
+  margin: 0 auto;
+  vertical-align: top;
 }
 
 .vl-synced-content.is-tools-active .video-lesson-workspace__frame,
@@ -2020,7 +2052,8 @@ body.vl-room-fullscreen .student-cabinet-nav {
   display: block;
   max-width: 100%;
   max-height: 100%;
-  margin: 0 auto;
+  width: auto;
+  height: auto;
   object-fit: contain;
   user-select: none;
   background: #fff;
@@ -2034,6 +2067,85 @@ body.vl-room-fullscreen .student-cabinet-nav {
   pointer-events: none;
   z-index: 2;
   overflow: visible;
+}
+
+.vl-student-viewport-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(248, 250, 252, 0.95);
+  font-size: 0.78rem;
+  color: var(--vl-muted, #64748b);
+}
+
+.vl-student-viewport-bar__select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vl-student-viewport-bar__select select {
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 8px;
+  font-size: 0.78rem;
+  padding: 2px 6px;
+  max-width: 10rem;
+}
+
+.vl-student-viewport-bar__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.vl-student-viewport-bar__preview {
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  background: #fff;
+  color: #1d4ed8;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.vl-student-viewport-bar__preview.is-active {
+  background: rgba(37, 99, 235, 0.1);
+  border-color: rgba(37, 99, 235, 0.45);
+}
+
+.vl-student-viewport-bar__preview:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.vl-student-viewport-bar__status {
+  margin-left: auto;
+  color: #334155;
+  font-size: 0.74rem;
+}
+
+.vl-student-viewport-label {
+  position: absolute;
+  z-index: 3;
+  transform: translate(4px, -100%);
+  margin-top: -2px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: #fff;
+  background: rgba(37, 99, 235, 0.88);
+  pointer-events: none;
+}
+
+.video-lesson-workspace__stage.is-student-preview {
+  outline: 1px dashed rgba(37, 99, 235, 0.35);
+  outline-offset: -2px;
 }
 
 .vl-local-pointer,

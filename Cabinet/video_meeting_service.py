@@ -19,9 +19,12 @@ from .choices import MeetingProvider, ParticipantRole, ParticipantStatus
 from .jitsi_service import (
     JitsiConfigError,
     build_user_info,
+    decode_jitsi_jwt_unsafe_for_tests,
     generate_jitsi_jwt,
     get_jitsi_auth_mode,
     get_jitsi_domain,
+    get_jitsi_sub,
+    jwt_expires_at,
 )
 from .models import MeetingAttendance, Profile, ScheduleEvent, Student, VideoMeeting
 from .schedule_series import _ensure_organizer
@@ -703,9 +706,11 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
     except JitsiConfigError as exc:
         raise VideoMeetingError(str(exc), code="jwt_config", status=503) from exc
 
-    if get_jitsi_domain() and (getattr(settings, "JITSI_AUTH_MODE", "none") or "").lower() == "jwt":
-        if not jwt_token:
-            raise VideoMeetingError("Не удалось сформировать JWT", code="jwt_missing", status=503)
+    auth_mode = get_jitsi_auth_mode()
+    # Важно: используем эффективный режим (в т.ч. auto-jwt на своём домене),
+    # а не сырой JITSI_AUTH_MODE — иначе JWT может отсутствовать при AUTH_MODE=none.
+    if auth_mode == "jwt" and not jwt_token:
+        raise VideoMeetingError("Не удалось сформировать JWT", code="jwt_missing", status=503)
 
     teacher_name = ""
     owner = event.owner
@@ -716,7 +721,6 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
         teacher_name = owner.get_full_name() or owner.username
 
     domain = get_jitsi_domain()
-    auth_mode = get_jitsi_auth_mode()
     # Без JWT публичный meet.jit.si (и любой хост с wait-for-moderator) не даёт
     # права организатора из профиля — учителю нужно жать «Я организатор».
     requires_moderator_login = bool(access.is_moderator and not jwt_token)
@@ -730,17 +734,46 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
             status=500,
         )
 
+    jwt_claims: dict = {}
+    jwt_exp_iso = None
+    if jwt_token:
+        try:
+            jwt_claims = decode_jitsi_jwt_unsafe_for_tests(jwt_token)
+        except Exception:
+            jwt_claims = {}
+        exp_dt = jwt_expires_at(jwt_token)
+        jwt_exp_iso = exp_dt.isoformat() if exp_dt else None
+        jwt_room = str(jwt_claims.get("room") or "")
+        if jwt_room and jwt_room != room_name:
+            raise VideoMeetingError(
+                "JWT room не совпадает с roomName конференции",
+                code="jwt_room_mismatch",
+                status=500,
+            )
+
+    config_endpoint = f"/api/video-meetings/{meeting.uuid}/join-config/"
     logger.info(
-        "Jitsi join configuration",
-        extra={
-            "meeting_uuid": str(meeting.uuid),
-            "room_name": meeting.room_name,
-            "domain": domain,
-            "user_id": user.pk,
-            "auth_mode": auth_mode,
-            "is_moderator": access.is_moderator,
-            "has_jwt": bool(jwt_token),
-        },
+        "jitsi_join_config lesson_id=%s schedule_event_id=%s meeting_uuid=%s "
+        "user_id=%s role=%s room_name=%s domain=%s auth_mode=%s is_moderator=%s "
+        "password_required=%s has_jwt=%s jwt_aud=%s jwt_iss=%s jwt_sub=%s "
+        "jwt_room=%s jwt_exp=%s endpoint=%s",
+        event.lesson_id or "",
+        event.pk,
+        meeting.uuid,
+        user.pk,
+        access.role,
+        meeting.room_name,
+        domain,
+        auth_mode,
+        access.is_moderator,
+        False,
+        bool(jwt_token),
+        jwt_claims.get("aud", ""),
+        jwt_claims.get("iss", ""),
+        jwt_claims.get("sub", "") or get_jitsi_sub(),
+        jwt_claims.get("room", room_name),
+        jwt_exp_iso or "",
+        config_endpoint,
     )
 
     subject = lesson_meeting_subject(event)
@@ -752,7 +785,28 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
         "jwt": jwt_token,
         "authMode": auth_mode,
         "requiresModeratorLogin": requires_moderator_login,
+        # Приложения не задаёт пароль комнаты Jitsi; «пароль» в UI Jitsi = token auth.
+        "passwordRequired": False,
+        "conferencePassword": None,
         "userInfo": user_info,
+        "diagnostics": {
+            "lessonId": event.lesson_id,
+            "scheduleEventId": event.pk,
+            "meetingUuid": str(meeting.uuid),
+            "userId": user.pk,
+            "role": access.role,
+            "roomName": meeting.room_name,
+            "domain": domain,
+            "jwtAud": jwt_claims.get("aud"),
+            "jwtIss": jwt_claims.get("iss"),
+            "jwtSub": jwt_claims.get("sub") or get_jitsi_sub(),
+            "jwtRoom": jwt_claims.get("room") or room_name,
+            "jwtExp": jwt_exp_iso,
+            "isModerator": access.is_moderator,
+            "passwordRequired": False,
+            "conferencePassword": None,
+            "configEndpoint": config_endpoint,
+        },
         "meeting": {
             "uuid": str(meeting.uuid),
             "title": subject,

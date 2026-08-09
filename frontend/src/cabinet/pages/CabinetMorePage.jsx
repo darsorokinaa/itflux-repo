@@ -5,13 +5,14 @@ import { CABINET_MORE_GROUPS } from "../cabinetNav";
 import { CabinetPageShell, CabinetPageHeader, CabinetSoonBadge } from "../CabinetSectionUi";
 import ProfileAvatarEditor from "../components/ProfileAvatarEditor";
 import { useSeasonalTheme } from "../../seasonal/SeasonalThemeProvider";
+import { openSupport as openSupportEvent } from "../support";
 
 function formatNavCount(count) {
   if (!count || count <= 0) return null;
   return count > 99 ? "99+" : String(count);
 }
 
-function MoreCard({ item, onSettings, onGuide, onNotifications, onAppearance, badgeCount = 0 }) {
+function MoreCard({ item, onSettings, onGuide, onSupport, onNotifications, onAppearance, badgeCount = 0 }) {
   const countLabel = formatNavCount(badgeCount);
 
   if (item.action === "settings") {
@@ -28,6 +29,17 @@ function MoreCard({ item, onSettings, onGuide, onNotifications, onAppearance, ba
   if (item.action === "guide") {
     return (
       <button type="button" className="cb-more-card" onClick={onGuide}>
+        <span className="cb-more-card__icon">
+          <CabinetIcon name={item.icon} />
+        </span>
+        <span className="cb-more-card__label">{item.label}</span>
+      </button>
+    );
+  }
+
+  if (item.action === "support") {
+    return (
+      <button type="button" className="cb-more-card" onClick={onSupport}>
         <span className="cb-more-card__icon">
           <CabinetIcon name={item.icon} />
         </span>
@@ -110,6 +122,7 @@ export default function CabinetMorePage() {
     handleLogout,
     loggingOut,
     openGuide,
+    openSupport,
     currentPlan,
     subscriptionLoading,
     navCounts,
@@ -123,7 +136,10 @@ export default function CabinetMorePage() {
     {
       id: "help",
       label: "Помощь",
-      items: [{ id: "guide", label: "Инструкция", path: null, icon: "bulb", action: "guide" }],
+      items: [
+        { id: "guide", label: "Инструкция", path: null, icon: "bulb", action: "guide" },
+        { id: "support", label: "Поддержка", path: null, icon: "help", action: "support" },
+      ],
     },
   ];
   const openNotifications = () => window.dispatchEvent(new Event("cabinet:open-notifications"));
@@ -157,6 +173,7 @@ export default function CabinetMorePage() {
                   onSettings={openSettings}
                   onAppearance={openAppearancePanel}
                   onGuide={openGuide}
+                  onSupport={openSupport || openSupportEvent}
                   onNotifications={openNotifications}
                 />
               ))}

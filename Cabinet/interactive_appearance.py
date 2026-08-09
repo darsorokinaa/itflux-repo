@@ -70,36 +70,49 @@ IMAGE_BACKGROUNDS = [
         "name": "Космос",
         "text_tone": "light",
         "sort_order": 10,
+        "css_background": "linear-gradient(135deg, #0B1026 0%, #1E1B4B 55%, #312E81 100%)",
+        "image_aliases": ("cosmos",),
     },
     {
         "slug": "potok",
         "name": "Цифровой поток",
         "text_tone": "light",
         "sort_order": 11,
+        "css_background": "linear-gradient(135deg, #042F2E 0%, #0F766E 55%, #134E4A 100%)",
+        "image_aliases": ("potok",),
     },
     {
         "slug": "robots",
         "name": "Роботы",
         "text_tone": "light",
         "sort_order": 12,
+        "css_background": "linear-gradient(135deg, #1E293B 0%, #334155 55%, #0F172A 100%)",
+        "image_aliases": ("robots",),
     },
     {
         "slug": "school",
         "name": "Школа",
         "text_tone": "light",
         "sort_order": 13,
+        "css_background": "linear-gradient(135deg, #1D4ED8 0%, #2563EB 45%, #1E3A8A 100%)",
+        "image_aliases": ("school",),
     },
     {
         "slug": "summer",
         "name": "Лето",
         "text_tone": "light",
         "sort_order": 14,
+        "css_background": "linear-gradient(135deg, #F59E0B 0%, #F97316 45%, #EA580C 100%)",
+        "image_aliases": ("summer",),
     },
     {
         "slug": "forrest",
         "name": "Лес",
         "text_tone": "light",
         "sort_order": 15,
+        "css_background": "linear-gradient(135deg, #14532D 0%, #166534 45%, #052E16 100%)",
+        # В media встречается и forest, и forrest.
+        "image_aliases": ("forrest", "forest"),
     },
 ]
 
@@ -212,23 +225,33 @@ def _background_image_source_dirs():
             yield candidate
 
 
-def _find_background_image_file(slug):
+def _find_background_image_file(aliases):
+    names = aliases if isinstance(aliases, (list, tuple)) else (aliases,)
     for base_dir in _background_image_source_dirs():
-        slug_dir = base_dir / slug
-        if not slug_dir.is_dir():
-            continue
-        for path in sorted(slug_dir.iterdir()):
-            if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
-                return path
+        for name in names:
+            slug_dir = base_dir / name
+            if not slug_dir.is_dir():
+                continue
+            for path in sorted(slug_dir.iterdir()):
+                if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+                    return path
     return None
 
 
-def _attach_background_image(background, slug):
-    source = _find_background_image_file(slug)
+def _attach_background_image(background, aliases):
+    source = _find_background_image_file(aliases)
     if not source:
-        return
+        return False
+    # Не перезаписываем, если файл на диске уже на месте.
+    if background.background_image:
+        try:
+            if background.background_image.storage.exists(background.background_image.name):
+                return True
+        except Exception:
+            pass
     with source.open("rb") as handle:
         background.background_image.save(source.name, File(handle), save=True)
+    return True
 
 
 def seed_interactive_appearance():
@@ -239,15 +262,16 @@ def seed_interactive_appearance():
             defaults={k: v for k, v in item.items() if k != "slug"},
         )
     for item in IMAGE_BACKGROUNDS:
-        background, created = InteractiveBackground.objects.update_or_create(
+        aliases = item.get("image_aliases") or (item["slug"],)
+        defaults = {
+            k: v for k, v in item.items()
+            if k not in {"slug", "image_aliases"}
+        }
+        background, _created = InteractiveBackground.objects.update_or_create(
             slug=item["slug"],
-            defaults={
-                **{k: v for k, v in item.items() if k != "slug"},
-                "css_background": "",
-            },
+            defaults=defaults,
         )
-        if created or not background.background_image:
-            _attach_background_image(background, item["slug"])
+        _attach_background_image(background, aliases)
     for item in CARD_STYLES:
         InteractiveCardStyle.objects.update_or_create(
             slug=item["slug"],

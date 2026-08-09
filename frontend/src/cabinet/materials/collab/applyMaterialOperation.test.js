@@ -42,6 +42,25 @@ describe("applyMaterialOperation", () => {
     expect(state.answers["3"].q1.value).toBe("a");
   });
 
+  it("clamps annotation points and keeps coordSpace", () => {
+    const next = applyMaterialOperation({}, {
+      action: "annotation_added",
+      payload: {
+        annotation: {
+          id: "c1",
+          points: [[-0.2, 1.5], [0.5, 0.5]],
+          width: 0.004,
+          coordSpace: "content_v1",
+        },
+      },
+      authorId: 1,
+      authorRole: "teacher",
+    });
+    expect(next.annotations[0].points[0]).toEqual([0, 1]);
+    expect(next.annotations[0].coordSpace).toBe("content_v1");
+    expect(next.annotations[0].width).toBeCloseTo(0.004);
+  });
+
   it("applies cell_updated ops", () => {
     const next = applyMaterialOperation({}, {
       action: "cell_updated",

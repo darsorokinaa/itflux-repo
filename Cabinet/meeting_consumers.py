@@ -147,10 +147,14 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         if msg_type == "material.operation":
             await self._handle_operation(data)
             return
-        if msg_type in ("material.cursor", "material.pointer"):
+        if msg_type in ("material.cursor", "material.pointer", "material.student_viewport"):
             data = {
                 **data,
-                "action": data.get("action") or ("pointer" if msg_type.endswith("pointer") else "cursor"),
+                "action": data.get("action") or (
+                    "pointer" if msg_type.endswith("pointer")
+                    else "student_viewport" if msg_type.endswith("student_viewport")
+                    else "cursor"
+                ),
             }
             await self._handle_operation(data)
             return
@@ -190,7 +194,12 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
         if not payload:
             return
         # Не отправляем автору эхо курсора / preview — он уже видит свой.
-        if payload.get("type") in ("material.cursor", "material.pointer", "material.annotation_preview"):
+        if payload.get("type") in (
+            "material.cursor",
+            "material.pointer",
+            "material.annotation_preview",
+            "material.student_viewport",
+        ):
             if payload.get("author_id") == getattr(self.user, "id", None):
                 return
         if payload.get("type") == "material.presence_join":

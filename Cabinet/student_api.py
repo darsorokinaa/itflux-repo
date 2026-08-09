@@ -244,10 +244,9 @@ def _video_meeting_payload(event):
         "joinStateLabel": ui_state_message(join_state),
         "pageUrl": f"/cabinet/meetings/{vm.uuid}",
     }
-    meeting_url = event.meeting_url or ""
-    # Постоянная внутренняя ссылка на всём жизненном цикле; вход в Jitsi только при live.
-    if not meeting_url:
-        meeting_url = payload["pageUrl"]
+    # При наличии VideoMeeting — только страница платформы (JWT выдаётся join-config).
+    # Сырой URL Jitsi без токена даёт «неверный пароль» / отдельную MUC.
+    meeting_url = payload["pageUrl"]
     return payload, meeting_url
 
 

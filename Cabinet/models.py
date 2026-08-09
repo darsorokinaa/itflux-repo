@@ -2758,9 +2758,21 @@ class TariffPlan(models.Model):
     price_year = models.DecimalField("Цена/год", max_digits=10, decimal_places=2, default=0)
     currency = models.CharField("Валюта", max_length=8, default="RUB")
     max_students = models.PositiveIntegerField("Макс. учеников", default=5)
-    max_groups = models.PositiveIntegerField("Макс. групп", default=2)
+    max_groups = models.PositiveIntegerField(
+        "Макс. групп",
+        null=True,
+        blank=True,
+        default=2,
+        help_text="Пусто — без лимита",
+    )
     max_lessons = models.PositiveIntegerField("Макс. уроков", default=10)
-    max_interactives = models.PositiveIntegerField("Макс. интерактивов", default=5)
+    max_interactives = models.PositiveIntegerField(
+        "Лимит интерактивов / мес",
+        null=True,
+        blank=True,
+        default=5,
+        help_text="Пусто — без лимита",
+    )
     max_variants_monthly = models.PositiveIntegerField(
         "Лимит вариантов / мес",
         null=True,
@@ -2886,12 +2898,45 @@ class TeacherSubscription(models.Model):
         default=BillingPeriod.MONTH,
     )
     auto_renew = models.BooleanField("Автопродление", default=False)
+    # Допустимые идентификаторы Т-Банка для COF/Charge (без PAN/CVV).
+    tbank_customer_key = models.CharField(
+        "T-Bank CustomerKey", max_length=64, blank=True, default=""
+    )
+    tbank_rebill_id = models.CharField(
+        "T-Bank RebillId", max_length=64, blank=True, default="", db_index=True
+    )
+    payment_method_mask = models.CharField(
+        "Маска карты (от провайдера)", max_length=32, blank=True, default=""
+    )
+    last_renewal_attempt_at = models.DateTimeField(
+        "Последняя попытка автопродления", null=True, blank=True
+    )
+    last_renewal_error = models.CharField(
+        "Ошибка автопродления", max_length=255, blank=True, default=""
+    )
+    # Если следующий период уже оплачен заранее (downgrade prepaid).
+    prepaid_until = models.DateTimeField(
+        "Предоплаченный период до",
+        null=True,
+        blank=True,
+        help_text="После scheduled_change_at тариф становится pending/prepaid без нового Charge",
+    )
     created_at = models.DateTimeField("Создана", auto_now_add=True)
     updated_at = models.DateTimeField("Обновлена", auto_now=True)
 
     class Meta:
         verbose_name = "Подписка платформы"
         verbose_name_plural = "Подписки платформы"
+        indexes = [
+            models.Index(
+                fields=["status", "expires_at"],
+                name="cab_sub_status_expires_idx",
+            ),
+            models.Index(
+                fields=["auto_renew", "expires_at"],
+                name="cab_sub_autorenew_exp_idx",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.teacher.username} — {self.plan.name} ({self.get_status_display()})"
@@ -2903,6 +2948,90 @@ class TeacherSubscription(models.Model):
         if self.expires_at and self.expires_at < tz.now():
             return False
         return True
+
+
+class SubscriptionPlanChange(models.Model):
+    """
+    История и текущий pending downgrade/смена тарифа.
+    Живое состояние также зеркалится в TeacherSubscription.scheduled_plan.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Ожидает"
+        PREPAID = "prepaid", "Предоплачен"
+        APPLIED = "applied", "Применён"
+        CANCELED = "canceled", "Отменён"
+        SUPERSEDED = "superseded", "Заменён"
+
+    class Reason(models.TextChoices):
+        DOWNGRADE = "downgrade", "Понижение тарифа"
+        CANCEL_TO_START = "cancel_to_start", "Переход на Старт"
+        REPLACE = "replace", "Замена будущего тарифа"
+        MANUAL = "manual", "Ручная смена"
+
+    teacher = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="subscription_plan_changes",
+        verbose_name="Учитель",
+    )
+    subscription = models.ForeignKey(
+        TeacherSubscription,
+        on_delete=models.CASCADE,
+        related_name="plan_changes",
+        verbose_name="Подписка",
+    )
+    from_plan = models.ForeignKey(
+        TariffPlan,
+        on_delete=models.PROTECT,
+        related_name="plan_changes_from",
+        verbose_name="С тарифа",
+    )
+    to_plan = models.ForeignKey(
+        TariffPlan,
+        on_delete=models.PROTECT,
+        related_name="plan_changes_to",
+        verbose_name="На тариф",
+    )
+    status = models.CharField(
+        "Статус", max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True
+    )
+    reason = models.CharField(
+        "Причина", max_length=32, choices=Reason.choices, default=Reason.DOWNGRADE
+    )
+    requested_at = models.DateTimeField("Запрошено", auto_now_add=True)
+    effective_at = models.DateTimeField("Дата перехода", db_index=True)
+    applied_at = models.DateTimeField("Применено", null=True, blank=True)
+    canceled_at = models.DateTimeField("Отменено", null=True, blank=True)
+    selected_student_ids = models.JSONField(
+        "Выбранные активные ученики", default=list, blank=True
+    )
+    selected_group_ids = models.JSONField(
+        "Выбранные активные группы", default=list, blank=True
+    )
+    payment = models.ForeignKey(
+        "Payment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="plan_changes",
+        verbose_name="Предоплата следующего периода",
+    )
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Смена тарифа подписки"
+        verbose_name_plural = "Смены тарифов подписки"
+        ordering = ["-requested_at"]
+        indexes = [
+            models.Index(fields=["subscription", "status"], name="cab_plan_chg_sub_status_idx"),
+            models.Index(fields=["status", "effective_at"], name="cab_plan_chg_status_eff_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.from_plan_id}→{self.to_plan_id} [{self.status}] @{self.effective_at}"
 
 
 class AIUsage(models.Model):
@@ -2995,6 +3124,9 @@ class Payment(models.Model):
     discount_amount = models.DecimalField(
         "Скидка", max_digits=10, decimal_places=2, default=0
     )
+    referral_discount_amount = models.DecimalField(
+        "Реферальная скидка", max_digits=10, decimal_places=2, default=0
+    )
     final_amount = models.DecimalField(
         "Итоговая сумма", max_digits=10, decimal_places=2, null=True, blank=True
     )
@@ -3002,6 +3134,16 @@ class Payment(models.Model):
     status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.PENDING)
     provider = models.CharField("Провайдер", max_length=50, default="mock")
     provider_payment_id = models.CharField("ID платежа провайдера", max_length=255, blank=True)
+    order_id = models.CharField(
+        "OrderId", max_length=64, blank=True, default="", db_index=True
+    )
+    customer_key = models.CharField("CustomerKey", max_length=64, blank=True, default="")
+    rebill_id = models.CharField("RebillId", max_length=64, blank=True, default="")
+    is_recurrent = models.BooleanField(
+        "Рекуррентный (автопродление)", default=False, db_index=True
+    )
+    error_code = models.CharField("Код ошибки", max_length=64, blank=True, default="")
+    error_message = models.CharField("Описание ошибки", max_length=512, blank=True, default="")
     idempotency_key = models.CharField(
         "Ключ идемпотентности", max_length=64, unique=True, null=True, blank=True
     )
@@ -3028,6 +3170,13 @@ class Payment(models.Model):
         verbose_name = "Платёж подписки платформы"
         verbose_name_plural = "Платежи подписки платформы"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status", "created_at"], name="cab_pay_status_created_idx"),
+            models.Index(
+                fields=["teacher", "status"],
+                name="cab_pay_teacher_status_idx",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.teacher.username} {self.amount} {self.currency} [{self.get_status_display()}]"
@@ -3116,7 +3265,7 @@ class AnonymousUsage(models.Model):
 
 
 class TeacherMonthlyUsage(models.Model):
-    """Месячные счётчики вариантов и рабочих тетрадей для лимитов тарифа."""
+    """Месячные счётчики вариантов, тетрадей и интерактивов для лимитов тарифа."""
 
     teacher = models.ForeignKey(
         User,
@@ -3128,6 +3277,7 @@ class TeacherMonthlyUsage(models.Model):
     period_end = models.DateField("Конец периода")
     variants_created = models.PositiveIntegerField("Вариантов создано", default=0)
     workbooks_created = models.PositiveIntegerField("Тетрадей создано", default=0)
+    interactives_created = models.PositiveIntegerField("Интерактивов создано", default=0)
     created_at = models.DateTimeField("Создан", auto_now_add=True)
     updated_at = models.DateTimeField("Обновлён", auto_now=True)
 
@@ -3235,6 +3385,16 @@ class PromoCodeUsage(models.Model):
         verbose_name = "Использование промокода"
         verbose_name_plural = "Использования промокодов"
         ordering = ["-applied_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["payment"],
+                condition=models.Q(
+                    payment__isnull=False,
+                    status="applied",
+                ),
+                name="uniq_promo_usage_applied_payment",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.promo_code.code} → {self.teacher.username} {self.applied_at:%Y-%m-%d}"
@@ -3262,12 +3422,13 @@ class ReferralLink(models.Model):
         null=True,
         blank=True,
         related_name="referral_links",
-        verbose_name="Тариф при регистрации",
-        help_text="Пусто — тариф «Профи»",
+        verbose_name="Тариф (legacy)",
+        help_text="Больше не выдаётся при регистрации. Оставлено для совместимости.",
     )
     reward_months = models.PositiveSmallIntegerField(
-        "Месяцев подписки",
-        default=3,
+        "Месяцев (legacy)",
+        default=0,
+        help_text="Legacy. Новая программа: 50% приглашённому и +14 дней рефереру.",
     )
     max_registrations = models.PositiveIntegerField(
         "Макс. регистраций",
@@ -3311,6 +3472,8 @@ class ReferralLink(models.Model):
 
 
 class ReferralLinkRegistration(models.Model):
+    """Связь «приглашённый ← referrer». Фиксируется один раз при регистрации."""
+
     referral_link = models.ForeignKey(
         ReferralLink,
         on_delete=models.CASCADE,
@@ -3323,14 +3486,44 @@ class ReferralLinkRegistration(models.Model):
         related_name="referral_registration",
         verbose_name="Пользователь",
     )
+    # Legacy: раньше при регистрации выдавали месяцы тарифа. Новые записи — без выдачи.
     reward_plan = models.ForeignKey(
         TariffPlan,
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="referral_registrations",
-        verbose_name="Выданный тариф",
+        verbose_name="Выданный тариф (legacy)",
     )
-    reward_months = models.PositiveSmallIntegerField("Выдано месяцев")
-    expires_at = models.DateTimeField("Подписка до", null=True, blank=True)
+    reward_months = models.PositiveSmallIntegerField(
+        "Выдано месяцев (legacy)",
+        default=0,
+    )
+    expires_at = models.DateTimeField("Подписка до (legacy)", null=True, blank=True)
+    invitee_discount_percent = models.DecimalField(
+        "Скидка приглашённому %",
+        max_digits=5,
+        decimal_places=2,
+        default=50,
+    )
+    invitee_discount_eligible = models.BooleanField(
+        "Скидка доступна",
+        default=True,
+        help_text="False после первой успешной платной покупки подписки",
+    )
+    invitee_discount_used_at = models.DateTimeField(
+        "Скидка использована / закрыта",
+        null=True,
+        blank=True,
+    )
+    invitee_discount_payment = models.ForeignKey(
+        "Payment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="referral_discount_registrations",
+        verbose_name="Платёж, закрывший скидку",
+    )
     registered_at = models.DateTimeField("Зарегистрирован", auto_now_add=True)
 
     class Meta:
@@ -3343,12 +3536,19 @@ class ReferralLinkRegistration(models.Model):
 
 
 class ReferralReward(models.Model):
-    """Награда рефереру после успешной оплаты приглашённого (отдельно от launch-награды при регистрации)."""
+    """
+    Награда рефереру после первой успешной оплаты приглашённого.
+    +14 дней к текущему платному тарифу или AVAILABLE-бонус, если тарифа нет.
+    """
 
     class Status(models.TextChoices):
         PENDING = "pending", "Ожидает"
-        GRANTED = "granted", "Выдана"
+        AVAILABLE = "available", "Доступен (отложен)"
+        GRANTED = "granted", "Применён"
         CANCELLED = "cancelled", "Отменена"
+
+    class RewardType(models.TextChoices):
+        FIRST_PAYMENT_DAYS = "first_payment_days", "Дни за первую оплату"
 
     referral_link = models.ForeignKey(
         ReferralLink,
@@ -3374,32 +3574,53 @@ class ReferralReward(models.Model):
         null=True,
         blank=True,
         related_name="referral_rewards",
-        verbose_name="Платёж",
+        verbose_name="Платёж-источник",
     )
+    reward_type = models.CharField(
+        "Тип награды",
+        max_length=40,
+        choices=RewardType.choices,
+        default=RewardType.FIRST_PAYMENT_DAYS,
+    )
+    reward_days = models.PositiveSmallIntegerField("Дней награды", default=14)
+    # Legacy fields (месяцы тарифа) — больше не используются для новых наград.
     reward_plan = models.ForeignKey(
         TariffPlan,
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="referral_payment_rewards",
-        verbose_name="Тариф награды",
+        verbose_name="Тариф награды (legacy)",
     )
-    reward_months = models.PositiveSmallIntegerField("Месяцев награды", default=1)
+    reward_months = models.PositiveSmallIntegerField("Месяцев награды (legacy)", default=0)
     status = models.CharField(
         "Статус",
         max_length=20,
         choices=Status.choices,
         default=Status.PENDING,
     )
-    granted_at = models.DateTimeField("Выдана", null=True, blank=True)
+    granted_at = models.DateTimeField("Создана/начислена", null=True, blank=True)
+    applied_at = models.DateTimeField("Применена к подписке", null=True, blank=True)
     created_at = models.DateTimeField("Создана", auto_now_add=True)
 
     class Meta:
         verbose_name = "Реферальная награда за оплату"
         verbose_name_plural = "Реферальные награды за оплату"
-        unique_together = [("referred_user", "payment")]
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["referred_user", "reward_type"],
+                name="uniq_referral_reward_referred_type",
+            ),
+            models.UniqueConstraint(
+                fields=["payment"],
+                condition=models.Q(payment__isnull=False),
+                name="uniq_referral_reward_payment",
+            ),
+        ]
 
     def __str__(self):
-        return f"{self.referrer_id} ← {self.referred_user_id} [{self.status}]"
+        return f"{self.referrer_id} ← {self.referred_user_id} +{self.reward_days}d [{self.status}]"
 
 
 class StudentTaskHistory(models.Model):

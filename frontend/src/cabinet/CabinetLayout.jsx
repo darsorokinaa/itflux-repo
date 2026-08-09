@@ -15,12 +15,14 @@ import CabinetGlobalSearch from "./components/CabinetGlobalSearch";
 import CabinetNotificationsBell from "./components/CabinetNotificationsBell";
 import CabinetGuideModal from "./components/CabinetGuideModal";
 import ConfirmActionModal from "./components/ConfirmActionModal";
+import SupportModal from "./components/SupportModal";
 import { UserAvatarMark } from "./components/ProfileAvatarEditor";
 import { useSubscription } from "./hooks/useSubscription";
 import { PageTitleProvider } from "./hooks/usePageTitle";
 import PwaEnableNotificationsPrompt from "./pwa/PwaEnableNotificationsPrompt";
 import PwaInstallPrompt from "./pwa/PwaInstallPrompt";
 import { useSeasonalTheme } from "../seasonal/SeasonalThemeProvider";
+import { SUPPORT_OPEN_EVENT } from "./support";
 import "../styles/cabinet-dashboard.css";
 import "./styles/teacher-cabinet.css";
 import "../styles/cabinet-mobile-system.css";
@@ -112,12 +114,14 @@ export default function CabinetLayout() {
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
   const [isMobileShell, setIsMobileShell] = useState(false);
   const [navCounts, setNavCounts] = useState({ students: 0, reviews: 0 });
   const searchInputRef = useRef(null);
   const headerMoreRef = useRef(null);
+  const supportTriggerRef = useRef(null);
   const subscription = useSubscription();
   const planName = subscription.currentPlan?.name || "";
 
@@ -238,6 +242,15 @@ export default function CabinetLayout() {
   }, [loading, user]);
 
   const openGuide = () => setGuideOpen(true);
+  const openSupport = useCallback(() => setSupportOpen(true), []);
+  const closeSupport = useCallback(() => setSupportOpen(false), []);
+
+  useEffect(() => {
+    const onOpen = () => setSupportOpen(true);
+    window.addEventListener(SUPPORT_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(SUPPORT_OPEN_EVENT, onOpen);
+  }, []);
+
   const refreshUser = useCallback(async () => {
     try {
       const d = await fetchCabinetSession();
@@ -318,7 +331,9 @@ export default function CabinetLayout() {
     openGuide,
     refreshUser,
     currentPlan: subscription.currentPlan,
+    subscription: subscription.subscription,
     subscriptionLoading: subscription.loading,
+    refreshSubscription: subscription.refreshUsage,
     navCounts,
   };
 

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import CabinetModal from "./CabinetModal";
 import {
+  chargeAccountFromPackage,
+  consumeBillingPackage,
   createBillingAdjustment,
   createBillingPackage,
   createBillingPayment,
@@ -16,6 +18,7 @@ const OP_TYPES = [
   { id: "advance", label: "Аванс / предоплата", hint: "Деньги до урока, без привязки" },
   { id: "package_buy", label: "Покупка абонемента", hint: "Создать абонемент и при необходимости покрыть прошлые" },
   { id: "package_pay", label: "Доплата за абонемент", hint: "Частичная оплата существующего абонемента" },
+  { id: "package_charge", label: "Списать из абонемента", hint: "Урок вне расписания, пропуск или погашение долга" },
   { id: "refund", label: "Возврат", hint: "Вернуть деньги ученику" },
   { id: "adjustment", label: "Корректировка", hint: "Ручная правка баланса с комментарием" },
 ];
@@ -72,6 +75,8 @@ export default function BillingOperationWizard({
   const [pkgDuration, setPkgDuration] = useState("60");
   const [coverPast, setCoverPast] = useState(null); // null | 'past' | 'future'
   const [selectedCoverIds, setSelectedCoverIds] = useState([]);
+  const [chargeMode, setChargeMode] = useState("manual"); // lessons | manual
+  const [chargeUnits, setChargeUnits] = useState("1");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [overpayChoice, setOverpayChoice] = useState(null);
@@ -87,6 +92,15 @@ export default function BillingOperationWizard({
       String(p.student_id) === String(studentId)
       && ["awaiting_payment", "partially_paid", "active", "ending"].includes(p.display_status || p.status)
       && Number(p.purchase_amount || 0) > Number(p.paid_amount || 0)
+    )),
+    [packages, studentId],
+  );
+
+  const chargeablePackages = useMemo(
+    () => packages.filter((p) => (
+      String(p.student_id) === String(studentId)
+      && Number(p.remaining_units || 0) > 0
+      && !["cancelled", "frozen"].includes(p.status)
     )),
     [packages, studentId],
   );
@@ -127,6 +141,8 @@ export default function BillingOperationWizard({
     setPkgDuration("60");
     setCoverPast(null);
     setSelectedCoverIds([]);
+    setChargeMode("manual");
+    setChargeUnits("1");
     setSelectedLessonIds(lessonLinked ? [...eventBillingIds] : []);
     setError("");
     setOverpayChoice(null);
@@ -147,6 +163,14 @@ export default function BillingOperationWizard({
       const due = Math.max(0, Number(pkg.purchase_amount || 0) - Number(pkg.paid_amount || 0));
       if (due > 0 && !defaultAmount) setAmount(String(due));
     }
+    if (opType === "package_charge") {
+      if (chargeablePackages.length === 1 && !packageId) {
+        setPackageId(chargeablePackages[0].id);
+      }
+      if (studentUnpaid.length > 0 && chargeMode === "lessons" && !selectedLessonIds.length) {
+        setSelectedLessonIds(studentUnpaid.map((l) => l.id || l.record_id));
+      }
+    }
     if (opType === "lessons" && !lessonLinked && studentUnpaid.length && !selectedLessonIds.length) {
       setSelectedLessonIds(studentUnpaid.map((l) => l.id || l.record_id));
     }
@@ -154,7 +178,7 @@ export default function BillingOperationWizard({
       setCoverPast("past");
       setSelectedCoverIds(studentUnpaid.map((l) => String(l.id || l.record_id)));
     }
-  }, [studentId, opType, unpaidPackages.length, studentUnpaid.length, open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [studentId, opType, unpaidPackages.length, studentUnpaid.length, chargeablePackages.length, open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (opType === "lessons" && !lessonLinked && selectedDue > 0) setAmount(String(selectedDue));
@@ -167,6 +191,7 @@ export default function BillingOperationWizard({
     advance: "Аванс / предоплата",
     package_buy: "Покупка абонемента",
     package_pay: "Доплата за абонемент",
+    package_charge: "Списать из абонемента",
     refund: "Возврат",
     adjustment: "Корректировка",
   }[opType] || "Финансовая операция";
@@ -182,7 +207,24 @@ export default function BillingOperationWizard({
       return;
     }
     if (step === 3) {
-      if (["lessons", "advance", "package_pay", "package_buy", "refund"].includes(opType)) {
+      if (opType === "package_charge") {
+        if (!packageId) {
+          setError("Выберите абонемент");
+          return;
+        }
+        if (chargeMode === "lessons" && !selectedLessonIds.length) {
+          setError("Выберите уроки или спишите вручную");
+          return;
+        }
+        if (chargeMode === "manual" && (!chargeUnits || Number(chargeUnits) <= 0)) {
+          setError("Укажите количество занятий");
+          return;
+        }
+        if (chargeMode === "manual" && !String(comment || "").trim()) {
+          setError("Укажите причину списания");
+          return;
+        }
+      } else if (["lessons", "advance", "package_pay", "package_buy", "refund"].includes(opType)) {
         if ((!amount || Number(amount) <= 0) && opType !== "package_buy") {
           // package_buy may have amount 0 if await payment, but we require amount for clarity
         }
@@ -294,6 +336,24 @@ export default function BillingOperationWizard({
             ? `Абонемент создан, покрыто прошлых уроков: ${pkg.covered_past_count}`
             : "Абонемент создан",
         };
+      } else if (opType === "package_charge") {
+        if (chargeMode === "lessons") {
+          const accountId = selectedAccount?.id;
+          if (!accountId) throw new Error("Не найден счёт ученика");
+          const result = await chargeAccountFromPackage(accountId, {
+            package_id: packageId,
+            event_billing_ids: selectedLessonIds,
+            comment,
+            idempotency_key: `wizard-settle-${accountId}-${packageId}-${[...selectedLessonIds].sort().join(",")}`,
+          });
+          meta.message = result?.message || `Списано уроков: ${result?.charged_count || selectedLessonIds.length}`;
+        } else {
+          const result = await consumeBillingPackage(packageId, {
+            units: String(chargeUnits),
+            comment: comment.trim(),
+          });
+          meta.message = result?.message || "Списание из абонемента сохранено";
+        }
       } else if (opType === "refund") {
         await createBillingRefund({
           student_id: Number(studentId),
@@ -461,6 +521,134 @@ export default function BillingOperationWizard({
           </div>
         ) : null}
 
+        {step === 3 && opType === "package_charge" ? (
+          <>
+            <div className="pay-field">
+              <label>Абонемент</label>
+              {chargeablePackages.length === 0 ? (
+                <p className="pay-hint">Нет абонемента с остатком занятий.</p>
+              ) : (
+                <div className="pay-radio-list">
+                  {chargeablePackages.map((pkg) => (
+                    <label key={pkg.id} className="pay-radio-row">
+                      <input
+                        type="radio"
+                        name="charge-pkg"
+                        checked={String(packageId) === String(pkg.id)}
+                        onChange={() => setPackageId(pkg.id)}
+                      />
+                      <span>
+                        {pkg.title || "Абонемент"}
+                        {" — остаток "}
+                        {formatUnits(pkg.remaining_units, pkg.unit_type)}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="pay-field">
+              <label>Что списать</label>
+              <div className="pay-cover-choice">
+                <label className={chargeMode === "manual" ? "is-active" : ""}>
+                  <input
+                    type="radio"
+                    name="charge-mode"
+                    checked={chargeMode === "manual"}
+                    onChange={() => setChargeMode("manual")}
+                  />
+                  <span>
+                    <strong>Без урока в расписании</strong>
+                    <em>Урок в другом месте или пропуск, который нужно списать</em>
+                  </span>
+                </label>
+                <label className={chargeMode === "lessons" ? "is-active" : ""}>
+                  <input
+                    type="radio"
+                    name="charge-mode"
+                    checked={chargeMode === "lessons"}
+                    disabled={studentUnpaid.length === 0}
+                    onChange={() => {
+                      setChargeMode("lessons");
+                      if (!selectedLessonIds.length) {
+                        setSelectedLessonIds(studentUnpaid.map((l) => l.id || l.record_id));
+                      }
+                    }}
+                  />
+                  <span>
+                    <strong>Неоплаченные уроки из расписания</strong>
+                    <em>
+                      {studentUnpaid.length > 0
+                        ? `Погасить ${studentUnpaid.length} уроков абонементом`
+                        : "Неоплаченных уроков нет"}
+                    </em>
+                  </span>
+                </label>
+              </div>
+            </div>
+            {chargeMode === "manual" ? (
+              <div className="pay-field">
+                <label>Количество занятий</label>
+                <div className="pay-chip-row">
+                  {[1, 2, 3].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      className={`pay-chip${chargeUnits === String(n) ? " pay-chip--active" : ""}`}
+                      onClick={() => setChargeUnits(String(n))}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  className="pay-input"
+                  type="number"
+                  min="0.5"
+                  step="0.5"
+                  value={chargeUnits}
+                  onChange={(e) => setChargeUnits(e.target.value)}
+                  style={{ marginTop: 8 }}
+                />
+              </div>
+            ) : (
+              <div className="pay-field">
+                <label>Уроки</label>
+                <div className="pay-check-list">
+                  {studentUnpaid.map((lesson) => {
+                    const id = lesson.id || lesson.record_id;
+                    return (
+                      <label key={id} className="pay-radio-row">
+                        <input
+                          type="checkbox"
+                          checked={selectedLessonIds.includes(id)}
+                          onChange={() => {
+                            setSelectedLessonIds((prev) => (
+                              prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+                            ));
+                          }}
+                        />
+                        <span>{formatLessonWhen(lesson.event_starts_at)}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <div className="pay-field">
+              <label>Комментарий{chargeMode === "manual" ? " *" : ""}</label>
+              <textarea
+                className="pay-textarea"
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder={chargeMode === "manual"
+                  ? "Например: урок вне кабинета / пропуск 12.03"
+                  : "Необязательно"}
+              />
+            </div>
+          </>
+        ) : null}
+
         {step === 3 && opType === "package_buy" ? (
           <>
             <div className="pay-field">
@@ -622,10 +810,30 @@ export default function BillingOperationWizard({
               {opType === "package_buy" ? (
                 <li><span>Занятий</span><strong>{pkgUnits}</strong></li>
               ) : null}
-              <li>
-                <span>Сумма</span>
-                <strong>{amount ? formatMoney(amount, selectedAccount?.currency) : "—"}</strong>
-              </li>
+              {opType === "package_charge" ? (
+                <>
+                  <li>
+                    <span>Режим</span>
+                    <strong>
+                      {chargeMode === "manual" ? "Без урока в расписании" : "Неоплаченные уроки"}
+                    </strong>
+                  </li>
+                  <li>
+                    <span>Списать</span>
+                    <strong>
+                      {chargeMode === "manual"
+                        ? formatUnits(chargeUnits, "lesson")
+                        : `${selectedLessonIds.length} уроков`}
+                    </strong>
+                  </li>
+                </>
+              ) : null}
+              {opType !== "package_charge" ? (
+                <li>
+                  <span>Сумма</span>
+                  <strong>{amount ? formatMoney(amount, selectedAccount?.currency) : "—"}</strong>
+                </li>
+              ) : null}
               {opType === "package_buy" && coverPast === "past" ? (
                 <li>
                   <span>Покрытие прошлых</span>
@@ -637,9 +845,11 @@ export default function BillingOperationWizard({
               ) : null}
               {comment ? <li><span>Комментарий</span><strong>{comment}</strong></li> : null}
             </ul>
-            {(opType === "refund" || opType === "adjustment") ? (
+            {(opType === "refund" || opType === "adjustment" || opType === "package_charge") ? (
               <p className="pay-warn-box">
-                Критичное действие: будет записано в историю и повлияет на баланс ученика.
+                {opType === "package_charge"
+                  ? "Списание уменьшит остаток абонемента и попадёт в историю операций."
+                  : "Критичное действие: будет записано в историю и повлияет на баланс ученика."}
               </p>
             ) : null}
           </div>

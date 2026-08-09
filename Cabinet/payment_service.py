@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import abc
 import calendar
+import logging
 import uuid
 from datetime import timedelta
 from decimal import Decimal
@@ -23,6 +24,8 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 def add_months(dt, months: int):
@@ -117,7 +120,8 @@ class PaymentProviderService:
         from django.conf import settings as django_settings
 
         from .models import Payment, PromoCode
-        from .subscription_service import SubscriptionLimitService
+        from .pricing_service import calculate_subscription_price, price_payload
+        from .subscription_service import PromoCodeService, SubscriptionLimitService
 
         provider_name = (
             getattr(django_settings, "PAYMENT_PROVIDER", None) or cls.PROVIDER or "mock"
@@ -128,14 +132,18 @@ class PaymentProviderService:
         if billing_period not in ("month", "year"):
             billing_period = "month"
 
-        original_amount = plan.price_year if billing_period == "year" else plan.price_month
-        original_amount = Decimal(str(original_amount or 0))
-        if discount_info:
-            final_amount = Decimal(str(discount_info["final_amount"]))
-            discount_amount = Decimal(str(discount_info.get("discount", 0)))
-        else:
-            final_amount = original_amount
-            discount_amount = Decimal("0")
+        # Всегда пересчитываем на backend перед Init.
+        calc = calculate_subscription_price(
+            teacher,
+            plan,
+            billing_period=billing_period,
+            promo_code=promo_code or None,
+            validate_promo=True,
+        )
+        original_amount = calc["base_price"]
+        final_amount = calc["final_price"]
+        discount_amount = calc["applied_discount"]
+        price_meta = price_payload(calc)
 
         if final_amount <= 0:
             raise ValueError("Для бесплатного тарифа оплата не требуется")
@@ -157,11 +165,35 @@ class PaymentProviderService:
                 "billing_period": existing.billing_period,
                 "plan_slug": plan.slug,
                 "idempotent": True,
+                "pricing": existing.metadata.get("pricing") if isinstance(existing.metadata, dict) else None,
             }
 
         promo_obj = None
-        if promo_code:
-            promo_obj = PromoCode.objects.filter(code__iexact=promo_code.strip()).first()
+        if calc["applied_discount_source"] == "promo" and calc.get("promo_code"):
+            promo_obj = PromoCode.objects.filter(
+                code__iexact=calc["promo_code"]
+            ).first()
+        elif promo_code and calc["applied_discount_source"] != "referral":
+            # Промо введён, но победил referral — не привязываем к Payment.
+            promo_obj = None
+
+        metadata = {
+            "plan_slug": plan.slug,
+            "billing_period": billing_period,
+            "pricing": price_meta,
+            "applied_discount_source": calc["applied_discount_source"],
+        }
+        # Согласие на автопродление: из явного флага в metadata вызывающего слоя
+        # или из текущего состояния подписки (пользователь уже включил toggle).
+        if discount_info and isinstance(discount_info, dict):
+            if discount_info.get("auto_renew") is True:
+                metadata["auto_renew"] = True
+            elif discount_info.get("consent_auto_renew") is True:
+                metadata["consent_auto_renew"] = True
+        if sub.auto_renew:
+            metadata.setdefault("auto_renew", True)
+
+        from .tbank_payment import customer_key_for_teacher
 
         payment = Payment.objects.create(
             teacher=teacher,
@@ -169,6 +201,7 @@ class PaymentProviderService:
             plan=plan,
             amount=original_amount,
             discount_amount=discount_amount,
+            referral_discount_amount=calc.get("referral_discount") or Decimal("0"),
             final_amount=final_amount,
             currency=plan.currency,
             status=Payment.Status.PENDING,
@@ -176,19 +209,26 @@ class PaymentProviderService:
             provider_payment_id=(
                 f"mock_{uuid.uuid4().hex[:16]}" if provider_name == "mock" else ""
             ),
+            customer_key=customer_key_for_teacher(teacher),
+            order_id="",  # заполняется в Init
             idempotency_key=key,
             billing_period=billing_period,
             promo_code=promo_obj,
-            metadata={"plan_slug": plan.slug, "billing_period": billing_period},
+            metadata=metadata,
+        )
+        logger.info(
+            "payment_created payment_id=%s teacher=%s plan=%s amount=%s",
+            payment.pk,
+            teacher.pk,
+            plan.slug,
+            final_amount,
         )
 
-        if promo_code and discount_info:
-            from .subscription_service import PromoCodeService
-
+        if promo_obj is not None:
             try:
                 PromoCodeService.apply(
                     teacher=teacher,
-                    code_str=promo_code,
+                    code_str=promo_obj.code,
                     plan_slug=plan.slug,
                     payment=payment,
                 )
@@ -201,6 +241,9 @@ class PaymentProviderService:
         except Exception:
             payment.status = Payment.Status.FAILED
             payment.save(update_fields=["status", "updated_at"])
+            from .subscription_service import PromoCodeService as _PCS
+
+            _PCS.release_for_payment(payment)
             raise
 
         payment.refresh_from_db()
@@ -214,9 +257,15 @@ class PaymentProviderService:
             "currency": payment.currency,
             "billing_period": billing_period,
             "plan_slug": plan.slug,
+            "pricing": price_meta,
+            "discount": {
+                "original_amount": str(original_amount),
+                "discount": str(discount_amount),
+                "final_amount": str(final_amount),
+                "applied_discount_source": calc["applied_discount_source"],
+                "message": calc.get("message"),
+            },
         }
-        if discount_info:
-            result["discount"] = discount_info
         return result
 
     @classmethod
@@ -313,7 +362,13 @@ class PaymentProviderService:
 
         from .models import Payment, PaymentWebhookEvent
 
-        provider_name = (provider_name or cls.PROVIDER or "").strip().lower()
+        provider_name = (
+            provider_name
+            or getattr(django_settings, "PAYMENT_PROVIDER", None)
+            or cls.PROVIDER
+            or "mock"
+        )
+        provider_name = str(provider_name).strip().lower()
         if provider_name == "tinkoff":
             provider_name = "tbank"
         configured = (getattr(django_settings, "PAYMENT_PROVIDER", "mock") or "mock").strip().lower()
@@ -332,6 +387,12 @@ class PaymentProviderService:
                 "status": (payload or {}).get("status", "paid"),
                 "event_id": (payload or {}).get("event_id") or "",
                 "provider_payment_id": (payload or {}).get("provider_payment_id") or "",
+                "rebill_id": (payload or {}).get("rebill_id") or "",
+                "amount_kopecks": (payload or {}).get("amount_kopecks"),
+                "pan_mask": (payload or {}).get("pan_mask") or "",
+                "customer_key": (payload or {}).get("customer_key") or "",
+                "error_code": (payload or {}).get("error_code") or "",
+                "error_message": (payload or {}).get("error_message") or "",
             }
         else:
             try:
@@ -341,6 +402,22 @@ class PaymentProviderService:
 
         # Промежуточные статусы Т-Банка не меняют подписку
         if parsed.get("status") == "pending":
+            # RebillId может прийти на AUTHORIZED — сохраняем заранее.
+            rebill_early = str(parsed.get("rebill_id") or "").strip()
+            if rebill_early and parsed.get("payment_id"):
+                try:
+                    p = Payment.objects.select_for_update().filter(pk=parsed["payment_id"]).first()
+                    if p and not p.rebill_id:
+                        p.rebill_id = rebill_early
+                        p.save(update_fields=["rebill_id", "updated_at"])
+                        cls._store_rebill_on_subscription(
+                            p,
+                            rebill_id=rebill_early,
+                            customer_key=parsed.get("customer_key") or "",
+                            pan_mask=parsed.get("pan_mask") or "",
+                        )
+                except Exception:
+                    logger.exception("early rebill store failed")
             return {"ok": True, "ignored": True, "status": "pending"}
 
         event_id = str(parsed.get("event_id") or "")
@@ -372,31 +449,137 @@ class PaymentProviderService:
         event.payment = payment
         event.payload = payload or {}
 
+        # Сверка суммы (копейки) — защита от подмены.
+        amount_kopecks = parsed.get("amount_kopecks")
+        if (
+            new_status == "paid"
+            and amount_kopecks is not None
+            and provider_name in ("tbank", "tinkoff")
+        ):
+            expected = payment.final_amount if payment.final_amount is not None else payment.amount
+            from .tbank_payment import amount_to_kopecks
+
+            try:
+                expected_k = amount_to_kopecks(expected)
+            except ValueError:
+                expected_k = None
+            if expected_k is not None and int(amount_kopecks) != int(expected_k):
+                logger.error(
+                    "payment_amount_mismatch payment_id=%s expected=%s got=%s",
+                    payment.pk,
+                    expected_k,
+                    amount_kopecks,
+                )
+                event.processed = True
+                event.processed_at = timezone.now()
+                event.save()
+                return {"ok": False, "error": "amount_mismatch"}
+
+        rebill_id = str(parsed.get("rebill_id") or "").strip()
+        if rebill_id:
+            payment.rebill_id = rebill_id
+        if parsed.get("customer_key"):
+            payment.customer_key = str(parsed["customer_key"])[:64]
+
         if new_status == "paid" and payment.status != Payment.Status.PAID:
             payment.status = Payment.Status.PAID
             payment.paid_at = timezone.now()
             if parsed.get("provider_payment_id"):
                 payment.provider_payment_id = parsed["provider_payment_id"]
-            payment.save(update_fields=["status", "paid_at", "provider_payment_id", "updated_at"])
+            payment.error_code = ""
+            payment.error_message = ""
+            payment.save(
+                update_fields=[
+                    "status",
+                    "paid_at",
+                    "provider_payment_id",
+                    "rebill_id",
+                    "customer_key",
+                    "error_code",
+                    "error_message",
+                    "updated_at",
+                ]
+            )
+            cls._store_rebill_on_subscription(
+                payment,
+                rebill_id=rebill_id or payment.rebill_id,
+                customer_key=payment.customer_key,
+                pan_mask=parsed.get("pan_mask") or "",
+            )
             cls.activate_subscription_from_payment(payment)
             from .subscription_service import PromoCodeService
 
             PromoCodeService.confirm_for_payment(payment)
+            logger.info("payment_confirmed payment_id=%s teacher=%s", payment.pk, payment.teacher_id)
         elif new_status in ("failed", "cancelled", "refunded"):
             payment.status = new_status
+            if parsed.get("error_code"):
+                payment.error_code = str(parsed["error_code"])[:64]
+            if parsed.get("error_message"):
+                payment.error_message = str(parsed["error_message"])[:512]
+            update_fields = ["status", "rebill_id", "customer_key", "error_code", "error_message", "updated_at"]
             if parsed.get("provider_payment_id") and not payment.provider_payment_id:
                 payment.provider_payment_id = parsed["provider_payment_id"]
-                payment.save(update_fields=["status", "provider_payment_id", "updated_at"])
-            else:
-                payment.save(update_fields=["status", "updated_at"])
+                update_fields.append("provider_payment_id")
+            payment.save(update_fields=update_fields)
             from .subscription_service import PromoCodeService
 
             PromoCodeService.release_for_payment(payment)
+            logger.info(
+                "payment_failed payment_id=%s status=%s code=%s",
+                payment.pk,
+                new_status,
+                payment.error_code,
+            )
+            if payment.is_recurrent:
+                try:
+                    from .subscription_notifications import notify_auto_renew_failed
+
+                    notify_auto_renew_failed(payment)
+                except Exception:
+                    logger.exception("notify_auto_renew_failed failed")
 
         event.processed = True
         event.processed_at = timezone.now()
         event.save()
         return {"ok": True, "payment_id": payment.pk, "status": payment.status}
+
+    @classmethod
+    def _store_rebill_on_subscription(
+        cls,
+        payment,
+        *,
+        rebill_id: str = "",
+        customer_key: str = "",
+        pan_mask: str = "",
+    ):
+        """Сохраняет допустимые идентификаторы COF на подписке (без PAN/CVV)."""
+        from .models import TeacherSubscription
+
+        rebill_id = str(rebill_id or "").strip()
+        customer_key = str(customer_key or payment.customer_key or "").strip()
+        pan_mask = str(pan_mask or "").strip()
+        if not rebill_id and not customer_key and not pan_mask:
+            return
+        sub = payment.subscription
+        if sub is None:
+            try:
+                sub = TeacherSubscription.objects.get(teacher_id=payment.teacher_id)
+            except TeacherSubscription.DoesNotExist:
+                return
+        update_fields = ["updated_at"]
+        if rebill_id and sub.tbank_rebill_id != rebill_id:
+            sub.tbank_rebill_id = rebill_id
+            update_fields.append("tbank_rebill_id")
+        if customer_key and sub.tbank_customer_key != customer_key:
+            sub.tbank_customer_key = customer_key
+            update_fields.append("tbank_customer_key")
+        if pan_mask and sub.payment_method_mask != pan_mask:
+            # Т-Банк иногда отдаёт маску вида 430000******9956 — храним как есть.
+            sub.payment_method_mask = pan_mask[:32]
+            update_fields.append("payment_method_mask")
+        if len(update_fields) > 1:
+            sub.save(update_fields=update_fields)
 
     @classmethod
     def activate_subscription_from_payment(cls, payment):
@@ -424,23 +607,79 @@ class PaymentProviderService:
         now = timezone.now()
         months = 12 if payment.billing_period == "year" else 1
         bonus_days = 0
-        if payment.promo_code_id:
+        meta = payment.metadata if isinstance(payment.metadata, dict) else {}
+        pricing = meta.get("pricing") if isinstance(meta.get("pricing"), dict) else {}
+
+        if payment.promo_code_id and meta.get("applied_discount_source") == "promo":
             promo = payment.promo_code
             if promo.discount_type == PromoCode.DiscountType.FREE_MONTHS:
                 months = max(months, int(promo.discount_value or 0) or months)
             elif promo.discount_type == PromoCode.DiscountType.BONUS_DAYS:
                 bonus_days = int(promo.discount_value or 0)
             bonus_days += int(getattr(promo, "bonus_days", 0) or 0)
+        elif pricing.get("extra_free_months"):
+            months = max(months, int(pricing.get("extra_free_months") or 0) or months)
+        if pricing.get("bonus_days") and meta.get("applied_discount_source") == "promo":
+            bonus_days = max(bonus_days, int(pricing.get("bonus_days") or 0))
+
+        was_active = bool(sub.expires_at and sub.expires_at > now and sub.is_valid())
+        from .subscription_downgrade import DowngradeService, is_downgrade
+
+        # Ранняя оплата будущего (более дешёвого) тарифа: не отнимаем остаток текущего.
+        if (
+            was_active
+            and plan
+            and sub.plan_id
+            and is_downgrade(sub.plan, plan)
+            and not payment.is_recurrent
+        ):
+            DowngradeService.mark_prepaid(sub, payment, plan)
+            logger.info(
+                "subscription_prepaid_downgrade payment_id=%s teacher=%s keep=%s next=%s",
+                payment.pk,
+                payment.teacher_id,
+                sub.plan.slug,
+                plan.slug,
+            )
+            try:
+                ReferralService.apply_available_bonus_days(payment.teacher)
+            except Exception:
+                logger.exception("apply_available_bonus_days failed for %s", payment.teacher_id)
+            try:
+                ReferralService.mark_invitee_discount_consumed(payment)
+            except Exception:
+                logger.exception("mark_invitee_discount_consumed failed for payment %s", payment.pk)
+            try:
+                ReferralService.grant_payment_reward_if_applicable(payment)
+            except Exception:
+                logger.exception("grant_payment_reward_if_applicable failed for payment %s", payment.pk)
+            try:
+                sub.refresh_from_db()
+                DowngradeService.sync_effective_at_to_expires(sub)
+            except Exception:
+                logger.exception("sync_effective_at_to_expires failed")
+            return
 
         base = sub.expires_at if sub.expires_at and sub.expires_at > now else now
         expires = add_months(base, months)
         if bonus_days:
             expires = expires + timedelta(days=bonus_days)
 
-        # Автопродление — только при явном согласии (metadata / поле платежа).
-        # По умолчанию False: без recurring-провайдера и без opt-in списаний нет.
-        meta = payment.metadata if isinstance(payment.metadata, dict) else {}
-        auto_renew = bool(meta.get("auto_renew") is True or meta.get("consent_auto_renew") is True)
+        # Автопродление:
+        # - явный consent в metadata платежа;
+        # - иначе сохраняем текущий флаг (рекуррентное продление не сбрасывает);
+        # - если есть RebillId и пользователь уже включил auto_renew — оставляем True.
+        if meta.get("auto_renew") is True or meta.get("consent_auto_renew") is True:
+            auto_renew = True
+        elif payment.is_recurrent:
+            auto_renew = bool(sub.auto_renew)
+        else:
+            auto_renew = bool(sub.auto_renew)
+
+        # Если карта сохранена (rebill) и это первая оплата без явного отказа — не трогаем False.
+        # Пользователь включает автопродление отдельным toggle в ЛК.
+        if meta.get("auto_renew") is False:
+            auto_renew = False
 
         sub.plan = plan
         sub.status = TeacherSubscription.Status.ACTIVE
@@ -451,6 +690,11 @@ class PaymentProviderService:
         sub.expires_at = expires
         sub.auto_renew = auto_renew
         sub.cancelled_at = None
+        sub.last_renewal_error = ""
+        sub.prepaid_until = None
+        # Успешная оплата текущего/upgrade снимает pending downgrade на другой план.
+        sub.scheduled_plan = None
+        sub.scheduled_change_at = None
         sub.save(
             update_fields=[
                 "plan",
@@ -462,11 +706,218 @@ class PaymentProviderService:
                 "expires_at",
                 "auto_renew",
                 "cancelled_at",
+                "last_renewal_error",
+                "prepaid_until",
+                "scheduled_plan",
+                "scheduled_change_at",
                 "updated_at",
             ]
         )
+        # Закрыть pending change как applied/superseded.
+        try:
+            from .models import SubscriptionPlanChange
 
+            active = DowngradeService.get_active_change(sub)
+            if active:
+                if active.to_plan_id == plan.pk:
+                    active.status = SubscriptionPlanChange.Status.APPLIED
+                    active.applied_at = now
+                    active.payment = payment
+                    active.save(
+                        update_fields=["status", "applied_at", "payment", "updated_at"]
+                    )
+                    try:
+                        DowngradeService._enforce_limits_after_plan(sub, active)
+                    except Exception:
+                        logger.exception("enforce limits after renew failed")
+                else:
+                    active.status = SubscriptionPlanChange.Status.SUPERSEDED
+                    active.canceled_at = now
+                    active.save(update_fields=["status", "canceled_at", "updated_at"])
+        except Exception:
+            logger.exception("close plan change after payment failed")
+
+        logger.info(
+            "%s payment_id=%s teacher=%s plan=%s expires_at=%s",
+            "subscription_extended" if was_active else "subscription_activated",
+            payment.pk,
+            payment.teacher_id,
+            plan.slug,
+            expires.isoformat(),
+        )
+
+        if payment.is_recurrent:
+            try:
+                from .subscription_notifications import notify_auto_renew_success
+
+                notify_auto_renew_success(payment, sub)
+            except Exception:
+                logger.exception("notify_auto_renew_success failed")
+
+        # Накопленные +14 дней реферала (если покупатель сам кого-то приглашал ранее).
+        try:
+            ReferralService.apply_available_bonus_days(payment.teacher)
+        except Exception:
+            logger.exception("apply_available_bonus_days failed for %s", payment.teacher_id)
+
+        # Закрыть eligibility 50% у приглашённого (после любой первой успешной оплаты).
+        try:
+            ReferralService.mark_invitee_discount_consumed(payment)
+        except Exception:
+            logger.exception("mark_invitee_discount_consumed failed for payment %s", payment.pk)
+
+        # +14 дней пригласившему (идемпотентно).
         try:
             ReferralService.grant_payment_reward_if_applicable(payment)
         except Exception:
-            pass
+            logger.exception("grant_payment_reward_if_applicable failed for payment %s", payment.pk)
+
+        try:
+            sub.refresh_from_db()
+            DowngradeService.sync_effective_at_to_expires(sub)
+        except Exception:
+            logger.exception("sync_effective_at_to_expires failed")
+
+    @classmethod
+    def create_recurrent_payment(cls, subscription):
+        """
+        Создаёт Payment на полную цену СЛЕДУЮЩЕГО тарифа (pending downgrade) и Charge.
+        Скидки referral/promo НЕ переносятся на автопродление.
+        """
+        from .models import Payment
+        from .pricing_service import base_plan_price
+        from .subscription_downgrade import DowngradeService, is_free_plan
+        from .tbank_payment import customer_key_for_teacher
+
+        # Если следующий период уже предоплачен — Charge не нужен.
+        change = DowngradeService.get_active_change(subscription)
+        if change and change.status == "prepaid":
+            return {"ok": True, "prepaid": True, "change_id": change.pk}
+
+        plan = DowngradeService.effective_next_plan(subscription)
+        if not plan or is_free_plan(plan):
+            # Переход на Старт — не списываем.
+            return {"ok": True, "skipped": True, "reason": "next_plan_free"}
+
+        rebill_id = (subscription.tbank_rebill_id or "").strip()
+        if not rebill_id:
+            raise ValueError("Нет сохранённого RebillId для автопродления")
+
+        billing_period = subscription.billing_period or "month"
+        amount = base_plan_price(plan, billing_period)
+        if amount <= 0:
+            raise ValueError("Цена тарифа должна быть больше нуля")
+
+        key = f"renew_{subscription.pk}_{subscription.expires_at.date().isoformat() if subscription.expires_at else 'na'}_{plan.slug}"
+        existing = Payment.objects.filter(idempotency_key=key).first()
+        if existing:
+            if existing.status == Payment.Status.PAID:
+                return {"ok": True, "payment": existing, "duplicate": True}
+            if existing.status == Payment.Status.PENDING and existing.provider_payment_id:
+                # Уже Init — не дублируем Charge без необходимости.
+                return {"ok": True, "payment": existing, "pending": True}
+            if existing.status == Payment.Status.FAILED:
+                # Одна неудачная попытка на период — не крутим бесконечно.
+                return {"ok": False, "payment": existing, "error": "already_failed"}
+
+        teacher = subscription.teacher
+        payment = Payment.objects.create(
+            teacher=teacher,
+            subscription=subscription,
+            plan=plan,
+            amount=amount,
+            discount_amount=Decimal("0"),
+            referral_discount_amount=Decimal("0"),
+            final_amount=amount,
+            currency=plan.currency,
+            status=Payment.Status.PENDING,
+            provider=(getattr(settings, "PAYMENT_PROVIDER", "tbank") or "tbank").strip().lower(),
+            customer_key=subscription.tbank_customer_key or customer_key_for_teacher(teacher),
+            rebill_id=rebill_id,
+            is_recurrent=True,
+            idempotency_key=key,
+            billing_period=billing_period,
+            metadata={
+                "plan_slug": plan.slug,
+                "billing_period": billing_period,
+                "auto_renew": True,
+                "is_recurrent": True,
+                "pending_downgrade": bool(change),
+                "pricing": {
+                    "base_price": str(amount),
+                    "final_price": str(amount),
+                    "applied_discount_source": "none",
+                },
+            },
+        )
+        logger.info(
+            "payment_created recurrent payment_id=%s subscription=%s amount=%s",
+            payment.pk,
+            subscription.pk,
+            amount,
+        )
+
+        provider_name = (payment.provider or "tbank").strip().lower()
+        if provider_name == "mock":
+            # В DEBUG mock сразу подтверждает.
+            if settings.DEBUG:
+                cls.handle_webhook(
+                    {
+                        "payment_id": payment.pk,
+                        "status": "paid",
+                        "event_id": f"mock_renew_{payment.pk}",
+                        "provider_payment_id": payment.provider_payment_id or f"mock_{payment.pk}",
+                        "rebill_id": rebill_id,
+                    },
+                    provider_name="mock",
+                    skip_provider_parse=True,
+                )
+                payment.refresh_from_db()
+                return {"ok": True, "payment": payment, "mock": True}
+            raise ValueError("Mock recurrent disabled outside DEBUG")
+
+        provider = get_payment_provider(provider_name)
+        if not hasattr(provider, "charge_recurrent"):
+            raise ValueError("Провайдер не поддерживает рекуррентные платежи")
+
+        try:
+            result = provider.charge_recurrent(payment, plan, rebill_id=rebill_id)
+        except Exception as exc:
+            payment.refresh_from_db()
+            if payment.status != Payment.Status.FAILED:
+                payment.status = Payment.Status.FAILED
+                payment.error_message = str(exc)[:512]
+                payment.save(update_fields=["status", "error_message", "updated_at"])
+            try:
+                from .subscription_notifications import notify_auto_renew_failed
+
+                notify_auto_renew_failed(payment)
+            except Exception:
+                logger.exception("notify_auto_renew_failed")
+            logger.info("auto_renew_failed payment_id=%s error=%s", payment.pk, exc)
+            return {"ok": False, "payment": payment, "error": str(exc)}
+
+        mapped = (result.get("mapped_status") or "").strip().lower()
+        if mapped == "paid":
+            cls.handle_webhook(
+                {
+                    "payment_id": payment.pk,
+                    "status": "paid",
+                    "event_id": f"charge_{payment.provider_payment_id}_CONFIRMED",
+                    "provider_payment_id": payment.provider_payment_id,
+                    "rebill_id": rebill_id,
+                },
+                provider_name=provider_name,
+                skip_provider_parse=True,
+            )
+            payment.refresh_from_db()
+            logger.info("auto_renew_success payment_id=%s", payment.pk)
+            return {"ok": True, "payment": payment, "charged": True}
+
+        # Иначе ждём webhook / GetState.
+        logger.info(
+            "auto_renew_started awaiting_webhook payment_id=%s status=%s",
+            payment.pk,
+            result.get("provider_status"),
+        )
+        return {"ok": True, "payment": payment, "awaiting": True, "provider_status": result.get("provider_status")}

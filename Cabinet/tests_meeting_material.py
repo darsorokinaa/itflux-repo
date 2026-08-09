@@ -698,6 +698,55 @@ class MeetingMaterialSessionApiTests(TestCase):
         self.assertEqual(session.version, before)
         self.assertEqual(result["operation"]["type"], "material.annotation_preview")
 
+    def test_annotation_points_clamped_and_coord_space_kept(self):
+        open_res = self._open()
+        session_id = open_res.data["materialSession"]["sessionId"]
+        self.meeting.refresh_from_db()
+        result = apply_material_operation(
+            meeting=self.meeting,
+            user=self.teacher,
+            action="annotation_added",
+            payload={
+                "annotation": {
+                    "id": "norm-1",
+                    "points": [[-0.5, 2.0], [0.4, 0.6]],
+                    "width": 0.003,
+                    "coordSpace": "content_v1",
+                    "page": 1,
+                }
+            },
+            operation_id="ann-norm-1",
+            session_id=session_id,
+        )
+        session = MeetingMaterialSession.objects.get(pk=session_id)
+        ann = session.state["annotations"][0]
+        self.assertEqual(ann["points"][0], [0.0, 1.0])
+        self.assertEqual(ann["coordSpace"], "content_v1")
+        self.assertAlmostEqual(ann["width"], 0.003)
+
+    def test_student_viewport_is_ephemeral(self):
+        open_res = self._open()
+        session_id = open_res.data["materialSession"]["sessionId"]
+        self.meeting.refresh_from_db()
+        before = MeetingMaterialSession.objects.get(pk=session_id).version
+        result = apply_material_operation(
+            meeting=self.meeting,
+            user=self.student_user,
+            action="student_viewport",
+            payload={
+                "page": 1,
+                "viewport": {"left": 0.1, "top": 0.2, "width": 0.5, "height": 0.4},
+                "zoom": 1,
+                "following": True,
+            },
+            operation_id="sv-1",
+            session_id=session_id,
+        )
+        self.assertTrue(result.get("ephemeral"))
+        session = MeetingMaterialSession.objects.get(pk=session_id)
+        self.assertEqual(session.version, before)
+        self.assertEqual(result["operation"]["type"], "material.student_viewport")
+
 
 class MeetingMaterialCollabPermissionTests(MeetingMaterialSessionApiTests):
     def test_student_cannot_enable_collaborative(self):

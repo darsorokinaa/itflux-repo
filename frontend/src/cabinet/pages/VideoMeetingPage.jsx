@@ -247,6 +247,7 @@ export default function VideoMeetingPage() {
   const [materialNotice, setMaterialNotice] = useState("");
   const [remoteCursors, setRemoteCursors] = useState([]);
   const [remotePreviews, setRemotePreviews] = useState({});
+  const [studentViewports, setStudentViewports] = useState({});
   const [materialPresence, setMaterialPresence] = useState([]);
   const [followByUser, setFollowByUser] = useState({});
   const [collabPermOpen, setCollabPermOpen] = useState(false);
@@ -407,6 +408,21 @@ export default function VideoMeetingPage() {
       }
       if (!containerRef.current) {
         throw new Error("Контейнер конференции недоступен");
+      }
+
+      try {
+        console.info("[Jitsi] join-config diagnostics", config.diagnostics || {
+          roomName: config.roomName,
+          domain: config.domain,
+          meetingUuid: config.meeting?.uuid,
+          role: config.meeting?.role,
+          isModerator: config.meeting?.isModerator,
+          authMode: config.authMode,
+          passwordRequired: config.passwordRequired,
+          hasJwt: Boolean(config.jwt),
+        });
+      } catch {
+        /* ignore */
       }
 
       const subject = String(
@@ -1172,6 +1188,7 @@ export default function VideoMeetingPage() {
     if (!session?.material) {
       setRemoteCursors([]);
       setRemotePreviews({});
+      setStudentViewports({});
       return;
     }
     setPresented(null);
@@ -1232,6 +1249,7 @@ export default function VideoMeetingPage() {
         remoteGuard.run(() => applyMaterialSession(null));
         setRemotePreviews({});
         setRemoteCursors([]);
+        setStudentViewports({});
         if (!canManageRef.current) {
           showMaterialNotice("Преподаватель закрыл материал");
           setMobilePane("call");
@@ -1331,6 +1349,30 @@ export default function VideoMeetingPage() {
           timers.delete(key);
         }, 1800));
       },
+      onStudentViewport: (payload) => {
+        const authorId = payload?.author_id;
+        if (authorId == null) return;
+        const p = payload?.payload || {};
+        const viewport = p.viewport;
+        if (!viewport || typeof viewport !== "object") return;
+        setStudentViewports((prev) => ({
+          ...prev,
+          [String(authorId)]: {
+            viewport: {
+              left: Number(viewport.left) || 0,
+              top: Number(viewport.top) || 0,
+              width: Math.max(0.01, Number(viewport.width) || 1),
+              height: Math.max(0.01, Number(viewport.height) || 1),
+            },
+            page: Number(p.page) || 1,
+            zoom: Number(p.zoom) || 1,
+            following: p.following !== false,
+            scroll: Number(p.scroll) || 0,
+            displayName: payload.display_name || "Ученик",
+            updatedAt: Date.now(),
+          },
+        }));
+      },
       onFollowStatus: (payload) => {
         const userId = payload.user_id || payload.author_id;
         if (userId == null) return;
@@ -1367,6 +1409,11 @@ export default function VideoMeetingPage() {
         const userId = payload.user_id || payload.author_id;
         setMaterialPresence((prev) => prev.filter((p) => Number(p.userId) !== Number(userId)));
         setRemoteCursors((prev) => prev.filter((c) => Number(c.authorId) !== Number(userId)));
+        setStudentViewports((prev) => {
+          const next = { ...prev };
+          delete next[String(userId)];
+          return next;
+        });
         setFollowByUser((prev) => {
           const next = { ...prev };
           delete next[String(userId)];
@@ -1388,6 +1435,7 @@ export default function VideoMeetingPage() {
       remoteCursorTimersRef.current.clear();
       setRemoteCursors([]);
       setRemotePreviews({});
+      setStudentViewports({});
       setMaterialPresence([]);
     };
   }, [applyMaterialSession, meetingUuid, pageState, showMaterialNotice, showMaterialsToast]);
@@ -2001,6 +2049,7 @@ export default function VideoMeetingPage() {
             }
             remoteCursors={remoteCursors}
             remotePreviews={remotePreviews}
+            studentViewports={studentViewports}
             presence={materialPresence}
             notice={materialNotice}
             canEditContent
@@ -2065,6 +2114,7 @@ export default function VideoMeetingPage() {
             }}
             onSendCursor={(x, y) => materialCollabRef.current?.sendCursor(x, y)}
             onSendPointer={(x, y) => materialCollabRef.current?.sendPointer(x, y)}
+            onSendStudentViewport={(payload) => materialCollabRef.current?.sendStudentViewport(payload)}
             onDrawPreview={(stroke) => {
               const collabPerm = materialSession.collaborationPermission || COLLAB_PERMISSIONS.ANNOTATE;
               if (!canManage && !(

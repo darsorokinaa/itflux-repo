@@ -10,6 +10,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { TEACHERS_TELEGRAM_URL } from "../../config/teacherLinks";
 import {
   changePlan,
+  cancelPendingPlanChange,
   confirmMockSubscriptionPayment,
   createPayment,
   createReferralLink,
@@ -18,6 +19,9 @@ import {
   syncSubscriptionPayment,
   validatePromoCode,
 } from "../../utils/cabinetAuth";
+import { notifySubscriptionChanged } from "../hooks/useSubscription";
+import SupportContactLink from "../components/SupportContactLink";
+import { openSupport } from "../support";
 
 function isLocalFrontendHost() {
   const host = window.location.hostname;
@@ -58,7 +62,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Какие материалы доступны на «Старт»?",
-    a: "Только бесплатные материалы раздела «Бесплатно». Платные уроки, симуляторы и расширенная библиотека на «Старте» недоступны.",
+    a: "«Старт» — ознакомительный тариф: только бесплатные материалы. Расписание, журнал и видеозанятия открываются с тарифа «Учитель».",
   },
   {
     q: "Что означает «не менее 5 новых материалов»?",
@@ -74,7 +78,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Как работает реферальная программа?",
-    a: "Поделитесь своей ссылкой. Приглашённый получает бонус при регистрации, а вы — награду после его первой успешной оплаты. Условия берутся из настроек программы.",
+    a: "Поделитесь персональной ссылкой. Коллеге — 50% на первый месяц любого платного тарифа. Вам — 14 дней текущего тарифа после его первой успешной оплаты. Награда начисляется только после подтверждённой оплаты, не за регистрацию.",
   },
   {
     q: "Как получить чек?",
@@ -83,24 +87,24 @@ const FAQ_ITEMS = [
 ];
 
 const COMPARE_ROWS = [
-  { key: "students", label: "Количество учеников", type: "limit", field: "students" },
+  { key: "students", label: "Активные ученики", type: "limit", field: "students" },
   { key: "groups", label: "Группы", type: "limit", field: "groups" },
-  { key: "schedule", label: "Расписание", type: "rank", min: 1 },
-  { key: "journal", label: "Журнал", type: "feature", field: "analytics", altMin: 1 },
   { key: "homework", label: "Домашние задания", type: "feature", field: "homework" },
   { key: "review", label: "Проверка работ", type: "feature", field: "review" },
+  { key: "variants", label: "Генератор вариантов", type: "limit_monthly", field: "variants_monthly" },
+  { key: "workbooks", label: "Рабочие тетради", type: "limit_monthly", field: "workbooks_monthly" },
+  { key: "interactives", label: "Создание интерактивов", type: "limit_monthly", field: "interactives" },
+  { key: "schedule", label: "Расписание", type: "rank", min: 1 },
+  { key: "journal", label: "Журнал", type: "rank", min: 1 },
   { key: "video", label: "Видеоконференции", type: "rank", min: 1 },
-  { key: "variants", label: "Генератор вариантов", type: "limit", field: "variants_monthly" },
-  { key: "workbooks", label: "Рабочие тетради", type: "limit", field: "workbooks_monthly" },
-  { key: "free_lib", label: "Бесплатные материалы", type: "always" },
-  { key: "teacher_lib", label: "Материалы уровня Teacher", type: "rank", min: 1 },
-  { key: "pro_lib", label: "Основная библиотека", type: "rank", min: 2 },
-  { key: "interactives", label: "Интерактивы", type: "limit", field: "interactives" },
-  { key: "simulators", label: "Симуляторы", type: "feature", field: "simulators" },
-  { key: "premium_lib", label: "Premium-материалы", type: "rank", min: 3 },
-  { key: "monthly_new", label: "Новые материалы ежемесячно", type: "promise" },
-  { key: "analytics", label: "Аналитика", type: "feature", field: "analytics" },
+  { key: "analytics", label: "Аналитика", type: "analytics_level" },
   { key: "mass", label: "Массовые действия", type: "feature", field: "mass_actions" },
+  { key: "free_lib", label: "Бесплатные материалы", type: "always" },
+  { key: "teacher_lib", label: "Расширенная библиотека", type: "rank", min: 1 },
+  { key: "pro_lib", label: "Полная библиотека", type: "rank", min: 2 },
+  { key: "premium_lib", label: "Premium-материалы", type: "rank", min: 3 },
+  { key: "simulators", label: "Симуляторы", type: "simulators_level" },
+  { key: "cross_subject", label: "Межпредметные проекты", type: "cross_subject" },
   { key: "storage", label: "Хранилище", type: "storage" },
   { key: "support", label: "Поддержка", type: "support" },
 ];
@@ -146,9 +150,28 @@ function monthsWord(n) {
   return "месяцев";
 }
 
-function ctaLabel(plan, isCurrent) {
+function planRank(slug) {
+  const map = { start: 0, teacher: 1, pro: 2, premium: 3, school: 4 };
+  return map[slug] ?? 0;
+}
+
+function formatDateShort(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function ctaLabel(plan, isCurrent, { expiresAt, currentSlug } = {}) {
   if (isCurrent) return "Текущий тариф";
   if (plan.cta_type === "contact" || plan.slug === SCHOOL_SLUG) return "Оставить заявку";
+  const isDown = currentSlug && planRank(plan.slug) < planRank(currentSlug);
+  if (isDown && expiresAt) {
+    if (plan.slug === "start") return "Перейти на Старт после окончания подписки";
+    return `Перейти с ${formatDateShort(expiresAt)}`;
+  }
   if (plan.slug === "pro") return "Перейти на Профи";
   if (plan.slug === "start") return "Выбрать Старт";
   if (plan.slug === "teacher") return "Выбрать Учитель";
@@ -156,78 +179,71 @@ function ctaLabel(plan, isCurrent) {
   return `Выбрать ${plan.name}`;
 }
 
-/** Ключевые пункты карточки — лимиты из API, формулировки по тарифу. */
+/** Ключевые пункты карточки — позиционирование тарифов, без «списка отсутствий». */
 function buildHighlights(plan) {
   const l = plan.limits || {};
   const f = plan.features || {};
-  const students = l.students != null ? `до ${l.students} активных учеников` : null;
-  const groups = l.groups != null ? `до ${l.groups} групп` : null;
+  const students =
+    l.students != null ? `до ${l.students} активных учеников` : null;
   const variants =
     l.variants_monthly == null
       ? "Генератор вариантов без лимита"
-      : `Генератор вариантов: до ${l.variants_monthly}/мес`;
+      : `${l.variants_monthly} вариантов в месяц`;
   const workbooks =
     l.workbooks_monthly == null
       ? "Рабочие тетради без лимита"
-      : `Рабочие тетради: до ${l.workbooks_monthly}/мес`;
+      : `${l.workbooks_monthly} рабочих тетрадей в месяц`;
+  const interactives =
+    l.interactives == null
+      ? "Создание интерактивов без лимита"
+      : `${l.interactives} интерактива в месяц`;
 
   if (plan.slug === "start") {
     return [
-      students && students.replace("активных ", ""),
-      groups,
-      f.homework && "Базовые домашние задания",
-      f.review && "Проверка работ",
-      variants.replace("Генератор вариантов: ", "Ограниченный генератор: "),
-      workbooks.replace("Рабочие тетради: ", "Ограниченное создание тетрадей: "),
-      { text: "Только бесплатные материалы", accent: true },
+      l.students != null && `до ${l.students} учеников`,
+      "домашние задания и проверка",
+      l.variants_monthly != null && `${l.variants_monthly} вариантов в месяц`,
+      l.workbooks_monthly != null && `${l.workbooks_monthly} рабочих тетрадей в месяц`,
+      "бесплатные материалы",
     ].filter(Boolean);
   }
 
   if (plan.slug === "teacher") {
     return [
       students,
-      "Расписание и журнал",
-      f.homework && "Домашние задания",
-      f.review && "Проверка работ",
-      "Видеоконференции",
-      variants,
-      "Материалы уровня «Учитель»",
-      plan.monthly_library_promise && {
-        text: "Не менее 5 новых готовых материалов каждый месяц",
-        accent: true,
-      },
+      "расписание и журнал",
+      "видеозанятия прямо на платформе",
+      "ДЗ и проверка",
+      l.variants_monthly != null && `${l.variants_monthly} вариантов в месяц`,
+      l.workbooks_monthly != null && `${l.workbooks_monthly} рабочих тетрадей`,
+      "расширенная библиотека",
     ].filter(Boolean);
   }
 
   if (plan.slug === "pro") {
     return [
-      students ? `Большое количество учеников: ${students}` : "Большое количество учеников",
-      "Все функции кабинета",
-      f.analytics && "Журнал и расширенная аналитика",
-      "Видеоконференции",
+      students,
+      "расписание, журнал и видеозанятия",
       variants,
       workbooks,
-      "Полная основная библиотека",
-      {
-        text: "Симуляторы и интерактивы — в приоритете",
-        accent: true,
-        hint: "Новые тренажёры, симуляторы и интерактивные уроки в первую очередь появляются на тарифе «Профи» и выше",
-      },
-      plan.monthly_library_promise && "Не менее 5 новых материалов ежемесячно",
+      interactives,
+      "полная основная библиотека",
+      f.simulators && "симуляторы",
+      f.mass_actions && "массовые действия",
+      f.analytics && "расширенная аналитика",
     ].filter(Boolean);
   }
 
   if (plan.slug === "premium") {
     return [
-      "Всё из «Профи»",
-      { text: "Полная библиотека и эксклюзивные материалы", accent: true },
-      "Премиальные интерактивы",
-      "Межпредметные проекты",
-      "Авторские методические подборки",
+      students,
+      "группы без лимита",
+      { text: "полная библиотека и Premium-материалы", accent: true },
+      "симуляторы и межпредметные проекты",
+      variants,
       workbooks,
-      "Ранний доступ к отдельным материалам",
-      f.priority_support && "Приоритетная поддержка",
-      plan.monthly_library_promise && "Не менее 5 новых материалов ежемесячно",
+      f.priority_support && "приоритетная поддержка",
+      "полная аналитика",
     ].filter(Boolean);
   }
 
@@ -245,11 +261,9 @@ function buildHighlights(plan) {
 
   return [
     students,
-    groups,
     f.homework && "Домашние задания",
     f.review && "Проверка работ",
     f.simulators && "Симуляторы",
-    plan.monthly_library_promise && "Не менее 5 новых материалов ежемесячно",
   ].filter(Boolean);
 }
 
@@ -268,13 +282,18 @@ function compareCell(plan, row) {
       if (v == null) return "Без лимита";
       return String(v);
     }
+    case "limit_monthly": {
+      const v = l[row.field];
+      if (v == null) return "Без лимита";
+      return `${v}/мес`;
+    }
     case "feature":
-      if (row.altMin != null && rank >= row.altMin) return "Да";
-      return f[row.field] ? "Да" : "—";
+      if (row.altMin != null && rank >= row.altMin) return "✓";
+      return f[row.field] ? "✓" : "—";
     case "rank":
-      return rank >= row.min ? "Да" : "—";
+      return rank >= row.min ? "✓" : "—";
     case "always":
-      return "Да";
+      return "✓";
     case "promise":
       return plan.monthly_library_promise ? "Не менее 5" : "—";
     case "storage": {
@@ -287,9 +306,28 @@ function compareCell(plan, row) {
       if (f.priority_support) return "Приоритетная";
       if (rank >= 1) return "Стандартная";
       return "Базовая";
+    case "analytics_level":
+      if (rank >= 3) return "Полная";
+      if (rank >= 2 || f.analytics) return "Расширенная";
+      if (rank >= 1) return "Базовая";
+      return "—";
+    case "simulators_level":
+      if (f.simulators || rank >= 2) return "✓";
+      if (rank >= 1) return "Часть";
+      return "Демо";
+    case "cross_subject":
+      if (rank >= 3) return "✓";
+      if (rank >= 2) return "Часть";
+      return "—";
     default:
       return "—";
   }
+}
+
+function formatMoneyRub(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return `${Math.round(n).toLocaleString("ru-RU")} ₽`;
 }
 
 function SubscriptionStatusCard({
@@ -300,6 +338,7 @@ function SubscriptionStatusCard({
   onPromoDetails,
   onSetAutoRenew,
   onCancelSubscription,
+  onCancelPending,
   managing,
 }) {
   if (!subscription) return null;
@@ -315,6 +354,11 @@ function SubscriptionStatusCard({
     cancelled_at: cancelledAt,
     latest_payment: payment,
     plan_name: planName,
+    plan_price_month: planPriceMonth,
+    next_charge: nextCharge,
+    has_payment_method: hasPaymentMethod,
+    payment_method_mask: paymentMask,
+    pending_plan_change: pendingChange,
   } = subscription;
 
   const endDate = promoEndsAt || expiresAt;
@@ -325,7 +369,16 @@ function SubscriptionStatusCard({
   const isCancelled = Boolean(cancelledAt) || status === "cancelled";
   const autoRenewOn = Boolean(autoRenew) && !cancelledAt;
   const canToggleAutoRenew = !isExpired && status !== "suspended";
-  const showCancel = !isExpired && !isCancelled && status !== "suspended";
+  const isStart =
+    (subscription.plan_slug || currentPlan?.slug) === "start" ||
+    Boolean(currentPlan?.is_free);
+  const showDisableAutoRenew = autoRenewOn && !isExpired && !isStart;
+  const monthlyPrice =
+    planPriceMonth != null
+      ? formatMoneyRub(planPriceMonth)
+      : currentPlan?.price_month != null
+        ? formatMoneyRub(currentPlan.price_month)
+        : null;
 
   if (launchPromo) {
     return (
@@ -383,8 +436,8 @@ function SubscriptionStatusCard({
         </h2>
         <ul className="upg-status__meta">
           <li>Тариф: {planName || currentPlan?.name || "—"}</li>
-          <li>Начало: {startedAt ? formatDate(startedAt) : "—"}</li>
-          <li>Конец: {expiresAt ? formatDate(expiresAt) : "—"}</li>
+          {monthlyPrice && !isStart ? <li>Стоимость: {monthlyPrice} / месяц</li> : null}
+          <li>Действует до: {expiresAt ? formatDate(expiresAt) : "—"}</li>
           <li className="upg-status__auto">
             <span>Автопродление:</span>
             <div className="upg-auto-toggle" role="group" aria-label="Автопродление">
@@ -394,7 +447,7 @@ function SubscriptionStatusCard({
                 disabled={!canToggleAutoRenew || managing || autoRenewOn}
                 onClick={() => onSetAutoRenew(true)}
               >
-                {managing === "enable_auto_renew" ? "…" : "вкл"}
+                {managing === "enable_auto_renew" ? "…" : "Вкл"}
               </button>
               <button
                 type="button"
@@ -402,38 +455,108 @@ function SubscriptionStatusCard({
                 disabled={!canToggleAutoRenew || managing || !autoRenewOn}
                 onClick={() => onSetAutoRenew(false)}
               >
-                {managing === "disable_auto_renew" ? "…" : "выкл"}
+                {managing === "disable_auto_renew" ? "…" : "Выкл"}
               </button>
             </div>
           </li>
+          {autoRenewOn && nextCharge?.at ? (
+            <>
+              <li>Следующее списание: {formatDate(nextCharge.at)}</li>
+              <li>Сумма: {formatMoneyRub(nextCharge.amount)}</li>
+            </>
+          ) : null}
+          {!autoRenewOn && !isStart && !isExpired && expiresAt ? (
+            <li className="upg-status__note">
+              После {formatDate(expiresAt)} будет активирован тариф «Старт».
+            </li>
+          ) : null}
+          {paymentMask ? <li>Карта: {paymentMask}</li> : null}
         </ul>
         {isCancelled && expiresAt ? (
           <p className="upg-status__note">
-            Подписка отменена. Доступ сохранится до {formatDate(expiresAt)}.
+            Автопродление отключено. Тариф продолжит действовать до {formatDate(expiresAt)}.
           </p>
         ) : null}
         {isPending ? (
-          <p className="upg-status__note">Оплата ожидается. Завершите платёж, чтобы активировать тариф.</p>
+          <p className="upg-status__note">Проверяем оплату… Завершите платёж в окне банка.</p>
         ) : null}
         {paymentFailed ? (
-          <p className="upg-status__note upg-status__note--err">
-            Оплата не прошла{payment?.plan_name ? ` для тарифа «${payment.plan_name}»` : ""}.
-            Попробуйте выбрать тариф снова.
-          </p>
+          <div className="upg-status__note upg-status__note--err">
+            <p>
+              Не удалось автоматически продлить подписку
+              {payment?.plan_name ? ` «${payment.plan_name}»` : ""}.
+            </p>
+            <div className="upg-status__actions--row upg-status__support">
+              <button type="button" className="upg-btn upg-btn--primary" onClick={onChoosePlan}>
+                Оплатить вручную
+              </button>
+              <SupportContactLink />
+            </div>
+          </div>
         ) : null}
         {isExpired ? (
           <p className="upg-status__note">Подписка истекла. Выберите тариф, чтобы продолжить работу.</p>
         ) : null}
+          {autoRenewOn && !hasPaymentMethod ? (
+          <p className="upg-status__note">
+            Для автопродления нужна сохранённая карта. Оплатите тариф ещё раз.
+          </p>
+        ) : null}
+        {pendingChange ? (
+          <div className="upg-status__pending" role="status">
+            <p>
+              <strong>Следующий тариф:</strong> {pendingChange.to_plan_name}
+            </p>
+            <p>
+              <strong>Переход:</strong>{" "}
+              {pendingChange.effective_at
+                ? formatDateShort(pendingChange.effective_at)
+                : "—"}
+            </p>
+            {pendingChange.is_to_start ? (
+              <p className="upg-status__note">
+                После {formatDateShort(pendingChange.effective_at)} вы перейдёте на бесплатный
+                тариф «Старт».
+              </p>
+            ) : autoRenewOn ? (
+              <p className="upg-status__note">
+                {formatDateShort(pendingChange.effective_at)} подписка будет автоматически
+                продлена на тарифе «{pendingChange.to_plan_name}» за{" "}
+                {formatMoneyRub(pendingChange.next_price)}.
+              </p>
+            ) : (
+              <p className="upg-status__note">
+                Чтобы получить «{pendingChange.to_plan_name}» с{" "}
+                {formatDateShort(pendingChange.effective_at)}, оплатите тариф до этой даты.
+                Иначе будет активирован «Старт».
+              </p>
+            )}
+            <button
+              type="button"
+              className="upg-btn upg-btn--ghost"
+              onClick={onCancelPending}
+              disabled={managing}
+            >
+              {managing === "cancel_pending" ? "…" : "Отменить переход"}
+            </button>
+          </div>
+        ) : null}
       </div>
       <div className="upg-status__actions">
-        {showCancel ? (
+        {showDisableAutoRenew ? (
           <button
             type="button"
             className="upg-btn upg-btn--danger"
             onClick={onCancelSubscription}
             disabled={managing}
           >
-            {managing === "cancel" ? "…" : "Отменить подписку"}
+            {managing === "cancel" || managing === "disable_auto_renew"
+              ? "…"
+              : "Отключить автопродление"}
+          </button>
+        ) : !autoRenewOn && !isExpired && !isStart ? (
+          <button type="button" className="upg-btn upg-btn--ghost" onClick={onChoosePlan}>
+            Продлить сейчас
           </button>
         ) : null}
         <button type="button" className="upg-btn upg-btn--primary" onClick={onChoosePlan}>
@@ -449,11 +572,15 @@ function PlanCard({
   isCurrent,
   period,
   promoDiscount,
+  referralEligible = false,
+  referralPercent = 50,
   onSelect,
   selecting,
   expanded,
   onToggleFeatures,
   paymentsEnabled = true,
+  currentSlug = null,
+  expiresAt = null,
 }) {
   const highlights = buildHighlights(plan).slice(0, 8);
   const priceMonth = Number(plan.price_month);
@@ -461,32 +588,49 @@ function PlanCard({
   const isContact = plan.cta_type === "contact" || plan.slug === SCHOOL_SLUG;
   const isFree = Boolean(plan.is_free) && !isContact;
   const paymentBlocked = !paymentsEnabled && !isFree && !isContact;
+  const buttonLabel = ctaLabel(plan, isCurrent, { expiresAt, currentSlug });
+
+  const basePrice = period === "year" && priceYear > 0 ? priceYear : priceMonth;
+  const referralFirstPrice =
+    referralEligible && !isFree && !isContact && basePrice > 0
+      ? Math.round(basePrice * (1 - Number(referralPercent || 50) / 100))
+      : null;
 
   let priceMain;
   let priceSub = null;
+  let priceWas = null;
   if (isContact) {
     priceMain = "По запросу";
     priceSub = "Стоимость рассчитывается индивидуально";
   } else if (isFree || priceMonth === 0) {
     priceMain = "Бесплатно";
+  } else if (
+    promoDiscount?.valid &&
+    promoDiscount.plan_slug === plan.slug &&
+    promoDiscount.final_amount != null
+  ) {
+    priceWas = formatMoney(basePrice);
+    priceMain = formatMoney(promoDiscount.final_amount);
+    priceSub =
+      promoDiscount.applied_discount_source === "referral"
+        ? "первый месяц по приглашению"
+        : promoDiscount.message || "с учётом скидки";
+  } else if (referralFirstPrice != null && period === "month") {
+    priceWas = formatMoney(priceMonth);
+    priceMain = formatMoney(referralFirstPrice);
+    priceSub = `первый месяц · далее ${formatMoney(priceMonth)}/мес`;
   } else if (period === "year" && priceYear > 0) {
     priceMain = formatMoney(priceYear);
-    priceSub = "за год";
     const perMonth = priceYear / 12;
     if (Number.isFinite(perMonth) && perMonth > 0) {
       priceSub = `${formatMoney(perMonth)}/мес при оплате за год`;
+    } else {
+      priceSub = "за год";
     }
   } else {
     priceMain = formatMoney(priceMonth);
     priceSub = "в месяц";
   }
-
-  const showPromoPrice =
-    promoDiscount?.valid &&
-    promoDiscount.plan_slug === plan.slug &&
-    promoDiscount.final_amount != null &&
-    !isContact &&
-    !isFree;
 
   return (
     <article
@@ -514,12 +658,11 @@ function PlanCard({
       </div>
 
       <div className="upg-card__price-block">
+        {priceWas ? <div className="upg-card__price-was">{priceWas}</div> : null}
         <div className="upg-card__price">{priceMain}</div>
         {priceSub ? <div className="upg-card__price-sub">{priceSub}</div> : null}
-        {showPromoPrice ? (
-          <div className="upg-card__promo-price">
-            С промокодом: {formatMoney(promoDiscount.final_amount)}
-          </div>
+        {referralFirstPrice != null && period === "month" && !promoDiscount?.valid ? (
+          <div className="upg-card__price-note">Скидка действует только на первый месяц.</div>
         ) : null}
       </div>
 
@@ -539,6 +682,10 @@ function PlanCard({
           );
         })}
       </ul>
+
+      {plan.slug === "start" ? (
+        <p className="upg-card__caveat">Без расписания, журнала и видеозанятий.</p>
+      ) : null}
 
       <button type="button" className="upg-card__more" onClick={onToggleFeatures}>
         {expanded ? "Скрыть сравнение" : "Все возможности"}
@@ -569,7 +716,7 @@ function PlanCard({
             onClick={() => onSelect(plan)}
             disabled={selecting === plan.slug}
           >
-            {selecting === plan.slug ? "Подождите…" : ctaLabel(plan, false)}
+            {selecting === plan.slug ? "Подождите…" : buttonLabel}
           </button>
         )}
       </div>
@@ -657,6 +804,145 @@ function CompareSection({ plans, open, onOpenChange }) {
   );
 }
 
+function DowngradeConfirmModal({
+  open,
+  plan,
+  preview,
+  selectedStudents,
+  selectedGroups,
+  onToggleStudent,
+  onToggleGroup,
+  onConfirm,
+  onClose,
+  busy,
+}) {
+  if (!open || !preview || !plan) return null;
+
+  const students = preview.limits?.students || {};
+  const groups = preview.limits?.groups || {};
+  const storage = preview.limits?.storage || {};
+  const studentLimit = Number(students.limit || 0);
+  const groupLimit = groups.limit != null ? Number(groups.limit) : null;
+  const studentsOk = !students.needs_selection || selectedStudents.length === studentLimit;
+  const groupsOk =
+    !groups.needs_selection ||
+    groupLimit == null ||
+    selectedGroups.length === groupLimit;
+  const canSubmit = studentsOk && groupsOk && !busy;
+  const when = preview.effective_at ? formatDateShort(preview.effective_at) : "окончания периода";
+  const confirmLabel = preview.is_to_start
+    ? `Перейти на Старт с ${when}`
+    : `Перейти на ${plan.name} с ${when}`;
+
+  return (
+    <div className="upg-modal-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="upg-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="upg-downgrade-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="upg-downgrade-title" className="upg-modal__title">
+          Перейти на «{plan.name}»?
+        </h2>
+        <p className="upg-modal__text">{preview.message}</p>
+        {preview.losses?.length ? (
+          <div className="upg-modal__block">
+            <strong>Вы потеряете доступ к:</strong>
+            <ul>
+              {preview.losses.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {students.needs_selection ? (
+          <div className="upg-modal__block">
+            <strong>
+              На тарифе «{plan.name}» доступно до {studentLimit} активных учеников. Сейчас у вас{" "}
+              {students.current}.
+            </strong>
+            <p>
+              Выберите {studentLimit}, которые останутся активными. Остальные будут переведены в
+              архив — данные сохранятся.
+            </p>
+            <ul className="upg-modal__checklist">
+              {(students.candidates || []).map((s) => {
+                const checked = selectedStudents.includes(s.id);
+                const name = [s.last_name, s.first_name].filter(Boolean).join(" ") || `#${s.id}`;
+                return (
+                  <li key={s.id}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={!checked && selectedStudents.length >= studentLimit}
+                        onChange={() => onToggleStudent(s.id)}
+                      />
+                      {name}
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="upg-modal__hint">
+              Выбрано: {selectedStudents.length} из {studentLimit}
+            </p>
+          </div>
+        ) : null}
+        {groups.needs_selection ? (
+          <div className="upg-modal__block">
+            <strong>
+              На тарифе «{plan.name}» доступно до {groupLimit} активных групп. Сейчас у вас{" "}
+              {groups.current}.
+            </strong>
+            <p>Выберите группы, которые останутся активными. Остальные — в архив.</p>
+            <ul className="upg-modal__checklist">
+              {(groups.candidates || []).map((g) => {
+                const checked = selectedGroups.includes(g.id);
+                return (
+                  <li key={g.id}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={!checked && selectedGroups.length >= groupLimit}
+                        onChange={() => onToggleGroup(g.id)}
+                      />
+                      {g.name || `Группа #${g.id}`}
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
+        {storage.over ? (
+          <p className="upg-modal__warn" role="status">
+            Использовано {storage.used_mb} МБ из {storage.limit_mb} МБ нового тарифа. Файлы не
+            удаляются, но новые загрузки будут недоступны, пока объём не станет меньше лимита.
+          </p>
+        ) : null}
+        <p className="upg-modal__note">Ваши данные и материалы удалены не будут.</p>
+        <div className="upg-modal__actions">
+          <button
+            type="button"
+            className="upg-btn upg-btn--primary"
+            onClick={onConfirm}
+            disabled={!canSubmit}
+          >
+            {busy ? "…" : confirmLabel}
+          </button>
+          <button type="button" className="upg-btn upg-btn--ghost" onClick={onClose} disabled={busy}>
+            Отмена
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FaqSection() {
   const [open, setOpen] = useState(null);
   return (
@@ -692,6 +978,8 @@ export default function CabinetUpgradePage() {
   const [loading, setLoading] = useState(true);
   const [selecting, setSelecting] = useState(null);
   const [notice, setNotice] = useState("");
+  const [noticeSupport, setNoticeSupport] = useState(false);
+  const [noticeRetry, setNoticeRetry] = useState(null);
   const [period, setPeriod] = useState("month");
   const [promoInput, setPromoInput] = useState("");
   const [promoState, setPromoState] = useState(null);
@@ -702,9 +990,19 @@ export default function CabinetUpgradePage() {
   const [referralLink, setReferralLink] = useState(null);
   const [referralCopied, setReferralCopied] = useState(false);
   const [managing, setManaging] = useState(null);
+  const [downgradeModal, setDowngradeModal] = useState(null);
+  const [selectedStudents, setSelectedStudents] = useState([]);
+  const [selectedGroups, setSelectedGroups] = useState([]);
+  const [confirmingDowngrade, setConfirmingDowngrade] = useState(false);
   const plansRef = useRef(null);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+
+  const showNotice = (text, { support = false, retry = null } = {}) => {
+    setNotice(text);
+    setNoticeSupport(Boolean(support));
+    setNoticeRetry(typeof retry === "function" ? retry : null);
+  };
 
   useEffect(() => {
     const qp = searchParams.get("period");
@@ -735,6 +1033,7 @@ export default function CabinetUpgradePage() {
         if (!cancelled) {
           setPlansData(refreshed);
           if (refreshed?.referral?.my_link) setReferralLink(refreshed.referral.my_link);
+          notifySubscriptionChanged();
         }
       } catch {
         /* ignore */
@@ -744,7 +1043,7 @@ export default function CabinetUpgradePage() {
     const applyReturn = async () => {
       if (status === "fail" || status === "failed" || status === "cancelled") {
         if (!cancelled) {
-          setNotice("Оплата не завершена. Можно выбрать тариф и попробовать снова.");
+          showNotice("Оплата не завершена. Можно выбрать тариф и попробовать снова.");
         }
         await finish();
         return;
@@ -762,25 +1061,52 @@ export default function CabinetUpgradePage() {
         if (cancelled) return;
 
         if (payment.is_paid) {
-          setNotice(
+          showNotice(
             payment.plan_name
               ? `Оплата прошла успешно. Тариф «${payment.plan_name}» активирован.`
               : "Оплата прошла успешно. Тариф обновлён.",
           );
         } else if (status === "success") {
-          setNotice(
-            "Платёж ещё обрабатывается банком. Обновите страницу через минуту.",
+          showNotice(
+            "Оплата получена, но обновление подписки занимает больше времени, чем обычно.",
+            {
+              support: true,
+              retry: async () => {
+                try {
+                  const again = await syncSubscriptionPayment(paymentId);
+                  if (again?.is_paid) {
+                    showNotice(
+                      again.plan_name
+                        ? `Оплата прошла успешно. Тариф «${again.plan_name}» активирован.`
+                        : "Оплата прошла успешно. Тариф обновлён.",
+                    );
+                    await refreshPlans();
+                  } else {
+                    showNotice(
+                      "Оплата получена, но обновление подписки занимает больше времени, чем обычно.",
+                      { support: true, retry: null },
+                    );
+                  }
+                } catch {
+                  showNotice(
+                    "Не удалось проверить оплату. Если вы платили — напишите мне.",
+                    { support: true },
+                  );
+                }
+              },
+            },
           );
         } else {
-          setNotice(
+          showNotice(
             "Открылась тестовая страница без формы банка. Перезапустите Django с PAYMENT_PROVIDER=tbank.",
           );
         }
       } catch (err) {
         if (!cancelled) {
-          setNotice(
+          showNotice(
             err?.data?.detail ||
               "Не удалось проверить оплату. Если вы платили — обновите страницу позже.",
+            { support: true },
           );
         }
       }
@@ -819,6 +1145,7 @@ export default function CabinetUpgradePage() {
     const refreshed = await fetchSubscriptionPlans();
     setPlansData(refreshed);
     if (refreshed?.referral?.my_link) setReferralLink(refreshed.referral.my_link);
+    notifySubscriptionChanged();
     return refreshed;
   };
 
@@ -854,21 +1181,93 @@ export default function CabinetUpgradePage() {
   const handleCancelSubscription = async () => {
     if (
       !window.confirm(
-        "Отменить подписку? Автопродление будет выключено. Доступ сохранится до конца текущего периода.",
+        "Отключить автопродление? Тариф продолжит действовать до конца оплаченного периода, затем станет доступен «Старт».",
       )
     ) {
       return;
     }
-    setManaging("cancel");
-    setNotice("");
+    setManaging("disable_auto_renew");
     try {
-      const result = await manageSubscription("cancel");
+      await manageSubscription("disable_auto_renew");
+      setNotice("Автопродление отключено. Оплаченный период сохранён.");
       await refreshPlans();
-      setNotice(result.message || "Подписка отменена.");
     } catch (err) {
-      setNotice(err.data?.detail || err.data?.message || "Не удалось отменить подписку.");
+      setNotice(err?.data?.detail || err?.message || "Не удалось отключить автопродление.");
     } finally {
       setManaging(null);
+    }
+  };
+
+  const handleCancelPending = async () => {
+    if (!window.confirm("Отменить запланированный переход на другой тариф?")) return;
+    setManaging("cancel_pending");
+    setNotice("");
+    try {
+      const result = await cancelPendingPlanChange();
+      await refreshPlans();
+      setNotice(result.message || "Переход отменён. Текущий тариф продолжит действовать.");
+    } catch (err) {
+      setNotice(err?.data?.detail || err?.message || "Не удалось отменить переход.");
+    } finally {
+      setManaging(null);
+    }
+  };
+
+  const closeDowngradeModal = () => {
+    if (confirmingDowngrade) return;
+    setDowngradeModal(null);
+    setSelectedStudents([]);
+    setSelectedGroups([]);
+    setSelecting(null);
+  };
+
+  const toggleStudentKeep = (id) => {
+    setSelectedStudents((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
+
+  const toggleGroupKeep = (id) => {
+    setSelectedGroups((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
+
+  const handleConfirmDowngrade = async () => {
+    if (!downgradeModal?.plan) return;
+    const plan = downgradeModal.plan;
+    const preview = downgradeModal.preview || {};
+    setConfirmingDowngrade(true);
+    setNotice("");
+    try {
+      const payload = { confirm: true };
+      if (preview.limits?.students?.needs_selection) {
+        payload.student_ids = selectedStudents;
+      }
+      if (preview.limits?.groups?.needs_selection) {
+        payload.group_ids = selectedGroups;
+      }
+      const result = await changePlan(plan.slug, period, payload);
+      setDowngradeModal(null);
+      setSelectedStudents([]);
+      setSelectedGroups([]);
+      await refreshPlans();
+      const when = result.effective_at
+        ? formatDateShort(result.effective_at)
+        : preview.effective_at
+          ? formatDateShort(preview.effective_at)
+          : "окончания периода";
+      setNotice(
+        result.message ||
+          `Переход на «${plan.name}» запланирован с ${when}. До этой даты действует текущий тариф.`,
+      );
+    } catch (err) {
+      setNotice(
+        err?.data?.detail || err?.message || "Не удалось запланировать понижение тарифа.",
+      );
+    } finally {
+      setConfirmingDowngrade(false);
+      setSelecting(null);
     }
   };
 
@@ -883,12 +1282,20 @@ export default function CabinetUpgradePage() {
         plans.find((p) => p.is_recommended)?.slug ||
         "pro";
       const data = await validatePromoCode(code, targetSlug, period);
+      const source = data.applied_discount_source;
+      let message;
+      if (source === "referral") {
+        message = data.message || `Реферальная скидка −${formatMoney(data.applied_discount || data.discount)} · к оплате ${formatMoney(data.final_amount || data.final_price)}`;
+      } else if (data.discount_type === "bonus_days" || source === "promo" && data.applied_discount_type === "bonus_days") {
+        message = `+${data.bonus_days || data.discount_value} бонусных дней`;
+      } else {
+        message =
+          data.message ||
+          `✓ ${data.code || code}: −${formatMoney(data.applied_discount || data.discount)} · к оплате ${formatMoney(data.final_amount || data.final_price)}`;
+      }
       setPromoState({
         valid: true,
-        message:
-          data.discount_type === "bonus_days"
-            ? `+${data.bonus_days || data.discount_value} бонусных дней`
-            : `Скидка −${formatMoney(data.discount)} · итого ${formatMoney(data.final_amount)}`,
+        message,
         ...data,
       });
     } catch (err) {
@@ -913,8 +1320,35 @@ export default function CabinetUpgradePage() {
 
     setSelecting(plan.slug);
     setNotice("");
+    let openedDowngradeModal = false;
     try {
       const result = await changePlan(plan.slug, period);
+      if (result.requires_downgrade_confirm || result.preview?.can_schedule) {
+        const preview = result.preview || {};
+        const students = preview.limits?.students;
+        const groups = preview.limits?.groups;
+        setSelectedStudents(
+          students?.needs_selection
+            ? (students.candidates || []).slice(0, Number(students.limit || 0)).map((s) => s.id)
+            : [],
+        );
+        setSelectedGroups(
+          groups?.needs_selection
+            ? (groups.candidates || []).slice(0, Number(groups.limit || 0)).map((g) => g.id)
+            : [],
+        );
+        openedDowngradeModal = true;
+        setDowngradeModal({ plan, preview });
+        return;
+      }
+      if (result.scheduled) {
+        await refreshPlans();
+        setNotice(
+          result.message ||
+            `Переход на «${plan.name}» запланирован. До даты перехода действует текущий тариф.`,
+        );
+        return;
+      }
       if (result.requires_payment) {
         if (!paymentsEnabled) {
           setNotice("Оплата временно недоступна. Попробуйте позже.");
@@ -963,9 +1397,7 @@ export default function CabinetUpgradePage() {
                 ? `Оплата прошла успешно. Тариф «${paid.plan_name}» активирован.`
                 : "Оплата прошла успешно. Тариф обновлён.",
             );
-            const refreshed = await fetchSubscriptionPlans();
-            setPlansData(refreshed);
-            if (refreshed?.referral?.my_link) setReferralLink(refreshed.referral.my_link);
+            await refreshPlans();
           } else {
             setNotice(
               "Платёж ещё не подтверждён. Если вы уже оплатили — обновите страницу через минуту.",
@@ -978,8 +1410,7 @@ export default function CabinetUpgradePage() {
         return;
       } else {
         setNotice("Тариф обновлён.");
-        const refreshed = await fetchSubscriptionPlans();
-        setPlansData(refreshed);
+        await refreshPlans();
         setTimeout(() => navigate("/cabinet"), 1200);
       }
     } catch (err) {
@@ -989,7 +1420,7 @@ export default function CabinetUpgradePage() {
           "Не удалось изменить тариф. Попробуйте позже.",
       );
     } finally {
-      setSelecting(null);
+      if (!openedDowngradeModal) setSelecting(null);
     }
   };
 
@@ -1050,6 +1481,7 @@ export default function CabinetUpgradePage() {
             onPromoDetails={() => setPromoDetailsOpen((v) => !v)}
             onSetAutoRenew={handleSetAutoRenew}
             onCancelSubscription={handleCancelSubscription}
+            onCancelPending={handleCancelPending}
             managing={managing}
           />
 
@@ -1150,6 +1582,13 @@ export default function CabinetUpgradePage() {
             </p>
           ) : null}
 
+          {referral?.my_discount?.eligible ? (
+            <div className="upg-referral-banner" role="status">
+              <strong>Ваша скидка по приглашению — 50%</strong>
+              <p>На первый месяц любого платного тарифа. Скидка действует только на первый месяц.</p>
+            </div>
+          ) : null}
+
           <div className="upg-grid">
             {mainPlans.map((plan) => (
               <PlanCard
@@ -1158,11 +1597,15 @@ export default function CabinetUpgradePage() {
                 isCurrent={plan.slug === currentSlug}
                 period={period}
                 promoDiscount={promoState}
+                referralEligible={Boolean(referral?.my_discount?.eligible)}
+                referralPercent={referral?.my_discount?.percent || 50}
                 onSelect={handleSelect}
                 selecting={selecting}
                 expanded={compareOpen}
                 onToggleFeatures={() => setCompareOpen((v) => !v)}
                 paymentsEnabled={paymentsEnabled}
+                currentSlug={currentSlug}
+                expiresAt={subscription?.expires_at || subscription?.promo_ends_at}
               />
             ))}
           </div>
@@ -1223,22 +1666,18 @@ export default function CabinetUpgradePage() {
           {referral?.enabled ? (
             <section className="upg-referral" aria-labelledby="upg-referral-title">
               <h2 id="upg-referral-title" className="upg-section-title">
-                Приглашайте коллег и получайте бонусы
+                Приглашайте коллег
               </h2>
-              <p className="upg-referral__desc">{referral.description}</p>
+              <p className="upg-referral__desc">
+                Поделитесь персональной ссылкой.
+              </p>
               <ul className="upg-referral__list">
-                {referral.invitee?.plan_name ? (
-                  <li>
-                    Приглашённому: {referral.invitee.months}{" "}
-                    {monthsWord(referral.invitee.months)} тарифа «{referral.invitee.plan_name}»
-                  </li>
-                ) : null}
-                {referral.referrer?.plan_name ? (
-                  <li>
-                    Вам после оплаты коллеги: {referral.referrer.months}{" "}
-                    {monthsWord(referral.referrer.months)} тарифа «{referral.referrer.plan_name}»
-                  </li>
-                ) : null}
+                <li>
+                  <strong>Коллеге — 50% на первый месяц</strong>
+                </li>
+                <li>
+                  <strong>Вам — 14 дней подписки после его первой оплаты</strong>
+                </li>
               </ul>
               <button
                 type="button"
@@ -1250,7 +1689,7 @@ export default function CabinetUpgradePage() {
                   ? "…"
                   : referralCopied
                     ? "Ссылка скопирована"
-                    : "Моя реферальная ссылка"}
+                    : "Скопировать ссылку"}
               </button>
               {referralLink?.url ? (
                 <p className="upg-referral__url">
@@ -1259,10 +1698,48 @@ export default function CabinetUpgradePage() {
                     : referralLink.url}
                 </p>
               ) : null}
+              {referral.stats ? (
+                <div className="upg-referral__stats" aria-label="Статистика рефералов">
+                  <div>
+                    <strong>{referral.stats.invited ?? 0}</strong>
+                    <span>Приглашено</span>
+                  </div>
+                  <div>
+                    <strong>{referral.stats.paid ?? 0}</strong>
+                    <span>Оплатили</span>
+                  </div>
+                  <div>
+                    <strong>{referral.stats.bonus_days ?? 0}</strong>
+                    <span>Бонусные дни</span>
+                  </div>
+                </div>
+              ) : null}
+              {Array.isArray(referral.history) && referral.history.length > 0 ? (
+                <ul className="upg-referral__history">
+                  {referral.history.map((item, idx) => (
+                    <li key={`${item.display_name}-${idx}`}>
+                      {item.display_name}: {item.note}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </section>
           ) : null}
 
           <FaqSection />
+
+          <DowngradeConfirmModal
+            open={Boolean(downgradeModal)}
+            plan={downgradeModal?.plan}
+            preview={downgradeModal?.preview}
+            selectedStudents={selectedStudents}
+            selectedGroups={selectedGroups}
+            onToggleStudent={toggleStudentKeep}
+            onToggleGroup={toggleGroupKeep}
+            onConfirm={handleConfirmDowngrade}
+            onClose={closeDowngradeModal}
+            busy={confirmingDowngrade}
+          />
         </>
       )}
     </CabinetPageShell>

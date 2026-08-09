@@ -162,6 +162,7 @@ class InterestingCatalogSerializer(serializers.ModelSerializer):
             "tag",
             "accent_color",
             "status",
+            "access_level",
             "sort_order",
             "cover_image_url",
             "file_url",

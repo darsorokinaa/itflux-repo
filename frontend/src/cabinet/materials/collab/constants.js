@@ -13,7 +13,10 @@ export const EPHEMERAL_ACTIONS = Object.freeze([
   "pointer",
   "drag_preview",
   "annotation_preview",
+  "student_viewport",
 ]);
+
+export const VIEWPORT_THROTTLE_MS = 100;
 
 export const FOLLOW_MODE_CONTENT_ACTIONS = Object.freeze([
   "answer_selected",

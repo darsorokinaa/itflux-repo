@@ -1418,3 +1418,73 @@ class BillingUiMetaAndCoverPastTests(BillingTestBase):
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(resp.data.get("covered_past_count"), 1)
         self.assertEqual(Decimal(resp.data["remaining_units"]), Decimal("4.00"))
+
+
+class ManualPackageConsumeTests(BillingTestBase):
+    def test_consume_package_manual_without_event(self):
+        from Cabinet.billing_service import consume_package_manual
+
+        pkg = create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="Ручное",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("8"),
+            purchase_amount=Decimal("8000"),
+        )
+        result = consume_package_manual(
+            teacher=self.teacher,
+            package=pkg,
+            units=Decimal("1"),
+            comment="Урок вне расписания",
+        )
+        pkg.refresh_from_db()
+        self.assertEqual(pkg.remaining_units, Decimal("7.00"))
+        self.assertEqual(result["units"], Decimal("1.00"))
+        self.assertEqual(
+            BillingTransaction.objects.filter(
+                package=pkg,
+                transaction_type=TransactionType.PACKAGE_CONSUMPTION,
+                event__isnull=True,
+                is_reversal=False,
+            ).count(),
+            1,
+        )
+
+    def test_consume_package_manual_requires_comment(self):
+        from Cabinet.billing_service import consume_package_manual
+
+        pkg = create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="Ручное",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("4"),
+            purchase_amount=Decimal("4000"),
+        )
+        with self.assertRaises(BillingError) as ctx:
+            consume_package_manual(
+                teacher=self.teacher,
+                package=pkg,
+                units=Decimal("1"),
+                comment="  ",
+            )
+        self.assertEqual(ctx.exception.code, "COMMENT_REQUIRED")
+
+    def test_consume_package_manual_http(self):
+        pkg = create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="API",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("3"),
+            purchase_amount=Decimal("3000"),
+        )
+        resp = self.client.post(
+            f"/api/cabinet/billing/packages/{pkg.id}/consume/",
+            {"units": "2", "comment": "Пропуск, списан устно"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(Decimal(resp.data["remaining_units"]), Decimal("1.00"))
+        self.assertIn("Списано", resp.data.get("message", ""))
