@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import CabinetIcon from "../CabinetIcons";
 import { getSupportContacts } from "../../config/supportContacts";
+import "../../components/SupportFab.css";
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';

@@ -14,8 +14,8 @@ describe("getSupportContacts defaults", () => {
   it("uses personal telegram, email and community chat", () => {
     const contacts = getSupportContacts();
     expect(contacts.telegram?.username).toBe(SUPPORT_TELEGRAM_DEFAULT);
-    expect(contacts.telegram?.display).toBe("@darsorokinaa");
-    expect(contacts.telegram?.url).toBe("https://t.me/darsorokinaa");
+    expect(contacts.telegram?.display).toBe("@dariyasorokinaa");
+    expect(contacts.telegram?.url).toBe("https://t.me/dariyasorokinaa");
     expect(contacts.email).toBe(SUPPORT_EMAIL_DEFAULT);
     expect(contacts.vk?.url).toBe(TEACHERS_VK_URL);
     expect(contacts.social).toEqual([

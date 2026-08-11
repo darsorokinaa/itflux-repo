@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Outlet, Link, useLocation } from "react-router-dom";
 import Nav from "../components/Nav";
 import MobileTabBar from "../components/MobileTabBar";
+import SupportFab from "../components/SupportFab";
 import { SUMMER_CLUB_NAV_LABEL, SUMMER_CLUB_URL } from "../config/summerClub";
 import {
   hasCookieConsent,
@@ -21,6 +22,10 @@ function Layout() {
     || /^\/cabinet\/student\/interactives\/\d+\/play$/.test(pathNorm);
   const isStudentCabinet = pathname.startsWith("/cabinet/student");
   const isCabinetArea = pathname.startsWith("/cabinet");
+  const isVideoMeetingPage = /^\/cabinet\/meetings\//.test(pathNorm);
+  const isBoardEditorPage =
+    /^\/cabinet\/boards\/[^/]+$/.test(pathNorm)
+    || /^\/teacher\/boards\/[^/]+$/.test(pathNorm);
   const isChromelessPage = isLessonViewerPage || isInteractivePlayPage;
   /** Экзамен/вариант: своя залипающая панель действий снизу — нижнюю навигацию там не показываем. */
   const isExamVariantPage = /^\/(oge|ege|vpr)\/[^/]+\/variant\//.test(pathNorm);
@@ -101,6 +106,14 @@ function Layout() {
     !isLessonOrHomeworkContext &&
     (!isCabinetArea || pathname === "/cabinet/login");
 
+  /** Скрываем на полноэкранных сценариях, где кнопка мешает работе. */
+  const showSupportFab =
+    !isChromelessPage &&
+    !isLessonOrHomeworkContext &&
+    !isHomeworkEmbedContext &&
+    !isVideoMeetingPage &&
+    !isBoardEditorPage;
+
   return (
     <div
       className={`app-shell${isChromelessPage ? " app-shell--lesson-viewer" : ""}${showMobileTabBar ? " app-shell--has-tabbar" : ""}`}
@@ -157,6 +170,8 @@ function Layout() {
       )}
 
       {showMobileTabBar ? <MobileTabBar /> : null}
+
+      <SupportFab hidden={!showSupportFab} />
 
       <script
         src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.min.js"

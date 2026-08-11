@@ -985,13 +985,15 @@ export default function CabinetStudentsPage() {
     [groups, filteredStudents],
   );
 
-  const visibleGroups = useMemo(() => {
-    if (!sectionVisibility.groups) return [];
+  const filteredGroups = useMemo(() => {
     if (filter === "all") return groupsWithStudents;
     return groupsWithStudents.filter((g) => g.students.length > 0);
-  }, [groupsWithStudents, filter, sectionVisibility.groups]);
+  }, [groupsWithStudents, filter]);
 
+  const hasFilteredGroups = filteredGroups.length > 0;
+  const hasFilteredIndividuals = individualStudents.length > 0;
   const showIndividuals = sectionVisibility.individual;
+  const visibleGroups = sectionVisibility.groups ? filteredGroups : [];
 
   const toggleSectionVisibility = useCallback((key) => {
     setSectionVisibility((prev) => {
@@ -1467,9 +1469,9 @@ export default function CabinetStudentsPage() {
     );
   }
 
-  const hasActiveContent =
-    (sectionVisibility.groups && (filter === "all" ? groups.length > 0 : visibleGroups.length > 0))
-    || (sectionVisibility.individual && (filter === "all" || individualStudents.length > 0));
+  // Не зависит от скрытия секций: иначе после «Скрыть» пропадает весь UI (включая кнопки «Показать»).
+  const hasFilteredContent = hasFilteredGroups || hasFilteredIndividuals
+    || (filter === "all" && (groups.length > 0 || students.length > 0));
   const isBrandNew = students.length === 0 && groups.length === 0;
 
   return (
@@ -1550,7 +1552,7 @@ export default function CabinetStudentsPage() {
                 </button>
               </div>
             </div>
-          ) : !hasActiveContent ? (
+          ) : !hasFilteredContent ? (
             <div className="cb-students-empty">
               <h3 className="cb-students-empty__title">Ничего не найдено</h3>
               <p className="cb-students-empty__text">Попробуйте изменить фильтр.</p>

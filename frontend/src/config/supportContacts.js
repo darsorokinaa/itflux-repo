@@ -16,7 +16,7 @@ import {
 } from "./teacherLinks";
 
 /** Личный Telegram для связи по поддержке. */
-export const SUPPORT_TELEGRAM_DEFAULT = "darsorokinaa";
+export const SUPPORT_TELEGRAM_DEFAULT = "dariyasorokinaa";
 
 /** Публичный email поддержки. */
 export const SUPPORT_EMAIL_DEFAULT = "itflux.academy@yandex.ru";

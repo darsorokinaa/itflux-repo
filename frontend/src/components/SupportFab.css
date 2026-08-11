@@ -1,0 +1,325 @@
+/* Глобальная кнопка поддержки — левый нижний угол (правый занят сезонным FAB). */
+
+.support-fab {
+  position: fixed;
+  left: 16px;
+  bottom: 20px;
+  z-index: 1085;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 10px 14px 10px 12px;
+  border: 1px solid #E2E8F0;
+  border-radius: 999px;
+  background: #FFFFFF;
+  color: #0F172A;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 650;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.support-fab:hover {
+  transform: translateY(-2px);
+  background: #F8FAFC;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.2);
+}
+
+.support-fab:focus-visible {
+  outline: 2px solid #2563EB;
+  outline-offset: 2px;
+}
+
+.support-fab svg {
+  width: 20px;
+  height: 20px;
+  color: #2563EB;
+  flex-shrink: 0;
+}
+
+.support-fab__label {
+  white-space: nowrap;
+}
+
+/* Над мобильной нижней навигацией сайта */
+body:has(.app-shell--has-tabbar) .support-fab {
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+}
+
+/* В кабинете — над нижней навигацией кабинета */
+body:has(.cabinet-layout) .support-fab {
+  bottom: calc(var(--cb-mobile-nav-height, 64px) + 16px);
+  left: 12px;
+}
+
+@media (min-width: 901px) {
+  body:has(.cabinet-layout) .support-fab {
+    bottom: 24px;
+    left: 24px;
+  }
+}
+
+@media (max-width: 640px) {
+  .support-fab {
+    left: 12px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    min-height: 44px;
+    padding: 10px 12px;
+    gap: 0;
+  }
+
+  .app-shell--has-tabbar .support-fab,
+  body:has(.app-shell--has-tabbar) .support-fab {
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  }
+
+  body:has(.cabinet-layout) .support-fab {
+    bottom: calc(var(--cb-mobile-nav-height, 64px) + 12px);
+  }
+
+  /* На узких экранах — только иконка, чтобы не мешать контенту */
+  .support-fab__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .support-fab {
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 16px;
+  }
+}
+
+/* Стили модалки поддержки — нужны и вне кабинета (маркетинг и т.п.) */
+.cb-support-backdrop.cb-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.cb-support-modal.cb-modal {
+  width: min(100%, 420px);
+  max-height: min(88vh, 640px);
+  overflow: auto;
+  background: #FFFFFF;
+  border-radius: 22px;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.2);
+  color: #0F172A;
+}
+
+.cb-support-modal .cb-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid #E2E8F0;
+}
+
+.cb-support-modal .cb-modal__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0F172A;
+}
+
+.cb-support-modal .cb-modal__close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 10px;
+  background: #F8FAFC;
+  color: #64748B;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.cb-support-modal .cb-modal__close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cb-support-modal .cb-modal__body,
+.cb-support-modal__body {
+  padding: 18px 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cb-support-modal__intro {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #64748B;
+}
+
+.cb-support-modal__empty {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #64748B;
+}
+
+.cb-support-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cb-support-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #E2E8F0;
+  border-radius: 14px;
+  background: #F8FAFC;
+}
+
+.cb-support-row__main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.cb-support-row__icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.cb-support-row__icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cb-support-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cb-support-row__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748B;
+}
+
+.cb-support-row__value {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #0F172A;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.cb-support-row__action {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #CBD5E1;
+  background: #FFFFFF;
+  color: #0F172A;
+  font-size: 0.84rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.cb-support-row__action:hover {
+  background: #F1F5F9;
+}
+
+.cb-support-social {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 2px 0;
+}
+
+.cb-support-social__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748B;
+}
+
+.cb-support-social__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cb-support-social__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid #E2E8F0;
+  background: #FFFFFF;
+  color: #0F172A;
+  font-size: 0.84rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.cb-support-social__link:hover {
+  background: #F8FAFC;
+}
+
+@media (max-width: 640px) {
+  .cb-support-backdrop.cb-modal-backdrop {
+    padding: 12px;
+    align-items: flex-end;
+  }
+
+  .cb-support-modal.cb-modal {
+    width: 100%;
+    max-height: min(92vh, 720px);
+    border-radius: 18px 18px 12px 12px;
+  }
+
+  .cb-support-row {
+    flex-wrap: wrap;
+  }
+
+  .cb-support-row__action {
+    width: 100%;
+  }
+}
