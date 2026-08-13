@@ -738,7 +738,7 @@ body:has(.cb-sch-fab) .seasonal-appearance-fab-dock--cabinet {
 @media (max-width: 768px) {
   .seasonal-appearance-fab-dock {
     right: 12px;
-    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    bottom: var(--mobile-tabbar-clearance, calc(86px + env(safe-area-inset-bottom, 0px)));
   }
 
   .seasonal-appearance-fab-dock--cabinet {

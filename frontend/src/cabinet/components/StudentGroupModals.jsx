@@ -307,7 +307,7 @@ export function StudentFormModal({ student, onClose, onSave, onArchive, onDelete
   );
 }
 
-export function InviteFormModal({ group, onClose, onCreate }) {
+export function InviteFormModal({ group, onClose, onCreate, onScheduleLesson, onSetupSubject }) {
   const [form, setForm] = useState(() => emptyInviteForm(group));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -377,13 +377,15 @@ export function InviteFormModal({ group, onClose, onCreate }) {
     : "";
 
   if (createdInvite) {
+    const studentId = createdInvite.pre_student || createdInvite.pre_student_id || null;
+    const title = studentName ? "Ученик добавлен" : "Ссылка создана";
     return (
-      <CabinetModal title="Ссылка создана" onClose={onClose}>
+      <CabinetModal title={title} onClose={onClose}>
         <div className="cb-modal-form">
           {studentName ? (
             <p className="cabinet-auth-muted">
-              Профиль <strong>{studentName}</strong> создан. Отправьте ссылку ученику — после входа он автоматически появится в вашем списке
-              {group?.name ? ` в группе «${group.name}»` : ""}.
+              Профиль <strong>{studentName}</strong> создан. Занятие можно поставить в расписание сразу — ждать входа ученика не нужно.
+              Отправьте ссылку, когда будете готовы.
             </p>
           ) : (
             <p className="cabinet-auth-muted">
@@ -407,8 +409,26 @@ export function InviteFormModal({ group, onClose, onCreate }) {
           ) : null}
           <div className="cb-modal-form__actions">
             <div className="cb-modal-form__actions-main">
+              {studentId && onScheduleLesson ? (
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--primary"
+                  onClick={() => onScheduleLesson(studentId)}
+                >
+                  Запланировать занятие
+                </button>
+              ) : null}
+              {studentId && onSetupSubject ? (
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--outline"
+                  onClick={() => onSetupSubject(studentId)}
+                >
+                  Настроить предмет
+                </button>
+              ) : null}
               <button type="button" className="cb-btn cb-btn--outline" onClick={onClose}>
-                Готово
+                Позже
               </button>
               <button type="button" className="cb-btn cb-btn--outline" onClick={() => setShowQr((v) => !v)}>
                 {showQr ? "Скрыть QR-код" : "Показать QR-код"}
@@ -416,7 +436,7 @@ export function InviteFormModal({ group, onClose, onCreate }) {
               <button type="button" className="cb-btn cb-btn--outline" onClick={handleShare}>
                 Отправить
               </button>
-              <button type="button" className="cb-btn cb-btn--primary" onClick={handleCopy}>
+              <button type="button" className="cb-btn cb-btn--outline" onClick={handleCopy}>
                 {copied ? "Скопировано" : "Скопировать ссылку"}
               </button>
             </div>

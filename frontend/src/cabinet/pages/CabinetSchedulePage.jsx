@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   createScheduleEvent,
@@ -31,6 +32,7 @@ import { openLessonSummaryTab } from "../journal/openLessonSummary";
 import PlanItemDetailModal from "../components/PlanItemDetailModal";
 import "../styles/schedule-mobile.css";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
+import { skipOnboardingMaterials } from "../onboardingStorage";
 import CabinetIcon from "../CabinetIcons";
 import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -1405,7 +1407,9 @@ function ConfirmActionModal({ action, onClose, onConfirm, saving = false }) {
     onConfirm(scope);
   };
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div className="cb-sch-overlay" onClick={saving ? undefined : onClose} role="presentation">
       <div
         className="cb-sch-confirm"
@@ -1498,7 +1502,8 @@ function ConfirmActionModal({ action, onClose, onConfirm, saving = false }) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -1594,6 +1599,16 @@ function eventStatusMeta(event) {
   return null;
 }
 
+function eventSuggestContext(event) {
+  const topic = String(event?.topic || "").trim();
+  const subjectLabel = String(event?.studentSubjectLabel || "").trim();
+  return {
+    topic,
+    subjectLabel,
+    query: [subjectLabel, topic].filter(Boolean).join(" "),
+  };
+}
+
 function EventDetailPopover(props) {
   const { event } = props;
   const typeInfo = EVENT_TYPES[event.type];
@@ -1685,6 +1700,7 @@ export default function CabinetSchedulePage() {
     yandex: true,
   });
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [prepareMaterialsPrompt, setPrepareMaterialsPrompt] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState(null);
   const [editEvent, setEditEvent] = useState(null);
@@ -1825,6 +1841,7 @@ export default function CabinetSchedulePage() {
         initialTab: "library",
         attachedMaterialIds: (planItem.materials || []).map((m) => m.id).filter(Boolean),
         attachedInteractiveIds: (planItem.attachedInteractives || []).map((i) => i.id).filter(Boolean),
+        suggestContext: eventSuggestContext(event),
       });
     } catch (err) {
       showToast(err.message || "Не удалось открыть добавление материалов");
@@ -2071,7 +2088,7 @@ export default function CabinetSchedulePage() {
     navigate(`${location.pathname}${next ? `?${next}` : ""}`, { replace: true, state: location.state || {} });
   }, [location.search, location.pathname, location.state, navigate, openBillingPrompt]);
 
-  // Deep-link /cabinet/schedule?event=<eventId> — из уведомлений
+  // Deep-link /cabinet/schedule?event=<eventId> — из уведомлений и onboarding
   useEffect(() => {
     if (calendarLoading) return;
     const params = new URLSearchParams(location.search || "");
@@ -2083,7 +2100,9 @@ export default function CabinetSchedulePage() {
     });
     if (!found) return;
     setSelectedEvent(found);
+    if (params.get("prepare") === "1") setPrepareMaterialsPrompt(true);
     params.delete("event");
+    params.delete("prepare");
     const next = params.toString();
     navigate(`${location.pathname}${next ? `?${next}` : ""}`, { replace: true, state: location.state || {} });
   }, [events, calendarLoading, location.search, location.pathname, location.state, navigate]);
@@ -2099,15 +2118,34 @@ export default function CabinetSchedulePage() {
 
   useEffect(() => {
     const groupId = location.state?.createWithGroupId;
-    if (groupId == null) return;
+    const studentId = location.state?.createWithStudentId;
+    if (groupId == null && studentId == null) return;
     setCreateDraft({
       groupId,
-      type: "group_lesson",
-      dialogTitle: "Запланировать урок",
+      studentId,
+      type: location.state?.createWithType
+        || (groupId != null ? "group_lesson" : "individual_lesson"),
+      dialogTitle: "Запланировать занятие",
     });
     setCreateOpen(true);
     navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
   }, [location.state, location.pathname, location.search, navigate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search || "");
+    if (params.get("create") !== "1") return;
+    const studentId = params.get("student");
+    setCreateDraft({
+      studentId: studentId || undefined,
+      type: "individual_lesson",
+      dialogTitle: "Запланировать занятие",
+    });
+    setCreateOpen(true);
+    params.delete("create");
+    params.delete("student");
+    const next = params.toString();
+    navigate(`${location.pathname}${next ? `?${next}` : ""}`, { replace: true, state: location.state || {} });
+  }, [location.search, location.pathname, location.state, navigate]);
 
   const showStatus = useCallback((message) => {
     setStatusMessage(message);
@@ -2338,9 +2376,21 @@ export default function CabinetSchedulePage() {
     }
     setCreateOpen(false);
     setCreateDraft(null);
+    if (data?.event) {
+      setSelectedEvent(data.event);
+      setPrepareMaterialsPrompt(true);
+    }
     const hasMeetingLink = Boolean(
       data?.event?.link || data?.event?.videoMeeting?.uuid || payload.jitsi_auto_create,
     );
+    if (data?.event) {
+      showStatus(
+        hasMeetingLink
+          ? "Занятие создано. Подготовьте материалы — или начните урок без них."
+          : "Занятие создано. Можно сразу подготовить материалы.",
+      );
+      return;
+    }
     if (payload.format === "online" && hasMeetingLink) {
       showStatus(data?.events_created > 1
         ? `Создано занятий: ${data.events_created}. Видеокомнаты готовы.`
@@ -2709,7 +2759,15 @@ export default function CabinetSchedulePage() {
         <EventDetailPopover
           event={selectedEvent}
           isMobile={isMobile}
-          onClose={() => setSelectedEvent(null)}
+          highlightMaterials={prepareMaterialsPrompt}
+          onSkipMaterials={() => {
+            skipOnboardingMaterials();
+            setPrepareMaterialsPrompt(false);
+          }}
+          onClose={() => {
+            setSelectedEvent(null);
+            setPrepareMaterialsPrompt(false);
+          }}
           onEdit={() => {
             setEditEvent(selectedEvent);
             setSelectedEvent(null);
@@ -2822,6 +2880,7 @@ export default function CabinetSchedulePage() {
         initialTab={lessonResourcePicker?.initialTab || "library"}
         attachedMaterialIds={lessonResourcePicker?.attachedMaterialIds || []}
         attachedInteractiveIds={lessonResourcePicker?.attachedInteractiveIds || []}
+        suggestContext={lessonResourcePicker?.suggestContext || null}
         onClose={() => {
           if (!lessonResourceBusy) setLessonResourcePicker(null);
         }}

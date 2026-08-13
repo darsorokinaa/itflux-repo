@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import CabinetIcon from "../CabinetIcons";
 
 const SCOPE_ACTIONS = {
@@ -37,7 +38,9 @@ export default function SeriesScopeModal({
     });
   };
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div
       className="cb-sch-overlay cb-sch-overlay--scope"
       onClick={saving ? undefined : onClose}
@@ -86,6 +89,7 @@ export default function SeriesScopeModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

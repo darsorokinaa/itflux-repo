@@ -52,7 +52,7 @@
 
 /* Над мобильной нижней навигацией сайта */
 body:has(.app-shell--has-tabbar) .support-fab {
-  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  bottom: var(--mobile-tabbar-clearance, calc(86px + env(safe-area-inset-bottom, 0px)));
 }
 
 /* В кабинете — над нижней навигацией кабинета */
@@ -101,7 +101,7 @@ body:has(.cabinet-layout) .support-fab {
 
   .app-shell--has-tabbar .support-fab,
   body:has(.app-shell--has-tabbar) .support-fab {
-    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    bottom: var(--mobile-tabbar-clearance, calc(86px + env(safe-area-inset-bottom, 0px)));
   }
 
   body:has(.cabinet-layout) .support-fab {

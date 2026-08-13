@@ -568,7 +568,7 @@ export default function CabinetLayout() {
               key={item.id}
               to={item.path}
               aria-label={ariaLabel}
-              className={`cb-mobile-nav__item cb-teacher-mobile-nav__item${isCabinetMobileNavActive(location.pathname, item) ? " is-active" : ""}`}
+              className={`cb-mobile-nav__item cb-teacher-mobile-nav__item${isCabinetMobileNavActive(location.pathname, item) ? " is-active" : ""}${item.featured ? " is-featured" : ""}`}
             >
               <span className="cb-mobile-nav__icon-wrap">
                 <CabinetIcon name={item.icon} />

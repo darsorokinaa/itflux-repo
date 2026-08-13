@@ -1,7 +1,5 @@
 import {
-  lazy,
   memo,
-  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -25,8 +23,9 @@ import { formatGroupsCount, formatTasksCount } from "../utils/formatTasksCount";
 import VariantCreateBar from "../components/VariantCreateBar";
 import WorkbookCreateBar from "../components/WorkbookCreateBar";
 import type { WorkbookTask } from "../utils/buildWorkbookHtml";
-import { isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
-import type { TaskFileSource } from "../components/InformaticsCodeEditor/types";
+// TEMP: кнопка «Код» временно скрыта
+// import { isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
+// import type { TaskFileSource } from "../components/InformaticsCodeEditor/types";
 
 import MathContent from "../components/MathContent";
 import TaskFileAttachment from "../components/TaskFileAttachment";
@@ -41,9 +40,10 @@ import {
   type TaskTag,
 } from "../components/AllTasksTagEditor";
 
-const InformaticsCodeEditorEntry = lazy(
-  () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
-);
+// TEMP: кнопка «Код» временно скрыта
+// const InformaticsCodeEditorEntry = lazy(
+//   () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
+// );
 
 type BankTask = {
   id: number;
@@ -894,19 +894,21 @@ export default function AllTasksPage() {
 
   const resetPage = () => setPage(1);
 
-  const showCodeSidebar = isInformaticsCodeEditorContext(level, subject);
+  // TEMP: кнопка «Код» временно скрыта
+  const showCodeSidebar = false;
+  // const showCodeSidebar = isInformaticsCodeEditorContext(level, subject);
   const showTagsSidebar = canEditTaskTags;
 
-  const getCodeEditorTaskSources = useCallback((): TaskFileSource[] => {
-    return (data?.tasks ?? [])
-      .filter((t) => t.file_url)
-      .slice(0, 80)
-      .map((t) => ({
-        id: t.id,
-        label: t.task_number != null ? `№${t.task_number} · id ${t.id}` : `id ${t.id}`,
-        fileUrl: t.file_url,
-      }));
-  }, [data?.tasks]);
+  // const getCodeEditorTaskSources = useCallback((): TaskFileSource[] => {
+  //   return (data?.tasks ?? [])
+  //     .filter((t) => t.file_url)
+  //     .slice(0, 80)
+  //     .map((t) => ({
+  //       id: t.id,
+  //       label: t.task_number != null ? `№${t.task_number} · id ${t.id}` : `id ${t.id}`,
+  //       fileUrl: t.file_url,
+  //     }));
+  // }, [data?.tasks]);
 
   return (
     <div className="digital-flow-page">
@@ -1577,11 +1579,13 @@ export default function AllTasksPage() {
           />
         ) : null}
 
+        {/* TEMP: кнопка «Код» временно скрыта
         {showCodeSidebar ? (
           <Suspense fallback={null}>
             <InformaticsCodeEditorEntry getTaskSources={getCodeEditorTaskSources} />
           </Suspense>
         ) : null}
+        */}
       </div>
 
       <WorkbookCreateBar

@@ -4,7 +4,9 @@ import { ensureCsrfCookie } from "../utils/cabinetAuth";
 
 const GUEST_PREF_KEY = "seasonal_theme_preference_v1";
 const DAY_OVERRIDE_KEY = "seasonal_theme_day_override_v1";
+const CURRENT_CACHE_KEY = "seasonal_theme_current_cache_v1";
 export const DAY_OVERRIDE_MS = 24 * 60 * 60 * 1000;
+export const CURRENT_CACHE_TTL_MS = 5 * 60 * 1000;
 
 function getCsrfToken() {
   const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
@@ -164,6 +166,44 @@ export function clearGuestPreference() {
     localStorage.removeItem(GUEST_PREF_KEY);
   } catch {
     /* ignore */
+  }
+}
+
+/** Последний успешный payload темы — чтобы оформление и анимация не ждали API. */
+export function readCachedThemePayload() {
+  try {
+    const raw = localStorage.getItem(CURRENT_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const savedAt = Number(parsed.saved_at) || 0;
+    if (!savedAt || Date.now() - savedAt > CURRENT_CACHE_TTL_MS) {
+      localStorage.removeItem(CURRENT_CACHE_KEY);
+      return null;
+    }
+    const payload = parsed.payload;
+    if (!payload || typeof payload !== "object") return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+export function writeCachedThemePayload(payload) {
+  try {
+    if (!payload || typeof payload !== "object") {
+      localStorage.removeItem(CURRENT_CACHE_KEY);
+      return;
+    }
+    localStorage.setItem(
+      CURRENT_CACHE_KEY,
+      JSON.stringify({
+        saved_at: Date.now(),
+        payload,
+      }),
+    );
+  } catch {
+    /* private mode */
   }
 }
 

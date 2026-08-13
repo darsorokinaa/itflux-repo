@@ -3,11 +3,14 @@ import {
   buildSeasonalCssVars,
   isHeavyRoute,
   readDayOverride,
+  readCachedThemePayload,
+  writeCachedThemePayload,
   resolveDeviceIntensity,
   themeAppliesToRoute,
   writeDayOverride,
   clearDayOverride,
   DAY_OVERRIDE_MS,
+  CURRENT_CACHE_TTL_MS,
 } from "./seasonalThemeApi";
 
 describe("seasonalThemeApi", () => {
@@ -120,5 +123,19 @@ describe("seasonalThemeApi", () => {
     expect(day?.expires_at).toBeLessThanOrEqual(Date.now() + DAY_OVERRIDE_MS + 1000);
     clearDayOverride();
     expect(readDayOverride()).toBeNull();
+  });
+
+  it("hydrates seasonal theme from a fresh local cache", () => {
+    const payload = { mode: "auto", theme: { slug: "medovyj-spas" } };
+    writeCachedThemePayload(payload);
+    expect(readCachedThemePayload()?.theme?.slug).toBe("medovyj-spas");
+  });
+
+  it("ignores expired seasonal theme cache", () => {
+    writeCachedThemePayload({ mode: "auto", theme: { slug: "old" } });
+    const raw = JSON.parse(localStorage.getItem("seasonal_theme_current_cache_v1"));
+    raw.saved_at = Date.now() - CURRENT_CACHE_TTL_MS - 1000;
+    localStorage.setItem("seasonal_theme_current_cache_v1", JSON.stringify(raw));
+    expect(readCachedThemePayload()).toBeNull();
   });
 });

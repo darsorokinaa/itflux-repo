@@ -3,13 +3,14 @@ import { useNavigate } from "react-router-dom";
 
 type Props = {
   className?: string;
+  onSearch?: () => void;
 };
 
 /**
  * Быстрый поиск по ID задачи или варианта.
  * Используется в верхнем меню сайта.
  */
-export default function TaskSearchPanel({ className = "" }: Props) {
+export default function TaskSearchPanel({ className = "", onSearch }: Props) {
   const navigate = useNavigate();
   const [taskId, setTaskId] = useState("");
   const [variantId, setVariantId] = useState("");
@@ -21,10 +22,12 @@ export default function TaskSearchPanel({ className = "" }: Props) {
     // Вариант приоритетнее задачи — сохраняем прежнее поведение шапки.
     if (variant) {
       navigate(`/search-variant?q=${encodeURIComponent(variant)}`);
+      onSearch?.();
       return;
     }
     if (task) {
       navigate(`/search/tasks?q=${encodeURIComponent(task)}`);
+      onSearch?.();
     }
   };
 

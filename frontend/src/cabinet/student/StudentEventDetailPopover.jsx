@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import EventDetailCard from "../components/EventDetailCard";
 import {
@@ -129,23 +130,27 @@ export default function StudentEventDetailPopover({ eventId, onClose }) {
   if (!eventId) return null;
 
   if (loading) {
-    return (
+    if (typeof document === "undefined") return null;
+    return createPortal(
       <div className="cb-sch-overlay cb-sch-overlay--lesson" onClick={onClose} role="presentation">
         <div className="cb-sch-popover cb-lesson-card" onClick={(e) => e.stopPropagation()} role="dialog">
           <div className="st-loading" style={{ minHeight: 200 }}>Загрузка…</div>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
   if (error || !event) {
-    return (
+    if (typeof document === "undefined") return null;
+    return createPortal(
       <div className="cb-sch-overlay cb-sch-overlay--lesson" onClick={onClose} role="presentation">
         <div className="cb-sch-popover cb-lesson-card" onClick={(e) => e.stopPropagation()} role="dialog">
           <p className="st-panel__empty">{error || "Занятие не найдено"}</p>
           <button type="button" className="cb-btn cb-btn--outline" onClick={onClose}>Закрыть</button>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 

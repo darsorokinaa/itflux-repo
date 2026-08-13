@@ -1,0 +1,76 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>Activation</h1>
+<p>Агрегированные метрики без персональных данных. Сгенерировано: {{ report.generated_at }}</p>
+
+<h2>Сводка</h2>
+<ul>
+  <li>Учителей всего: {{ report.teachers_total }}</li>
+  <li>Новые за 7 дней: {{ report.new_teachers_7d }}</li>
+  <li>Новые за 30 дней: {{ report.new_teachers_30d }}</li>
+  <li>Activation rate (первое занятие / регистрация): {{ report.activation_rate.first_event_over_registered }}%</li>
+  <li>Core activation (любой рабочий цикл): {{ report.activation_rate.core }}%</li>
+</ul>
+
+<h2>Core activation по сценариям</h2>
+<ul>
+  <li>Видеоурок: {{ report.core_activation.video_lesson.count }} ({{ report.core_activation.video_lesson.rate }}%)</li>
+  <li>ДЗ выдано и сдано: {{ report.core_activation.homework_cycle.count }} ({{ report.core_activation.homework_cycle.rate }}%)</li>
+  <li>Другой рабочий цикл: {{ report.core_activation.other_work_cycle.count }} ({{ report.core_activation.other_work_cycle.rate }}%)</li>
+</ul>
+
+<h2>Воронка</h2>
+<table>
+  <thead>
+    <tr><th>Шаг</th><th>Число</th><th>%</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Ученик</td><td>{{ report.funnel.first_student.count }}</td><td>{{ report.funnel.first_student.rate }}</td></tr>
+    <tr><td>Ученик подключён</td><td>{{ report.funnel.first_student_connected.count }}</td><td>{{ report.funnel.first_student_connected.rate }}</td></tr>
+    <tr><td>Предмет</td><td>{{ report.funnel.first_subject.count }}</td><td>{{ report.funnel.first_subject.rate }}</td></tr>
+    <tr><td>Занятие</td><td>{{ report.funnel.first_schedule_event.count }}</td><td>{{ report.funnel.first_schedule_event.rate }}</td></tr>
+    <tr><td>Материал</td><td>{{ report.funnel.first_lesson_material.count }}</td><td>{{ report.funnel.first_lesson_material.rate }}</td></tr>
+    <tr><td>Видео начато</td><td>{{ report.funnel.first_video_lesson_started.count }}</td><td>{{ report.funnel.first_video_lesson_started.rate }}</td></tr>
+    <tr><td>Видео завершено</td><td>{{ report.funnel.first_video_lesson_finished.count }}</td><td>{{ report.funnel.first_video_lesson_finished.rate }}</td></tr>
+    <tr><td>ДЗ выдано</td><td>{{ report.funnel.first_homework_assigned.count }}</td><td>{{ report.funnel.first_homework_assigned.rate }}</td></tr>
+    <tr><td>Сдача ДЗ</td><td>{{ report.funnel.first_homework_submission.count }}</td><td>{{ report.funnel.first_homework_submission.rate }}</td></tr>
+    <tr><td>Журнал</td><td>{{ report.funnel.first_journal_completed.count }}</td><td>{{ report.funnel.first_journal_completed.rate }}</td></tr>
+  </tbody>
+</table>
+
+<h2>Когорты по неделе регистрации</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Неделя</th>
+      <th>Учителя</th>
+      <th>Ученик</th>
+      <th>Занятие</th>
+      <th>Материал</th>
+      <th>Урок</th>
+      <th>ДЗ</th>
+      <th>Сдача</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in report.cohorts_weekly %}
+    <tr>
+      <td>{{ row.week_start }}</td>
+      <td>{{ row.teachers }}</td>
+      <td>{{ row.added_student }}</td>
+      <td>{{ row.created_event }}</td>
+      <td>{{ row.added_material }}</td>
+      <td>{{ row.conducted_lesson }}</td>
+      <td>{{ row.assigned_homework }}</td>
+      <td>{{ row.received_submission }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Retention</h2>
+<p>{{ report.retention.registration_d7.note }}</p>
+<p>Registration D7: {{ report.retention.registration_d7.returned }} / {{ report.retention.registration_d7.eligible }} ({{ report.retention.registration_d7.rate }}%)</p>
+<p>{{ report.retention.activation_d7.note }}</p>
+<p>Activation D7: {{ report.retention.activation_d7.returned }} / {{ report.retention.activation_d7.eligible }} ({{ report.retention.activation_d7.rate }}%)</p>
+{% endblock %}

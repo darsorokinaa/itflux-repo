@@ -23,6 +23,7 @@ import {
   writeGuestPreference,
   clearGuestPreference,
   readDayOverride,
+  writeCachedThemePayload,
 } from "./seasonalThemeApi";
 
 function Probe() {
@@ -55,6 +56,7 @@ describe("SeasonalThemeProvider", () => {
     document.documentElement.className = "";
     document.documentElement.removeAttribute("data-seasonal-theme");
     localStorage.clear();
+    sessionStorage.clear();
     window.matchMedia = vi.fn().mockImplementation((query) => ({
       matches: false,
       media: query,
@@ -443,5 +445,62 @@ describe("SeasonalThemeProvider", () => {
     expect(updateSeasonalThemePreference).toHaveBeenCalledWith({ mode: "default" });
     expect(readDayOverride()?.mode).toBe("default");
     expect(screen.getByTestId("tip").textContent).toBe("Включить: Медовый Спас");
+  });
+
+  it("applies cached theme immediately without waiting for API", async () => {
+    writeCachedThemePayload({
+      mode: "auto",
+      preference_mode: "auto",
+      theme: {
+        id: 7,
+        name: "Медовый Спас",
+        slug: "medovyj-spas",
+        background: { color: "#FFF8E7" },
+        cards: {},
+        surfaces: {},
+        animation: { type: "leaves", intensity: "normal", max_elements: 16 },
+        decorations: [],
+        include_routes: [],
+        exclude_routes: [],
+      },
+      animations_enabled: true,
+      available_themes: [],
+      period_themes: [],
+      preview: { active: false },
+    });
+    let resolveFetch;
+    fetchSeasonalThemeCurrent.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    renderWithProvider();
+
+    expect(screen.getByTestId("slug").textContent).toBe("medovyj-spas");
+    expect(document.documentElement.classList.contains("seasonal-theme-active")).toBe(true);
+    expect(document.querySelector(".seasonal-fx-canvas")).not.toBeNull();
+
+    resolveFetch({
+      mode: "auto",
+      preference_mode: "auto",
+      theme: {
+        id: 7,
+        name: "Медовый Спас",
+        slug: "medovyj-spas",
+        background: { color: "#FFF8E7" },
+        cards: {},
+        surfaces: {},
+        animation: { type: "leaves", intensity: "normal", max_elements: 16 },
+        decorations: [],
+        include_routes: [],
+        exclude_routes: [],
+      },
+      animations_enabled: true,
+      available_themes: [],
+      period_themes: [],
+      preview: { active: false },
+    });
+    await waitFor(() => expect(screen.getByTestId("slug").textContent).toBe("medovyj-spas"));
   });
 });

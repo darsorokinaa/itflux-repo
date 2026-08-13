@@ -874,7 +874,7 @@ export default function VideoMeetingPage() {
       setPageState("finished");
       setFinishConfirm(false);
       await loadFinishedAttendance(true);
-      if (isModerator && event?.id) openLessonSummaryTab(event.id);
+      if (isModerator && event?.id) openLessonSummaryTab(event.id, { fromMeeting: true });
     } catch (err) {
       setError(err?.message || "Не удалось завершить урок");
     } finally {
@@ -2378,9 +2378,18 @@ export default function VideoMeetingPage() {
               <p className="video-lesson-state__title">Урок завершён</p>
               <p className="video-lesson-state__text">
                 {canManage
-                  ? (attendance?.length
-                    ? "Время присутствия участников (короткие переподключения склеены)."
-                    : "Подключений пока не было.")
+                  ? [
+                    event?.audience || event?.student_name || event?.title,
+                    event?.topic,
+                    event?.startsAt || event?.starts_at
+                      ? new Date(event.startsAt || event.starts_at).toLocaleString("ru-RU", {
+                        day: "numeric",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                      : null,
+                  ].filter(Boolean).join(" · ") || "Можно сразу заполнить итоги и журнал."
                   : "Повторный вход в конференцию недоступен."}
               </p>
               {canManage && Array.isArray(attendance) ? (
@@ -2410,9 +2419,9 @@ export default function VideoMeetingPage() {
                   <button
                     type="button"
                     className="video-lesson-btn video-lesson-btn--primary"
-                    onClick={() => openLessonSummaryTab(event.id)}
+                    onClick={() => openLessonSummaryTab(event.id, { fromMeeting: true })}
                   >
-                    Итоги урока
+                    Заполнить результаты занятия · около 1 минуты
                   </button>
                 ) : null}
                 {canManage ? (
@@ -2425,10 +2434,10 @@ export default function VideoMeetingPage() {
                   </button>
                 ) : null}
                 <Link to={returnUrl} className="video-lesson-btn">
-                  Вернуться к уроку
+                  К карточке урока
                 </Link>
                 <Link to={scheduleUrl} className="video-lesson-btn">
-                  Вернуться в расписание
+                  Следующее занятие
                 </Link>
               </div>
             </div>

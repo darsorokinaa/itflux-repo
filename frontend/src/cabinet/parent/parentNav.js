@@ -13,7 +13,7 @@ export const PARENT_NAV = [
 export const PARENT_MOBILE_NAV = [
   { id: "home", label: "Главная", path: "/cabinet/parent", icon: "home" },
   { id: "homework", label: "Задания", path: "/cabinet/parent/homework", icon: "check" },
-  { id: "schedule", label: "Расписание", path: "/cabinet/parent/schedule", icon: "lessons" },
+  { id: "schedule", label: "Расписание", path: "/cabinet/parent/schedule", icon: "lessons", featured: true },
   { id: "results", label: "Успех.", path: "/cabinet/parent/results", icon: "chart" },
   { id: "more", label: "Ещё", path: "/cabinet/parent/more", icon: "expand" },
 ];

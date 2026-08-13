@@ -11,7 +11,7 @@ import {
   StudentPageShell,
   formatStudentDate,
 } from "../StudentSectionUi";
-import { masteryLabel } from "../studentDisplay";
+import { masteryLabel, pluralRu } from "../studentDisplay";
 import StudentSubjectTabs, { getStoredStudentSubjectId } from "../StudentSubjectTabs";
 
 function TopicRow({ item, open, onToggle }) {
@@ -19,6 +19,9 @@ function TopicRow({ item, open, onToggle }) {
     ? formatStudentDate(item.completed_at)
     : "Дата не указана";
   const status = masteryLabel(item.mastery || item.status);
+  const timesLabel = item.times > 1
+    ? `${item.times} ${pluralRu(item.times, "занятие", "занятия", "занятий")}`
+    : "";
 
   return (
     <li className={`st-topic-row${open ? " is-open" : ""}`}>
@@ -27,7 +30,7 @@ function TopicRow({ item, open, onToggle }) {
         <span className="st-topic-row__body">
           <span className="st-topic-row__title">{item.title}</span>
           <span className="st-topic-row__meta">
-            {[item.subject, dateLabel, status].filter(Boolean).join(" · ")}
+            {[item.subject, dateLabel, timesLabel, status].filter(Boolean).join(" · ")}
           </span>
         </span>
         <span className="st-topic-row__status">{status}</span>
@@ -59,20 +62,57 @@ function TopicRow({ item, open, onToggle }) {
   );
 }
 
+function topicDedupeKey(title, subject) {
+  const t = String(title || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const s = String(subject || "").trim().toLowerCase();
+  return `${s}::${t || "занятие"}`;
+}
+
+function stampMs(iso) {
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
+
+function mergeTopicRow(existing, incoming) {
+  existing.times = (existing.times || 1) + 1;
+  if (stampMs(incoming.completed_at) >= stampMs(existing.completed_at)) {
+    existing.completed_at = incoming.completed_at || existing.completed_at;
+    existing.teacher = incoming.teacher || existing.teacher;
+    existing.homework_title = incoming.homework_title || existing.homework_title;
+    existing.lesson_path = incoming.lesson_path || existing.lesson_path;
+    existing.homework_path = incoming.homework_path || existing.homework_path;
+    existing.mastery = incoming.mastery || existing.mastery;
+    existing.status = incoming.status || existing.status;
+  } else {
+    existing.teacher = existing.teacher || incoming.teacher;
+    existing.homework_title = existing.homework_title || incoming.homework_title;
+    existing.lesson_path = existing.lesson_path || incoming.lesson_path;
+    existing.homework_path = existing.homework_path || incoming.homework_path;
+  }
+  existing.materials_count = Math.max(existing.materials_count || 0, incoming.materials_count || 0);
+}
+
 function buildTopics(lessons, scheduleEvents) {
-  const items = [];
-  const seen = new Set();
+  const byKey = new Map();
+
+  const add = (row) => {
+    const key = topicDedupeKey(row.title, row.subject);
+    const existing = byKey.get(key);
+    if (existing) {
+      mergeTopicRow(existing, row);
+      return;
+    }
+    byKey.set(key, { ...row, times: 1 });
+  };
 
   for (const event of scheduleEvents || []) {
     const ended = event.ends_at
       ? new Date(event.ends_at).getTime() < Date.now()
       : event.starts_at && new Date(event.starts_at).getTime() < Date.now();
     if (!ended) continue;
-    const key = `schedule-${event.id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    items.push({
-      id: key,
+    add({
+      id: `schedule-${event.id}`,
       title: event.topic || event.title || "Занятие",
       subject: event.student_subject_label || "",
       completed_at: event.starts_at,
@@ -91,11 +131,8 @@ function buildTopics(lessons, scheduleEvents) {
 
   for (const lesson of lessons || []) {
     if (!["completed", "checked", "repeat"].includes(lesson.status)) continue;
-    const key = `lesson-${lesson.id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    items.push({
-      id: key,
+    add({
+      id: `lesson-${lesson.id}`,
       title: lesson.topic || lesson.title || "Тема",
       subject: lesson.direction || lesson.student_subject_label || "",
       completed_at: lesson.scheduled_at || lesson.due_at || lesson.assigned_at,
@@ -106,15 +143,12 @@ function buildTopics(lessons, scheduleEvents) {
       status: lesson.status,
       lesson_path: `/cabinet/student/lessons/${lesson.id}`,
       homework_path: null,
-      result: lesson.progress_percent === 100 ? null : null,
+      result: null,
     });
   }
 
-  items.sort((a, b) => {
-    const ta = a.completed_at ? new Date(a.completed_at).getTime() : 0;
-    const tb = b.completed_at ? new Date(b.completed_at).getTime() : 0;
-    return tb - ta;
-  });
+  const items = Array.from(byKey.values());
+  items.sort((a, b) => stampMs(b.completed_at) - stampMs(a.completed_at));
   return items;
 }
 

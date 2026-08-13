@@ -405,6 +405,7 @@ export default function LessonSummaryDrawer({
   onSaved,
   onBillingPrompt,
   presentation = "drawer",
+  fromMeeting = false,
 }) {
   const isPage = presentation === "page";
   const [journal, setJournal] = useState(null);
@@ -723,6 +724,36 @@ export default function LessonSummaryDrawer({
             </button>
           </div>
         </header>
+
+        {journal && !loading ? (
+          <section className="jl-recap" aria-label="Результаты занятия">
+            <h3 className="jl-recap__title">
+              {fromMeeting ? "Урок завершён" : "Результаты занятия"}
+            </h3>
+            <p className="jl-recap__meta">
+              {[
+                isGroup
+                  ? (journal.group_title || "Группа")
+                  : (records[0]?.student_name || ""),
+                formatLessonDate(journal.lesson_date),
+                plannedTopic || actualTopic,
+                journal.actual_duration_minutes || journal.planned_duration_minutes
+                  ? `${journal.actual_duration_minutes || journal.planned_duration_minutes} мин`
+                  : timeRange,
+              ].filter(Boolean).join(" · ")}
+            </p>
+            {journal.homework ? (
+              <p className="jl-recap__hw">
+                ДЗ: {journal.homework.title || "задание подготовлено"}
+                {journal.homework.due_at
+                  ? ` · срок ${new Date(journal.homework.due_at).toLocaleDateString("ru-RU")}`
+                  : ""}
+              </p>
+            ) : (
+              <p className="jl-recap__hw">ДЗ можно подтвердить или добавить в шаге «Домашнее задание».</p>
+            )}
+          </section>
+        ) : null}
 
         <nav className="jl-stepper" aria-label="Шаги итогов">
           {stepStates.map((s, index) => {

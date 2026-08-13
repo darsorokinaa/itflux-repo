@@ -295,6 +295,7 @@ class StudentInvitationSerializer(serializers.ModelSerializer):
     direction_label = serializers.CharField(source="get_direction_display", read_only=True)
     group_title = serializers.SerializerMethodField()
     join_path = serializers.SerializerMethodField()
+    pre_student = serializers.IntegerField(source="pre_student_id", read_only=True, allow_null=True)
 
     class Meta:
         model = StudentInvitation
@@ -313,6 +314,7 @@ class StudentInvitationSerializer(serializers.ModelSerializer):
             "group",
             "group_title",
             "join_path",
+            "pre_student",
             "expires_at",
             "accepted_at",
             "created_at",
@@ -1903,6 +1905,7 @@ class DashboardSerializer(serializers.Serializer):
     progress_overview = serializers.ListField()
     upcoming_actions = serializers.ListField()
     calendar_event_days = serializers.ListField(child=serializers.IntegerField())
+    onboarding = serializers.DictField(required=False)
 
 
 def build_dashboard_payload(teacher):
@@ -2004,4 +2007,11 @@ def build_dashboard_payload(teacher):
         "progress_overview": progress_overview,
         "upcoming_actions": upcoming_actions,
         "calendar_event_days": calendar_event_days,
+        "onboarding": _build_onboarding_payload(teacher),
     }
+
+
+def _build_onboarding_payload(teacher):
+    from .onboarding_service import build_teacher_onboarding_state
+
+    return build_teacher_onboarding_state(teacher)

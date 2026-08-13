@@ -16,9 +16,10 @@ export function lessonSummaryPath(eventId) {
 }
 
 /** Opens detailed lesson summary in a new browser tab. */
-export function openLessonSummaryTab(eventId) {
+export function openLessonSummaryTab(eventId, { fromMeeting = false } = {}) {
   const path = lessonSummaryPath(eventId);
   if (!path) return false;
-  window.open(path, "_blank", "noopener,noreferrer");
+  const url = fromMeeting ? `${path}?from=meeting` : path;
+  window.open(url, "_blank", "noopener,noreferrer");
   return true;
 }

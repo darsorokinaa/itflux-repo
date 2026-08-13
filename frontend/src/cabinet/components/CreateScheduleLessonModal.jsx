@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import CabinetIcon from "../CabinetIcons";
 import {
   billingPlanCheck,
@@ -350,7 +351,9 @@ export default function CreateScheduleLessonModal({
     }
   };
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div className="cb-sch-overlay" onClick={onClose} role="presentation">
       <div
         className="cb-sch-modal cb-sch-modal--wide"
@@ -677,6 +680,7 @@ export default function CreateScheduleLessonModal({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

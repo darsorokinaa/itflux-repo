@@ -1,4 +1,7 @@
 from django.contrib import admin
+from django.contrib.admin.views.decorators import staff_member_required
+from django.shortcuts import render
+from django.urls import path
 from django.utils.html import format_html
 
 from .journal_models import (
@@ -1056,6 +1059,20 @@ class PromotionAdmin(admin.ModelAdmin):
         }),
     )
 
+    def get_fieldsets(self, request, obj=None):
+        fieldsets = super().get_fieldsets(request, obj)
+        if obj is None or obj.code != "launch-premium":
+            return fieldsets
+        result = []
+        for name, opts in fieldsets:
+            if name == "Основное":
+                opts = {**opts, "description": (
+                    "Стартовая акция при регистрации. Чтобы завершить: снимите «Активна» "
+                    "или поставьте дату «Можно получить до». Код launch-premium не меняйте."
+                )}
+            result.append((name, opts))
+        return result
+
     def save_model(self, request, obj, form, change):
         obj.full_clean()
         super().save_model(request, obj, form, change)
@@ -1326,3 +1343,36 @@ class EventBillingRecordAdmin(admin.ModelAdmin):
 class StudentPaymentAdmin(admin.ModelAdmin):
     list_display = ("paid_at", "student", "amount", "method", "status")
     list_filter = ("status", "method")
+
+
+@staff_member_required
+def activation_metrics_view(request):
+    from .activation_analytics import build_activation_report
+
+    report = build_activation_report()
+    return render(
+        request,
+        "admin/cabinet/activation_metrics.html",
+        {
+            **admin.site.each_context(request),
+            "title": "Activation",
+            "report": report,
+        },
+    )
+
+
+_original_admin_get_urls = admin.site.get_urls
+
+
+def _admin_urls_with_activation():
+    custom = [
+        path(
+            "cabinet/activation/",
+            admin.site.admin_view(activation_metrics_view),
+            name="cabinet_activation_metrics",
+        ),
+    ]
+    return custom + _original_admin_get_urls()
+
+
+admin.site.get_urls = _admin_urls_with_activation

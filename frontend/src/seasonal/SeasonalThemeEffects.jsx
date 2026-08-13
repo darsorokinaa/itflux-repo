@@ -99,27 +99,31 @@ export default function SeasonalThemeEffects({ theme, intensity, isMobile }) {
     const spawn = (kind) => {
       const count = kind === "confetti" ? Math.min(maxElements, 36) : maxElements;
       particles = Array.from({ length: count }, (_, i) => {
-        const size = sprite
+        const size = spriteUrl
           ? (kind === "snow" ? 18 : 22) + Math.random() * (kind === "snow" ? 14 : 18)
           : kind === "snow"
             ? 2.5 + Math.random() * 3.5
             : kind === "leaves"
               ? 8 + Math.random() * 10
               : 3 + Math.random() * 4;
-        const delay = (i / count) * 0.9;
+        const t = count > 1 ? i / (count - 1) : 0;
+        // Часть частиц сразу в кадре, остальные чуть выше — без паузы «пустое небо».
+        const y = kind === "confetti"
+          ? Math.random() * height * 0.28
+          : t < 0.55
+            ? Math.random() * height * 0.42
+            : -10 - (t - 0.55) * 120;
         return {
           x: Math.random() * width,
-          y: kind === "confetti"
-            ? Math.random() * height * 0.25 - 20
-            : -30 - Math.random() * height * 0.35 - delay * 80,
+          y,
           r: size,
           vx: (Math.random() - 0.5) * (kind === "confetti" ? 2.4 : kind === "leaves" ? 1.1 : 0.7),
           vy:
             kind === "confetti"
-              ? 1.8 + Math.random() * 2.8
+              ? 2.4 + Math.random() * 3.0
               : kind === "leaves"
-                ? 1.0 + Math.random() * 1.8
-                : 0.7 + Math.random() * 1.4,
+                ? 2.0 + Math.random() * 2.4
+                : 1.8 + Math.random() * 2.2,
           rot: Math.random() * Math.PI,
           vr: (Math.random() - 0.5) * (kind === "leaves" ? 0.08 : 0.05),
           color:
@@ -228,21 +232,20 @@ export default function SeasonalThemeEffects({ theme, intensity, isMobile }) {
     if (spriteUrl) {
       const img = new Image();
       img.decoding = "async";
-      // Без crossOrigin для same-origin media; при ошибке — fallback-рисунок
       img.onload = () => {
         if (cancelled) return;
         sprite = img;
-        start();
       };
       img.onerror = () => {
         if (cancelled) return;
         sprite = null;
-        start();
       };
       img.src = spriteUrl;
-    } else {
-      start();
+      if (img.complete && img.naturalWidth > 0) {
+        sprite = img;
+      }
     }
+    start();
 
     return () => {
       cancelled = true;

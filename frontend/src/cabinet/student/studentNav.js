@@ -14,7 +14,7 @@ export const STUDENT_NAV = [
 export const STUDENT_MOBILE_NAV = [
   { id: "home",        label: "Главная",    path: "/cabinet/student",             icon: "home"    },
   { id: "assignments", label: "Задания",    path: "/cabinet/student/assignments", icon: "check"   },
-  { id: "lessons",     label: "Расписание", path: "/cabinet/student/lessons",     icon: "lessons" },
+  { id: "lessons",     label: "Расписание", path: "/cabinet/student/lessons",     icon: "lessons", featured: true },
   { id: "progress",    label: "Успех.",     path: "/cabinet/student/progress",    icon: "chart"   },
   { id: "more",        label: "Ещё",        path: "/cabinet/student/more",        icon: "expand"  },
 ];

@@ -1,7 +1,8 @@
 """
-Выдаёт акционный тариф «Профи» на 3 месяца с даты регистрации
-всем учителям, зарегистрировавшимся до 1 января 2027.
-Также мигрирует legacy slug=profi → актуальный slug=pro.
+Выдаёт акционный тариф стартовой акции (Премиум) на N месяцев
+с даты регистрации всем учителям в окне акции.
+
+Параметры акции — в БД (Cabinet → Акции, код launch-premium).
 
 python manage.py grant_registration_promo
 python manage.py grant_registration_promo --dry-run
@@ -14,16 +15,17 @@ from django.core.management.base import BaseCommand
 from Cabinet.models import Profile
 from Cabinet.referral_service import ReferralService, add_months
 from Cabinet.registration_promo import (
-    PROMO_MONTHS,
-    PROMO_PLAN_SLUG,
     apply_registration_promo,
+    ensure_launch_promotion,
     promo_deadline,
+    promo_months,
+    promo_plan_slug,
     registration_qualifies_for_promo,
 )
 
 
 class Command(BaseCommand):
-    help = "Акция: Профи на 3 месяца с даты регистрации (до 1 января 2027)"
+    help = "Стартовая акция: Премиум на 3 месяца с даты регистрации (запись в Акциях)"
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -34,15 +36,29 @@ class Command(BaseCommand):
         parser.add_argument(
             "--force",
             action="store_true",
-            help="Перезаписать подписку даже если уже есть Профи",
+            help="Перезаписать подписку даже если уже есть Премиум",
         )
 
     def handle(self, *args, **options):
         dry_run = options["dry_run"]
         force = options["force"]
+        promo = ensure_launch_promotion()
+        if promo is None:
+            self.stderr.write(self.style.ERROR(
+                "Нет тарифа «premium» и записи акции. Сначала: python manage.py seed_tariffs"
+            ))
+            return
+
         deadline = promo_deadline()
+        slug = promo_plan_slug()
+        months = promo_months()
         self.stdout.write(
-            f"Акция до {deadline.isoformat()} · план «{PROMO_PLAN_SLUG}» · {PROMO_MONTHS} мес."
+            f"Акция «{promo.name}» (код {promo.code}, активна={promo.is_active}) "
+            f"до {deadline.isoformat()} · план «{slug}» · {months} мес."
+        )
+        self.stdout.write(
+            "Завершить можно в админке: Cabinet → Акции → снять «Активна» "
+            "или изменить «Можно получить до»."
         )
 
         teachers = (
@@ -55,11 +71,11 @@ class Command(BaseCommand):
         skipped = 0
         for teacher in teachers:
             started_at = ReferralService.registration_started_at(teacher)
-            if not registration_qualifies_for_promo(started_at):
+            if not force and not registration_qualifies_for_promo(started_at):
                 skipped += 1
                 continue
 
-            expires_at = add_months(started_at, PROMO_MONTHS)
+            expires_at = add_months(started_at, months)
             label = teacher.email or teacher.username
             current_sub = getattr(teacher, "subscription", None)
             current = getattr(current_sub, "plan", None)
@@ -67,7 +83,7 @@ class Command(BaseCommand):
 
             if dry_run:
                 self.stdout.write(
-                    f"  [dry-run] {label}: {current_slug} → {PROMO_PLAN_SLUG} "
+                    f"  [dry-run] {label}: {current_slug} → {slug} "
                     f"до {expires_at:%Y-%m-%d} (с {started_at:%Y-%m-%d})"
                 )
                 granted += 1
@@ -75,10 +91,11 @@ class Command(BaseCommand):
 
             result = apply_registration_promo(teacher, force=force)
             if result:
+                until = (result.get("expires_at") or "")[:10] or "без срока"
                 self.stdout.write(
                     self.style.SUCCESS(
                         f"  {label}: «{result['plan_name']}» ({result['plan_slug']}) "
-                        f"до {result['expires_at'][:10]}"
+                        f"до {until}"
                     )
                 )
                 granted += 1

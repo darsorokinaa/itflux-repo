@@ -103,9 +103,28 @@
 }
 
 .jl-drawer__header-actions {
+
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.jl-recap {
+  padding: 12px 20px 4px;
+  background: #f8fbff;
+  border-bottom: 1px solid #e5eaf3;
+}
+
+.jl-recap__title {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.jl-recap__meta,
+.jl-recap__hw {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 0.85rem;
 }
 
 .jl-stepper {

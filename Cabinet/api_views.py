@@ -7,7 +7,7 @@ from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -2276,6 +2276,17 @@ class NavCountsView(TeacherScopedMixin, APIView):
             "students_count": students_count,
             "reviews_count": reviews_count,
         })
+
+
+class ActivationMetricsView(APIView):
+    """Staff-only aggregated activation metrics. No personal data."""
+
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        from .activation_analytics import build_activation_report
+
+        return Response(build_activation_report())
 
 
 class ReportsOverviewView(TeacherScopedMixin, APIView):

@@ -14,11 +14,13 @@ import {
   consumeDayOverrideExpiredFlag,
   fetchSeasonalThemeCurrent,
   isHeavyRoute,
+  readCachedThemePayload,
   readDayOverride,
   readGuestPreference,
   resolveDeviceIntensity,
   themeAppliesToRoute,
   updateSeasonalThemePreference,
+  writeCachedThemePayload,
   writeDayOverride,
   writeGuestPreference,
   stopSeasonalThemePreview,
@@ -78,8 +80,8 @@ function themeLabelFromPayload(payload) {
 
 export function SeasonalThemeProvider({ children }) {
   const { pathname } = useLocation();
-  const [payload, setPayload] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [payload, setPayload] = useState(() => readCachedThemePayload());
+  const [loading, setLoading] = useState(payload == null);
   const [error, setError] = useState(null);
   const [isMobile, setIsMobile] = useState(() => detectMobile());
   const [reducedMotion, setReducedMotion] = useState(() => detectReducedMotion());
@@ -107,13 +109,17 @@ export function SeasonalThemeProvider({ children }) {
     try {
       const next = await updateSeasonalThemePreference(patch);
       setPayload(next);
+      writeCachedThemePayload(next);
       if (!dayOverride) clearGuestPreference();
       return next;
     } catch (err) {
       if (err?.status === 401 || err?.status === 403) {
         writeGuestPreference(nextGuest);
         const next = await fetchSeasonalThemeCurrent(nextGuest);
-        if (next) setPayload(next);
+        if (next) {
+          setPayload(next);
+          writeCachedThemePayload(next);
+        }
         return next;
       }
       throw err;
@@ -162,6 +168,7 @@ export function SeasonalThemeProvider({ children }) {
 
       if (ctrl.signal.aborted) return data;
       setPayload(data);
+      writeCachedThemePayload(data);
       setError(null);
       return data;
     } catch (err) {
@@ -183,9 +190,8 @@ export function SeasonalThemeProvider({ children }) {
 
   useEffect(() => {
     refresh();
-    return () => {
-      if (abortRef.current) abortRef.current.abort();
-    };
+    // Не abort на unmount: Strict Mode иначе отменяет первый запрос и анимация
+    // ждёт повторный round-trip. Перекрывающий refresh() сам abort'ит предыдущий.
   }, [refresh]);
 
   // Guest → server только если серверные prefs ещё «чистые»
@@ -229,6 +235,7 @@ export function SeasonalThemeProvider({ children }) {
         });
         if (!cancelled && next) {
           setPayload(next);
+          writeCachedThemePayload(next);
           clearGuestPreference();
         }
       } catch {
@@ -362,6 +369,7 @@ export function SeasonalThemeProvider({ children }) {
     try {
       const next = await stopSeasonalThemePreview();
       setPayload(next);
+      writeCachedThemePayload(next);
     } catch {
       await refresh();
     }

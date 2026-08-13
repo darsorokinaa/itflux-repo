@@ -1688,13 +1688,22 @@ class StudentScheduleView(StudentScopedView):
         if err:
             return err
         self.sync_student_releases(students)
-        events = _schedule_qs(students).order_by("starts_at")
+        qs = _schedule_qs(students)
         subject_id = request.GET.get("student_subject") or request.GET.get("subject")
         if subject_id:
-            events = events.filter(
+            qs = qs.filter(
                 Q(student_subject_id=subject_id) | Q(student_subject__isnull=True)
             )
-        events = list(events[:50])
+        now = timezone.now()
+        upcoming = list(
+            qs.filter(Q(ends_at__gte=now) | Q(ends_at__isnull=True, starts_at__gte=now))
+            .order_by("starts_at")[:40]
+        )
+        past = list(
+            qs.filter(Q(ends_at__lt=now) | Q(ends_at__isnull=True, starts_at__lt=now))
+            .order_by("-starts_at")[:40]
+        )
+        events = list(reversed(past)) + upcoming
         return Response({
             "items": [_serialize_schedule_event(e, students) for e in events]
         })

@@ -65,6 +65,11 @@ class NotificationEventType:
     SYSTEM_ANNOUNCEMENT = "system_announcement"
     PUSH_TEST = "push_test"
 
+    # Teacher activation (in-app nudges, no extra preference field)
+    ONBOARDING_ADD_STUDENT = "onboarding_add_student"
+    ONBOARDING_SCHEDULE_LESSON = "onboarding_schedule_lesson"
+    ONBOARDING_ADD_MATERIALS = "onboarding_add_materials"
+
     # Legacy schedule payload type (stored as schedule_event + change_type)
     SCHEDULE_EVENT = "schedule_event"
 
@@ -504,6 +509,45 @@ def _init_catalog() -> None:
             priority="important",
             group="system",
             url_default="/cabinet",
+        ),
+        EventDefinition(
+            code=NotificationEventType.ONBOARDING_ADD_STUDENT,
+            label="Онбординг: первый ученик",
+            description="Подсказка добавить первого ученика, если активация не завершена.",
+            preference_field="notify_system",
+            roles=frozenset({ROLE_TEACHER}),
+            channels=frozenset({CHANNEL_IN_APP}),
+            default_enabled=True,
+            can_disable=True,
+            priority="normal",
+            group="system",
+            url_default="/cabinet/students?invite=1",
+        ),
+        EventDefinition(
+            code=NotificationEventType.ONBOARDING_SCHEDULE_LESSON,
+            label="Онбординг: первое занятие",
+            description="Подсказка запланировать занятие после добавления ученика.",
+            preference_field="notify_system",
+            roles=frozenset({ROLE_TEACHER}),
+            channels=frozenset({CHANNEL_IN_APP}),
+            default_enabled=True,
+            can_disable=True,
+            priority="normal",
+            group="system",
+            url_default="/cabinet/schedule",
+        ),
+        EventDefinition(
+            code=NotificationEventType.ONBOARDING_ADD_MATERIALS,
+            label="Онбординг: материалы занятия",
+            description="Подсказка добавить материалы к запланированному занятию.",
+            preference_field="notify_system",
+            roles=frozenset({ROLE_TEACHER}),
+            channels=frozenset({CHANNEL_IN_APP}),
+            default_enabled=True,
+            can_disable=True,
+            priority="normal",
+            group="system",
+            url_default="/cabinet/schedule",
         ),
     ]
     for d in defs:

@@ -262,7 +262,7 @@ export default function ParentCabinetPage() {
             key={item.id}
             to={item.path}
             aria-label={item.label}
-            className={`cb-mobile-nav__item st-mobile-nav__item${isParentMobileNavActive(location.pathname, item) ? " is-active" : ""}`}
+            className={`cb-mobile-nav__item st-mobile-nav__item${isParentMobileNavActive(location.pathname, item) ? " is-active" : ""}${item.featured ? " is-featured" : ""}`}
           >
             <span className="cb-mobile-nav__icon-wrap">
               <CabinetIcon name={item.icon} />

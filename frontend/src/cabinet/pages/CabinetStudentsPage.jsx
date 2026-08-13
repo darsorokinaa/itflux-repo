@@ -1092,6 +1092,17 @@ export default function CabinetStudentsPage() {
     }
   }, [searchParams, setSearchParams, openCreateStudent]);
 
+  useEffect(() => {
+    const editId = searchParams.get("editStudent");
+    if (!editId || loading) return;
+    const student = students.find((item) => String(item.id) === String(editId));
+    if (!student) return;
+    setStudentModal({ mode: "edit", student });
+    const next = new URLSearchParams(searchParams);
+    next.delete("editStudent");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, students, loading]);
+
   const openInviteToGroup = (group) => setInviteModal({ group });
   const closeInviteModal = () => {
     setInviteModal(null);
@@ -1403,6 +1414,21 @@ export default function CabinetStudentsPage() {
           group={inviteModal.group}
           onClose={closeInviteModal}
           onCreate={handleCreateInvite}
+          onScheduleLesson={(studentId) => {
+            setInviteModal(null);
+            loadData();
+            navigate("/cabinet/schedule", {
+              state: {
+                createWithStudentId: studentId,
+                createWithType: "individual_lesson",
+              },
+            });
+          }}
+          onSetupSubject={(studentId) => {
+            setInviteModal(null);
+            loadData();
+            navigate(`/cabinet/students?editStudent=${encodeURIComponent(studentId)}`);
+          }}
         />
       ) : null}
       <ConfirmActionModal

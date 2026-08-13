@@ -298,7 +298,7 @@ export default function StudentCabinetLayout() {
               key={item.id}
               to={item.path}
               aria-label={ariaLabel}
-              className={`cb-mobile-nav__item st-mobile-nav__item${isStudentMobileNavActive(location.pathname, item) ? " is-active" : ""}`}
+              className={`cb-mobile-nav__item st-mobile-nav__item${isStudentMobileNavActive(location.pathname, item) ? " is-active" : ""}${item.featured ? " is-featured" : ""}`}
             >
               <span className="cb-mobile-nav__icon-wrap">
                 <CabinetIcon name={item.icon} />

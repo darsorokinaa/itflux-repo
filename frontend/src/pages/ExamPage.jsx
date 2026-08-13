@@ -1,12 +1,14 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useLocation, Link, useNavigate } from "react-router-dom";
 import MathContent from "../components/MathContent";
 import { devApiBase } from "../utils/devApiBase";
-import { isEgeInfTruthTableTask, isEgeInfParallelProcessesTask, isEgeInfRoadGraphTask, isInformaticsCodeEditorContext, isOgeRusTask13 } from "../utils/isOgeInformaticsTask";
+import { isEgeInfTruthTableTask, isEgeInfParallelProcessesTask, isEgeInfRoadGraphTask, isOgeRusTask13 } from "../utils/isOgeInformaticsTask";
 
-const InformaticsCodeEditorEntry = lazy(
-  () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
-);
+// TEMP: кнопка «Код» временно скрыта
+// import { isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
+// const InformaticsCodeEditorEntry = lazy(
+//   () => import("../components/InformaticsCodeEditor/InformaticsCodeEditorEntry")
+// );
 import TaskFileAttachment from "../components/TaskFileAttachment";
 import ImageLightbox from "../components/ImageLightbox";
 import SupportInfoModal from "../components/SupportInfoModal";
@@ -1706,18 +1708,19 @@ function ExamPage() {
   }, []);
 
   const tasksFilteredByAuthor = Array.isArray(variant?.tasks) ? variant.tasks : [];
-  const getCodeEditorTaskSources = useCallback(
-    () =>
-      tasksFilteredByAuthor
-        .filter((t) => t.file)
-        .slice(0, 80)
-        .map((t) => ({
-          id: t.id,
-          label: t.number != null ? `№${t.number}` : `id ${t.id}`,
-          fileUrl: t.file || null,
-        })),
-    [tasksFilteredByAuthor]
-  );
+  // TEMP: кнопка «Код» временно скрыта
+  // const getCodeEditorTaskSources = useCallback(
+  //   () =>
+  //     tasksFilteredByAuthor
+  //       .filter((t) => t.file)
+  //       .slice(0, 80)
+  //       .map((t) => ({
+  //         id: t.id,
+  //         label: t.number != null ? `№${t.number}` : `id ${t.id}`,
+  //         fileUrl: t.file || null,
+  //       })),
+  //   [tasksFilteredByAuthor]
+  // );
 
   if (error) {
     return (
@@ -1773,7 +1776,9 @@ function ExamPage() {
   const part2Linked1921 = part2Tasks.filter((t) => LINKED_19_21.includes(t.number));
   const part2Rest = part2Tasks.filter((t) => !LINKED_19_21.includes(t.number));
   const showLinkedGroup = subject === "inf" && part2Linked1921.length === 3;
-  const showInfCodeSidebar = isInformaticsCodeEditorContext(level, subject);
+  // TEMP: кнопка «Код» временно скрыта
+  const showInfCodeSidebar = false;
+  // const showInfCodeSidebar = isInformaticsCodeEditorContext(level, subject);
   // Для математики или если не все три — показываем 19/20/21 как обычные задания
   const part2Regular = showLinkedGroup ? part2Rest : [...part2Linked1921, ...part2Rest].sort((a, b) => a.number - b.number);
 
@@ -3725,6 +3730,7 @@ function ExamPage() {
           </div>
         </div>
           </div>
+          {/* TEMP: кнопка «Код» временно скрыта
           {showInfCodeSidebar ? (
             <Suspense fallback={null}>
               <InformaticsCodeEditorEntry
@@ -3733,6 +3739,7 @@ function ExamPage() {
               />
             </Suspense>
           ) : null}
+          */}
         </div>
       </div>
 

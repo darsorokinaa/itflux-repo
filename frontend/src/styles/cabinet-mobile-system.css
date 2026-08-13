@@ -4,8 +4,10 @@
    ============================================================ */
 
 :root {
-  --cb-mobile-nav-base: 64px;
+  --cb-mobile-nav-base: 86px;
   --cb-mobile-nav-height: calc(var(--cb-mobile-nav-base) + env(safe-area-inset-bottom, 0px));
+  --cb-mobile-header-base: 56px;
+  --cb-mobile-header-height: calc(var(--cb-mobile-header-base) + env(safe-area-inset-top, 0px));
   --cb-mobile-page-pad: 16px;
   --cb-mobile-page-pad-sm: 12px;
   --cb-drawer-width: min(300px, 86vw);
@@ -612,6 +614,26 @@ video {
     padding-bottom: var(--cb-mobile-nav-height);
   }
 
+  /*
+   * Global `header { position:sticky; z-index:100 }` plus `.cabinet-main { z-index:1 }`
+   * vs `.cb-mobile-nav { z-index:1200 }` lets chrome paint over in-page overlays.
+   * While a sheet is open, drop chrome below the overlay stacking context.
+   */
+  .cb-layout:has(.cb-sch-overlay) .cabinet-header,
+  .st-layout:has(.cb-sch-overlay) .cabinet-header,
+  .cabinet-layout:has(.cb-sch-overlay) .cabinet-header {
+    z-index: 0;
+  }
+
+  .cb-layout:has(.cb-sch-overlay) .cb-mobile-nav,
+  .st-layout:has(.cb-sch-overlay) .cb-mobile-nav,
+  .st-layout:has(.cb-sch-overlay) .st-mobile-nav,
+  .cabinet-layout:has(.cb-sch-overlay) .cb-mobile-nav,
+  .cabinet-layout:has(.cb-sch-overlay) .st-mobile-nav {
+    z-index: 0;
+    pointer-events: none;
+  }
+
   /* Secondary action bars sit above bottom navigation */
   .cb-pe-mobile-bar,
   .ix-ed-mobile-bar,
@@ -859,20 +881,34 @@ video {
     font-size: 0.875rem;
   }
 
-  /* Modals & upgrade sheets — bottom sheet with internal scroll */
+  /* Modals & sheets — sit between header and bottom nav, body scrolls */
   .cb-modal-backdrop,
   .upm-backdrop,
-  .ix-modal-backdrop {
+  .ix-modal-backdrop,
+  .cb-sch-overlay,
+  .cb-sch-overlay--sheet,
+  .cb-sch-overlay--lesson,
+  .cb-sch-overlay--lesson.cb-sch-overlay--sheet,
+  .cb-sch-overlay--scope,
+  .cb-support-backdrop {
     align-items: flex-end;
-    padding: 0;
+    justify-content: center;
+    padding: calc(var(--cb-mobile-header-height) + 8px) 0 calc(var(--cb-mobile-nav-height) + 8px);
+    box-sizing: border-box;
   }
 
   .cb-modal,
+  .cb-layout .cb-modal,
   .upm-sheet,
-  .ix-modal {
+  .ix-modal,
+  .cb-sch-modal,
+  .cb-sch-modal--wide,
+  .cb-sch-popover,
+  .cb-sch-confirm {
     width: 100%;
     max-width: none;
-    max-height: min(92dvh, 100%);
+    max-height: 100%;
+    height: auto;
     border-radius: 24px 24px 0 0;
     margin: 0;
     display: flex;
@@ -881,39 +917,71 @@ video {
   }
 
   .cb-modal__head,
-  .cb-modal__footer {
+  .cb-modal__footer,
+  .cb-sch-modal__head,
+  .cb-sch-overlay .cb-sch-popover__header,
+  .cb-sch-overlay .cb-lesson-card__header {
     flex: 0 0 auto;
   }
 
-  .cb-modal__body {
+  .cb-modal__body,
+  .cb-sch-modal .cb-sch-form,
+  .cb-sch-overlay .cb-sch-popover__body,
+  .cb-sch-overlay .cb-lesson-card__body,
+  .cb-sch-overlay .cb-lesson-card__scroll {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    overscroll-behavior: contain;
   }
 
-  .cb-modal__close {
+  .cb-modal__body > .cb-modal-form {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    gap: 16px;
+  }
+
+  .cb-modal__body {
+    padding-bottom: 12px;
+  }
+
+  .cb-modal__close,
+  .cb-sch-popover__close {
     width: 44px;
     height: 44px;
     min-width: 44px;
     min-height: 44px;
   }
 
-  .cb-modal--lesson {
-    max-height: 100dvh;
-    height: 100dvh;
-    border-radius: 0;
+  .cb-modal--lesson,
+  .cb-sch-overlay--lesson.cb-sch-overlay--sheet .cb-lesson-card.cb-sch-popover,
+  .cb-sch-overlay--lesson .cb-lesson-card.cb-sch-popover {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 24px 24px 0 0;
   }
 
-  .upm-backdrop {
-    padding: 0;
+  .cb-modal-form__actions,
+  .cb-sch-modal__actions,
+  .cb-sch-overlay .cb-lesson-card__footer,
+  .cb-sch-overlay .cb-sch-popover__footer {
+    flex: 0 0 auto;
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    background: #FFFFFF;
+    padding-top: 12px;
+    padding-bottom: 4px;
+    margin-top: auto;
   }
 
   .upm-sheet {
     border-radius: 24px 24px 0 0;
     max-width: none;
-    padding: 28px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+    padding: 28px 20px 20px;
   }
 
   /* Forms: full-width fields, readable size (no iOS zoom) */
@@ -949,7 +1017,10 @@ video {
 
   .cb-page-actions,
   .cb-modal__footer,
-  .cb-form-actions {
+  .cb-form-actions,
+  .cb-modal-form__actions,
+  .cb-modal-form__actions-main,
+  .cb-sch-modal__actions {
     flex-direction: column;
     align-items: stretch;
     gap: 10px;
@@ -957,9 +1028,13 @@ video {
 
   .cb-page-actions .cb-btn,
   .cb-modal__footer .cb-btn,
-  .cb-form-actions .cb-btn {
+  .cb-form-actions .cb-btn,
+  .cb-modal-form__actions .cb-btn,
+  .cb-modal-form__actions-main .cb-btn,
+  .cb-sch-modal__actions .cb-btn {
     width: 100%;
     justify-content: center;
+    margin-left: 0;
   }
 
   /* Cards: text hierarchy & wrapping */
@@ -1077,5 +1152,151 @@ video {
   .st-mobile-nav__item svg {
     width: 20px;
     height: 20px;
+  }
+
+  .cb-mobile-nav__item.is-featured,
+  .st-mobile-nav__item.is-featured {
+    padding: 0;
+    width: 56px;
+    height: 56px;
+    min-height: 56px;
+  }
+
+  .cb-mobile-nav__item.is-featured svg,
+  .st-mobile-nav__item.is-featured svg {
+    width: 22px;
+    height: 22px;
+  }
+}
+
+/* ============================================================
+   Floating pill bottom nav (matches public site mobile tabbar)
+   ============================================================ */
+@media (max-width: 900px) {
+  .cb-mobile-nav,
+  .st-mobile-nav,
+  .cb-mobile-nav.st-mobile-nav,
+  .cb-teacher-mobile-nav {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr 64px 1fr 1fr !important;
+    align-items: center;
+    gap: 0 !important;
+    height: var(--cb-mobile-nav-height) !important;
+    padding: 8px 14px calc(10px + env(safe-area-inset-bottom, 0px)) !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    pointer-events: none;
+    box-sizing: border-box;
+  }
+
+  .cb-mobile-nav::before,
+  .st-mobile-nav::before {
+    content: "";
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    top: 8px;
+    height: 58px;
+    background: #ffffff;
+    border-radius: 999px;
+    box-shadow:
+      0 8px 28px rgba(15, 23, 42, 0.14),
+      0 1px 4px rgba(15, 23, 42, 0.06);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .cb-mobile-nav__item,
+  .st-mobile-nav__item,
+  .cb-teacher-mobile-nav__item {
+    position: relative;
+    z-index: 1;
+    pointer-events: auto;
+    background: transparent;
+  }
+
+  .cb-mobile-nav__item.is-featured,
+  .st-mobile-nav__item.is-featured,
+  a.cb-mobile-nav__item.is-featured,
+  a.st-mobile-nav__item.is-featured {
+    width: 62px;
+    height: 62px;
+    min-height: 62px;
+    padding: 0 !important;
+    gap: 0;
+    justify-self: center;
+    border-radius: 50%;
+    background: var(--blue-main, #1550D8) !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 0 3px #ffffff, 0 8px 18px rgba(11, 47, 159, 0.28);
+    z-index: 2;
+  }
+
+  .cb-mobile-nav__item.is-featured:hover,
+  .st-mobile-nav__item.is-featured:hover,
+  .cb-mobile-nav__item.is-featured:focus-visible,
+  .st-mobile-nav__item.is-featured:focus-visible,
+  .cb-mobile-nav__item.is-featured:active,
+  .st-mobile-nav__item.is-featured:active,
+  a.cb-mobile-nav__item.is-featured:hover,
+  a.st-mobile-nav__item.is-featured:hover,
+  a.cb-mobile-nav__item.is-featured:visited,
+  a.st-mobile-nav__item.is-featured:visited {
+    color: #ffffff !important;
+  }
+
+  .cb-mobile-nav__item.is-featured:hover,
+  .st-mobile-nav__item.is-featured:hover,
+  .cb-mobile-nav__item.is-featured:focus-visible,
+  .st-mobile-nav__item.is-featured:focus-visible,
+  .cb-mobile-nav__item.is-featured:active,
+  .st-mobile-nav__item.is-featured:active,
+  a.cb-mobile-nav__item.is-featured:hover,
+  a.st-mobile-nav__item.is-featured:hover {
+    background: var(--blue-dark, #0B2F9F) !important;
+  }
+
+  .cb-mobile-nav__item.is-featured.is-active,
+  .st-mobile-nav__item.is-featured.is-active {
+    background: var(--blue-main, #1550D8) !important;
+    color: #ffffff !important;
+  }
+
+  .cb-mobile-nav__item.is-featured.is-active:hover,
+  .st-mobile-nav__item.is-featured.is-active:hover,
+  .cb-mobile-nav__item.is-featured.is-active:active,
+  .st-mobile-nav__item.is-featured.is-active:active {
+    background: var(--blue-dark, #0B2F9F) !important;
+    color: #ffffff !important;
+  }
+
+  .cb-mobile-nav__item.is-featured > span:not(.cb-mobile-nav__icon-wrap),
+  .st-mobile-nav__item.is-featured > span:not(.cb-mobile-nav__icon-wrap) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .cb-mobile-nav__item.is-featured .cb-mobile-nav__icon-wrap,
+  .st-mobile-nav__item.is-featured .cb-mobile-nav__icon-wrap {
+    width: 24px;
+    height: 24px;
+  }
+
+  .cb-mobile-nav__item.is-featured svg,
+  .st-mobile-nav__item.is-featured svg {
+    width: 24px;
+    height: 24px;
+    color: inherit;
+    stroke: currentColor;
   }
 }

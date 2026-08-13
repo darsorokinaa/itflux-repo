@@ -267,9 +267,11 @@ export default function Nav() {
             </div>
 
             <CabinetNavButton onNavigate={() => setMenuOpen(false)} />
+            <TaskSearchPanel
+              className="site-nav__quick-search"
+              onSearch={() => setMenuOpen(false)}
+            />
           </div>
-
-          <TaskSearchPanel className="site-nav__quick-search" />
         </div>
       </nav>
     </header>

@@ -32,6 +32,8 @@ export default function SeasonalThemeDecorations({
   return (
     <div className="seasonal-decor-layer" aria-hidden="true">
       {visible.map((d) => {
+        const animType = d.animation?.type;
+        const delay = Math.max(Number(d.animation?.delay) || 0, 0);
         const style = {
           width: d.width || "80px",
           height: d.height || "auto",
@@ -39,8 +41,13 @@ export default function SeasonalThemeDecorations({
           zIndex: d.z_index ?? 1,
           ["--seasonal-decor-x"]: d.offset_x || "0",
           ["--seasonal-decor-y"]: d.offset_y || "0",
-          animationDuration: `${d.animation?.speed || 6}s`,
-          animationDelay: `${d.animation?.delay || 0}s`,
+          // fade_in в админке по умолчанию 6с (как цикл sway) — для появления это слишком долго
+          animationDuration: animType === "fade_in"
+            ? "0.4s"
+            : `${d.animation?.speed || 6}s`,
+          animationDelay: animType === "fade_in"
+            ? `${Math.min(delay, 0.15)}s`
+            : `${delay}s`,
         };
         const animClass =
           animationsEnabled && d.animation?.type && d.animation.type !== "none"
@@ -51,7 +58,7 @@ export default function SeasonalThemeDecorations({
           <img
             src={d.image_url}
             alt=""
-            loading="lazy"
+            loading="eager"
             decoding="async"
             draggable={false}
           />

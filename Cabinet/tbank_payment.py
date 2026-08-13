@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
@@ -63,16 +64,31 @@ def _api_base() -> str:
     return (getattr(settings, "TBANK_API_URL", "") or TBANK_API_DEFAULT).rstrip("/")
 
 
+# Системное хранилище Ubuntu/Debian: туда ставится «Российский доверенный УЦ»
+# (сертификаты Т-Банка). certifi его не содержит.
+_SYSTEM_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+
+
 def _ssl_verify():
     """
     Проверка TLS к API Т-Банка.
-    Локально антивирус/прокси иногда ломают цепочку сертификатов —
-    тогда TBANK_VERIFY_SSL=false (только для DEBUG).
+    На проде всегда включена; если есть системный CA bundle — используем его
+    (нужен Russian Trusted CA). Локально TBANK_VERIFY_SSL=false только при DEBUG.
     """
+    if not getattr(settings, "DEBUG", False):
+        if os.path.isfile(_SYSTEM_CA_BUNDLE):
+            return _SYSTEM_CA_BUNDLE
+        return True
     raw = getattr(settings, "TBANK_VERIFY_SSL", True)
     if isinstance(raw, str):
-        return raw.strip().lower() not in ("0", "false", "no", "off")
-    return bool(raw)
+        enabled = raw.strip().lower() not in ("0", "false", "no", "off")
+    else:
+        enabled = bool(raw)
+    if not enabled:
+        return False
+    if os.path.isfile(_SYSTEM_CA_BUNDLE):
+        return _SYSTEM_CA_BUNDLE
+    return True
 
 
 def build_tbank_token(payload: dict[str, Any], password: str | None = None) -> str:
@@ -392,10 +408,18 @@ class TBankPaymentProvider(PaymentProviderInterface):
             data = response.json()
         except requests.exceptions.SSLError as exc:
             logger.exception("T-Bank Init SSL error")
+            if getattr(settings, "DEBUG", False):
+                hint = (
+                    "Для локальной проверки добавьте в Generator/.env: "
+                    "TBANK_VERIFY_SSL=false и перезапустите Django."
+                )
+            else:
+                hint = (
+                    "На сервере установите сертификаты «Российский доверенный УЦ» "
+                    "в /usr/local/share/ca-certificates и выполните update-ca-certificates."
+                )
             raise ValueError(
-                "Ошибка SSL при обращении к Т-Банку (часто из‑за антивируса/прокси). "
-                "Для локальной проверки добавьте в Generator/.env: TBANK_VERIFY_SSL=false "
-                f"и перезапустите Django. Детали: {exc}"
+                f"Ошибка SSL при обращении к Т-Банку. {hint} Детали: {exc}"
             ) from exc
         except Exception as exc:
             logger.exception("payment_init_failed payment_id=%s", payment.pk)

@@ -1,10 +1,4 @@
-import { lazy, Suspense, useCallback, useState } from "react";
 import type { TaskFileSource } from "./types";
-import "../../styles/informatics-code-editor.css";
-
-const InformaticsCodeEditorSidebar = lazy(
-  () => import("./InformaticsCodeEditorSidebar")
-);
 
 type Props = {
   getTaskSources?: () => TaskFileSource[];
@@ -12,6 +6,19 @@ type Props = {
 };
 
 /** Лёгкая оболочка: тяжёлый редактор грузится только после нажатия «Код». */
+export default function InformaticsCodeEditorEntry(_props: Props) {
+  // TEMP: кнопка «Код» и редактор временно скрыты
+  return null;
+}
+
+/*
+import { lazy, Suspense, useCallback, useState } from "react";
+import "../../styles/informatics-code-editor.css";
+
+const InformaticsCodeEditorSidebar = lazy(
+  () => import("./InformaticsCodeEditorSidebar")
+);
+
 export default function InformaticsCodeEditorEntry({
   getTaskSources,
   storageId,
@@ -62,3 +69,4 @@ export default function InformaticsCodeEditorEntry({
     </Suspense>
   );
 }
+*/

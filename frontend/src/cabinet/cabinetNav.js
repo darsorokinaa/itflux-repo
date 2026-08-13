@@ -51,7 +51,7 @@ export const CABINET_NAV = CABINET_NAV_GROUPS.flatMap((group) => group.items);
 export const CABINET_MOBILE_NAV = [
   { id: "home", label: "Главная", path: "/cabinet", icon: "home" },
   { id: "students", label: "Ученики", path: "/cabinet/students", icon: "students" },
-  { id: "schedule", label: "Расписание", path: "/cabinet/schedule", icon: "calendar" },
+  { id: "schedule", label: "Расписание", path: "/cabinet/schedule", icon: "calendar", featured: true },
   { id: "review", label: "Проверка", path: "/cabinet/review", icon: "check" },
   { id: "more", label: "Ещё", path: "/cabinet/more", icon: "expand" },
 ];

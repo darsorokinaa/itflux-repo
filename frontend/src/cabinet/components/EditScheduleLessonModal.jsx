@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import SeriesScopeModal from "./SeriesScopeModal";
@@ -757,9 +758,11 @@ export default function EditScheduleLessonModal({ event, onClose, onSave, onEven
     }
   };
 
+  if (typeof document === "undefined") return null;
+
   return (
     <>
-      {!scopeOpen ? (
+      {!scopeOpen ? createPortal(
       <div className="cb-sch-overlay" onClick={saving ? undefined : onClose} role="presentation">
         <div
           className="cb-sch-modal cb-sch-modal--wide"
@@ -874,7 +877,8 @@ export default function EditScheduleLessonModal({ event, onClose, onSave, onEven
             </div>
           </form>
         </div>
-      </div>
+      </div>,
+      document.body
       ) : null}
 
       {scopeOpen ? (

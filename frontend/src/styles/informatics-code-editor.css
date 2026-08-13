@@ -1,5 +1,11 @@
 /* Редактор кода — боковой сайдбар (ОГЭ/ЕГЭ информатика) */
 
+/* TEMP: кнопка «Код» временно скрыта */
+.inf-code-sidebar,
+.inf-code-sidebar__toggle {
+  display: none !important;
+}
+
 html[data-inf-code-sidebar="open"] {
   --inf-code-sidebar-width: max(480px, 50vw);
 }

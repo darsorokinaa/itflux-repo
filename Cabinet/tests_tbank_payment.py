@@ -15,6 +15,7 @@ from Cabinet.payment_service import PaymentProviderService
 from Cabinet.tbank_payment import (
     _notification_url,
     _return_url,
+    _ssl_verify,
     amount_to_kopecks,
     build_tbank_token,
     map_tbank_status,
@@ -94,6 +95,16 @@ class TBankHelpersTests(TestCase):
     )
     def test_debug_keeps_ngrok_notification_url(self):
         self.assertIn("ngrok", _notification_url())
+
+    @override_settings(DEBUG=True, TBANK_VERIFY_SSL=False)
+    def test_debug_can_disable_tbank_ssl_verify(self):
+        self.assertFalse(_ssl_verify())
+
+    @override_settings(DEBUG=False, TBANK_VERIFY_SSL=False)
+    def test_production_never_disables_tbank_ssl_verify(self):
+        verify = _ssl_verify()
+        self.assertTrue(bool(verify))
+        self.assertNotEqual(verify, False)
 
 
 @override_settings(

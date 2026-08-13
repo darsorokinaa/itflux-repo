@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import CabinetIcon from "../CabinetIcons";
 import BoardLessonBlock from "./BoardLessonBlock";
 import CabinetFloatingMenu from "./CabinetFloatingMenu";
@@ -273,12 +274,12 @@ function ResourceCard({ row, variant = "material", onRemove = null }) {
   );
 }
 
-function CollapsibleBlock({ title, count, countVariant, isMobile, children, className = "", onAdd = null, addLabel = "Добавить" }) {
-  const [open, setOpen] = useState(!isMobile);
+function CollapsibleBlock({ title, count, countVariant, isMobile, children, className = "", onAdd = null, addLabel = "Добавить", forceOpen = false }) {
+  const [open, setOpen] = useState(!isMobile || forceOpen);
 
   useEffect(() => {
-    setOpen(!isMobile);
-  }, [isMobile]);
+    setOpen(!isMobile || forceOpen);
+  }, [isMobile, forceOpen]);
 
   const head = (
     <SectionHead
@@ -352,6 +353,9 @@ function ResourceSection({
   suppressEmpty = false,
   /** Учитывать в бейдже счётчика (например +1 за прикреплённую доску) */
   extraCount = 0,
+  highlight = false,
+  emptyExtra = null,
+  defaultOpen = null,
 }) {
   const [showAll, setShowAll] = useState(false);
   const visibleRows = showAll ? rows : rows.slice(0, RESOURCE_PREVIEW);
@@ -386,13 +390,14 @@ function ResourceSection({
           ) : null}
         </>
       ) : showEmpty ? (
-        <div className={`cb-lesson-card__empty cb-lesson-card__empty--${variant}`}>
+        <div className={`cb-lesson-card__empty cb-lesson-card__empty--${variant}${highlight ? " is-highlight" : ""}`}>
           <p>{emptyLabel}</p>
-          {addHandler && !onAdd ? (
+          {addHandler ? (
             <button type="button" className="cb-lesson-card__empty-btn" onClick={addHandler}>
               {emptyActionLabel || addLabel}
             </button>
           ) : null}
+          {emptyExtra}
         </div>
       ) : addHandler && !rows.length && !onAdd ? (
         <div className={`cb-lesson-card__empty cb-lesson-card__empty--${variant} cb-lesson-card__empty--compact`}>
@@ -411,9 +416,10 @@ function ResourceSection({
       count={totalCount}
       countVariant={variant}
       isMobile={isMobile}
-      className={`cb-lesson-card__section--${variant}`}
+      className={`cb-lesson-card__section--${variant}${highlight ? " is-highlight" : ""}`}
       onAdd={addHandler}
       addLabel={addLabel || emptyActionLabel || "Добавить"}
+      forceOpen={Boolean(highlight || defaultOpen)}
     >
       {content}
     </CollapsibleBlock>
@@ -645,6 +651,8 @@ export default function EventDetailCard({
   onRegisterPayment,
   onOpenJournal,
   billingBadges = [],
+  highlightMaterials = false,
+  onSkipMaterials = null,
 }) {
   const [linkDraft, setLinkDraft] = useState(event.link || "");
   const [copied, setCopied] = useState(false);
@@ -810,7 +818,9 @@ export default function EventDetailCard({
     onOpenLesson?.(true);
   };
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div className={overlayClass} onClick={onClose} role="presentation">
       <div
         className={cardClass}
@@ -1090,19 +1100,30 @@ export default function EventDetailCard({
 
             <div className="cb-lesson-card__col cb-lesson-card__col--side">
               <ResourceSection
-                title="Материалы урока"
+                title="Материалы занятия"
                 rows={materials}
-                emptyLabel="Материалы пока не добавлены"
+                emptyLabel="Добавьте готовый урок, интерактив, вариант, доску или файл"
                 emptyActionLabel="Добавить материал"
                 addLabel="Добавить"
                 onAdd={event.readOnly || studentMode ? null : handleAddMaterials}
                 onRemove={event.readOnly || studentMode ? null : onRemoveMaterial || null}
                 variant="material"
                 isMobile={isMobile}
+                highlight={highlightMaterials && !hasAnyMaterials}
+                emptyExtra={
+                  !studentMode && !event.readOnly && onSkipMaterials && !hasAnyMaterials ? (
+                    <button
+                      type="button"
+                      className="cb-lesson-card__empty-btn cb-lesson-card__empty-btn--ghost"
+                      onClick={onSkipMaterials}
+                    >
+                      Продолжить без материалов
+                    </button>
+                  ) : null
+                }
                 suppressEmpty={
                   boardPresence.loading
                   || Boolean(boardPresence.board)
-                  || (!studentMode && !event.readOnly)
                 }
                 extraCount={boardPresence.board ? 1 : 0}
                 extra={
@@ -1164,6 +1185,7 @@ export default function EventDetailCard({
           moreItems={moreItems}
         />
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

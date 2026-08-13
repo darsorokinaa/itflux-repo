@@ -8444,6 +8444,12 @@ button.cb-sch-event {
   border: 1px dashed #CBD5E1;
 }
 
+.cb-lesson-card__empty.is-highlight {
+  flex-wrap: wrap;
+  background: #EDF3FF;
+  border-color: #3564ef;
+}
+
 .cb-lesson-card__empty p {
   margin: 0;
   font-size: 13px;
@@ -8460,6 +8466,16 @@ button.cb-sch-event {
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
+}
+
+.cb-lesson-card__empty-btn--ghost {
+  color: #64748B;
+}
+
+.cb-lesson-card__section--material.is-highlight {
+  outline: 1px solid #3564ef;
+  outline-offset: 2px;
+  border-radius: 16px;
 }
 
 .cb-lesson-card__accordion {
@@ -9836,7 +9852,7 @@ button.cb-sch-event {
     box-shadow: none !important;
     width: 100% !important;
     max-width: 100% !important;
-    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+    padding-bottom: var(--cb-mobile-nav-height, calc(86px + env(safe-area-inset-bottom, 0px)));
   }
 
   .cabinet-layout:has(.cabinet-sidebar:hover) .cabinet-main,
@@ -12803,6 +12819,13 @@ button.cb-sch-event {
   line-height: 1.45;
 }
 
+.cb-plan-material-picker__suggest {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e3a8a;
+}
+
 .cb-plan-material-picker__tabs--wrap {
   flex-wrap: wrap;
 }
@@ -13844,7 +13867,7 @@ button.cb-sch-event {
     border-radius: 0;
     border: none;
     box-shadow: none;
-    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+    padding-bottom: var(--cb-mobile-nav-height, calc(86px + env(safe-area-inset-bottom, 0px)));
   }
 
   .cabinet-header {
@@ -14129,7 +14152,7 @@ button.cb-sch-event {
 
   .cb-section--interactive-editor .cb-interactive-editor__footer {
     position: sticky;
-    bottom: calc(72px + env(safe-area-inset-bottom));
+    bottom: var(--cb-mobile-nav-height, calc(86px + env(safe-area-inset-bottom, 0px)));
     z-index: 20;
     margin: 0 -14px;
     padding: 12px 14px;
@@ -14148,7 +14171,7 @@ button.cb-sch-event {
   }
 
   .cb-call-panel {
-    bottom: calc(72px + env(safe-area-inset-bottom));
+    bottom: var(--cb-mobile-nav-height, calc(86px + env(safe-area-inset-bottom, 0px)));
     width: calc(100vw - 24px);
   }
 
@@ -14946,7 +14969,7 @@ button.cb-sch-event {
   .cabinet-notifications__panel {
     position: fixed;
     top: auto;
-    bottom: calc(72px + env(safe-area-inset-bottom));
+    bottom: var(--cb-mobile-nav-height, calc(86px + env(safe-area-inset-bottom, 0px)));
     left: 12px;
     right: 12px;
     width: auto;
@@ -14956,7 +14979,7 @@ button.cb-sch-event {
 
   /* --- Form sticky action bar adjustments --- */
   .cb-sticky-action-bar {
-    bottom: calc(72px + env(safe-area-inset-bottom));
+    bottom: var(--cb-mobile-nav-height, calc(86px + env(safe-area-inset-bottom, 0px)));
   }
 
   /* --- Icon buttons bigger on mobile --- */
@@ -15002,7 +15025,7 @@ button.cb-sch-event {
   /* --- Interactive editor: sticky footer above bottom nav --- */
   .cb-interactive-editor__footer {
     position: sticky;
-    bottom: calc(72px + env(safe-area-inset-bottom));
+    bottom: var(--cb-mobile-nav-height, calc(86px + env(safe-area-inset-bottom, 0px)));
     z-index: 20;
     padding: 12px 16px;
     background: rgba(244, 247, 251, 0.97);

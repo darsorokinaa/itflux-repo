@@ -81,6 +81,11 @@ urlpatterns = [
 
     path("dashboard/", api_views.DashboardView.as_view(), name="cabinet_dashboard"),
     path("nav-counts/", api_views.NavCountsView.as_view(), name="cabinet_nav_counts"),
+    path(
+        "internal/activation/",
+        api_views.ActivationMetricsView.as_view(),
+        name="cabinet_internal_activation",
+    ),
     path("student/dashboard/", student_api.StudentDashboardView.as_view(), name="student_dashboard"),
     path("student/lessons/", student_api.StudentLessonsView.as_view(), name="student_lessons"),
     path("student/lessons/<int:assignment_id>/", student_api.StudentLessonDetailView.as_view(), name="student_lesson_detail"),

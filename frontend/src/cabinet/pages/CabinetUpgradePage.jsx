@@ -401,7 +401,7 @@ function SubscriptionStatusCard({
       <section className="upg-status upg-status--promo" aria-labelledby="upg-status-title">
         <div className="upg-status__body">
           <h2 id="upg-status-title" className="upg-status__title">
-            Сейчас у вас тариф «{planName || "Профи"}» по стартовой акции
+            Сейчас у вас тариф «{planName || registrationPromo?.plan_name || "Премиум"}» по стартовой акции
           </h2>
           <ul className="upg-status__meta">
             {startedAt ? <li>Начало: {formatDate(startedAt)}</li> : null}
@@ -1641,7 +1641,7 @@ export default function CabinetUpgradePage() {
               <strong>{registrationPromo.title || "Стартовая акция"}</strong>
               <p>
                 {registrationPromo.message ||
-                  "Всем зарегистрировавшимся — тариф «Профи» на 3 месяца с даты регистрации."}
+                  "Всем зарегистрировавшимся — тариф «Премиум» на 3 месяца с даты регистрации."}
               </p>
               {registrationPromo.until_label ? (
                 <p className="upg-promo-details__meta">

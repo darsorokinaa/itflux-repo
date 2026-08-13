@@ -177,6 +177,13 @@ def _plan_ok(promotion) -> bool:
     return True
 
 
+def _is_launch_registration_promo(promotion) -> bool:
+    """Стартовая выдача тарифа при регистрации — не скидка на кассе."""
+    from .registration_promo import LAUNCH_PROMO_CODE
+
+    return (getattr(promotion, "code", None) or "") == LAUNCH_PROMO_CODE
+
+
 def _base_queryset(plan=None, *, lock=False):
     from .models import Promotion
 
@@ -214,6 +221,8 @@ def get_applicable_promotion(
 
     qs = _base_queryset(plan, lock=lock)
     for promotion in qs:
+        if _is_launch_registration_promo(promotion):
+            continue
         if not _plan_ok(promotion):
             continue
         if for_display:
@@ -257,6 +266,8 @@ def list_displayable_promotions(user: Optional[User], *, now=None):
         .order_by("-priority", "id")
     )
     for promotion in qs:
+        if _is_launch_registration_promo(promotion):
+            continue
         if not is_in_display_window(promotion, now):
             continue
         if not user_eligible(user, promotion, now):

@@ -5,6 +5,8 @@ import { mapApiStudent } from "./cabinetMappers";
 import { CabinetEmptyState } from "./CabinetSectionUi";
 import CabinetModal from "./components/CabinetModal";
 import HomeworkAssignModal from "./components/HomeworkAssignModal";
+import TeacherOnboardingCard from "./components/TeacherOnboardingCard";
+import { hasSkippedOnboardingMaterials } from "./onboardingStorage";
 import {
   fetchBillingDashboard,
   fetchDashboard,
@@ -247,6 +249,20 @@ export default function CabinetDashboard() {
 
   const progressItems = data?.progress_overview || [];
   const upcomingActions = data?.upcoming_actions || [];
+  const onboarding = data?.onboarding || null;
+  const materialsSkipped = hasSkippedOnboardingMaterials();
+  const onboardingVisible = Boolean(onboarding?.visible);
+  const onboardingCta = (() => {
+    if (!onboardingVisible) return null;
+    if (onboarding.next_step === "materials" && materialsSkipped) {
+      const eventId = onboarding.context?.event_id;
+      return {
+        label: "Всё готово к первому уроку",
+        href: eventId ? `/cabinet/schedule?event=${eventId}` : "/cabinet/schedule",
+      };
+    }
+    return onboarding.cta;
+  })();
   const draftsCount = data?.drafts_count ?? 0;
   const lessonsCount = data?.today_lessons_count ?? todayLessons.length;
   const reviewsCount = data?.pending_reviews_count ?? pendingReviews.length;
@@ -367,16 +383,24 @@ export default function CabinetDashboard() {
           </Link>
         </div>
         <div className="td-topbar-actions">
-          <Link to="/cabinet/schedule" className="td-button td-button-primary">＋ Создать урок</Link>
-          <button
-            type="button"
-            className="td-button td-button-glass"
-            onClick={openHomeworkAssign}
-            disabled={assignLoading}
-          >
-            {assignLoading ? "Загрузка…" : "Выдать задание"}
-          </button>
-          <Link to="/cabinet/students?invite=1" className="td-button td-button-glass">Добавить ученика</Link>
+          {onboardingCta ? (
+            <Link to={onboardingCta.href} className="td-button td-button-primary">
+              {onboardingCta.label}
+            </Link>
+          ) : (
+            <>
+              <Link to="/cabinet/schedule" className="td-button td-button-primary">＋ Создать урок</Link>
+              <button
+                type="button"
+                className="td-button td-button-glass"
+                onClick={openHomeworkAssign}
+                disabled={assignLoading}
+              >
+                {assignLoading ? "Загрузка…" : "Выдать задание"}
+              </button>
+              <Link to="/cabinet/students?invite=1" className="td-button td-button-glass">Добавить ученика</Link>
+            </>
+          )}
         </div>
       </div>
 
@@ -408,6 +432,12 @@ export default function CabinetDashboard() {
       ) : null}
 
       <div className="td-workspace">
+        {onboardingVisible ? (
+          <TeacherOnboardingCard
+            onboarding={onboarding}
+            materialsSkipped={materialsSkipped}
+          />
+        ) : null}
         <section className="td-main-column">
           <article className="td-card td-today-board">
             <div className="td-section-head">

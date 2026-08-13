@@ -68,6 +68,7 @@ export default function PlanItemResourcesPicker({
   initialTab = "library",
   attachedMaterialIds = [],
   attachedInteractiveIds = [],
+  suggestContext = null,
   onClose,
   onAttachMaterial,
   onAttachInteractive,
@@ -89,7 +90,11 @@ export default function PlanItemResourcesPicker({
     setLoading(true);
     setError("");
     try {
-      const interactivesData = await fetchInteractives({ search: search.trim() || undefined });
+      const query = search.trim() || suggestContext?.query || undefined;
+      const interactivesData = await fetchInteractives({
+        search: query,
+        direction: suggestContext?.direction || undefined,
+      });
       setInteractives(normalizeList(interactivesData));
     } catch (err) {
       setInteractives([]);
@@ -97,32 +102,30 @@ export default function PlanItemResourcesPicker({
     } finally {
       setLoading(false);
     }
-  }, [search]);
+  }, [search, suggestContext]);
 
   const loadLibrary = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/lessons/", { credentials: "same-origin" });
+      const params = new URLSearchParams();
+      const query = search.trim() || suggestContext?.topic || suggestContext?.query || "";
+      if (query) params.set("q", query);
+      if (suggestContext?.grade) params.set("grade", String(suggestContext.grade));
+      if (suggestContext?.examType) params.set("exam_type", suggestContext.examType);
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`/api/lessons/${suffix}`, { credentials: "same-origin" });
       if (!res.ok) throw new Error("Не удалось загрузить каталог уроков");
       const data = await res.json();
       const lessons = Array.isArray(data?.lessons) ? data.lessons : [];
-      const query = search.trim().toLowerCase();
-      setLibraryLessons(
-        query
-          ? lessons.filter((lesson) => {
-            const hay = `${lesson.title || ""} ${lesson.topic || ""} ${lesson.subtopic || ""}`.toLowerCase();
-            return hay.includes(query);
-          })
-          : lessons,
-      );
+      setLibraryLessons(lessons);
     } catch (err) {
       setLibraryLessons([]);
       setError(err?.message || "Не удалось загрузить каталог уроков");
     } finally {
       setLoading(false);
     }
-  }, [search]);
+  }, [search, suggestContext]);
 
   const loadTeacherMaterials = useCallback(async () => {
     setLoading(true);
@@ -130,7 +133,8 @@ export default function PlanItemResourcesPicker({
     try {
       const data = await fetchMaterials({
         mine: "true",
-        search: search.trim() || undefined,
+        search: search.trim() || suggestContext?.query || undefined,
+        direction: suggestContext?.direction || undefined,
       });
       setTeacherMaterials(normalizeList(data));
     } catch (err) {
@@ -139,7 +143,7 @@ export default function PlanItemResourcesPicker({
     } finally {
       setLoading(false);
     }
-  }, [search]);
+  }, [search, suggestContext]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -344,6 +348,13 @@ export default function PlanItemResourcesPicker({
   return (
     <CabinetModal title={config.title} onClose={onClose} wide>
       <p className="cabinet-auth-muted cb-plan-material-picker__hint">{config.hint}</p>
+      {suggestContext?.subjectLabel || suggestContext?.topic ? (
+        <p className="cb-plan-material-picker__suggest">
+          Для этого занятия
+          {suggestContext.subjectLabel ? ` · ${suggestContext.subjectLabel}` : ""}
+          {suggestContext.topic ? ` · ${suggestContext.topic}` : ""}
+        </p>
+      ) : null}
       <div className="cb-plan-material-picker__toolbar">
         <div className="cb-plan-material-picker__tabs cb-plan-material-picker__tabs--wrap" role="tablist">
           {tabs.map(([id, label]) => (

@@ -239,7 +239,7 @@ def api_register(request):
     if role == Profile.Role.TEACHER:
         from .registration_promo import apply_registration_promo
 
-        # Если рефералка уже выдала Профи — акция не затрёт более выгодный срок.
+        # Если рефералка уже выдала Премиум — акция не затрёт более выгодный срок.
         registration_promo = apply_registration_promo(user)
 
     payload = {"ok": True, "user": _profile_payload(user)}
