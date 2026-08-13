@@ -219,6 +219,34 @@
   font-size: 0.92rem;
 }
 
+.cabinet-auth-success {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #ecfdf3;
+  color: #166534;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.cabinet-auth-text-btn {
+  align-self: flex-start;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #3730a3;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.cabinet-auth-text-btn:hover {
+  color: #1e3fd4;
+}
+
 .cabinet-auth-referral {
   margin: 0 0 12px;
   padding: 10px 12px;

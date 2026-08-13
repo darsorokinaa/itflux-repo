@@ -55,6 +55,11 @@ from .models import (
     WheelSegment,
     Payment,
     Profile,
+    PromoCode,
+    PromoCodeUsage,
+    Promotion,
+    PromotionRedemption,
+    Receipt,
     ReviewItem,
     ScheduleEvent,
     ScheduleEventChangeLog,
@@ -955,11 +960,184 @@ class PromoCodeUsageAdmin(admin.ModelAdmin):
     ordering = ("-applied_at",)
 
 
+class PromotionStatusFilter(admin.SimpleListFilter):
+    title = "Статус"
+    parameter_name = "computed_status"
+
+    def lookups(self, request, model_admin):
+        return (
+            ("active", "Действует"),
+            ("scheduled", "Запланирована"),
+            ("ended", "Завершена"),
+            ("disabled", "Выключена"),
+            ("limit_reached", "Лимит исчерпан"),
+        )
+
+    def queryset(self, request, queryset):
+        from django.utils import timezone as tz
+
+        from .promotion_service import redemption_count
+
+        now = tz.now()
+        value = self.value()
+        if value == "disabled":
+            return queryset.filter(is_active=False)
+        qs = queryset.filter(is_active=True)
+        if value == "scheduled":
+            return qs.filter(starts_at__gt=now)
+        if value == "ended":
+            return qs.filter(ends_at__lte=now)
+        if value == "active":
+            return qs.filter(starts_at__lte=now, ends_at__gt=now)
+        if value == "limit_reached":
+            ids = [
+                obj.pk
+                for obj in qs.filter(starts_at__lte=now, ends_at__gt=now, max_redemptions__isnull=False)
+                if redemption_count(obj) >= obj.max_redemptions
+            ]
+            return qs.filter(pk__in=ids)
+        return queryset
+
+
+class PromotionRedemptionInline(admin.TabularInline):
+    model = PromotionRedemption
+    extra = 0
+    can_delete = False
+    readonly_fields = (
+        "teacher", "plan", "payment", "original_price", "final_price",
+        "benefit_type", "free_months", "status", "created_at",
+    )
+
+
+@admin.register(Promotion)
+class PromotionAdmin(admin.ModelAdmin):
+    list_display = (
+        "name", "title", "plan", "plan_price", "benefit_display",
+        "starts_at", "ends_at", "is_active", "status_display",
+        "eligibility_type", "uses_display", "priority",
+    )
+    list_filter = (
+        PromotionStatusFilter,
+        "is_active",
+        "benefit_type",
+        "eligibility_type",
+        "plan",
+        "allow_promo_codes",
+    )
+    search_fields = ("name", "title", "code", "short_description")
+    filter_horizontal = ("eligible_users",)
+    readonly_fields = ("created_at", "updated_at", "status_display", "uses_display")
+    inlines = [PromotionRedemptionInline]
+    fieldsets = (
+        ("Основное", {
+            "fields": ("code", "name", "title", "short_description", "description"),
+        }),
+        ("Предложение", {
+            "fields": ("plan", "benefit_type", "promo_price", "free_months", "pricing_duration"),
+        }),
+        ("Сроки", {
+            "fields": ("starts_at", "ends_at", "display_starts_at", "display_ends_at"),
+        }),
+        ("Аудитория", {
+            "fields": (
+                "eligibility_type", "registered_from", "registered_until", "eligible_users",
+            ),
+        }),
+        ("Ограничения", {
+            "fields": (
+                "max_redemptions", "max_redemptions_per_user", "allow_promo_codes", "claim_mode",
+            ),
+        }),
+        ("Отображение", {
+            "fields": ("how_to_get", "terms", "button_text", "priority"),
+        }),
+        ("Системное", {
+            "fields": ("is_active", "status_display", "uses_display", "created_at", "updated_at"),
+        }),
+    )
+
+    def save_model(self, request, obj, form, change):
+        obj.full_clean()
+        super().save_model(request, obj, form, change)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is None:
+            return super().has_delete_permission(request, obj)
+        if obj.redemptions.filter(status="applied").exists():
+            return False
+        return super().has_delete_permission(request, obj)
+
+    @admin.display(description="Цена тарифа")
+    def plan_price(self, obj):
+        if not obj.plan_id:
+            return "—"
+        return obj.plan.price_month
+
+    @admin.display(description="Выгода")
+    def benefit_display(self, obj):
+        if obj.benefit_type == Promotion.BenefitType.FREE_PERIOD:
+            return f"{obj.free_months or 0} мес. бесплатно"
+        if obj.promo_price is not None:
+            return f"{obj.promo_price} ₽"
+        return "—"
+
+    @admin.display(description="Статус")
+    def status_display(self, obj):
+        from .promotion_service import compute_status
+
+        if obj.pk is None:
+            return "—"
+        labels = {
+            "active": "Действует",
+            "scheduled": "Запланирована",
+            "ended": "Завершена",
+            "disabled": "Выключена",
+            "limit_reached": "Лимит исчерпан",
+        }
+        key = compute_status(obj)
+        return labels.get(key, key)
+
+    @admin.display(description="Использований")
+    def uses_display(self, obj):
+        if obj.pk is None:
+            return "—"
+        used = obj.redemptions.filter(status="applied").count()
+        reserved = obj.redemptions.filter(status="reserved").count()
+        limit = obj.max_redemptions if obj.max_redemptions is not None else "∞"
+        extra = f" (+{reserved} резерв)" if reserved else ""
+        return f"{used} / {limit}{extra}"
+
+
+@admin.register(PromotionRedemption)
+class PromotionRedemptionAdmin(admin.ModelAdmin):
+    list_display = (
+        "promotion", "teacher", "plan", "status",
+        "original_price", "final_price", "payment", "created_at",
+    )
+    list_filter = ("status", "benefit_type", "created_at")
+    search_fields = (
+        "promotion__code", "promotion__name",
+        "teacher__username", "teacher__email",
+    )
+    readonly_fields = (
+        "promotion", "teacher", "plan", "payment", "subscription",
+        "original_price", "final_price", "benefit_type", "free_months",
+        "status", "created_at",
+    )
+    ordering = ("-created_at",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
     list_display = (
         "teacher", "plan", "final_amount", "amount", "currency",
-        "status", "provider", "is_recurrent", "billing_period", "paid_at", "created_at",
+        "status", "provider", "promotion", "is_recurrent", "billing_period", "paid_at", "created_at",
     )
     list_filter = ("status", "provider", "currency", "billing_period", "is_recurrent")
     search_fields = (

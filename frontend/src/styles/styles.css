@@ -5013,6 +5013,27 @@ input.tasks-page-subtopic-num-input::-webkit-inner-spin-button {
     color: #4f46e5;
 }
 
+.hw-review-files__item--image {
+    margin: 8px 0;
+}
+
+.hw-review-files__thumb {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+}
+
+.hw-review-files__thumb img {
+    width: 56px;
+    height: 56px;
+    object-fit: cover;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+    flex-shrink: 0;
+}
+
 .hw-review-task-note {
     margin-top: 0.85rem;
     padding: 0.75rem 0.85rem;
@@ -10659,6 +10680,8 @@ header.header--themed .theme-toggle > span {
 }
 
 .lesson-solution-pending {
+    display: grid;
+    gap: 0.65rem;
     min-width: 0;
 }
 

@@ -40,6 +40,7 @@ from .journal_models import (
     StudentLessonRecordTag,
 )
 from .models import Homework, HomeworkSubmission, ScheduleEvent, Student, StudentGroup
+from .submission_files import submission_has_files
 
 
 class JournalError(Exception):
@@ -676,7 +677,7 @@ def build_homework_result_payload(
             status_key = raw_status
         elif submission.submitted_at:
             status_key = "submitted"
-        elif submission.result_payload or (submission.answer_text or "").strip() or submission.attached_file:
+        elif submission.result_payload or (submission.answer_text or "").strip() or submission_has_files(submission):
             status_key = "not_submitted"
 
     score = None
@@ -740,7 +741,7 @@ def build_homework_result_payload(
         "max_score": 100,
         "teacher_comment": (submission.teacher_comment if submission else "") or "",
         "answer_text": (submission.answer_text if submission else "") or "",
-        "has_attached_file": bool(submission and submission.attached_file),
+        "has_attached_file": submission_has_files(submission),
         "has_variant": bool(tasks),
         "variant_id": variant_id,
         "checked_count": checked_count or None,

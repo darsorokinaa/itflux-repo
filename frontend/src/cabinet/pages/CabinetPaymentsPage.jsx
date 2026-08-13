@@ -4,6 +4,7 @@ import BillingOperationWizard from "../components/BillingOperationWizard";
 import BillingTermsModal from "../components/BillingTermsModal";
 import ChargeFromPackageModal from "../components/ChargeFromPackageModal";
 import ConfirmActionModal from "../components/ConfirmActionModal";
+import CabinetFloatingMenu from "../components/CabinetFloatingMenu";
 import StudentFinanceDrawer from "../components/StudentFinanceDrawer";
 import { CabinetSoonBadge } from "../CabinetSectionUi";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -75,39 +76,40 @@ function debtLabel(amount, currency) {
 }
 
 function AddMenu({ onPayment, onPackage, onCharge, onMore }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDoc = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
+  const [anchor, setAnchor] = useState(null);
+  const open = Boolean(anchor);
 
   return (
-    <div className="pay-add-menu" ref={ref}>
-      <button type="button" className="pay-btn pay-btn--primary" onClick={() => setOpen((v) => !v)}>
+    <div className="pay-add-menu">
+      <button
+        type="button"
+        className="pay-btn pay-btn--primary"
+        aria-expanded={open}
+        onClick={(e) => setAnchor(open ? null : e.currentTarget)}
+      >
         + Добавить
       </button>
-      {open ? (
-        <div className="pay-add-menu__dropdown" role="menu">
-          <button type="button" role="menuitem" onClick={() => { setOpen(false); onPayment(); }}>
-            Добавить оплату
-          </button>
-          <button type="button" role="menuitem" onClick={() => { setOpen(false); onPackage(); }}>
-            Создать абонемент
-          </button>
-          <button type="button" role="menuitem" onClick={() => { setOpen(false); onCharge?.(); }}>
-            Списать из абонемента
-          </button>
-          <button type="button" role="menuitem" onClick={() => { setOpen(false); onMore?.(); }}>
-            Другая операция…
-          </button>
-        </div>
-      ) : null}
+      <CabinetFloatingMenu
+        open={open}
+        anchorEl={anchor}
+        onClose={() => setAnchor(null)}
+        className="pay-add-menu__dropdown"
+        align="left"
+        width={220}
+      >
+        <button type="button" role="menuitem" onClick={() => { setAnchor(null); onPayment(); }}>
+          Добавить оплату
+        </button>
+        <button type="button" role="menuitem" onClick={() => { setAnchor(null); onPackage(); }}>
+          Создать абонемент
+        </button>
+        <button type="button" role="menuitem" onClick={() => { setAnchor(null); onCharge?.(); }}>
+          Списать из абонемента
+        </button>
+        <button type="button" role="menuitem" onClick={() => { setAnchor(null); onMore?.(); }}>
+          Другая операция…
+        </button>
+      </CabinetFloatingMenu>
     </div>
   );
 }

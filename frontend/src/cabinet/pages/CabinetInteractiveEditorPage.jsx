@@ -12,6 +12,7 @@ import InteractiveImageField from "../components/InteractiveImageField";
 import QuizEditor from "../components/QuizEditor";
 import WheelEditor from "../components/WheelEditor";
 import { CabinetPageShell } from "../CabinetSectionUi";
+import CabinetFloatingMenu from "../components/CabinetFloatingMenu";
 import { useInteractiveAppearanceCatalog } from "../interactiveAppearance";
 import {
   INTERACTIVE_TYPE_LIST,
@@ -80,7 +81,7 @@ function EditorItemShell({
   isMobile = false,
   children,
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState(null);
 
   return (
     <div
@@ -118,18 +119,29 @@ function EditorItemShell({
         </button>
         <div className="ix-ed-item__tools">
           {isMobile ? (
-            <div className={`ix-ed-item__menu${menuOpen ? " is-open" : ""}`}>
-              <button type="button" className="ix-ed-icon-btn" onClick={() => setMenuOpen((v) => !v)} aria-label="Меню">⋯</button>
-              {menuOpen ? (
-                <div className="ix-ed-item__menu-pop">
-                  <button type="button" disabled={!canMoveUp} onClick={() => { onMoveUp(); setMenuOpen(false); }}>Выше</button>
-                  <button type="button" disabled={!canMoveDown} onClick={() => { onMoveDown(); setMenuOpen(false); }}>Ниже</button>
-                  <button type="button" onClick={() => { onDuplicate(); setMenuOpen(false); }}>Дублировать</button>
-                  {canRemove ? (
-                    <button type="button" className="danger" onClick={() => { onRemove(); setMenuOpen(false); }}>Удалить</button>
-                  ) : null}
-                </div>
-              ) : null}
+            <div className={`ix-ed-item__menu${menuAnchor ? " is-open" : ""}`}>
+              <button
+                type="button"
+                className="ix-ed-icon-btn"
+                onClick={(e) => setMenuAnchor(menuAnchor ? null : e.currentTarget)}
+                aria-label="Меню"
+              >
+                ⋯
+              </button>
+              <CabinetFloatingMenu
+                open={Boolean(menuAnchor)}
+                anchorEl={menuAnchor}
+                onClose={() => setMenuAnchor(null)}
+                className="ix-ed-item__menu-pop"
+                width={180}
+              >
+                <button type="button" disabled={!canMoveUp} onClick={() => { onMoveUp(); setMenuAnchor(null); }}>Выше</button>
+                <button type="button" disabled={!canMoveDown} onClick={() => { onMoveDown(); setMenuAnchor(null); }}>Ниже</button>
+                <button type="button" onClick={() => { onDuplicate(); setMenuAnchor(null); }}>Дублировать</button>
+                {canRemove ? (
+                  <button type="button" className="danger" onClick={() => { onRemove(); setMenuAnchor(null); }}>Удалить</button>
+                ) : null}
+              </CabinetFloatingMenu>
             </div>
           ) : (
             <>

@@ -22,7 +22,12 @@ function normalizeMediaUrl(url) {
   return normalized;
 }
 
-function FileLinks({ files, label, emptyLabel }) {
+function isImageFile(file) {
+  const name = String(file?.filename || file?.url || "").toLowerCase();
+  return /\.(png|jpe?g|webp|gif|bmp|heic|heif)$/i.test(name);
+}
+
+export function FileLinks({ files, label, emptyLabel }) {
   if (!files?.length) {
     return emptyLabel ? <span className="hw-review-empty">{emptyLabel}</span> : null;
   }
@@ -39,6 +44,16 @@ function FileLinks({ files, label, emptyLabel }) {
                 <audio controls src={normalizedUrl} className="hw-review-audio-player" preload="metadata">
                   Ваш браузер не поддерживает элемент <code>audio</code>.
                 </audio>
+              </li>
+            );
+          }
+          if (isImageFile(file)) {
+            return (
+              <li key={file.url} className="hw-review-files__item--image">
+                <a href={normalizedUrl} target="_blank" rel="noreferrer" className="hw-review-files__thumb">
+                  <img src={normalizedUrl} alt={file.filename || "Изображение"} />
+                  <span>{file.filename || "Файл"}</span>
+                </a>
               </li>
             );
           }
@@ -237,9 +252,12 @@ export default function HomeworkReviewResults({
 }) {
   if (!review) return null;
   const teacherComment = teacherCommentProp || review.teacherComment || "";
+  const commentFiles = Array.isArray(review.teacherCommentAttachments)
+    ? review.teacherCommentAttachments
+    : [];
   const hasPart1 = review.part1?.length > 0;
   const hasPart2 = review.part2?.length > 0;
-  if (!hasPart1 && !hasPart2 && !teacherComment) return null;
+  if (!hasPart1 && !hasPart2 && !teacherComment && !commentFiles.length) return null;
 
   const summary = computeHomeworkReviewSummary(review);
 
@@ -250,10 +268,11 @@ export default function HomeworkReviewResults({
     >
       <h2 className="hw-review-results__title">Результаты проверки</h2>
       <ReviewSummary summary={summary} />
-      {teacherComment ? (
+      {teacherComment || commentFiles.length ? (
         <div className="hw-review-results__teacher">
           <span className="hw-review-results__teacher-label">Комментарий учителя</span>
-          <p>{teacherComment}</p>
+          {teacherComment ? <p>{teacherComment}</p> : null}
+          <FileLinks files={commentFiles} />
         </div>
       ) : null}
       <Part1Table rows={review.part1} />

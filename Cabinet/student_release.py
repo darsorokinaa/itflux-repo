@@ -233,7 +233,10 @@ def _sync_lesson_content(lesson, plan_item, *, keep_status=False):
     )
 
     material_ids = list(plan_item.materials.values_list("pk", flat=True))
-    lesson.materials.set(material_ids)
+    if material_ids:
+        # add(), не set(): уже выданные ученику материалы не стираются,
+        # если учитель позже изменил карточку/шаблон занятия.
+        lesson.materials.add(*material_ids)
     return lesson
 
 
@@ -415,19 +418,8 @@ def _add_interactive_homework_task(homework, interactive, order, *, sync_existin
 
 def _sync_homework_tasks(homework, plan_item):
     order = 0
-    description = (plan_item.homework_description or "").strip()
-    if description:
-        task, created = HomeworkTask.objects.get_or_create(
-            homework=homework,
-            task_type=HomeworkTaskType.TEXT,
-            title="Домашнее задание",
-            defaults={"description": description, "order": order},
-        )
-        if not created and task.description != description:
-            task.description = description
-            task.save(update_fields=["description"])
-        order += 1
-
+    # Текст ДЗ живёт в Homework.description — не создаём отдельную текстовую
+    # задачу, иначе инструкция дублируется как вложение у учителя и ученика.
     for material in plan_item.homework_materials.all():
         order = _add_material_homework_task(homework, material, order, sync_existing=True)
 
@@ -597,16 +589,6 @@ def assign_custom_homework(
     )
 
     order = 0
-    if description:
-        HomeworkTask.objects.create(
-            homework=homework,
-            task_type=HomeworkTaskType.TEXT,
-            title="Домашнее задание",
-            description=description,
-            order=order,
-        )
-        order += 1
-
     for material in materials:
         order = _add_material_homework_task(homework, material, order)
 
@@ -1096,6 +1078,18 @@ def release_for_student(event, student, plan_item, lesson):
             lesson=lesson,
             plan_item=plan_item,
         )
+
+    logger.info(
+        "student_release event_id=%s student_id=%s teacher_id=%s lesson_id=%s "
+        "plan_item_id=%s materials=%s homework=%s",
+        event.pk,
+        student.pk,
+        teacher.pk,
+        lesson.pk,
+        plan_item.pk,
+        list(lesson.materials.values_list("pk", flat=True)),
+        bool(_plan_item_has_homework(plan_item)),
+    )
 
     return assignment
 

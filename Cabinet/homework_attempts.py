@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from .choices import SubmissionStatus
 from .models import HomeworkSubmission, HomeworkSubmissionAttempt
+from .submission_files import submission_has_files
 
 
 def next_attempt_number(submission: HomeworkSubmission) -> int:
@@ -38,7 +39,7 @@ def snapshot_submission_attempt(
         or submission.score is not None
         or (submission.result_payload or {})
         or (submission.answer_text or "").strip()
-        or submission.attached_file
+        or submission_has_files(submission)
         or (submission.teacher_comment or "").strip()
     )
     if not has_content:

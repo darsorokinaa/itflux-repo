@@ -15,6 +15,7 @@ Endpoints:
 """
 
 from decimal import Decimal, ROUND_HALF_UP
+from datetime import timedelta
 
 from django.conf import settings
 from django.utils import timezone
@@ -51,10 +52,10 @@ def _year_savings_months(price_month, price_year) -> int | None:
     return months if months > 0 else None
 
 
-def _plan_public(plan) -> dict:
+def _plan_public(plan, *, promotion=None) -> dict:
     """Витрина: без ИИ-лимитов."""
     savings = _year_savings_months(plan.price_month, plan.price_year)
-    return {
+    data = {
         "id": plan.pk,
         "name": plan.name,
         "slug": plan.slug,
@@ -94,7 +95,9 @@ def _plan_public(plan) -> dict:
             "analytics": getattr(plan, "has_analytics", False),
             "simulators": getattr(plan, "has_simulators", False),
         },
+        "promotion": promotion,
     }
+    return data
 
 
 def _subscription_payload(sub: TeacherSubscription) -> dict:
@@ -124,17 +127,30 @@ def _subscription_payload(sub: TeacherSubscription) -> dict:
         Payment.Status.PENDING,
         Payment.Status.FAILED,
     ):
-        payment_state = {
-            "status": latest_payment.status,
-            "plan_slug": latest_payment.plan.slug if latest_payment.plan_id else None,
-            "plan_name": latest_payment.plan.name if latest_payment.plan_id else None,
-            "final_amount": str(
-                latest_payment.final_amount
-                if latest_payment.final_amount is not None
-                else latest_payment.amount
-            ),
-            "created_at": latest_payment.created_at.isoformat() if latest_payment.created_at else None,
-        }
+        created = latest_payment.created_at
+        age = (now - created) if created else None
+        stale_pending = (
+            latest_payment.status == Payment.Status.PENDING
+            and age is not None
+            and age > timedelta(hours=24)
+        )
+        stale_failed = (
+            latest_payment.status == Payment.Status.FAILED
+            and age is not None
+            and age > timedelta(days=7)
+        )
+        if not stale_pending and not stale_failed:
+            payment_state = {
+                "status": latest_payment.status,
+                "plan_slug": latest_payment.plan.slug if latest_payment.plan_id else None,
+                "plan_name": latest_payment.plan.name if latest_payment.plan_id else None,
+                "final_amount": str(
+                    latest_payment.final_amount
+                    if latest_payment.final_amount is not None
+                    else latest_payment.amount
+                ),
+                "created_at": latest_payment.created_at.isoformat() if latest_payment.created_at else None,
+            }
 
     scheduled = None
     if sub.scheduled_plan_id and sub.scheduled_change_at:
@@ -305,10 +321,9 @@ def _get_or_create_teacher_referral_link(user) -> ReferralLink:
     )
 
 
-def _plan_short(plan) -> dict:
+def _plan_short(plan, *, promotion=None) -> dict:
     """Кабинет: совместимость + публичные поля (ИИ скрыт от витрины, в кабинете тоже не акцентируем)."""
-    data = _plan_public(plan)
-    return data
+    return _plan_public(plan, promotion=promotion)
 
 
 class SubscriptionCurrentView(APIView):
@@ -380,6 +395,11 @@ class SubscriptionPlansView(APIView):
     permission_classes = [IsCabinetTeacher]
 
     def get(self, request):
+        from .promotion_service import (
+            list_displayable_promotions,
+            serialize_plan_promotion,
+            serialize_promotion,
+        )
         from .registration_promo import promo_payload
 
         plans = (
@@ -403,9 +423,20 @@ class SubscriptionPlansView(APIView):
                 year_savings = s
                 break
 
+        plan_payloads = []
+        for p in plans:
+            offer = serialize_plan_promotion(request.user, p, billing_period="month")
+            plan_payloads.append(_plan_short(p, promotion=offer))
+
+        promotions = [
+            serialize_promotion(item, request.user, billing_period="month")
+            for item in list_displayable_promotions(request.user)
+        ]
+
         return Response({
             "current_slug": current_plan.slug,
-            "plans": [_plan_short(p) for p in plans],
+            "plans": plan_payloads,
+            "promotions": promotions,
             "registration_promo": promo_payload(),
             "subscription": _subscription_payload(sub),
             "anonymous": _anonymous_payload(),
@@ -430,14 +461,29 @@ class PublicPricingPlansView(APIView):
     authentication_classes = []
 
     def get(self, request):
+        from .promotion_service import (
+            list_displayable_promotions,
+            serialize_plan_promotion,
+            serialize_promotion,
+        )
         from .registration_promo import promo_payload
 
         plans = (
             TariffPlan.objects.filter(is_active=True, is_public=True)
             .order_by("sort_order", "price_month")
         )
+        user = request.user if getattr(request.user, "is_authenticated", False) else None
+        plan_payloads = []
+        for p in plans:
+            offer = serialize_plan_promotion(user, p, billing_period="month")
+            plan_payloads.append(_plan_public(p, promotion=offer))
+        promotions = [
+            serialize_promotion(item, user, billing_period="month")
+            for item in list_displayable_promotions(user)
+        ]
         return Response({
-            "plans": [_plan_public(p) for p in plans],
+            "plans": plan_payloads,
+            "promotions": promotions,
             "anonymous": _anonymous_payload(),
             "registration_promo": promo_payload(),
         })
@@ -549,6 +595,17 @@ class SubscriptionManageView(APIView):
         now = timezone.now()
 
         def _set_auto_renew(enabled: bool):
+            from django.db import transaction
+
+            with transaction.atomic():
+                locked = (
+                    TeacherSubscription.objects.select_for_update()
+                    .select_related("plan", "scheduled_plan")
+                    .get(pk=sub.pk)
+                )
+                return _set_auto_renew_locked(locked, enabled)
+
+        def _set_auto_renew_locked(sub, enabled: bool):
             if enabled:
                 if sub.status in (
                     TeacherSubscription.Status.EXPIRED,
@@ -699,7 +756,10 @@ class SubscriptionManageView(APIView):
         if action == "cancel_pending_plan":
             from .subscription_downgrade import DowngradeService
 
-            result = DowngradeService.cancel(request.user)
+            try:
+                result = DowngradeService.cancel(request.user)
+            except ValueError as exc:
+                return Response({"detail": str(exc), "code": "PREPAID_LOCKED"}, status=400)
             sub = TeacherSubscription.objects.select_related("plan", "scheduled_plan").get(
                 pk=sub.pk
             )
@@ -821,7 +881,10 @@ class SubscriptionCancelPendingPlanView(APIView):
     def post(self, request):
         from .subscription_downgrade import DowngradeService
 
-        result = DowngradeService.cancel(request.user)
+        try:
+            result = DowngradeService.cancel(request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc), "code": "PREPAID_LOCKED"}, status=400)
         sub = TeacherSubscription.objects.select_related("plan", "scheduled_plan").get(
             teacher=request.user
         )
@@ -836,16 +899,9 @@ class SubscriptionCreatePaymentView(APIView):
 
     def post(self, request):
         from .payment_service import PaymentProviderService
+        from .pricing_service import calculate_subscription_price
+        from .promotion_service import PromotionError
         from .subscription_service import PromoCodeError
-
-        if not getattr(settings, "PAYMENTS_ENABLED", False):
-            return Response(
-                {
-                    "detail": "Оплата временно недоступна. Попробуйте позже.",
-                    "code": "PAYMENTS_DISABLED",
-                },
-                status=503,
-            )
 
         slug = request.data.get("plan_slug") or request.data.get("plan")
         billing_period = (request.data.get("billing_period") or "month").strip().lower()
@@ -855,6 +911,7 @@ class SubscriptionCreatePaymentView(APIView):
             billing_period = "year"
         promo_code = (request.data.get("promo_code") or "").strip()
         idempotency_key = (request.data.get("idempotency_key") or "").strip() or None
+        requested_promotion_id = request.data.get("promotion_id")
         # Frontend не передаёт amount — цена только на backend.
         # auto_renew / consent — опционально.
         consent = request.data.get("auto_renew")
@@ -872,6 +929,32 @@ class SubscriptionCreatePaymentView(APIView):
         if getattr(plan, "cta_type", "") == TariffPlan.CtaType.CONTACT:
             return Response({"detail": "Тариф оформляется по заявке.", "code": "CONTACT_ONLY"}, status=400)
 
+        payments_on = bool(getattr(settings, "PAYMENTS_ENABLED", False))
+        if not payments_on:
+            try:
+                preview = calculate_subscription_price(
+                    request.user,
+                    plan,
+                    billing_period=billing_period,
+                    promo_code=promo_code or None,
+                    validate_promo=bool(promo_code),
+                    requested_promotion_id=requested_promotion_id,
+                )
+            except PromoCodeError as exc:
+                return Response(exc.to_dict(), status=400)
+            if not (
+                preview.get("applied_discount_source") == "promotion"
+                and preview.get("final_price") is not None
+                and preview["final_price"] <= 0
+            ):
+                return Response(
+                    {
+                        "detail": "Оплата временно недоступна. Попробуйте позже.",
+                        "code": "PAYMENTS_DISABLED",
+                    },
+                    status=503,
+                )
+
         try:
             result = PaymentProviderService.create_payment(
                 teacher=request.user,
@@ -880,8 +963,11 @@ class SubscriptionCreatePaymentView(APIView):
                 promo_code=promo_code or None,
                 discount_info=discount_info,
                 idempotency_key=idempotency_key,
+                requested_promotion_id=requested_promotion_id,
             )
         except PromoCodeError as exc:
+            return Response(exc.to_dict(), status=400)
+        except PromotionError as exc:
             return Response(exc.to_dict(), status=400)
         except ValueError as exc:
             return Response({"detail": str(exc), "code": "PAYMENT_UNAVAILABLE"}, status=503)

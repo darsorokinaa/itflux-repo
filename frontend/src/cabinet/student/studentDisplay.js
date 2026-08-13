@@ -16,7 +16,7 @@ export function studentHwStatusLabel(status, fallback = "") {
 }
 
 export function studentHwActionLabel(status) {
-  if (status === "checked" || status === "completed") return "Результат";
+  if (status === "checked" || status === "completed") return "Результаты";
   if (status === "needs_fix") return "Исправить";
   if (status === "submitted" || status === "reviewing") return "Открыть";
   if (status === "in_progress") return "Продолжить";

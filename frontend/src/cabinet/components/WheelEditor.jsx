@@ -1,4 +1,5 @@
 import { useState } from "react";
+import CabinetFloatingMenu from "./CabinetFloatingMenu";
 import { BuilderSection } from "./InteractiveEditorSettings";
 import {
   createEmptySegment,
@@ -51,7 +52,7 @@ export default function WheelEditor({
   const settings = normalizeWheelSettings(data.wheelSettings);
   const [dragIndex, setDragIndex] = useState(null);
   const [overIndex, setOverIndex] = useState(null);
-  const [menuIndex, setMenuIndex] = useState(null);
+  const [menu, setMenu] = useState(null);
 
   const updateSegment = (index, field, value) => {
     const next = segments.map((item, i) => (i === index ? { ...item, [field]: value } : item));
@@ -66,14 +67,14 @@ export default function WheelEditor({
   const duplicateSegment = (index) => {
     onSegmentsChange(duplicateWheelSegment(segments, index));
     setOpenIndex(index + 1);
-    setMenuIndex(null);
+    setMenu(null);
   };
 
   const removeSegment = (index) => {
     if (segments.length <= 2) return;
     onSegmentsChange(segments.filter((_, i) => i !== index));
     setOpenIndex((prev) => (prev >= index ? Math.max(0, prev - 1) : prev));
-    setMenuIndex(null);
+    setMenu(null);
   };
 
   const moveSegment = (from, to) => {
@@ -171,33 +172,37 @@ export default function WheelEditor({
                       >
                         {open ? "Свернуть" : "Ещё"}
                       </button>
-                      <div className={`ix-card-row__menu${menuIndex === index ? " is-open" : ""}`}>
+                      <div className={`ix-card-row__menu${menu?.index === index ? " is-open" : ""}`}>
                         <button
                           type="button"
                           className="ix-ed-icon-btn"
                           aria-label="Меню"
-                          onClick={() => setMenuIndex(menuIndex === index ? null : index)}
+                          onClick={(e) => setMenu(menu?.index === index ? null : { index, anchor: e.currentTarget })}
                         >
                           ⋯
                         </button>
-                        {menuIndex === index ? (
-                          <div className="ix-card-row__menu-pop">
-                            <button type="button" onClick={() => { moveSegment(index, index - 1); setMenuIndex(null); }} disabled={index === 0}>
-                              Выше
+                        <CabinetFloatingMenu
+                          open={menu?.index === index}
+                          anchorEl={menu?.anchor}
+                          onClose={() => setMenu(null)}
+                          className="ix-card-row__menu-pop"
+                          width={180}
+                        >
+                          <button type="button" onClick={() => { moveSegment(index, index - 1); setMenu(null); }} disabled={index === 0}>
+                            Выше
+                          </button>
+                          <button type="button" onClick={() => { moveSegment(index, index + 1); setMenu(null); }} disabled={index >= segments.length - 1}>
+                            Ниже
+                          </button>
+                          <button type="button" onClick={() => { duplicateSegment(index); setMenu(null); }}>
+                            Дублировать
+                          </button>
+                          {segments.length > 2 ? (
+                            <button type="button" className="danger" onClick={() => { removeSegment(index); setMenu(null); }}>
+                              Удалить
                             </button>
-                            <button type="button" onClick={() => { moveSegment(index, index + 1); setMenuIndex(null); }} disabled={index >= segments.length - 1}>
-                              Ниже
-                            </button>
-                            <button type="button" onClick={() => duplicateSegment(index)}>
-                              Дублировать
-                            </button>
-                            {segments.length > 2 ? (
-                              <button type="button" className="danger" onClick={() => removeSegment(index)}>
-                                Удалить
-                              </button>
-                            ) : null}
-                          </div>
-                        ) : null}
+                          ) : null}
+                        </CabinetFloatingMenu>
                       </div>
                     </div>
                   </div>

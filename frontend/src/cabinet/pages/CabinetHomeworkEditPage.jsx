@@ -7,6 +7,10 @@ import HomeworkAttachmentsField from "../components/HomeworkAttachmentsField";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import { getInteractiveDisplayTitle } from "../interactivesData";
 import { fetchHomeworkForEdit, updateHomework } from "../../utils/cabinetAuth";
+import {
+  isHomeworkInstructionTask,
+  taskDuplicatesAttachment,
+} from "../homeworkTaskDisplay";
 
 function toDateTimeLocalValue(iso) {
   if (!iso) return "";
@@ -107,10 +111,12 @@ export default function CabinetHomeworkEditPage() {
   const [description, setDescription] = useState("");
   const [deadline, setDeadline] = useState("");
   const [tasks, setTasks] = useState([]);
+  const [attachments, setAttachments] = useState([]);
   const [warnings, setWarnings] = useState({
     student_started: false,
     is_checked_or_completed: false,
   });
+  const [canEdit, setCanEdit] = useState(true);
   const [studentStartedMessage, setStudentStartedMessage] = useState("");
   const [checkedMessage, setCheckedMessage] = useState("");
   const [studentName, setStudentName] = useState("");
@@ -153,7 +159,9 @@ export default function CabinetHomeworkEditPage() {
         clientKey: t.id ? `id-${t.id}` : `new-${i}-${t.material_id || t.interactive_id || "x"}`,
       })) : [];
       setTasks(nextTasks);
+      setAttachments(Array.isArray(data.attachments) ? data.attachments : []);
       setWarnings(data.warnings || {});
+      setCanEdit(data.can_edit !== false && !data.warnings?.is_checked_or_completed);
       setStudentStartedMessage(data.student_started_message || "");
       setCheckedMessage(data.checked_message || "");
       setStudentName(data.student_name || "");
@@ -188,6 +196,15 @@ export default function CabinetHomeworkEditPage() {
   const attachedInteractiveIds = useMemo(
     () => tasks.map((t) => Number(t.interactive_id)).filter((id) => Number.isFinite(id) && id > 0),
     [tasks],
+  );
+  const visibleTasks = useMemo(
+    () => tasks
+      .map((task, index) => ({ task, index }))
+      .filter(({ task }) => (
+        !isHomeworkInstructionTask(task, description)
+        && !taskDuplicatesAttachment(task, attachments)
+      )),
+    [tasks, description, attachments],
   );
 
   const askRemoveTask = (index) => {
@@ -317,18 +334,6 @@ export default function CabinetHomeworkEditPage() {
             doSave({ ...confirms, confirm_student_started: true });
           },
         });
-      } else if (code === "needs_confirm_checked") {
-        setConfirmAction({
-          type: "confirm-checked",
-          title: "ДЗ уже проверено",
-          text: detail,
-          confirmLabel: "Сохранить изменения",
-          danger: false,
-          onConfirm: () => {
-            setConfirmAction(null);
-            doSave({ ...confirms, confirm_checked_edit: true });
-          },
-        });
       } else if (code === "conflict" || err?.status === 409) {
         setError(detail);
       } else {
@@ -341,6 +346,7 @@ export default function CabinetHomeworkEditPage() {
 
   const handleSubmit = (event) => {
     event.preventDefault();
+    if (!canEdit) return;
     if (!title.trim()) {
       setError("Укажите название задания");
       return;
@@ -354,21 +360,6 @@ export default function CabinetHomeworkEditPage() {
     const compositionChanged = tasksCompositionChanged();
 
     const runWithConfirms = (base) => {
-      if (warnings.is_checked_or_completed && !base.confirm_checked_edit) {
-        setConfirmAction({
-          type: "confirm-checked",
-          title: "ДЗ уже проверено",
-          text: checkedMessage
-            || "Домашнее задание уже завершено или проверено. Изменения могут повлиять на выставленный результат.",
-          confirmLabel: "Сохранить изменения",
-          danger: false,
-          onConfirm: () => {
-            setConfirmAction(null);
-            runWithConfirms({ ...base, confirm_checked_edit: true });
-          },
-        });
-        return;
-      }
       if (warnings.student_started && compositionChanged && !base.confirm_student_started) {
         setConfirmAction({
           type: "confirm-started",
@@ -446,10 +437,10 @@ export default function CabinetHomeworkEditPage() {
 
       {error ? <p className="cb-inline-error" role="alert">{error}</p> : null}
 
-      {warnings.is_checked_or_completed ? (
+      {!canEdit ? (
         <p className="cb-inline-warn" role="status">
           {checkedMessage
-            || "Домашнее задание уже завершено или проверено. Изменения могут повлиять на выставленный результат."}
+            || "Нельзя изменить проверенное и принятое домашнее задание."}
         </p>
       ) : null}
 
@@ -460,7 +451,7 @@ export default function CabinetHomeworkEditPage() {
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            disabled={submitting}
+            disabled={submitting || !canEdit}
             required
           />
         </label>
@@ -471,7 +462,7 @@ export default function CabinetHomeworkEditPage() {
             rows={4}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            disabled={submitting}
+            disabled={submitting || !canEdit}
           />
         </label>
 
@@ -481,35 +472,37 @@ export default function CabinetHomeworkEditPage() {
             type="datetime-local"
             value={deadline}
             onChange={(e) => setDeadline(e.target.value)}
-            disabled={submitting}
+            disabled={submitting || !canEdit}
           />
         </label>
 
         <div className="cb-attach-section">
           <div className="cb-hw-assign-section-head">
             <h3 className="cb-attach-section__title">Задания и материалы</h3>
-            <button
-              type="button"
-              className="cb-btn cb-btn--outline cb-btn--sm"
-              onClick={() => setResourcePickerOpen(true)}
-              disabled={submitting}
-            >
-              Добавить задание
-            </button>
+            {canEdit ? (
+              <button
+                type="button"
+                className="cb-btn cb-btn--outline cb-btn--sm"
+                onClick={() => setResourcePickerOpen(true)}
+                disabled={submitting}
+              >
+                Добавить задание
+              </button>
+            ) : null}
           </div>
-          {tasks.length === 0 ? (
+          {visibleTasks.length === 0 ? (
             <p className="cabinet-auth-muted">
               Можно добавить материалы, варианты или интерактивы.
             </p>
           ) : (
             <div className="cb-hw-assign-resource-list">
-              {tasks.map((task, index) => (
+              {visibleTasks.map(({ task, index }) => (
                 <TaskRow
                   key={task.clientKey || task.id || `task-${index}`}
                   task={task}
                   index={index}
                   total={tasks.length}
-                  disabled={submitting}
+                  disabled={submitting || !canEdit}
                   onRemove={askRemoveTask}
                   onMove={moveTask}
                 />
@@ -521,7 +514,7 @@ export default function CabinetHomeworkEditPage() {
         <div className="cb-attach-section">
           <HomeworkAttachmentsField
             homeworkId={homeworkId}
-            disabled={submitting}
+            disabled={submitting || !canEdit}
           />
         </div>
 
@@ -533,11 +526,13 @@ export default function CabinetHomeworkEditPage() {
               onClick={handleCancel}
               disabled={submitting}
             >
-              Отмена
+              {canEdit ? "Отмена" : "Назад"}
             </button>
-            <button type="submit" className="cb-btn cb-btn--primary" disabled={submitting}>
-              {submitting ? "Сохранение…" : "Сохранить изменения"}
-            </button>
+            {canEdit ? (
+              <button type="submit" className="cb-btn cb-btn--primary" disabled={submitting}>
+                {submitting ? "Сохранение…" : "Сохранить изменения"}
+              </button>
+            ) : null}
           </div>
         </div>
       </form>

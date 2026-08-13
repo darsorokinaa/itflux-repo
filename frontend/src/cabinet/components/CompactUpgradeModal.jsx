@@ -23,21 +23,35 @@ function PlanCard({ plan, isCurrent, onSelect }) {
     l.ai_requests != null ? `${l.ai_requests} ИИ` : null,
   ].filter(Boolean).join(" · ");
 
-  const price =
+  const offer = plan.promotion?.can_redeem ? plan.promotion : null;
+  let price =
     Number(plan.price_month) === 0
       ? "Бесплатно"
       : `${Number(plan.price_month).toLocaleString("ru-RU")} ₽/мес`;
+  if (offer?.benefit_type === "free_period") {
+    price = `${offer.free_months} мес. бесплатно`;
+  } else if (offer?.pricing?.current != null) {
+    price = `${Number(offer.pricing.current).toLocaleString("ru-RU")} ₽/мес`;
+  }
 
   return (
     <div className={`cum-plan-card${isCurrent ? " cum-plan-card--current" : ""}${plan.is_recommended ? " cum-plan-card--recommended" : ""}`}>
       {plan.is_recommended && <span className="cum-badge">Оптимально</span>}
       {isCurrent && <span className="cum-badge cum-badge--current">Текущий</span>}
+      {offer ? <span className="cum-badge">Акция</span> : null}
       <div className="cum-plan-name">{plan.name}</div>
       <div className="cum-plan-price">{price}</div>
-      <div className="cum-plan-summary">{summary}</div>
+      {offer?.pricing?.original && offer.benefit_type !== "free_period" ? (
+        <div className="cum-plan-summary">
+          <s>{Number(offer.pricing.original).toLocaleString("ru-RU")} ₽</s>
+          {offer.pricing.renewal ? ` · далее ${Number(offer.pricing.renewal).toLocaleString("ru-RU")} ₽/мес` : ""}
+        </div>
+      ) : (
+        <div className="cum-plan-summary">{summary}</div>
+      )}
       {!isCurrent && (
         <button type="button" className="cum-plan-btn" onClick={() => onSelect(plan.slug)}>
-          Перейти на {plan.name}
+          {offer?.button_text || `Перейти на ${plan.name}`}
         </button>
       )}
     </div>

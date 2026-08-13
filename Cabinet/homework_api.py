@@ -25,6 +25,7 @@ from rest_framework.views import APIView
 from .choices import SubmissionStatus
 from .models import Homework, HomeworkSubmission, HomeworkTask, Profile, Student
 from .student_api import _homework_qs, _pick_student, resolve_roster_students
+from .submission_files import submission_has_files
 from .upload_validation import UploadValidationError, validate_uploaded_file
 
 logger = logging.getLogger(__name__)
@@ -299,7 +300,7 @@ def submission_api_status(submission: HomeworkSubmission | None) -> str:
     if submission.status == SubmissionStatus.SUBMITTED:
         if submission.result_payload:
             return "submitted"
-        if submission.answer_text.strip() or submission.attached_file:
+        if submission.answer_text.strip() or submission_has_files(submission):
             return "submitted"
         return "sent"
     return "sent"
@@ -414,7 +415,7 @@ def serialize_assignment_payload(*, homework: Homework, submission: HomeworkSubm
         "score": score,
         "score_percent": score,
         "answer_text": submission.answer_text if submission else "",
-        "has_attached_file": bool(submission and submission.attached_file),
+        "has_attached_file": submission_has_files(submission),
     }
 
 
@@ -515,6 +516,35 @@ def _safe_upload_filename(name: str) -> str:
     base = os.path.basename(name or "file")
     cleaned = re.sub(r"[^\w.\-() ]", "_", base).strip("._ ")
     return (cleaned[:180] or "file")
+
+
+TASK_ATTACHMENT_MAX_COUNT = int(getattr(settings, "TASK_ATTACHMENT_MAX_COUNT", 20))
+
+
+def collect_request_files(request) -> list:
+    files = []
+    seen = set()
+    for key in ("file", "files"):
+        for uploaded in request.FILES.getlist(key):
+            ident = id(uploaded)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            files.append(uploaded)
+    return files
+
+
+def count_task_attachments(payload: dict, *, task_id: str, task_number: str, teacher: bool = False) -> int:
+    id_key = "teacher_attachments_by_task_id" if teacher else "attachments_by_task_id"
+    num_key = "teacher_attachments_by_number" if teacher else "attachments_by_number"
+    by_id = payload.get(id_key) or {}
+    by_num = payload.get(num_key) or {}
+    items = None
+    if task_id:
+        items = by_id.get(str(task_id))
+    if not items and task_number:
+        items = by_num.get(str(task_number))
+    return len(items) if isinstance(items, list) else 0
 
 
 def _submission_student_editable(submission: HomeworkSubmission) -> bool:
@@ -705,6 +735,31 @@ def append_teacher_feedback_attachment(
     return payload
 
 
+def teacher_comment_attachments(payload: dict) -> list:
+    items = (payload or {}).get("teacher_comment_attachments") or []
+    return list(items) if isinstance(items, list) else []
+
+
+def append_teacher_comment_attachment(payload: dict, *, file_url: str, filename: str) -> dict:
+    items = teacher_comment_attachments(payload)
+    items.append({
+        "url": file_url,
+        "filename": filename,
+        "uploaded_at": timezone.now().isoformat(),
+    })
+    payload["teacher_comment_attachments"] = items
+    return payload
+
+
+def remove_teacher_comment_attachment(payload: dict, *, file_url: str) -> bool:
+    items = teacher_comment_attachments(payload)
+    kept = [item for item in items if str(item.get("url") or "") != str(file_url or "")]
+    if len(kept) == len(items):
+        return False
+    payload["teacher_comment_attachments"] = kept
+    return True
+
+
 def _delete_attachment_file(file_url: str):
     rel_path = _storage_path_from_media_url(file_url)
     if rel_path and default_storage.exists(rel_path):
@@ -893,12 +948,18 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
         if err:
             return err
 
-        uploaded = request.FILES.get("file")
-        if not uploaded:
+        uploaded_files = collect_request_files(request)
+        if not uploaded_files:
             return Response({"error": "file required"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            validate_uploaded_file(uploaded)
+            if len(uploaded_files) > TASK_ATTACHMENT_MAX_COUNT:
+                raise UploadValidationError(
+                    f"Слишком много файлов. Максимум {TASK_ATTACHMENT_MAX_COUNT}.",
+                    code="TOO_MANY_FILES",
+                )
+            for uploaded in uploaded_files:
+                validate_uploaded_file(uploaded)
         except UploadValidationError as exc:
             return Response({"error": exc.message, "code": exc.code}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -917,33 +978,59 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        safe_name = _safe_upload_filename(uploaded.name)
-        uid = uuid.uuid4().hex[:12]
-        task_key = task_id or task_number
-        rel_path = (
-            f"cabinet/homework/answers/{homework_id}/{student.pk}/"
-            f"{task_key}_{uid}_{safe_name}"
-        )
-        saved_path = default_storage.save(rel_path, uploaded)
-        file_url = default_storage.url(saved_path)
-
         payload = dict(submission.result_payload or {})
+        existing_count = count_task_attachments(
+            payload, task_id=task_id, task_number=task_number, teacher=False
+        )
+        if existing_count + len(uploaded_files) > TASK_ATTACHMENT_MAX_COUNT:
+            return Response(
+                {
+                    "error": f"Слишком много файлов к заданию. Максимум {TASK_ATTACHMENT_MAX_COUNT}.",
+                    "code": "TOO_MANY_FILES",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         by_id = dict(payload.get("attachments_by_task_id") or {})
         by_num = dict(payload.get("attachments_by_number") or {})
-        entry = {
-            "url": file_url,
-            "filename": safe_name,
-            "uploaded_at": timezone.now().isoformat(),
-        }
-        if task_id:
-            by_id.setdefault(task_id, []).append(entry)
-        by_num.setdefault(task_number, []).append(entry)
+        saved = []
+        for uploaded in uploaded_files:
+            try:
+                if hasattr(uploaded, "seek"):
+                    uploaded.seek(0)
+            except Exception:
+                pass
+            safe_name = _safe_upload_filename(uploaded.name)
+            uid = uuid.uuid4().hex[:12]
+            task_key = task_id or task_number
+            rel_path = (
+                f"cabinet/homework/answers/{homework_id}/{student.pk}/"
+                f"{task_key}_{uid}_{safe_name}"
+            )
+            saved_path = default_storage.save(rel_path, uploaded)
+            file_url = default_storage.url(saved_path)
+            entry = {
+                "url": file_url,
+                "filename": safe_name,
+                "uploaded_at": timezone.now().isoformat(),
+            }
+            if task_id:
+                by_id.setdefault(task_id, []).append(entry)
+            by_num.setdefault(task_number, []).append(entry)
+            saved.append({"url": file_url, "filename": safe_name})
+
         payload["attachments_by_task_id"] = by_id
         payload["attachments_by_number"] = by_num
         submission.result_payload = payload
         submission.save(update_fields=["result_payload", "updated_at"])
 
-        return Response({"ok": True, "url": file_url, "filename": safe_name})
+        first = saved[0]
+        return Response({
+            "ok": True,
+            "url": first["url"],
+            "filename": first["filename"],
+            "attachments": saved,
+        })
 
     def delete(self, request, homework_id: int):
         homework, student, err = self.resolve(request, homework_id)
@@ -1233,7 +1320,12 @@ def serialize_student_task(
             homework_id=homework_id,
             token=token,
         )
-    elif not is_variant and resource_url and looks_like_resource_path(resource_url):
+    elif (
+        not is_variant
+        and task.task_type != "text"
+        and resource_url
+        and looks_like_resource_path(resource_url)
+    ):
         open_url = resource_url
 
     file_url = ""
@@ -1253,6 +1345,101 @@ def serialize_student_task(
         "file_url": file_url,
         "open_url": open_url,
     }
+
+
+INSTRUCTION_TASK_TITLES = frozenset({"домашнее задание", "описание"})
+
+
+def homework_instruction_text(homework: Homework) -> str:
+    """Текст инструкции ДЗ: поле description, иначе текстовая задача без ссылки."""
+    text = (homework.description or "").strip()
+    if text:
+        return text
+    tasks = homework.tasks.filter(is_active=True, task_type="text").order_by("order", "id")
+    for task in tasks:
+        if task_is_variant(task):
+            continue
+        desc = (task.description or "").strip()
+        title = (task.title or "").strip().lower()
+        if desc and not looks_like_resource_path(desc):
+            return desc
+        if title in INSTRUCTION_TASK_TITLES and desc and not looks_like_resource_path(desc):
+            return desc
+    return ""
+
+
+def _is_instruction_text_task(task: HomeworkTask, homework_description: str) -> bool:
+    """Текстовая задача, дублирующая инструкцию ДЗ — её не показывают как вложение."""
+    if getattr(task, "task_type", "") != "text":
+        return False
+    if task_is_variant(task):
+        return False
+    desc = (task.description or "").strip()
+    title = (task.title or "").strip()
+    hw_desc = (homework_description or "").strip()
+    if hw_desc and desc == hw_desc:
+        return True
+    return title.lower() in INSTRUCTION_TASK_TITLES
+
+
+def _norm_key(value) -> str:
+    return str(value or "").strip().lower()
+
+
+def _basename_key(value) -> str:
+    text = _norm_key(value)
+    if not text:
+        return ""
+    return text.rstrip("/").split("/")[-1].split("?")[0]
+
+
+def _filename_key(value) -> str:
+    """Имя файла с расширением; служебные сегменты URL вроде download не считаем."""
+    base = _basename_key(value)
+    if "." not in base:
+        return ""
+    return base
+
+
+def _attachment_dedupe_keys(attachments: list[dict]) -> set[str]:
+    keys: set[str] = set()
+    for att in attachments or []:
+        for raw in (
+            att.get("name"),
+            att.get("original_name"),
+            att.get("url"),
+            att.get("preview_url"),
+            att.get("file_id"),
+            att.get("material_id"),
+        ):
+            key = _norm_key(raw)
+            if key:
+                keys.add(key)
+            filename = _filename_key(raw)
+            if filename:
+                keys.add(filename)
+    return keys
+
+
+def _task_duplicates_attachment(row: dict, attachment_keys: set[str]) -> bool:
+    if not attachment_keys or row.get("is_variant"):
+        return False
+    if row.get("task_type") not in {"file", "external_link"}:
+        return False
+    for raw in (
+        row.get("title"),
+        row.get("open_url"),
+        row.get("file_url"),
+        row.get("description"),
+        row.get("material_id"),
+    ):
+        key = _norm_key(raw)
+        if key and key in attachment_keys:
+            return True
+        filename = _filename_key(raw)
+        if filename and filename in attachment_keys:
+            return True
+    return False
 
 
 def _task_dedupe_key(serialized: dict) -> tuple:
@@ -1275,15 +1462,23 @@ def serialize_homework_tasks(
     homework_id: int,
     token: str | None = None,
 ) -> list[dict]:
+    from .homework_attachments import list_homework_attachments
+
+    homework_description = homework_instruction_text(homework)
+    attachment_keys = _attachment_dedupe_keys(list_homework_attachments(homework))
     seen = set()
     items = []
     for task in homework.tasks.filter(is_active=True).order_by("order", "id"):
+        if _is_instruction_text_task(task, homework_description):
+            continue
         row = serialize_student_task(
             task,
             homework=homework,
             homework_id=homework_id,
             token=token,
         )
+        if _task_duplicates_attachment(row, attachment_keys):
+            continue
         key = _task_dedupe_key(row)
         if key in seen:
             continue
@@ -1325,6 +1520,9 @@ def build_homework_review_context(homework: Homework) -> dict:
             subject = match.group("subject")
         break
     tasks = serialize_homework_tasks(homework, homework_id=homework.id, token=None)
+    from .homework_attachments import list_homework_attachments
+
+    attachments = list_homework_attachments(homework)
     return {
         "homework_id": homework.id,
         "homework_title": homework.title,
@@ -1336,7 +1534,9 @@ def build_homework_review_context(homework: Homework) -> dict:
         "subject": subject,
         "tasks": tasks,
         "tasks_count": len(tasks),
-        "description": (homework.description or "").strip(),
+        "description": homework_instruction_text(homework),
+        "attachments": attachments,
+        "attachments_count": len(attachments),
     }
 
 
@@ -1449,11 +1649,9 @@ def add_tasks_to_homework(
         raise PermissionError("Нет доступа к этому домашнему заданию")
     if homework.status == HomeworkStatus.ARCHIVED:
         raise ValueError("Нельзя изменить архивное домашнее задание")
-    if homework.status == HomeworkStatus.CHECKED:
-        raise ValueError("Нельзя добавить задание в проверенное домашнее задание")
-    if HomeworkSubmission.objects.filter(
-        homework=homework, status=SubmissionStatus.CHECKED
-    ).exists():
+    from .homework_edit import homework_is_checked_or_completed
+
+    if homework_is_checked_or_completed(homework):
         raise ValueError("Нельзя добавить задание: работа уже проверена и принята")
 
     material_ids = [int(pk) for pk in (material_ids or []) if pk]

@@ -425,6 +425,11 @@ class HomeworkReviewNotifyTests(TestCase):
                 event_type=NotificationEventType.HOMEWORK_CHECKED,
             ).exists()
         )
+        note = Notification.objects.get(
+            recipient_user=self.student_user,
+            event_type=NotificationEventType.HOMEWORK_CHECKED,
+        )
+        self.assertIn("focus=results", (note.payload or {}).get("url", ""))
 
     def test_check_skipped_when_review_disabled(self):
         from Cabinet.student_notifications import notify_student_homework_reviewed

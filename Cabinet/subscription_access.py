@@ -156,7 +156,19 @@ class SubscriptionAccessService:
     # ── Content access ───────────────────────────────────────────────────────
 
     @staticmethod
+    def is_student_user(user: Optional[User]) -> bool:
+        if user is None or not getattr(user, "is_authenticated", False):
+            return False
+        from .models import Profile
+
+        profile = getattr(user, "profile", None)
+        return bool(profile is not None and profile.role == Profile.Role.STUDENT)
+
+    @staticmethod
     def can_access_content(user: Optional[User], content) -> bool:
+        # Ученики открывают контент без ограничения тарифа учителя.
+        if SubscriptionAccessService.is_student_user(user):
+            return True
         level = getattr(content, "access_level", ContentAccessLevel.FREE) or ContentAccessLevel.FREE
         required = SubscriptionAccessService.content_level_rank(level)
         if required <= 0:

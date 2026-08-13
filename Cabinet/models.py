@@ -1712,6 +1712,31 @@ class HomeworkSubmission(models.Model):
         return f"{self.student} — {self.homework.title}"
 
 
+class HomeworkSubmissionAttachment(models.Model):
+    """Дополнительные файлы сдачи (первый файл остаётся в HomeworkSubmission.attached_file)."""
+
+    submission = models.ForeignKey(
+        HomeworkSubmission,
+        on_delete=models.CASCADE,
+        related_name="file_attachments",
+        verbose_name="Сдача",
+    )
+    file = models.FileField(
+        "Файл",
+        upload_to="cabinet/homework/",
+    )
+    original_name = models.CharField("Исходное имя", max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Файл сдачи ДЗ"
+        verbose_name_plural = "Файлы сдачи ДЗ"
+        ordering = ["id"]
+
+    def __str__(self):
+        return self.original_name or (self.file.name.split("/")[-1] if self.file else "Файл")
+
+
 class HomeworkSubmissionAttempt(models.Model):
     """История попыток: снимок перед перезаписью текущей сдачи."""
 
@@ -2853,6 +2878,7 @@ class TeacherSubscription(models.Model):
         ADMIN = "admin", "Администратор"
         PAYMENT = "payment", "Оплата"
         PROMO_CODE = "promo_code", "Промокод"
+        PROMOTION = "promotion", "Акция"
 
     teacher = models.OneToOneField(
         User,
@@ -2945,7 +2971,7 @@ class TeacherSubscription(models.Model):
         from django.utils import timezone as tz
         if self.status not in (self.Status.ACTIVE, self.Status.TRIAL):
             return False
-        if self.expires_at and self.expires_at < tz.now():
+        if self.expires_at and self.expires_at <= tz.now():
             return False
         return True
 
@@ -3160,6 +3186,17 @@ class Payment(models.Model):
         blank=True,
         related_name="payments",
         verbose_name="Промокод",
+    )
+    promotion = models.ForeignKey(
+        "Promotion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payments",
+        verbose_name="Акция",
+    )
+    promotion_discount_amount = models.DecimalField(
+        "Скидка по акции", max_digits=10, decimal_places=2, default=0
     )
     metadata = models.JSONField("Метаданные", default=dict, blank=True)
     paid_at = models.DateTimeField("Оплачен", null=True, blank=True)
@@ -3398,6 +3435,253 @@ class PromoCodeUsage(models.Model):
 
     def __str__(self):
         return f"{self.promo_code.code} → {self.teacher.username} {self.applied_at:%Y-%m-%d}"
+
+
+class Promotion(models.Model):
+    """Специальное предложение на тариф. Не путать с PromoCode."""
+
+    class BenefitType(models.TextChoices):
+        FIXED_PRICE = "fixed_price", "Фиксированная цена"
+        FREE_PERIOD = "free_period", "Бесплатный период"
+
+    class EligibilityType(models.TextChoices):
+        ALL = "all", "Всем"
+        NEW_USERS = "new_users", "Новым пользователям"
+        EXISTING_USERS = "existing_users", "Уже покупавшим"
+        CURRENT_FREE_PLAN = "current_free_plan", "На бесплатном тарифе"
+        CURRENT_PAID_USERS = "current_paid_users", "С платной подпиской"
+        SPECIFIC_USERS = "specific_users", "Выбранным пользователям"
+
+    class ClaimMode(models.TextChoices):
+        AUTOMATIC = "automatic", "Автоматически"
+        ACTION_REQUIRED = "action_required", "По кнопке"
+
+    class PricingDuration(models.TextChoices):
+        FIRST_PAYMENT_ONLY = "first_payment_only", "Только первый период"
+
+    code = models.SlugField("Код", max_length=64, unique=True)
+    name = models.CharField("Внутреннее название", max_length=160)
+    title = models.CharField("Публичный заголовок", max_length=160)
+    short_description = models.CharField("Краткое описание", max_length=255, blank=True, default="")
+    description = models.TextField("Описание", blank=True, default="")
+    how_to_get = models.TextField("Как получить", blank=True, default="")
+    terms = models.TextField("Условия", blank=True, default="")
+    button_text = models.CharField(
+        "Текст кнопки",
+        max_length=80,
+        blank=True,
+        default="Выбрать тариф",
+    )
+    plan = models.ForeignKey(
+        TariffPlan,
+        on_delete=models.PROTECT,
+        related_name="promotions",
+        verbose_name="Тариф",
+    )
+    benefit_type = models.CharField(
+        "Тип выгоды",
+        max_length=20,
+        choices=BenefitType.choices,
+        default=BenefitType.FIXED_PRICE,
+    )
+    promo_price = models.DecimalField(
+        "Акционная цена",
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Для фиксированной цены. Обычная цена берётся с тарифа.",
+    )
+    free_months = models.PositiveSmallIntegerField(
+        "Бесплатных месяцев",
+        null=True,
+        blank=True,
+        help_text="Для бесплатного периода.",
+    )
+    pricing_duration = models.CharField(
+        "Длительность цены",
+        max_length=32,
+        choices=PricingDuration.choices,
+        default=PricingDuration.FIRST_PAYMENT_ONLY,
+    )
+    starts_at = models.DateTimeField("Можно получить с")
+    ends_at = models.DateTimeField("Можно получить до")
+    display_starts_at = models.DateTimeField("Показывать с", null=True, blank=True)
+    display_ends_at = models.DateTimeField("Показывать до", null=True, blank=True)
+    is_active = models.BooleanField("Активна", default=True)
+    eligibility_type = models.CharField(
+        "Аудитория",
+        max_length=32,
+        choices=EligibilityType.choices,
+        default=EligibilityType.ALL,
+    )
+    registered_from = models.DateTimeField("Регистрация с", null=True, blank=True)
+    registered_until = models.DateTimeField("Регистрация до", null=True, blank=True)
+    eligible_users = models.ManyToManyField(
+        User,
+        blank=True,
+        related_name="targeted_promotions",
+        verbose_name="Выбранные пользователи",
+    )
+    claim_mode = models.CharField(
+        "Как получить",
+        max_length=20,
+        choices=ClaimMode.choices,
+        default=ClaimMode.AUTOMATIC,
+    )
+    allow_promo_codes = models.BooleanField(
+        "Совмещается с промокодом",
+        default=False,
+        help_text="Если выключено, акционная цена уже финальная.",
+    )
+    max_redemptions = models.PositiveIntegerField(
+        "Макс. активаций",
+        null=True,
+        blank=True,
+        help_text="Пусто — без общего лимита. Считаются успешные и зарезервированные.",
+    )
+    max_redemptions_per_user = models.PositiveSmallIntegerField(
+        "Макс. на пользователя",
+        null=True,
+        blank=True,
+        default=1,
+        help_text="Пусто — без ограничения на пользователя.",
+    )
+    priority = models.PositiveIntegerField(
+        "Приоритет",
+        default=0,
+        help_text="Больше — важнее. При равенстве выбирается акция с меньшим id.",
+    )
+    created_at = models.DateTimeField("Создана", auto_now_add=True)
+    updated_at = models.DateTimeField("Обновлена", auto_now=True)
+
+    class Meta:
+        verbose_name = "Акция"
+        verbose_name_plural = "Акции"
+        ordering = ["-priority", "id"]
+        indexes = [
+            models.Index(fields=["is_active", "starts_at", "ends_at"], name="cab_promo_active_dates_idx"),
+            models.Index(fields=["plan", "is_active"], name="cab_promo_plan_active_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.starts_at and self.ends_at and self.ends_at <= self.starts_at:
+            errors["ends_at"] = "Дата окончания должна быть позже даты начала."
+        if (
+            self.display_starts_at
+            and self.display_ends_at
+            and self.display_ends_at <= self.display_starts_at
+        ):
+            errors["display_ends_at"] = "Дата окончания показа должна быть позже даты начала показа."
+        if self.max_redemptions is not None and self.max_redemptions < 1:
+            errors["max_redemptions"] = "Лимит должен быть больше нуля или пустым."
+        if self.max_redemptions_per_user is not None and self.max_redemptions_per_user < 1:
+            errors["max_redemptions_per_user"] = "Лимит на пользователя должен быть больше нуля или пустым."
+
+        if self.benefit_type == self.BenefitType.FIXED_PRICE:
+            if self.promo_price is None:
+                errors["promo_price"] = "Для фиксированной цены укажите акционную стоимость."
+            elif self.promo_price < 0:
+                errors["promo_price"] = "Акционная цена не может быть отрицательной."
+            if self.free_months:
+                errors["free_months"] = "Для фиксированной цены поле бесплатных месяцев должно быть пустым."
+            if self.promo_price is not None and self.plan_id:
+                plan_price = self.plan.price_month
+                if self.promo_price > plan_price:
+                    errors["promo_price"] = (
+                        f"Акционная цена не может быть выше цены тарифа ({plan_price} ₽/мес)."
+                    )
+        elif self.benefit_type == self.BenefitType.FREE_PERIOD:
+            if not self.free_months or self.free_months < 1:
+                errors["free_months"] = "Укажите число бесплатных месяцев (минимум 1)."
+            if self.promo_price is not None:
+                errors["promo_price"] = "Для бесплатного периода акционная цена не заполняется."
+        else:
+            errors["benefit_type"] = "Выберите тип выгоды."
+
+        if self.plan_id and not self.plan.is_active:
+            errors["plan"] = "Нельзя привязать акцию к неактивному тарифу."
+
+        if errors:
+            raise ValidationError(errors)
+
+
+class PromotionRedemption(models.Model):
+    class Status(models.TextChoices):
+        RESERVED = "reserved", "Зарезервирована"
+        APPLIED = "applied", "Применена"
+        CANCELLED = "cancelled", "Отменена"
+
+    promotion = models.ForeignKey(
+        Promotion,
+        on_delete=models.PROTECT,
+        related_name="redemptions",
+        verbose_name="Акция",
+    )
+    teacher = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="promotion_redemptions",
+        verbose_name="Учитель",
+    )
+    plan = models.ForeignKey(
+        TariffPlan,
+        on_delete=models.PROTECT,
+        related_name="promotion_redemptions",
+        verbose_name="Тариф",
+    )
+    payment = models.ForeignKey(
+        Payment,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="promotion_redemptions",
+        verbose_name="Платёж",
+    )
+    subscription = models.ForeignKey(
+        TeacherSubscription,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="promotion_redemptions",
+        verbose_name="Подписка",
+    )
+    original_price = models.DecimalField("Цена тарифа на момент покупки", max_digits=10, decimal_places=2)
+    final_price = models.DecimalField("Итоговая цена", max_digits=10, decimal_places=2)
+    benefit_type = models.CharField("Тип выгоды", max_length=20, blank=True, default="")
+    free_months = models.PositiveSmallIntegerField("Бесплатных месяцев", default=0)
+    status = models.CharField(
+        "Статус",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.RESERVED,
+        db_index=True,
+    )
+    created_at = models.DateTimeField("Создана", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Использование акции"
+        verbose_name_plural = "Использования акций"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["promotion", "status"], name="cab_promored_promo_st_idx"),
+            models.Index(fields=["teacher", "promotion"], name="cab_promored_user_promo_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["payment"],
+                condition=models.Q(payment__isnull=False, status="applied"),
+                name="uniq_promo_redemption_applied_payment",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.promotion_id} → {self.teacher_id} [{self.status}]"
 
 
 class ReferralLink(models.Model):
@@ -4120,4 +4404,9 @@ from .parent_models import (  # noqa: E402
     ParentInvitation,
     ParentStudentRelationship,
     default_parent_permissions,
+)
+
+from .student_library_folder_models import (  # noqa: E402
+    StudentMaterialFolder,
+    StudentMaterialPlacement,
 )

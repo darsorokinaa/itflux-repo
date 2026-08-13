@@ -50,6 +50,16 @@ function formatLessonTimeRange(item) {
   return start || "";
 }
 
+function resultDetailHref(item) {
+  const homeworkId = item?.homework_id || item?.homework_result?.homework_id;
+  if (item?.entry_type === "homework" || (homeworkId && String(item?.id).startsWith("hw-"))) {
+    return homeworkId
+      ? `/cabinet/student/assignments/${homeworkId}?focus=results`
+      : "/cabinet/student/assignments";
+  }
+  return `/cabinet/student/results/${item.id}`;
+}
+
 function formatScore(score) {
   if (score == null) return null;
   return Number(score) === Number.parseInt(score, 10)
@@ -303,7 +313,7 @@ export default function StudentResultsPage() {
   return (
     <div className="jl-page">
       <h1 className="jl-page__title">Мои результаты</h1>
-      <p className="jl-page__sub">Опубликованные итоги уроков, вариант и домашние задания</p>
+      <p className="jl-page__sub">Опубликованные итоги уроков и проверенные домашние задания</p>
       {!items.length ? (
         <p className="jl-state">Пока нет опубликованных результатов</p>
       ) : (
@@ -311,35 +321,31 @@ export default function StudentResultsPage() {
           {items.map((item) => {
             const timeRange = formatLessonTimeRange(item);
             const hw = item.homework_result;
-            const hwScore = formatScore(hw?.score_percent);
+            const hwScore = formatScore(hw?.score_percent ?? item.overall_score);
+            const isHomework = item.entry_type === "homework" || String(item.id).startsWith("hw-");
+            const title = isHomework
+              ? (item.topic || hw?.title || "Домашнее задание")
+              : `${formatLessonDate(item.lesson_date)}${timeRange ? ` · ${timeRange}` : ""} · ${item.topic || "Урок"}`;
             return (
               <article key={item.id} className="jl-result-card">
-                <h3>
-                  {formatLessonDate(item.lesson_date)}
-                  {timeRange ? ` · ${timeRange}` : ""}
-                  {" · "}
-                  {item.topic || "Урок"}
-                </h3>
+                <h3>{title}</h3>
                 <p>
-                  {ATTENDANCE_RU[item.attendance_status] || item.attendance_status}
-                  {item.overall_score != null ? ` · урок ${formatScore(item.overall_score)}` : ""}
-                  {hwScore ? ` · ДЗ ${hwScore}` : hw?.status_label ? ` · ДЗ: ${hw.status_label}` : ""}
+                  {isHomework
+                    ? (hw?.status_label || "Проверено")
+                    : (ATTENDANCE_RU[item.attendance_status] || item.attendance_status || "")}
+                  {!isHomework && item.overall_score != null ? ` · урок ${formatScore(item.overall_score)}` : ""}
+                  {hwScore ? ` · ДЗ ${hwScore}` : !isHomework && hw?.status_label ? ` · ДЗ: ${hw.status_label}` : ""}
                 </p>
                 {item.teacher_comment ? <p>{item.teacher_comment}</p> : null}
-                {hw?.title ? (
+                {hw?.title && !isHomework ? (
                   <p className="jl-hw-result-note">
                     ДЗ: {hw.title}
                     {hw.status_label ? ` · ${hw.status_label}` : ""}
                   </p>
                 ) : null}
-                <a
-                  className="jl-btn jl-btn--secondary"
-                  href={`/cabinet/student/results/${item.id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Подробнее
-                </a>
+                <Link className="jl-btn jl-btn--secondary" to={resultDetailHref(item)}>
+                  {isHomework ? "Результаты" : "Подробнее"}
+                </Link>
               </article>
             );
           })}

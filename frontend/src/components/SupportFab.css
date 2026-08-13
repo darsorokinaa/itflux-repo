@@ -20,7 +20,12 @@
   font-weight: 650;
   line-height: 1;
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease,
+    left 0.24s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.18s ease;
 }
 
 .support-fab:hover {
@@ -56,10 +61,32 @@ body:has(.cabinet-layout) .support-fab {
   left: 12px;
 }
 
+/* Десктоп: справа от сайдбара, сдвигается вместе с его раскрытием */
 @media (min-width: 901px) {
   body:has(.cabinet-layout) .support-fab {
     bottom: 24px;
-    left: 24px;
+    left: calc(12px + var(--cb-sidebar-collapsed, 68px) + 12px);
+  }
+
+  body:has(.cabinet-sidebar:hover) .support-fab,
+  body:has(.cabinet-sidebar:focus-within) .support-fab {
+    left: calc(12px + var(--cb-sidebar-expanded, 300px) + 12px);
+  }
+}
+
+/* Мобильное меню-шторка: уводим кнопку вправо, чтобы не перекрывать пункты */
+@media (max-width: 900px) {
+  body:has(.cabinet-layout.is-nav-open) .support-fab,
+  body:has(.cabinet-sidebar.is-open) .support-fab {
+    left: calc(var(--cb-drawer-width, 300px) + 12px);
+  }
+}
+
+@media (max-width: 480px) {
+  body:has(.cabinet-layout.is-nav-open) .support-fab,
+  body:has(.cabinet-sidebar.is-open) .support-fab {
+    opacity: 0;
+    pointer-events: none;
   }
 }
 

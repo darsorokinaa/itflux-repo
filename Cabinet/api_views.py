@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 from .choices import (
     EnrollmentStatus,
     GroupStatus,
+    HomeworkStatus,
     InvitationStatus,
     PlanItemStatus,
     PlanStatus,
@@ -319,6 +320,136 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                         status=EnrollmentStatus.ACTIVE,
                     )
         return Response(StudentSubjectSerializer(subject).data)
+
+    @action(detail=True, methods=["get"], url_path="materials")
+    def materials(self, request, pk=None):
+        """Выданные этим учителем материалы ученика (тот же merge, что во вкладке ученика)."""
+        from .student_api import build_teacher_student_library
+
+        student = self.get_object()
+        subject_id = request.query_params.get("student_subject") or request.query_params.get("subject")
+        if subject_id in ("", None):
+            subject_id = None
+        else:
+            try:
+                subject_id = int(subject_id)
+            except (TypeError, ValueError):
+                return Response({"error": "Некорректный student_subject."}, status=status.HTTP_400_BAD_REQUEST)
+        items = build_teacher_student_library(
+            self.get_teacher(),
+            student,
+            student_subject_id=subject_id,
+        )
+        from .student_library_overlay import attach_library_folders
+
+        items, folders = attach_library_folders(
+            items, teacher=self.get_teacher(), student=student,
+        )
+        return Response({
+            "student_id": student.id,
+            "student_name": student.full_name or str(student),
+            "items": items,
+            "folders": folders,
+        })
+
+    @action(detail=True, methods=["get", "post"], url_path="material-folders")
+    def material_folders(self, request, pk=None):
+        from .models import StudentMaterialFolder
+        from .student_library_overlay import attach_library_folders, serialize_folder
+        from .student_api import build_teacher_student_library
+
+        student = self.get_object()
+        teacher = self.get_teacher()
+        if request.method == "GET":
+            items = build_teacher_student_library(teacher, student)
+            _, folders = attach_library_folders(items, teacher=teacher, student=student)
+            return Response({"items": folders})
+
+        name = (request.data.get("name") or "").strip()
+        if not name:
+            return Response({"error": "Название папки обязательно."}, status=status.HTTP_400_BAD_REQUEST)
+        if len(name) > 80:
+            return Response({"error": "Слишком длинное название."}, status=status.HTTP_400_BAD_REQUEST)
+        if StudentMaterialFolder.objects.filter(teacher=teacher, student=student, name=name).exists():
+            return Response({"error": "Папка с таким названием уже есть."}, status=status.HTTP_400_BAD_REQUEST)
+        subject_id = request.data.get("student_subject_id") or request.data.get("student_subject")
+        subject = None
+        if subject_id:
+            subject = student.subjects.filter(pk=subject_id).first()
+        folder = StudentMaterialFolder.objects.create(
+            teacher=teacher,
+            student=student,
+            name=name,
+            student_subject=subject,
+        )
+        return Response(serialize_folder(folder, teacher=teacher), status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=["patch", "delete"],
+        url_path=r"material-folders/(?P<folder_id>[0-9]+)",
+    )
+    def material_folder_detail(self, request, pk=None, folder_id=None):
+        from .models import StudentMaterialFolder
+        from .student_library_overlay import serialize_folder
+
+        student = self.get_object()
+        teacher = self.get_teacher()
+        folder = StudentMaterialFolder.objects.filter(
+            pk=folder_id, teacher=teacher, student=student,
+        ).first()
+        if folder is None:
+            return Response({"error": "Папка не найдена."}, status=status.HTTP_404_NOT_FOUND)
+        if request.method == "DELETE":
+            folder.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        name = request.data.get("name")
+        if name is not None:
+            name = str(name).strip()
+            if not name:
+                return Response({"error": "Название папки обязательно."}, status=status.HTTP_400_BAD_REQUEST)
+            clash = StudentMaterialFolder.objects.filter(
+                teacher=teacher, student=student, name=name,
+            ).exclude(pk=folder.pk).exists()
+            if clash:
+                return Response({"error": "Папка с таким названием уже есть."}, status=status.HTTP_400_BAD_REQUEST)
+            folder.name = name
+            folder.save(update_fields=["name", "updated_at"])
+        return Response(serialize_folder(folder, teacher=teacher))
+
+    @action(detail=True, methods=["post"], url_path="material-placements")
+    def material_placements(self, request, pk=None):
+        from .models import StudentMaterialFolder
+        from .student_library_overlay import place_library_items
+        from .student_api import build_teacher_student_library
+
+        student = self.get_object()
+        teacher = self.get_teacher()
+        keys = request.data.get("keys") or []
+        if isinstance(keys, str):
+            keys = [keys]
+        folder_id = request.data.get("folder_id", "__missing__")
+        folder = None
+        if folder_id not in ("__missing__", None, "", 0, "0"):
+            folder = StudentMaterialFolder.objects.filter(
+                pk=folder_id, teacher=teacher, student=student,
+            ).first()
+            if folder is None:
+                return Response({"error": "Папка не найдена."}, status=status.HTTP_404_NOT_FOUND)
+        elif folder_id in (None, "", 0, "0"):
+            folder = None
+        items = build_teacher_student_library(teacher, student)
+        allowed = {str(it["id"]) for it in items}
+        moved = place_library_items(
+            teacher=teacher,
+            student=student,
+            keys=keys,
+            folder=folder,
+            allowed_keys=allowed,
+        )
+        if moved == 0:
+            return Response({"error": "Нечего переместить."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"ok": True, "moved": moved})
 
     @action(detail=True, methods=["patch"], url_path="archive")
     def archive(self, request, pk=None):
@@ -1629,9 +1760,15 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         import uuid
 
         from .homework_api import (
+            TASK_ATTACHMENT_MAX_COUNT,
             _safe_upload_filename,
+            append_teacher_comment_attachment,
             append_teacher_feedback_attachment,
+            collect_request_files,
+            count_task_attachments,
+            teacher_comment_attachments,
         )
+        from .upload_validation import UploadValidationError, validate_uploaded_file
 
         item = self.get_object()
         if item.status != ReviewStatus.PENDING:
@@ -1645,55 +1782,99 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        uploaded = request.FILES.get("file")
-        if not uploaded:
+        uploaded_files = collect_request_files(request)
+        if not uploaded_files:
             return Response({"error": "file required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        from .upload_validation import UploadValidationError, validate_uploaded_file
-
         try:
-            validate_uploaded_file(uploaded)
+            if len(uploaded_files) > TASK_ATTACHMENT_MAX_COUNT:
+                raise UploadValidationError(
+                    f"Слишком много файлов. Максимум {TASK_ATTACHMENT_MAX_COUNT}.",
+                    code="TOO_MANY_FILES",
+                )
+            for uploaded in uploaded_files:
+                validate_uploaded_file(uploaded)
         except UploadValidationError as exc:
             return Response({"error": exc.message, "code": exc.code}, status=status.HTTP_400_BAD_REQUEST)
 
         task_number = str(
             request.data.get("task_number") or request.POST.get("task_number") or ""
         ).strip()
-        if not task_number:
-            return Response({"error": "task_number required"}, status=status.HTTP_400_BAD_REQUEST)
-
         task_id = str(request.data.get("task_id") or request.POST.get("task_id") or "").strip()
+        is_comment_attachment = not task_number and not task_id
 
         submission = HomeworkSubmission.objects.filter(pk=item.source_id).first()
         if not submission:
             return Response({"error": "Submission not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        safe_name = _safe_upload_filename(uploaded.name)
-        uid = uuid.uuid4().hex[:12]
-        task_key = task_id or task_number
-        rel_path = (
-            f"cabinet/homework/review_feedback/{item.pk}/{task_key}_{uid}_{safe_name}"
-        )
-        saved_path = default_storage.save(rel_path, uploaded)
-        file_url = default_storage.url(saved_path)
-
         payload = dict(submission.result_payload or {})
-        append_teacher_feedback_attachment(
-            payload,
-            task_id=task_id,
-            task_number=task_number,
-            file_url=file_url,
-            filename=safe_name,
-        )
+        if is_comment_attachment:
+            existing_count = len(teacher_comment_attachments(payload))
+        else:
+            if not task_number:
+                return Response({"error": "task_number required"}, status=status.HTTP_400_BAD_REQUEST)
+            existing_count = count_task_attachments(
+                payload, task_id=task_id, task_number=task_number, teacher=True
+            )
+        if existing_count + len(uploaded_files) > TASK_ATTACHMENT_MAX_COUNT:
+            return Response(
+                {
+                    "error": f"Слишком много файлов. Максимум {TASK_ATTACHMENT_MAX_COUNT}.",
+                    "code": "TOO_MANY_FILES",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        saved = []
+        for uploaded in uploaded_files:
+            try:
+                if hasattr(uploaded, "seek"):
+                    uploaded.seek(0)
+            except Exception:
+                pass
+            safe_name = _safe_upload_filename(uploaded.name)
+            uid = uuid.uuid4().hex[:12]
+            task_key = "comment" if is_comment_attachment else (task_id or task_number)
+            rel_path = (
+                f"cabinet/homework/review_feedback/{item.pk}/{task_key}_{uid}_{safe_name}"
+            )
+            saved_path = default_storage.save(rel_path, uploaded)
+            file_url = default_storage.url(saved_path)
+            if is_comment_attachment:
+                append_teacher_comment_attachment(
+                    payload,
+                    file_url=file_url,
+                    filename=safe_name,
+                )
+            else:
+                append_teacher_feedback_attachment(
+                    payload,
+                    task_id=task_id,
+                    task_number=task_number,
+                    file_url=file_url,
+                    filename=safe_name,
+                )
+            saved.append({"url": file_url, "filename": safe_name})
+
         HomeworkSubmission.objects.filter(pk=submission.pk).update(
             result_payload=payload,
             updated_at=timezone.now(),
         )
 
-        return Response({"ok": True, "url": file_url, "filename": safe_name})
+        first = saved[0]
+        return Response({
+            "ok": True,
+            "url": first["url"],
+            "filename": first["filename"],
+            "attachments": saved,
+        })
 
     def _delete_review_feedback(self, request, pk=None):
-        from .homework_api import _delete_attachment_file, _remove_teacher_attachment_from_payload
+        from .homework_api import (
+            _delete_attachment_file,
+            _remove_teacher_attachment_from_payload,
+            remove_teacher_comment_attachment,
+        )
 
         item = self.get_object()
         if item.status != ReviewStatus.PENDING:
@@ -1731,12 +1912,16 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
             return Response({"error": "Submission not found."}, status=status.HTTP_404_NOT_FOUND)
 
         payload = dict(submission.result_payload or {})
-        if not _remove_teacher_attachment_from_payload(
-            payload,
-            file_url=file_url,
-            task_id=task_id,
-            task_number=task_number,
-        ):
+        if not task_number and not task_id:
+            removed = remove_teacher_comment_attachment(payload, file_url=file_url)
+        else:
+            removed = _remove_teacher_attachment_from_payload(
+                payload,
+                file_url=file_url,
+                task_id=task_id,
+                task_number=task_number,
+            )
+        if not removed:
             return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
 
         _delete_attachment_file(file_url)
@@ -1843,6 +2028,15 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         except Exception:
             # Сводка успеваемости подтянет актуальный статус и без записи в журнал.
             pass
+        homework = submission.homework
+        if homework is not None:
+            new_hw_status = HomeworkStatus.CHECKED if checked else HomeworkStatus.ASSIGNED
+            if homework.status != new_hw_status and homework.status not in (
+                HomeworkStatus.ARCHIVED,
+                HomeworkStatus.DRAFT,
+            ):
+                homework.status = new_hw_status
+                homework.save(update_fields=["status", "updated_at"])
 
 
 class ScheduleViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
@@ -2377,11 +2571,7 @@ class HomeworkSubmissionAttachedFileView(TeacherScopedMixin, APIView):
     """Скачивание файла ответа ученика учителем (без публичного /media/)."""
 
     def get(self, request, submission_id):
-        import mimetypes
-
-        from django.http import FileResponse
-
-        from .files_storage import content_disposition
+        from .submission_files import filefield_download_response
 
         submission = get_object_or_404(
             HomeworkSubmission.objects.select_related("homework"),
@@ -2390,15 +2580,27 @@ class HomeworkSubmissionAttachedFileView(TeacherScopedMixin, APIView):
         )
         if not submission.attached_file:
             return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
-        try:
-            fh = submission.attached_file.open("rb")
-        except Exception:
-            return Response({"error": "Файл недоступен."}, status=status.HTTP_404_NOT_FOUND)
         name = submission.attached_file.name.split("/")[-1] or "file"
-        content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
-        response = FileResponse(fh, content_type=content_type)
-        response["Content-Disposition"] = content_disposition(name, inline=False)
-        return response
+        return filefield_download_response(submission.attached_file, name)
+
+
+class HomeworkSubmissionExtraAttachedFileView(TeacherScopedMixin, APIView):
+    """Скачивание дополнительного файла ответа ученика учителем."""
+
+    def get(self, request, submission_id, attachment_id):
+        from .models import HomeworkSubmissionAttachment
+        from .submission_files import filefield_download_response
+
+        attachment = get_object_or_404(
+            HomeworkSubmissionAttachment.objects.select_related("submission", "submission__homework"),
+            pk=attachment_id,
+            submission_id=submission_id,
+            submission__homework__teacher=request.user,
+        )
+        if not attachment.file:
+            return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
+        name = attachment.original_name or attachment.file.name.split("/")[-1] or "file"
+        return filefield_download_response(attachment.file, name)
 
 
 class DirectMaterialAssignView(TeacherScopedMixin, APIView):
@@ -2481,6 +2683,18 @@ class DirectMaterialAssignView(TeacherScopedMixin, APIView):
             student=student,
             student_subject=student_subject,
             message=message,
+        )
+        import logging
+        logging.getLogger("cabinet.student_materials").info(
+            "direct_material_assign teacher_id=%s student_id=%s group_id=%s "
+            "material_id=%s material_type=%s subject_id=%s assignment_id=%s",
+            teacher.id,
+            student.id if student else None,
+            group.id if group else None,
+            material.id,
+            material.material_type,
+            student_subject.id if student_subject else None,
+            da.id,
         )
         return Response({"id": da.id, "ok": True}, status=status.HTTP_201_CREATED)
 

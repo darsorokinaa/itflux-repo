@@ -1,12 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   fetchStudentAssignment,
   submitStudentAssignment,
 } from "../../../utils/cabinetAuth";
-import HomeworkReviewResults, { buildHomeworkReviewFromVariant } from "../../HomeworkReviewResults";
-import { parseVariantApiUrl } from "../../cabinetReviewUtils";
+import HomeworkReviewResults, {
+  buildHomeworkReviewFromVariant,
+  FileLinks,
+} from "../../HomeworkReviewResults";
+import { homeworkTeacherCommentAttachments, parseVariantApiUrl } from "../../cabinetReviewUtils";
 import CabinetIcon from "../../CabinetIcons";
+import {
+  extraHomeworkText,
+  isOpenableUrl,
+  resolveTaskHref,
+  visibleHomeworkResourceTasks,
+} from "../../homeworkTaskDisplay";
 import {
   StudentPageShell,
   formatDueDate,
@@ -20,20 +29,6 @@ const TASK_TYPE_META = {
   interactive: { icon: "interactives", typeLabel: "Интерактив" },
   generated_task: { icon: "tasks", typeLabel: "Набор задач" },
 };
-
-function isHttpUrl(value) {
-  return /^https?:\/\//i.test((value || "").trim());
-}
-
-function isOpenableUrl(value) {
-  const text = (value || "").trim();
-  if (!text) return false;
-  return isHttpUrl(text) || text.startsWith("/");
-}
-
-function resolveTaskHref(task) {
-  return [task.open_url, task.file_url, task.description].find(isOpenableUrl) || "";
-}
 
 function isInternalVariantHref(href) {
   return (href || "").startsWith("/") && /\/variant\/\d+/i.test(href);
@@ -185,11 +180,12 @@ const STUDENT_HW_RESULTS_ID = "st-hw-results";
 
 export default function StudentAssignmentDetailPage() {
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   const [item, setItem] = useState(null);
   const [answer, setAnswer] = useState("");
-  const [attachedFile, setAttachedFile] = useState(null);
+  const [attachedFiles, setAttachedFiles] = useState([]);
   const [fileUploadFailed, setFileUploadFailed] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -213,7 +209,7 @@ export default function StudentAssignmentDetailPage() {
         setItem(d);
         if (!preserveLocal) {
           setAnswer(d.answer_text || "");
-          setAttachedFile(null);
+          setAttachedFiles([]);
           setIsDirty(false);
           setFileUploadFailed(false);
         }
@@ -229,7 +225,7 @@ export default function StudentAssignmentDetailPage() {
   useEffect(() => {
     setIsDirty(false);
     isDirtyRef.current = false;
-    setAttachedFile(null);
+    setAttachedFiles([]);
     setFileUploadFailed(false);
     loadAssignment({ preserveLocal: false, silent: false });
   }, [id, loadAssignment]);
@@ -284,7 +280,6 @@ export default function StudentAssignmentDetailPage() {
     && (item.status !== "submitted" || missingAttachment);
   const isChecked = item?.status === "checked";
   const dueLabel = item?.due_at ? formatDueDate(item.due_at) : "";
-  const taskCount = item?.tasks?.length || 0;
   const homeworkReview = useMemo(() => {
     if (!isChecked || !item?.result || !variantTasks?.length) return null;
     const variantTask = (item.tasks || []).find((t) => t.is_variant);
@@ -305,44 +300,52 @@ export default function StudentAssignmentDetailPage() {
     });
   };
 
+  useEffect(() => {
+    if (!isChecked) return undefined;
+    if (searchParams.get("focus") !== "results") return undefined;
+    const timer = window.setTimeout(scrollToResults, 80);
+    return () => window.clearTimeout(timer);
+  }, [isChecked, homeworkReview, item, searchParams]);
+
   const answerSummary = useMemo(() => {
     if (!item) return "";
     if (variantSubmitted) return "вариант отправлен";
-    if (item.answer_text?.trim() || item.attached_file_url) return "отправлен";
+    if (item.answer_text?.trim() || item.attached_file_url || (item.attached_files || []).length) return "отправлен";
     if (["submitted", "checked"].includes(item.status)) return "отправлен";
     return "не отправлен";
   }, [item, variantSubmitted]);
 
   const handleSubmit = async () => {
-    if (missingAttachment && !attachedFile) {
-      setValidationMsg("Прикрепите файл ответа, затем нажмите «Дослать файл».");
+    if (missingAttachment && !attachedFiles.length) {
+      setValidationMsg("Прикрепите файлы ответа, затем нажмите «Дослать файлы».");
       return;
     }
-    if (!answer.trim() && !attachedFile) {
-      setValidationMsg("Сначала напишите ответ или нажмите «Прикрепить файл» и выберите файл.");
+    if (!answer.trim() && !attachedFiles.length) {
+      setValidationMsg("Сначала напишите ответ или нажмите «Прикрепить файлы» и выберите файлы.");
       return;
     }
     setSubmitting(true);
     setMsg("");
     setValidationMsg("");
     try {
-      const hadFile = Boolean(attachedFile);
+      const hadFile = attachedFiles.length > 0;
       const formData = new FormData();
       formData.append("answer_text", answer || "");
-      if (attachedFile) {
-        formData.append("attached_file", attachedFile, attachedFile.name || "file");
-      }
+      attachedFiles.forEach((file) => {
+        formData.append("attached_file", file, file.name || "file");
+      });
       const result = await submitStudentAssignment(id, formData);
       setMsg("Ответ отправлен");
       setIsDirty(false);
       isDirtyRef.current = false;
-      setAttachedFile(null);
+      setAttachedFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
       await loadAssignment({ preserveLocal: false });
-      const fileFailed = hadFile && result && !result.attached_file_url && !result.attached_file_name;
+      const savedCount = Array.isArray(result?.attached_files) ? result.attached_files.length : 0;
+      const fileFailed = hadFile && result && savedCount === 0 && !result.attached_file_url && !result.attached_file_name;
       setFileUploadFailed(fileFailed);
       if (fileFailed) {
-        setMsg("Ответ отправлен, но файл мог не сохраниться. Проверьте вложение или отправьте ещё раз.");
+        setMsg("Ответ отправлен, но файлы могли не сохраниться. Проверьте вложения или отправьте ещё раз.");
       }
     } catch (e) {
       setMsg(e.message || "Ошибка");
@@ -351,9 +354,35 @@ export default function StudentAssignmentDetailPage() {
     }
   };
 
-  const clearAttachedFile = () => {
-    setAttachedFile(null);
+  const savedAttachedFiles = item?.attached_files?.length
+    ? item.attached_files
+    : item?.attached_file_url
+      ? [{ id: "main", name: item.attached_file_name || "Прикреплённый файл", url: item.attached_file_url }]
+      : [];
+
+  const addAttachedFiles = (fileList) => {
+    const next = Array.from(fileList || []);
+    if (!next.length) return;
+    setAttachedFiles((prev) => {
+      const merged = [...prev];
+      next.forEach((file) => {
+        const exists = merged.some(
+          (f) => f.name === file.name && f.size === file.size && f.lastModified === file.lastModified,
+        );
+        if (!exists) merged.push(file);
+      });
+      return merged.slice(0, 20);
+    });
     setIsDirty(true);
+    isDirtyRef.current = true;
+    if (validationMsg) setValidationMsg("");
+    setMsg("");
+  };
+
+  const clearAttachedFile = (index) => {
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
+    setIsDirty(true);
+    isDirtyRef.current = true;
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (validationMsg) setValidationMsg("");
   };
@@ -377,20 +406,14 @@ export default function StudentAssignmentDetailPage() {
   const defaultBrief = hasVariant
     ? "Откройте вариант, решите задания и отправьте работу на проверку."
     : "Откройте материалы, выполните задание и отправьте ответ.";
-  const briefText = item.description?.trim() || defaultBrief;
-  const materialTasks = (item.tasks || []).filter((task) => {
-    if (task.is_variant || task.task_type === "generated_task" || task.task_type === "interactive") {
-      return true;
-    }
-    if (resolveTaskHref(task) || task.task_type === "file") return true;
-    if (task.task_type === "text") {
-      const desc = (task.description || "").trim();
-      return desc && desc !== briefText;
-    }
-    return Boolean(task.title);
+  const briefText = extraHomeworkText(item.tasks, item.description) || defaultBrief;
+  const materialTasks = visibleHomeworkResourceTasks(item.tasks, {
+    description: item.description,
+    attachments: item.attachments,
   });
-  const materialsCount = materialTasks.length || taskCount;
+  const materialsCount = (item.attachments || []).length + materialTasks.length;
   const manualStats = item?.result?.manual_stats || null;
+  const commentFiles = homeworkTeacherCommentAttachments(item?.result);
   const draftHint = isDirty
     ? "Есть несохранённые изменения"
     : canEditAnswer
@@ -403,7 +426,7 @@ export default function StudentAssignmentDetailPage() {
       ? item.teacher_comment
       : "Учитель проверил работу. Результаты — в блоке ниже.")
     : canEditAnswer
-      ? "Добавьте текст или файл, затем отправьте работу преподавателю."
+      ? "Добавьте текст или файлы, затем отправьте работу преподавателю."
       : "Ответ отправлен преподавателю. Результаты появятся после проверки.";
 
   return (
@@ -440,26 +463,36 @@ export default function StudentAssignmentDetailPage() {
             </span>
           </div>
         </div>
-        {!variantOnly ? (
+        {canEditAnswer ? (
           <div className="st-hw-top-actions">
-            {canEditAnswer ? (
-              <button
-                type="button"
-                className="st-hw-btn st-hw-btn--primary"
-                onClick={handleSubmit}
-                disabled={submitting}
-              >
-                {submitting
-                  ? "Отправка…"
-                  : missingAttachment
-                    ? "Дослать файл"
-                    : "Отправить ответ"}
-              </button>
-            ) : (
-              <button type="button" className="st-hw-btn st-hw-btn--primary" disabled>
-                {isChecked ? "Проверено" : "Отправлено"}
-              </button>
-            )}
+            <button
+              type="button"
+              className="st-hw-btn st-hw-btn--primary"
+              onClick={handleSubmit}
+              disabled={submitting}
+            >
+              {submitting
+                ? "Отправка…"
+                : missingAttachment
+                  ? "Дослать файлы"
+                  : "Отправить ответ"}
+            </button>
+          </div>
+        ) : isChecked ? (
+          <div className="st-hw-top-actions">
+            <button
+              type="button"
+              className="st-hw-btn st-hw-btn--primary"
+              onClick={scrollToResults}
+            >
+              Результаты
+            </button>
+          </div>
+        ) : !variantOnly ? (
+          <div className="st-hw-top-actions">
+            <button type="button" className="st-hw-btn st-hw-btn--primary" disabled>
+              Отправлено
+            </button>
           </div>
         ) : null}
       </header>
@@ -551,50 +584,53 @@ export default function StudentAssignmentDetailPage() {
             </section>
           ) : null}
 
-          {isChecked && hasVariant && item.result && !homeworkReview ? (
-            <section className="st-hw-card">
-              <p className="st-hw-card__text">Загрузка результатов…</p>
-            </section>
-          ) : null}
-
-          {isChecked && homeworkReview ? (
+          {isChecked ? (
             <div id={STUDENT_HW_RESULTS_ID} className="st-hw-results-anchor">
-              <HomeworkReviewResults
-                review={homeworkReview}
-                teacherComment={item.teacher_comment}
-                className="st-hw-review"
-              />
-            </div>
-          ) : null}
+              {hasVariant && item.result && !homeworkReview ? (
+                <section className="st-hw-card">
+                  <p className="st-hw-card__text">Загрузка результатов…</p>
+                </section>
+              ) : null}
 
-          {isChecked && !hasVariant ? (
-            <section id={STUDENT_HW_RESULTS_ID} className="st-hw-card st-hw-card--result">
-              <div className="st-hw-section-head">
-                <div>
-                  <h2 className="st-hw-card__title">Результаты</h2>
-                  <p className="st-hw-section-desc">Оценка и комментарий преподавателя</p>
-                </div>
-              </div>
-              {item.result_percent != null ? (
-                <p className="st-hw-result-score">{Math.round(item.result_percent)}%</p>
+              {homeworkReview ? (
+                <HomeworkReviewResults
+                  review={homeworkReview}
+                  teacherComment={item.teacher_comment}
+                  className="st-hw-review"
+                />
               ) : null}
-              {manualStats ? (
-                <div className="st-hw-manual-stats">
-                  <div><span>Всего</span><strong>{manualStats.total ?? "—"}</strong></div>
-                  <div><span>Правильно</span><strong>{manualStats.correct ?? "—"}</strong></div>
-                  <div><span>Неправильно</span><strong>{manualStats.incorrect ?? "—"}</strong></div>
-                  <div><span>Не решено</span><strong>{manualStats.unsolved ?? "—"}</strong></div>
-                </div>
+
+              {!hasVariant ? (
+                <section className="st-hw-card st-hw-card--result">
+                  <div className="st-hw-section-head">
+                    <div>
+                      <h2 className="st-hw-card__title">Результаты</h2>
+                      <p className="st-hw-section-desc">Оценка и комментарий преподавателя</p>
+                    </div>
+                  </div>
+                  {item.result_percent != null ? (
+                    <p className="st-hw-result-score">{Math.round(item.result_percent)}%</p>
+                  ) : null}
+                  {manualStats ? (
+                    <div className="st-hw-manual-stats">
+                      <div><span>Всего</span><strong>{manualStats.total ?? "—"}</strong></div>
+                      <div><span>Правильно</span><strong>{manualStats.correct ?? "—"}</strong></div>
+                      <div><span>Неправильно</span><strong>{manualStats.incorrect ?? "—"}</strong></div>
+                      <div><span>Не решено</span><strong>{manualStats.unsolved ?? "—"}</strong></div>
+                    </div>
+                  ) : null}
+                  {item.teacher_comment?.trim() || commentFiles.length ? (
+                    <div className="st-hw-teacher-comment">
+                      <span className="st-hw-teacher-comment__label">Комментарий учителя</span>
+                      {item.teacher_comment?.trim() ? <p>{item.teacher_comment}</p> : null}
+                      <FileLinks files={commentFiles} />
+                    </div>
+                  ) : (
+                    <p className="st-hw-empty">Комментарий пока не добавлен</p>
+                  )}
+                </section>
               ) : null}
-              {item.teacher_comment?.trim() ? (
-                <div className="st-hw-teacher-comment">
-                  <span className="st-hw-teacher-comment__label">Комментарий учителя</span>
-                  <p>{item.teacher_comment}</p>
-                </div>
-              ) : (
-                <p className="st-hw-empty">Комментарий пока не добавлен</p>
-              )}
-            </section>
+            </div>
           ) : null}
 
           {!variantOnly ? (
@@ -632,39 +668,36 @@ export default function StudentAssignmentDetailPage() {
                     )}
                     <div className="st-hw-attachment-area">
                       <div className="st-hw-attach-left">
-                        <label className={`st-hw-btn st-hw-btn--small${attachedFile ? " is-selected" : ""}`}>
+                        <label className={`st-hw-btn st-hw-btn--small${attachedFiles.length ? " is-selected" : ""}`}>
                           <input
                             ref={fileInputRef}
                             type="file"
+                            multiple
                             className="st-hw-file-input"
                             onChange={(e) => {
-                              const file = e.target.files?.[0] || null;
-                              setAttachedFile(file);
-                              setIsDirty(true);
-                              isDirtyRef.current = true;
-                              if (validationMsg) setValidationMsg("");
-                              if (file) setMsg("");
+                              addAttachedFiles(e.target.files);
+                              e.target.value = "";
                             }}
                           />
-                          {attachedFile ? "Файл выбран" : "Прикрепить файл"}
+                          {attachedFiles.length ? "Добавить ещё" : "Прикрепить файлы"}
                         </label>
                         <span className="st-hw-attach-hint">
-                          Можно добавить текст, фотографию или документ
+                          Можно прикрепить несколько файлов: фото, PDF или документы
                         </span>
                       </div>
                       <span className="st-hw-attach-hint">{draftHint}</span>
                     </div>
                   </div>
-                  {attachedFile || item.attached_file_name ? (
+                  {attachedFiles.length ? (
                     <div className="st-hw-attached-files is-visible">
-                      <div className="st-hw-attached-file">
-                        <span>{attachedFile?.name || item.attached_file_name}</span>
-                        {attachedFile ? (
-                          <button type="button" className="st-hw-remove-file" onClick={clearAttachedFile}>
+                      {attachedFiles.map((file, index) => (
+                        <div key={`${file.name}-${file.size}-${file.lastModified}-${index}`} className="st-hw-attached-file">
+                          <span>{file.name}</span>
+                          <button type="button" className="st-hw-remove-file" onClick={() => clearAttachedFile(index)}>
                             Удалить
                           </button>
-                        ) : null}
-                      </div>
+                        </div>
+                      ))}
                     </div>
                   ) : null}
                   {validationMsg ? (
@@ -683,7 +716,7 @@ export default function StudentAssignmentDetailPage() {
                       {submitting
                         ? "Отправка…"
                         : missingAttachment
-                          ? "Дослать файл"
+                          ? "Дослать файлы"
                           : "Отправить ответ"}
                     </button>
                   </div>
@@ -691,12 +724,20 @@ export default function StudentAssignmentDetailPage() {
               ) : (
                 <div className="st-hw-answer-readonly">
                   {answer?.trim() || item.answer_text?.trim() || "Ответ не указан"}
-                  {item.attached_file_url ? (
-                    <p className="st-hw-file-link">
-                      <a href={item.attached_file_url} target="_blank" rel="noreferrer">
-                        {item.attached_file_name || "Прикреплённый файл"}
-                      </a>
-                    </p>
+                  {savedAttachedFiles.length ? (
+                    <div className="st-hw-attached-files is-visible">
+                      {savedAttachedFiles.map((file) => (
+                        <p key={file.id || file.url} className="st-hw-file-link">
+                          {file.url ? (
+                            <a href={file.url} target="_blank" rel="noreferrer">
+                              {file.name || "Прикреплённый файл"}
+                            </a>
+                          ) : (
+                            <span>{file.name || "Прикреплённый файл"}</span>
+                          )}
+                        </p>
+                      ))}
+                    </div>
                   ) : null}
                 </div>
               )}

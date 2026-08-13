@@ -99,11 +99,11 @@ class HomeworkAttachmentsApiTests(TestCase):
             relation_type=CabinetFileRelationType.HOMEWORK,
         ).count()
         self.assertEqual(rel_count, 3)
-        self.assertGreaterEqual(
+        self.assertEqual(
             HomeworkTask.objects.filter(
                 homework=self.homework, task_type="file", is_active=True
             ).count(),
-            1,
+            0,
         )
 
     def test_delete_one_attachment_keeps_others(self):
@@ -174,7 +174,6 @@ class HomeworkAttachmentsApiTests(TestCase):
                 "title": "ДЗ обновлено",
                 "description": "Новый текст",
                 "updated_at": self.homework.updated_at.isoformat(),
-                "confirm_checked_edit": True,
                 "confirm_student_started": True,
             },
         )
@@ -186,3 +185,34 @@ class HomeworkAttachmentsApiTests(TestCase):
         self.assertEqual(submission.answer_text, "Мой ответ")
         self.assertEqual(submission.teacher_comment, "Отлично")
         self.assertEqual(float(submission.score), 90.0)
+
+    def test_instruction_text_task_is_not_serialized_as_attachment(self):
+        from Cabinet.homework_api import homework_instruction_text, serialize_homework_tasks
+
+        HomeworkTask.objects.create(
+            homework=self.homework,
+            task_type="text",
+            title="Домашнее задание",
+            description=self.homework.description,
+            order=0,
+        )
+        self.assertEqual(homework_instruction_text(self.homework), "Решите задания")
+        tasks = serialize_homework_tasks(self.homework, homework_id=self.homework.id)
+        self.assertEqual(tasks, [])
+
+    def test_file_task_matching_attachment_is_not_serialized_twice(self):
+        from Cabinet.homework_api import serialize_homework_tasks
+
+        add_homework_attachments(self.homework, self.teacher, [self._pdf("A4 - 8 (4).pdf")])
+        HomeworkTask.objects.create(
+            homework=self.homework,
+            task_type="file",
+            title="A4 - 8 (4).pdf",
+            description="/api/cabinet/files/unused/download/",
+            order=0,
+        )
+        tasks = serialize_homework_tasks(self.homework, homework_id=self.homework.id)
+        self.assertEqual(tasks, [])
+        attachments = list_homework_attachments(self.homework)
+        self.assertEqual(len(attachments), 1)
+        self.assertEqual(attachments[0]["name"], "A4 - 8 (4).pdf")

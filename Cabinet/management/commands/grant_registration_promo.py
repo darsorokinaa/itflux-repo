@@ -1,6 +1,6 @@
 """
 Выдаёт акционный тариф «Профи» на 3 месяца с даты регистрации
-всем учителям, зарегистрировавшимся до 1 октября 2026.
+всем учителям, зарегистрировавшимся до 1 января 2027.
 Также мигрирует legacy slug=profi → актуальный slug=pro.
 
 python manage.py grant_registration_promo
@@ -23,7 +23,7 @@ from Cabinet.registration_promo import (
 
 
 class Command(BaseCommand):
-    help = "Акция: Профи на 3 месяца с даты регистрации (до 1 октября 2026)"
+    help = "Акция: Профи на 3 месяца с даты регистрации (до 1 января 2027)"
 
     def add_arguments(self, parser):
         parser.add_argument(

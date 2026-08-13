@@ -81,11 +81,6 @@ def process_auto_renewals(*, limit: int = 200) -> dict:
 
     ok = failed = skipped = 0
     for sub in qs:
-        if sub.last_renewal_attempt_at and (
-            now - sub.last_renewal_attempt_at < MIN_RENEW_ATTEMPT_GAP
-        ):
-            skipped += 1
-            continue
         with transaction.atomic():
             locked = (
                 TeacherSubscription.objects.select_for_update()
@@ -96,33 +91,46 @@ def process_auto_renewals(*, limit: int = 200) -> dict:
             if not locked or not locked.auto_renew or not locked.tbank_rebill_id:
                 skipped += 1
                 continue
+            if locked.last_renewal_attempt_at and (
+                now - locked.last_renewal_attempt_at < MIN_RENEW_ATTEMPT_GAP
+            ):
+                skipped += 1
+                continue
             locked.last_renewal_attempt_at = now
             locked.save(update_fields=["last_renewal_attempt_at", "updated_at"])
-            try:
-                result = PaymentProviderService.create_recurrent_payment(locked)
-            except Exception as exc:
-                locked.last_renewal_error = str(exc)[:255]
-                locked.auto_renew = False  # избегаем бесконечных попыток
-                locked.save(update_fields=["last_renewal_error", "auto_renew", "updated_at"])
-                logger.exception("auto_renew_failed subscription=%s", locked.pk)
-                failed += 1
-                continue
 
-            if result.get("ok"):
-                locked.last_renewal_error = ""
-                locked.save(update_fields=["last_renewal_error", "updated_at"])
-                ok += 1
-            else:
-                locked.last_renewal_error = str(result.get("error") or "failed")[:255]
-                # После FAILED на период — выключаем автопродление, чтобы не долбить карту.
-                if result.get("error") == "already_failed" or (
-                    result.get("payment")
-                    and getattr(result["payment"], "status", None)
-                    == result["payment"].Status.FAILED
-                ):
-                    locked.auto_renew = False
-                locked.save(update_fields=["last_renewal_error", "auto_renew", "updated_at"])
-                failed += 1
+        # Charge / GetState вне lock, чтобы не держать строку на время HTTP.
+        try:
+            result = PaymentProviderService.create_recurrent_payment(locked)
+        except Exception as exc:
+            TeacherSubscription.objects.filter(pk=locked.pk).update(
+                last_renewal_error=str(exc)[:255],
+                updated_at=timezone.now(),
+            )
+            logger.exception("auto_renew_failed subscription=%s", locked.pk)
+            failed += 1
+            continue
+
+        if result.get("ok"):
+            TeacherSubscription.objects.filter(pk=locked.pk).update(
+                last_renewal_error="",
+                updated_at=timezone.now(),
+            )
+            ok += 1
+        else:
+            error = str(result.get("error") or "failed")[:255]
+            payment = result.get("payment")
+            fields = {
+                "last_renewal_error": error,
+                "updated_at": timezone.now(),
+            }
+            if result.get("error") == "already_failed" or (
+                payment is not None
+                and getattr(payment, "status", None) == payment.Status.FAILED
+            ):
+                fields["auto_renew"] = False
+            TeacherSubscription.objects.filter(pk=locked.pk).update(**fields)
+            failed += 1
 
     return {"ok": ok, "failed": failed, "skipped": skipped}
 
@@ -140,7 +148,7 @@ def process_expired_subscriptions(*, limit: int = 500) -> dict:
     qs = (
         TeacherSubscription.objects.select_related("plan")
         .filter(
-            expires_at__lt=now,
+            expires_at__lte=now,
             status__in=[
                 TeacherSubscription.Status.ACTIVE,
                 TeacherSubscription.Status.TRIAL,
@@ -156,7 +164,7 @@ def process_expired_subscriptions(*, limit: int = 500) -> dict:
     for sub in qs:
         with transaction.atomic():
             locked = TeacherSubscription.objects.select_for_update().filter(pk=sub.pk).first()
-            if not locked or not locked.expires_at or locked.expires_at >= now:
+            if not locked or not locked.expires_at or locked.expires_at > now:
                 continue
             if locked.plan_id == start_plan.pk:
                 continue

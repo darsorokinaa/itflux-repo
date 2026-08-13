@@ -264,7 +264,7 @@ export function mapApiMaterial(material) {
     title: material.title,
     description: material.description || "",
     materialType: material.material_type || material.materialType,
-    materialTypeLabel: material.material_type_label || material.materialTypeLabel || material.material_type || material.materialType,
+    materialTypeLabel: material.material_type_label || material.materialTypeLabel || "",
     topic: material.topic || "",
     subtopic: material.subtopic || "",
     externalUrl: material.external_url || material.externalUrl || "",

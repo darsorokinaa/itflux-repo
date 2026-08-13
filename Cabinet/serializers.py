@@ -1546,6 +1546,7 @@ class HomeworkSubmissionSerializer(serializers.ModelSerializer):
     homework_title = serializers.CharField(source="homework.title", read_only=True)
     attached_file_url = serializers.SerializerMethodField()
     attached_file_name = serializers.SerializerMethodField()
+    attached_files = serializers.SerializerMethodField()
 
     class Meta:
         model = HomeworkSubmission
@@ -1561,6 +1562,7 @@ class HomeworkSubmissionSerializer(serializers.ModelSerializer):
             "attached_file",
             "attached_file_url",
             "attached_file_name",
+            "attached_files",
             "status",
             "score",
             "teacher_comment",
@@ -1575,21 +1577,17 @@ class HomeworkSubmissionSerializer(serializers.ModelSerializer):
         return submission_file_url(obj, for_student=False)
 
     def get_attached_file_name(self, obj):
-        from .files_models import CabinetFileRelation, CabinetFileRelationType
+        files = self.get_attached_files(obj)
+        return files[0]["name"] if files else ""
 
-        rel = (
-            CabinetFileRelation.objects.filter(
-                submission=obj,
-                relation_type=CabinetFileRelationType.SUBMISSION,
-            )
-            .select_related("file")
-            .first()
-        )
-        if rel and rel.file_id:
-            return rel.file.display_name or rel.file.original_name
-        if obj.attached_file:
-            return obj.attached_file.name.split("/")[-1]
-        return ""
+    def get_attached_files(self, obj):
+        from .submission_files import serialize_submission_files
+
+        cached = getattr(obj, "_serialized_attached_files", None)
+        if cached is None:
+            cached = serialize_submission_files(obj, for_student=False)
+            obj._serialized_attached_files = cached
+        return cached
 
 
 class ReviewItemSerializer(serializers.ModelSerializer):
@@ -1629,7 +1627,7 @@ class ReviewItemSerializer(serializers.ModelSerializer):
             return None
         submission = HomeworkSubmission.objects.filter(pk=obj.source_id).select_related(
             "homework", "student"
-        ).first()
+        ).prefetch_related("file_attachments").first()
         if not submission:
             return None
         return HomeworkSubmissionSerializer(submission).data

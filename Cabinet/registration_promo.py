@@ -1,6 +1,6 @@
 """
 Акция при регистрации: тариф «Профи» (slug=pro) на 3 месяца с даты регистрации
-для всех учителей, зарегистрировавшихся до 1 октября 2026.
+для всех учителей, зарегистрировавшихся до 1 января 2027.
 
 Legacy-тариф slug=profi (rank=0) считается тем же продуктом и принудительно
 мигрируется на актуальный slug=pro (rank=2).
@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 PROMO_PLAN_SLUG = "pro"
 LEGACY_PRO_SLUGS = frozenset({"profi", "pro"})
 PROMO_MONTHS = 3
-# Акция действует для регистраций строго до этой даты (1 октября не включается).
-PROMO_UNTIL_DATE = datetime(2026, 10, 1, 0, 0, 0)
+# Акция действует для регистраций строго до этой даты (1 января 2027 не включается).
+PROMO_UNTIL_DATE = datetime(2027, 1, 1, 0, 0, 0)
 PROMO_TZ = ZoneInfo("Europe/Moscow")
 
 _PLAN_RANK = {
@@ -66,8 +66,8 @@ def promo_payload() -> dict:
         "plan_name": "Профи",
         "months": PROMO_MONTHS,
         "until": deadline.date().isoformat(),
-        "until_label": "1 октября 2026",
-        "title": "Акция до 1 октября",
+        "until_label": "1 января 2027",
+        "title": "Акция до 1 января",
         "message": (
             "Всем зарегистрировавшимся на платформе — тариф «Профи» "
             "на 3 месяца с даты регистрации."

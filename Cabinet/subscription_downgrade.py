@@ -395,6 +395,12 @@ class DowngradeService:
         change = DowngradeService.get_active_change(sub)
         if not change:
             return {"ok": True, "message": "Отложенный переход не запланирован."}
+        if change.status == SubscriptionPlanChange.Status.PREPAID:
+            raise ValueError(
+                "Следующий период уже оплачен. Отменить переход нельзя: "
+                "текущий тариф действует до конца оплаченного периода, "
+                "затем включится предоплаченный."
+            )
         now = timezone.now()
         change.status = SubscriptionPlanChange.Status.CANCELED
         change.canceled_at = now

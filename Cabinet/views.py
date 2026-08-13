@@ -1,16 +1,24 @@
 import json
-
+import logging
 from datetime import datetime
+from urllib.parse import urlencode
 
+from django.conf import settings
 from django.utils.dateparse import parse_date
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import ValidationError
+from django.core.mail import send_mail
 from django.http import JsonResponse
 from django.utils import timezone
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.views.decorators.http import require_http_methods
+
+logger = logging.getLogger(__name__)
 
 from .models import Profile, ScheduleEvent, TeacherApplication, TeacherCommunityFeedback
 from .invitations import invite_accept_api_payload, try_accept_invite_token
@@ -272,6 +280,135 @@ def api_referral_preview(request, code):
 def api_logout(request):
     logout(request)
     return JsonResponse({"ok": True})
+
+
+PASSWORD_RESET_SENT_MESSAGE = (
+    "Если аккаунт с такими данными существует, мы отправили ссылку для восстановления пароля."
+)
+
+
+def _public_site_origin(request) -> str:
+    origin = (getattr(settings, "LK_PUBLIC_URL", "") or "").rstrip("/")
+    if origin:
+        return origin
+    return request.build_absolute_uri("/").rstrip("/")
+
+
+def _password_reset_url(request, user) -> str:
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+    query = urlencode({"mode": "reset", "uid": uid, "token": token})
+    return f"{_public_site_origin(request)}/cabinet/login?{query}"
+
+
+def _user_from_reset_uid(uidb64: str):
+    try:
+        uid = force_str(urlsafe_base64_decode(uidb64))
+        return User.objects.filter(pk=uid).first()
+    except (TypeError, ValueError, OverflowError, UnicodeDecodeError):
+        return None
+
+
+def _send_password_reset_email(request, user) -> bool:
+    email = (user.email or "").strip()
+    if not email:
+        return False
+    reset_url = _password_reset_url(request, user)
+    if settings.DEBUG:
+        logger.info("Password reset link for %s: %s", email, reset_url)
+    name = ""
+    profile = getattr(user, "profile", None)
+    if profile:
+        name = " ".join(part for part in (profile.name, profile.surname) if part).strip()
+    greeting = f"Здравствуйте{', ' + name if name else ''}!"
+    body = "\n".join(
+        [
+            greeting,
+            "",
+            "Вы запросили восстановление пароля на платформе «Цифровой поток».",
+            "Перейдите по ссылке, чтобы задать новый пароль:",
+            "",
+            reset_url,
+            "",
+            "Ссылка действует ограниченное время. Если вы не запрашивали сброс, просто проигнорируйте это письмо.",
+        ]
+    )
+    try:
+        sent = send_mail(
+            subject="Восстановление пароля — Цифровой поток",
+            message=body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[email],
+            fail_silently=False,
+        )
+        return bool(sent)
+    except Exception:
+        logger.exception("Не удалось отправить письмо для восстановления пароля на %s", email)
+        return False
+
+
+@require_http_methods(["POST"])
+def api_password_reset_request(request):
+    if not rate_limit_check(request, "auth_password_reset", 5, 900):
+        return rate_limit_json_response()
+
+    data = _load_json_body(request)
+    if data is None:
+        return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
+
+    login_id = (data.get("login") or data.get("email") or data.get("username") or "").strip()
+    if not login_id:
+        return JsonResponse({"ok": False, "error": "Укажите email или логин"}, status=400)
+
+    user = _find_user_by_login(login_id)
+    if user is not None:
+        access_error = _profile_access_error(user.profile)
+        if not access_error:
+            _send_password_reset_email(request, user)
+
+    return JsonResponse({"ok": True, "message": PASSWORD_RESET_SENT_MESSAGE})
+
+
+@require_http_methods(["POST"])
+def api_password_reset_confirm(request):
+    if not rate_limit_check(request, "auth_password_reset_confirm", 10, 900):
+        return rate_limit_json_response()
+
+    data = _load_json_body(request)
+    if data is None:
+        return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
+
+    uidb64 = (data.get("uid") or "").strip()
+    token = (data.get("token") or "").strip()
+    password = data.get("password") or ""
+    password_confirm = data.get("password_confirm") or password
+
+    if not uidb64 or not token:
+        return JsonResponse({"ok": False, "error": "Ссылка недействительна или устарела."}, status=400)
+    if not password:
+        return JsonResponse({"ok": False, "error": "Укажите новый пароль"}, status=400)
+    if password != password_confirm:
+        return JsonResponse({"ok": False, "error": "Пароли не совпадают"}, status=400)
+
+    try:
+        validate_password(password)
+    except ValidationError as exc:
+        return JsonResponse({"ok": False, "error": " ".join(exc.messages)}, status=400)
+
+    user = _user_from_reset_uid(uidb64)
+    if user is None or not default_token_generator.check_token(user, token):
+        return JsonResponse({"ok": False, "error": "Ссылка недействительна или устарела."}, status=400)
+
+    access_error = _profile_access_error(user.profile)
+    if access_error:
+        return JsonResponse({"ok": False, "error": access_error}, status=403)
+
+    user.set_password(password)
+    user.save(update_fields=["password"])
+    auth_user = authenticate(request, username=user.username, password=password) or user
+    login(request, auth_user)
+    Profile.objects.filter(pk=auth_user.profile.pk).update(last_activity=timezone.now())
+    return JsonResponse({"ok": True, "user": _profile_payload(auth_user)})
 
 
 def _require_authenticated_user(request):

@@ -34,7 +34,11 @@ export function getStudentAssignmentPath(item) {
   if (item.kind === "interactive") {
     return `/cabinet/student/interactives/${item.interactive_id || item.id}/play`;
   }
-  return `/cabinet/student/assignments/${item.id}`;
+  const base = `/cabinet/student/assignments/${item.id}`;
+  if (item.status === "checked" || item.status === "completed") {
+    return `${base}?focus=results`;
+  }
+  return base;
 }
 
 export function mapStudentAssignmentToHwCard(item) {

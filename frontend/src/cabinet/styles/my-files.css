@@ -257,6 +257,13 @@
   align-items: stretch;
   min-height: 168px;
   padding: 0.65rem;
+  position: relative;
+}
+
+.cb-files__tile .cb-files__row-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
 }
 
 .cb-files__thumb {
@@ -306,7 +313,10 @@
   color: #fff;
   font-size: 0.65rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
+  line-height: 1.15;
+  text-align: center;
+  max-width: calc(100% - 8px);
 }
 
 .cb-files__thumb--folder {

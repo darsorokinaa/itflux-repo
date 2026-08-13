@@ -91,6 +91,11 @@ urlpatterns = [
         student_api.StudentAssignmentAttachedFileView.as_view(),
         name="student_assignment_attached_file",
     ),
+    path(
+        "student/assignments/<int:homework_id>/attached-files/<int:attachment_id>/",
+        student_api.StudentAssignmentExtraAttachedFileView.as_view(),
+        name="student_assignment_extra_attached_file",
+    ),
     path("student/interactives/", student_api.StudentInteractivesView.as_view(), name="student_interactives"),
     path("student/interactives/<int:assignment_id>/", student_api.StudentInteractiveDetailView.as_view(), name="student_interactive_detail"),
     path("student/schedule/", student_api.StudentScheduleView.as_view(), name="student_schedule"),
@@ -191,6 +196,11 @@ urlpatterns = [
         "homework/submissions/<int:submission_id>/attached-file/",
         api_views.HomeworkSubmissionAttachedFileView.as_view(),
         name="cabinet_homework_submission_attached_file",
+    ),
+    path(
+        "homework/submissions/<int:submission_id>/attached-files/<int:attachment_id>/",
+        api_views.HomeworkSubmissionExtraAttachedFileView.as_view(),
+        name="cabinet_homework_submission_extra_attached_file",
     ),
     path("direct-materials/", api_views.DirectMaterialAssignView.as_view(), name="direct_materials"),
     path("direct-materials/<int:pk>/", api_views.DirectMaterialAssignView.as_view(), name="direct_materials_delete"),

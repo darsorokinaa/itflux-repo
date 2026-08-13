@@ -34,7 +34,7 @@ def notify_student_homework_reviewed(
     hw_title = (homework.title if homework else "") or review_item.title or "Домашнее задание"
     assignment_id = homework.id if homework else None
     url = (
-        f"/cabinet/student/assignments/{assignment_id}"
+        f"/cabinet/student/assignments/{assignment_id}?focus=results"
         if assignment_id
         else "/cabinet/student/assignments"
     )

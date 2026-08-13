@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import CabinetIcon from "../CabinetIcons";
 import BoardLessonBlock from "./BoardLessonBlock";
+import CabinetFloatingMenu from "./CabinetFloatingMenu";
 import LiveVariantAnswersTable from "./LiveVariantAnswersTable";
 import LiveMaterialAnswersTable from "./LiveMaterialAnswersTable";
 
@@ -68,6 +69,7 @@ function MaterialRow({
   const presentable = canPresentRow(row);
   const removable = Boolean(canManage && onRemove && (row.materialId || row.interactiveId));
   const menuOpen = menuKey === row.key;
+  const btnRef = useRef(null);
 
   return (
     <li className={`vl-mat-item${showing ? " is-showing" : ""}`}>
@@ -94,6 +96,7 @@ function MaterialRow({
       <div className="vl-mat-item__actions">
         <div className="vl-mat-item__menu-wrap">
           <button
+            ref={btnRef}
             type="button"
             className="video-lesson-icon-btn"
             aria-label="Действия с материалом"
@@ -103,61 +106,65 @@ function MaterialRow({
           >
             <span aria-hidden="true">•••</span>
           </button>
-          {menuOpen ? (
-            <div className="vl-dropdown" role="menu">
-              {(row.url || row.kind === "board" || row.text) ? (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuKey("");
-                    onOpen(row);
-                  }}
-                >
-                  Открыть
-                </button>
-              ) : null}
-              {row.url ? (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuKey("");
-                    onOpenInNewTab(row);
-                  }}
-                >
-                  Открыть в новой вкладке
-                </button>
-              ) : null}
-              {canManage && presentable ? (
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={presentBusy}
-                  onClick={() => {
-                    setMenuKey("");
-                    onToggleVisibility(row, showing);
-                  }}
-                >
-                  {showing ? "Скрыть от ученика" : "Показать ученику"}
-                </button>
-              ) : null}
-              {removable ? (
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="is-danger"
-                  disabled={removeBusy || presentBusy}
-                  onClick={() => {
-                    setMenuKey("");
-                    onRemove(row);
-                  }}
-                >
-                  Убрать с урока
-                </button>
-              ) : null}
-            </div>
-          ) : null}
+          <CabinetFloatingMenu
+            open={menuOpen}
+            anchorEl={btnRef.current}
+            onClose={() => setMenuKey("")}
+            className="vl-dropdown"
+            width={220}
+          >
+            {(row.url || row.kind === "board" || row.text) ? (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuKey("");
+                  onOpen(row);
+                }}
+              >
+                Открыть
+              </button>
+            ) : null}
+            {row.url ? (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuKey("");
+                  onOpenInNewTab(row);
+                }}
+              >
+                Открыть в новой вкладке
+              </button>
+            ) : null}
+            {canManage && presentable ? (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={presentBusy}
+                onClick={() => {
+                  setMenuKey("");
+                  onToggleVisibility(row, showing);
+                }}
+              >
+                {showing ? "Скрыть от ученика" : "Показать ученику"}
+              </button>
+            ) : null}
+            {removable ? (
+              <button
+                type="button"
+                role="menuitem"
+                className="is-danger"
+                disabled={removeBusy || presentBusy}
+                onClick={() => {
+                  setMenuKey("");
+                  onRemove(row);
+                }}
+              >
+                Убрать с урока
+              </button>
+            ) : null}
+          </CabinetFloatingMenu>
         </div>
       </div>
     </li>
@@ -195,7 +202,7 @@ export default function VideoLessonMaterialsPanel({
 }) {
   const [addOpen, setAddOpen] = useState(false);
   const [menuKey, setMenuKey] = useState("");
-  const rootRef = useRef(null);
+  const addBtnRef = useRef(null);
 
   const allRows = [
     ...(boardRow ? [boardRow] : []),
@@ -204,19 +211,8 @@ export default function VideoLessonMaterialsPanel({
   ];
   const count = allRows.length;
 
-  useEffect(() => {
-    const onDoc = (e) => {
-      if (!rootRef.current?.contains(e.target)) {
-        setAddOpen(false);
-        setMenuKey("");
-      }
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
-
   return (
-    <aside className="video-lesson-aside" aria-label="Материалы урока" ref={rootRef}>
+    <aside className="video-lesson-aside" aria-label="Материалы урока">
       <div className="video-lesson-aside__header">
         <div className="video-lesson-aside__header-text">
           <h2 className="video-lesson-aside__title">
@@ -228,38 +224,47 @@ export default function VideoLessonMaterialsPanel({
           {canManage ? (
             <div className="vl-add-wrap">
               <button
+                ref={addBtnRef}
                 type="button"
                 className="video-lesson-btn video-lesson-btn--primary"
                 aria-expanded={addOpen}
-                onClick={() => setAddOpen((v) => !v)}
+                onClick={() => {
+                  setMenuKey("");
+                  setAddOpen((v) => !v);
+                }}
               >
                 <CabinetIcon name="plus" />
                 <span>Добавить материал</span>
               </button>
-              {addOpen ? (
-                <div className="vl-dropdown vl-dropdown--add" role="menu">
-                  {[
-                    ["library", "Из библиотеки"],
-                    ["file", "Файл"],
-                    ["link", "Ссылка"],
-                    ["variant", "Задание / вариант"],
-                    ["interactive", "Интерактив"],
-                    ["homework", "Домашнее задание"],
-                  ].map(([id, label]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setAddOpen(false);
-                        onAddMenuAction(id);
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
+              <CabinetFloatingMenu
+                open={addOpen}
+                anchorEl={addBtnRef.current}
+                onClose={() => setAddOpen(false)}
+                className="vl-dropdown vl-dropdown--add"
+                align="left"
+                width={220}
+              >
+                {[
+                  ["library", "Из библиотеки"],
+                  ["file", "Файл"],
+                  ["link", "Ссылка"],
+                  ["variant", "Задание / вариант"],
+                  ["interactive", "Интерактив"],
+                  ["homework", "Домашнее задание"],
+                ].map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setAddOpen(false);
+                      onAddMenuAction(id);
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </CabinetFloatingMenu>
             </div>
           ) : null}
           <button
@@ -316,7 +321,10 @@ export default function VideoLessonMaterialsPanel({
                 presentBusy={presentBusy}
                 removeBusy={removeBusy}
                 menuKey={menuKey}
-                setMenuKey={setMenuKey}
+                setMenuKey={(key) => {
+                  setAddOpen(false);
+                  setMenuKey(key);
+                }}
                 onOpen={onOpenRow}
                 onToggleVisibility={onToggleVisibility}
                 onOpenInNewTab={onOpenInNewTab}

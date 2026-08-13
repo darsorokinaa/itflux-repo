@@ -12,6 +12,15 @@ import {
   formatStudentDate,
 } from "../StudentSectionUi";
 
+function resultItemHref(item) {
+  if (item.homeworkId) {
+    return `/cabinet/student/assignments/${item.homeworkId}?focus=results`;
+  }
+  if (item.entryType === "homework") return null;
+  if (item.id) return `/cabinet/student/results/${item.id}`;
+  return null;
+}
+
 function insightForScore(score) {
   if (score == null) return null;
   if (score >= 85) return "Хорошо получается";
@@ -85,13 +94,17 @@ export default function StudentProgressPage() {
   const recentWithScores = results
     .map((r) => ({
       id: r.id || r.record_id || r.lesson_date,
-      title: r.topic || r.title || r.lesson_topic || "Занятие",
+      title: r.homework_result?.title || r.topic || r.title || r.lesson_topic || "Занятие",
       score: r.overall_score ?? r.homework_result?.score_percent ?? r.score_percent ?? r.score ?? null,
       date: r.lesson_date || r.starts_at || r.completed_at,
       comment: r.teacher_comment || r.comment || r.homework_result?.teacher_comment || "",
-      subject: r.student_subject_label || r.subject || "",
+      subject: r.student_subject_label || r.subject || (r.entry_type === "homework" ? "Домашнее задание" : ""),
+      homeworkId: r.entry_type === "homework"
+        ? (r.homework_id || r.homework_result?.homework_id || null)
+        : null,
+      entryType: r.entry_type || "lesson",
     }))
-    .filter((r) => r.score != null || r.comment)
+    .filter((r) => r.score != null || r.comment || r.homeworkId)
     .slice(0, 8);
 
   const strong = recentWithScores.filter((r) => r.score != null && r.score >= 80).slice(0, 3);
@@ -179,23 +192,31 @@ export default function StudentProgressPage() {
             </div>
             {recentWithScores.length ? (
               <ul className="st-progress-recent">
-                {recentWithScores.map((item) => (
-                  <li key={`r-${item.id}`}>
-                    <div>
-                      <strong>{item.title}</strong>
-                      <span>
-                        {[item.subject, item.date ? formatStudentDate(item.date) : ""]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </span>
-                      {item.comment ? <em>«{item.comment}»</em> : null}
-                    </div>
-                    <div className="st-progress-recent__right">
-                      {item.score != null ? <b>{Math.round(item.score)}%</b> : null}
-                      {insightForScore(item.score) ? <small>{insightForScore(item.score)}</small> : null}
-                    </div>
-                  </li>
-                ))}
+                {recentWithScores.map((item) => {
+                  const href = resultItemHref(item);
+                  const body = (
+                    <>
+                      <div>
+                        <strong>{item.title}</strong>
+                        <span>
+                          {[item.subject, item.date ? formatStudentDate(item.date) : ""]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
+                        {item.comment ? <em>«{item.comment}»</em> : null}
+                      </div>
+                      <div className="st-progress-recent__right">
+                        {item.score != null ? <b>{Math.round(item.score)}%</b> : null}
+                        {insightForScore(item.score) ? <small>{insightForScore(item.score)}</small> : null}
+                      </div>
+                    </>
+                  );
+                  return (
+                    <li key={`r-${item.id}`}>
+                      {href ? <Link to={href} className="st-progress-recent__link">{body}</Link> : body}
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className="st-dash-soft-note">Оценки появятся после проверки работ учителем.</p>

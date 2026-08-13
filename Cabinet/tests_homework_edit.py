@@ -310,7 +310,7 @@ class HomeworkEditApiTests(TestCase):
             HomeworkEditHistory.objects.filter(homework=self.homework).exists()
         )
 
-    def test_checked_homework_keeps_answers_and_comments(self):
+    def test_checked_homework_cannot_be_edited(self):
         self.submission.status = "checked"
         self.submission.submitted_at = timezone.now()
         self.submission.teacher_comment = "Отличная работа"
@@ -321,20 +321,30 @@ class HomeworkEditApiTests(TestCase):
         self.review.teacher_comment = "OK"
         self.review.save()
 
+        get_response = self.client.get(self.url)
+        self.assertEqual(get_response.status_code, 200)
+        get_data = get_response.json()
+        self.assertFalse(get_data.get("can_edit"))
+        self.assertTrue(get_data["warnings"].get("is_checked_or_completed"))
+
         payload = self._payload(
             title="Правка после проверки",
             confirm_checked_edit=True,
         )
         response = self.client.patch(self.url, payload, format="json")
-        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("принято", response.json().get("detail", "").lower())
 
+        self.homework.refresh_from_db()
+        self.assertEqual(self.homework.title, "Исходное ДЗ")
+        self.assertFalse(
+            HomeworkEditHistory.objects.filter(homework=self.homework).exists()
+        )
         self.submission.refresh_from_db()
         self.assertEqual(self.submission.status, "checked")
         self.assertEqual(self.submission.teacher_comment, "Отличная работа")
         self.assertEqual(self.submission.result_payload.get("answers", {}).get("1"), "A")
         self.assertEqual(float(self.submission.score), 100.0)
-        history = HomeworkEditHistory.objects.filter(homework=self.homework).latest("created_at")
-        self.assertEqual(history.previous_result_meta.get("teacher_comment"), "Отличная работа")
 
     def test_concurrent_edit_conflict(self):
         stale = self._payload(title="Из вкладки A")
@@ -365,3 +375,5 @@ class HomeworkEditApiTests(TestCase):
         self.assertEqual(len(data["tasks"]), 2)
         self.assertIn("updated_at", data)
         self.assertIn("warnings", data)
+        self.assertTrue(data.get("can_edit"))
+        self.assertFalse(data["warnings"].get("is_checked_or_completed"))

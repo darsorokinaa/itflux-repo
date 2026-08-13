@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useState } from "react";
+import CabinetFloatingMenu from "./components/CabinetFloatingMenu";
 import "../styles/cabinet-homework-card.css";
 
 const DEADLINE_TONES = ["default", "today", "overdue", "review", "completed", "draft", "info"];
@@ -132,27 +133,9 @@ export default function CabinetHomeworkCard({
   const safeProgress = PROGRESS_TONES.includes(progressTone) ? progressTone : "default";
   const pct = Math.max(0, Math.min(100, progressPercent));
   const resolvedCoverVariant = coverVariant || pickCoverVariant(title);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef(null);
+  const [menuAnchor, setMenuAnchor] = useState(null);
+  const menuOpen = Boolean(menuAnchor);
   const menuId = useId();
-
-  useEffect(() => {
-    if (!menuOpen) return undefined;
-    const onPointerDown = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) {
-        setMenuOpen(false);
-      }
-    };
-    const onKeyDown = (event) => {
-      if (event.key === "Escape") setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [menuOpen]);
 
   return (
     <article className="cb-hw-card">
@@ -215,7 +198,7 @@ export default function CabinetHomeworkCard({
 
             <div className="cb-hw-card__footer-actions">
               {dangerActionLabel ? (
-                <div className="cb-hw-card__more" ref={menuRef}>
+                <div className="cb-hw-card__more">
                   <button
                     type="button"
                     className="cb-hw-card__more-btn"
@@ -223,28 +206,33 @@ export default function CabinetHomeworkCard({
                     aria-haspopup="menu"
                     aria-expanded={menuOpen}
                     aria-controls={menuId}
-                    onClick={() => setMenuOpen((open) => !open)}
+                    onClick={(e) => setMenuAnchor(menuOpen ? null : e.currentTarget)}
                   >
                     ⋯
                   </button>
-                  {menuOpen ? (
-                    <div className="cb-hw-card__menu" id={menuId} role="menu">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="cb-hw-card__menu-item cb-hw-card__menu-item--danger"
-                        disabled={dangerActionDisabled}
-                        title={dangerActionDisabled ? dangerActionDisabledHint : undefined}
-                        onClick={() => {
-                          if (dangerActionDisabled) return;
-                          setMenuOpen(false);
-                          onDangerAction?.();
-                        }}
-                      >
-                        {dangerActionLabel}
-                      </button>
-                    </div>
-                  ) : null}
+                  <CabinetFloatingMenu
+                    open={menuOpen}
+                    anchorEl={menuAnchor}
+                    onClose={() => setMenuAnchor(null)}
+                    className="cb-hw-card__menu"
+                    width={168}
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      id={menuId}
+                      className="cb-hw-card__menu-item cb-hw-card__menu-item--danger"
+                      disabled={dangerActionDisabled}
+                      title={dangerActionDisabled ? dangerActionDisabledHint : undefined}
+                      onClick={() => {
+                        if (dangerActionDisabled) return;
+                        setMenuAnchor(null);
+                        onDangerAction?.();
+                      }}
+                    >
+                      {dangerActionLabel}
+                    </button>
+                  </CabinetFloatingMenu>
                 </div>
               ) : null}
               {secondaryActionLabel ? (

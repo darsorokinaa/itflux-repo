@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import CabinetFloatingMenu from "./CabinetFloatingMenu";
 import {
   ACCESS_OPTIONS,
   DEFAULT_PARAMS,
@@ -303,17 +304,8 @@ export function LaunchInfoBar({
   const canPublish = interactive.status === "draft" || interactive.status === "review";
   const canShare = canShareInteractive(interactive);
   const canAssign = canAssignInteractive(interactive);
-  const [moreOpen, setMoreOpen] = useState(false);
-  const moreRef = useRef(null);
-
-  useEffect(() => {
-    if (!moreOpen) return undefined;
-    const close = (e) => {
-      if (moreRef.current && !moreRef.current.contains(e.target)) setMoreOpen(false);
-    };
-    document.addEventListener("click", close);
-    return () => document.removeEventListener("click", close);
-  }, [moreOpen]);
+  const [moreAnchor, setMoreAnchor] = useState(null);
+  const moreOpen = Boolean(moreAnchor);
 
   return (
     <section className="ix-launch-info ix-launch-info--v2">
@@ -361,49 +353,53 @@ export function LaunchInfoBar({
         <button type="button" className="cb-btn cb-btn--ghost cb-btn--sm" onClick={onDuplicate}>
           Дублировать
         </button>
-        <div className={`ix-launch-more${moreOpen ? " is-open" : ""}`} ref={moreRef}>
+        <div className={`ix-launch-more${moreOpen ? " is-open" : ""}`}>
           <button
             type="button"
             className="cb-btn cb-btn--ghost cb-btn--sm"
-            onClick={() => setMoreOpen((v) => !v)}
+            onClick={(e) => setMoreAnchor(moreOpen ? null : e.currentTarget)}
             aria-expanded={moreOpen}
             aria-label="Дополнительные действия"
           >
             Ещё
           </button>
-          {moreOpen ? (
-            <div className="ix-launch-more__menu" role="menu">
-              <button
-                type="button"
-                role="menuitem"
-                disabled={!canShare}
-                title={canShare ? "" : "Сначала опубликуйте интерактив"}
-                onClick={() => { setMoreOpen(false); onShare?.(); }}
-              >
-                Скопировать ссылку
+          <CabinetFloatingMenu
+            open={moreOpen}
+            anchorEl={moreAnchor}
+            onClose={() => setMoreAnchor(null)}
+            className="ix-launch-more__menu"
+            width={180}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!canShare}
+              title={canShare ? "" : "Сначала опубликуйте интерактив"}
+              onClick={() => { setMoreAnchor(null); onShare?.(); }}
+            >
+              Скопировать ссылку
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!canAssign}
+              title={canAssign ? "" : "Сначала опубликуйте интерактив"}
+              onClick={() => { setMoreAnchor(null); onAssign?.(); }}
+            >
+              Выдать
+            </button>
+            {!canPublish ? (
+              <button type="button" role="menuitem" onClick={() => { setMoreAnchor(null); onUnpublish?.(); }}>
+                Снять с публикации
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                disabled={!canAssign}
-                title={canAssign ? "" : "Сначала опубликуйте интерактив"}
-                onClick={() => { setMoreOpen(false); onAssign?.(); }}
-              >
-                Выдать
-              </button>
-              {!canPublish ? (
-                <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); onUnpublish?.(); }}>
-                  Снять с публикации
-                </button>
-              ) : null}
-              <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); onAccessSettings?.(); }}>
-                Настройки доступа
-              </button>
-              <button type="button" role="menuitem" className="danger" onClick={() => { setMoreOpen(false); onDelete?.(); }}>
-                Удалить
-              </button>
-            </div>
-          ) : null}
+            ) : null}
+            <button type="button" role="menuitem" onClick={() => { setMoreAnchor(null); onAccessSettings?.(); }}>
+              Настройки доступа
+            </button>
+            <button type="button" role="menuitem" className="danger" onClick={() => { setMoreAnchor(null); onDelete?.(); }}>
+              Удалить
+            </button>
+          </CabinetFloatingMenu>
         </div>
       </div>
     </section>

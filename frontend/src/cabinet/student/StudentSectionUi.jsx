@@ -316,9 +316,9 @@ export function lessonActionLabel(status) {
 }
 
 export function assignmentActionLabel(status) {
-  if (status === "checked") return "Результат";
+  if (status === "checked") return "Результаты";
   if (status === "needs_fix") return "Исправить";
-  if (status === "submitted") return "Результат";
+  if (status === "submitted") return "Открыть";
   if (status === "overdue") return "Сдать";
   return status === "new" ? "Открыть" : "Сдать";
 }

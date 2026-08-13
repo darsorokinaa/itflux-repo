@@ -25,6 +25,13 @@ const FAQ = [
   },
 ];
 
+function formatOfferUntil(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+}
+
 function formatPrice(value) {
   const n = Number(value);
   if (!n) return "Бесплатно";
@@ -128,6 +135,7 @@ export default function PricingPage() {
   const plans = useMemo(() => data?.plans || [], [data]);
   const anon = data?.anonymous;
   const promo = data?.registration_promo;
+  const promotions = data?.promotions || [];
 
   return (
     <div className="pricing-page">
@@ -166,6 +174,21 @@ export default function PricingPage() {
         </div>
       ) : null}
 
+      {promotions.filter((o) => o.can_redeem || o.status === "ended" || !o.can_redeem && o.status === "active").length ? (
+        <section className="pricing-offers" aria-label="Специальные предложения">
+          {promotions.map((offer) => (
+            <article key={offer.id} className="pricing-offer">
+              <strong>{offer.title}</strong>
+              {offer.short_description ? <p>{offer.short_description}</p> : null}
+              <p className="pricing-offer__meta">
+                {offer.plan?.name}
+                {offer.ends_at ? ` · до ${formatOfferUntil(offer.ends_at)}` : ""}
+              </p>
+            </article>
+          ))}
+        </section>
+      ) : null}
+
       {anon ? (
         <section className="pricing-anon" aria-labelledby="pricing-anon-title">
           <h2 id="pricing-anon-title">{anon.title}</h2>
@@ -179,13 +202,22 @@ export default function PricingPage() {
       <section className="pricing-grid" aria-label="Тарифы">
         {plans.map((plan) => {
           const isContact = plan.cta_type === "contact" || plan.slug === "school";
+          const offer = plan.promotion;
+          const offerLive =
+            offer?.can_redeem &&
+            !(period === "year" && offer.benefit_type === "fixed_price");
           const rawPrice = period === "year" ? plan.price_year : plan.price_month;
-          const price = isContact
+          let price = isContact
             ? "По запросу"
             : formatPrice(rawPrice);
+          if (!isContact && offerLive && offer.benefit_type === "free_period") {
+            price = "Бесплатно";
+          } else if (!isContact && offerLive && offer.pricing?.current != null) {
+            price = formatPrice(offer.pricing.current);
+          }
           const priceSuffix =
-            !isContact && Number(rawPrice) > 0
-              ? period === "year"
+            !isContact && (offerLive || Number(rawPrice) > 0)
+              ? period === "year" && !offerLive
                 ? "/год"
                 : "/мес"
               : "";
@@ -200,9 +232,9 @@ export default function PricingPage() {
                 .filter(Boolean)
                 .join(" ")}
             >
-              {(plan.badge_text || plan.is_recommended) && (
+              {(plan.badge_text || plan.is_recommended || offerLive) && (
                 <div className="pricing-card__badge">
-                  {plan.badge_text || "Рекомендуем"}
+                  {offerLive ? "Специальное предложение" : plan.badge_text || "Рекомендуем"}
                 </div>
               )}
               <h2 className="pricing-card__name">{plan.name}</h2>
@@ -210,12 +242,23 @@ export default function PricingPage() {
                 {plan.short_description || plan.description}
               </p>
               <p className="pricing-card__price">
+                {offerLive && offer.pricing?.original && offer.benefit_type !== "free_period" ? (
+                  <s className="pricing-card__was">{formatPrice(offer.pricing.original)}</s>
+                ) : null}
                 {price}
                 {priceSuffix ? <span>{priceSuffix}</span> : null}
                 {isContact ? (
                   <span className="pricing-card__price-note"> индивидуально</span>
                 ) : null}
               </p>
+              {offerLive && offer.ends_at ? (
+                <p className="pricing-card__caveat">
+                  Доступно до {formatOfferUntil(offer.ends_at)}
+                  {offer.pricing?.renewal && offer.benefit_type !== "free_period"
+                    ? ` · далее ${formatPrice(offer.pricing.renewal)}/мес`
+                    : ""}
+                </p>
+              ) : null}
               <PlanFeatures plan={plan} />
               {cta === "contact" ? (
                 <a

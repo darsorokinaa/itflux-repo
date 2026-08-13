@@ -167,6 +167,10 @@ function normalizeMediaUrl(url) {
 }
 
 /** Урок/ДЗ: ученик прикрепляет файлы решения (часть 2). */
+function fileIdentity(file) {
+  return `${file?.name || ""}-${file?.size || 0}-${file?.lastModified || 0}`;
+}
+
 function LessonSolutionUpload({
   taskNumber,
   taskId,
@@ -184,9 +188,7 @@ function LessonSolutionUpload({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [sentPreviews, setSentPreviews] = useState(initialAttachments || []);
-  
-  const [pendingFile, setPendingFile] = useState(null);
-  const [pendingPreview, setPendingPreview] = useState(null);
+  const [pendingItems, setPendingItems] = useState([]);
   const initialAttachmentsKeyRef = useRef("");
 
   useEffect(() => {
@@ -196,35 +198,67 @@ function LessonSolutionUpload({
     setSentPreviews(Array.isArray(initialAttachments) ? initialAttachments : []);
   }, [initialAttachments]);
 
-  const canDeleteAttachment =
-    allowDelete && (cabinetMode || homeworkMode) && !!assignmentId;
+  const pendingItemsRef = useRef([]);
+  pendingItemsRef.current = pendingItems;
 
-  if (!enabled) return null;
-  if (!cabinetMode && !lessonToken) return null;
+  useEffect(() => () => {
+    pendingItemsRef.current.forEach((item) => {
+      if (item.preview) URL.revokeObjectURL(item.preview);
+    });
+  }, []);
+
+  const canDeleteAttachment =
+    allowDelete && (cabinetMode || homeworkMode) && !!assignmentId && enabled;
+
+  if (!enabled && !(Array.isArray(sentPreviews) && sentPreviews.length)) return null;
+  if (!cabinetMode && !lessonToken && !enabled) return null;
+
+  const clearPending = () => {
+    setPendingItems((prev) => {
+      prev.forEach((item) => {
+        if (item.preview) URL.revokeObjectURL(item.preview);
+      });
+      return [];
+    });
+  };
 
   const onFileSelect = (e) => {
-    const file = e.target.files?.[0];
+    const selected = Array.from(e.target.files || []);
     e.target.value = "";
-    if (!file) return;
+    if (!selected.length) return;
     setErr(null);
-    setPendingFile(file);
-    setPendingPreview((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+    setPendingItems((prev) => {
+      const merged = [...prev];
+      selected.forEach((file) => {
+        const key = fileIdentity(file);
+        if (merged.some((item) => item.key === key)) return;
+        merged.push({
+          key,
+          file,
+          preview: file.type?.startsWith("image/") ? URL.createObjectURL(file) : null,
+        });
+      });
+      return merged.slice(0, 20);
     });
   };
 
   const onCancel = (e) => {
     e.stopPropagation();
-    setPendingFile(null);
-    if (pendingPreview) URL.revokeObjectURL(pendingPreview);
-    setPendingPreview(null);
+    clearPending();
     setErr(null);
+  };
+
+  const removePending = (key) => {
+    setPendingItems((prev) => {
+      const item = prev.find((p) => p.key === key);
+      if (item?.preview) URL.revokeObjectURL(item.preview);
+      return prev.filter((p) => p.key !== key);
+    });
   };
 
   const onSend = async (e) => {
     e.stopPropagation();
-    if (!pendingFile) return;
+    if (!pendingItems.length) return;
     setBusy(true);
     setErr(null);
     const fd = new FormData();
@@ -233,7 +267,9 @@ function LessonSolutionUpload({
     if (!homeworkMode && !cabinetMode) {
       fd.append("lesson_token", lessonToken);
     }
-    fd.append("file", pendingFile);
+    pendingItems.forEach((item) => {
+      fd.append("file", item.file, item.file.name || "file");
+    });
     try {
       const uploadOpts = lessonToken ? { lessonToken } : undefined;
       const useNativeHomeworkUpload = (cabinetMode || homeworkMode) && assignmentId;
@@ -251,12 +287,21 @@ function LessonSolutionUpload({
             }
             return parsed;
           })();
-      const url = String(data.url || "");
-      const filename = String(data.filename || pendingFile.name);
-      setSentPreviews((prev) => [...prev, { url, filename, isImage: pendingFile.type.startsWith("image/") }]);
-      setPendingFile(null);
-      if (pendingPreview) URL.revokeObjectURL(pendingPreview);
-      setPendingPreview(null);
+      const imageByName = Object.fromEntries(
+        pendingItems.map((item) => [item.file.name, Boolean(item.file.type?.startsWith("image/"))]),
+      );
+      const uploaded = Array.isArray(data.attachments) && data.attachments.length
+        ? data.attachments
+        : (data.url ? [{ url: data.url, filename: data.filename || pendingItems[0].file.name }] : []);
+      setSentPreviews((prev) => [
+        ...prev,
+        ...uploaded.map((item) => ({
+          url: String(item.url || ""),
+          filename: String(item.filename || "Файл"),
+          isImage: Boolean(imageByName[item.filename]),
+        })),
+      ]);
+      clearPending();
     } catch (ex) {
       const raw = ex instanceof Error ? ex.message : String(ex || "");
       setErr(
@@ -302,72 +347,98 @@ function LessonSolutionUpload({
   return (
     <div className="lesson-solution-upload" onClick={(e) => e.stopPropagation()}>
       <div className="lesson-solution-upload__head">
-        <span className="lesson-solution-upload__label">Прикрепить файлы</span>
-        <span className="lesson-solution-upload__hint">PNG, PDF, DOC, XLS и другие форматы</span>
+        <span className="lesson-solution-upload__label">
+          {enabled ? "Прикрепить файлы" : "Прикреплённые файлы"}
+        </span>
+        {enabled ? (
+          <span className="lesson-solution-upload__hint">PNG, PDF, DOC, XLS и другие форматы</span>
+        ) : null}
       </div>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept={FILE_ACCEPT}
-        className="lesson-solution-file-input"
-        tabIndex={-1}
-        onChange={onFileSelect}
-      />
+      {enabled ? (
+        <>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={FILE_ACCEPT}
+            className="lesson-solution-file-input"
+            tabIndex={-1}
+            onChange={onFileSelect}
+          />
 
-      {!pendingFile ? (
-        <div className="lesson-solution-picker">
-          <button
-            type="button"
-            className="lesson-solution-picker-btn"
-            disabled={busy}
-            onClick={(e) => {
-              e.stopPropagation();
-              fileInputRef.current?.click();
-            }}
-          >
-            Выбрать файл
-          </button>
-          <span className="lesson-solution-picker-name">Файл не выбран</span>
-        </div>
-      ) : (
+          <div className="lesson-solution-picker">
+            <button
+              type="button"
+              className="lesson-solution-picker-btn"
+              disabled={busy}
+              onClick={(e) => {
+                e.stopPropagation();
+                fileInputRef.current?.click();
+              }}
+            >
+              {pendingItems.length ? "Добавить ещё" : "Выбрать файлы"}
+            </button>
+            <span className="lesson-solution-picker-name">
+              {pendingItems.length
+                ? `Выбрано: ${pendingItems.length}`
+                : "Файлы не выбраны"}
+            </span>
+          </div>
+        </>
+      ) : null}
+
+      {enabled && pendingItems.length ? (
         <div className="lesson-solution-pending">
-          <div className="lesson-solution-pending-preview">
-            {pendingPreview ? (
-              <img
-                src={pendingPreview}
-                alt=""
-                className="lesson-solution-pending-image"
-              />
-            ) : (
-              <div className="lesson-solution-pending-file-icon" aria-hidden="true">
-                📄
-              </div>
-            )}
-            <div className="lesson-solution-pending-meta">
-              <span className="lesson-solution-pending-file-name">{pendingFile.name}</span>
-              <div className="lesson-solution-pending-actions">
+          {pendingItems.map((item) => (
+            <div key={item.key} className="lesson-solution-pending-preview">
+              {item.preview ? (
+                <img
+                  src={item.preview}
+                  alt=""
+                  className="lesson-solution-pending-image"
+                />
+              ) : (
+                <div className="lesson-solution-pending-file-icon" aria-hidden="true">
+                  📄
+                </div>
+              )}
+              <div className="lesson-solution-pending-meta">
+                <span className="lesson-solution-pending-file-name">{item.file.name}</span>
                 <button
                   type="button"
                   className="lesson-solution-pending-action lesson-solution-pending-action--ghost"
                   disabled={busy}
-                  onClick={onCancel}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removePending(item.key);
+                  }}
                 >
-                  Отмена
-                </button>
-                <button
-                  type="button"
-                  className="lesson-solution-pending-action lesson-solution-pending-action--primary"
-                  disabled={busy}
-                  onClick={onSend}
-                >
-                  {busy ? "Отправка…" : "Прикрепить"}
+                  Удалить
                 </button>
               </div>
             </div>
+          ))}
+          <div className="lesson-solution-pending-actions">
+            <button
+              type="button"
+              className="lesson-solution-pending-action lesson-solution-pending-action--ghost"
+              disabled={busy}
+              onClick={onCancel}
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              className="lesson-solution-pending-action lesson-solution-pending-action--primary"
+              disabled={busy}
+              onClick={onSend}
+            >
+              {busy ? "Отправка…" : pendingItems.length > 1 ? "Прикрепить все" : "Прикрепить"}
+            </button>
           </div>
         </div>
-      )}
+      ) : null}
 
       {err ? <span className="lesson-solution-upload-error">{err}</span> : null}
 
@@ -3199,6 +3270,20 @@ function ExamPage() {
                     ) : null}
                   </div>
                   </ExamTaskDrawingShell>
+                  <LessonSolutionUpload
+                    taskNumber={task.number}
+                    taskId={task.id}
+                    lessonToken={lessonEmbedParams.token}
+                    assignmentId={cabinetAssignmentId}
+                    homeworkMode={isHomework}
+                    cabinetMode={showCabinetPart2SolutionUpload}
+                    allowDelete
+                    initialAttachments={homeworkTaskAttachments(hwPicked?.result, task.id, task.number, variant?.tasks)}
+                    enabled={
+                      (showLessonSolutionUpload || showCabinetPart2SolutionUpload)
+                      && (!isHomework || (!hRead && !numLocked(task.number)))
+                    }
+                  />
                   {!isHomework && (
                   <div className="task-report-error-wrap">
                     <TaskReportErrorButton taskId={task.id} taskNumber={task.number} onClick={handleReportErrorClick} />

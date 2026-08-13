@@ -10,28 +10,30 @@ import {
 } from "../StudentSectionUi";
 import CabinetIcon from "../../CabinetIcons";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import { getMaterialTypeConfig, materialTypeLabel } from "../../materialTypeConfig";
+import {
+  StudentMaterialPreviewModal,
+  StudentMaterialThumb,
+  isMaterialPreviewable,
+} from "../components/StudentMaterialPreview";
 
-const MATERIAL_ICONS = {
-  lesson:       { icon: "lessons",   color: "blue"   },
-  task_set:     { icon: "tasks",     color: "blue"   },
-  worksheet:    { icon: "note",      color: "purple" },
-  presentation: { icon: "plan",      color: "yellow" },
-  methodic:     { icon: "book",      color: "green"  },
-  link:         { icon: "arrow",     color: "blue"   },
-  file:         { icon: "folder",    color: "yellow" },
-};
-
-function DetailItemCard({ icon, iconColor = "blue", title, subtitle, to, href, isClickable = true }) {
+function DetailItemCard({ icon, iconColor = "blue", iconStyle, title, subtitle, to, href, thumb, onClick }) {
   const inner = (
     <>
-      <span className={`st-ld-item__icon st-ld-item__icon--${iconColor}`} aria-hidden="true">
-        <CabinetIcon name={icon} />
-      </span>
+      {thumb || (
+        <span
+          className={`st-ld-item__icon${iconStyle ? "" : ` st-ld-item__icon--${iconColor}`}`}
+          style={iconStyle}
+          aria-hidden="true"
+        >
+          <CabinetIcon name={icon} />
+        </span>
+      )}
       <span className="st-ld-item__body">
         <span className="st-ld-item__title">{title}</span>
         {subtitle ? <span className="st-ld-item__sub">{subtitle}</span> : null}
       </span>
-      {(to || href) && (
+      {(to || href || onClick) && (
         <span className="st-ld-item__arrow" aria-hidden="true">
           <CabinetIcon name="arrow" />
         </span>
@@ -39,6 +41,13 @@ function DetailItemCard({ icon, iconColor = "blue", title, subtitle, to, href, i
     </>
   );
 
+  if (onClick) {
+    return (
+      <button type="button" className="st-ld-item st-ld-item--link" onClick={onClick}>
+        {inner}
+      </button>
+    );
+  }
   if (to)   return <Link to={to} className="st-ld-item st-ld-item--link">{inner}</Link>;
   if (href) return <a href={href} target="_blank" rel="noreferrer" className="st-ld-item st-ld-item--link">{inner}</a>;
   return <div className="st-ld-item">{inner}</div>;
@@ -50,6 +59,7 @@ export default function StudentLessonDetailPage() {
   const [lesson, setLesson] = useState(null);
   const [loading, setLoading] = useState(true);
   const [completing, setCompleting] = useState(false);
+  const [previewItem, setPreviewItem] = useState(null);
   usePageTitle(lesson?.title || "Урок");
 
   useEffect(() => {
@@ -120,16 +130,19 @@ export default function StudentLessonDetailPage() {
           <h2 className="st-ld-section__title">Материалы</h2>
           <div className="st-ld-list">
             {lesson.materials.map((m) => {
-              const { icon, color } = MATERIAL_ICONS[m.type] || { icon: "note", color: "blue" };
+              const cfg = getMaterialTypeConfig(m.type);
+              const previewable = isMaterialPreviewable(m);
               const url = m.external_url || m.file_url || undefined;
               return (
                 <DetailItemCard
                   key={m.id}
-                  icon={icon}
-                  iconColor={color}
+                  thumb={<StudentMaterialThumb item={m} />}
+                  icon={cfg.icon}
+                  iconStyle={{ background: cfg.background, color: cfg.color }}
                   title={m.title}
-                  subtitle={m.type_label}
-                  href={url}
+                  subtitle={materialTypeLabel(m.type, m.type_label)}
+                  href={previewable ? undefined : url}
+                  onClick={previewable ? () => setPreviewItem(m) : undefined}
                 />
               );
             })}
@@ -164,7 +177,7 @@ export default function StudentLessonDetailPage() {
               <DetailItemCard
                 key={ix.id}
                 icon="interactives"
-                iconColor="purple"
+                iconStyle={{ background: getMaterialTypeConfig("interactive").background, color: getMaterialTypeConfig("interactive").color }}
                 title={ix.title}
                 to={`/cabinet/student/interactives/${ix.id}/play`}
               />
@@ -198,6 +211,9 @@ export default function StudentLessonDetailPage() {
           К списку занятий
         </button>
       </div>
+      {previewItem ? (
+        <StudentMaterialPreviewModal item={previewItem} onClose={() => setPreviewItem(null)} />
+      ) : null}
     </StudentPageShell>
   );
 }

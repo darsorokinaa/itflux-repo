@@ -21,6 +21,12 @@ from Cabinet.payment_service import PaymentProviderService
 from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
 
 
+def _set_teacher_role(user):
+    profile = user.profile
+    profile.role = Profile.Role.TEACHER
+    profile.save(update_fields=["role"])
+
+
 def _ensure_plans():
     plans = {}
     specs = [
@@ -55,11 +61,14 @@ class SubscriptionAccessTests(TestCase):
     def setUp(self):
         self.plans = _ensure_plans()
         self.factory = RequestFactory()
-        self.user = User.objects.create_user("teacher1", "t1@example.com", "pass")
-        Profile.objects.get_or_create(
-            user=self.user,
-            defaults={"role": Profile.Role.TEACHER},
+        promo_patcher = mock.patch(
+            "Cabinet.registration_promo.ensure_registration_promo",
+            return_value=None,
         )
+        promo_patcher.start()
+        self.addCleanup(promo_patcher.stop)
+        self.user = User.objects.create_user("teacher1", "t1@example.com", "pass")
+        _set_teacher_role(self.user)
         TeacherSubscription.objects.update_or_create(
             teacher=self.user,
             defaults={
@@ -88,6 +97,24 @@ class SubscriptionAccessTests(TestCase):
             access_level=ContentAccessLevel.PREMIUM,
         )
         self.assertTrue(SubscriptionAccessService.can_access_content(self.user, material))
+
+    def test_student_bypasses_teacher_plan_gate(self):
+        student_user = User.objects.create_user("stu1", "s1@example.com", "pass")
+        student_user.profile.role = Profile.Role.STUDENT
+        student_user.profile.save(update_fields=["role"])
+        other = User.objects.create_user("other_prem", "op@example.com", "pass")
+        material = Material.objects.create(
+            title="Premium catalog",
+            teacher=other,
+            access_level=ContentAccessLevel.PREMIUM,
+            is_public=True,
+        )
+        self.assertTrue(SubscriptionAccessService.can_access_content(student_user, material))
+        SubscriptionAccessService.raise_if_cannot_access_content(student_user, material)
+        gate = SubscriptionAccessService.serialize_access_gate(student_user, material)
+        self.assertTrue(gate["allowed"])
+        self.assertFalse(SubscriptionAccessService.can_access_content(self.user, material))
+        self.assertFalse(SubscriptionAccessService.can_access_content(None, material))
 
     def test_anonymous_variant_limit(self):
         request = self.factory.post("/")
@@ -171,8 +198,14 @@ class RemapTariffTests(TestCase):
 class ExpiredPlanAccessTests(TestCase):
     def setUp(self):
         self.plans = _ensure_plans()
+        promo_patcher = mock.patch(
+            "Cabinet.registration_promo.ensure_registration_promo",
+            return_value=None,
+        )
+        promo_patcher.start()
+        self.addCleanup(promo_patcher.stop)
         self.user = User.objects.create_user("exp1", "exp1@example.com", "pass")
-        Profile.objects.get_or_create(user=self.user, defaults={"role": Profile.Role.TEACHER})
+        _set_teacher_role(self.user)
         TeacherSubscription.objects.update_or_create(
             teacher=self.user,
             defaults={

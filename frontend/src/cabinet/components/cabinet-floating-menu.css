@@ -1,0 +1,66 @@
+/* Портал на document.body: выше сайдбара кабинета (200) и комнаты урока (12000). */
+.cb-float-menu-catch {
+  position: fixed;
+  inset: 0;
+  z-index: 12990;
+}
+
+.cb-float-menu {
+  position: fixed !important;
+  right: auto !important;
+  bottom: auto !important;
+  top: var(--cb-float-top, 8px) !important;
+  left: var(--cb-float-left, 8px) !important;
+  z-index: 13000 !important;
+}
+
+.cb-float-menu--sheet {
+  left: 12px !important;
+  right: 12px !important;
+  bottom: 12px !important;
+  top: auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none;
+}
+
+.cb-float-menu.cabinet-header-more__menu {
+  min-width: 180px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+}
+
+.cb-float-menu.cabinet-header-more__menu .cabinet-header-more__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #0f172a;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.cb-float-menu.cabinet-header-more__menu .cabinet-header-more__item:hover,
+.cb-float-menu.cabinet-header-more__menu .cabinet-header-more__item:focus-visible {
+  background: #f1f5f9;
+  outline: none;
+}
+
+.cb-float-menu.cabinet-header-more__menu .cabinet-header-more__item svg {
+  width: 18px;
+  height: 18px;
+  color: #475569;
+  flex-shrink: 0;
+}

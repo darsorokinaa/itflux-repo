@@ -1338,7 +1338,8 @@ class StudentReleaseTests(TestCase):
         homework = Homework.objects.filter(student=self.student, lesson_plan_item=self.plan_item).first()
         self.assertIsNotNone(homework)
         self.assertEqual(homework.status, "assigned")
-        self.assertEqual(homework.tasks.count(), 1)
+        self.assertEqual(homework.tasks.count(), 0)
+        self.assertEqual(homework.description, "Решить задачи 1–3")
 
         options = client.get(f"/api/cabinet/students/{self.student.pk}/homework-options/").json()
         self.assertTrue(options["items"][0]["assigned"])
@@ -1370,7 +1371,8 @@ class StudentReleaseTests(TestCase):
         ).first()
         self.assertIsNotNone(homework)
         self.assertEqual(homework.status, "assigned")
-        self.assertEqual(homework.tasks.count(), 1)
+        self.assertEqual(homework.tasks.count(), 0)
+        self.assertEqual(homework.description, "Решите задачи 1–5")
 
         submission = HomeworkSubmission.objects.get(homework=homework, student=self.student)
         self.assertIsNone(submission.submitted_at)
@@ -1498,7 +1500,7 @@ class HomeworkSubmissionApiTests(TestCase):
             homework=hw,
             task_type="file",
             title="Презентация.pdf",
-            description="/media/cabinet/materials/demo.pdf",
+            description="https://example.com/demo.pdf",
             order=0,
         )
 
@@ -1508,7 +1510,7 @@ class HomeworkSubmissionApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         task = response.json()["tasks"][0]
         self.assertTrue(task.get("open_url"))
-        self.assertTrue(task["open_url"].startswith("/media/"))
+        self.assertTrue(task["open_url"].startswith("https://example.com/"))
 
     def test_homework_assignment_submit_stores_result_for_teacher(self):
         from rest_framework.test import APIClient
@@ -1553,6 +1555,30 @@ class HomeworkSubmissionApiTests(TestCase):
         attachments = submission.result_payload["attachments_by_task_id"]["42"]
         self.assertEqual(len(attachments), 1)
         self.assertEqual(attachments[0]["filename"], "solution.png")
+
+    def test_homework_upload_answer_stores_multiple_files(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from rest_framework.test import APIClient
+        from Cabinet.models import HomeworkSubmission
+
+        client = APIClient()
+        client.force_login(self.student_user)
+        file_a = SimpleUploadedFile("page1.pdf", b"pdf-one", content_type="application/pdf")
+        file_b = SimpleUploadedFile("page2.pdf", b"pdf-two", content_type="application/pdf")
+        response = client.post(
+            f"/api/homework/assignment/{self.homework.pk}/upload-answer/",
+            {"file": [file_a, file_b], "task_number": "16", "task_id": "42"},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertTrue(data.get("ok"))
+        self.assertEqual(len(data.get("attachments") or []), 2)
+        submission = HomeworkSubmission.objects.get(homework=self.homework, student=self.student)
+        attachments = submission.result_payload["attachments_by_task_id"]["42"]
+        self.assertEqual(len(attachments), 2)
+        self.assertEqual(attachments[0]["filename"], "page1.pdf")
+        self.assertEqual(attachments[1]["filename"], "page2.pdf")
 
     def test_homework_delete_answer_removes_attachment(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
@@ -1730,6 +1756,87 @@ class HomeworkSubmissionApiTests(TestCase):
         submission = HomeworkSubmission.objects.get(homework=hw, student=self.student)
         self.assertEqual(submission.answer_text, "Только текст")
         self.assertTrue(submission.attached_file.name.endswith(".pdf"))
+
+    def test_student_can_submit_multiple_files(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from rest_framework.test import APIClient
+        from Cabinet.models import HomeworkSubmission, HomeworkSubmissionAttachment
+
+        hw = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="ДЗ: Несколько файлов",
+            status="assigned",
+        )
+        client = APIClient()
+        client.force_login(self.student_user)
+        file_a = SimpleUploadedFile("page1.pdf", b"pdf-one", content_type="application/pdf")
+        file_b = SimpleUploadedFile("page2.pdf", b"pdf-two", content_type="application/pdf")
+        file_c = SimpleUploadedFile("photo.jpg", b"\xff\xd8\xffjpeg", content_type="image/jpeg")
+        response = client.post(
+            f"/api/cabinet/student/assignments/{hw.pk}/",
+            {"answer_text": "Готово", "attached_file": [file_a, file_b, file_c]},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        submission = HomeworkSubmission.objects.get(homework=hw, student=self.student)
+        extras = list(HomeworkSubmissionAttachment.objects.filter(submission=submission).order_by("id"))
+        self.assertTrue(submission.attached_file.name.endswith(".pdf"))
+        self.assertEqual(len(extras), 2)
+        attached_files = response.data.get("attached_files") or []
+        self.assertEqual(len(attached_files), 3)
+        self.assertTrue(all(item.get("url") and item.get("name") for item in attached_files))
+
+        detail = client.get(f"/api/cabinet/student/assignments/{hw.pk}/")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(len(detail.data.get("attached_files") or []), 3)
+
+        first = client.get(f"/api/cabinet/student/assignments/{hw.pk}/attached-file/")
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(b"".join(first.streaming_content), b"pdf-one")
+
+        extra_url = attached_files[1]["url"]
+        extra = client.get(extra_url)
+        self.assertEqual(extra.status_code, 200, extra_url)
+        self.assertEqual(b"".join(extra.streaming_content), b"pdf-two")
+
+        teacher_client = APIClient()
+        teacher_client.force_login(self.teacher)
+        teacher_extra = teacher_client.get(
+            f"/api/cabinet/homework/submissions/{submission.pk}/attached-files/{extras[0].pk}/"
+        )
+        self.assertEqual(teacher_extra.status_code, 200)
+        self.assertEqual(b"".join(teacher_extra.streaming_content), b"pdf-two")
+
+    def test_student_cannot_add_more_files_after_submit_with_files(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from rest_framework.test import APIClient
+        from Cabinet.models import HomeworkSubmission
+
+        hw = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="ДЗ: Уже сдано",
+            status="assigned",
+        )
+        client = APIClient()
+        client.force_login(self.student_user)
+        first = SimpleUploadedFile("one.pdf", b"pdf-one", content_type="application/pdf")
+        submit = client.post(
+            f"/api/cabinet/student/assignments/{hw.pk}/",
+            {"answer_text": "Готово", "attached_file": first},
+            format="multipart",
+        )
+        self.assertEqual(submit.status_code, 200, submit.content)
+        extra = SimpleUploadedFile("two.pdf", b"pdf-two", content_type="application/pdf")
+        again = client.post(
+            f"/api/cabinet/student/assignments/{hw.pk}/",
+            {"answer_text": "", "attached_file": extra},
+            format="multipart",
+        )
+        self.assertEqual(again.status_code, 403)
+        submission = HomeworkSubmission.objects.get(homework=hw, student=self.student)
+        self.assertEqual(submission.file_attachments.count(), 0)
 
 
 class ReviewApiTests(TestCase):
@@ -2023,6 +2130,67 @@ class ReviewApiTests(TestCase):
         self.assertEqual(delete_response.status_code, 200, delete_response.content)
         submission.refresh_from_db()
         self.assertNotIn("20", submission.result_payload.get("teacher_attachments_by_task_id", {}))
+
+    def test_teacher_can_upload_multiple_review_feedback_files(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from rest_framework.test import APIClient
+        from Cabinet.models import HomeworkSubmission
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        file_a = SimpleUploadedFile("note1.pdf", b"%PDF-1.4 a", content_type="application/pdf")
+        file_b = SimpleUploadedFile("note2.pdf", b"%PDF-1.4 b", content_type="application/pdf")
+        response = client.post(
+            f"/api/cabinet/review/{self.review_item.pk}/upload-feedback/",
+            {"task_number": "20", "task_id": "20", "file": [file_a, file_b]},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(len(data.get("attachments") or []), 2)
+        submission = HomeworkSubmission.objects.get(pk=self.submission.pk)
+        attachments = submission.result_payload["teacher_attachments_by_task_id"]["20"]
+        self.assertEqual(len(attachments), 2)
+
+    def test_teacher_can_attach_multiple_files_to_review_comment(self):
+        from urllib.parse import quote
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from rest_framework.test import APIClient
+        from Cabinet.models import HomeworkSubmission
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        file_a = SimpleUploadedFile("comment1.pdf", b"%PDF-1.4 a", content_type="application/pdf")
+        file_b = SimpleUploadedFile("photo.png", b"\x89PNG\r\n\x1a\n", content_type="image/png")
+        response = client.post(
+            f"/api/cabinet/review/{self.review_item.pk}/upload-feedback/",
+            {"file": [file_a, file_b]},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(len(data.get("attachments") or []), 2)
+
+        submission = HomeworkSubmission.objects.get(pk=self.submission.pk)
+        attachments = submission.result_payload["teacher_comment_attachments"]
+        self.assertEqual(len(attachments), 2)
+        self.assertEqual(
+            {item["filename"] for item in attachments},
+            {"comment1.pdf", "photo.png"},
+        )
+        self.assertNotIn("teacher_attachments_by_task_id", submission.result_payload)
+
+        delete_url = (
+            f"/api/cabinet/review/{self.review_item.pk}/upload-feedback/"
+            f"?url={quote(attachments[0]['url'])}"
+        )
+        delete_response = client.delete(delete_url)
+        self.assertEqual(delete_response.status_code, 200, delete_response.content)
+        submission.refresh_from_db()
+        remaining = submission.result_payload.get("teacher_comment_attachments") or []
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0]["filename"], attachments[1]["filename"])
 
 
 class ReferralLinkTests(TestCase):

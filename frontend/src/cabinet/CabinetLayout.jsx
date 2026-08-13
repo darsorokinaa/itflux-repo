@@ -15,6 +15,7 @@ import CabinetGlobalSearch from "./components/CabinetGlobalSearch";
 import CabinetNotificationsBell from "./components/CabinetNotificationsBell";
 import CabinetGuideModal from "./components/CabinetGuideModal";
 import ConfirmActionModal from "./components/ConfirmActionModal";
+import CabinetFloatingMenu from "./components/CabinetFloatingMenu";
 import { UserAvatarMark } from "./components/ProfileAvatarEditor";
 import { useSubscription } from "./hooks/useSubscription";
 import { PageTitleProvider } from "./hooks/usePageTitle";
@@ -118,7 +119,7 @@ export default function CabinetLayout() {
   const [isMobileShell, setIsMobileShell] = useState(false);
   const [navCounts, setNavCounts] = useState({ students: 0, reviews: 0 });
   const searchInputRef = useRef(null);
-  const headerMoreRef = useRef(null);
+  const [headerMoreAnchor, setHeaderMoreAnchor] = useState(null);
   const subscription = useSubscription();
   const planName = subscription.currentPlan?.name || "";
 
@@ -130,6 +131,7 @@ export default function CabinetLayout() {
       if (!mq.matches) {
         setNavOpen(false);
         setHeaderMoreOpen(false);
+        setHeaderMoreAnchor(null);
       }
     };
     sync();
@@ -203,24 +205,6 @@ export default function CabinetLayout() {
       window.removeEventListener("keydown", onKey);
     };
   }, [navOpen]);
-
-  useEffect(() => {
-    if (!headerMoreOpen) return undefined;
-    const onDoc = (e) => {
-      if (headerMoreRef.current && !headerMoreRef.current.contains(e.target)) {
-        setHeaderMoreOpen(false);
-      }
-    };
-    const onKey = (e) => {
-      if (e.key === "Escape") setHeaderMoreOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [headerMoreOpen]);
 
   useEffect(() => {
     if (loading || !user || user.role === "student") return;
@@ -461,67 +445,84 @@ export default function CabinetLayout() {
             >
               <CabinetIcon name="search" />
             </button>
-            <div className="cabinet-header-more" ref={headerMoreRef}>
+            <div className="cabinet-header-more">
               <button
                 type="button"
                 className="cabinet-header-icon-btn cabinet-header-more-btn"
                 aria-label="Дополнительные действия"
                 aria-expanded={headerMoreOpen}
-                onClick={() => setHeaderMoreOpen((v) => !v)}
+                onClick={(e) => {
+                  const next = !headerMoreOpen;
+                  setHeaderMoreOpen(next);
+                  setHeaderMoreAnchor(next ? e.currentTarget : null);
+                }}
               >
                 <CabinetIcon name="more" />
               </button>
-              {headerMoreOpen ? (
-                <div className="cabinet-header-more__menu" role="menu">
+              <CabinetFloatingMenu
+                open={headerMoreOpen}
+                anchorEl={headerMoreAnchor}
+                onClose={() => {
+                  setHeaderMoreOpen(false);
+                  setHeaderMoreAnchor(null);
+                }}
+                className="cabinet-header-more__menu"
+                width={180}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="cabinet-header-more__item"
+                  onClick={() => {
+                    setHeaderMoreOpen(false);
+                    setHeaderMoreAnchor(null);
+                    openGuide();
+                  }}
+                >
+                  <CabinetIcon name="bulb" />
+                  <span>Инструкция</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="cabinet-header-more__item"
+                  onClick={() => {
+                    setHeaderMoreOpen(false);
+                    setHeaderMoreAnchor(null);
+                    setSearchOpen(true);
+                  }}
+                >
+                  <CabinetIcon name="search" />
+                  <span>Поиск</span>
+                </button>
+                <Link
+                  to="/cabinet/settings/notifications/"
+                  role="menuitem"
+                  className="cabinet-header-more__item"
+                  onClick={() => {
+                    setHeaderMoreOpen(false);
+                    setHeaderMoreAnchor(null);
+                  }}
+                >
+                  <CabinetIcon name="settings" />
+                  <span>Настройки</span>
+                </Link>
+                {hasSeasonalAppearance ? (
                   <button
                     type="button"
                     role="menuitem"
                     className="cabinet-header-more__item"
                     onClick={() => {
                       setHeaderMoreOpen(false);
-                      openGuide();
+                      setHeaderMoreAnchor(null);
+                      openAppearancePanel();
                     }}
                   >
-                    <CabinetIcon name="bulb" />
-                    <span>Инструкция</span>
+                    <CabinetIcon name="spark" />
+                    <span>Оформление</span>
                   </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="cabinet-header-more__item"
-                    onClick={() => {
-                      setHeaderMoreOpen(false);
-                      setSearchOpen(true);
-                    }}
-                  >
-                    <CabinetIcon name="search" />
-                    <span>Поиск</span>
-                  </button>
-                  <Link
-                    to="/cabinet/settings/notifications/"
-                    role="menuitem"
-                    className="cabinet-header-more__item"
-                    onClick={() => setHeaderMoreOpen(false)}
-                  >
-                    <CabinetIcon name="settings" />
-                    <span>Настройки</span>
-                  </Link>
-                  {hasSeasonalAppearance ? (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="cabinet-header-more__item"
-                      onClick={() => {
-                        setHeaderMoreOpen(false);
-                        openAppearancePanel();
-                      }}
-                    >
-                      <CabinetIcon name="spark" />
-                      <span>Оформление</span>
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
+                ) : null}
+              </CabinetFloatingMenu>
             </div>
             <Link
               to="/cabinet/more"

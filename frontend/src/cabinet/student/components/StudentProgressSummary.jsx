@@ -38,13 +38,26 @@ export default function StudentProgressSummary({ metrics, lastResult, hasData })
       </div>
 
       {lastResult ? (
-        <div className="st-dash-last-result">
-          <span>Последний результат</span>
-          <strong>
-            {lastResult.title}
-            {lastResult.score_percent != null ? ` · ${Math.round(lastResult.score_percent)}%` : ""}
-          </strong>
-        </div>
+        lastResult.href || lastResult.homework_id ? (
+          <Link
+            to={lastResult.href || `/cabinet/student/assignments/${lastResult.homework_id}?focus=results`}
+            className="st-dash-last-result"
+          >
+            <span>Последний результат</span>
+            <strong>
+              {lastResult.title}
+              {lastResult.score_percent != null ? ` · ${Math.round(lastResult.score_percent)}%` : ""}
+            </strong>
+          </Link>
+        ) : (
+          <div className="st-dash-last-result">
+            <span>Последний результат</span>
+            <strong>
+              {lastResult.title}
+              {lastResult.score_percent != null ? ` · ${Math.round(lastResult.score_percent)}%` : ""}
+            </strong>
+          </div>
+        )
       ) : null}
 
       <Link to="/cabinet/student/progress" className="st-home-block__link st-progress-summary__link">

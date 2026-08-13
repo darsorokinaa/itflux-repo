@@ -208,6 +208,10 @@ def add_homework_attachments(homework: Homework, teacher, uploaded_files: list) 
         getattr(teacher, "is_staff", False) or getattr(teacher, "is_superuser", False)
     ):
         raise HomeworkAttachmentError("Нет доступа", code="forbidden", status=403)
+    from .homework_edit import HOMEWORK_ACCEPTED_EDIT_ERROR, homework_is_checked_or_completed
+
+    if homework_is_checked_or_completed(homework):
+        raise HomeworkAttachmentError(HOMEWORK_ACCEPTED_EDIT_ERROR, code="homework_accepted")
 
     files = [f for f in (uploaded_files or []) if f]
     if not files:
@@ -261,7 +265,6 @@ def add_homework_attachments(homework: Homework, teacher, uploaded_files: list) 
                 if relation:
                     relation.material = material
                     relation.save(update_fields=["material"])
-            _ensure_file_task_for_material(homework, material, teacher=teacher)
             created.append(serialize_homework_attachment(relation))
         except (HomeworkAttachmentError, UploadValidationError, FileServiceError) as exc:
             errors.append(
@@ -290,6 +293,10 @@ def add_homework_attachments(homework: Homework, teacher, uploaded_files: list) 
 def delete_homework_attachment(homework: Homework, teacher, attachment_id) -> dict:
     if not _teacher_can_edit_homework(teacher, homework):
         raise HomeworkAttachmentError("Нет доступа", code="forbidden", status=403)
+    from .homework_edit import HOMEWORK_ACCEPTED_EDIT_ERROR, homework_is_checked_or_completed
+
+    if homework_is_checked_or_completed(homework):
+        raise HomeworkAttachmentError(HOMEWORK_ACCEPTED_EDIT_ERROR, code="homework_accepted")
 
     relation = (
         CabinetFileRelation.objects.select_related("file", "material")

@@ -1,5 +1,6 @@
 import { getInteractiveDisplayTitle } from "./interactivesData";
 import { mapApiMaterial, mapApiPlanItem } from "./lessonPlansData";
+import { materialTypeLabel } from "./materialTypeConfig";
 import { mapApiInteractiveAttachment, materialOpenUrl } from "./planItemAttachments";
 
 export const EMPTY_PLAN_SESSION = {
@@ -85,7 +86,7 @@ export function sessionLessonAttachmentRows(session) {
       key: `lm-${material.id}`,
       kind,
       label: material.title,
-      typeLabel: material.materialTypeLabel || "Материал",
+      typeLabel: materialTypeLabel(material.materialType, material.materialTypeLabel),
       url: materialOpenUrl(material),
       materialId: material.id,
     }));
@@ -96,7 +97,7 @@ export function sessionLessonAttachmentRows(session) {
       key: `task-${material.id}`,
       kind: "variant",
       label: material.title,
-      typeLabel: material.materialTypeLabel || "Вариант",
+      typeLabel: materialTypeLabel(material.materialType, material.materialTypeLabel) || "Вариант",
       url: materialOpenUrl(material),
       materialId: material.id,
     }));
@@ -119,7 +120,7 @@ export function sessionTaskAttachmentRows(session) {
     key: `task-${material.id}`,
     kind: "variant",
     label: material.title,
-    typeLabel: material.materialTypeLabel || "Вариант",
+    typeLabel: materialTypeLabel(material.materialType, material.materialTypeLabel) || "Вариант",
     url: materialOpenUrl(material),
     materialId: material.id,
   }));
@@ -137,7 +138,7 @@ export function sessionHomeworkAttachmentRows(session) {
       key: `hwm-${material.id}`,
       kind,
       label: material.title,
-      typeLabel: material.materialTypeLabel || "Материал",
+      typeLabel: materialTypeLabel(material.materialType, material.materialTypeLabel),
       url: materialOpenUrl(material),
       materialId: material.id,
     }));

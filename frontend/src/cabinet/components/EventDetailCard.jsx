@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import CabinetIcon from "../CabinetIcons";
 import BoardLessonBlock from "./BoardLessonBlock";
+import CabinetFloatingMenu from "./CabinetFloatingMenu";
 import {
   compactLessonBillingLabel,
   financialStatusMod,
@@ -419,24 +420,28 @@ function ResourceSection({
   );
 }
 
-function MoreMenu({ open, onClose, items, isMobile }) {
-  if (!open) return null;
+function MoreMenu({ open, onClose, items = [], isMobile, anchorEl }) {
   const regular = items.filter((item) => !item.danger);
   const danger = items.filter((item) => item.danger);
   return (
-    <>
-      <button type="button" className="cb-lesson-card__menu-backdrop" onClick={onClose} aria-label="Закрыть меню" />
-      <div className={`cb-lesson-card__menu${isMobile ? " cb-lesson-card__menu--sheet" : ""}`} role="menu">
-        {regular.map((item) => (
-          <button
-            key={item.label}
-            type="button"
-            className="cb-lesson-card__menu-item"
-            role="menuitem"
-            onClick={() => {
-              onClose();
-              item.onClick();
-            }}
+    <CabinetFloatingMenu
+      open={open}
+      anchorEl={anchorEl}
+      onClose={onClose}
+      className={`cb-lesson-card__menu${isMobile ? " cb-lesson-card__menu--sheet" : ""}`}
+      placement={isMobile ? "sheet" : "anchor"}
+      width={200}
+    >
+      {regular.map((item) => (
+        <button
+          key={item.label}
+          type="button"
+          className="cb-lesson-card__menu-item"
+          role="menuitem"
+          onClick={() => {
+            onClose();
+            item.onClick();
+          }}
           >
             {item.label}
           </button>
@@ -456,8 +461,7 @@ function MoreMenu({ open, onClose, items, isMobile }) {
             {item.label}
           </button>
         ))}
-      </div>
-    </>
+    </CabinetFloatingMenu>
   );
 }
 
@@ -483,6 +487,7 @@ function ActionBar({
   moreItems,
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreBtnRef = useRef(null);
 
   if (studentMode) {
     return (
@@ -568,6 +573,7 @@ function ActionBar({
         ) : null}
         <div className="cb-lesson-card__more-wrap">
           <button
+            ref={moreBtnRef}
             type="button"
             className="cb-lesson-card__btn cb-lesson-card__btn--ghost"
             onClick={() => setMoreOpen((value) => !value)}
@@ -576,7 +582,13 @@ function ActionBar({
           >
             Ещё
           </button>
-          <MoreMenu open={moreOpen} onClose={() => setMoreOpen(false)} items={moreItems} isMobile={isMobile} />
+          <MoreMenu
+            open={moreOpen}
+            onClose={() => setMoreOpen(false)}
+            items={moreItems}
+            isMobile={isMobile}
+            anchorEl={moreBtnRef.current}
+          />
         </div>
       </div>
     </footer>

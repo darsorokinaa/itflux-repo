@@ -19,12 +19,9 @@ def submission_has_student_work(submission) -> bool:
         return False
     if (getattr(submission, "answer_text", None) or "").strip():
         return True
-    if getattr(submission, "attached_file", None):
-        try:
-            if submission.attached_file.name:
-                return True
-        except Exception:
-            pass
+    from .submission_files import submission_has_files
+    if submission_has_files(submission):
+        return True
     payload = getattr(submission, "result_payload", None) or {}
     if not isinstance(payload, dict) or not payload:
         return False

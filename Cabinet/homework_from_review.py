@@ -590,15 +590,6 @@ def create_homework_from_review(
                 plan_item=None,
             )
 
-    if description and not homework.tasks.filter(is_active=True).exists():
-        HomeworkTask.objects.create(
-            homework=homework,
-            task_type=HomeworkTaskType.TEXT,
-            title="Домашнее задание",
-            description=description,
-            order=order,
-        )
-
     _record_variant_tasks_for_homework(homework, student, teacher)
 
     notified = 0

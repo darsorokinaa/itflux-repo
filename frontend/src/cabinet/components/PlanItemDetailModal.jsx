@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import CabinetModal from "./CabinetModal";
+import CabinetFloatingMenu from "./CabinetFloatingMenu";
 import {
   mapApiPlanItem,
   planExamLabel,
@@ -183,7 +184,7 @@ export default function PlanItemDetailModal({
 }) {
   const [item, setItem] = useState(initialItem || null);
   const [loading, setLoading] = useState(!initialItem);
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [moreAnchor, setMoreAnchor] = useState(null);
   const [materialsSaving, setMaterialsSaving] = useState(false);
   const [materialsError, setMaterialsError] = useState("");
   const [duplicating, setDuplicating] = useState(false);
@@ -330,7 +331,7 @@ export default function PlanItemDetailModal({
         homework_description: item.homeworkDescription,
         teacher_comment: item.teacherComment,
       });
-      setMoreOpen(false);
+      setMoreAnchor(null);
       onClose?.();
       navigate(`/cabinet/plans/${planId}/edit`);
     } catch (err) {
@@ -374,24 +375,28 @@ export default function PlanItemDetailModal({
           <button
             type="button"
             className="cb-btn cb-btn--ghost cb-btn--sm"
-            aria-expanded={moreOpen}
-            onClick={() => setMoreOpen((v) => !v)}
+            aria-expanded={Boolean(moreAnchor)}
+            onClick={(e) => setMoreAnchor(moreAnchor ? null : e.currentTarget)}
           >
             Ещё
           </button>
-          {moreOpen ? (
-            <div className="cb-lesson-card__more-menu" role="menu">
-              <button
-                type="button"
-                className="cb-lesson-card__more-item"
-                role="menuitem"
-                onClick={handleDuplicateItem}
-                disabled={duplicating}
-              >
-                {duplicating ? "…" : "Дублировать в редакторе"}
-              </button>
-            </div>
-          ) : null}
+          <CabinetFloatingMenu
+            open={Boolean(moreAnchor)}
+            anchorEl={moreAnchor}
+            onClose={() => setMoreAnchor(null)}
+            className="cb-lesson-card__more-menu"
+            width={220}
+          >
+            <button
+              type="button"
+              className="cb-lesson-card__more-item"
+              role="menuitem"
+              onClick={handleDuplicateItem}
+              disabled={duplicating}
+            >
+              {duplicating ? "…" : "Дублировать в редакторе"}
+            </button>
+          </CabinetFloatingMenu>
         </div>
       ) : null}
     </div>

@@ -3,6 +3,7 @@ import {
   StudentStatusBadge,
   formatDueDate,
 } from "../StudentSectionUi";
+import { getStudentAssignmentPath } from "../studentAssignmentCards";
 import {
   studentHwActionLabel,
   studentHwStatusLabel,
@@ -65,7 +66,7 @@ export function PendingHomeworkCard({ item, showTeacher = false }) {
         ) : null}
       </div>
       <Link
-        to={`/cabinet/student/assignments/${item.id}`}
+        to={getStudentAssignmentPath(item)}
         className="cb-btn cb-btn--primary cb-btn--sm"
       >
         {actionLabel}

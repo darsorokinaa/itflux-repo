@@ -435,6 +435,7 @@ class TBankPaymentProvider(PaymentProviderInterface):
                 "billing_period": payment.billing_period,
                 "amount_kopecks": kopecks,
                 "recurrent_parent": recurrent_parent,
+                "payment_url": payment_url,
             }
         )
         payment.provider_payment_id = provider_payment_id
@@ -516,9 +517,9 @@ class TBankPaymentProvider(PaymentProviderInterface):
             logger.exception("auto_renew_failed payment_id=%s charge_request", payment.pk)
             payment.error_code = "charge_network"
             payment.error_message = str(exc)[:512]
-            payment.status = payment.Status.FAILED
+            # Не FAILED: банк мог списать, подтвердим через GetState/webhook.
             payment.save(
-                update_fields=["status", "error_code", "error_message", "updated_at"]
+                update_fields=["error_code", "error_message", "updated_at"]
             )
             raise ValueError(f"Charge failed: {exc}") from exc
 

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CabinetPageHeader, CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
 import BoardCreateModal from "../components/BoardCreateModal";
+import CabinetFloatingMenu from "../components/CabinetFloatingMenu";
 import CabinetModal from "../components/CabinetModal";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import {
@@ -72,30 +73,12 @@ export default function CabinetBoardsPage() {
   const [renameError, setRenameError] = useState("");
   const [deleteBoard, setDeleteBoard] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [menuBoardId, setMenuBoardId] = useState(null);
-  const menuRef = useRef(null);
+  const [cardMenu, setCardMenu] = useState(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(t);
   }, [search]);
-
-  useEffect(() => {
-    if (!menuBoardId) return undefined;
-    const onDoc = (e) => {
-      if (menuRef.current?.contains(e.target)) return;
-      setMenuBoardId(null);
-    };
-    const onKey = (e) => {
-      if (e.key === "Escape") setMenuBoardId(null);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [menuBoardId]);
 
   const showNotice = (text) => {
     setNotice(text);
@@ -143,12 +126,12 @@ export default function CabinetBoardsPage() {
   }, [items.length, loading, search, groupFilter, studentFilter]);
 
   const openBoard = (board) => {
-    setMenuBoardId(null);
+    setCardMenu(null);
     navigate(`/cabinet/boards/${board.id}`);
   };
 
   const openRename = (board) => {
-    setMenuBoardId(null);
+    setCardMenu(null);
     setRenameBoard(board);
     setRenameTitle(board.title || "Новая доска");
     setRenameError("");
@@ -186,7 +169,7 @@ export default function CabinetBoardsPage() {
   };
 
   const handleDuplicate = async (board) => {
-    setMenuBoardId(null);
+    setCardMenu(null);
     try {
       const copy = await duplicateInteractiveBoard(board.id);
       showNotice("Копия создана");
@@ -287,7 +270,7 @@ export default function CabinetBoardsPage() {
         <div className="cb-boards-grid">
           {items.map((board) => {
             const viewOnly = board.permission === "view" || board.can_edit === false;
-            const menuOpen = menuBoardId === board.id;
+            const menuOpen = cardMenu?.id === board.id;
             return (
               <article key={board.id} className={`cb-board-card${menuOpen ? " is-menu-open" : ""}`}>
                 <button
@@ -323,10 +306,7 @@ export default function CabinetBoardsPage() {
                     >
                       {board.title || "Без названия"}
                     </button>
-                    <div
-                      className="cb-board-card__menu"
-                      ref={menuOpen ? menuRef : undefined}
-                    >
+                    <div className="cb-board-card__menu">
                       <button
                         type="button"
                         className="cb-board-card__menu-btn"
@@ -334,39 +314,43 @@ export default function CabinetBoardsPage() {
                         aria-expanded={menuOpen}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setMenuBoardId(menuOpen ? null : board.id);
+                          setCardMenu(menuOpen ? null : { id: board.id, anchor: e.currentTarget });
                         }}
                       >
                         <span aria-hidden="true">⋯</span>
                       </button>
-                      {menuOpen ? (
-                        <div className="cb-board-card__menu-panel" role="menu">
-                          <button type="button" role="menuitem" onClick={() => openBoard(board)}>
-                            Открыть
+                      <CabinetFloatingMenu
+                        open={menuOpen}
+                        anchorEl={cardMenu?.anchor}
+                        onClose={() => setCardMenu(null)}
+                        className="cb-board-card__menu-panel"
+                        width={200}
+                      >
+                        <button type="button" role="menuitem" onClick={() => openBoard(board)}>
+                          Открыть
+                        </button>
+                        {board.permission === "owner" ? (
+                          <button type="button" role="menuitem" onClick={() => openRename(board)}>
+                            Переименовать
                           </button>
-                          {board.permission === "owner" ? (
-                            <button type="button" role="menuitem" onClick={() => openRename(board)}>
-                              Переименовать
-                            </button>
-                          ) : null}
-                          <button type="button" role="menuitem" onClick={() => handleDuplicate(board)}>
-                            Создать копию
+                        ) : null}
+                        <button type="button" role="menuitem" onClick={() => handleDuplicate(board)}>
+                          Создать копию
+                        </button>
+                        {board.permission === "owner" ? (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="cb-board-card__menu-danger"
+                            onClick={() => {
+                              setCardMenu(null);
+                              setDeleteBoard(board);
+                            }}
+                          >
+                            Удалить
                           </button>
-                          {board.permission === "owner" ? (
-                            <button
-                              type="button"
-                              role="menuitem"
-                              className="cb-board-card__menu-danger"
-                              onClick={() => {
-                                setMenuBoardId(null);
-                                setDeleteBoard(board);
-                              }}
-                            >
-                              Удалить
-                            </button>
-                          ) : null}
-                        </div>
-                      ) : null}
+                        ) : null}
+                      </CabinetFloatingMenu>
                     </div>
                   </div>
                   <p className="cb-board-card__meta">

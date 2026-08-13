@@ -6,6 +6,7 @@ import {
   CabinetPageShell,
   CabinetPageHeader,
 } from "../CabinetSectionUi";
+import CabinetFloatingMenu from "../components/CabinetFloatingMenu";
 import {
   buildTeacherVariantUrl,
   formatReviewDate,
@@ -14,6 +15,7 @@ import {
   homeworkTaskComment,
   homeworkTaskScore,
   homeworkTeacherAttachments,
+  homeworkTeacherCommentAttachments,
   inferExamTaskPart,
   resolvePart1Verdict,
   taskMaxScore,
@@ -42,6 +44,10 @@ import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import HomeworkReviewSummary, {
   buildHomeworkReviewFromVariant,
 } from "../HomeworkReviewResults";
+import {
+  extraHomeworkText,
+  visibleHomeworkResourceTasks,
+} from "../homeworkTaskDisplay";
 
 const HW_TASK_TYPE_RU = {
   text: "Текст",
@@ -125,6 +131,11 @@ function VerdictBadge({ verdict }) {
   return <span className="cb-review-detail__verdict is-empty">Нет ответа</span>;
 }
 
+function isImageAttachment(file) {
+  const name = String(file?.filename || file?.url || "").toLowerCase();
+  return /\.(png|jpe?g|webp|gif|bmp|heic|heif)$/i.test(name);
+}
+
 function AttachmentList({ attachments, emptyLabel = "Файлы не прикреплены" }) {
   if (!attachments?.length) {
     return <p className="cb-review-detail__empty-answer">{emptyLabel}</p>;
@@ -132,10 +143,17 @@ function AttachmentList({ attachments, emptyLabel = "Файлы не прикр�
   return (
     <ul className="cb-review-detail__attachments">
       {attachments.map((file) => (
-        <li key={file.url}>
-          <a href={file.url} target="_blank" rel="noreferrer" className="cb-review-detail__file-link">
-            {file.filename || "Файл"}
-          </a>
+        <li key={file.url} className={isImageAttachment(file) ? "is-image" : ""}>
+          {isImageAttachment(file) ? (
+            <a href={file.url} target="_blank" rel="noreferrer" className="cb-review-detail__file-thumb">
+              <img src={file.url} alt={file.filename || "Изображение"} />
+              <span>{file.filename || "Файл"}</span>
+            </a>
+          ) : (
+            <a href={file.url} target="_blank" rel="noreferrer" className="cb-review-detail__file-link">
+              {file.filename || "Файл"}
+            </a>
+          )}
         </li>
       ))}
     </ul>
@@ -167,22 +185,31 @@ function ReviewFeedbackUpload({
   }
 
   const onFileSelect = async (e) => {
-    const file = e.target.files?.[0];
+    const selected = Array.from(e.target.files || []);
     e.target.value = "";
-    if (!file) return;
+    if (!selected.length) return;
     setBusy(true);
     setErr(null);
     const fd = new FormData();
-    fd.append("task_number", String(taskNumber));
+    if (taskNumber != null && String(taskNumber).trim() !== "") {
+      fd.append("task_number", String(taskNumber));
+    }
     if (taskId != null && String(taskId).trim() !== "") fd.append("task_id", String(taskId));
-    fd.append("file", file);
+    selected.forEach((file) => {
+      fd.append("file", file, file.name || "file");
+    });
     try {
       const data = await uploadReviewFeedback(reviewId, fd);
-      const entry = {
-        url: String(data.url || ""),
-        filename: String(data.filename || file.name),
-      };
-      setFiles((prev) => [...prev, entry]);
+      const uploaded = Array.isArray(data.attachments) && data.attachments.length
+        ? data.attachments
+        : (data.url ? [{ url: data.url, filename: data.filename || selected[0].name }] : []);
+      setFiles((prev) => [
+        ...prev,
+        ...uploaded.map((item) => ({
+          url: String(item.url || ""),
+          filename: String(item.filename || "Файл"),
+        })),
+      ]);
       onChange?.();
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "Ошибка загрузки");
@@ -216,6 +243,7 @@ function ReviewFeedbackUpload({
         <input
           ref={fileInputRef}
           type="file"
+          multiple
           accept={FEEDBACK_FILE_ACCEPT}
           className="cb-review-detail__file-input"
           onChange={onFileSelect}
@@ -227,9 +255,10 @@ function ReviewFeedbackUpload({
           disabled={busy}
           onClick={() => fileInputRef.current?.click()}
         >
-          {busy ? "Загрузка…" : "Прикрепить файл"}
+          {busy ? "Загрузка…" : "Прикрепить файлы"}
         </button>
       </div>
+      <p className="cb-review-detail__feedback-hint">Можно несколько фото или файлов</p>
       {files.length > 0 ? (
         <ul className="cb-review-detail__feedback-delete-list">
           {files.map((file) => (
@@ -272,7 +301,7 @@ export default function CabinetReviewDetailPage() {
   });
   const [confirmAction, setConfirmAction] = useState(null);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const moreMenuRef = useRef(null);
+  const [moreMenuAnchor, setMoreMenuAnchor] = useState(null);
   const [resourcePickerOpen, setResourcePickerOpen] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
   const [notice, setNotice] = useState("");
@@ -320,6 +349,7 @@ export default function CabinetReviewDetailPage() {
   const submission = review?.homework_submission;
   const reviewCtx = review?.homework_review;
   const result = submission?.result_payload || {};
+  const commentAttachments = homeworkTeacherCommentAttachments(result);
   const isPending = review?.status === "pending";
   const isChecked = review?.status === "checked";
   const awaitingSubmission = isPending && !submission?.submitted_at;
@@ -328,32 +358,25 @@ export default function CabinetReviewDetailPage() {
   const canAddHomeworkTask = Boolean(submission?.homework) && !isChecked;
   const canCopyHomework = Boolean(submission?.homework || reviewCtx?.homework_id);
   const homeworkIdForCopy = submission?.homework || reviewCtx?.homework_id || null;
-  const canEditHomework = Boolean(homeworkIdForCopy);
-  const homeworkTasks = Array.isArray(reviewCtx?.tasks) ? reviewCtx.tasks : [];
+  const canEditHomework = Boolean(homeworkIdForCopy) && !isChecked;
+  const homeworkTasks = visibleHomeworkResourceTasks(
+    Array.isArray(reviewCtx?.tasks) ? reviewCtx.tasks : [],
+    {
+      description: reviewCtx?.description,
+      attachments: reviewCtx?.attachments,
+    },
+  );
+  const homeworkAttachments = Array.isArray(reviewCtx?.attachments) ? reviewCtx.attachments : [];
+  const homeworkInstruction = extraHomeworkText(
+    Array.isArray(reviewCtx?.tasks) ? reviewCtx.tasks : [],
+    reviewCtx?.description,
+  );
   const attachedMaterialIds = homeworkTasks
     .map((task) => Number(task.material_id))
     .filter((id) => Number.isFinite(id) && id > 0);
   const attachedInteractiveIds = homeworkTasks
     .map((task) => Number(task.interactive_id))
     .filter((id) => Number.isFinite(id) && id > 0);
-
-  useEffect(() => {
-    if (!moreMenuOpen) return undefined;
-    const onPointerDown = (event) => {
-      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target)) {
-        setMoreMenuOpen(false);
-      }
-    };
-    const onKeyDown = (event) => {
-      if (event.key === "Escape") setMoreMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [moreMenuOpen]);
 
   const variantUrl = buildTeacherVariantUrl(reviewCtx);
   const level = reviewCtx?.level;
@@ -697,8 +720,30 @@ export default function CabinetReviewDetailPage() {
             ) : null}
           </div>
         </div>
-        {reviewCtx?.description ? (
-          <p className="cb-review-detail__hw-desc">{reviewCtx.description}</p>
+        {homeworkInstruction ? (
+          <p className="cb-review-detail__hw-desc">{homeworkInstruction}</p>
+        ) : null}
+        {homeworkAttachments.length ? (
+          <ul className="cb-review-detail__hw-tasks">
+            {homeworkAttachments.map((file) => (
+              <li key={file.id || file.url} className="cb-review-detail__hw-task">
+                <div className="cb-review-detail__hw-task-main">
+                  <strong>{file.name || file.original_name || "Файл"}</strong>
+                  <span>Файл</span>
+                </div>
+                {file.url ? (
+                  <a
+                    href={file.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="cb-review-detail__hw-task-link"
+                  >
+                    Открыть
+                  </a>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         ) : null}
         {homeworkTasks.length ? (
           <ul className="cb-review-detail__hw-tasks">
@@ -721,11 +766,12 @@ export default function CabinetReviewDetailPage() {
               </li>
             ))}
           </ul>
-        ) : (
+        ) : null}
+        {!homeworkInstruction && !homeworkAttachments.length && !homeworkTasks.length ? (
           <p className="cb-review-detail__empty-answer">
             В этом домашнем задании пока нет отдельных материалов.
           </p>
-        )}
+        ) : null}
         {canAddHomeworkTask ? (
           <p className="cb-review-detail__panel-hint">
             При добавлении задания ученик сразу получит оповещение.
@@ -761,7 +807,19 @@ export default function CabinetReviewDetailPage() {
               ) : (
                 <p className="cb-review-detail__empty-answer">Текстовый ответ не указан</p>
               )}
-              {submission?.attached_file_url ? (
+              {submission?.attached_files?.length ? (
+                submission.attached_files.map((file) => (
+                  <p key={file.id || file.url}>
+                    {file.url ? (
+                      <a href={file.url} target="_blank" rel="noreferrer">
+                        {file.name || "Прикреплённый файл"}
+                      </a>
+                    ) : (
+                      <span>{file.name || "Прикреплённый файл"}</span>
+                    )}
+                  </p>
+                ))
+              ) : submission?.attached_file_url ? (
                 <p>
                   <a href={submission.attached_file_url} target="_blank" rel="noreferrer">
                     {submission.attached_file_name || "Прикреплённый файл"}
@@ -833,6 +891,8 @@ export default function CabinetReviewDetailPage() {
                   const answer = homeworkTaskAnswer(result, task.id, task.number, variant?.tasks);
                   const verdict = getPart1Verdict(task, answer);
                   const tableAnswer = isTableAnswerTask(subject, task.number);
+                  const studentAttachments = homeworkTaskAttachments(result, task.id, task.number);
+                  const teacherAttachments = homeworkTeacherAttachments(result, task.id, task.number);
                   return (
                     <article key={task.id} className="cb-review-detail__task">
                       <div className="cb-review-detail__task-head">
@@ -877,6 +937,21 @@ export default function CabinetReviewDetailPage() {
                           {homeworkTaskComment(result, task.id, task.number)}
                         </p>
                       ) : null}
+                      <div className="cb-review-detail__task-files">
+                        <span className="cb-review-detail__section-label">Файлы ученика</span>
+                        <AttachmentList attachments={studentAttachments} />
+                      </div>
+                      <div className="cb-review-detail__task-files">
+                        <span className="cb-review-detail__section-label">Файлы с разбором ошибок</span>
+                        <ReviewFeedbackUpload
+                          reviewId={reviewId}
+                          taskId={task.id}
+                          taskNumber={task.number}
+                          enabled={isPending}
+                          initialAttachments={teacherAttachments}
+                          onChange={load}
+                        />
+                      </div>
                     </article>
                   );
                 })}
@@ -1007,6 +1082,15 @@ export default function CabinetReviewDetailPage() {
             onChange={(e) => setTeacherComment(e.target.value)}
           />
         )}
+        <div className="cb-review-detail__task-files">
+          <span className="cb-review-detail__section-label">Файлы к комментарию</span>
+          <ReviewFeedbackUpload
+            reviewId={reviewId}
+            enabled={isPending}
+            initialAttachments={commentAttachments}
+            onChange={load}
+          />
+        </div>
       </section>
       ) : null}
 
@@ -1050,7 +1134,7 @@ export default function CabinetReviewDetailPage() {
           Ошибки ученика
         </Link>
         {canCopyHomework || submission?.homework ? (
-          <div className="cb-review-detail__more" ref={moreMenuRef}>
+          <div className="cb-review-detail__more">
             <button
               type="button"
               className="cb-review-detail__more-btn"
@@ -1058,12 +1142,24 @@ export default function CabinetReviewDetailPage() {
               aria-haspopup="menu"
               aria-expanded={moreMenuOpen}
               disabled={busy}
-              onClick={() => setMoreMenuOpen((open) => !open)}
+              onClick={(e) => {
+                setMoreMenuAnchor(moreMenuOpen ? null : e.currentTarget);
+                setMoreMenuOpen((open) => !open);
+              }}
             >
               ⋯
             </button>
-            {moreMenuOpen ? (
-              <div className="cb-review-detail__menu" role="menu">
+            <CabinetFloatingMenu
+              open={moreMenuOpen}
+              anchorEl={moreMenuAnchor}
+              onClose={() => {
+                setMoreMenuOpen(false);
+                setMoreMenuAnchor(null);
+              }}
+              className="cb-review-detail__menu"
+              align="left"
+              width={180}
+            >
                 {canEditHomework ? (
                   <button
                     type="button"
@@ -1072,6 +1168,7 @@ export default function CabinetReviewDetailPage() {
                     disabled={busy}
                     onClick={() => {
                       setMoreMenuOpen(false);
+                      setMoreMenuAnchor(null);
                       navigate(
                         `/cabinet/homework/${encodeURIComponent(String(homeworkIdForCopy))}/edit?review=${encodeURIComponent(String(reviewId))}`,
                       );
@@ -1088,6 +1185,7 @@ export default function CabinetReviewDetailPage() {
                     disabled={busy}
                     onClick={() => {
                       setMoreMenuOpen(false);
+                      setMoreMenuAnchor(null);
                       setCopyModalOpen(true);
                     }}
                   >
@@ -1108,14 +1206,14 @@ export default function CabinetReviewDetailPage() {
                     onClick={() => {
                       if (!canDeleteHomework) return;
                       setMoreMenuOpen(false);
+                      setMoreMenuAnchor(null);
                       handleDeleteHomework();
                     }}
                   >
                     Удалить ДЗ
                   </button>
                 ) : null}
-              </div>
-            ) : null}
+            </CabinetFloatingMenu>
           </div>
         ) : null}
         {isPending && !awaitingSubmission ? (

@@ -708,6 +708,33 @@ class JournalHomeworkResultTests(JournalTestBase):
         self.assertEqual(detail_resp.data["homework_result"]["title"], "ДЗ к прошлому уроку")
         self.assertEqual(detail_resp.data["previous_homework_status"], "full")
 
+    def test_student_results_include_standalone_checked_homework(self):
+        hw = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="Самостоятельное ДЗ",
+            description="Решите",
+            status="assigned",
+        )
+        HomeworkSubmission.objects.create(
+            homework=hw,
+            student=self.student,
+            submitted_at=timezone.now(),
+            status=SubmissionStatus.CHECKED,
+            score=91,
+            teacher_comment="Принято",
+        )
+        self.client.force_login(self.student_user)
+        resp = self.client.get("/api/cabinet/student/results/")
+        self.assertEqual(resp.status_code, 200)
+        items = resp.data["results"]
+        hw_item = next((i for i in items if i.get("homework_id") == hw.id and i.get("entry_type") == "homework"), None)
+        self.assertIsNotNone(hw_item)
+        self.assertEqual(hw_item["id"], f"hw-{hw.id}")
+        self.assertEqual(float(hw_item["overall_score"]), 91.0)
+        self.assertEqual(hw_item["homework_result"]["title"], "Самостоятельное ДЗ")
+        self.assertEqual(hw_item["homework_result"]["status"], "checked")
+
 
 class JournalTopicsSyncTests(JournalTestBase):
     def test_planned_topic_resolves_plan_slot_without_explicit_link(self):

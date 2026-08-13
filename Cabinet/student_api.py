@@ -1,6 +1,7 @@
 """Student cabinet API — scoped to the logged-in pupil."""
 
-from django.db import models
+import logging
+
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
@@ -41,10 +42,20 @@ from .models import (
     StudentSubject,
 )
 from .serializers import StudentSubjectSerializer
-from .files_services import material_file_url, submission_file_url
+from .files_services import material_file_url, material_view_url
 from .permissions import IsCabinetStudent
 from .plan_schedule import resolve_plan_item_for_event
 from .schedule_events import _participants_to_json, _plan_item_to_json
+
+logger = logging.getLogger(__name__)
+
+_INTERACTIVE_TYPE_LABELS = {
+    "flashcards": "Карточки",
+    "matching": "Сопоставление",
+    "ordering": "Порядок",
+    "quiz": "Викторина",
+    "wheel": "Колесо",
+}
 
 
 def resolve_roster_students(user):
@@ -147,6 +158,88 @@ def _teacher_name(user):
     if profile:
         return profile.get_display_name()
     return user.get_full_name() or user.username
+
+
+def _stamp_iso(value):
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
+
+
+def _lesson_subject_map_for_students(students):
+    """lesson_id → (student_subject_id, label) по событиям и ДЗ ученика."""
+    student_ids, groups = _student_ids_and_groups(students)
+    if not student_ids:
+        return {}
+    group_ids = list(groups.values_list("id", flat=True))
+    filters = Q(student_id__in=student_ids)
+    if group_ids:
+        filters |= Q(group_id__in=group_ids)
+
+    mapping = {}
+    events = (
+        ScheduleEvent.objects.filter(filters, lesson_id__isnull=False, student_subject_id__isnull=False)
+        .select_related("student_subject")
+        .order_by("-starts_at", "-id")
+    )
+    for event in events:
+        if event.lesson_id in mapping:
+            continue
+        subject = event.student_subject
+        mapping[event.lesson_id] = (
+            event.student_subject_id,
+            subject.display_label if subject else "",
+        )
+
+    hw_filters = Q(student_id__in=student_ids)
+    if group_ids:
+        hw_filters |= Q(group_id__in=group_ids)
+    homeworks = (
+        Homework.objects.filter(
+            hw_filters,
+            lesson_id__isnull=False,
+            student_subject_id__isnull=False,
+        )
+        .select_related("student_subject")
+        .order_by("-created_at", "-id")
+    )
+    for hw in homeworks:
+        if hw.lesson_id in mapping:
+            continue
+        subject = hw.student_subject
+        mapping[hw.lesson_id] = (
+            hw.student_subject_id,
+            subject.display_label if subject else "",
+        )
+    return mapping
+
+
+def _log_student_materials_snapshot(*, user, students, items, student_subject_id=None):
+    roster_ids = []
+    teacher_ids = []
+    for roster in students:
+        roster_ids.append(roster.id)
+        if roster.teacher_id:
+            teacher_ids.append(roster.teacher_id)
+    by_source = {}
+    by_type = {}
+    for item in items:
+        source = item.get("source") or "unknown"
+        by_source[source] = by_source.get(source, 0) + 1
+        mtype = item.get("type") or "unknown"
+        by_type[mtype] = by_type.get(mtype, 0) + 1
+    logger.info(
+        "student_materials user_id=%s roster=%s teachers=%s subject=%s total=%s by_source=%s by_type=%s",
+        getattr(user, "id", None),
+        roster_ids,
+        teacher_ids,
+        student_subject_id,
+        len(items),
+        by_source,
+        by_type,
+    )
 
 
 def _student_display_names(students):
@@ -311,6 +404,56 @@ _MATERIAL_HW_TASK_TYPES = {
 }
 
 
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+_PDF_EXTS = {".pdf"}
+_VIDEO_EXTS = {".mp4", ".webm", ".mov"}
+_UNSAFE_PREVIEW_EXTS = {".html", ".htm", ".js", ".svg", ".xhtml"}
+
+
+def _material_file_meta(material):
+    import mimetypes
+
+    cabinet = getattr(material, "cabinet_file", None)
+    mime = ""
+    ext = ""
+    if cabinet is not None:
+        mime = (cabinet.mime_type or "").lower()
+        ext = (cabinet.extension or "").lower()
+    elif getattr(material, "file", None) and material.file:
+        filename = material.file.name or ""
+        mime = (mimetypes.guess_type(filename)[0] or "").lower()
+        if "." in filename:
+            ext = "." + filename.rsplit(".", 1)[-1].lower()
+    if ext and not ext.startswith("."):
+        ext = f".{ext}"
+    if not ext and (material.title or "") and "." in material.title:
+        maybe = "." + material.title.rsplit(".", 1)[-1].lower()
+        if 1 < len(maybe) <= 6:
+            ext = maybe
+    return mime, ext
+
+
+def _library_preview_fields(material):
+    mime, ext = _material_file_meta(material)
+    unsafe = ext in _UNSAFE_PREVIEW_EXTS
+    preview_url = "" if unsafe else material_view_url(material, for_student=True)
+    kind = ""
+    if preview_url and not unsafe:
+        if mime.startswith("image/") or ext in _IMAGE_EXTS:
+            kind = "image"
+        elif mime == "application/pdf" or ext in _PDF_EXTS:
+            kind = "pdf"
+        elif mime.startswith("video/") or ext in _VIDEO_EXTS:
+            kind = "video"
+    return {
+        "preview_url": preview_url if kind else "",
+        "preview_kind": kind,
+        "mime_type": mime,
+        "extension": ext,
+        "is_image": kind == "image",
+    }
+
+
 def _serialize_library_material(
     material,
     *,
@@ -325,12 +468,16 @@ def _serialize_library_material(
     student_subject_label="",
     message="",
     description="",
+    teacher=None,
+    direct_assignment_id=None,
+    direct_group_id=None,
 ):
     stamp = updated_at or assigned_at
     if stamp is None and getattr(material, "updated_at", None):
-        stamp = material.updated_at.isoformat()
-    elif stamp is not None and hasattr(stamp, "isoformat"):
-        stamp = stamp.isoformat()
+        stamp = material.updated_at
+    teacher_obj = teacher
+    if teacher_obj is None and getattr(material, "teacher_id", None):
+        teacher_obj = getattr(material, "teacher", None)
     return {
         "id": material.id,
         "title": material.title,
@@ -343,23 +490,31 @@ def _serialize_library_material(
         "homework_id": homework_id,
         "external_url": material.external_url or "",
         "file_url": material_file_url(material, for_student=True),
+        **_library_preview_fields(material),
+        "has_content": bool(getattr(material, "content", None) and str(material.content).strip()),
         "cover_theme": "material",
         "message": message or "",
         "direct": direct,
         "source": source,
-        "assigned_at": assigned_at.isoformat() if hasattr(assigned_at, "isoformat") else assigned_at,
-        "updated_at": stamp,
+        "assigned_at": _stamp_iso(assigned_at),
+        "updated_at": _stamp_iso(stamp),
         "student_subject_id": student_subject_id,
         "student_subject_label": student_subject_label or "",
+        "teacher_id": getattr(teacher_obj, "id", None) or getattr(material, "teacher_id", None),
+        "teacher_name": _teacher_name(teacher_obj) if teacher_obj is not None else "",
+        "direct_assignment_id": direct_assignment_id,
+        "direct_group_id": direct_group_id,
+        "can_revoke": bool(direct and direct_assignment_id),
+        "edit_url": "",
     }
 
 
 def _published_materials_for_lesson(lesson):
     """Материалы урока + актуальные вложения из связанных пунктов плана."""
     by_id = {}
-    for material in lesson.materials.filter(status=MaterialStatus.PUBLISHED):
+    for material in lesson.materials.filter(status=MaterialStatus.PUBLISHED).select_related("cabinet_file"):
         by_id[material.id] = material
-    plan_items = LessonPlanItem.objects.filter(linked_lesson=lesson).prefetch_related("materials")
+    plan_items = LessonPlanItem.objects.filter(linked_lesson=lesson).prefetch_related("materials__cabinet_file")
     for plan_item in plan_items:
         for material in plan_item.materials.filter(status=MaterialStatus.PUBLISHED):
             by_id[material.id] = material
@@ -370,18 +525,20 @@ def _published_materials_for_lesson(lesson):
     )
 
 
-def _collect_student_materials(students, limit=None):
+def _collect_student_materials(students, limit=None, lesson_subjects=None):
     items = []
     seen = set()
+    lesson_subjects = lesson_subjects or {}
     assignments = (
         _lesson_assignments_qs(students)
-        .select_related("lesson")
-        .prefetch_related("lesson__materials")
+        .select_related("lesson", "teacher", "teacher__profile")
+        .prefetch_related("lesson__materials__cabinet_file")
         .order_by("-assigned_at", "-id")
     )
     for assignment in assignments:
         lesson = assignment.lesson
         lesson_topic = lesson.topic or lesson.title
+        subject_id, subject_label = lesson_subjects.get(lesson.id, (None, ""))
         for material in _published_materials_for_lesson(lesson):
             if material.id in seen:
                 continue
@@ -394,6 +551,9 @@ def _collect_student_materials(students, limit=None):
                     source="lesson",
                     assigned_at=assignment.assigned_at,
                     updated_at=material.updated_at,
+                    student_subject_id=subject_id,
+                    student_subject_label=subject_label,
+                    teacher=assignment.teacher,
                 )
             )
     items.sort(key=lambda row: row.get("updated_at") or row.get("assigned_at") or "", reverse=True)
@@ -436,8 +596,8 @@ def _collect_homework_materials(students, limit=None):
         .select_related("lesson", "lesson_plan_item", "student_subject", "teacher")
         .prefetch_related(
             "tasks",
-            "lesson_plan_item__homework_materials",
-            "cabinet_file_relations__material",
+            "lesson_plan_item__homework_materials__cabinet_file",
+            "cabinet_file_relations__material__cabinet_file",
         )
         .order_by("-updated_at", "-id")
     )
@@ -491,6 +651,7 @@ def _collect_homework_materials(students, limit=None):
                     updated_at=material.updated_at or hw.updated_at,
                     student_subject_id=subject_id,
                     student_subject_label=subject_label,
+                    teacher=hw.teacher,
                 )
             )
 
@@ -506,17 +667,24 @@ def _merge_student_library_materials(
     user=None,
     student_subject_id=None,
     include_boards=True,
+    include_interactives=True,
     limit=None,
 ):
-    """Единый список материалов ученика: прямые + уроки + ДЗ (+ доски), без дублей."""
+    """Единый список материалов ученика: прямые + уроки + ДЗ + интерактивы (+ доски), без дублей."""
+    lesson_subjects = _lesson_subject_map_for_students(students)
     direct_items = _collect_direct_materials(students, student_subject_id=student_subject_id)
-    lesson_items = _collect_student_materials(students, limit=200)
+    lesson_items = _collect_student_materials(students, limit=200, lesson_subjects=lesson_subjects)
     homework_items = _collect_homework_materials(students, limit=200)
-    board_items = _collect_student_boards(user) if include_boards and user is not None else []
+    interactive_items = (
+        _collect_student_interactives(students, lesson_subjects=lesson_subjects)
+        if include_interactives
+        else []
+    )
+    board_items = _collect_student_boards(user, lesson_subjects=lesson_subjects) if include_boards and user is not None else []
 
     merged = list(direct_items)
     seen = {it["id"] for it in merged}
-    for bucket in (lesson_items, homework_items, board_items):
+    for bucket in (lesson_items, homework_items, interactive_items, board_items):
         for it in bucket:
             if it["id"] in seen:
                 continue
@@ -528,7 +696,7 @@ def _merge_student_library_materials(
         merged = [
             it
             for it in merged
-            if it.get("student_subject_id") in (None, sid) or it.get("type") == "board"
+            if it.get("student_subject_id") in (None, sid)
         ]
 
     merged.sort(
@@ -538,6 +706,54 @@ def _merge_student_library_materials(
     if limit is not None:
         return merged[:limit]
     return merged
+
+
+_STUDENT_SHARED_PREFIX = "/api/cabinet/student/files/shared/"
+_TEACHER_FILES_PREFIX = "/api/cabinet/files/"
+_STUDENT_MATERIAL_PREFIX = "/api/cabinet/student/materials/"
+_TEACHER_MATERIAL_PREFIX = "/api/cabinet/materials/"
+
+
+def _rewrite_library_item_for_teacher(item):
+    """Те же поля, что у ученика, но URL учителя и ссылки на редактирование."""
+    row = dict(item)
+    for key in ("preview_url", "file_url"):
+        url = row.get(key) or ""
+        if _STUDENT_SHARED_PREFIX in url:
+            row[key] = url.replace(_STUDENT_SHARED_PREFIX, _TEACHER_FILES_PREFIX)
+        elif _STUDENT_MATERIAL_PREFIX in url:
+            row[key] = url.replace(_STUDENT_MATERIAL_PREFIX, _TEACHER_MATERIAL_PREFIX)
+    if row.get("type") == "interactive" and row.get("interactive_id"):
+        row["edit_url"] = f"/cabinet/interactives/{row['interactive_id']}/edit"
+        row["interactive_url"] = f"/cabinet/interactives/{row['interactive_id']}"
+    elif row.get("type") == "board" and row.get("board_id"):
+        row["edit_url"] = f"/cabinet/boards/{row['board_id']}"
+        row["board_url"] = row["edit_url"]
+    elif row.get("homework_id"):
+        row["edit_url"] = f"/cabinet/homework/{row['homework_id']}/edit"
+    row["can_revoke"] = bool(row.get("source") == "direct" and row.get("direct_assignment_id"))
+    return row
+
+
+def build_teacher_student_library(teacher, student, *, student_subject_id=None, limit=200):
+    """Материалы этого ученика, выданные текущим учителем — тот же merge, что у ученика."""
+    items = _merge_student_library_materials(
+        [student],
+        user=getattr(student, "user", None),
+        student_subject_id=student_subject_id,
+        include_boards=True,
+        include_interactives=True,
+        limit=None,
+    )
+    teacher_id = getattr(teacher, "id", None)
+    scoped = [
+        _rewrite_library_item_for_teacher(item)
+        for item in items
+        if item.get("teacher_id") == teacher_id
+    ]
+    if limit is not None:
+        return scoped[:limit]
+    return scoped
 
 
 def _recent_materials(students, limit=3, user=None):
@@ -655,7 +871,7 @@ def _serialize_assignment_card(homework, students):
         "items_done": tasks_done,
         "progress_percent": progress_percent,
         "teacher_comment": (submission.teacher_comment or "") if submission else "",
-        "description": (homework.description or "")[:240],
+        "description": (homework.description or "").strip()[:240],
         "attachments": attachments[:4],
         "attachments_count": len(attachments),
     }
@@ -1093,8 +1309,10 @@ class StudentDashboardView(StudentScopedView):
             "recent_results": [
                 {
                     "title": hw.title,
+                    "homework_id": hw.id,
                     "score_percent": float(sub.score) if sub.score is not None else None,
                     "completed_at": (sub.updated_at or sub.submitted_at).isoformat() if (sub.updated_at or sub.submitted_at) else None,
+                    "href": f"/cabinet/student/assignments/{hw.id}?focus=results",
                 }
                 for hw in all_homeworks
                 for sub in [
@@ -1150,8 +1368,9 @@ class StudentLessonDetailView(StudentScopedView):
                 "external_url": m.external_url or "",
                 "file_url": material_file_url(m, for_student=True),
                 "has_content": bool(m.content and m.content.strip()),
+                **_library_preview_fields(m),
             }
-            for m in lesson.materials.all()[:20]
+            for m in _published_materials_for_lesson(lesson)
         ]
         homeworks = [
             _serialize_assignment_card(hw, students)
@@ -1221,12 +1440,14 @@ class StudentAssignmentDetailView(StudentScopedView):
         roster = _pick_student(students, hw.teacher)
         submission = (
             HomeworkSubmission.objects.filter(homework=hw, student=roster)
+            .prefetch_related("file_attachments")
             .order_by("-submitted_at")
             .first()
         )
         from .homework_api import (
             cleanup_duplicate_homework_tasks,
             homework_has_variant_task,
+            homework_instruction_text,
             issue_homework_token,
             serialize_homework_tasks,
         )
@@ -1234,36 +1455,23 @@ class StudentAssignmentDetailView(StudentScopedView):
         cleanup_duplicate_homework_tasks(hw)
         token = issue_homework_token(homework_id=hw.id, student_user_id=request.user.id)
         tasks = serialize_homework_tasks(hw, homework_id=hw.id, token=token)
-        attached_name = ""
-        if submission:
-            from .files_models import CabinetFileRelation, CabinetFileRelationType
-
-            rel = (
-                CabinetFileRelation.objects.filter(
-                    submission=submission,
-                    relation_type=CabinetFileRelationType.SUBMISSION,
-                )
-                .select_related("file")
-                .first()
-            )
-            if rel and rel.file_id:
-                attached_name = rel.file.display_name or rel.file.original_name
-            elif submission.attached_file:
-                attached_name = submission.attached_file.name.split("/")[-1]
-
         from .homework_attachments import list_homework_attachments
+        from .submission_files import serialize_submission_files
 
+        attached_files = serialize_submission_files(submission, for_student=True)
+        attached_name = attached_files[0]["name"] if attached_files else ""
         attachments = list_homework_attachments(hw, for_student=True)
         card = _serialize_assignment_card(hw, students)
         card.update({
-            "description": hw.description or "",
+            "description": homework_instruction_text(hw),
             "tasks": tasks,
             "attachments": attachments,
             "attachments_count": len(attachments),
             "has_variant": homework_has_variant_task(hw),
             "answer_text": submission.answer_text if submission else "",
-            "attached_file_url": submission_file_url(submission, for_student=True) if submission else "",
+            "attached_file_url": attached_files[0]["url"] if attached_files else "",
             "attached_file_name": attached_name,
+            "attached_files": attached_files,
             "teacher_comment": submission.teacher_comment if submission else "",
             "mistakes": [],
             # Черновик (есть result_payload) ≠ сдача. Учитель видит работу только после submitted_at.
@@ -1283,23 +1491,26 @@ class StudentAssignmentDetailView(StudentScopedView):
         if roster is None:
             return Response({"error": "Ученик не найден."}, status=status.HTTP_403_FORBIDDEN)
 
-        answer_text = (request.data.get("answer_text") or "").strip()
-        attached_file = (
-            request.FILES.get("attached_file")
-            or request.FILES.get("file")
-            or next(iter(request.FILES.values()), None)
+        from .submission_files import (
+            collect_uploaded_submission_files,
+            save_submission_files,
+            serialize_submission_files,
+            submission_has_files,
+            validate_submission_uploads,
         )
-        if not answer_text and not attached_file:
+        from .upload_validation import UploadValidationError
+
+        answer_text = (request.data.get("answer_text") or "").strip()
+        uploaded_files = collect_uploaded_submission_files(request)
+        if not answer_text and not uploaded_files:
             return Response(
                 {"error": "Добавьте ответ или файл."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if attached_file:
-            from .upload_validation import UploadValidationError, validate_uploaded_file
-
+        if uploaded_files:
             try:
-                validate_uploaded_file(attached_file)
+                validate_submission_uploads(uploaded_files)
             except UploadValidationError as exc:
                 return Response(
                     {"error": exc.message, "code": exc.code},
@@ -1308,6 +1519,7 @@ class StudentAssignmentDetailView(StudentScopedView):
 
         existing = (
             HomeworkSubmission.objects.filter(homework=hw, student=roster)
+            .prefetch_related("file_attachments")
             .order_by("-submitted_at", "-id")
             .first()
         )
@@ -1318,8 +1530,8 @@ class StudentAssignmentDetailView(StudentScopedView):
                 status=status.HTTP_403_FORBIDDEN,
             )
         if existing and existing.submitted_at and existing.status == SubmissionStatus.SUBMITTED:
-            # Уже сдали: можно только дослать файл, если его ещё не было.
-            if not attached_file or existing.attached_file:
+            # Уже сдали: можно только дослать файлы, если их ещё не было.
+            if not uploaded_files or submission_has_files(existing):
                 return Response(
                     {"error": "Работа уже отправлена на проверку."},
                     status=status.HTTP_403_FORBIDDEN,
@@ -1340,18 +1552,12 @@ class StudentAssignmentDetailView(StudentScopedView):
 
         # Надёжный путь для прода: сразу в FileField (cabinet/homework/),
         # без зависимости от квоты «Мои файлы».
-        if attached_file:
-            try:
-                if hasattr(attached_file, "seek"):
-                    attached_file.seek(0)
-            except Exception:
-                pass
-            submission.attached_file = attached_file
-
-        submission.save()
+        if uploaded_files:
+            save_submission_files(submission, uploaded_files)
+        else:
+            submission.save()
 
         from .homework_api import _ensure_review_item, _notify_homework_submitted
-        from .files_services import submission_file_url
 
         review_item = _ensure_review_item(submission)
         _notify_homework_submitted(
@@ -1359,14 +1565,14 @@ class StudentAssignmentDetailView(StudentScopedView):
             review_item,
             is_resubmit=old_status in (SubmissionStatus.RETURNED, SubmissionStatus.NEEDS_REVISION),
         )
-        attached_name = ""
-        if submission.attached_file:
-            attached_name = submission.attached_file.name.split("/")[-1]
+        attached_files = serialize_submission_files(submission, for_student=True)
+        attached_name = attached_files[0]["name"] if attached_files else ""
         return Response({
             "ok": True,
             "status": "submitted",
-            "attached_file_url": submission_file_url(submission, for_student=True),
+            "attached_file_url": attached_files[0]["url"] if attached_files else "",
             "attached_file_name": attached_name,
+            "attached_files": attached_files,
         })
 
 
@@ -1374,11 +1580,7 @@ class StudentAssignmentAttachedFileView(StudentScopedView):
     """Скачивание файла ответа ученика (без публичного /media/)."""
 
     def get(self, request, homework_id):
-        import mimetypes
-
-        from django.http import FileResponse
-
-        from .files_storage import content_disposition
+        from .submission_files import filefield_download_response
 
         students, err = self.student_response_or_error()
         if err:
@@ -1394,15 +1596,37 @@ class StudentAssignmentAttachedFileView(StudentScopedView):
         )
         if not submission or not submission.attached_file:
             return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
-        try:
-            fh = submission.attached_file.open("rb")
-        except Exception:
-            return Response({"error": "Файл недоступен."}, status=status.HTTP_404_NOT_FOUND)
         name = submission.attached_file.name.split("/")[-1] or "file"
-        content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
-        response = FileResponse(fh, content_type=content_type)
-        response["Content-Disposition"] = content_disposition(name, inline=False)
-        return response
+        return filefield_download_response(submission.attached_file, name)
+
+
+class StudentAssignmentExtraAttachedFileView(StudentScopedView):
+    """Скачивание дополнительного файла ответа ученика."""
+
+    def get(self, request, homework_id, attachment_id):
+        from .models import HomeworkSubmissionAttachment
+        from .submission_files import filefield_download_response
+
+        students, err = self.student_response_or_error()
+        if err:
+            return err
+        hw = _homework_qs(students).filter(pk=homework_id).first()
+        if not hw:
+            return Response({"error": "Задание не найдено."}, status=status.HTTP_404_NOT_FOUND)
+        roster = _pick_student(students, hw.teacher)
+        attachment = (
+            HomeworkSubmissionAttachment.objects.filter(
+                pk=attachment_id,
+                submission__homework=hw,
+                submission__student=roster,
+            )
+            .select_related("submission")
+            .first()
+        )
+        if not attachment or not attachment.file:
+            return Response({"error": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
+        name = attachment.original_name or attachment.file.name.split("/")[-1] or "file"
+        return filefield_download_response(attachment.file, name)
 
 
 class StudentInteractivesView(StudentScopedView):
@@ -1539,23 +1763,24 @@ def _collect_direct_materials(students, student_subject_id=None):
     from .models import DirectMaterialAssignment
     items = []
     seen = set()
-    student_objs = list(students)
-    group_ids = set()
-    for s in student_objs:
-        for g in s.groups.all():
-            group_ids.add(g.id)
+    student_ids, groups = _student_ids_and_groups(students)
+    group_ids = list(groups.values_list("id", flat=True))
 
     qs = DirectMaterialAssignment.objects.filter(
-        models.Q(student__in=student_objs) | models.Q(group_id__in=group_ids)
-    ).select_related("material", "teacher", "student_subject").order_by("-assigned_at")
+        Q(student_id__in=student_ids) | Q(group_id__in=group_ids)
+    ).select_related(
+        "material", "material__cabinet_file", "teacher", "teacher__profile", "student_subject",
+    ).order_by("-assigned_at")
     if student_subject_id:
         qs = qs.filter(
-            models.Q(student_subject_id=student_subject_id)
-            | models.Q(student_subject__isnull=True, group_id__isnull=False)
+            Q(student_subject_id=student_subject_id)
+            | Q(student_subject__isnull=True, group_id__isnull=False)
         )
 
     for da in qs:
         m = da.material
+        if m is None or m.status != MaterialStatus.PUBLISHED:
+            continue
         if m.id in seen:
             continue
         seen.add(m.id)
@@ -1573,27 +1798,102 @@ def _collect_direct_materials(students, student_subject_id=None):
                 student_subject_label=subject_label,
                 message=da.message or "",
                 description=m.description or "",
+                teacher=da.teacher,
+                direct_assignment_id=da.id,
+                direct_group_id=da.group_id,
             )
         )
     return items
 
 
-def _collect_student_boards(user):
+def _collect_student_interactives(students, lesson_subjects=None):
+    """Выданные интерактивы (квиз, карточки и т.д.) — в той же библиотеке, что и файлы."""
+    lesson_subjects = lesson_subjects or {}
+    items = []
+    seen_assignments = set()
+    qs = (
+        _interactive_assignments_qs(students)
+        .select_related("interactive", "teacher", "teacher__profile", "lesson")
+        .order_by("-assigned_at", "-id")
+    )
+    for assignment in qs:
+        if assignment.id in seen_assignments:
+            continue
+        seen_assignments.add(assignment.id)
+        interactive = assignment.interactive
+        if interactive is None:
+            continue
+        subject_id, subject_label = (None, "")
+        if assignment.lesson_id:
+            subject_id, subject_label = lesson_subjects.get(assignment.lesson_id, (None, ""))
+        lesson_topic = ""
+        if assignment.lesson_id and assignment.lesson:
+            lesson_topic = assignment.lesson.topic or assignment.lesson.title or ""
+        stamp = assignment.assigned_at or assignment.updated_at
+        items.append({
+            "id": f"interactive-{assignment.id}",
+            "title": interactive.get_display_title(),
+            "description": "",
+            "type": "interactive",
+            "type_label": "Интерактив",
+            "interactive_type": interactive.interactive_type,
+            "interactive_type_label": _INTERACTIVE_TYPE_LABELS.get(
+                interactive.interactive_type, "Интерактив"
+            ),
+            "topic": interactive.topic or "",
+            "lesson_topic": lesson_topic,
+            "assignment_id": None,
+            "homework_id": None,
+            "interactive_assignment_id": assignment.id,
+            "interactive_id": interactive.id,
+            "interactive_url": f"/cabinet/student/interactives/{assignment.id}/play",
+            "external_url": "",
+            "file_url": "",
+            "has_content": False,
+            "cover_theme": "interactive",
+            "message": "",
+            "direct": False,
+            "source": "interactive",
+            "assigned_at": _stamp_iso(stamp),
+            "updated_at": _stamp_iso(stamp),
+            "student_subject_id": subject_id,
+            "student_subject_label": subject_label,
+            "teacher_id": assignment.teacher_id,
+            "teacher_name": _teacher_name(assignment.teacher) if assignment.teacher_id else "",
+        })
+    return items
+
+
+def _collect_student_boards(user, lesson_subjects=None):
     """Интерактивные доски, к которым ученику открыт доступ."""
     from .boards_api import user_accessible_boards_qs
 
+    lesson_subjects = lesson_subjects or {}
     items = []
     qs = (
         user_accessible_boards_qs(user)
         .filter(is_archived=False)
+        .select_related(
+            "owner",
+            "owner__profile",
+            "lesson",
+            "schedule_event",
+            "schedule_event__student_subject",
+        )
         .order_by("-updated_at")[:50]
     )
     for board in qs:
         lesson_topic = ""
+        subject_id, subject_label = None, ""
         if board.lesson_id and board.lesson:
             lesson_topic = board.lesson.topic or board.lesson.title or ""
+            subject_id, subject_label = lesson_subjects.get(board.lesson_id, (None, ""))
         elif board.schedule_event_id and board.schedule_event:
-            lesson_topic = board.schedule_event.topic or board.schedule_event.title or ""
+            event = board.schedule_event
+            lesson_topic = event.topic or event.title or ""
+            if event.student_subject_id and event.student_subject:
+                subject_id = event.student_subject_id
+                subject_label = event.student_subject.display_label
         items.append({
             "id": f"board-{board.id}",
             "board_id": str(board.id),
@@ -1606,10 +1906,17 @@ def _collect_student_boards(user):
             "assignment_id": None,
             "external_url": "",
             "file_url": "",
+            "has_content": False,
             "board_url": f"/cabinet/boards/{board.id}",
             "cover_theme": "board",
             "direct": bool(board.student_id),
-            "updated_at": board.updated_at.isoformat() if board.updated_at else None,
+            "source": "board",
+            "updated_at": _stamp_iso(board.updated_at),
+            "assigned_at": _stamp_iso(board.updated_at),
+            "student_subject_id": subject_id,
+            "student_subject_label": subject_label,
+            "teacher_id": board.owner_id,
+            "teacher_name": _teacher_name(board.owner) if board.owner_id else "",
         })
     return items
 
@@ -1654,8 +1961,12 @@ class StudentMaterialsView(StudentScopedView):
             user=request.user,
             student_subject_id=subject_id or None,
             include_boards=True,
+            include_interactives=True,
             limit=100,
         )
+        from .student_library_overlay import attach_library_folders
+
+        all_items, folders = attach_library_folders(all_items, students=students)
         if q:
             all_items = [
                 it for it in all_items
@@ -1665,8 +1976,15 @@ class StudentMaterialsView(StudentScopedView):
                 or q in it.get("type_label", "").lower()
                 or q in it.get("lesson_topic", "").lower()
                 or q in (it.get("student_subject_label") or "").lower()
+                or q in (it.get("teacher_name") or "").lower()
             ]
-        return Response({"items": all_items[:100]})
+        _log_student_materials_snapshot(
+            user=request.user,
+            students=students,
+            items=all_items,
+            student_subject_id=subject_id or None,
+        )
+        return Response({"items": all_items[:100], "folders": folders})
 
 
 class StudentMaterialFileView(StudentScopedView):

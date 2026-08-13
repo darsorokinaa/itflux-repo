@@ -112,6 +112,12 @@ export function buildTeacherVariantUrl(reviewCtx) {
   return String(reviewCtx?.variant_path || "").trim();
 }
 
+export function homeworkTeacherCommentAttachments(result) {
+  if (!result || typeof result !== "object") return [];
+  const list = result.teacher_comment_attachments || result.teacherCommentAttachments || [];
+  return Array.isArray(list) ? list : [];
+}
+
 export function homeworkTeacherAttachments(result, taskId, taskNumber, tasks) {
   if (!result || typeof result !== "object") return [];
   const byId = result.teacher_attachments_by_task_id || result.teacherAttachmentsByTaskId || {};
@@ -140,11 +146,12 @@ export function resolvePart1Verdict(task, answer, result, subject) {
 
 export function buildStudentHomeworkReviewRows(tasks, result, level, subject) {
   if (!Array.isArray(tasks) || !tasks.length || !result || typeof result !== "object") {
-    return { part1: [], part2: [], teacherComment: "" };
+    return { part1: [], part2: [], teacherComment: "", teacherCommentAttachments: [] };
   }
   const teacherComment = String(
     result.teacher_comment || result.review_comment || result.teacherComment || ""
   ).trim();
+  const teacherCommentAttachments = homeworkTeacherCommentAttachments(result);
   const part1 = [];
   const part2 = [];
   const list = [...tasks].sort((a, b) => a.number - b.number);
@@ -180,7 +187,7 @@ export function buildStudentHomeworkReviewRows(tasks, result, level, subject) {
       });
     }
   }
-  return { part1, part2, teacherComment };
+  return { part1, part2, teacherComment, teacherCommentAttachments };
 }
 
 function hasReviewAnswer(row) {

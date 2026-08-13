@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import CabinetFloatingMenu from "../components/CabinetFloatingMenu";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import ConfirmActionModal from "../components/ConfirmActionModal";
@@ -165,29 +166,13 @@ function groupExamLabel(group) {
 }
 
 function StuMenu({ items, align = "right", ariaLabel = "Ещё" }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDoc = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
-    };
-    const onKey = (e) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  const [anchor, setAnchor] = useState(null);
+  const open = Boolean(anchor);
 
   if (!items?.length) return null;
 
   return (
-    <div className={`cb-stu-menu${align === "left" ? " cb-stu-menu--left" : ""}`} ref={rootRef}>
+    <div className={`cb-stu-menu${align === "left" ? " cb-stu-menu--left" : ""}`}>
       <button
         type="button"
         className="cb-stu-menu__btn"
@@ -195,36 +180,38 @@ function StuMenu({ items, align = "right", ariaLabel = "Ещё" }) {
         aria-expanded={open}
         onClick={(e) => {
           e.stopPropagation();
-          setOpen((v) => !v);
+          setAnchor(open ? null : e.currentTarget);
         }}
         onMouseDown={(e) => e.stopPropagation()}
         onDragStart={(e) => e.preventDefault()}
       >
         ⋯
       </button>
-      {open ? (
-        <div
-          className={`cb-stu-menu__list${align === "left" ? " cb-stu-menu__list--left" : ""}`}
-          role="menu"
-        >
-          {items.map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              role="menuitem"
-              className={`cb-stu-menu__item${item.danger ? " cb-stu-menu__item--danger" : ""}`}
-              disabled={item.disabled}
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                item.onClick?.();
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      <CabinetFloatingMenu
+        open={open}
+        anchorEl={anchor}
+        onClose={() => setAnchor(null)}
+        className={`cb-stu-menu__list${align === "left" ? " cb-stu-menu__list--left" : ""}`}
+        align={align === "left" ? "left" : "right"}
+        width={196}
+      >
+        {items.map((item) => (
+          <button
+            key={item.label}
+            type="button"
+            role="menuitem"
+            className={`cb-stu-menu__item${item.danger ? " cb-stu-menu__item--danger" : ""}`}
+            disabled={item.disabled}
+            onClick={(e) => {
+              e.stopPropagation();
+              setAnchor(null);
+              item.onClick?.();
+            }}
+          >
+            {item.label}
+          </button>
+        ))}
+      </CabinetFloatingMenu>
     </div>
   );
 }
@@ -1160,7 +1147,7 @@ export default function CabinetStudentsPage() {
     await loadData();
   };
   const openAssignMaterialsForStudent = (student) => {
-    setMaterialsAssignModal({ student });
+    navigate(`/cabinet/students/${student.id}/materials`);
   };
   const openAssignMaterialsForGroup = (group) => {
     setMaterialsAssignModal({ group });

@@ -20,6 +20,7 @@ import {
   uploadMyFile,
 } from "../../utils/cabinetAuth";
 import CabinetModal from "./CabinetModal";
+import CabinetFloatingMenu from "./CabinetFloatingMenu";
 import ConfirmActionModal from "./ConfirmActionModal";
 import MyFileAssignModal from "./MyFileAssignModal";
 import CabinetIcon from "../CabinetIcons";
@@ -247,7 +248,7 @@ export default function MyFilesManager({
   const [view, setView] = useState(compact ? "list" : "list");
   const [selected, setSelected] = useState(null);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
-  const [menuId, setMenuId] = useState(null);
+  const [menu, setMenu] = useState(null);
   const [dropActive, setDropActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [notice, setNotice] = useState("");
@@ -262,7 +263,6 @@ export default function MyFilesManager({
   const [students, setStudents] = useState([]);
   const [groups, setGroups] = useState([]);
   const fileInputRef = useRef(null);
-  const menuRef = useRef(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -329,16 +329,6 @@ export default function MyFilesManager({
   useEffect(() => {
     load();
   }, [load]);
-
-  useEffect(() => {
-    if (!menuId) return undefined;
-    const onDoc = (e) => {
-      if (menuRef.current?.contains(e.target)) return;
-      setMenuId(null);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [menuId]);
 
   const showNotice = (text) => {
     setNotice(text);
@@ -771,124 +761,19 @@ export default function MyFilesManager({
                       </div>
                     </div>
                     {!selectable ? (
-                      <div className="cb-files__row-actions" ref={menuId === item.id ? menuRef : null}>
+                      <div className="cb-files__row-actions">
                         <button
                           type="button"
                           className="cb-files__menu-btn"
                           aria-label="Действия"
-                          aria-expanded={menuId === item.id}
+                          aria-expanded={menu?.id === item.id}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setMenuId(menuId === item.id ? null : item.id);
+                            setMenu(menu?.id === item.id ? null : { id: item.id, item, anchor: e.currentTarget });
                           }}
                         >
                           ⋯
                         </button>
-                        {menuId === item.id ? (
-                          <div className="cb-files__menu" role="menu">
-                            {section !== "trash" ? (
-                              <>
-                                {item.kind === "file" ? (
-                                  <div className="cb-files__menu-group">
-                                    <p className="cb-files__menu-title">Файл</p>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        window.open(myFileDownloadUrl(item.id, { student }), "_blank", "noopener,noreferrer");
-                                        setMenuId(null);
-                                      }}
-                                    >
-                                      Скачать
-                                    </button>
-                                  </div>
-                                ) : null}
-                                <div className="cb-files__menu-group">
-                                  <p className="cb-files__menu-title">Правка</p>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setRenameItem(item);
-                                      setRenameValue(item.name || item.display_name || "");
-                                      setMenuId(null);
-                                    }}
-                                  >
-                                    Переименовать
-                                  </button>
-                                  {item.kind === "file" && !student ? (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleCopy(item);
-                                        setMenuId(null);
-                                      }}
-                                    >
-                                      Копировать
-                                    </button>
-                                  ) : null}
-                                </div>
-                                {item.kind === "file" && !student ? (
-                                  <div className="cb-files__menu-group">
-                                    <p className="cb-files__menu-title">Обучение</p>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setAssignItem(item);
-                                        setMenuId(null);
-                                      }}
-                                    >
-                                      Выдать ученику / группе
-                                    </button>
-                                  </div>
-                                ) : null}
-                                <div className="cb-files__menu-group">
-                                  <p className="cb-files__menu-title">Удаление</p>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleTrash(item);
-                                      setMenuId(null);
-                                    }}
-                                  >
-                                    В корзину
-                                  </button>
-                                </div>
-                              </>
-                            ) : (
-                              <div className="cb-files__menu-group">
-                                <p className="cb-files__menu-title">Корзина</p>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleRestore(item);
-                                    setMenuId(null);
-                                  }}
-                                >
-                                  Восстановить
-                                </button>
-                                {item.kind === "file" ? (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setPurgeItem(item);
-                                      setPurgeForce(false);
-                                      setPurgeRelations([]);
-                                      setMenuId(null);
-                                    }}
-                                  >
-                                    Удалить окончательно
-                                  </button>
-                                ) : null}
-                              </div>
-                            )}
-                          </div>
-                        ) : null}
                       </div>
                     ) : null}
                   </RowTag>
@@ -958,6 +843,107 @@ export default function MyFilesManager({
           ) : null}
         </div>
       </div>
+
+      <CabinetFloatingMenu
+        open={Boolean(menu)}
+        anchorEl={menu?.anchor}
+        onClose={() => setMenu(null)}
+      >
+        {menu?.item && section !== "trash" ? (
+          <>
+            {menu.item.kind === "file" ? (
+              <div className="cb-files__menu-group">
+                <p className="cb-files__menu-title">Файл</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.open(myFileDownloadUrl(menu.item.id, { student }), "_blank", "noopener,noreferrer");
+                    setMenu(null);
+                  }}
+                >
+                  Скачать
+                </button>
+              </div>
+            ) : null}
+            <div className="cb-files__menu-group">
+              <p className="cb-files__menu-title">Правка</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setRenameItem(menu.item);
+                  setRenameValue(menu.item.name || menu.item.display_name || "");
+                  setMenu(null);
+                }}
+              >
+                Переименовать
+              </button>
+              {menu.item.kind === "file" && !student ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleCopy(menu.item);
+                    setMenu(null);
+                  }}
+                >
+                  Копировать
+                </button>
+              ) : null}
+            </div>
+            {menu.item.kind === "file" && !student ? (
+              <div className="cb-files__menu-group">
+                <p className="cb-files__menu-title">Обучение</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAssignItem(menu.item);
+                    setMenu(null);
+                  }}
+                >
+                  Выдать ученику / группе
+                </button>
+              </div>
+            ) : null}
+            <div className="cb-files__menu-group">
+              <p className="cb-files__menu-title">Удаление</p>
+              <button
+                type="button"
+                onClick={() => {
+                  handleTrash(menu.item);
+                  setMenu(null);
+                }}
+              >
+                В корзину
+              </button>
+            </div>
+          </>
+        ) : menu?.item ? (
+          <div className="cb-files__menu-group">
+            <p className="cb-files__menu-title">Корзина</p>
+            <button
+              type="button"
+              onClick={() => {
+                handleRestore(menu.item);
+                setMenu(null);
+              }}
+            >
+              Восстановить
+            </button>
+            {menu.item.kind === "file" ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setPurgeItem(menu.item);
+                  setPurgeForce(false);
+                  setPurgeRelations([]);
+                  setMenu(null);
+                }}
+              >
+                Удалить окончательно
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </CabinetFloatingMenu>
 
       {renameItem ? (
         <CabinetModal

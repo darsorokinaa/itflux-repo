@@ -29,6 +29,7 @@ from .models import (
     Notification,
     ReviewItem,
 )
+from .submission_files import submission_has_files
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ def student_has_started_homework(homework: Homework) -> bool:
             return True
         if (submission.answer_text or "").strip():
             return True
-        if submission.attached_file:
+        if submission_has_files(submission):
             return True
         payload = submission.result_payload
         if isinstance(payload, dict) and payload:
@@ -83,6 +84,9 @@ def student_has_started_homework(homework: Homework) -> bool:
     return False
 
 
+HOMEWORK_ACCEPTED_EDIT_ERROR = "Нельзя изменить проверенное и принятое домашнее задание."
+
+
 def homework_is_checked_or_completed(homework: Homework) -> bool:
     if homework.status in (HomeworkStatus.CHECKED, HomeworkStatus.COMPLETED):
         return True
@@ -96,6 +100,11 @@ def homework_is_checked_or_completed(homework: Homework) -> bool:
     ).exists():
         return True
     return False
+
+
+def ensure_homework_editable(homework: Homework) -> None:
+    if homework_is_checked_or_completed(homework):
+        raise ValueError(HOMEWORK_ACCEPTED_EDIT_ERROR)
 
 
 def _parse_due_at(raw):
@@ -194,6 +203,7 @@ def serialize_homework_for_edit(homework: Homework) -> dict:
     from .homework_attachments import list_homework_attachments
 
     attachments = list_homework_attachments(homework)
+    is_checked = homework_is_checked_or_completed(homework)
     return {
         "id": homework.id,
         "title": homework.title,
@@ -210,16 +220,14 @@ def serialize_homework_for_edit(homework: Homework) -> dict:
         "attachments_count": len(attachments),
         "warnings": {
             "student_started": student_has_started_homework(homework),
-            "is_checked_or_completed": homework_is_checked_or_completed(homework),
+            "is_checked_or_completed": is_checked,
         },
+        "can_edit": not is_checked,
         "student_started_message": (
             "Ученик уже начал выполнять это домашнее задание. "
             "Изменение состава заданий может повлиять на его ответы и результаты."
         ),
-        "checked_message": (
-            "Домашнее задание уже завершено или проверено. "
-            "Изменения могут повлиять на выставленный результат."
-        ),
+        "checked_message": HOMEWORK_ACCEPTED_EDIT_ERROR,
     }
 
 
@@ -228,7 +236,7 @@ def _archive_removed_task_answers(submission: HomeworkSubmission, removed_task_i
     if not removed_task_ids:
         return False
     payload = dict(submission.result_payload or {})
-    if not payload and not submission.answer_text and not submission.attached_file:
+    if not payload and not submission.answer_text and not submission_has_files(submission):
         excluded = list(payload.get("excluded_homework_task_ids") or [])
         for tid in removed_task_ids:
             if tid not in excluded:
@@ -437,9 +445,8 @@ def update_issued_homework(
         raise HomeworkEditConflict()
 
     student_started = student_has_started_homework(homework)
-    is_checked = homework_is_checked_or_completed(homework)
     confirm_started = data.get("confirm_student_started") in (True, "1", "true", "yes")
-    confirm_checked = data.get("confirm_checked_edit") in (True, "1", "true", "yes")
+    ensure_homework_editable(homework)
 
     tasks_payload = data.get("tasks")
     if tasks_payload is not None and not isinstance(tasks_payload, list):
@@ -486,12 +493,6 @@ def update_issued_homework(
             "needs_confirm_student_started",
             "Ученик уже начал выполнять это домашнее задание. "
             "Изменение состава заданий может повлиять на его ответы и результаты.",
-        )
-    if is_checked and not confirm_checked:
-        raise HomeworkEditNeedsConfirm(
-            "needs_confirm_checked",
-            "Домашнее задание уже завершено или проверено. "
-            "Изменения могут повлиять на выставленный результат.",
         )
 
     changed_fields: list[str] = []

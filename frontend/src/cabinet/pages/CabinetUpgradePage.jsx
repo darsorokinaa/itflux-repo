@@ -164,9 +164,25 @@ function formatDateShort(iso) {
   });
 }
 
-function ctaLabel(plan, isCurrent, { expiresAt, currentSlug } = {}) {
-  if (isCurrent) return "Текущий тариф";
+function formatOfferUntil(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+}
+
+function activeOffer(plan, period) {
+  const offer = plan?.promotion;
+  if (!offer) return null;
+  if (period === "year" && offer.benefit_type === "fixed_price") return null;
+  return offer;
+}
+
+function ctaLabel(plan, isCurrent, { expiresAt, currentSlug, period } = {}) {
   if (plan.cta_type === "contact" || plan.slug === SCHOOL_SLUG) return "Оставить заявку";
+  const isFree = Boolean(plan.is_free) || plan.slug === "start";
+  if (isCurrent && isFree) return "Текущий тариф";
+  if (isCurrent) return period === "year" ? "Продлить на год" : "Продлить на месяц";
   const isDown = currentSlug && planRank(plan.slug) < planRank(currentSlug);
   if (isDown && expiresAt) {
     if (plan.slug === "start") return "Перейти на Старт после окончания подписки";
@@ -531,14 +547,21 @@ function SubscriptionStatusCard({
                 Иначе будет активирован «Старт».
               </p>
             )}
-            <button
-              type="button"
-              className="upg-btn upg-btn--ghost"
-              onClick={onCancelPending}
-              disabled={managing}
-            >
-              {managing === "cancel_pending" ? "…" : "Отменить переход"}
-            </button>
+            {pendingChange.prepaid ? (
+              <p className="upg-status__note">
+                Следующий период уже оплачен. Отменить переход нельзя — текущий тариф
+                сохранится до {formatDateShort(pendingChange.effective_at)}.
+              </p>
+            ) : (
+              <button
+                type="button"
+                className="upg-btn upg-btn--ghost"
+                onClick={onCancelPending}
+                disabled={managing}
+              >
+                {managing === "cancel_pending" ? "…" : "Отменить переход"}
+              </button>
+            )}
           </div>
         ) : null}
       </div>
@@ -581,6 +604,7 @@ function PlanCard({
   paymentsEnabled = true,
   currentSlug = null,
   expiresAt = null,
+  onOfferDetails,
 }) {
   const highlights = buildHighlights(plan).slice(0, 8);
   const priceMonth = Number(plan.price_month);
@@ -588,11 +612,15 @@ function PlanCard({
   const isContact = plan.cta_type === "contact" || plan.slug === SCHOOL_SLUG;
   const isFree = Boolean(plan.is_free) && !isContact;
   const paymentBlocked = !paymentsEnabled && !isFree && !isContact;
-  const buttonLabel = ctaLabel(plan, isCurrent, { expiresAt, currentSlug });
+  const offer = activeOffer(plan, period);
+  const offerLive = Boolean(offer?.can_redeem);
+  const buttonLabel = offerLive
+    ? offer.button_text || ctaLabel(plan, isCurrent, { expiresAt, currentSlug, period })
+    : ctaLabel(plan, isCurrent, { expiresAt, currentSlug, period });
 
   const basePrice = period === "year" && priceYear > 0 ? priceYear : priceMonth;
   const referralFirstPrice =
-    referralEligible && !isFree && !isContact && basePrice > 0
+    referralEligible && !isFree && !isContact && basePrice > 0 && !offerLive
       ? Math.round(basePrice * (1 - Number(referralPercent || 50) / 100))
       : null;
 
@@ -602,6 +630,14 @@ function PlanCard({
   if (isContact) {
     priceMain = "По запросу";
     priceSub = "Стоимость рассчитывается индивидуально";
+  } else if (offerLive && offer.benefit_type === "free_period") {
+    priceWas = formatMoney(basePrice);
+    priceMain = "Бесплатно";
+    priceSub = `${offer.free_months} ${offer.free_months === 1 ? "месяц" : offer.free_months < 5 ? "месяца" : "месяцев"} · далее ${formatMoney(offer.pricing?.renewal || basePrice)}/мес`;
+  } else if (offerLive && offer.pricing?.current != null) {
+    priceWas = formatMoney(offer.pricing.original || basePrice);
+    priceMain = formatMoney(offer.pricing.current);
+    priceSub = `первый период · далее ${formatMoney(offer.pricing.renewal || basePrice)}/мес`;
   } else if (isFree || priceMonth === 0) {
     priceMain = "Бесплатно";
   } else if (
@@ -649,6 +685,10 @@ function PlanCard({
         ) : plan.is_recommended ? (
           <span className="upg-card__badge">{plan.badge_text || "Рекомендуем"}</span>
         ) : null}
+        {offerLive ? <span className="upg-card__badge upg-card__badge--offer">Специальное предложение</span> : null}
+        {offer && !offerLive && offer.status === "ended" ? (
+          <span className="upg-card__badge upg-card__badge--muted">Акция завершена</span>
+        ) : null}
         {isCurrent ? <span className="upg-card__badge upg-card__badge--current">Текущий</span> : null}
       </div>
 
@@ -661,6 +701,19 @@ function PlanCard({
         {priceWas ? <div className="upg-card__price-was">{priceWas}</div> : null}
         <div className="upg-card__price">{priceMain}</div>
         {priceSub ? <div className="upg-card__price-sub">{priceSub}</div> : null}
+        {offerLive && offer.ends_at ? (
+          <div className="upg-card__price-note">
+            Доступно до {formatOfferUntil(offer.ends_at)}
+            {onOfferDetails ? (
+              <>
+                {" · "}
+                <button type="button" className="upg-link-btn" onClick={() => onOfferDetails(offer)}>
+                  Подробнее
+                </button>
+              </>
+            ) : null}
+          </div>
+        ) : null}
         {referralFirstPrice != null && period === "month" && !promoDiscount?.valid ? (
           <div className="upg-card__price-note">Скидка действует только на первый месяц.</div>
         ) : null}
@@ -701,7 +754,7 @@ function PlanCard({
           >
             {ctaLabel(plan, false)}
           </a>
-        ) : isCurrent ? (
+        ) : isCurrent && (isFree || isContact) ? (
           <div className="upg-card__current-label" aria-disabled="true">
             Текущий тариф
           </div>
@@ -801,6 +854,72 @@ function CompareSection({ plans, open, onOpenChange }) {
         </>
       ) : null}
     </section>
+  );
+}
+
+function OfferDetailsModal({ offer, onClose }) {
+  if (!offer) return null;
+  const original = offer.pricing?.original;
+  const current = offer.pricing?.current;
+  const renewal = offer.pricing?.renewal;
+  return (
+    <div className="upg-modal-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="upg-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="upg-offer-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="upg-offer-title" className="upg-modal__title">
+          {offer.title}
+        </h2>
+        {offer.status === "ended" ? (
+          <p className="upg-modal__note">Акция завершена.</p>
+        ) : null}
+        {offer.description ? (
+          <div className="upg-modal__block">
+            <strong>Об акции</strong>
+            <p>{offer.description}</p>
+          </div>
+        ) : null}
+        {offer.how_to_get ? (
+          <div className="upg-modal__block">
+            <strong>Как получить</strong>
+            <p>{offer.how_to_get}</p>
+          </div>
+        ) : null}
+        {offer.terms ? (
+          <div className="upg-modal__block">
+            <strong>Условия</strong>
+            <p>{offer.terms}</p>
+          </div>
+        ) : null}
+        <div className="upg-modal__block">
+          <strong>Тариф</strong>
+          <p>{offer.plan?.name}</p>
+        </div>
+        <div className="upg-modal__block">
+          <strong>Стоимость</strong>
+          <p>
+            {offer.benefit_type === "free_period"
+              ? `${offer.free_months} мес. бесплатно, далее ${formatMoney(renewal)}/мес`
+              : `${formatMoney(current)} сейчас${original ? ` (вместо ${formatMoney(original)})` : ""}, далее ${formatMoney(renewal)}/мес`}
+          </p>
+        </div>
+        {offer.ends_at ? (
+          <div className="upg-modal__block">
+            <strong>Действует до</strong>
+            <p>{formatOfferUntil(offer.ends_at)}</p>
+          </div>
+        ) : null}
+        <div className="upg-modal__actions">
+          <button type="button" className="upg-btn upg-btn--ghost" onClick={onClose}>
+            Закрыть
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -991,10 +1110,12 @@ export default function CabinetUpgradePage() {
   const [referralCopied, setReferralCopied] = useState(false);
   const [managing, setManaging] = useState(null);
   const [downgradeModal, setDowngradeModal] = useState(null);
+  const [offerModal, setOfferModal] = useState(null);
   const [selectedStudents, setSelectedStudents] = useState([]);
   const [selectedGroups, setSelectedGroups] = useState([]);
   const [confirmingDowngrade, setConfirmingDowngrade] = useState(false);
   const plansRef = useRef(null);
+  const payIdemRef = useRef({});
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -1309,10 +1430,12 @@ export default function CabinetUpgradePage() {
   };
 
   const handleSelect = async (plan) => {
-    if (!plan || plan.slug === currentSlug) return;
+    if (!plan) return;
     if (plan.cta_type === "contact" || plan.slug === SCHOOL_SLUG) return;
-
     const isFree = Boolean(plan.is_free);
+    const isExtendCurrent = plan.slug === currentSlug;
+    if (isExtendCurrent && isFree) return;
+
     if (!paymentsEnabled && !isFree) {
       setNotice("Оплата временно недоступна. Попробуйте позже.");
       return;
@@ -1322,7 +1445,10 @@ export default function CabinetUpgradePage() {
     setNotice("");
     let openedDowngradeModal = false;
     try {
-      const result = await changePlan(plan.slug, period);
+      let result = { requires_payment: isExtendCurrent && !isFree };
+      if (!isExtendCurrent) {
+        result = await changePlan(plan.slug, period);
+      }
       if (result.requires_downgrade_confirm || result.preview?.can_schedule) {
         const preview = result.preview || {};
         const students = preview.limits?.students;
@@ -1354,8 +1480,31 @@ export default function CabinetUpgradePage() {
           setNotice("Оплата временно недоступна. Попробуйте позже.");
           return;
         }
-        const promoCode = promoState?.valid ? promoInput.trim() : null;
-        const payment = await createPayment(plan.slug, period, promoCode);
+        const promoCode = (() => {
+          const offer = activeOffer(plan, period);
+          if (offer?.can_redeem && offer.allow_promo_codes === false) return null;
+          return promoState?.valid ? promoInput.trim() : null;
+        })();
+        const idemKey = `${plan.slug}:${period}`;
+        if (!payIdemRef.current[idemKey]) {
+          const uuid =
+            typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+              ? crypto.randomUUID()
+              : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+          payIdemRef.current[idemKey] = `pay_${plan.slug}_${period}_${uuid}`;
+        }
+        const payment = await createPayment(
+          plan.slug,
+          period,
+          promoCode,
+          payIdemRef.current[idemKey],
+          activeOffer(plan, period)?.id || null,
+        );
+        if (payment.granted || payment.status === "paid") {
+          await refreshPlans();
+          setNotice(payment.discount?.message || payment.pricing?.message || "Предложение применено.");
+          return;
+        }
         const url = (payment.payment_url || "").trim();
         if (!url) {
           setNotice("Не удалось получить ссылку на оплату.");
@@ -1392,6 +1541,7 @@ export default function CabinetUpgradePage() {
           );
           const paid = await pollLocalPaymentUntilPaid(payment.payment_id);
           if (paid?.is_paid) {
+            delete payIdemRef.current[idemKey];
             setNotice(
               paid.plan_name
                 ? `Оплата прошла успешно. Тариф «${paid.plan_name}» активирован.`
@@ -1416,6 +1566,7 @@ export default function CabinetUpgradePage() {
     } catch (err) {
       setNotice(
         err?.data?.detail ||
+          err?.data?.message ||
           err?.message ||
           "Не удалось изменить тариф. Попробуйте позже.",
       );
@@ -1516,6 +1667,56 @@ export default function CabinetUpgradePage() {
             </aside>
           ) : null}
 
+          {(plansData?.promotions || []).filter((p) => p.can_redeem || p.status === "ended").length ? (
+            <section className="upg-offers" aria-labelledby="upg-offers-title">
+              <h2 id="upg-offers-title" className="upg-section-title">
+                Специальные предложения
+              </h2>
+              <div className="upg-offers__list">
+                {(plansData.promotions || [])
+                  .filter((p) => p.can_redeem || p.status === "ended")
+                  .map((offer) => (
+                    <article key={offer.id} className="upg-offer-card">
+                      <div className="upg-offer-card__head">
+                        <strong>{offer.title}</strong>
+                        {offer.status === "ended" ? (
+                          <span className="upg-card__badge upg-card__badge--muted">Завершена</span>
+                        ) : (
+                          <span className="upg-card__badge upg-card__badge--offer">Акция</span>
+                        )}
+                      </div>
+                      {offer.short_description ? <p>{offer.short_description}</p> : null}
+                      <p className="upg-offer-card__meta">
+                        {offer.plan?.name}
+                        {offer.ends_at ? ` · до ${formatOfferUntil(offer.ends_at)}` : ""}
+                      </p>
+                      <div className="upg-offer-card__actions">
+                        <button
+                          type="button"
+                          className="upg-link-btn"
+                          onClick={() => setOfferModal(offer)}
+                        >
+                          Подробнее
+                        </button>
+                        {offer.can_redeem ? (
+                          <button
+                            type="button"
+                            className="upg-card__btn"
+                            onClick={() => {
+                              const target = plans.find((p) => p.slug === offer.plan?.slug);
+                              if (target) handleSelect(target);
+                            }}
+                          >
+                            {offer.button_text || "Выбрать тариф"}
+                          </button>
+                        ) : null}
+                      </div>
+                    </article>
+                  ))}
+              </div>
+            </section>
+          ) : null}
+
           <div className="upg-toolbar" ref={plansRef}>
             <div className="upg-period" role="group" aria-label="Период оплаты">
               <button
@@ -1606,6 +1807,7 @@ export default function CabinetUpgradePage() {
                 paymentsEnabled={paymentsEnabled}
                 currentSlug={currentSlug}
                 expiresAt={subscription?.expires_at || subscription?.promo_ends_at}
+                onOfferDetails={setOfferModal}
               />
             ))}
           </div>
@@ -1740,6 +1942,7 @@ export default function CabinetUpgradePage() {
             onClose={closeDowngradeModal}
             busy={confirmingDowngrade}
           />
+          <OfferDetailsModal offer={offerModal} onClose={() => setOfferModal(null)} />
         </>
       )}
     </CabinetPageShell>

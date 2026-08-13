@@ -98,16 +98,34 @@ class SubscriptionLimitService:
             return sub.plan
 
         start_plan = SubscriptionAccessService.get_start_plan()
-        # Истёкший активный/пробный период: демотируем на «Старт», чтобы лимиты и
-        # content_access_rank не оставались от прежнего тарифа.
+        # Доступ уже как «Старт». Persist-демотирование — только если период
+        # всё ещё истёк (не затираем параллельный webhook) и нет prepaid/grace.
+        now = timezone.now()
         if sub.expires_at and sub.status in (
             TeacherSubscription.Status.ACTIVE,
             TeacherSubscription.Status.TRIAL,
         ):
-            TeacherSubscription.objects.filter(pk=sub.pk).update(
+            from .subscription_downgrade import DowngradeService
+            from .subscription_lifecycle import RENEW_GRACE
+
+            change = DowngradeService.get_active_change(sub)
+            in_renew_grace = bool(
+                sub.auto_renew
+                and (sub.tbank_rebill_id or "").strip()
+                and sub.expires_at >= now - RENEW_GRACE
+            )
+            if change or in_renew_grace:
+                return start_plan
+            TeacherSubscription.objects.filter(
+                pk=sub.pk,
+                expires_at__lte=now,
+                status__in=[
+                    TeacherSubscription.Status.ACTIVE,
+                    TeacherSubscription.Status.TRIAL,
+                ],
+            ).update(
                 status=TeacherSubscription.Status.EXPIRED,
                 plan_id=start_plan.pk,
-                auto_renew=False,
             )
         return start_plan
 

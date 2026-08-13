@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import CabinetIcon from "../CabinetIcons";
+import CabinetFloatingMenu from "./CabinetFloatingMenu";
 import {
   appearancePageClass,
   appearancePageStyle,
@@ -286,29 +287,13 @@ export function InteractiveActivityCard({
     interactive.topic || null,
   ].filter((part) => part && part !== "null" && part !== "undefined") : [];
 
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef(null);
+  const [menuAnchor, setMenuAnchor] = useState(null);
+  const menuOpen = Boolean(menuAnchor);
   const canAssign = canAssignInteractive(interactive);
   const isOwned = variant === "owned" || variant === "mine";
   const canEdit = isOwned && Boolean(onEdit);
   const primaryLabel = onLaunch ? "Запустить" : "Открыть";
   const primaryAction = onLaunch || onOpen;
-
-  useEffect(() => {
-    if (!menuOpen) return undefined;
-    const close = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
-    };
-    const onKey = (e) => {
-      if (e.key === "Escape") setMenuOpen(false);
-    };
-    document.addEventListener("click", close);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("click", close);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen]);
 
   if (!interactive) return null;
 
@@ -353,42 +338,46 @@ export function InteractiveActivityCard({
       <div className="ix-activity-card__body">
         <div className="ix-activity-card__head">
           <h3 className="ix-activity-card__title">{getInteractiveDisplayTitle(interactive)}</h3>
-          <div
-            className={`ix-activity-card__menu-wrap${menuOpen ? " is-open" : ""}`}
-            ref={menuRef}
-          >
+          <div className={`ix-activity-card__menu-wrap${menuOpen ? " is-open" : ""}`}>
             <button
               type="button"
               className="ix-activity-card__menu-btn"
               aria-label="Дополнительные действия"
               aria-expanded={menuOpen}
-              onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuAnchor(menuOpen ? null : e.currentTarget);
+              }}
             >
               ⋯
             </button>
-            {menuOpen ? (
-              <div className="ix-activity-card__dropdown" role="menu">
-                <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onOpen?.(); }}>Открыть</button>
-                {canEdit ? (
-                  <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit?.(); }}>Редактировать</button>
-                ) : null}
-                <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDuplicate?.(); }}>Дублировать</button>
-                {isOwned ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={!canAssign}
-                    title={canAssign ? "" : "Сначала опубликуйте"}
-                    onClick={(e) => { e.stopPropagation(); if (!canAssign) return; setMenuOpen(false); onAssign?.(); }}
-                  >
-                    Выдать
-                  </button>
-                ) : null}
-                {isOwned ? (
-                  <button type="button" role="menuitem" className="danger" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDelete?.(); }}>Удалить</button>
-                ) : null}
-              </div>
-            ) : null}
+            <CabinetFloatingMenu
+              open={menuOpen}
+              anchorEl={menuAnchor}
+              onClose={() => setMenuAnchor(null)}
+              className="ix-activity-card__dropdown"
+              width={172}
+            >
+              <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuAnchor(null); onOpen?.(); }}>Открыть</button>
+              {canEdit ? (
+                <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuAnchor(null); onEdit?.(); }}>Редактировать</button>
+              ) : null}
+              <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuAnchor(null); onDuplicate?.(); }}>Дублировать</button>
+              {isOwned ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!canAssign}
+                  title={canAssign ? "" : "Сначала опубликуйте"}
+                  onClick={(e) => { e.stopPropagation(); if (!canAssign) return; setMenuAnchor(null); onAssign?.(); }}
+                >
+                  Выдать
+                </button>
+              ) : null}
+              {isOwned ? (
+                <button type="button" role="menuitem" className="danger" onClick={(e) => { e.stopPropagation(); setMenuAnchor(null); onDelete?.(); }}>Удалить</button>
+              ) : null}
+            </CabinetFloatingMenu>
           </div>
         </div>
         {description ? (

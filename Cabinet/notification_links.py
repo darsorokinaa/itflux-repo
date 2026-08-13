@@ -42,6 +42,12 @@ def resolve_notification_url(notification, request=None) -> str:
         if student_id and not student:
             return f"/cabinet/payments?student={student_id}"
         return "/cabinet/schedule" if not student else "/cabinet/student/lessons"
+    if ntype in ("homework_checked", "homework_returned"):
+        hw_id = payload.get("homework_id")
+        if hw_id:
+            suffix = "?focus=results" if ntype == "homework_checked" else ""
+            return f"/cabinet/student/assignments/{hw_id}{suffix}"
+        return "/cabinet/student/assignments"
     if ntype == "journal_results":
         record_id = payload.get("record_id")
         if record_id:

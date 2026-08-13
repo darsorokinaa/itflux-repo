@@ -1,6 +1,7 @@
 import { getInteractiveDisplayTitle } from "./interactivesData";
 import { getLessonOpenUrl } from "./lessonCardUtils";
 import { mapApiMaterial, mapApiPlanItem } from "./lessonPlansData";
+import { materialTypeLabel } from "./materialTypeConfig";
 
 export function mapApiInteractiveAttachment(interactive) {
   return {
@@ -46,7 +47,7 @@ export function lessonResourceRows(item) {
       key: `lesson-material-${material.id}`,
       kind,
       label: material.title,
-      typeLabel: material.materialTypeLabel || "Материал",
+      typeLabel: materialTypeLabel(material.materialType, material.materialTypeLabel),
       url: materialOpenUrl(material),
       materialId: material.id,
       cabinetFileId: material.cabinetFileId || material.cabinet_file_id || null,
@@ -89,7 +90,7 @@ export function homeworkResourceRows(item) {
       key: `hw-material-${material.id}`,
       kind,
       label: material.title,
-      typeLabel: material.materialTypeLabel || "Материал",
+      typeLabel: materialTypeLabel(material.materialType, material.materialTypeLabel),
       url: materialOpenUrl(material),
       materialId: material.id,
       cabinetFileId: material.cabinetFileId || material.cabinet_file_id || null,

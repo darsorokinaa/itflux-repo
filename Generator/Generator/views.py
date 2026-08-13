@@ -6900,78 +6900,88 @@ def api_lesson_attachment_upload(request):
     except ValueError as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=401)
 
-    uploaded = request.FILES.get("file")
-    if not uploaded:
+    uploaded_files = list(request.FILES.getlist("file") or [])
+    if not uploaded_files:
+        uploaded_files = list(request.FILES.getlist("files") or [])
+    if not uploaded_files:
         return JsonResponse({"ok": False, "error": "field 'file' required"}, status=400)
+    if len(uploaded_files) > 20:
+        return JsonResponse({"ok": False, "error": "Слишком много файлов. Максимум 20."}, status=400)
 
     max_bytes = 20 * 1024 * 1024  # 20 MB
-    if uploaded.size > max_bytes:
-        return JsonResponse({"ok": False, "error": "Файл слишком большой (макс. 20 МБ)"}, status=400)
-
     room_id = normalized["room_id"]
     safe_room = re.sub(r"[^a-zA-Z0-9_-]", "_", room_id)[:64]
-    file_token = secrets.token_urlsafe(32)
-    orig_ext = os.path.splitext(uploaded.name)[1][:10].lower()
-    filename = f"{file_token}{orig_ext}"
-
     attach_dir = os.path.join(django_settings.MEDIA_ROOT, "lesson_attachments", safe_room)
     os.makedirs(attach_dir, exist_ok=True)
-
-    filepath = os.path.join(attach_dir, filename)
-    with open(filepath, "wb") as f:
-        for chunk in uploaded.chunks():
-            f.write(chunk)
 
     _tid_raw = (request.POST.get("task_id") or "").strip()
     task_id_meta = ""
     if _tid_raw.isdigit():
         task_id_meta = _tid_raw
-    meta = {
-        "original_name": uploaded.name[:200],
-        "content_type": uploaded.content_type or "application/octet-stream",
-        "room_id": room_id,
-        "safe_room": safe_room,
-        "participant": normalized.get("participant_name", ""),
-        "task_number": request.POST.get("task_number", ""),
-        "task_id": task_id_meta,
-        "created_at": time.time(),
-    }
-    with open(filepath + ".meta.json", "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False)
-
-    serve_url = f"/api/lesson/attachment/{safe_room}/{filename}"
     task_num = str(request.POST.get("task_number", "") or "").strip()
     student_label = str(
         normalized.get("participant_name")
         or normalized.get("target_name")
         or ""
     ).strip() or "Ученик"
-    try:
-        from asgiref.sync import async_to_sync
-        from channels.layers import get_channel_layer
 
-        channel_layer = get_channel_layer()
-        if channel_layer and room_id:
-            ws_payload = {
-                "type": "student_attachment",
-                "task_number": task_num,
-                "name": student_label,
-                "url": serve_url,
-                "filename": uploaded.name[:200],
-            }
-            if task_id_meta:
-                ws_payload["task_id"] = task_id_meta
-            async_to_sync(channel_layer.group_send)(
-                f"lesson_{room_id}",
-                {
-                    "type": "lesson_message",
-                    "payload": ws_payload,
-                },
-            )
-    except Exception:
-        logger.exception("WS broadcast student_attachment failed for room %s", room_id)
+    saved = []
+    for uploaded in uploaded_files:
+        if uploaded.size > max_bytes:
+            return JsonResponse({"ok": False, "error": "Файл слишком большой (макс. 20 МБ)"}, status=400)
+        file_token = secrets.token_urlsafe(32)
+        orig_ext = os.path.splitext(uploaded.name)[1][:10].lower()
+        filename = f"{file_token}{orig_ext}"
+        filepath = os.path.join(attach_dir, filename)
+        with open(filepath, "wb") as f:
+            for chunk in uploaded.chunks():
+                f.write(chunk)
+        meta = {
+            "original_name": uploaded.name[:200],
+            "content_type": uploaded.content_type or "application/octet-stream",
+            "room_id": room_id,
+            "safe_room": safe_room,
+            "participant": normalized.get("participant_name", ""),
+            "task_number": request.POST.get("task_number", ""),
+            "task_id": task_id_meta,
+            "created_at": time.time(),
+        }
+        with open(filepath + ".meta.json", "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False)
+        serve_url = f"/api/lesson/attachment/{safe_room}/{filename}"
+        saved.append({"url": serve_url, "filename": uploaded.name[:200]})
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
 
-    return JsonResponse({"ok": True, "url": serve_url, "filename": uploaded.name[:200]})
+            channel_layer = get_channel_layer()
+            if channel_layer and room_id:
+                ws_payload = {
+                    "type": "student_attachment",
+                    "task_number": task_num,
+                    "name": student_label,
+                    "url": serve_url,
+                    "filename": uploaded.name[:200],
+                }
+                if task_id_meta:
+                    ws_payload["task_id"] = task_id_meta
+                async_to_sync(channel_layer.group_send)(
+                    f"lesson_{room_id}",
+                    {
+                        "type": "lesson_message",
+                        "payload": ws_payload,
+                    },
+                )
+        except Exception:
+            logger.exception("WS broadcast student_attachment failed for room %s", room_id)
+
+    first = saved[0]
+    return JsonResponse({
+        "ok": True,
+        "url": first["url"],
+        "filename": first["filename"],
+        "attachments": saved,
+    })
 
 
 @require_http_methods(["GET"])

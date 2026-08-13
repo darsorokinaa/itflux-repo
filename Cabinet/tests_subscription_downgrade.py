@@ -123,6 +123,29 @@ class DowngradeScheduleTests(TestCase):
             1,
         )
 
+    def test_cancel_prepaid_rejected(self):
+        DowngradeService.schedule(self.teacher, self.pro)
+        payment = Payment.objects.create(
+            teacher=self.teacher,
+            plan=self.pro,
+            amount=Decimal("2990"),
+            final_amount=Decimal("2990"),
+            currency="RUB",
+            status=Payment.Status.PAID,
+            billing_period="month",
+            provider="mock",
+        )
+        DowngradeService.mark_prepaid(self.sub, payment, self.pro)
+        with self.assertRaises(ValueError):
+            DowngradeService.cancel(self.teacher)
+        self.sub.refresh_from_db()
+        self.assertEqual(self.sub.plan_id, self.premium.pk)
+        self.assertIsNotNone(self.sub.prepaid_until)
+        self.assertEqual(
+            DowngradeService.get_active_change(self.sub).status,
+            SubscriptionPlanChange.Status.PREPAID,
+        )
+
     def test_replace_pending_keeps_single_active(self):
         DowngradeService.schedule(self.teacher, self.pro)
         DowngradeService.schedule(self.teacher, self.teacher_plan)
@@ -218,6 +241,10 @@ class DowngradeScheduleTests(TestCase):
         payment = result["payment"]
         self.assertEqual(payment.final_amount, Decimal("2990.00"))
         self.assertEqual(payment.plan_id, self.pro.pk)
+        self.sub.refresh_from_db()
+        self.assertEqual(self.sub.plan_id, self.premium.pk)
+        self.assertIsNotNone(self.sub.prepaid_until)
+        self.assertGreater(self.sub.prepaid_until, self.sub.expires_at)
 
     def test_archive_students_fallback_by_updated_at(self):
         self.sub.plan = self.pro

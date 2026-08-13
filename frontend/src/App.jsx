@@ -24,6 +24,7 @@ import CabinetNotificationsSettingsPage from "./cabinet/pages/CabinetNotificatio
 import CabinetPage from "./pages/CabinetPage";
 import CabinetDashboard from "./cabinet/CabinetDashboard";
 import CabinetStudentsPage from "./cabinet/pages/CabinetStudentsPage";
+import CabinetStudentMaterialsPage from "./cabinet/pages/CabinetStudentMaterialsPage";
 import CabinetLessonsPage from "./cabinet/pages/CabinetLessonsPage";
 import CabinetReviewPage from "./cabinet/pages/CabinetReviewPage";
 import CabinetReviewDetailPage from "./cabinet/pages/CabinetReviewDetailPage";
@@ -336,6 +337,7 @@ function App() {
             <Route path="settings/notifications" element={<CabinetNotificationsSettingsPage />} />
             <Route path="settings/notifications/" element={<CabinetNotificationsSettingsPage />} />
             <Route path="students" element={<CabinetStudentsPage />} />
+            <Route path="students/:studentId/materials" element={<CabinetStudentMaterialsPage />} />
             <Route path="lessons" element={<CabinetLessonsPage />} />
             <Route path="plans" element={<CabinetLessonPlansPage />} />
             <Route path="plans/new" element={<CabinetLessonPlanEditorPage />} />

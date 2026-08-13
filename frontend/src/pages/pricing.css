@@ -102,6 +102,29 @@
   color: var(--pricing-ink) !important;
 }
 
+.pricing-offers {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0 0 1.5rem;
+}
+.pricing-offer {
+  border: 1px solid var(--pricing-line);
+  border-radius: 1rem;
+  padding: 1rem 1.25rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+.pricing-offer strong { display: block; margin: 0 0 0.35rem; }
+.pricing-offer p { margin: 0; color: var(--pricing-muted); line-height: 1.45; }
+.pricing-offer__meta { margin-top: 0.4rem !important; font-size: 0.9rem; }
+
+.pricing-card__was {
+  display: block;
+  font-size: 0.9rem;
+  color: var(--pricing-muted);
+  font-weight: 500;
+  text-decoration: line-through;
+}
+
 .pricing-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

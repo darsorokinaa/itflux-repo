@@ -58,10 +58,12 @@ class RegistrationPromoTests(TestCase):
         return user
 
     def test_deadline_and_window(self):
-        self.assertEqual(promo_deadline().date().isoformat(), "2026-10-01")
-        before = timezone.make_aware(datetime(2026, 9, 30, 23, 0), ZoneInfo("Europe/Moscow"))
-        on_day = timezone.make_aware(datetime(2026, 10, 1, 0, 0), ZoneInfo("Europe/Moscow"))
+        self.assertEqual(promo_deadline().date().isoformat(), "2027-01-01")
+        before = timezone.make_aware(datetime(2026, 12, 31, 23, 0), ZoneInfo("Europe/Moscow"))
+        on_day = timezone.make_aware(datetime(2027, 1, 1, 0, 0), ZoneInfo("Europe/Moscow"))
+        still_open = timezone.make_aware(datetime(2026, 10, 1, 0, 0), ZoneInfo("Europe/Moscow"))
         self.assertTrue(registration_qualifies_for_promo(before))
+        self.assertTrue(registration_qualifies_for_promo(still_open))
         self.assertFalse(registration_qualifies_for_promo(on_day))
 
     def test_grant_pro_three_months_from_registration(self):

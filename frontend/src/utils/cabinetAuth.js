@@ -137,6 +137,20 @@ export function registerCabinet(payload) {
   });
 }
 
+export function requestPasswordReset(payload) {
+  return cabinetFetch("/password-reset/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function confirmPasswordReset(payload) {
+  return cabinetFetch("/password-reset/confirm/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function fetchReferralPreview(code) {
   return cabinetFetch(`/referral/${encodeURIComponent(code)}/preview/`, { method: "GET" });
 }
@@ -1284,10 +1298,16 @@ export function previewPlanChange(planSlug, billingPeriod = "month") {
   return changePlan(planSlug, billingPeriod, { preview: true });
 }
 
-export function createPayment(planSlug, billingPeriod = "month", promoCode = null) {
+export function createPayment(planSlug, billingPeriod = "month", promoCode = null, idempotencyKey = null, promotionId = null) {
   return cabinetFetch("/subscription/create-payment/", {
     method: "POST",
-    body: JSON.stringify({ plan_slug: planSlug, billing_period: billingPeriod, promo_code: promoCode || undefined }),
+    body: JSON.stringify({
+      plan_slug: planSlug,
+      billing_period: billingPeriod,
+      promo_code: promoCode || undefined,
+      idempotency_key: idempotencyKey || undefined,
+      promotion_id: promotionId || undefined,
+    }),
   });
 }
 
@@ -1512,6 +1532,45 @@ export function fetchStudentScheduleEvent(eventId) {
 
 export function fetchStudentProgress() {
   return cabinetFetch("/student/progress/", { method: "GET" });
+}
+
+export function fetchCabinetStudent(id) {
+  return cabinetFetch(`/students/${id}/`, { method: "GET" });
+}
+
+export function fetchTeacherStudentMaterials(studentId, { studentSubjectId } = {}) {
+  const params = new URLSearchParams();
+  if (studentSubjectId) params.set("student_subject", String(studentSubjectId));
+  const qs = params.toString();
+  return cabinetFetch(`/students/${studentId}/materials/${qs ? `?${qs}` : ""}`, { method: "GET" });
+}
+
+export function createStudentMaterialFolder(studentId, payload) {
+  return cabinetFetch(`/students/${studentId}/material-folders/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateStudentMaterialFolder(studentId, folderId, payload) {
+  return cabinetFetch(`/students/${studentId}/material-folders/${folderId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteStudentMaterialFolder(studentId, folderId) {
+  return cabinetFetch(`/students/${studentId}/material-folders/${folderId}/`, { method: "DELETE" });
+}
+
+export function placeStudentMaterials(studentId, { keys, folderId }) {
+  return cabinetFetch(`/students/${studentId}/material-placements/`, {
+    method: "POST",
+    body: JSON.stringify({
+      keys,
+      folder_id: folderId == null ? null : folderId,
+    }),
+  });
 }
 
 export function fetchStudentMaterials(query = "", { studentSubjectId } = {}) {

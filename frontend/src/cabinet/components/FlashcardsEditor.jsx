@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import InteractiveImageField from "./InteractiveImageField";
+import CabinetFloatingMenu from "./CabinetFloatingMenu";
 import { BuilderSection } from "./InteractiveEditorSettings";
 import { reorderList } from "../interactivesEditorUtils";
 
@@ -112,7 +113,7 @@ export default function FlashcardsEditor({
   const [overIndex, setOverIndex] = useState(null);
   const [undoRemove, setUndoRemove] = useState(null);
   const [sideModes, setSideModes] = useState({});
-  const [menuIndex, setMenuIndex] = useState(null);
+  const [menu, setMenu] = useState(null);
 
   const cards = data.cards || [];
 
@@ -149,7 +150,7 @@ export default function FlashcardsEditor({
     next.splice(index + 1, 0, { ...next[index] });
     onCardsChange(next);
     setOpenIndex(index + 1);
-    setMenuIndex(null);
+    setMenu(null);
   };
 
   const removeCard = (index) => {
@@ -158,7 +159,7 @@ export default function FlashcardsEditor({
     onCardsChange(cards.filter((_, i) => i !== index));
     setOpenIndex((prev) => (prev >= index ? Math.max(0, prev - 1) : prev));
     setUndoRemove({ item, index });
-    setMenuIndex(null);
+    setMenu(null);
   };
 
   const restoreCard = () => {
@@ -279,33 +280,37 @@ export default function FlashcardsEditor({
                     >
                       {open ? "Свернуть" : "Изменить"}
                     </button>
-                    <div className={`ix-card-row__menu${menuIndex === index ? " is-open" : ""}`}>
+                    <div className={`ix-card-row__menu${menu?.index === index ? " is-open" : ""}`}>
                       <button
                         type="button"
                         className="ix-ed-icon-btn"
                         aria-label="Меню"
-                        onClick={() => setMenuIndex(menuIndex === index ? null : index)}
+                        onClick={(e) => setMenu(menu?.index === index ? null : { index, anchor: e.currentTarget })}
                       >
                         ⋯
                       </button>
-                      {menuIndex === index ? (
-                        <div className="ix-card-row__menu-pop">
-                          <button type="button" onClick={() => { moveCard(index, index - 1); setMenuIndex(null); }} disabled={index === 0}>
-                            Выше
+                      <CabinetFloatingMenu
+                        open={menu?.index === index}
+                        anchorEl={menu?.anchor}
+                        onClose={() => setMenu(null)}
+                        className="ix-card-row__menu-pop"
+                        width={180}
+                      >
+                        <button type="button" onClick={() => { moveCard(index, index - 1); setMenu(null); }} disabled={index === 0}>
+                          Выше
+                        </button>
+                        <button type="button" onClick={() => { moveCard(index, index + 1); setMenu(null); }} disabled={index >= cards.length - 1}>
+                          Ниже
+                        </button>
+                        <button type="button" onClick={() => { duplicateCard(index); setMenu(null); }}>
+                          Дублировать
+                        </button>
+                        {cards.length > 1 ? (
+                          <button type="button" className="danger" onClick={() => { removeCard(index); setMenu(null); }}>
+                            Удалить
                           </button>
-                          <button type="button" onClick={() => { moveCard(index, index + 1); setMenuIndex(null); }} disabled={index >= cards.length - 1}>
-                            Ниже
-                          </button>
-                          <button type="button" onClick={() => duplicateCard(index)}>
-                            Дублировать
-                          </button>
-                          {cards.length > 1 ? (
-                            <button type="button" className="danger" onClick={() => removeCard(index)}>
-                              Удалить
-                            </button>
-                          ) : null}
-                        </div>
-                      ) : null}
+                        ) : null}
+                      </CabinetFloatingMenu>
                     </div>
                   </div>
                 </div>

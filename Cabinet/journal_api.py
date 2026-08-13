@@ -1145,6 +1145,66 @@ def _student_result_lesson_fields(record: StudentLessonRecord) -> dict:
     }
 
 
+def _checked_homework_result_entries(roster, already_homework_ids: set[int]) -> list[dict]:
+    """Проверенные ДЗ, которых ещё нет в опубликованных итогах урока."""
+    from .choices import SubmissionStatus
+    from .homework_api import is_live_meeting_homework
+    from .models import HomeworkSubmission
+
+    student_ids = list(roster.values_list("id", flat=True))
+    if not student_ids:
+        return []
+    submissions = (
+        HomeworkSubmission.objects.filter(
+            student_id__in=student_ids,
+            status=SubmissionStatus.CHECKED,
+        )
+        .select_related("homework", "student")
+        .order_by("-updated_at", "-submitted_at", "-id")
+    )
+    entries = []
+    seen: set[int] = set()
+    for sub in submissions:
+        homework = sub.homework
+        if homework is None or homework.id in already_homework_ids or homework.id in seen:
+            continue
+        if is_live_meeting_homework(homework):
+            continue
+        payload = build_homework_result_payload(
+            homework=homework,
+            student=sub.student,
+            submission=sub,
+            for_student=True,
+        )
+        if not payload:
+            continue
+        seen.add(homework.id)
+        when = sub.submitted_at or sub.updated_at or homework.created_at
+        date_val = timezone.localtime(when).date().isoformat() if when else None
+        entries.append(
+            {
+                "id": f"hw-{homework.id}",
+                "entry_type": "homework",
+                "lesson_date": date_val,
+                "starts_at": when.isoformat() if when else None,
+                "ends_at": None,
+                "topic": homework.title,
+                "title": homework.title,
+                "overall_score": payload.get("score_percent"),
+                "teacher_comment": payload.get("teacher_comment") or "",
+                "homework_result": payload,
+                "homework_id": homework.id,
+                "attendance_status": "",
+                "criterion_scores": [],
+                "tags": [],
+                "visible_to_student": True,
+            }
+        )
+        if len(entries) >= 50:
+            break
+    return entries
+
+
 class StudentResultsListView(APIView):
     permission_classes = [IsAuthenticated, IsCabinetStudent]
 
@@ -1172,6 +1232,7 @@ class StudentResultsListView(APIView):
             )
         )
         results = []
+        already_homework_ids: set[int] = set()
         for r in records[:100]:
             hw = resolve_homework_for_journal_record(r.journal, r.student)
             homework_result = build_homework_result_payload(
@@ -1179,6 +1240,8 @@ class StudentResultsListView(APIView):
                 student=r.student,
                 for_student=True,
             )
+            if homework_result and homework_result.get("homework_id"):
+                already_homework_ids.add(int(homework_result["homework_id"]))
             results.append(
                 {
                     **serialize_record(
@@ -1187,9 +1250,15 @@ class StudentResultsListView(APIView):
                         homework_result=homework_result,
                     ),
                     **_student_result_lesson_fields(r),
+                    "entry_type": "lesson",
                 }
             )
-        return Response({"results": results})
+        results.extend(_checked_homework_result_entries(roster, already_homework_ids))
+        results.sort(
+            key=lambda item: item.get("starts_at") or item.get("lesson_date") or "",
+            reverse=True,
+        )
+        return Response({"results": results[:100]})
 
 
 class StudentResultDetailView(APIView):

@@ -1282,8 +1282,8 @@ def student_can_access_material_file(user, material: Material) -> bool:
         id__in=student_ids, teacher_id=material.teacher_id
     ).exists():
         return False
-    if DirectMaterialAssignment.objects.filter(
-        student_id__in=student_ids, material=material
+    if DirectMaterialAssignment.objects.filter(material=material).filter(
+        Q(student_id__in=student_ids) | Q(group__students__id__in=student_ids)
     ).exists():
         return True
     if LessonAssignment.objects.filter(
@@ -1303,6 +1303,32 @@ def student_can_access_material_file(user, material: Material) -> bool:
         return True
     if hw_qs.filter(lesson__materials=material).exists():
         return True
+    from .choices import HomeworkTaskType
+
+    if CabinetFileRelation.objects.filter(
+        material=material,
+        relation_type=CabinetFileRelationType.HOMEWORK,
+    ).filter(
+        Q(homework__student_id__in=student_ids) | Q(homework__group__students__id__in=student_ids)
+    ).exists():
+        return True
+    task_urls = []
+    if material.external_url:
+        task_urls.append(material.external_url.strip())
+    student_file_url = material_file_url(material, for_student=True)
+    if student_file_url:
+        task_urls.append(student_file_url)
+    if task_urls:
+        if hw_qs.filter(
+            tasks__is_active=True,
+            tasks__task_type__in=(
+                HomeworkTaskType.FILE,
+                HomeworkTaskType.EXTERNAL_LINK,
+                HomeworkTaskType.GENERATED_TASK,
+            ),
+            tasks__description__in=task_urls,
+        ).exists():
+            return True
     return False
 
 
