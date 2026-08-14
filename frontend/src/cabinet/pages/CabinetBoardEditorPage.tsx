@@ -387,7 +387,6 @@ export default function CabinetBoardEditorPage() {
   /** Сырой files из Excalidraw onChange — для детекта реальной смены файлов, не копии. */
   const lastRawFilesRef = useRef<Record<string, unknown> | null>(null);
   const sceneTooLargeNoticeRef = useRef(false);
-  const pendingCompactPersistRef = useRef(false);
   const sceneChangeReadyRef = useRef(false);
   const knownElementIdsRef = useRef(new Set<string>());
   const viewerUserIdRef = useRef<number | null>(null);
@@ -774,7 +773,6 @@ export default function CabinetBoardEditorPage() {
     lastFilesRef.current = null;
     lastRawFilesRef.current = null;
     sceneTooLargeNoticeRef.current = false;
-    pendingCompactPersistRef.current = false;
     sceneChangeReadyRef.current = false;
     stableFileUrlsRef.current = createStableUrlMap();
     loadedFilesRef.current = new Set();
@@ -820,24 +818,8 @@ export default function CabinetBoardEditorPage() {
         const style = normalizeGridStyle(rawApp[GRID_STYLE_KEY], rawApp.gridModeEnabled);
         const solidBg = resolveBoardBgColor(rawApp);
         const theme = rawApp.theme === "dark" ? "dark" : "light";
-        const compactResult = compactBoardScene({
-          elements: data.scene_data?.elements || [],
-          appState: rawApp,
-          files: (data.scene_data?.files || {}) as Record<string, unknown>,
-        });
-        if (compactResult.changed && data.can_edit) {
-          pendingCompactPersistRef.current = true;
-          boardLog("compact:load", {
-            beforeKb: Math.round(compactResult.statsBefore.sceneBytes / 1024),
-            afterKb: Math.round(compactResult.statsAfter.sceneBytes / 1024),
-            elements: compactResult.statsAfter.elementCount,
-            deleted: compactResult.statsAfter.deletedCount,
-            files: compactResult.statsAfter.fileCount,
-            unusedDropped: compactResult.statsBefore.unusedFileCount,
-          });
-        }
-        const rawFiles = compactResult.scene.files as Record<string, Record<string, unknown>>;
-        const elements = compactResult.scene.elements;
+        const rawFiles = (data.scene_data?.files || {}) as Record<string, Record<string, unknown>>;
+        const elements = data.scene_data?.elements || [];
 
         setLoadPhase("loading_files");
         logBoardMetrics("loading_files", metricsRef.current);
@@ -2379,16 +2361,6 @@ export default function CabinetBoardEditorPage() {
       /* ignore */
     }
   }, []);
-
-  // Сжатие существующей раздутой сцены — один persist после готовности холста.
-  useEffect(() => {
-    if (!excalidrawReady || !hostReady || !canEdit || conflict || loading) return;
-    if (!pendingCompactPersistRef.current) return;
-    pendingCompactPersistRef.current = false;
-    markLocalSceneChange();
-    safeSetSaveStatus("dirty");
-    debouncedSaver.schedule();
-  }, [excalidrawReady, hostReady, canEdit, conflict, loading, markLocalSceneChange, safeSetSaveStatus, debouncedSaver]);
 
   const retryBoardLoad = useCallback(() => {
     setReloadToken((n) => n + 1);

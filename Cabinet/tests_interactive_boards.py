@@ -322,7 +322,7 @@ class InteractiveBoardApiTests(TestCase):
         del_out = next(el for el in compacted["elements"] if el["id"] == "del-1")
         self.assertEqual(live_out["points"], [[0, 0], [1, 1], [2, 2]])
         self.assertEqual(del_out["points"], [[0, 0]])
-        self.assertEqual(del_out["pressures"], [])
+        self.assertEqual(del_out["pressures"], [0.5])
         self.assertEqual(del_out["version"], 5)
         self.assertEqual(del_out["customData"]["itfluxOwnerId"], 1)
         self.assertIn("used", compacted["files"])

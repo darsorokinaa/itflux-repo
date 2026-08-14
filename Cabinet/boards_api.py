@@ -153,29 +153,6 @@ def normalize_scene_data(raw: Any) -> dict:
     }
 
 
-_DELETED_TOMBSTONE_KEYS = (
-    "id",
-    "type",
-    "x",
-    "y",
-    "width",
-    "height",
-    "angle",
-    "isDeleted",
-    "version",
-    "versionNonce",
-    "updated",
-    "index",
-    "customData",
-    "fileId",
-    "frameId",
-    "groupIds",
-    "locked",
-    "seed",
-    "name",
-)
-
-
 def _is_bulky_deleted_element(el: dict) -> bool:
     if not el.get("isDeleted"):
         return False
@@ -193,12 +170,19 @@ def _is_bulky_deleted_element(el: dict) -> bool:
 
 
 def _compact_deleted_element(el: dict) -> dict:
-    next_el = {key: el[key] for key in _DELETED_TOMBSTONE_KEYS if key in el}
+    next_el = dict(el)
     next_el["isDeleted"] = True
-    if el.get("type") == "freedraw":
+    points = next_el.get("points")
+    if isinstance(points, list) and len(points) > 1:
         next_el["points"] = [[0, 0]]
-        if "pressures" in el:
-            next_el["pressures"] = []
+        points = next_el["points"]
+    pressures = next_el.get("pressures")
+    if isinstance(pressures, list) and len(pressures) > 1:
+        n = len(points) if isinstance(points, list) else 0
+        next_el["pressures"] = [0.5] * n
+    for key in ("text", "originalText", "rawText"):
+        if isinstance(next_el.get(key), str) and next_el.get(key):
+            next_el[key] = ""
     return next_el
 
 

@@ -28,28 +28,6 @@ export type CompactBoardSceneResult = {
   statsAfter: BoardSceneStats;
 };
 
-const TOMBSTONE_KEYS = [
-  "id",
-  "type",
-  "x",
-  "y",
-  "width",
-  "height",
-  "angle",
-  "isDeleted",
-  "version",
-  "versionNonce",
-  "updated",
-  "index",
-  "customData",
-  "fileId",
-  "frameId",
-  "groupIds",
-  "locked",
-  "seed",
-  "name",
-] as const;
-
 function utf8Bytes(value: unknown): number {
   try {
     return new TextEncoder().encode(JSON.stringify(value)).length;
@@ -88,19 +66,25 @@ function isBulkyDeleted(el: Record<string, unknown>): boolean {
 }
 
 function compactDeletedElement(el: Record<string, unknown>): Record<string, unknown> {
-  const next: Record<string, unknown> = {};
-  for (const key of TOMBSTONE_KEYS) {
-    if (key in el) next[key] = el[key];
-  }
-  next.isDeleted = true;
-  if (el.type === "freedraw") {
+  const next: Record<string, unknown> = { ...el, isDeleted: true };
+  if (Array.isArray(next.points) && next.points.length > 1) {
     next.points = [[0, 0]];
-    if ("pressures" in el) next.pressures = [];
+  }
+  if (Array.isArray(next.pressures) && next.pressures.length > 1) {
+    next.pressures = Array.isArray(next.points) ? next.points.map(() => 0.5) : [];
+  }
+  for (const key of ["text", "originalText", "rawText"] as const) {
+    if (typeof next[key] === "string" && (next[key] as string).length > 0) {
+      next[key] = "";
+    }
   }
   return next;
 }
 
-export function summarizeBoardScene(scene: BoardSceneLike | null | undefined): BoardSceneStats {
+export function summarizeBoardScene(
+  scene: BoardSceneLike | null | undefined,
+  opts: { bytes?: boolean } = {},
+): BoardSceneStats {
   const elements = Array.isArray(scene?.elements) ? scene!.elements! : [];
   const files = scene?.files && typeof scene.files === "object" ? scene.files : {};
   let deletedCount = 0;
@@ -113,21 +97,22 @@ export function summarizeBoardScene(scene: BoardSceneLike | null | undefined): B
   for (const id of Object.keys(files)) {
     if (!used.has(id)) unusedFileCount += 1;
   }
-  const elementsBytes = utf8Bytes(elements);
-  const filesBytes = utf8Bytes(files);
+  const withBytes = Boolean(opts.bytes);
   return {
     elementCount: elements.length,
     deletedCount,
     liveCount: elements.length - deletedCount,
     fileCount: Object.keys(files).length,
     unusedFileCount,
-    elementsBytes,
-    filesBytes,
-    sceneBytes: utf8Bytes({
-      elements,
-      appState: scene?.appState || {},
-      files,
-    }),
+    elementsBytes: withBytes ? utf8Bytes(elements) : 0,
+    filesBytes: withBytes ? utf8Bytes(files) : 0,
+    sceneBytes: withBytes
+      ? utf8Bytes({
+          elements,
+          appState: scene?.appState || {},
+          files,
+        })
+      : 0,
   };
 }
 
@@ -135,16 +120,12 @@ export function summarizeBoardScene(scene: BoardSceneLike | null | undefined): B
  * Идемпотентное сжатие: живые элементы не трогаем.
  * Удалённые freedraw/text теряют геометрию/текст (для collab остаются tombstones).
  * Files без ссылки из элементов (включая deleted image.fileId) удаляются из JSON.
+ * Не сериализует всю сцену — это блокировало бы открытие большой доски.
  */
 export function compactBoardScene(scene: BoardSceneLike | null | undefined): CompactBoardSceneResult {
   const elementsIn = Array.isArray(scene?.elements) ? scene!.elements! : [];
   const appState = scene?.appState && typeof scene.appState === "object" ? scene.appState : {};
   const filesIn = scene?.files && typeof scene.files === "object" ? scene.files : {};
-  const statsBefore = summarizeBoardScene({
-    elements: elementsIn,
-    appState,
-    files: filesIn,
-  });
 
   let changed = false;
   const elements: unknown[] = new Array(elementsIn.length);
@@ -173,7 +154,7 @@ export function compactBoardScene(scene: BoardSceneLike | null | undefined): Com
   return {
     scene: nextScene,
     changed,
-    statsBefore,
+    statsBefore: summarizeBoardScene({ elements: elementsIn, appState, files: filesIn }),
     statsAfter: summarizeBoardScene(nextScene),
   };
 }

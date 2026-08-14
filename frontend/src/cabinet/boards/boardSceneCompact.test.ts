@@ -73,18 +73,24 @@ describe("compactBoardScene", () => {
       isDeleted: boolean;
       id: string;
       version: number;
+      strokeColor?: string;
     };
     expect(deleted.isDeleted).toBe(true);
     expect(deleted.id).toBe("del-0");
     expect(deleted.version).toBe(4);
     expect(deleted.points).toEqual([[0, 0]]);
-    expect(result.statsAfter.sceneBytes).toBeLessThan(result.statsBefore.sceneBytes / 2);
+    expect(deleted.strokeColor).toBe("#1e1e1e");
+    const beforeBytes = summarizeBoardScene(scene, { bytes: true });
+    const afterBytes = summarizeBoardScene(result.scene, { bytes: true });
+    expect(afterBytes.sceneBytes).toBeLessThan(beforeBytes.sceneBytes / 2);
   });
 
   it("печатает безопасные BEFORE/AFTER метрики (без содержимого доски)", () => {
     const scene = makeHeavyScene();
     const result = compactBoardScene(scene);
-    const fmt = (s: typeof result.statsBefore) => ({
+    const before = summarizeBoardScene(scene, { bytes: true });
+    const after = summarizeBoardScene(result.scene, { bytes: true });
+    const fmt = (s: typeof before) => ({
       sceneKb: Math.round(s.sceneBytes / 102.4) / 10,
       elementsKb: Math.round(s.elementsBytes / 102.4) / 10,
       filesKb: Math.round(s.filesBytes / 102.4) / 10,
@@ -95,7 +101,7 @@ describe("compactBoardScene", () => {
       unusedFiles: s.unusedFileCount,
     });
     // eslint-disable-next-line no-console
-    console.info("[board-compact-metrics]", JSON.stringify({ before: fmt(result.statsBefore), after: fmt(result.statsAfter) }));
+    console.info("[board-compact-metrics]", JSON.stringify({ before: fmt(before), after: fmt(after) }));
     expect(result.statsAfter.liveCount).toBe(result.statsBefore.liveCount);
   });
 
@@ -103,7 +109,6 @@ describe("compactBoardScene", () => {
     const once = compactBoardScene(makeHeavyScene());
     const twice = compactBoardScene(once.scene);
     expect(twice.changed).toBe(false);
-    expect(twice.statsAfter.sceneBytes).toBe(once.statsAfter.sceneBytes);
     expect(twice.statsAfter.elementCount).toBe(once.statsAfter.elementCount);
     expect(twice.statsAfter.fileCount).toBe(once.statsAfter.fileCount);
   });
