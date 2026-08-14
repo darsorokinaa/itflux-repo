@@ -3,6 +3,7 @@ import {
   AUTOSAVE_DEBOUNCE_MS,
   buildScenePayload,
   createDebouncedSaver,
+  isBoardSceneTooLargeError,
   sanitizeAppState,
   saveStatusLabel,
   shouldBlockUnload,
@@ -100,6 +101,14 @@ describe("boardAutosave", () => {
     expect(shouldBlockUnload("error", false)).toBe(true);
     expect(shouldBlockUnload("saved", false)).toBe(false);
     expect(shouldBlockUnload("idle", true)).toBe(true);
+  });
+
+  it("isBoardSceneTooLargeError ловит лимит сцены и слишком большое тело запроса", () => {
+    expect(isBoardSceneTooLargeError({ code: "SCENE_TOO_LARGE" })).toBe(true);
+    expect(isBoardSceneTooLargeError({ status: 413 })).toBe(true);
+    expect(isBoardSceneTooLargeError({ message: "Request body exceeded settings.DATA_UPLOAD_MAX_MEMORY_SIZE." })).toBe(true);
+    expect(isBoardSceneTooLargeError({ message: "Данные доски слишком большие" })).toBe(true);
+    expect(isBoardSceneTooLargeError({ code: "VERSION_CONFLICT", status: 409 })).toBe(false);
   });
 
   it("режим просмотра: viewMode отражается через отсутствие can_edit на статусе", () => {

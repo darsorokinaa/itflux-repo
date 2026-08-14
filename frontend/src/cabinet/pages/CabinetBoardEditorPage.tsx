@@ -26,6 +26,7 @@ import {
   buildScenePayload,
   createDebouncedSaver,
   isBoardPersistableChange,
+  isBoardSceneTooLargeError,
   saveStatusLabel,
   shouldBlockUnload,
   type BoardScenePayload,
@@ -33,6 +34,7 @@ import {
 } from "../boards/boardAutosave";
 import {
   boardFileSlug,
+  buildThumbnailExportAppState,
   captureBoardThumbnail,
   copyBlobToClipboard,
   downloadBlob,
@@ -42,6 +44,7 @@ import {
   createStableUrlMap,
   externalizeSceneFiles,
   filesForPersist,
+  filesForRestPayload,
   filesNeedRemoteHydrate,
   findMissingImageFileIds,
   hydrateBoardFiles,
@@ -505,6 +508,7 @@ export default function CabinetBoardEditorPage() {
     );
 
     safeSetSaveStatus("saving");
+    let persistError: { code?: string; status?: number; message?: string } | null = null;
     try {
       const preUploadFiles = filesForPersist(snapshot.files as Record<string, Record<string, unknown>>) as Record<string, Record<string, unknown>>;
       boardLog("persist:before", {
@@ -523,7 +527,7 @@ export default function CabinetBoardEditorPage() {
       // Смена доски — бросаем. Размонтирование — всё равно сохраняем снимок.
       if (boardIdRef.current !== boardIdAtSave) return;
 
-      const persistFiles = filesForPersist(
+      const persistFiles = filesForRestPayload(
         attachStableUrls(files, stableFileUrlsRef.current),
       ) as Record<string, unknown>;
 
@@ -581,6 +585,7 @@ export default function CabinetBoardEditorPage() {
     } catch (err: unknown) {
       if (boardIdRef.current !== boardIdAtSave) return;
       const error = err as { code?: string; status?: number; message?: string };
+      persistError = error;
       if (error?.code === "VERSION_CONFLICT" || error?.status === 409) {
         // При совместном редактировании сливаем серверную сцену, не заменяя локальные правки.
         if (collaborative) {
@@ -666,14 +671,14 @@ export default function CabinetBoardEditorPage() {
           setConflict(true);
           safeSetSaveStatus("conflict");
         }
-      } else if (error?.code === "SCENE_TOO_LARGE") {
+      } else if (isBoardSceneTooLargeError(error)) {
         dirtyRef.current = true;
         saveRequestedRef.current = false;
         if (mountedRef.current) {
           safeSetSaveStatus("error");
           if (!sceneTooLargeNoticeRef.current) {
             sceneTooLargeNoticeRef.current = true;
-            showNotice(error?.message || "Данные доски слишком большие");
+            showNotice("Данные доски слишком большие. Уменьшите число изображений или их размер.");
           }
         }
       } else {
@@ -693,6 +698,7 @@ export default function CabinetBoardEditorPage() {
         && (saveRequestedRef.current || localRevisionRef.current > revisionAtSave)
         && canEdit
         && !conflictRef.current
+        && !isBoardSceneTooLargeError(persistError)
       ) {
         saveRequestedRef.current = false;
         // Следующее сохранение — после короткого debounce, не параллельно.
@@ -946,7 +952,7 @@ export default function CabinetBoardEditorPage() {
             scene_data: compactBoardScene({
               elements: scene.elements,
               appState: scene.appState,
-              files: filesForPersist(
+              files: filesForRestPayload(
                 attachStableUrls(
                   scene.files as Record<string, Record<string, unknown>>,
                   stableFileUrlsRef.current,
@@ -2366,10 +2372,9 @@ export default function CabinetBoardEditorPage() {
     setReloadToken((n) => n + 1);
   }, []);
 
-  // Если превью ещё нет, но на доске уже есть элементы — сохранить thumbnail для списка
+  // Обновить превью при открытии: старые JPEG были чёрными из‑за тёмной темы / transparent.
   useEffect(() => {
     if (!excalidrawReady || !boardId || !canEdit || conflict) return;
-    if (board?.thumbnail) return;
     const scene = latestSceneRef.current;
     const hasElements = (scene?.elements || []).some((el) => !(el as { isDeleted?: boolean })?.isDeleted);
     if (!hasElements) return;
@@ -2389,7 +2394,7 @@ export default function CabinetBoardEditorPage() {
     return () => {
       cancelled = true;
     };
-  }, [excalidrawReady, boardId, board?.thumbnail, canEdit, conflict]);
+  }, [excalidrawReady, boardId, canEdit, conflict]);
 
   useEffect(() => {
     if (!exportOpen && !moreOpen) return undefined;
@@ -2558,7 +2563,7 @@ export default function CabinetBoardEditorPage() {
     const { exportToBlob } = await getExportModules();
     const blob = await exportToBlob({
       elements: apiRef.current.getSceneElements(),
-      appState: { ...apiRef.current.getAppState(), exportBackground: true },
+      appState: buildThumbnailExportAppState(apiRef.current.getAppState()),
       files: apiRef.current.getFiles(),
       mimeType: "image/png",
     });
@@ -2571,7 +2576,7 @@ export default function CabinetBoardEditorPage() {
     const { exportToSvg } = await getExportModules();
     const svg = await exportToSvg({
       elements: apiRef.current.getSceneElements(),
-      appState: { ...apiRef.current.getAppState(), exportBackground: true },
+      appState: buildThumbnailExportAppState(apiRef.current.getAppState()),
       files: apiRef.current.getFiles(),
     });
     const blob = new Blob([svg.outerHTML], { type: "image/svg+xml" });
@@ -2597,7 +2602,7 @@ export default function CabinetBoardEditorPage() {
     const { exportToBlob } = await getExportModules();
     const blob = await exportToBlob({
       elements: apiRef.current.getSceneElements(),
-      appState: { ...apiRef.current.getAppState(), exportBackground: true },
+      appState: buildThumbnailExportAppState(apiRef.current.getAppState()),
       files: apiRef.current.getFiles(),
       mimeType: "image/png",
     });

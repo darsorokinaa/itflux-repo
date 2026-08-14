@@ -347,10 +347,10 @@ _csrf_extra = [o.strip() for o in os.environ.get("CSRF_TRUSTED_ORIGINS", "").spl
 if _csrf_extra:
     CSRF_TRUSTED_ORIGINS = CSRF_TRUSTED_ORIGINS + _csrf_extra
 
-# Тело JSON PATCH сцены доски (лимит сцены 15 МБ + обёртка).
+# Тело JSON PATCH сцены доски (лимит сцены 15 МБ + обёртка + запас на вложенные поля).
 # Без этого Django по умолчанию рвёт запрос на 2.5 МБ раньше SCENE_TOO_LARGE.
 DATA_UPLOAD_MAX_MEMORY_SIZE = int(
-    os.environ.get("DATA_UPLOAD_MAX_MEMORY_SIZE", str(20 * 1024 * 1024))
+    os.environ.get("DATA_UPLOAD_MAX_MEMORY_SIZE", str(32 * 1024 * 1024))
 )
 
 # Cabinet uploads

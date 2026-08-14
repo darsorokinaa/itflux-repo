@@ -336,6 +336,26 @@ export function filesForPersist(files: SceneFiles | null | undefined): SceneFile
   return out;
 }
 
+/**
+ * В REST PATCH нельзя класть data:/blob: — из‑за них сцена «иногда»
+ * превышает лимит, хотя картинки уже есть в assets.
+ */
+export function filesForRestPayload(files: SceneFiles | null | undefined): SceneFiles {
+  const persisted = filesForPersist(files);
+  const out: SceneFiles = {};
+  for (const [id, meta] of Object.entries(persisted)) {
+    if (!meta || typeof meta !== "object") continue;
+    const url = String(meta.dataURL || meta.url || "");
+    if (!isStableFileUrl(url)) continue;
+    out[id] = {
+      ...meta,
+      dataURL: url,
+      url,
+    };
+  }
+  return out;
+}
+
 export type HydrateBoardFilesResult = {
   files: SceneFiles;
   /** Blob URL, созданные при hydrate — отозвать при размонтировании. */

@@ -57,7 +57,6 @@ def _parse_optional_pk(value):
         return None
 
 MAX_SCENE_JSON_BYTES = 15 * 1024 * 1024
-MAX_INLINE_FILE_BYTES = 250 * 1024
 MAX_BOARD_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_THUMBNAIL_CHARS = 200_000
 
@@ -453,7 +452,7 @@ def _data_url_payload(data_url: str) -> tuple[str, bytes] | None:
 
 
 def persist_large_scene_files(board: InteractiveBoard, scene: dict, user: User) -> dict:
-    """Крупные dataURL → private asset + защищённый API URL. SVG отклоняется."""
+    """dataURL → private asset + защищённый API URL. SVG отклоняется."""
     files = scene.get("files")
     if not isinstance(files, dict) or not files:
         return scene
@@ -502,17 +501,7 @@ def persist_large_scene_files(board: InteractiveBoard, scene: dict, user: User) 
         except UploadValidationError as exc:
             raise serializers.ValidationError({"scene_data": exc.message}) from exc
 
-        if len(content) <= MAX_INLINE_FILE_BYTES:
-            new_meta = dict(meta)
-            new_meta["mimeType"] = mime
-            # Перекодируем с корректным MIME (на случай подмены)
-            b64 = base64.b64encode(content).decode("ascii")
-            new_meta["dataURL"] = f"data:{mime};base64,{b64}"
-            updated_files[file_id] = new_meta
-            if new_meta["dataURL"] != data_url:
-                changed = True
-            continue
-
+        # dataURL всегда выносим в asset — inline base64 раздувает PATCH «иногда».
         ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[mime]
         asset = InteractiveBoardAsset(
             board=board,

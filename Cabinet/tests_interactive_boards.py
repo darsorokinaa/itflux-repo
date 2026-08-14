@@ -458,7 +458,9 @@ class InteractiveBoardApiTests(TestCase):
             f"/api/cabinet/interactive-boards/{board.id}/",
             {
                 "scene_data": {
-                    "elements": [],
+                    "elements": [
+                        {"id": "img1", "type": "image", "fileId": "f1", "isDeleted": False, "version": 1}
+                    ],
                     "appState": {},
                     "files": {
                         "f1": {

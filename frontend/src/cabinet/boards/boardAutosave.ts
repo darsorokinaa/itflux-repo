@@ -161,6 +161,18 @@ export function shouldBlockUnload(status: SaveStatus, hasPending: boolean): bool
   return hasPending || status === "dirty" || status === "saving" || status === "error";
 }
 
+export function isBoardSceneTooLargeError(error: {
+  code?: string;
+  status?: number;
+  message?: string;
+} | null | undefined): boolean {
+  if (!error) return false;
+  if (error.code === "SCENE_TOO_LARGE") return true;
+  if (error.status === 413) return true;
+  const message = String(error.message || "");
+  return /слишком больш|SCENE_TOO_LARGE|Request body exceeded|DATA_UPLOAD_MAX/i.test(message);
+}
+
 /** Простой debounce-хелпер для тестов и UI. */
 export function createDebouncedSaver(
   saveFn: () => void | Promise<void>,

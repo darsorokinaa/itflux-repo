@@ -5,6 +5,7 @@ import {
   externalizeSceneFiles,
   filesForLivePublish,
   filesForPersist,
+  filesForRestPayload,
   filesNeedRemoteHydrate,
   markImageElementsSaved,
   pendingUploadFileIds,
@@ -108,6 +109,17 @@ describe("externalizeSceneFiles", () => {
     const out = filesForPersist({
       f1: { dataURL: "blob:http://local/1", [STABLE_URL_KEY]: stable, mimeType: "image/png" },
     });
+    expect(out.f1.dataURL).toBe(stable);
+  });
+
+  it("filesForRestPayload не отправляет data/blob в PATCH", () => {
+    const stable = "/api/cabinet/interactive-boards/b/assets/x/";
+    const out = filesForRestPayload({
+      f1: { dataURL: "blob:http://local/1", [STABLE_URL_KEY]: stable, mimeType: "image/png" },
+      f2: { dataURL: "data:image/png;base64,aaaa", mimeType: "image/png" },
+      f3: { dataURL: "blob:http://local/2", mimeType: "image/png" },
+    });
+    expect(Object.keys(out)).toEqual(["f1"]);
     expect(out.f1.dataURL).toBe(stable);
   });
 
