@@ -844,6 +844,56 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(teacher_cfg["diagnostics"]["jwtRoom"], student_cfg["diagnostics"]["jwtRoom"])
         self.assertEqual(teacher_cfg["diagnostics"]["jwtRoom"], room)
 
+    def test_connection_probe_does_not_create_meeting(self):
+        self.client.force_login(self.teacher)
+        before = VideoMeeting.objects.count()
+        res = self.client.get("/api/video-meetings/connection-probe/")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(VideoMeeting.objects.count(), before)
+        self.assertTrue(str(res.data["roomName"]).startswith("diag"))
+        self.assertEqual(res.data["domain"], "meet.example.test")
+        self.assertEqual(res.data["authMode"], "jwt")
+        self.assertTrue(res.data["jwt"])
+        self.assertTrue(res.data["probe"])
+        claims = decode_jitsi_jwt_unsafe_for_tests(res.data["jwt"])
+        self.assertEqual(claims["room"], res.data["roomName"])
+        self.assertEqual(claims["context"]["user"]["moderator"], "true")
+        self.assertNotIn("schedule_event", res.data)
+        self.assertNotIn("meetingUuid", res.data)
+
+    def test_connection_probe_does_not_start_existing_meeting(self):
+        meeting = self._create_meeting()
+        self.client.force_login(self.teacher)
+        res = self.client.get("/api/video-meetings/connection-probe/")
+        self.assertEqual(res.status_code, 200, res.content)
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.status, VideoMeeting.Status.SCHEDULED)
+        self.assertIsNone(meeting.actual_started_at)
+        self.assertEqual(MeetingAttendance.objects.count(), 0)
+
+    def test_connection_probe_requires_auth(self):
+        res = self.client.get("/api/video-meetings/connection-probe/")
+        self.assertIn(res.status_code, (401, 403))
+
+    def test_connection_probe_allows_student(self):
+        self.client.force_login(self.student_user)
+        res = self.client.get("/api/video-meetings/connection-probe/")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertTrue(res.data["roomName"].startswith("diag"))
+        self.assertNotEqual(res.data["roomName"], "")
+
+    def test_connection_probe_log_does_not_create_meeting(self):
+        self.client.force_login(self.teacher)
+        before = VideoMeeting.objects.count()
+        res = self.client.post(
+            "/api/video-meetings/connection-probe/",
+            {"stage": "join_timeout", "errorType": "join_timeout", "durationMs": 15000, "online": True},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertTrue(res.data.get("ok"))
+        self.assertEqual(VideoMeeting.objects.count(), before)
+
     def test_different_lessons_get_different_rooms(self):
         m1, _ = get_or_create_meeting_for_event(event=self.event, created_by=self.teacher)
         other = create_single_event(

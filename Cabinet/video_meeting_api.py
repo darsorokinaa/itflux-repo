@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from .rate_limit import rate_limit_check, rate_limit_drf_response
 
 from .meeting_material_session import (
     apply_material_operation,
@@ -29,6 +33,7 @@ from .meeting_present import (
 from .student_api import _interactive_to_player_payload
 from .video_meeting_service import (
     VideoMeetingError,
+    build_connection_probe_config,
     build_join_config,
     finish_meeting,
     get_event_for_teacher,
@@ -46,6 +51,8 @@ from .video_meeting_service import (
     start_meeting,
     ui_state_message,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _error_response(exc: VideoMeetingError, *, meeting=None) -> Response:
@@ -636,3 +643,56 @@ class VideoMeetingMaterialOperationView(APIView):
                 include_state=True,
             ),
         })
+
+
+class VideoMeetingConnectionProbeView(APIView):
+    """Диагностика Jitsi: без VideoMeeting, посещаемости, журнала и уведомлений."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not rate_limit_check(request, "jitsi_probe", 12, 300):
+            return rate_limit_drf_response()
+        try:
+            payload = build_connection_probe_config(user=request.user, request=request)
+        except Exception:
+            logger.exception("jitsi_connection_probe_failed user_id=%s", request.user.pk)
+            return Response(
+                {
+                    "error": "Не удалось подготовить проверку видеосвязи",
+                    "detail": "Не удалось подготовить проверку видеосвязи",
+                    "code": "probe_failed",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response(payload)
+
+    def post(self, request):
+        """Клиентский отчёт о сбое диагностики — только лог, без БД и без JWT."""
+        if not rate_limit_check(request, "jitsi_probe_log", 20, 300):
+            return rate_limit_drf_response()
+        data = request.data if isinstance(request.data, dict) else {}
+        stage = str(data.get("stage") or "")[:64]
+        error_type = str(data.get("errorType") or data.get("error_type") or "")[:64]
+        duration = data.get("durationMs")
+        if duration is None:
+            duration = data.get("duration_ms")
+        try:
+            duration_ms = int(duration) if duration is not None else None
+        except (TypeError, ValueError):
+            duration_ms = None
+        online = data.get("online")
+        browser = str(data.get("browser") or "")[:32]
+        device_type = str(data.get("deviceType") or data.get("device_type") or "")[:32]
+        logger.warning(
+            "jitsi_connection_probe_client user_id=%s stage=%s duration_ms=%s "
+            "error_type=%s online=%s browser=%s device=%s",
+            request.user.pk,
+            stage,
+            duration_ms,
+            error_type,
+            online,
+            browser,
+            device_type,
+        )
+        return Response({"ok": True})

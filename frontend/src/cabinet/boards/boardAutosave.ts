@@ -72,6 +72,73 @@ export function buildScenePayload(
   };
 }
 
+/**
+ * Excalidraw при рисовании мутирует элемент и тот же массив in-place (version++).
+ * Сравнение по ссылке массива пропускает промежуточные точки штриха.
+ */
+export function boardElementsVersionSum(elements: readonly unknown[] | null | undefined): number {
+  if (!elements?.length) return 0;
+  let sum = 0;
+  for (const raw of elements) {
+    if (raw && typeof raw === "object") {
+      sum += Number((raw as { version?: number }).version) || 0;
+    }
+  }
+  return sum;
+}
+
+/**
+ * Смена files для persist: новые/удалённые id, не новая обёртка-объект с теми же ключами.
+ * Первый onChange (prev == null) не считается сменой.
+ */
+export function didExcalidrawFilesChange(prev: unknown, next: unknown): boolean {
+  if (prev == null) return false;
+  if (prev === next) return false;
+  if (!prev || !next || typeof prev !== "object" || typeof next !== "object") return true;
+  const a = prev as Record<string, unknown>;
+  const b = next as Record<string, unknown>;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return true;
+  for (const key of bKeys) {
+    if (!Object.prototype.hasOwnProperty.call(a, key)) return true;
+  }
+  return false;
+}
+
+export type BoardPersistableChangeInput = {
+  prevVersionSum: number;
+  nextVersionSum: number;
+  prevElementCount: number;
+  nextElementCount: number;
+  /** Сырой объект files из Excalidraw, не копия attachStableUrls. */
+  prevRawFiles: unknown;
+  nextRawFiles: unknown;
+  prevBackground?: unknown;
+  nextBackground?: unknown;
+  prevGrid?: unknown;
+  nextGrid?: unknown;
+  prevTheme?: unknown;
+  nextTheme?: unknown;
+};
+
+/**
+ * Нужно ли сохранять/публиковать сцену.
+ * Pan/zoom/scroll и прочий viewport не считаются изменением содержимого.
+ *
+ * Важно: не сравнивать files с копией attachStableUrls — она каждый кадр новая,
+ * и pan ошибочно считался правкой доски.
+ */
+export function isBoardPersistableChange(input: BoardPersistableChangeInput): boolean {
+  if (input.nextVersionSum !== input.prevVersionSum) return true;
+  if (input.nextElementCount !== input.prevElementCount) return true;
+  if (didExcalidrawFilesChange(input.prevRawFiles, input.nextRawFiles)) return true;
+  if (input.prevBackground !== input.nextBackground) return true;
+  if (input.prevGrid !== input.nextGrid) return true;
+  if (input.prevTheme !== input.nextTheme) return true;
+  return false;
+}
+
 export function saveStatusLabel(status: SaveStatus): string {
   switch (status) {
     case "saving":

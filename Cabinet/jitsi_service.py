@@ -110,12 +110,14 @@ def generate_jitsi_jwt(
     user: User,
     is_moderator: bool,
     request=None,
+    ttl_seconds: int | None = None,
 ) -> str | None:
     """
     Короткоживущий JWT для собственного Jitsi (режим JITSI_AUTH_MODE=jwt).
 
     Формат claims совместим с token_verification Prosody (не JaaS):
     aud по умолчанию «jitsi», iss = JITSI_APP_ID, sub = JITSI_SUB или домен.
+    ttl_seconds — опционально короче, чем JITSI_TOKEN_TTL_SECONDS (диагностика).
     """
     if get_jitsi_auth_mode() != "jwt":
         return None
@@ -128,7 +130,10 @@ def generate_jitsi_jwt(
     domain = get_jitsi_domain()
     sub = get_jitsi_sub()
     aud = (getattr(settings, "JITSI_AUD", "") or "").strip() or "jitsi"
-    ttl = int(getattr(settings, "JITSI_TOKEN_TTL_SECONDS", 7200) or 7200)
+    if ttl_seconds is None:
+        ttl = int(getattr(settings, "JITSI_TOKEN_TTL_SECONDS", 7200) or 7200)
+    else:
+        ttl = int(ttl_seconds)
     ttl = max(60, min(ttl, 86400))
 
     now = timezone.now()

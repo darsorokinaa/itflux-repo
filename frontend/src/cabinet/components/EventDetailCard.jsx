@@ -3,11 +3,24 @@ import { createPortal } from "react-dom";
 import CabinetIcon from "../CabinetIcons";
 import BoardLessonBlock from "./BoardLessonBlock";
 import CabinetFloatingMenu from "./CabinetFloatingMenu";
+import { openConnectionCheck, closeConnectionCheck } from "../connectionCheck/openConnectionCheck";
 import {
   compactLessonBillingLabel,
   financialStatusMod,
   formatMoney,
 } from "../billing/billingFormat";
+
+function CheckDevicesBtn({ className, label = "Проверить камеру и микрофон", canJoin = false, onJoin }) {
+  return (
+    <button
+      type="button"
+      className={className}
+      onClick={() => openConnectionCheck({ canJoin, onJoin, joinLabel: "Перейти в урок" })}
+    >
+      {label}
+    </button>
+  );
+}
 
 const RESOURCE_PREVIEW = 2;
 
@@ -491,6 +504,8 @@ function ActionBar({
   onEdit,
   onOpenJournal,
   moreItems,
+  onCheckDevices,
+  showCheckDevices = false,
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const moreBtnRef = useRef(null);
@@ -524,6 +539,15 @@ function ActionBar({
             <span className="cb-lesson-card__btn cb-lesson-card__btn--ghost" style={{ cursor: "default" }}>
               {meetingStatus === "cancelled" ? "Урок отменён" : "Урок завершён"}
             </span>
+          ) : null}
+          {showCheckDevices ? (
+            <button
+              type="button"
+              className="cb-lesson-card__btn cb-lesson-card__btn--ghost"
+              onClick={onCheckDevices}
+            >
+              Проверить связь
+            </button>
           ) : null}
         </div>
       </footer>
@@ -559,6 +583,15 @@ function ActionBar({
             onClick={onFooterPrimary}
           >
             {primaryBusy ? "…" : footerPrimaryLabel}
+          </button>
+        ) : null}
+        {showCheckDevices ? (
+          <button
+            type="button"
+            className="cb-lesson-card__btn cb-lesson-card__btn--ghost"
+            onClick={onCheckDevices}
+          >
+            Проверить камеру и микрофон
           </button>
         ) : null}
         {!isCancelled ? (
@@ -705,6 +738,7 @@ export default function EventDetailCard({
   };
 
   const handleOpenExternalOrMeeting = () => {
+    closeConnectionCheck();
     const link = meetingPageUrl || event.link || "";
     const isInternalJitsi = typeof link === "string" && link.startsWith("/cabinet/meetings/");
     if (hasLink && link && !isInternalJitsi && !event.videoMeeting?.uuid) {
@@ -716,6 +750,21 @@ export default function EventDetailCard({
       return;
     }
     onStart?.(event);
+  };
+
+  const canJoinAfterCheck = studentMode
+    ? Boolean(hasLink) && meetingStatus === "live"
+    : Boolean(isOnline && !isCancelled && meetingStatus !== "finished" && meetingStatus !== "cancelled" && (hasLink || meetingStatus));
+
+  const openDeviceCheck = () => {
+    openConnectionCheck({
+      canJoin: canJoinAfterCheck,
+      joinLabel: "Перейти в урок",
+      onJoin: () => {
+        if (!canJoinAfterCheck) return;
+        handleOpenExternalOrMeeting();
+      },
+    });
   };
 
   const lessonTopic = topic?.trim() || "";
@@ -952,6 +1001,13 @@ export default function EventDetailCard({
                               <button type="button" className="cb-lesson-card__meeting-btn" onClick={handleCopyLink}>
                                 {copied ? "Ссылка скопирована" : "Копировать"}
                               </button>
+                              {meetingStatus === "scheduled" || meetingStatus === "live" ? (
+                                <CheckDevicesBtn
+                                  className="cb-lesson-card__meeting-btn"
+                                  canJoin={canJoinAfterCheck}
+                                  onJoin={() => handleOpenExternalOrMeeting()}
+                                />
+                              ) : null}
                               {meetingStatus === "scheduled" ? (
                                 <button
                                   type="button"
@@ -985,6 +1041,11 @@ export default function EventDetailCard({
                           <button type="button" className="cb-lesson-card__meeting-btn" onClick={handleCopyLink}>
                             {copied ? "Ссылка скопирована" : "Копировать"}
                           </button>
+                          <CheckDevicesBtn
+                            className="cb-lesson-card__meeting-btn"
+                            canJoin={canJoinAfterCheck}
+                            onJoin={() => handleOpenExternalOrMeeting()}
+                          />
                         </div>
                       </>
                     ) : studentMode && meetingStatus === "live" && hasLink ? (
@@ -996,17 +1057,35 @@ export default function EventDetailCard({
                         >
                           Подключиться к уроку
                         </button>
+                        <CheckDevicesBtn
+                          className="cb-lesson-card__meeting-btn"
+                          label="Проверить связь"
+                          canJoin
+                          onJoin={() => handleOpenExternalOrMeeting()}
+                        />
                       </div>
                     ) : studentMode && meetingStatus === "scheduled" ? (
-                      <p className="cb-lesson-card__meeting-empty">Урок ещё не начался</p>
+                      <>
+                        <p className="cb-lesson-card__meeting-empty">Урок ещё не начался</p>
+                        <CheckDevicesBtn
+                          className="cb-lesson-card__meeting-btn"
+                          label="Проверить связь"
+                        />
+                      </>
                     ) : studentMode && meetingStatus === "finished" ? (
                       <p className="cb-lesson-card__meeting-empty">Урок завершён</p>
                     ) : studentMode && meetingStatus === "cancelled" ? (
                       <p className="cb-lesson-card__meeting-empty">Урок отменён</p>
                     ) : studentMode && hasMeetingLinkPending && !isDone ? (
-                      <p className="cb-lesson-card__meeting-empty">
-                        Подключение откроется, когда учитель начнёт урок
-                      </p>
+                      <>
+                        <p className="cb-lesson-card__meeting-empty">
+                          Подключение откроется, когда учитель начнёт урок
+                        </p>
+                        <CheckDevicesBtn
+                          className="cb-lesson-card__meeting-btn"
+                          label="Проверить связь"
+                        />
+                      </>
                     ) : !studentMode && !hasLink ? (
                       <>
                         <p className="cb-lesson-card__meeting-empty">Ссылка не создана</p>
@@ -1020,6 +1099,7 @@ export default function EventDetailCard({
                             {creatingLinkId === event.id ? "…" : "Создать ссылку на онлайн-урок"}
                           </button>
                         ) : null}
+                        <CheckDevicesBtn className="cb-lesson-card__meeting-btn" />
                         {canEditLink ? (
                           <div className="cb-lesson-card__link-form" style={{ marginTop: 8 }}>
                             <input
@@ -1183,6 +1263,8 @@ export default function EventDetailCard({
           onEdit={onEdit}
           onOpenJournal={() => onOpenJournal?.(event)}
           moreItems={moreItems}
+          showCheckDevices={Boolean(isOnline && !isCancelled && !isDone)}
+          onCheckDevices={openDeviceCheck}
         />
       </div>
     </div>,

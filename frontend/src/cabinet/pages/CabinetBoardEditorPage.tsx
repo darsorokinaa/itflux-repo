@@ -22,8 +22,10 @@ import ConfirmActionModal from "../components/ConfirmActionModal";
 import BoardExcalidrawCanvas from "../boards/BoardExcalidrawCanvas";
 import {
   AUTOSAVE_DEBOUNCE_MS,
+  boardElementsVersionSum,
   buildScenePayload,
   createDebouncedSaver,
+  isBoardPersistableChange,
   saveStatusLabel,
   shouldBlockUnload,
   type BoardScenePayload,
@@ -90,6 +92,7 @@ import {
   type BoardLoadMetrics,
   type BoardLoadPhase,
 } from "../boards/boardLifecycle";
+import { compactBoardScene } from "../boards/boardSceneCompact";
 import "../styles/boards.css";
 
 const TEACHER_CURSOR = { background: "#2563eb", stroke: "#1d4ed8" };
@@ -161,22 +164,6 @@ function boardLog(tag: string, data?: Record<string, unknown>) {
   }
   // eslint-disable-next-line no-console
   console.debug(`[board] ${tag} ${json}`);
-}
-
-/**
- * Excalidraw при рисовании мутирует элемент и тот же массив elements in-place
- * (version++), не создавая новый reference. Сравнение по ссылке пропускает
- * промежуточные точки штриха — пир видит рисунок только в конце жеста.
- */
-function boardElementsVersionSum(elements: readonly unknown[] | null | undefined): number {
-  if (!elements?.length) return 0;
-  let sum = 0;
-  for (const raw of elements) {
-    if (raw && typeof raw === "object") {
-      sum += Number((raw as { version?: number }).version) || 0;
-    }
-  }
-  return sum;
 }
 
 /**
@@ -397,6 +384,11 @@ export default function CabinetBoardEditorPage() {
   /** Снимок sum(version) на момент последней локальной публикации — не читать из live-массива. */
   const lastElementsVersionSumRef = useRef(0);
   const lastFilesRef = useRef<Record<string, unknown> | null>(null);
+  /** Сырой files из Excalidraw onChange — для детекта реальной смены файлов, не копии. */
+  const lastRawFilesRef = useRef<Record<string, unknown> | null>(null);
+  const sceneTooLargeNoticeRef = useRef(false);
+  const pendingCompactPersistRef = useRef(false);
+  const sceneChangeReadyRef = useRef(false);
   const knownElementIdsRef = useRef(new Set<string>());
   const viewerUserIdRef = useRef<number | null>(null);
   const viewerRoleRef = useRef<string>("student");
@@ -505,6 +497,13 @@ export default function CabinetBoardEditorPage() {
       appState: { ...(scene.appState || {}) },
       files: filesWithStable,
     };
+    const compacted = compactBoardScene(snapshot);
+    snapshot.elements = compacted.scene.elements;
+    snapshot.appState = compacted.scene.appState;
+    snapshot.files = attachStableUrls(
+      compacted.scene.files as Record<string, Record<string, unknown>>,
+      stableFileUrlsRef.current,
+    );
 
     safeSetSaveStatus("saving");
     try {
@@ -571,6 +570,7 @@ export default function CabinetBoardEditorPage() {
         if (mountedRef.current) safeSetSaveStatus("dirty");
       } else {
         dirtyRef.current = false;
+        sceneTooLargeNoticeRef.current = false;
         if (mountedRef.current) safeSetSaveStatus("saved");
       }
 
@@ -667,6 +667,16 @@ export default function CabinetBoardEditorPage() {
           setConflict(true);
           safeSetSaveStatus("conflict");
         }
+      } else if (error?.code === "SCENE_TOO_LARGE") {
+        dirtyRef.current = true;
+        saveRequestedRef.current = false;
+        if (mountedRef.current) {
+          safeSetSaveStatus("error");
+          if (!sceneTooLargeNoticeRef.current) {
+            sceneTooLargeNoticeRef.current = true;
+            showNotice(error?.message || "Данные доски слишком большие");
+          }
+        }
       } else {
         // Сеть/сервер: локальные правки сохраняем, пометим dirty для повтора.
         dirtyRef.current = true;
@@ -762,6 +772,10 @@ export default function CabinetBoardEditorPage() {
     lastElementsRef.current = null;
     lastElementsVersionSumRef.current = 0;
     lastFilesRef.current = null;
+    lastRawFilesRef.current = null;
+    sceneTooLargeNoticeRef.current = false;
+    pendingCompactPersistRef.current = false;
+    sceneChangeReadyRef.current = false;
     stableFileUrlsRef.current = createStableUrlMap();
     loadedFilesRef.current = new Set();
     loadingRemoteFilesRef.current = new Set();
@@ -806,8 +820,24 @@ export default function CabinetBoardEditorPage() {
         const style = normalizeGridStyle(rawApp[GRID_STYLE_KEY], rawApp.gridModeEnabled);
         const solidBg = resolveBoardBgColor(rawApp);
         const theme = rawApp.theme === "dark" ? "dark" : "light";
-        const rawFiles = (data.scene_data?.files || {}) as Record<string, Record<string, unknown>>;
-        const elements = data.scene_data?.elements || [];
+        const compactResult = compactBoardScene({
+          elements: data.scene_data?.elements || [],
+          appState: rawApp,
+          files: (data.scene_data?.files || {}) as Record<string, unknown>,
+        });
+        if (compactResult.changed && data.can_edit) {
+          pendingCompactPersistRef.current = true;
+          boardLog("compact:load", {
+            beforeKb: Math.round(compactResult.statsBefore.sceneBytes / 1024),
+            afterKb: Math.round(compactResult.statsAfter.sceneBytes / 1024),
+            elements: compactResult.statsAfter.elementCount,
+            deleted: compactResult.statsAfter.deletedCount,
+            files: compactResult.statsAfter.fileCount,
+            unusedDropped: compactResult.statsBefore.unusedFileCount,
+          });
+        }
+        const rawFiles = compactResult.scene.files as Record<string, Record<string, unknown>>;
+        const elements = compactResult.scene.elements;
 
         setLoadPhase("loading_files");
         logBoardMetrics("loading_files", metricsRef.current);
@@ -857,6 +887,10 @@ export default function CabinetBoardEditorPage() {
 
         setInitialData(scene);
         latestSceneRef.current = scene;
+        lastElementsRef.current = elementsReady;
+        lastElementsVersionSumRef.current = boardElementsVersionSum(elementsReady);
+        lastFilesRef.current = filesReady;
+        lastRawFilesRef.current = null;
         setGridStyle(style);
         setBgColor(solidBg);
         setBoardTheme(theme);
@@ -926,7 +960,19 @@ export default function CabinetBoardEditorPage() {
             "Content-Type": "application/json",
             ...(token ? { "X-CSRFToken": token } : {}),
           },
-          body: JSON.stringify({ scene_data: scene, version: versionRef.current }),
+          body: JSON.stringify({
+            scene_data: compactBoardScene({
+              elements: scene.elements,
+              appState: scene.appState,
+              files: filesForPersist(
+                attachStableUrls(
+                  scene.files as Record<string, Record<string, unknown>>,
+                  stableFileUrlsRef.current,
+                ),
+              ),
+            }).scene,
+            version: versionRef.current,
+          }),
         });
       } catch {
         /* ignore */
@@ -1237,6 +1283,44 @@ export default function CabinetBoardEditorPage() {
       if (applyingRemoteRef.current) return;
       if (!canEditRef.current || conflictRef.current) return;
 
+      const toolType = String((appState.activeTool as { type?: string } | undefined)?.type || "");
+      if (toolType && toolType !== lastActiveToolRef.current) {
+        lastActiveToolRef.current = toolType;
+        collabRef.current?.publishActiveTool(toolType);
+      }
+
+      // Первый onChange после mount — снимок baseline, не пользовательская правка.
+      if (!sceneChangeReadyRef.current) {
+        sceneChangeReadyRef.current = true;
+        lastRawFilesRef.current = files;
+        lastElementsRef.current = elements;
+        lastElementsVersionSumRef.current = boardElementsVersionSum(elements);
+        return;
+      }
+
+      const nextTheme = appState.theme === "dark" ? "dark" : "light";
+      const overlay = usesPaperOverlay(gridStyleRef.current);
+      const nextBg = overlay
+        ? "transparent"
+        : appState.viewBackgroundColor;
+      const persistable = isBoardPersistableChange({
+        prevVersionSum: lastElementsVersionSumRef.current,
+        nextVersionSum: boardElementsVersionSum(elements),
+        prevElementCount: lastElementsRef.current?.length || 0,
+        nextElementCount: Array.isArray(elements) ? elements.length : 0,
+        prevRawFiles: lastRawFilesRef.current,
+        nextRawFiles: files,
+        prevBackground: latestSceneRef.current?.appState?.viewBackgroundColor,
+        nextBackground: nextBg,
+        prevGrid: latestSceneRef.current?.appState?.[GRID_STYLE_KEY],
+        nextGrid: gridStyleRef.current,
+        prevTheme: latestSceneRef.current?.appState?.theme,
+        nextTheme,
+      });
+      lastRawFilesRef.current = files;
+      // Pan/zoom/scroll и прочий viewport: не копируем сцену, не save, не live-publish.
+      if (!persistable) return;
+
       const prevElements = (latestSceneRef.current?.elements || lastElementsRef.current || []) as unknown[];
       let nextElements = elements as unknown[];
       // Владение: stamp на новые, откат чужих мутаций у ученика.
@@ -1265,29 +1349,12 @@ export default function CabinetBoardEditorPage() {
       // Сохраняем наш стиль сетки и цвет бумаги (Excalidraw может не вернуть кастомные ключи)
       scene.appState[GRID_STYLE_KEY] = gridStyleRef.current;
       scene.appState[BG_COLOR_KEY] = bgColorRef.current;
-      if (usesPaperOverlay(gridStyleRef.current)) {
+      if (overlay) {
         scene.appState.viewBackgroundColor = "transparent";
       }
       scene.appState.theme = boardThemeRef.current;
       const nextVersionSum = boardElementsVersionSum(nextElements);
-      // Ссылка массива часто та же при in-place mutate — смотрим sum(version).
-      const elementsChanged = lastElementsRef.current !== elements
-        || nextElements !== elements
-        || lastElementsVersionSumRef.current !== nextVersionSum
-        || (lastElementsRef.current?.length || 0) !== nextElements.length;
-      const filesChanged = lastFilesRef.current !== files;
-      const bgChanged =
-        latestSceneRef.current?.appState?.viewBackgroundColor !== scene.appState.viewBackgroundColor;
-      const gridChanged =
-        latestSceneRef.current?.appState?.[GRID_STYLE_KEY] !== scene.appState[GRID_STYLE_KEY];
-      const themeChanged = latestSceneRef.current?.appState?.theme !== scene.appState.theme;
       latestSceneRef.current = scene;
-      const toolType = String((appState.activeTool as { type?: string } | undefined)?.type || "");
-      if (toolType && toolType !== lastActiveToolRef.current) {
-        lastActiveToolRef.current = toolType;
-        collabRef.current?.publishActiveTool(toolType);
-      }
-      if (!elementsChanged && !filesChanged && !bgChanged && !gridChanged && !themeChanged) return;
       lastElementsRef.current = nextElements;
       lastElementsVersionSumRef.current = nextVersionSum;
       lastFilesRef.current = filesAttached;
@@ -2313,6 +2380,16 @@ export default function CabinetBoardEditorPage() {
     }
   }, []);
 
+  // Сжатие существующей раздутой сцены — один persist после готовности холста.
+  useEffect(() => {
+    if (!excalidrawReady || !hostReady || !canEdit || conflict || loading) return;
+    if (!pendingCompactPersistRef.current) return;
+    pendingCompactPersistRef.current = false;
+    markLocalSceneChange();
+    safeSetSaveStatus("dirty");
+    debouncedSaver.schedule();
+  }, [excalidrawReady, hostReady, canEdit, conflict, loading, markLocalSceneChange, safeSetSaveStatus, debouncedSaver]);
+
   const retryBoardLoad = useCallback(() => {
     setReloadToken((n) => n + 1);
   }, []);
@@ -2441,6 +2518,7 @@ export default function CabinetBoardEditorPage() {
   };
 
   const handleRetrySave = async () => {
+    sceneTooLargeNoticeRef.current = false;
     await debouncedSaver.flush();
   };
 

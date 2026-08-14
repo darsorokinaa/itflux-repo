@@ -36,6 +36,7 @@ deploy/dumps/
 Generator/media/cabinet/
 Generator/media/lesson_attachments/
 generatordb_*.dump
+Cabinet/board_scene_backups/
 
 # Локальный скрипт импорта (не коммитить)
 import_tasks_universal.py

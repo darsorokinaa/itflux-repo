@@ -825,6 +825,68 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
     }
 
 
+# Диагностическая комната Jitsi: не VideoMeeting, не урок, короткий JWT.
+DIAGNOSTIC_ROOM_PREFIX = "diag"
+DIAGNOSTIC_JWT_TTL_SECONDS = 180
+
+
+def build_connection_probe_config(*, user: User, request=None) -> dict:
+    """
+    Конфиг проверки Jitsi без создания VideoMeeting и без побочных эффектов урока.
+
+    Комната diagnostic_* живёт только на сервере Jitsi (если клиент её откроет)
+    и не попадает в расписание, посещаемость, журнал и биллинг.
+    """
+    domain = get_jitsi_domain()
+    auth_mode = get_jitsi_auth_mode()
+    room_name = f"{DIAGNOSTIC_ROOM_PREFIX}{secrets.token_hex(16)}"
+    user_info = build_user_info(user, request)
+    display_name = str(user_info.get("displayName") or "").strip() or f"Пользователь {user.pk}"
+
+    jwt_token = None
+    jwt_ready = auth_mode != "jwt"
+    if auth_mode == "jwt":
+        try:
+            jwt_token = generate_jitsi_jwt(
+                room_name=room_name,
+                user=user,
+                is_moderator=True,
+                request=request,
+                ttl_seconds=DIAGNOSTIC_JWT_TTL_SECONDS,
+            )
+            jwt_ready = bool(jwt_token)
+        except JitsiConfigError as exc:
+            logger.warning(
+                "jitsi_connection_probe_jwt_error user_id=%s domain=%s error=%s",
+                user.pk,
+                domain,
+                exc,
+            )
+            jwt_ready = False
+
+    logger.info(
+        "jitsi_connection_probe user_id=%s domain=%s auth_mode=%s has_jwt=%s jwt_ready=%s room=%s",
+        user.pk,
+        domain,
+        auth_mode,
+        bool(jwt_token),
+        jwt_ready,
+        room_name,
+    )
+
+    return {
+        "domain": domain,
+        "roomName": room_name,
+        "jwt": jwt_token,
+        "authMode": auth_mode,
+        "scriptUrl": f"https://{domain}/libs/external_api.min.js",
+        "userInfo": {"displayName": display_name},
+        "jwtReady": jwt_ready,
+        "probe": True,
+        "ttlSeconds": DIAGNOSTIC_JWT_TTL_SECONDS if jwt_token else None,
+    }
+
+
 def _return_url_for_role(role: AccessRole) -> str:
     if role == "student":
         return "/cabinet/student/lessons"

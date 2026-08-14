@@ -15,6 +15,7 @@ import CabinetGlobalSearch from "./components/CabinetGlobalSearch";
 import CabinetNotificationsBell from "./components/CabinetNotificationsBell";
 import CabinetGuideModal from "./components/CabinetGuideModal";
 import ConfirmActionModal from "./components/ConfirmActionModal";
+import ConnectionCheckHost from "./connectionCheck/ConnectionCheckHost";
 import CabinetFloatingMenu from "./components/CabinetFloatingMenu";
 import { UserAvatarMark } from "./components/ProfileAvatarEditor";
 import { useSubscription } from "./hooks/useSubscription";
@@ -587,6 +588,7 @@ export default function CabinetLayout() {
         })}
       </nav>
       <CabinetGuideModal open={guideOpen} onClose={closeGuide} onComplete={completeGuide} />
+      <ConnectionCheckHost />
       <ConfirmActionModal
         open={logoutConfirm}
         title="Выйти из аккаунта?"

@@ -11,6 +11,7 @@ import {
 import CabinetIcon from "../CabinetIcons";
 import CabinetNotificationsBell from "../components/CabinetNotificationsBell";
 import ConfirmActionModal from "../components/ConfirmActionModal";
+import ConnectionCheckHost from "../connectionCheck/ConnectionCheckHost";
 import { UserAvatarMark } from "../components/ProfileAvatarEditor";
 import PwaEnableNotificationsPrompt from "../pwa/PwaEnableNotificationsPrompt";
 import PwaInstallPrompt from "../pwa/PwaInstallPrompt";
@@ -314,6 +315,7 @@ export default function StudentCabinetLayout() {
         })}
       </nav>
 
+      <ConnectionCheckHost />
       <ConfirmActionModal
         open={logoutConfirm}
         title="Выйти из аккаунта?"

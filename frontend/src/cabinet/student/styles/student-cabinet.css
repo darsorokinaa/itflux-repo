@@ -3512,6 +3512,11 @@ button.st-ld-item {
   align-items: center;
 }
 
+.st-next-lesson__actions .cc-checked,
+.st-next-lesson__actions .cc-reminder {
+  flex-basis: 100%;
+}
+
 .st-next-lesson__locked {
   opacity: 0.85;
   cursor: default;

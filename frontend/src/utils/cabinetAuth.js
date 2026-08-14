@@ -354,6 +354,17 @@ export function fetchVideoMeetingJoinConfig(meetingUuid) {
   return videoMeetingFetch(`/${meetingUuid}/join-config/`, { method: "POST", body: "{}" });
 }
 
+export function fetchVideoMeetingConnectionProbe() {
+  return videoMeetingFetch("/connection-probe/", { method: "GET" });
+}
+
+export function reportVideoMeetingConnectionProbe(payload = {}) {
+  return videoMeetingFetch("/connection-probe/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }).catch(() => null);
+}
+
 export function startVideoMeeting(meetingUuid) {
   return videoMeetingFetch(`/${meetingUuid}/start/`, { method: "POST", body: "{}" });
 }

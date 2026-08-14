@@ -7,11 +7,25 @@
  */
 
 const SCRIPT_ID = "jitsi-external-api-script";
-const JOIN_TIMEOUT_MS = 15000;
+/** Таймаут входа в конференцию и загрузки External API — из реального урока. */
+export const JOIN_TIMEOUT_MS = 15000;
+export const JITSI_SCRIPT_LOAD_TIMEOUT_MS = JOIN_TIMEOUT_MS;
 
 let sessionInitializing = false;
 
-export function loadJitsiExternalApi(domain) {
+function jitsiScriptError() {
+  const err = new Error("Не удалось загрузить Jitsi Meet");
+  err.code = "jitsi_script";
+  return err;
+}
+
+function jitsiScriptTimeoutError() {
+  const err = new Error("Не удалось загрузить Jitsi Meet");
+  err.code = "jitsi_script_timeout";
+  return err;
+}
+
+export function loadJitsiExternalApi(domain, { timeoutMs = JITSI_SCRIPT_LOAD_TIMEOUT_MS } = {}) {
   const host = String(domain || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
   if (!host) {
     return Promise.reject(new Error("Не задан домен Jitsi"));
@@ -20,24 +34,54 @@ export function loadJitsiExternalApi(domain) {
     return Promise.resolve(window.JitsiMeetExternalAPI);
   }
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      if (error) {
+        reject(error);
+        return;
+      }
+      if (window.JitsiMeetExternalAPI) resolve(window.JitsiMeetExternalAPI);
+      else reject(jitsiScriptError());
+    };
+    const timer = window.setTimeout(() => finish(jitsiScriptTimeoutError()), timeoutMs);
+
+    const attach = (script) => {
+      if (window.JitsiMeetExternalAPI) {
+        finish(null);
+        return;
+      }
+      if (script.dataset.jitsiError === "1") {
+        finish(jitsiScriptError());
+        return;
+      }
+      const ready = script.readyState;
+      if (script.dataset.jitsiReady === "1" || ready === "complete" || ready === "loaded") {
+        finish(null);
+        return;
+      }
+      script.addEventListener("load", () => {
+        script.dataset.jitsiReady = "1";
+        finish(null);
+      }, { once: true });
+      script.addEventListener("error", () => {
+        script.dataset.jitsiError = "1";
+        finish(jitsiScriptError());
+      }, { once: true });
+    };
+
     const existing = document.getElementById(SCRIPT_ID);
     if (existing) {
-      existing.addEventListener("load", () => {
-        if (window.JitsiMeetExternalAPI) resolve(window.JitsiMeetExternalAPI);
-        else reject(new Error("Не удалось загрузить Jitsi Meet"));
-      });
-      existing.addEventListener("error", () => reject(new Error("Не удалось загрузить Jitsi Meet")));
+      attach(existing);
       return;
     }
     const script = document.createElement("script");
     script.id = SCRIPT_ID;
     script.async = true;
     script.src = `https://${host}/libs/external_api.min.js`;
-    script.onload = () => {
-      if (window.JitsiMeetExternalAPI) resolve(window.JitsiMeetExternalAPI);
-      else reject(new Error("Не удалось загрузить Jitsi Meet"));
-    };
-    script.onerror = () => reject(new Error("Не удалось загрузить Jitsi Meet"));
+    attach(script);
     document.head.appendChild(script);
   });
 }

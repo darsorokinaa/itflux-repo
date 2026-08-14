@@ -4,6 +4,11 @@ from . import video_meeting_api
 
 urlpatterns = [
     path(
+        "connection-probe/",
+        video_meeting_api.VideoMeetingConnectionProbeView.as_view(),
+        name="video_meeting_connection_probe",
+    ),
+    path(
         "for-event/<int:event_id>/",
         video_meeting_api.VideoMeetingForEventView.as_view(),
         name="video_meeting_for_event",

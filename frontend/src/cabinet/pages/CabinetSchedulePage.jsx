@@ -27,6 +27,8 @@ import { isTelemostMeetingUrl } from "../telemostPopup";
 import CreateScheduleLessonModal from "../components/CreateScheduleLessonModal";
 import EditScheduleLessonModal from "../components/EditScheduleLessonModal";
 import EventDetailCard from "../components/EventDetailCard";
+import ConnectionCheckButton from "../connectionCheck/ConnectionCheckButton";
+import { closeConnectionCheck } from "../connectionCheck/openConnectionCheck";
 import HomeworkAssignModal from "../components/HomeworkAssignModal";
 import { openLessonSummaryTab } from "../journal/openLessonSummary";
 import PlanItemDetailModal from "../components/PlanItemDetailModal";
@@ -1344,9 +1346,16 @@ function ListView({ events, onOpen, onStart, onCreateLink, onAddLesson }) {
                         </button>
                       ) : null}
                       {canStart && onStart && startLabel && startLabel !== "Создать ссылку" ? (
-                        <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={() => onStart(ev)}>
+                        <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={() => { closeConnectionCheck(); onStart(ev); }}>
                           {startLabel}
                         </button>
+                      ) : null}
+                      {ev.format === "Онлайн" && ev.status === "planned" ? (
+                        <ConnectionCheckButton
+                          className="cb-btn cb-btn--outline cb-btn--sm"
+                          canJoin={Boolean(onStart && startLabel && startLabel !== "Создать ссылку")}
+                          onJoin={onStart && startLabel && startLabel !== "Создать ссылку" ? () => onStart(ev) : undefined}
+                        />
                       ) : null}
                     </div>
                   </div>

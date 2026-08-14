@@ -24,6 +24,8 @@ import {
   useScheduleNow,
   LESSON_CONNECT_BEFORE_MS,
 } from "../StudentSectionUi";
+import ConnectionCheckButton from "../../connectionCheck/ConnectionCheckButton";
+import { closeConnectionCheck } from "../../connectionCheck/openConnectionCheck";
 import { usePageTitle } from "../../hooks/usePageTitle";
 import { formatDayLabel } from "../studentDisplay";
 
@@ -75,15 +77,19 @@ function groupByDate(events) {
 }
 
 function MeetingConnectLink({ href, className, children, onClick }) {
+  const handleClick = (event) => {
+    closeConnectionCheck();
+    onClick?.(event);
+  };
   if (isInternalMeetingHref(href)) {
     return (
-      <Link to={href} className={className} onClick={onClick}>
+      <Link to={href} className={className} onClick={handleClick}>
         {children}
       </Link>
     );
   }
   return (
-    <a href={href} className={className} target="_blank" rel="noreferrer" onClick={onClick}>
+    <a href={href} className={className} target="_blank" rel="noreferrer" onClick={handleClick}>
       {children}
     </a>
   );
@@ -167,6 +173,13 @@ function ScheduleLessonRow({ event, onOpen, past = false, now }) {
           >
             Комната скоро откроется
           </button>
+        ) : null}
+        {!past && (hasMeeting || /онлайн/i.test(String(event.format || event.format_label || ""))) ? (
+          <ConnectionCheckButton
+            className="cb-btn cb-btn--outline cb-btn--sm"
+            canJoin={Boolean(canConnect && meetingHref)}
+            joinHref={canConnect ? meetingHref : ""}
+          />
         ) : null}
         {materialsLink ? (
           <Link

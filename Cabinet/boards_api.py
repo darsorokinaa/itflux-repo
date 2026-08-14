@@ -56,7 +56,7 @@ def _parse_optional_pk(value):
     except (TypeError, ValueError):
         return None
 
-MAX_SCENE_JSON_BYTES = 5 * 1024 * 1024
+MAX_SCENE_JSON_BYTES = 15 * 1024 * 1024
 MAX_INLINE_FILE_BYTES = 250 * 1024
 MAX_BOARD_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_THUMBNAIL_CHARS = 200_000
@@ -150,6 +150,132 @@ def normalize_scene_data(raw: Any) -> dict:
         "elements": elements,
         "appState": sanitize_app_state(raw.get("appState")),
         "files": files,
+    }
+
+
+_DELETED_TOMBSTONE_KEYS = (
+    "id",
+    "type",
+    "x",
+    "y",
+    "width",
+    "height",
+    "angle",
+    "isDeleted",
+    "version",
+    "versionNonce",
+    "updated",
+    "index",
+    "customData",
+    "fileId",
+    "frameId",
+    "groupIds",
+    "locked",
+    "seed",
+    "name",
+)
+
+
+def _is_bulky_deleted_element(el: dict) -> bool:
+    if not el.get("isDeleted"):
+        return False
+    points = el.get("points")
+    if isinstance(points, list) and len(points) > 1:
+        return True
+    pressures = el.get("pressures")
+    if isinstance(pressures, list) and len(pressures) > 1:
+        return True
+    for key in ("text", "originalText", "rawText"):
+        value = el.get(key)
+        if isinstance(value, str) and value:
+            return True
+    return False
+
+
+def _compact_deleted_element(el: dict) -> dict:
+    next_el = {key: el[key] for key in _DELETED_TOMBSTONE_KEYS if key in el}
+    next_el["isDeleted"] = True
+    if el.get("type") == "freedraw":
+        next_el["points"] = [[0, 0]]
+        if "pressures" in el:
+            next_el["pressures"] = []
+    return next_el
+
+
+def _referenced_file_ids(elements: list) -> set[str]:
+    ids: set[str] = set()
+    for raw in elements:
+        if not isinstance(raw, dict):
+            continue
+        file_id = raw.get("fileId")
+        if isinstance(file_id, str) and file_id:
+            ids.add(file_id)
+    return ids
+
+
+def compact_scene_data(scene: dict) -> tuple[dict, bool]:
+    """
+    Идемпотентно сжимает сцену: tombstones вместо геометрии deleted-элементов
+    и удаление files без ссылок. Живые элементы не меняются.
+    """
+    if not isinstance(scene, dict):
+        return empty_board_scene(), False
+    elements_in = scene.get("elements")
+    if not isinstance(elements_in, list):
+        elements_in = []
+    files_in = scene.get("files")
+    if not isinstance(files_in, dict):
+        files_in = {}
+
+    changed = False
+    elements = []
+    for raw in elements_in:
+        if isinstance(raw, dict) and _is_bulky_deleted_element(raw):
+            elements.append(_compact_deleted_element(raw))
+            changed = True
+        else:
+            elements.append(raw)
+
+    used = _referenced_file_ids(elements)
+    files = {}
+    for file_id, meta in files_in.items():
+        if str(file_id) in used:
+            files[file_id] = meta
+        else:
+            changed = True
+
+    if not changed:
+        return scene, False
+    return {
+        **scene,
+        "elements": elements,
+        "appState": scene.get("appState") if isinstance(scene.get("appState"), dict) else {},
+        "files": files,
+    }, True
+
+
+def scene_size_stats(scene: dict) -> dict:
+    elements = scene.get("elements") if isinstance(scene, dict) else None
+    files = scene.get("files") if isinstance(scene, dict) else None
+    if not isinstance(elements, list):
+        elements = []
+    if not isinstance(files, dict):
+        files = {}
+    deleted = 0
+    for el in elements:
+        if isinstance(el, dict) and el.get("isDeleted"):
+            deleted += 1
+    used = _referenced_file_ids(elements)
+    unused = sum(1 for fid in files if str(fid) not in used)
+    return {
+        "element_count": len(elements),
+        "deleted_count": deleted,
+        "live_count": len(elements) - deleted,
+        "file_count": len(files),
+        "unused_file_count": unused,
+        "elements_bytes": estimate_json_bytes(elements),
+        "files_bytes": estimate_json_bytes(files),
+        "scene_bytes": estimate_json_bytes(scene),
     }
 
 
@@ -951,6 +1077,11 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
                         user_id=request.user.id,
                         is_owner=(perm == "owner"),
                     )
+                    scene, _compacted = compact_scene_data(scene)
+                    try:
+                        scene = persist_large_scene_files(locked, scene, request.user)
+                    except serializers.ValidationError as exc:
+                        return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
                     size = estimate_json_bytes(scene)
                     if size > MAX_SCENE_JSON_BYTES:
                         return Response(
@@ -963,10 +1094,6 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
                             },
                             status=status.HTTP_400_BAD_REQUEST,
                         )
-                    try:
-                        scene = persist_large_scene_files(locked, scene, request.user)
-                    except serializers.ValidationError as exc:
-                        return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
 
                     locked.scene_data = scene
                     locked.version = locked.version + 1

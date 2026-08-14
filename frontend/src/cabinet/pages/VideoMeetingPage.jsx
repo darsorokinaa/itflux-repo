@@ -36,6 +36,10 @@ import {
   setMeetingCameraEnabled,
   setMeetingMicEnabled,
 } from "../jitsiMeet";
+import { closeConnectionCheck } from "../connectionCheck/openConnectionCheck";
+import { abortJitsiConnectionProbe } from "../connectionCheck/jitsiProbe";
+import { stopAllConnectionCheckStreams } from "../connectionCheck/mediaCleanup";
+import { clearPrimedMedia } from "../connectionCheck/mediaDevices";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import { openLessonSummaryTab } from "../journal/openLessonSummary";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
@@ -626,8 +630,13 @@ export default function VideoMeetingPage() {
   }, [cancelPendingLeave, disposeApi, loadFinishedAttendance, meetingUuid, requestJoin]);
 
   useEffect(() => {
+    closeConnectionCheck();
+    abortJitsiConnectionProbe();
+    clearPrimedMedia();
+    stopAllConnectionCheckStreams();
     void bootstrap();
     return () => {
+      abortJitsiConnectionProbe();
       stopPolling();
       sendLeave(false);
       disposeApi();

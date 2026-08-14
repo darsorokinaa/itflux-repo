@@ -268,7 +268,7 @@ class InteractiveBoardApiTests(TestCase):
     def test_scene_size_limit(self):
         board = InteractiveBoard.objects.create(owner=self.teacher, title="Big")
         self._auth(self.teacher)
-        huge = "x" * (6 * 1024 * 1024)
+        huge = "x" * (16 * 1024 * 1024)
         res = self.client.patch(
             f"/api/cabinet/interactive-boards/{board.id}/",
             {
@@ -283,6 +283,93 @@ class InteractiveBoardApiTests(TestCase):
         )
         self.assertEqual(res.status_code, 400)
         self.assertEqual(res.json().get("code"), "SCENE_TOO_LARGE")
+
+    def test_compact_scene_strips_deleted_geometry_keeps_live(self):
+        from Cabinet.boards_api import compact_scene_data
+
+        live = {
+            "id": "live-1",
+            "type": "freedraw",
+            "isDeleted": False,
+            "version": 2,
+            "points": [[0, 0], [1, 1], [2, 2]],
+        }
+        deleted = {
+            "id": "del-1",
+            "type": "freedraw",
+            "isDeleted": True,
+            "version": 5,
+            "versionNonce": 9,
+            "updated": 11,
+            "customData": {"itfluxOwnerId": 1, "itfluxOwnership": "teacher"},
+            "points": [[i, i] for i in range(400)],
+            "pressures": [0.5] * 400,
+        }
+        scene = {
+            "elements": [live, deleted],
+            "appState": {"viewBackgroundColor": "#fff"},
+            "files": {
+                "used": {"dataURL": "/api/cabinet/interactive-boards/x/assets/a/"},
+                "orphan": {"dataURL": "data:image/png;base64," + ("A" * 1000)},
+            },
+        }
+        scene["elements"].append(
+            {"id": "img-1", "type": "image", "fileId": "used", "isDeleted": False, "version": 1}
+        )
+        compacted, changed = compact_scene_data(scene)
+        self.assertTrue(changed)
+        live_out = next(el for el in compacted["elements"] if el["id"] == "live-1")
+        del_out = next(el for el in compacted["elements"] if el["id"] == "del-1")
+        self.assertEqual(live_out["points"], [[0, 0], [1, 1], [2, 2]])
+        self.assertEqual(del_out["points"], [[0, 0]])
+        self.assertEqual(del_out["pressures"], [])
+        self.assertEqual(del_out["version"], 5)
+        self.assertEqual(del_out["customData"]["itfluxOwnerId"], 1)
+        self.assertIn("used", compacted["files"])
+        self.assertNotIn("orphan", compacted["files"])
+
+        again, changed_again = compact_scene_data(compacted)
+        self.assertFalse(changed_again)
+        self.assertEqual(again["elements"][1]["points"], [[0, 0]])
+
+    def test_patch_compacts_deleted_geometry(self):
+        board = InteractiveBoard.objects.create(owner=self.teacher, title="Compact")
+        self._auth(self.teacher)
+        live_points = [[0, 0], [4, 5], [8, 1]]
+        res = self.client.patch(
+            f"/api/cabinet/interactive-boards/{board.id}/",
+            {
+                "scene_data": {
+                    "elements": [
+                        {
+                            "id": "keep",
+                            "type": "freedraw",
+                            "isDeleted": False,
+                            "version": 1,
+                            "points": live_points,
+                        },
+                        {
+                            "id": "gone",
+                            "type": "freedraw",
+                            "isDeleted": True,
+                            "version": 3,
+                            "points": [[i, i] for i in range(80)],
+                        },
+                    ],
+                    "appState": {},
+                    "files": {},
+                },
+                "version": 1,
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        board.refresh_from_db()
+        els = {el["id"]: el for el in board.scene_data["elements"]}
+        self.assertEqual(els["keep"]["points"], live_points)
+        self.assertTrue(els["gone"]["isDeleted"])
+        self.assertEqual(els["gone"]["points"], [[0, 0]])
+        self.assertEqual(els["gone"]["version"], 3)
 
     def test_unauthenticated_rejected(self):
         res = self.client.get("/api/cabinet/interactive-boards/")

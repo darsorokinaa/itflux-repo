@@ -6,6 +6,10 @@ import { CabinetEmptyState } from "./CabinetSectionUi";
 import CabinetModal from "./components/CabinetModal";
 import HomeworkAssignModal from "./components/HomeworkAssignModal";
 import TeacherOnboardingCard from "./components/TeacherOnboardingCard";
+import ConnectionCheckButton from "./connectionCheck/ConnectionCheckButton";
+import { closeConnectionCheck } from "./connectionCheck/openConnectionCheck";
+import LastCheckHint from "./connectionCheck/LastCheckHint";
+import { shouldRemindBeforeLesson } from "./connectionCheck/storage";
 import { hasSkippedOnboardingMaterials } from "./onboardingStorage";
 import {
   fetchBillingDashboard,
@@ -125,6 +129,7 @@ function mapTodayLesson(ev, now) {
     ev.topic || ev.link || ev.telemost_url || ev.meeting_url
       || ev.plan_item_id || ev.lesson_plan_item,
   );
+  const isOnline = ev.format === "online" || ev.format === "Онлайн";
   return {
     id: ev.id,
     time,
@@ -134,6 +139,7 @@ function mapTodayLesson(ev, now) {
     startsAt: ev.starts_at,
     ready,
     isDone,
+    isOnline,
     isCurrent: isCurrent || isSoon,
     countdown: isDone && !isCurrent
       ? "пройден"
@@ -513,14 +519,38 @@ export default function CabinetDashboard() {
                               ? `${lesson.topic} · ${lesson.countdown}`
                               : `Тема пока не указана · ${lesson.countdown}`}
                           </p>
+                          {lesson.isOnline && !lesson.isDone && shouldRemindBeforeLesson(lesson.startsAt) ? (
+                            <p className="td-lesson-remind">До урока меньше 10 минут. Рекомендуем проверить камеру и микрофон.</p>
+                          ) : null}
+                          {lesson.isOnline && !lesson.isDone ? <LastCheckHint /> : null}
                         </div>
                         <div className="td-lesson-meta">
                           <span className={`td-chip${lesson.ready || lesson.isDone ? "" : " is-yellow"}`}>
                             {lesson.isDone ? "Пройден" : lesson.ready ? "Готово" : "Не всё готово"}
                           </span>
-                          <Link to="/cabinet/schedule" className="td-lesson-action">
-                            {lesson.ready || lesson.isDone ? "Открыть урок →" : "Доделать →"}
-                          </Link>
+                          <div className="td-lesson-actions">
+                            {lesson.isOnline && !lesson.isDone ? (
+                              <>
+                                <Link
+                                  to={`/cabinet/schedule?event=${lesson.id}`}
+                                  className="td-lesson-action td-lesson-action--primary"
+                                  onClick={() => closeConnectionCheck()}
+                                >
+                                  Начать урок
+                                </Link>
+                                <ConnectionCheckButton
+                                  className="td-lesson-check"
+                                  canJoin={Boolean(lesson.id)}
+                                  joinHref={`/cabinet/schedule?event=${lesson.id}`}
+                                  joinLabel="Перейти в урок"
+                                />
+                              </>
+                            ) : (
+                              <Link to="/cabinet/schedule" className="td-lesson-action">
+                                {lesson.ready || lesson.isDone ? "Открыть урок →" : "Доделать →"}
+                              </Link>
+                            )}
+                          </div>
                         </div>
                       </article>
                     ))}
