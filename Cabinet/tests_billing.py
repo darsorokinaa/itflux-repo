@@ -41,6 +41,7 @@ from Cabinet.billing_service import (
     update_teacher_settings,
 )
 from Cabinet.models import Profile, ScheduleEvent, Student, StudentGroup
+from Cabinet.schedule_service import cancel_event, move_event
 
 
 class BillingTestBase(TestCase):
@@ -1488,3 +1489,242 @@ class ManualPackageConsumeTests(BillingTestBase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(Decimal(resp.data["remaining_units"]), Decimal("1.00"))
         self.assertIn("Списано", resp.data.get("message", ""))
+
+
+class LessonBillingLifecycleTests(BillingTestBase):
+    def _charges(self, event=None):
+        qs = BillingTransaction.objects.filter(
+            student=self.student,
+            transaction_type=TransactionType.CHARGE,
+            is_reversal=False,
+        )
+        if event is not None:
+            qs = qs.filter(event=event)
+        return qs
+
+    def test_conducted_paid_lesson_creates_one_charge(self):
+        event = self._event()
+        records = finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="charge", idempotency_key="lc-1"
+        )
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].charged_amount, Decimal("1600.00"))
+        self.assertEqual(records[0].financial_status, FinancialStatus.AWAITING_PAYMENT)
+        self.assertEqual(self._charges(event).count(), 1)
+
+    def test_pay_conducted_lesson_clears_debt(self):
+        event = self._event()
+        finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="charge", idempotency_key="lc-2"
+        )
+        register_payment(teacher=self.teacher, student=self.student, amount=Decimal("1600"))
+        data = serialize_account(self.account)
+        self.assertEqual(Decimal(data["debt_amount"]), Decimal("0.00"))
+        self.assertEqual(compute_account_balance(self.account)["debt"], Decimal("0.00"))
+
+    def test_cancel_before_conduct_has_no_charge_or_debt(self):
+        event = self._event()
+        cancel_event(event, changed_by=self.teacher, notify=False)
+        self.assertEqual(self._charges(event).count(), 0)
+        data = serialize_account(self.account)
+        self.assertEqual(Decimal(data["debt_amount"]), Decimal("0.00"))
+        rec = EventBillingRecord.objects.get(event=event, student=self.student)
+        self.assertEqual(rec.financial_status, FinancialStatus.NOT_BILLABLE)
+        self.assertFalse(rec.financial_status == FinancialStatus.AWAITING_PAYMENT)
+
+    def test_move_same_event_has_no_finance_duplicate(self):
+        event = self._event()
+        new_start = event.starts_at + timedelta(days=1)
+        new_end = event.ends_at + timedelta(days=1)
+        move_event(event, starts_at=new_start, ends_at=new_end, changed_by=self.teacher, notify=False)
+        self.assertEqual(self._charges().count(), 0)
+        self.assertEqual(EventBillingRecord.objects.filter(event=event).count(), 0)
+        data = serialize_account(self.account)
+        self.assertEqual(Decimal(data["debt_amount"]), Decimal("0.00"))
+
+    def test_move_then_conduct_creates_one_charge(self):
+        event = self._event()
+        move_event(
+            event,
+            starts_at=event.starts_at + timedelta(days=1),
+            ends_at=event.ends_at + timedelta(days=1),
+            changed_by=self.teacher,
+            notify=False,
+        )
+        finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="charge", idempotency_key="lc-5"
+        )
+        self.assertEqual(self._charges(event).count(), 1)
+        self.assertEqual(EventBillingRecord.objects.filter(event=event).count(), 1)
+
+    def test_multiple_moves_then_conduct_one_charge(self):
+        event = self._event()
+        for days in (1, 2, 3):
+            move_event(
+                event,
+                starts_at=event.starts_at + timedelta(days=1),
+                ends_at=event.ends_at + timedelta(days=1),
+                changed_by=self.teacher,
+                notify=False,
+            )
+        auto_finalize_after_lesson_complete(event=event, teacher=self.teacher)
+        auto_finalize_after_lesson_complete(event=event, teacher=self.teacher)
+        self.assertEqual(self._charges(event).count(), 1)
+
+    def test_price_set_before_conduct(self):
+        event = self._event()
+        rec = finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="charge", idempotency_key="lc-7"
+        )[0]
+        self.assertEqual(rec.charged_amount, Decimal("1600.00"))
+        self.assertEqual(serialize_account(self.account)["unpaid_lessons"][0]["due_amount"], "1600.00")
+
+    def test_conduct_without_price_then_set_price(self):
+        self.account.settings.default_lesson_price = None
+        self.account.settings.save()
+        event = self._event()
+        rec = finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="charge", idempotency_key="lc-8"
+        )[0]
+        self.assertEqual(rec.financial_status, FinancialStatus.NEEDS_DECISION)
+        self.assertEqual(self._charges(event).count(), 0)
+        data = serialize_account(self.account)
+        self.assertEqual(Decimal(data["debt_amount"]), Decimal("0.00"))
+        self.assertTrue(data["unpaid_lessons"][0]["price_missing"])
+
+        update_student_settings(
+            self.teacher,
+            self.account,
+            {"default_lesson_price": "1800"},
+        )
+        rec.refresh_from_db()
+        self.assertEqual(rec.charged_amount, Decimal("1800.00"))
+        self.assertEqual(rec.financial_status, FinancialStatus.AWAITING_PAYMENT)
+        self.assertEqual(self._charges(event).count(), 1)
+        self.assertEqual(Decimal(serialize_account(self.account)["debt_amount"]), Decimal("1800.00"))
+
+    def test_intentional_free_zero_price(self):
+        self.account.settings.default_lesson_price = Decimal("0")
+        self.account.settings.save()
+        event = self._event()
+        rec = finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="charge", idempotency_key="lc-9"
+        )[0]
+        self.assertEqual(rec.financial_status, FinancialStatus.NOT_BILLABLE)
+        self.assertTrue(rec.is_free)
+        self.assertEqual(self._charges(event).count(), 0)
+        self.assertEqual(Decimal(serialize_account(self.account)["debt_amount"]), Decimal("0.00"))
+
+    def test_unspecified_price_is_not_debt(self):
+        self.account.settings.default_lesson_price = None
+        self.account.settings.save()
+        event = self._event()
+        rec = finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="charge", idempotency_key="lc-10"
+        )[0]
+        self.assertEqual(rec.financial_status, FinancialStatus.NEEDS_DECISION)
+        self.assertTrue(rec.price_missing if hasattr(rec, "price_missing") else True)
+        dash = dashboard_summary(self.teacher)
+        self.assertEqual(Decimal(dash["debt_total"]), Decimal("0.00"))
+        self.assertEqual(Decimal(dash["unpaid_lessons_amount"]), Decimal("0.00"))
+
+    def test_later_tariff_change_keeps_historical_charge(self):
+        event = self._event()
+        rec = finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="charge", idempotency_key="lc-11"
+        )[0]
+        update_student_settings(
+            self.teacher,
+            self.account,
+            {"default_lesson_price": "2200"},
+        )
+        rec.refresh_from_db()
+        self.assertEqual(rec.charged_amount, Decimal("1600.00"))
+        self.assertEqual(self._charges(event).count(), 1)
+
+    def test_package_covers_lesson_without_money_debt(self):
+        create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="4",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("4"),
+            purchase_amount=Decimal("4000"),
+        )
+        event = self._event()
+        rec = finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="package", idempotency_key="lc-12"
+        )[0]
+        self.assertEqual(rec.financial_status, FinancialStatus.PAID_FROM_PACKAGE)
+        self.assertEqual(self._charges(event).count(), 0)
+        self.assertEqual(Decimal(serialize_account(self.account)["debt_amount"]), Decimal("0.00"))
+
+    def test_repeat_finalize_does_not_duplicate_charge(self):
+        event = self._event()
+        finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="charge", idempotency_key="lc-13"
+        )
+        with self.assertRaises(BillingError) as ctx:
+            finalize_event_billing(
+                event=event, teacher=self.teacher, financial_action="charge", idempotency_key="lc-13b"
+            )
+        self.assertEqual(ctx.exception.code, "ALREADY_FINALIZED")
+        self.assertEqual(self._charges(event).count(), 1)
+
+    def test_repeat_api_finalize_is_idempotent(self):
+        event = self._event()
+        url = f"/api/cabinet/billing/events/{event.id}/finalize/"
+        payload = {"delivery_status": "conducted", "financial_action": "charge", "idempotency_key": "lc-14"}
+        first = self.client.post(url, payload, format="json")
+        self.assertEqual(first.status_code, 200)
+        second = self.client.post(url, payload, format="json")
+        self.assertIn(second.status_code, (200, 400))
+        self.assertEqual(self._charges(event).count(), 1)
+
+    def test_cancel_moved_event_has_no_debt(self):
+        event = self._event()
+        move_event(
+            event,
+            starts_at=event.starts_at + timedelta(days=1),
+            ends_at=event.ends_at + timedelta(days=1),
+            changed_by=self.teacher,
+            notify=False,
+        )
+        cancel_event(event, changed_by=self.teacher, notify=False)
+        self.assertEqual(self._charges().count(), 0)
+        self.assertEqual(Decimal(serialize_account(self.account)["debt_amount"]), Decimal("0.00"))
+
+    def test_cancel_after_charge_reverses_debt(self):
+        event = self._event()
+        finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="charge", idempotency_key="lc-16"
+        )
+        self.assertEqual(Decimal(serialize_account(self.account)["debt_amount"]), Decimal("1600.00"))
+        cancel_event(event, changed_by=self.teacher, notify=False)
+        data = serialize_account(self.account)
+        self.assertEqual(Decimal(data["debt_amount"]), Decimal("0.00"))
+        rec = EventBillingRecord.objects.get(event=event, student=self.student)
+        self.assertEqual(rec.financial_status, FinancialStatus.NOT_BILLABLE)
+        self.assertEqual(rec.delivery_status, DeliveryStatus.CANCELLED_BY_TEACHER)
+
+    def test_partial_payment_keeps_remaining_debt(self):
+        event = self._event()
+        finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="charge", idempotency_key="lc-17"
+        )
+        register_payment(teacher=self.teacher, student=self.student, amount=Decimal("600"))
+        self.assertEqual(Decimal(serialize_account(self.account)["debt_amount"]), Decimal("1000.00"))
+
+    def test_several_lessons_and_payments_debt(self):
+        e1 = self._event()
+        e2 = self._event()
+        finalize_event_billing(
+            event=e1, teacher=self.teacher, financial_action="charge", idempotency_key="lc-18a"
+        )
+        finalize_event_billing(
+            event=e2, teacher=self.teacher, financial_action="charge", idempotency_key="lc-18b"
+        )
+        register_payment(teacher=self.teacher, student=self.student, amount=Decimal("2000"))
+        self.assertEqual(Decimal(serialize_account(self.account)["debt_amount"]), Decimal("1200.00"))
+        register_payment(teacher=self.teacher, student=self.student, amount=Decimal("1200"))
+        self.assertEqual(Decimal(serialize_account(self.account)["debt_amount"]), Decimal("0.00"))

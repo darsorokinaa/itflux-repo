@@ -11,15 +11,15 @@ const BILLING_TYPE_LABELS = {
 };
 
 const FINANCIAL_STATUS_LABELS = {
-  not_specified: "Не указано",
+  not_specified: "Стоимость не задана",
   not_charged: "Не начислен",
-  awaiting_payment: "Не оплачен",
+  awaiting_payment: "К оплате",
   partially_paid: "Частично оплачен",
   paid: "Оплачено",
   paid_from_package: "Из абонемента",
   not_billable: "Не подлежит оплате",
   refunded: "Возвращён",
-  needs_decision: "Требует оформления",
+  needs_decision: "Стоимость не задана",
 };
 
 const TX_TYPE_LABELS = {
@@ -247,10 +247,8 @@ export function resolveAccountState(account) {
     };
   }
 
-  if (unpaidAmount > 0 || unpaidCount > 0) {
-    const debtText = unpaidAmount > 0
-      ? `Долг ${formatMoney(unpaidAmount, currency)}`
-      : "Есть неоплаченные уроки";
+  if (unpaidAmount > 0) {
+    const debtText = `Долг ${formatMoney(unpaidAmount, currency)}`;
     return {
       kind: "debt",
       mod: "alert",
@@ -407,7 +405,7 @@ export function resolvePaymentsRowState(account) {
     };
   }
 
-  if (unpaidAmount > 0 || unpaidCount > 0) {
+  if (unpaidAmount > 0) {
     const sub = unpaidCount > 0
       ? (pkg && remaining <= 0
         ? `Абонемент закончился · ${lessonsCountLabel(unpaidCount)}`
@@ -591,31 +589,38 @@ function badgeLooksLikePackage(badge) {
 export function compactLessonBillingLabel(badge) {
   if (!badge) return "";
   const status = badge.financial_status;
+  const delivery = badge.delivery_status;
+  const amount = Number(badge.amount || 0);
+  const isDebt = badge.is_debt === true || (amount > 0 && (status === "awaiting_payment" || status === "partially_paid"));
+  if (delivery === "rescheduled" && !isDebt) return "Перенесено";
+  if ((delivery === "cancelled_by_student" || delivery === "cancelled_by_teacher") && !isDebt) {
+    return "Отменено";
+  }
+  if (badge.price_missing || status === "needs_decision" || status === "not_specified") {
+    if (badgeLooksLikePackage(badge)) return "Абонемент — требует оформления";
+    return "Стоимость не задана";
+  }
   if (status === "paid") return "Оплачено";
   if (status === "paid_from_package") {
     return badge.label?.startsWith("Абонемент") ? badge.label : "Оплачено из абонемента";
   }
   if (status === "awaiting_payment") {
-    const amount = Number(badge.amount || 0);
-    if (amount > 0) return `Не оплачен · ${formatMoney(amount, badge.currency)}`;
-    return "Не оплачен";
+    if (amount > 0) return `К оплате · ${formatMoney(amount, badge.currency)}`;
+    return "К оплате";
   }
   if (status === "partially_paid") {
-    const amount = Number(badge.amount || 0);
     if (amount > 0) return `Частично оплачен · долг ${formatMoney(amount, badge.currency)}`;
     return "Частично оплачен";
   }
   if (status === "not_charged") {
     if (badgeLooksLikePackage(badge)) return "Абонемент (ещё не списан)";
-    const amount = Number(badge.amount || 0);
     if (amount > 0) return `Не начислен · ${formatMoney(amount, badge.currency)}`;
     return "Не начислен";
   }
-  if (status === "needs_decision" || status === "not_specified") {
-    if (badgeLooksLikePackage(badge)) return "Абонемент — требует оформления";
-    return "Требует оформления";
+  if (status === "not_billable") {
+    if (badge.is_free) return "Бесплатно";
+    return "Не оплачивается";
   }
-  if (status === "not_billable") return "Не оплачивается";
   if (status === "refunded") return "Возвращён";
   return badge.label || financialStatusLabel(status);
 }

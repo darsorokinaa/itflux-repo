@@ -89,7 +89,6 @@ import {
 } from "../boards/boardViewport";
 import {
   createBoardLoadMetrics,
-  estimateSceneBytes,
   logBoardMetrics,
   phaseLabel,
   type BoardLoadMetrics,
@@ -443,28 +442,36 @@ export default function CabinetBoardEditorPage() {
     setSaveStatus(status);
   }, []);
 
-  /** Thumbnail в фоне — не блокирует рисование и не входит в критический путь PATCH. */
+  /** Thumbnail только после паузы — exportToBlob на большой доске блокирует кадр. */
   const scheduleThumbnailRefresh = useCallback((targetBoardId: string) => {
     if (thumbnailTimerRef.current) clearTimeout(thumbnailTimerRef.current);
     thumbnailTimerRef.current = setTimeout(() => {
       thumbnailTimerRef.current = null;
       if (!mountedRef.current || boardIdRef.current !== targetBoardId) return;
-      const scene = latestSceneRef.current;
-      void (async () => {
-        try {
-          const thumbnail = await captureBoardThumbnail(
-            apiRef.current ?? (scene as { elements?: Array<{ isDeleted?: boolean } & Record<string, unknown>>; appState?: Record<string, unknown>; files?: Record<string, unknown> }),
-          );
-          if (!mountedRef.current || boardIdRef.current !== targetBoardId) return;
-          if (thumbnail === null) return;
-          await updateInteractiveBoard(targetBoardId, { thumbnail });
-          if (!mountedRef.current || boardIdRef.current !== targetBoardId) return;
-          setBoard((prev) => (prev ? { ...prev, thumbnail } : prev));
-        } catch {
-          /* preview is best-effort */
-        }
-      })();
-    }, 1500);
+      const run = () => {
+        if (!mountedRef.current || boardIdRef.current !== targetBoardId) return;
+        const scene = latestSceneRef.current;
+        void (async () => {
+          try {
+            const thumbnail = await captureBoardThumbnail(
+              apiRef.current ?? (scene as { elements?: Array<{ isDeleted?: boolean } & Record<string, unknown>>; appState?: Record<string, unknown>; files?: Record<string, unknown> }),
+            );
+            if (!mountedRef.current || boardIdRef.current !== targetBoardId) return;
+            if (thumbnail === null) return;
+            await updateInteractiveBoard(targetBoardId, { thumbnail });
+            if (!mountedRef.current || boardIdRef.current !== targetBoardId) return;
+            setBoard((prev) => (prev ? { ...prev, thumbnail } : prev));
+          } catch {
+            /* preview is best-effort */
+          }
+        })();
+      };
+      if (typeof requestIdleCallback === "function") {
+        requestIdleCallback(run, { timeout: 8000 });
+      } else {
+        run();
+      }
+    }, 4000);
   }, []);
 
   const markLocalSceneChange = useCallback(() => {
@@ -827,45 +834,16 @@ export default function CabinetBoardEditorPage() {
         const rawFiles = (data.scene_data?.files || {}) as Record<string, Record<string, unknown>>;
         const elements = data.scene_data?.elements || [];
 
-        setLoadPhase("loading_files");
-        logBoardMetrics("loading_files", metricsRef.current);
-        const hydrated = await hydrateBoardFiles(rawFiles, { signal: abort.signal });
-        if (cancelled || abort.signal.aborted || boardIdRef.current !== boardId) {
-          revokeBoardBlobUrls(hydrated.blobUrls);
-          return;
-        }
-        hydratedBlobUrlsRef.current = hydrated.blobUrls;
+        // Холст сразу: ждать fetch+decode всех картинок — секунды задержки урока.
         rememberStableUrls(stableFileUrlsRef.current, rawFiles);
-        rememberStableUrls(stableFileUrlsRef.current, hydrated.files);
-        for (const id of Object.keys(hydrated.files)) {
-          if (stableFileUrlsRef.current.has(id)) loadedFilesRef.current.add(id);
-        }
-        const orphanIds = findMissingImageFileIds(elements, hydrated.files);
-        boardLog("hydrate:initialLoad", {
-          fileCount: Object.keys(hydrated.files).length,
-          ok: hydrated.blobUrls.length,
-          missing: hydrated.missingFileIds,
-          failed: hydrated.failedFileIds,
-          orphanImageElements: orphanIds,
-          registrySize: stableFileUrlsRef.current.size,
-        });
-        setMissingImageCount(hydrated.failedFileIds.length + orphanIds.length + hydrated.missingFileIds.length);
-
-        const filesReady = attachStableUrls(hydrated.files, stableFileUrlsRef.current);
-        // Snapshot мог сохранить pending — после hydrate считаем изображения saved.
-        const elementsReady = markImageElementsSaved(
-          elements,
-          Object.keys(filesReady).filter((id) => loadedFilesRef.current.has(id)),
-        );
+        const filesBoot = attachStableUrls(rawFiles, stableFileUrlsRef.current);
         const scene = buildScenePayload(
-          elementsReady,
+          elements,
           { ...rawApp, ...gridAppStatePatch(style, solidBg), theme },
-          filesReady,
+          filesBoot,
         );
-        metricsRef.current.filesLoadedAt = performance.now();
         metricsRef.current.elementCount = Array.isArray(elements) ? elements.length : 0;
-        metricsRef.current.fileCount = Object.keys(hydrated.files).length;
-        metricsRef.current.sceneBytesApprox = estimateSceneBytes(scene);
+        metricsRef.current.fileCount = Object.keys(rawFiles).length;
 
         knownElementIdsRef.current = new Set(
           (Array.isArray(elements) ? elements : [])
@@ -875,9 +853,9 @@ export default function CabinetBoardEditorPage() {
 
         setInitialData(scene);
         latestSceneRef.current = scene;
-        lastElementsRef.current = elementsReady;
-        lastElementsVersionSumRef.current = boardElementsVersionSum(elementsReady);
-        lastFilesRef.current = filesReady;
+        lastElementsRef.current = elements;
+        lastElementsVersionSumRef.current = boardElementsVersionSum(elements);
+        lastFilesRef.current = filesBoot;
         lastRawFilesRef.current = null;
         setGridStyle(style);
         setBgColor(solidBg);
@@ -885,6 +863,58 @@ export default function CabinetBoardEditorPage() {
         setLoadPhase("connecting");
         setLoading(false);
         logBoardMetrics("connecting", metricsRef.current);
+
+        if (!Object.keys(rawFiles).length) {
+          metricsRef.current.filesLoadedAt = performance.now();
+          return;
+        }
+        const hydrated = await hydrateBoardFiles(rawFiles, { signal: abort.signal });
+        if (cancelled || abort.signal.aborted || boardIdRef.current !== boardId) {
+          revokeBoardBlobUrls(hydrated.blobUrls);
+          return;
+        }
+        hydratedBlobUrlsRef.current = hydrated.blobUrls;
+        rememberStableUrls(stableFileUrlsRef.current, hydrated.files);
+        for (const id of Object.keys(hydrated.files)) {
+          if (stableFileUrlsRef.current.has(id)) loadedFilesRef.current.add(id);
+        }
+        const filesReady = attachStableUrls(hydrated.files, stableFileUrlsRef.current);
+        const orphanIds = findMissingImageFileIds(
+          latestSceneRef.current?.elements || elements,
+          filesReady,
+        );
+        boardLog("hydrate:initialLoad", {
+          fileCount: Object.keys(hydrated.files).length,
+          ok: hydrated.blobUrls.length,
+          missing: hydrated.missingFileIds,
+          failed: hydrated.failedFileIds,
+          orphanImageElements: orphanIds,
+          registrySize: stableFileUrlsRef.current.size,
+        });
+        setMissingImageCount(hydrated.failedFileIds.length + orphanIds.length + hydrated.missingFileIds.length);
+        metricsRef.current.filesLoadedAt = performance.now();
+        if (latestSceneRef.current && boardIdRef.current === boardId) {
+          latestSceneRef.current = {
+            ...latestSceneRef.current,
+            files: filesReady,
+          };
+        }
+        lastFilesRef.current = filesReady;
+        const api = apiRef.current;
+        if (api) {
+          applyingRemoteRef.current = true;
+          api.addFiles?.(toBinaryFileDataList(filesReady, "bootHydrate"));
+          api.updateScene?.({
+            files: filesReady,
+            captureUpdate: CaptureUpdateAction.NEVER,
+          });
+          const gen = (applyingRemoteGenRef.current += 1);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              if (applyingRemoteGenRef.current === gen) applyingRemoteRef.current = false;
+            });
+          });
+        }
       } catch (err: unknown) {
         if (cancelled || abort.signal.aborted || boardIdRef.current !== boardId) return;
         const error = err as { message?: string; code?: string };
@@ -2361,10 +2391,18 @@ export default function CabinetBoardEditorPage() {
     metricsRef.current.readyAt = performance.now();
     setLoadPhase("ready");
     logBoardMetrics("ready", metricsRef.current);
-    try {
-      apiRef.current?.refresh?.();
-    } catch {
-      /* ignore */
+    const api = apiRef.current;
+    const refresh = () => {
+      try {
+        api?.refresh?.();
+      } catch {
+        /* ignore */
+      }
+    };
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(refresh, { timeout: 1200 });
+    } else {
+      window.setTimeout(refresh, 0);
     }
   }, []);
 
@@ -2372,29 +2410,7 @@ export default function CabinetBoardEditorPage() {
     setReloadToken((n) => n + 1);
   }, []);
 
-  // Обновить превью при открытии: старые JPEG были чёрными из‑за тёмной темы / transparent.
-  useEffect(() => {
-    if (!excalidrawReady || !boardId || !canEdit || conflict) return;
-    const scene = latestSceneRef.current;
-    const hasElements = (scene?.elements || []).some((el) => !(el as { isDeleted?: boolean })?.isDeleted);
-    if (!hasElements) return;
-    let cancelled = false;
-    void (async () => {
-      const thumbnail = await captureBoardThumbnail(apiRef.current ?? scene);
-      if (cancelled || thumbnail === null || thumbnail === "") return;
-      try {
-        await updateInteractiveBoard(boardId, { thumbnail });
-        if (!cancelled) {
-          setBoard((prev) => (prev ? { ...prev, thumbnail } : prev));
-        }
-      } catch {
-        /* ignore backfill errors */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [excalidrawReady, boardId, canEdit, conflict]);
+  // Превью не снимаем при открытии — exportToBlob на большой доске вешает урок.
 
   useEffect(() => {
     if (!exportOpen && !moreOpen) return undefined;
@@ -2658,7 +2674,7 @@ export default function CabinetBoardEditorPage() {
       <div className="cb-board-editor" aria-busy="true">
         <div className="cb-board-editor__skeleton">
           <p>{phaseLabel(loadPhase)}</p>
-          <p className="cb-board-editor__skeleton-hint">Изображения подготавливаются до открытия холста</p>
+          <p className="cb-board-editor__skeleton-hint">Открываем доску</p>
         </div>
       </div>
     );

@@ -161,7 +161,13 @@ export default function StudentBillingPanel({
                     </span>
                   </div>
                   <strong className="pay-student-block__op-amount">
-                    {due > 0 ? debtLabel(due, currency) : "—"}
+                    {lesson.price_missing
+                      ? "Стоимость не задана"
+                      : due > 0
+                        ? debtLabel(due, currency)
+                        : lesson.is_free
+                          ? "0 ₽"
+                          : "—"}
                   </strong>
                 </li>
               );

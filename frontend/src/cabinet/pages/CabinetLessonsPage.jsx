@@ -9,6 +9,7 @@ import {
   useSoonToast,
 } from "../CabinetSectionUi";
 import {
+  eventLocalTimeRange,
   formatDayHeading,
   getLessonsFetchRange,
   groupSessionsByDate,
@@ -39,9 +40,7 @@ function SessionCard({ event, onOpen, onJoin }) {
       <div className="cb-schedule-card__main">
         <div className="cb-schedule-card__row">
           <span className="cb-schedule-card__time">
-            {event.startTime}
-            –
-            {event.endTime}
+            {eventLocalTimeRange(event)}
           </span>
           <span className={`cb-status-badge cb-status-badge--${statusBadgeTone(event.status)}`}>
             {event.statusLabel || event.status}

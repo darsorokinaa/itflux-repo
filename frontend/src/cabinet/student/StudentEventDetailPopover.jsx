@@ -14,7 +14,7 @@ import {
   resolveLessonTopic,
 } from "../lessonCardContent";
 import { fetchStudentScheduleEvent } from "../../utils/cabinetAuth";
-import { useLessonConnectAvailable } from "./StudentSectionUi";
+import { formatLessonTimeRange, useLessonConnectAvailable } from "./StudentSectionUi";
 
 const EVENT_TYPES = {
   group: { label: "Групповое занятие", color: "#2563EB" },
@@ -195,7 +195,7 @@ export default function StudentEventDetailPopover({ eventId, onClose }) {
       accentColor={eventAccentColor(event)}
       profileName={event.teacher_name || ""}
       dateLabel={formatEventDateShort(event)}
-      timeRange={`${event.startTime}–${event.endTime}`}
+      timeRange={formatLessonTimeRange(event.startsAt, event.endsAt) || `${event.startTime}–${event.endTime}`}
       statusMeta={null}
       recurring={Boolean(event.seriesId)}
       isOnline={event.format === "Онлайн"}

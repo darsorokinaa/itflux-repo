@@ -23,6 +23,70 @@ export function normalizeTimeValue(value) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+/** Часы:минуты в часовом поясе браузера — как на главной странице кабинета. */
+export function formatEventLocalClock(iso) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+export function eventLocalStartTime(event) {
+  return formatEventLocalClock(event?.startsAt) || normalizeTimeValue(event?.startTime);
+}
+
+export function eventLocalEndTime(event) {
+  return formatEventLocalClock(event?.endsAt) || normalizeTimeValue(event?.endTime);
+}
+
+export function eventLocalTimeRange(event) {
+  const start = eventLocalStartTime(event);
+  const end = eventLocalEndTime(event);
+  if (!start) return "";
+  return end ? `${start}–${end}` : start;
+}
+
+export function combineLocalDateAndTime(date, time) {
+  const [hours, minutes] = normalizeTimeValue(time).split(":").map(Number);
+  const next = new Date(date);
+  next.setHours(hours, minutes, 0, 0);
+  return next;
+}
+
+export function formatLocalDateTimeIso(date) {
+  const offsetMin = -date.getTimezoneOffset();
+  const sign = offsetMin >= 0 ? "+" : "-";
+  const abs = Math.abs(offsetMin);
+  return (
+    `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+    + `T${pad2(date.getHours())}:${pad2(date.getMinutes())}:00`
+    + `${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`
+  );
+}
+
+export function localClockToTimeZone(date, time, timeZone) {
+  const dt = combineLocalDateAndTime(date, time);
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(dt);
+  const get = (type) => parts.find((part) => part.type === type)?.value || "";
+  const hour = get("hour") === "24" ? "00" : get("hour");
+  return {
+    date: `${get("year")}-${get("month")}-${get("day")}`,
+    time: `${pad2(hour)}:${pad2(get("minute"))}`,
+  };
+}
+
 export function buildScheduleDateTimePayload(date, startTime, endTime) {
   const start = normalizeTimeValue(startTime);
   const end = normalizeTimeValue(endTime);
@@ -146,7 +210,8 @@ export function sessionMatchesFilter(event, filter) {
 export function groupSessionsByDate(events) {
   const groups = new Map();
   for (const event of events) {
-    const dateKey = (event.startsAt || "").slice(0, 10);
+    const parsed = event.startsAt ? new Date(event.startsAt) : null;
+    const dateKey = parsed && !Number.isNaN(parsed.getTime()) ? formatApiDate(parsed) : "";
     if (!dateKey) continue;
     if (!groups.has(dateKey)) groups.set(dateKey, []);
     groups.get(dateKey).push(event);

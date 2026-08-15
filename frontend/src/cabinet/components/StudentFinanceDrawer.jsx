@@ -241,13 +241,27 @@ export default function StudentFinanceDrawer({
                           </span>
                         </div>
                         <div className="pay-unpaid-list__right">
-                          {lesson.price_missing || due <= 0 ? (
-                            <span className="pay-balance pay-balance--muted">Стоимость не указана</span>
-                          ) : (
+                          {lesson.price_missing ? (
+                            <span className="pay-balance pay-balance--muted">Стоимость не задана</span>
+                          ) : lesson.delivery_status === "rescheduled" && !lesson.is_debt ? (
+                            <span className="pay-balance pay-balance--muted">Перенесено</span>
+                          ) : (lesson.delivery_status === "cancelled_by_student" || lesson.delivery_status === "cancelled_by_teacher") && !lesson.is_debt ? (
+                            <span className="pay-balance pay-balance--muted">Отменено</span>
+                          ) : due > 0 ? (
                             <span className="pay-balance pay-balance--debt">{debtLabel(due, currency)}</span>
+                          ) : lesson.is_free ? (
+                            <span className="pay-balance pay-balance--muted">0 ₽</span>
+                          ) : (
+                            <span className="pay-balance pay-balance--muted">Стоимость не задана</span>
                           )}
-                          <span className="pay-pill pay-pill--debt">
-                            {lesson.financial_status === "partially_paid" ? "Частично" : "Ожидает оплаты"}
+                          <span className={`pay-pill ${due > 0 ? "pay-pill--debt" : "pay-pill--muted"}`}>
+                            {lesson.financial_status === "partially_paid"
+                              ? "Частично"
+                              : lesson.price_missing
+                                ? "Стоимость не задана"
+                                : due > 0
+                                  ? "К оплате"
+                                  : (lesson.financial_status_label || "Оформлено")}
                           </span>
                           {canSettle ? (
                             <button

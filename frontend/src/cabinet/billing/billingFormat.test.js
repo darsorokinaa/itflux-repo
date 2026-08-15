@@ -48,8 +48,8 @@ describe("billingFormat", () => {
 
   it("maps labels", () => {
     expect(billingTypeLabel("per_lesson")).toBe("За урок");
-    expect(financialStatusLabel("awaiting_payment")).toBe("Не оплачен");
-    expect(financialStatusLabel("needs_decision")).toBe("Требует оформления");
+    expect(financialStatusLabel("awaiting_payment")).toBe("К оплате");
+    expect(financialStatusLabel("needs_decision")).toBe("Стоимость не задана");
     expect(transactionTypeLabel("charge")).toBe("Начисление");
   });
 
@@ -126,8 +126,25 @@ describe("billingFormat", () => {
       financial_status: "awaiting_payment",
       amount: "1600",
       currency: "RUB",
-    })).toContain("Не оплачен");
-    expect(compactLessonBillingLabel({ financial_status: "needs_decision" })).toBe("Требует оформления");
+    })).toContain("К оплате");
+    expect(compactLessonBillingLabel({ financial_status: "needs_decision" })).toBe("Стоимость не задана");
+    expect(compactLessonBillingLabel({
+      financial_status: "awaiting_payment",
+      amount: "0",
+      price_missing: true,
+    })).toBe("Стоимость не задана");
+    expect(compactLessonBillingLabel({
+      financial_status: "not_billable",
+      delivery_status: "cancelled_by_teacher",
+    })).toBe("Отменено");
+    expect(compactLessonBillingLabel({
+      financial_status: "not_billable",
+      delivery_status: "rescheduled",
+    })).toBe("Перенесено");
+    expect(compactLessonBillingLabel({
+      financial_status: "not_billable",
+      is_free: true,
+    })).toBe("Бесплатно");
     expect(compactLessonBillingLabel({
       financial_status: "paid_from_package",
       label: "Абонемент: осталось 3 зан.",

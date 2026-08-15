@@ -40,7 +40,13 @@ import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
   applySeriesTimeUpdate,
+  combineLocalDateAndTime,
+  eventLocalEndTime,
+  eventLocalStartTime,
+  eventLocalTimeRange,
+  formatLocalDateTimeIso,
   getSeriesRefreshRange,
+  localClockToTimeZone,
   parseScheduleScope,
 } from "../scheduleLessonUtils";
 import {
@@ -277,7 +283,7 @@ function dayOffsetFromToday(date) {
 function formatEventWhen(event) {
   const d = eventDate(event);
   const wd = WEEKDAYS_FULL[(d.getDay() + 6) % 7];
-  return `${wd.charAt(0).toUpperCase()}${wd.slice(1)}, ${d.getDate()} ${MONTHS[d.getMonth()]}, ${event.startTime}–${event.endTime}`;
+  return `${wd.charAt(0).toUpperCase()}${wd.slice(1)}, ${d.getDate()} ${MONTHS[d.getMonth()]}, ${eventLocalTimeRange(event)}`;
 }
 
 function isRecurring(event) {
@@ -289,13 +295,18 @@ function seriesScopeKey(event) {
 }
 
 function buildEventDateTime(event) {
+  const start = event.startsAt ? new Date(event.startsAt) : null;
+  const end = event.endsAt ? new Date(event.endsAt) : null;
+  if (start && end && !Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+    return {
+      starts_at: formatLocalDateTimeIso(start),
+      ends_at: formatLocalDateTimeIso(end),
+    };
+  }
   const date = eventDate(event);
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
   return {
-    starts_at: `${y}-${m}-${d}T${event.startTime}:00`,
-    ends_at: `${y}-${m}-${d}T${event.endTime}:00`,
+    starts_at: formatLocalDateTimeIso(combineLocalDateAndTime(date, eventLocalStartTime(event))),
+    ends_at: formatLocalDateTimeIso(combineLocalDateAndTime(date, eventLocalEndTime(event))),
   };
 }
 
@@ -332,29 +343,25 @@ function matchesSeriesScope(ev, event, scope) {
 function applyMoveEvents(events, event, targetDate, newStartTime, scope) {
   const dayDelta = dayOffsetFromToday(targetDate) - dayOffsetFromToday(eventDate(event));
   const newStart = parseTime(newStartTime);
-  const timeDelta = newStart - parseTime(event.startTime);
+  const timeDelta = newStart - parseTime(eventLocalStartTime(event));
 
   const patch = (ev) => {
-    const evDuration = parseTime(ev.endTime) - parseTime(ev.startTime);
-    const evNewStart = parseTime(ev.startTime) + timeDelta;
+    const evDuration = parseTime(eventLocalEndTime(ev)) - parseTime(eventLocalStartTime(ev));
+    const evNewStart = parseTime(eventLocalStartTime(ev)) + timeDelta;
     const startTime = minutesToTime(evNewStart);
     const endTime = minutesToTime(evNewStart + evDuration);
     const newDayOffset = dayOffsetFromToday(eventDate(ev)) + dayDelta;
-    const updated = {
+    const newDate = addDays(startOfDay(new Date()), newDayOffset);
+    const startDt = combineLocalDateAndTime(newDate, startTime);
+    const endDt = combineLocalDateAndTime(newDate, endTime);
+    return {
       ...ev,
       dayOffset: newDayOffset,
       startTime,
       endTime,
+      startsAt: formatLocalDateTimeIso(startDt),
+      endsAt: formatLocalDateTimeIso(endDt),
     };
-    if (ev.startsAt) {
-      const newDate = addDays(startOfDay(new Date()), newDayOffset);
-      const y = newDate.getFullYear();
-      const mo = String(newDate.getMonth() + 1).padStart(2, "0");
-      const d = String(newDate.getDate()).padStart(2, "0");
-      updated.startsAt = `${y}-${mo}-${d}T${startTime}:00`;
-      updated.endsAt = `${y}-${mo}-${d}T${endTime}:00`;
-    }
-    return updated;
   };
 
   if (scope === "single" || !isRecurring(event)) {
@@ -439,7 +446,7 @@ function useSchedulePointerDrag({ enabled, events, onDragOver, onDrop, onDragEnd
         const target = resolveScheduleDropTarget(e.clientX, e.clientY, sessionRef.current?.mode);
         if (target) {
           const event = events.find((ev) => String(ev.id) === String(sessionRef.current?.eventId));
-          const time = target.time ?? event?.startTime ?? "09:00";
+          const time = target.time ?? eventLocalStartTime(event) ?? "09:00";
           onDrop(sessionRef.current.eventId, target.targetDate, time);
         }
         onDragEnd?.();
@@ -462,7 +469,7 @@ function useSchedulePointerDrag({ enabled, events, onDragOver, onDrop, onDragEnd
       const target = resolveScheduleDropTarget(e.clientX, e.clientY, session.mode);
       if (!target) return;
       const event = events.find((ev) => String(ev.id) === String(session.eventId));
-      const time = target.time ?? event?.startTime ?? "09:00";
+      const time = target.time ?? eventLocalStartTime(event) ?? "09:00";
       onDragOver(target.targetDate, time, target.dayKey);
     };
 
@@ -703,7 +710,7 @@ function UpcomingLessons({ events, onEventClick, compact }) {
                 className="cb-sch-upcoming__item"
                 onClick={() => onEventClick(ev)}
               >
-                <span className="cb-sch-upcoming__time">{ev.startTime}</span>
+                <span className="cb-sch-upcoming__time">{eventLocalStartTime(ev)}</span>
                 <span className="cb-sch-upcoming__text">
                 <span className="cb-sch-upcoming__title">{eventDisplayTitle(ev)}</span>
                 {eventDisplaySubtitle(ev) ? (
@@ -808,7 +815,7 @@ function CalendarEventBlock({
   onPointerDown,
 }) {
   const accent = eventAccentColor(event);
-  const shortBlock = !compact && eventDurationMinutes(event.startTime, event.endTime) < 35;
+  const shortBlock = !compact && eventDurationMinutes(eventLocalStartTime(event), eventLocalEndTime(event)) < 35;
   const isOnline = event.format === "Онлайн" || Boolean(event.link);
   const cancelled = event.status === "cancelled";
   const recurring = isRecurring(event);
@@ -826,7 +833,7 @@ function CalendarEventBlock({
   const content = !compact ? (
     <>
       <div className="cb-sch-event__head">
-        <span className="cb-sch-event__time">{event.startTime}–{event.endTime}</span>
+        <span className="cb-sch-event__time">{eventLocalTimeRange(event)}</span>
         <span className="cb-sch-event__badges">
           {recurring ? (
             <span className="cb-sch-event__badge cb-sch-event__badge--repeat" title="Повторяется">
@@ -856,7 +863,7 @@ function CalendarEventBlock({
     <>
       <span className="cb-sch-event__dot" style={{ background: accent }} aria-hidden="true" />
       <span className="cb-sch-event__pill-text">
-        <span className="cb-sch-event__pill-time">{event.startTime}</span>
+        <span className="cb-sch-event__pill-time">{eventLocalStartTime(event)}</span>
         <span className="cb-sch-event__pill-title">{displayTitle}</span>
         {cardSubtitle ? (
           <span className="cb-sch-event__pill-audience">{cardSubtitle}</span>
@@ -980,7 +987,7 @@ function TimeGridColumn({
           style={{
             top: timeToTop(dropPreview.time),
             height: draggingEvent
-              ? eventHeight(draggingEvent.startTime, draggingEvent.endTime)
+              ? eventHeight(eventLocalStartTime(draggingEvent), eventLocalEndTime(draggingEvent))
               : EVENT_MIN_HEIGHT,
           }}
           aria-hidden="true"
@@ -995,8 +1002,8 @@ function TimeGridColumn({
           onClick={onEventClick}
           onPointerDown={onPointerDown}
           style={{
-            top: timeToTop(ev.startTime),
-            height: eventHeight(ev.startTime, ev.endTime),
+            top: timeToTop(eventLocalStartTime(ev)),
+            height: eventHeight(eventLocalStartTime(ev), eventLocalEndTime(ev)),
           }}
         />
       ))}
@@ -1302,7 +1309,7 @@ function ListView({ events, onOpen, onStart, onCreateLink, onAddLesson }) {
               else if (hasLink) startLabel = "Начать урок";
               const studentName = (ev.audience || ev.title || "Занятие").trim();
               const typeLabel = EVENT_TYPES[ev.type]?.label || "Занятие";
-              const duration = eventDurationMinutes(ev.startTime, ev.endTime);
+              const duration = eventDurationMinutes(eventLocalStartTime(ev), eventLocalEndTime(ev));
               const showStatus = Boolean(ev.statusLabel) && ev.status !== "planned";
               const metaParts = [
                 typeLabel,
@@ -1315,7 +1322,7 @@ function ListView({ events, onOpen, onStart, onCreateLink, onAddLesson }) {
                   <div className="cb-sch-list-card__accent" style={{ background: accent }} aria-hidden="true" />
                   <div className="cb-sch-list-card__content">
                     <div className="cb-sch-list-card__row">
-                      <span className="cb-sch-list-card__time">{ev.startTime}–{ev.endTime}</span>
+                      <span className="cb-sch-list-card__time">{eventLocalTimeRange(ev)}</span>
                       {showStatus ? (
                         <span className={`cb-sch-list-card__status cb-sch-list-card__status--${ev.status}`}>
                           {ev.statusLabel}
@@ -1640,7 +1647,7 @@ function EventDetailPopover(props) {
       accentColor={eventAccentColor(event)}
       profileName={displayEventTitle(eventDisplayTitle(event))}
       dateLabel={formatEventDateShort(event)}
-      timeRange={`${event.startTime}–${event.endTime}`}
+      timeRange={eventLocalTimeRange(event)}
       statusMeta={statusMeta}
       recurring={isRecurring(event)}
       isOnline={event.format === "Онлайн"}
@@ -2446,10 +2453,13 @@ export default function CabinetSchedulePage() {
   }, [openCreateLesson]);
 
   const handleSlotClick = useCallback((day, startTime) => {
+    const endTime = addMinutesToTime(startTime, 45);
+    const startInFormTz = localClockToTimeZone(day, startTime, "Europe/Moscow");
+    const endInFormTz = localClockToTimeZone(day, endTime, "Europe/Moscow");
     openCreateLesson({
-      date: formatApiDate(day),
-      startTime,
-      endTime: addMinutesToTime(startTime, 45),
+      date: startInFormTz.date || formatApiDate(day),
+      startTime: startInFormTz.time || startTime,
+      endTime: endInFormTz.time || endTime,
     });
   }, [openCreateLesson]);
 
@@ -2582,7 +2592,7 @@ export default function CabinetSchedulePage() {
         const updated = nextEvents.find((ev) => ev.id === event.id);
         setEvents(nextEvents);
         if (local && updated) {
-          await updateScheduleEvent(event.id, {
+          const data = await updateScheduleEvent(event.id, {
             ...buildEventDateTime(updated),
             scope: apiScope,
             notify_participants: true,
@@ -2591,6 +2601,8 @@ export default function CabinetSchedulePage() {
             const range = getSeriesRefreshRange(focusDate);
             const refreshed = await fetchScheduleEvents(range);
             if (refreshed?.events) setEvents(refreshed.events);
+          } else if (data?.event) {
+            setEvents((prev) => prev.map((ev) => (ev.id === event.id ? data.event : ev)));
           }
         }
         showStatus(scope === "entire" ? "Вся серия перенесена" : scope === "following" ? "Серия перенесена" : "Занятие перенесено");

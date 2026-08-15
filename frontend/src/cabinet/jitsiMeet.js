@@ -170,6 +170,7 @@ export function buildJitsiConfigOverwrite({
     defaultLanguage: "ru",
     subject: title,
     localSubject: title,
+    inviteAppName: "Цифровой поток",
     hideConferenceSubject: false,
     hideConferenceTimer: false,
     disableModeratorIndicator: false,
@@ -188,8 +189,15 @@ export function buildJitsiInterfaceConfigOverwrite() {
   return {
     MOBILE_APP_PROMO: false,
     SHOW_JITSI_WATERMARK: false,
+    SHOW_WATERMARK_FOR_GUESTS: false,
     SHOW_BRAND_WATERMARK: false,
     SHOW_POWERED_BY: false,
+    APP_NAME: "Цифровой поток",
+    NATIVE_APP_NAME: "Цифровой поток",
+    PROVIDER_NAME: "Цифровой поток",
+    DEFAULT_LOGO_URL: "",
+    DEFAULT_WELCOME_PAGE_LOGO_URL: "",
+    JITSI_WATERMARK_LINK: "",
     DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
     VIDEO_LAYOUT_FIT: "both",
     VERTICAL_FILMSTRIP: true,
@@ -330,8 +338,15 @@ export function buildJitsiEmbedUrl(config) {
     'config.defaultLanguage="ru"',
     `config.subject=${encodeURIComponent(JSON.stringify(subject))}`,
     `config.localSubject=${encodeURIComponent(JSON.stringify(subject))}`,
+    `config.inviteAppName=${encodeURIComponent(JSON.stringify("Цифровой поток"))}`,
     "interfaceConfig.MOBILE_APP_PROMO=false",
     "interfaceConfig.SHOW_JITSI_WATERMARK=false",
+    "interfaceConfig.SHOW_WATERMARK_FOR_GUESTS=false",
+    "interfaceConfig.SHOW_BRAND_WATERMARK=false",
+    "interfaceConfig.SHOW_POWERED_BY=false",
+    `interfaceConfig.APP_NAME=${encodeURIComponent(JSON.stringify("Цифровой поток"))}`,
+    `interfaceConfig.NATIVE_APP_NAME=${encodeURIComponent(JSON.stringify("Цифровой поток"))}`,
+    `interfaceConfig.PROVIDER_NAME=${encodeURIComponent(JSON.stringify("Цифровой поток"))}`,
     `userInfo.displayName=${encodeURIComponent(JSON.stringify(displayName))}`,
   ];
 
@@ -440,7 +455,7 @@ export function createJitsiIframeEmbed(config, container, {
   container.innerHTML = "";
   const frame = document.createElement("iframe");
   frame.src = embedUrl;
-  frame.title = "Jitsi Meet";
+  frame.title = "Видеоурок";
   frame.allow = "camera; microphone; display-capture; autoplay; clipboard-write; fullscreen";
   frame.allowFullscreen = true;
   frame.style.width = "100%";

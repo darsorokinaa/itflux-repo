@@ -439,6 +439,12 @@ def move_event(event, *, starts_at, ends_at, changed_by, notify=True):
         NotificationService.notify_event_moved(
             event, old_start_at=old.get("starts_at"), old_end_at=old.get("ends_at"),
         )
+    try:
+        from .billing_service import sync_moved_event_billing
+
+        sync_moved_event_billing(event)
+    except Exception:
+        pass
     return event
 
 
@@ -551,23 +557,15 @@ def cancel_event(event, *, changed_by, notify=True, plan_cancel_action=None):
     if plan_cancel_action:
         apply_plan_cancel_action(event, plan_cancel_action)
 
-    # Если урок уже был оформлен финансово как проведённый — вернуть списание.
+    # Обычная отмена не создаёт долг и снимает автоначисление, если оно уже было.
     try:
-        from .billing_models import DeliveryStatus, EventBillingRecord
-        from .billing_service import unfinalize_event_billing
+        from .billing_service import sync_cancelled_event_billing
 
-        has_finalized = EventBillingRecord.objects.filter(
-            event=event,
-            finalized_at__isnull=False,
-            delivery_status=DeliveryStatus.CONDUCTED,
-        ).exists()
-        if has_finalized and changed_by:
-            unfinalize_event_billing(
-                event=event,
-                teacher=changed_by,
-                comment="Отмена урока — возврат списания",
-                reset_event_status=False,
-            )
+        sync_cancelled_event_billing(
+            event,
+            teacher=changed_by or event.owner,
+            comment="Отмена урока",
+        )
     except Exception:
         pass
 

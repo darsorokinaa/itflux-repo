@@ -222,10 +222,14 @@ const DEFAULT_VPR_GRADES = [7, 8, 10];
 function buildQuery(
   level: string,
   vprGrade: number,
+  vprAdvanced: boolean,
   extra?: Record<string, string | undefined>
 ): string {
   const p = new URLSearchParams();
-  if (level === "vpr") p.set("grade", String(vprGrade));
+  if (level === "vpr") {
+    p.set("grade", String(vprGrade));
+    if (vprAdvanced) p.set("advanced", "1");
+  }
   if (extra) {
     for (const [k, v] of Object.entries(extra)) {
       if (v) p.set(k, v);
@@ -241,6 +245,7 @@ type AllTasksFilters = {
   level: string;
   subject: SubjectId;
   vprGrade: number;
+  vprAdvanced: boolean;
   taskListId: string;
   subtopicId: string;
   onlyFipi: boolean;
@@ -274,6 +279,7 @@ function readFiltersFromSearchParams(
   const gradeRaw = Number(sp.get("grade"));
   const vprGrade =
     level === "vpr" && grades.includes(gradeRaw) ? gradeRaw : (grades[0] ?? 7);
+  const vprAdvanced = level === "vpr" && sp.get("advanced") === "1";
 
   const taskListId = sp.get("task")?.trim() ?? "";
   const subtopicRaw = sp.get("subtopic")?.trim() ?? "";
@@ -283,14 +289,17 @@ function readFiltersFromSearchParams(
   const author = usesFipiFilter ? "" : (sp.get("author")?.trim() ?? "");
   const page = Math.max(1, Number(sp.get("page")) || 1);
 
-  return { level, subject, vprGrade, taskListId, subtopicId, onlyFipi, author, page };
+  return { level, subject, vprGrade, vprAdvanced, taskListId, subtopicId, onlyFipi, author, page };
 }
 
 function writeFiltersToSearchParams(f: AllTasksFilters): URLSearchParams {
   const p = new URLSearchParams();
   p.set("level", f.level);
   p.set("subject", f.subject);
-  if (f.level === "vpr") p.set("grade", String(f.vprGrade));
+  if (f.level === "vpr") {
+    p.set("grade", String(f.vprGrade));
+    if (f.vprAdvanced) p.set("advanced", "1");
+  }
   if (f.taskListId) p.set("task", f.taskListId);
   if (f.subtopicId) p.set("subtopic", f.subtopicId);
   if (FIPI_FILTER_LEVELS.has(f.level)) {
@@ -335,6 +344,7 @@ export default function AllTasksPage() {
   const [onlyFipi, setOnlyFipi] = useState(initialFilters.onlyFipi);
   const [author, setAuthor] = useState(initialFilters.author);
   const [vprGrade, setVprGrade] = useState<number>(initialFilters.vprGrade);
+  const [vprAdvanced, setVprAdvanced] = useState(initialFilters.vprAdvanced);
   const [taskListId, setTaskListId] = useState(initialFilters.taskListId);
   const [subtopicId, setSubtopicId] = useState(initialFilters.subtopicId);
   const [page, setPage] = useState(initialFilters.page);
@@ -510,6 +520,7 @@ export default function AllTasksPage() {
       level,
       subject,
       vprGrade,
+      vprAdvanced,
       taskListId,
       subtopicId,
       onlyFipi: usesFipiFilter ? onlyFipi : false,
@@ -519,7 +530,7 @@ export default function AllTasksPage() {
     setSearchParams((prev) => (prev.toString() === next.toString() ? prev : next), {
       replace: true,
     });
-  }, [level, subject, vprGrade, taskListId, subtopicId, onlyFipi, author, page, usesFipiFilter, setSearchParams]);
+  }, [level, subject, vprGrade, vprAdvanced, taskListId, subtopicId, onlyFipi, author, page, usesFipiFilter, setSearchParams]);
 
   useEffect(() => {
     if (!catalogReady || !catalog.length) return;
@@ -564,7 +575,7 @@ export default function AllTasksPage() {
 
   useEffect(() => {
     let cancelled = false;
-    const url = `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/tasks/${buildQuery(level, vprGrade)}`;
+    const url = `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/tasks/${buildQuery(level, vprGrade, vprAdvanced)}`;
 
     fetch(url, { credentials: "same-origin" })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
@@ -580,12 +591,12 @@ export default function AllTasksPage() {
     return () => {
       cancelled = true;
     };
-  }, [level, subject, vprGrade]);
+  }, [level, subject, vprGrade, vprAdvanced]);
 
   useEffect(() => {
     let cancelled = false;
     setFiltersLoading(true);
-    const qs = buildQuery(level, vprGrade, {
+    const qs = buildQuery(level, vprGrade, vprAdvanced, {
       task_list_id: taskListId || undefined,
     });
     const url = `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/task-bank-filters/${qs}`;
@@ -605,7 +616,7 @@ export default function AllTasksPage() {
     return () => {
       cancelled = true;
     };
-  }, [level, subject, vprGrade, taskListId]);
+  }, [level, subject, vprGrade, vprAdvanced, taskListId]);
 
   useEffect(() => {
     if (!subtopicId) return;
@@ -640,7 +651,7 @@ export default function AllTasksPage() {
 
     try {
       if (groupDescriptor) {
-        const qs = buildQuery(level, vprGrade, {
+        const qs = buildQuery(level, vprGrade, vprAdvanced, {
           page: String(page),
           per_page: String(PER_PAGE),
           only_fipi: onlyFipiParam,
@@ -661,7 +672,7 @@ export default function AllTasksPage() {
         setBankUsesGroups(true);
         setActiveGroupDescriptor(groupDescriptor);
       } else {
-        const qs = buildQuery(level, vprGrade, {
+        const qs = buildQuery(level, vprGrade, vprAdvanced, {
           page: String(page),
           per_page: String(PER_PAGE),
           raw_html: undefined,
@@ -700,6 +711,7 @@ export default function AllTasksPage() {
     usesFipiFilter,
     page,
     vprGrade,
+    vprAdvanced,
     taskListId,
     subtopicId,
     groupByTaskListId,
@@ -711,7 +723,7 @@ export default function AllTasksPage() {
 
   useEffect(() => {
     setOpenAnswers({});
-  }, [level, subject, vprGrade, taskListId, subtopicId, onlyFipi, author, page]);
+  }, [level, subject, vprGrade, vprAdvanced, taskListId, subtopicId, onlyFipi, author, page]);
 
   useEffect(() => {
     setPickMode(null);
@@ -762,6 +774,7 @@ export default function AllTasksPage() {
 
     if (level === "vpr") {
       subtitleParts.push(`${vprGrade} класс`);
+      subtitleParts.push(vprAdvanced ? "углублённый" : "базовый");
     }
 
     const selectedTaskNum = taskListId
@@ -791,6 +804,7 @@ export default function AllTasksPage() {
     subjectTitle,
     taskListId,
     vprGrade,
+    vprAdvanced,
   ]);
 
   const togglePickGroup = useCallback((tasks: BankTask[], checked: boolean) => {
@@ -936,6 +950,7 @@ export default function AllTasksPage() {
             <span>Фильтры</span>
             <span className="all-tasks-filters-toggle__meta">
               {levelTitle}
+              {level === "vpr" && vprAdvanced ? " · углублённый" : ""}
               {usesFipiFilter && onlyFipi ? " · ФИПИ" : ""}
               {!usesFipiFilter && author ? ` · ${author}` : ""}
             </span>
@@ -988,23 +1003,46 @@ export default function AllTasksPage() {
             </label>
 
             {level === "vpr" ? (
-              <label className="all-tasks-filter">
-                <span className="all-tasks-filter__label">Класс</span>
-                <select
-                  className="all-tasks-filter__control"
-                  value={vprGrade}
-                  onChange={(e) => {
-                    setVprGrade(Number(e.target.value));
-                    resetPage();
-                  }}
-                >
-                  {((GRADES_BY_LEVEL as Record<string, number[]>).vpr || DEFAULT_VPR_GRADES).map((g) => (
-                    <option key={g} value={g}>
-                      {g} класс
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <>
+                <label className="all-tasks-filter">
+                  <span className="all-tasks-filter__label">Класс</span>
+                  <select
+                    className="all-tasks-filter__control"
+                    value={vprGrade}
+                    onChange={(e) => {
+                      setVprGrade(Number(e.target.value));
+                      resetPage();
+                    }}
+                  >
+                    {((GRADES_BY_LEVEL as Record<string, number[]>).vpr || DEFAULT_VPR_GRADES).map((g) => (
+                      <option key={g} value={g}>
+                        {g} класс
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="all-tasks-filter all-tasks-filter--check">
+                  <span className="all-tasks-filter__label all-tasks-filter__label--spacer" aria-hidden>
+                    &nbsp;
+                  </span>
+                  <span className="all-tasks-filter--check__row">
+                    <input
+                      type="checkbox"
+                      className="tasks-page-subtopic-checkbox-input"
+                      checked={vprAdvanced}
+                      onChange={(e) => {
+                        setVprAdvanced(e.target.checked);
+                        resetPage();
+                      }}
+                    />
+                    <span
+                      className={`tasks-page-subtopic-checkbox-visual${vprAdvanced ? " selected" : ""}`}
+                      aria-hidden
+                    />
+                    <span>Углублённый уровень</span>
+                  </span>
+                </label>
+              </>
             ) : null}
 
             <label className="all-tasks-filter">
