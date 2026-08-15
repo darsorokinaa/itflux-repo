@@ -121,3 +121,16 @@ export function trackPageView(href) {
     /* ignore */
   }
 }
+
+/** Цель Метрики. Без согласия — no-op, новый сервис не подключаем. */
+export function trackGoal(name, params) {
+  if (typeof window === "undefined" || !name) return;
+  if (!hasCookieConsent() || !window.__itfluxMetrikaStarted || typeof window.ym !== "function") {
+    return;
+  }
+  try {
+    window.ym(METRIKA_COUNTER_ID, "reachGoal", String(name), params && typeof params === "object" ? params : {});
+  } catch {
+    /* ignore */
+  }
+}

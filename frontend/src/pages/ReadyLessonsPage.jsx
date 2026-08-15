@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ClipboardList, PenLine, Presentation, Search, StickyNote } from "lucide-react";
+import AccessGateBadge from "../components/AccessGateBadge";
 import CatalogEngagementBar from "../components/CatalogEngagementBar";
 import StateView from "../components/StateView";
+import { isCatalogLocked } from "../accessGate/accessGate";
+import { useAccessGate, useCabinetAuthed } from "../hooks/useAccessGate";
 import { CATALOG_ORDERING_OPTIONS, registerCatalogView } from "../utils/catalogEngagement";
 
 const patternInf = new URL("../assets/subject-patterns/inf.svg", import.meta.url).href;
@@ -73,13 +76,14 @@ const INCLUDES = [
   { id: "notes", label: "Заметки", Icon: StickyNote },
 ];
 
-function LessonCard({ lesson, onEngagementChange }) {
+function LessonCard({ lesson, onEngagementChange, onLockedOpen }) {
   const subjectTheme = getSubjectTheme(lesson.subject);
   const status = lesson.status || "published";
   const statusLabel = STATUS_LABELS[status];
   const durationLabel = formatDuration(lesson.duration_minutes);
   const difficultyLabel = DIFFICULTY_LABELS[lesson.difficulty];
-  const canOpenLesson = Boolean(lesson.slug && (lesson.archive_url || lesson.file_url));
+  const locked = isCatalogLocked(lesson);
+  const canOpenLesson = Boolean(lesson.slug && (lesson.archive_url || lesson.file_url || locked));
   const fileExtLower = (lesson.file_url || "").toLowerCase().split("?")[0];
   const isReactViewer = Boolean(
     !lesson.archive_url &&
@@ -92,7 +96,12 @@ function LessonCard({ lesson, onEngagementChange }) {
 
   const coverUrl = mediaUrl(lesson.cover_image_url);
 
-  const handleOpen = () => {
+  const handleOpen = (event) => {
+    if (locked) {
+      event.preventDefault();
+      onLockedOpen?.(lesson);
+      return;
+    }
     if (!lesson.slug || isReactViewer) return;
     // HTML/архив открывается в новой вкладке — регистрируем просмотр здесь
     registerCatalogView("lessons", lesson.slug).catch(() => {});
@@ -132,7 +141,13 @@ function LessonCard({ lesson, onEngagementChange }) {
           <span className={`lesson-card-v3__status lesson-card-v3__status--${status}`}>
             {statusLabel}
           </span>
-        ) : null}
+        ) : (
+          <AccessGateBadge
+            minPlan={lesson.access?.min_plan}
+            accessLevel={lesson.access_level}
+            allowed={lesson.access?.allowed}
+          />
+        )}
       </div>
 
       <div className="lesson-card-v3__body">
@@ -173,7 +188,11 @@ function LessonCard({ lesson, onEngagementChange }) {
           onChange={(next) => onEngagementChange?.(lesson.slug, next)}
         />
 
-        {canOpenLesson ? (
+        {locked ? (
+          <button type="button" className="lesson-card-v3__btn" onClick={() => onLockedOpen?.(lesson)}>
+            Открыть урок
+          </button>
+        ) : canOpenLesson ? (
           <a
             href={lessonUrl}
             className="lesson-card-v3__btn"
@@ -205,6 +224,8 @@ export default function ReadyLessonsPage() {
   const [durationFilter, setDurationFilter] = useState("");
   const [difficulty, setDifficulty] = useState("");
   const [ordering, setOrdering] = useState("newest");
+  const authed = useCabinetAuthed();
+  const { modal: accessGateModal, openGate } = useAccessGate({ authenticated: authed, sourcePage: "/lessons" });
 
   const [reloadKey, setReloadKey] = useState(0);
   const reloadLessons = useCallback(() => setReloadKey((k) => k + 1), []);
@@ -223,6 +244,16 @@ export default function ReadyLessonsPage() {
       ),
     );
   }, []);
+
+  const handleLockedOpen = useCallback((lesson) => {
+    openGate({
+      reason: authed ? "insufficient_plan" : "anonymous",
+      resourceType: "lesson",
+      requiredPlan: lesson?.access?.min_plan,
+      resourceId: lesson?.slug,
+      returnUrl: `/lessons/${encodeURIComponent(lesson?.slug || "")}/view`,
+    });
+  }, [authed, openGate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -518,6 +549,7 @@ export default function ReadyLessonsPage() {
                     key={lesson.slug || lesson.id}
                     lesson={lesson}
                     onEngagementChange={handleEngagementChange}
+                    onLockedOpen={handleLockedOpen}
                   />
                 ))}
               </div>
@@ -525,6 +557,7 @@ export default function ReadyLessonsPage() {
           </section>
         </main>
       </div>
+      {accessGateModal}
     </div>
   );
 }

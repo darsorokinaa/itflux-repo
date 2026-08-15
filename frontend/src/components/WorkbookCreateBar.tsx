@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { useAnonLimitModal } from "../hooks/useAnonLimitModal";
 import {
   openWorkbook,
   type WorkbookMeta,
@@ -30,6 +31,7 @@ export default function WorkbookCreateBar({
 }: WorkbookCreateBarProps) {
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [options, setOptions] = useState<Required<WorkbookOptions>>(DEFAULT_OPTIONS);
+  const { modal: anonLimitModal, openFromError } = useAnonLimitModal();
 
   const countLabel = useMemo(() => {
     const n = tasks.length;
@@ -65,6 +67,7 @@ export default function WorkbookCreateBar({
       });
       if (res.status === 403) {
         const data = await res.json().catch(() => ({}));
+        if (openFromError(data)) return;
         window.alert(
           data.message ||
             "Лимит рабочих тетрадей исчерпан. Зарегистрируйтесь или выберите тариф на /pricing/."
@@ -82,7 +85,7 @@ export default function WorkbookCreateBar({
     }
     openWorkbook(tasks, { ...meta, options });
     onCreated();
-  }, [meta, onCreated, options, tasks]);
+  }, [meta, onCreated, openFromError, options, tasks]);
 
   if (!active) return null;
 
@@ -176,6 +179,7 @@ export default function WorkbookCreateBar({
           Создать тетрадь
         </button>
       </div>
+      {anonLimitModal}
     </div>
   );
 }

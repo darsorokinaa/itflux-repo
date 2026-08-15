@@ -15,6 +15,8 @@ import {
   useSoonToast,
 } from "../CabinetSectionUi";
 import { fetchLibraryNewThisMonth } from "../../utils/cabinetAuth";
+import { isCatalogLocked } from "../../accessGate/accessGate";
+import { useAccessGate } from "../../hooks/useAccessGate";
 
 const SECTIONS = [
   { id: "lessons", label: "Готовые уроки", icon: "lessons", href: "/lessons" },
@@ -37,6 +39,10 @@ export default function CabinetLibraryPage() {
   const [lessonsError, setLessonsError] = useState(null);
   const [newItems, setNewItems] = useState([]);
   const { notifySoon, toast } = useSoonToast();
+  const { modal: accessGateModal, openGate } = useAccessGate({
+    authenticated: true,
+    sourcePage: "/cabinet/library",
+  });
 
   useEffect(() => {
     fetchLibraryNewThisMonth()
@@ -74,13 +80,24 @@ export default function CabinetLibraryPage() {
   );
 
   const handleOpenLesson = useCallback((card) => {
-    const url = getLessonOpenUrl(card.lesson);
+    const lesson = card.lesson;
+    if (isCatalogLocked(lesson)) {
+      openGate({
+        reason: "insufficient_plan",
+        resourceType: "lesson",
+        requiredPlan: lesson?.access?.min_plan,
+        resourceId: lesson?.slug,
+        returnUrl: `/lessons/${encodeURIComponent(lesson?.slug || "")}/view`,
+      });
+      return;
+    }
+    const url = getLessonOpenUrl(lesson);
     if (url) {
       window.open(url, "_blank", "noopener,noreferrer");
       return;
     }
     notifySoon();
-  }, [notifySoon]);
+  }, [notifySoon, openGate]);
 
   const showLessonCatalog = section === "lessons";
 
@@ -99,9 +116,18 @@ export default function CabinetLibraryPage() {
               <li key={`${item.kind}-${item.id}`}>
                 <span>{item.title}</span>
                 {!item.allowed ? (
-                  <Link to="/pricing" className="cb-btn cb-btn--outline cb-btn--sm">
+                  <button
+                    type="button"
+                    className="cb-btn cb-btn--outline cb-btn--sm"
+                    onClick={() => openGate({
+                      reason: "insufficient_plan",
+                      resourceType: item.kind === "lesson" ? "lesson" : "material",
+                      requiredPlan: item.min_plan,
+                      resourceId: String(item.id || ""),
+                    })}
+                  >
                     от {item.min_plan || "тарифа"}
-                  </Link>
+                  </button>
                 ) : null}
               </li>
             ))}
@@ -185,6 +211,7 @@ export default function CabinetLibraryPage() {
         />
       )}
 
+      {accessGateModal}
     </CabinetPageShell>
   );
 }

@@ -8,6 +8,7 @@ import {
   fetchStudents,
 } from "../../utils/cabinetAuth";
 import { formatMoney, formatUnits } from "../billing/billingFormat";
+import { useAccessGate } from "../../hooks/useAccessGate";
 import "../styles/payments.css";
 
 const WEEKDAYS = [
@@ -113,6 +114,10 @@ export default function CreateScheduleLessonModal({
   const [meetingMode, setMeetingMode] = useState("auto");
   const [manualLink, setManualLink] = useState("");
   const [saving, setSaving] = useState(false);
+  const { modal: accessGateModal, openFromError } = useAccessGate({
+    authenticated: true,
+    sourcePage: "/cabinet/schedule",
+  });
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState(null);
   const [students, setStudents] = useState([]);
@@ -340,7 +345,9 @@ export default function CreateScheduleLessonModal({
     try {
       await onCreate(buildPayload(force));
     } catch (err) {
-      if (err.code === "schedule_conflict" || err.message?.includes("уже есть занятие")) {
+      if (openFromError(err)) {
+        setError("");
+      } else if (err.code === "schedule_conflict" || err.message?.includes("уже есть занятие")) {
         setConflict(err.conflicts || true);
         setError("В это время уже есть занятие.");
       } else {
@@ -354,6 +361,7 @@ export default function CreateScheduleLessonModal({
   if (typeof document === "undefined") return null;
 
   return createPortal(
+    <>
     <div className="cb-sch-overlay" onClick={onClose} role="presentation">
       <div
         className="cb-sch-modal cb-sch-modal--wide"
@@ -680,7 +688,9 @@ export default function CreateScheduleLessonModal({
           </div>
         </form>
       </div>
-    </div>,
+    </div>
+    {accessGateModal}
+    </>,
     document.body
   );
 }

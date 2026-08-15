@@ -3,7 +3,7 @@ import {
   homeUpdatesVisibleCount,
   isExternalUpdateUrl,
   paginateItems,
-  sanitizeUpdateUrl,
+  resolveUpdateHref,
   updateLinkText,
   type HomeUpdateItem,
 } from "./homeUpdatesUtils";
@@ -48,33 +48,26 @@ function useVisibleUpdateCount(): 1 | 2 | 3 {
 }
 
 function UpdateCard({ item }: { item: HomeUpdateItem }) {
-  const href = sanitizeUpdateUrl(item.url);
+  const href = resolveUpdateHref(item);
   const title = (item.title || "").trim();
   const text = (item.description || "").trim();
-  const content = (
-    <>
+  const external = href ? isExternalUpdateUrl(href) : false;
+
+  return (
+    <article className={`home-updates__card${href ? " home-updates__card--linked" : ""}`}>
       <h3 className="home-updates__card-title">{title}</h3>
       {text ? <p className="home-updates__card-text">{text}</p> : null}
       {href ? (
-        <span className="home-updates__more">{updateLinkText(item.link_text)}</span>
+        <a
+          className="home-updates__more"
+          href={href}
+          {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+        >
+          {updateLinkText(item.link_text)}
+        </a>
       ) : null}
-    </>
+    </article>
   );
-
-  if (href) {
-    const external = isExternalUpdateUrl(href);
-    return (
-      <a
-        className="home-updates__card"
-        href={href}
-        {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
-      >
-        {content}
-      </a>
-    );
-  }
-
-  return <article className="home-updates__card">{content}</article>;
 }
 
 export default function HomeUpdatesBlock() {

@@ -10,6 +10,7 @@ import {
   fetchReferralPreview,
 } from "../utils/cabinetAuth";
 import { usePageTitle } from "../cabinet/hooks/usePageTitle";
+import { safeReturnPath, takeReturnPath } from "../accessGate/accessGate";
 
 const GUIDE_OPEN_ON_REGISTER_KEY = "cabinet-guide-open-on-register";
 
@@ -31,9 +32,9 @@ export default function CabinetAuthPage() {
   const inviteToken = searchParams.get("invite") || "";
   const parentInviteToken = searchParams.get("parent_invite") || "";
   const referralCode = searchParams.get("ref") || searchParams.get("referral") || "";
-  const redirectTo = location.state?.from
+  const redirectTo = safeReturnPath(location.state?.from)
     || (parentInviteToken ? `/parent/invite/accept/${parentInviteToken}/` : "")
-    || (inviteToken ? `/invite/${inviteToken}/` : "/cabinet");
+    || (inviteToken ? `/invite/${inviteToken}/` : "");
 
   const resetUid = searchParams.get("uid") || "";
   const resetToken = searchParams.get("token") || "";
@@ -114,7 +115,8 @@ export default function CabinetAuthPage() {
       .then((data) => {
         if (!cancelled && data?.authenticated && mode !== "reset") {
           const home = getCabinetHomePath(data.user);
-          const target = redirectTo.startsWith("/cabinet") ? redirectTo : home;
+          const stored = takeReturnPath();
+          const target = safeReturnPath(redirectTo) || stored || home;
           navigate(target, { replace: true });
         }
       })
@@ -142,9 +144,8 @@ export default function CabinetAuthPage() {
     }
     const session = await fetchCabinetSession();
     const home = getCabinetHomePath(session?.user);
-    const target = (
-      redirectTo.startsWith("/cabinet") || redirectTo.startsWith("/parent/")
-    ) ? redirectTo : home;
+    const stored = takeReturnPath();
+    const target = safeReturnPath(redirectTo) || stored || home;
     navigate(target, { replace: true });
   };
 

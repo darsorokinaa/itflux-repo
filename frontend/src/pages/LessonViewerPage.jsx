@@ -4,6 +4,7 @@ import DocViewer, { DocViewerRenderers } from "@cyntler/react-doc-viewer";
 import CatalogEngagementBar, {
   useRegisterCatalogView,
 } from "../components/CatalogEngagementBar";
+import { useAccessGate, useCabinetAuthed } from "../hooks/useAccessGate";
 import { devApiBase } from "../utils/devApiBase";
 
 export default function LessonViewerPage() {
@@ -11,8 +12,19 @@ export default function LessonViewerPage() {
   const [lesson, setLesson] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [accessPayload, setAccessPayload] = useState(null);
+  const authed = useCabinetAuthed();
+  const { modal: accessGateModal, openGate } = useAccessGate({
+    authenticated: authed,
+    sourcePage: `/lessons/${slug || ""}/view`,
+  });
 
-  const syncedViews = useRegisterCatalogView("lessons", slug, Boolean(slug) && !loading && !error && Boolean(lesson));
+  const locked = Boolean(lesson?.locked || accessPayload);
+  const syncedViews = useRegisterCatalogView(
+    "lessons",
+    slug,
+    Boolean(slug) && !loading && !error && Boolean(lesson) && !locked,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -23,13 +35,14 @@ export default function LessonViewerPage() {
     fetch(`${apiBase}/api/lessons/${encodeURIComponent(slug)}/`, {
       credentials: apiBase ? "omit" : "same-origin",
     })
-      .then((res) => {
-        if (!res.ok) throw new Error("Не удалось загрузить урок");
-        return res.json();
-      })
-      .then((data) => {
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ data }) => {
         if (cancelled) return;
-        setLesson(data?.lesson || null);
+        const next = data?.lesson || null;
+        setLesson(next);
+        if (next?.locked || data?.upgrade_required || data?.code === "CONTENT_ACCESS_DENIED") {
+          setAccessPayload(data);
+        }
       })
       .catch((err) => {
         if (cancelled) return;
@@ -50,6 +63,18 @@ export default function LessonViewerPage() {
     }
   }, [syncedViews]);
 
+  useEffect(() => {
+    if (!locked || !lesson) return undefined;
+    openGate({
+      reason: authed ? "insufficient_plan" : "anonymous",
+      resourceType: "lesson",
+      requiredPlan: lesson.access?.min_plan || accessPayload?.min_plan,
+      resourceId: slug,
+      returnUrl: `/lessons/${encodeURIComponent(slug || "")}/view`,
+    });
+    return undefined;
+  }, [locked, lesson, authed, openGate, slug, accessPayload]);
+
   if (loading) {
     return (
       <div className="lesson-viewer-page lesson-viewer-page--loading">
@@ -68,6 +93,20 @@ export default function LessonViewerPage() {
             Вернуться к каталогу
           </Link>
         </div>
+      </div>
+    );
+  }
+
+  if (locked) {
+    return (
+      <div className="lesson-viewer-page">
+        <div className="lesson-viewer-page__toolbar">
+          <Link to="/lessons" className="lesson-viewer-page__back">
+            К каталогу
+          </Link>
+          <h1 className="lesson-viewer-page__title">{lesson.title}</h1>
+        </div>
+        {accessGateModal}
       </div>
     );
   }

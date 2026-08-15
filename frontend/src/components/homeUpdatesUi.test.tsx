@@ -87,7 +87,7 @@ describe("HomeUpdates", () => {
     expect(prev.disabled).toBe(true);
   });
 
-  it("makes the whole card a link only when a url exists", async () => {
+  it("shows a visible link when a url exists", async () => {
     mockFetch({
       updates: [
         { id: 1, title: "Со ссылкой", description: "Есть", url: "/cabinet", link_text: "Открыть" },
@@ -95,9 +95,8 @@ describe("HomeUpdates", () => {
       ],
     });
     render(<HomeUpdatesBlock />);
-    const linked = await screen.findByRole("link", { name: /Со ссылкой/ });
+    const linked = await screen.findByRole("link", { name: "Открыть" });
     expect(linked.getAttribute("href")).toBe("/cabinet");
-    expect(screen.getByText("Открыть")).toBeTruthy();
     expect(screen.queryByRole("link", { name: /Без ссылки/ })).toBeNull();
     expect(screen.getByText("Без ссылки").closest("article")).toBeTruthy();
   });

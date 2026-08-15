@@ -90,6 +90,61 @@ class SubscriptionAccessTests(TestCase):
         sub.save(update_fields=["plan"])
         self.assertTrue(SubscriptionAccessService.can_access_content(self.user, material))
 
+    def test_higher_plans_include_lower_tier_content(self):
+        other = User.objects.create_user("other_ladder", "ol@example.com", "pass")
+        levels = [
+            (ContentAccessLevel.FREE, 0),
+            (ContentAccessLevel.TEACHER, 1),
+            (ContentAccessLevel.PROFESSIONAL, 2),
+            (ContentAccessLevel.PREMIUM, 3),
+            (ContentAccessLevel.CORPORATE, 4),
+        ]
+        materials = {
+            level: Material.objects.create(
+                title=f"{level} material",
+                teacher=other,
+                access_level=level,
+                is_public=True,
+            )
+            for level, _rank in levels
+        }
+        sub = self.user.subscription
+        for plan_slug, plan_rank in (
+            ("start", 0),
+            ("teacher", 1),
+            ("pro", 2),
+            ("premium", 3),
+            ("school", 4),
+        ):
+            sub.plan = self.plans[plan_slug]
+            sub.save(update_fields=["plan"])
+            for level, required in levels:
+                allowed = SubscriptionAccessService.can_access_content(
+                    self.user, materials[level]
+                )
+                self.assertEqual(
+                    allowed,
+                    plan_rank >= required,
+                    msg=f"{plan_slug} vs {level}: expected {plan_rank >= required}",
+                )
+
+    def test_plan_slug_rank_floor_when_db_rank_too_low(self):
+        premium = self.plans["premium"]
+        premium.content_access_rank = 0
+        premium.save(update_fields=["content_access_rank"])
+        other = User.objects.create_user("other_floor", "of@example.com", "pass")
+        material = Material.objects.create(
+            title="Teacher material",
+            teacher=other,
+            access_level=ContentAccessLevel.TEACHER,
+            is_public=True,
+        )
+        sub = self.user.subscription
+        sub.plan = premium
+        sub.save(update_fields=["plan"])
+        self.assertEqual(SubscriptionAccessService.get_content_rank_for_user(self.user), 3)
+        self.assertTrue(SubscriptionAccessService.can_access_content(self.user, material))
+
     def test_owner_bypasses_content_gate(self):
         material = Material.objects.create(
             title="Own premium",
@@ -125,6 +180,47 @@ class SubscriptionAccessTests(TestCase):
             SubscriptionAccessService.enforce_variant_creation(request)
         with self.assertRaises(AccessDenied):
             SubscriptionAccessService.enforce_variant_creation(request)
+
+    def test_anonymous_workbook_limit_returns_register_payload(self):
+        client = Client()
+        for _ in range(3):
+            res = client.post(
+                "/api/cabinet/usage/workbook/",
+                {},
+                content_type="application/json",
+            )
+            self.assertEqual(res.status_code, 201, res.content)
+        res = client.post(
+            "/api/cabinet/usage/workbook/",
+            {},
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 403)
+        data = res.json()
+        self.assertEqual(data["code"], "ANON_WORKBOOK_LIMIT_REACHED")
+        self.assertTrue(data["upgrade_required"])
+        self.assertIn("Зарегистрируйтесь", data["message"])
+
+    def test_lesson_catalog_hides_locked_file_urls(self):
+        from django.contrib.auth.models import AnonymousUser
+
+        from Generator.models import Lesson
+        from Generator.serializers import LessonCatalogSerializer
+
+        lesson = Lesson.objects.create(
+            title="Закрытый урок",
+            slug="closed-lesson-access-gate",
+            subject="Информатика",
+            access_level="premium",
+            status=Lesson.Status.PUBLISHED,
+        )
+        request = self.factory.get("/")
+        request.user = AnonymousUser()
+        data = LessonCatalogSerializer(lesson, context={"request": request}).data
+        self.assertFalse(data["access"]["allowed"])
+        self.assertEqual(data["access"]["min_plan"], "premium")
+        self.assertIsNone(data["file_url"])
+        self.assertIsNone(data["archive_url"])
 
     def test_public_pricing_endpoint(self):
         client = Client()

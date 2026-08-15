@@ -10,6 +10,7 @@
 
 import { useCallback, useState } from "react";
 import { fetchSubscriptionPlans } from "../../utils/cabinetAuth";
+import { classifyAccessError } from "../../accessGate/accessGate";
 
 export function useLimitModal(currentPlan) {
   const [limitModal, setLimitModal] = useState(null);
@@ -42,7 +43,19 @@ export function useLimitModal(currentPlan) {
   }, []);
 
   const handleApiLimitError = useCallback((error) => {
-    // err.code — прямо на объекте ошибки, err.data — полный body ответа
+    const classified = classifyAccessError(error, {
+      currentPlan: currentPlan?.slug,
+    });
+    if (classified) {
+      openLimitModal({
+        type: classified.resourceType,
+        reason: classified.reason,
+        current: error?.current ?? error?.data?.current ?? 0,
+        limit: error?.limit ?? error?.data?.limit ?? 0,
+        recommendedPlan: classified.requiredPlan || "teacher",
+      });
+      return true;
+    }
     const code = error?.code || error?.data?.code;
     const data = error?.data || error || {};
     const LIMIT_MAP = {
@@ -56,6 +69,7 @@ export function useLimitModal(currentPlan) {
     if (type) {
       openLimitModal({
         type,
+        reason: "limit_reached",
         current: data.current ?? 0,
         limit: data.limit ?? 0,
         recommendedPlan: data.recommended_plan || "teacher",
@@ -63,7 +77,7 @@ export function useLimitModal(currentPlan) {
       return true;
     }
     return false;
-  }, [openLimitModal]);
+  }, [openLimitModal, currentPlan]);
 
   const limitModalProps = limitModal
     ? {

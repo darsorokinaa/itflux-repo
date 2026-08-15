@@ -32,8 +32,20 @@ PLAN_SLUG_TO_RANK = {
     "teacher": 1,
     "repetitor": 1,  # legacy alias
     "pro": 2,
+    "profi": 2,  # legacy alias
     "premium": 3,
     "school": 4,
+}
+
+# access_level → канонический ContentAccessLevel (план-slug и legacy значения).
+ACCESS_LEVEL_ALIASES = {
+    "paid": ContentAccessLevel.PROFESSIONAL,
+    "private": ContentAccessLevel.CORPORATE,
+    "pro": ContentAccessLevel.PROFESSIONAL,
+    "profi": ContentAccessLevel.PROFESSIONAL,
+    "start": ContentAccessLevel.FREE,
+    "school": ContentAccessLevel.CORPORATE,
+    "repetitor": ContentAccessLevel.TEACHER,
 }
 
 RANK_TO_MIN_PLAN = {
@@ -68,6 +80,7 @@ class AccessDenied(Exception):
         payload = {
             "code": self.code,
             "message": self.message,
+            "error": self.message,
             "upgrade_required": True,
             "feature": self.feature,
             "min_plan": self.min_plan,
@@ -84,6 +97,8 @@ def next_plan_slug(current_slug: str) -> str:
     slug = current_slug or "start"
     if slug == "repetitor":
         slug = "teacher"
+    elif slug == "profi":
+        slug = "pro"
     try:
         idx = PLAN_LADDER.index(slug)
         return PLAN_LADDER[idx + 1] if idx + 1 < len(PLAN_LADDER) else "school"
@@ -117,20 +132,31 @@ class SubscriptionAccessService:
         return SubscriptionLimitService.get_current_plan(user)
 
     @staticmethod
+    def plan_content_rank(plan) -> int:
+        """Ранг тарифа для контента. Выше по лестнице всегда включает нижестоящие уровни.
+
+        Берём максимум из поля плана и ранга по slug: если в БД rank занижен,
+        slug всё равно даёт доступ ко всему, что открыто более низким тарифам.
+        """
+        if plan is None:
+            return 0
+        db_rank = int(getattr(plan, "content_access_rank", 0) or 0)
+        slug = (getattr(plan, "slug", "") or "").strip().lower()
+        slug_rank = PLAN_SLUG_TO_RANK.get(slug, 0)
+        return max(db_rank, slug_rank)
+
+    @staticmethod
     def get_content_rank_for_user(user: Optional[User] = None) -> int:
         plan = SubscriptionAccessService.get_effective_plan(user)
-        return int(getattr(plan, "content_access_rank", 0) or 0)
+        return SubscriptionAccessService.plan_content_rank(plan)
 
     @staticmethod
     def content_level_rank(access_level: str) -> int:
-        if access_level in CONTENT_ACCESS_RANK:
-            return CONTENT_ACCESS_RANK[access_level]
-        # legacy Generator values
-        if access_level == "paid":
-            return CONTENT_ACCESS_RANK[ContentAccessLevel.PROFESSIONAL]
-        if access_level == "private":
-            return CONTENT_ACCESS_RANK[ContentAccessLevel.CORPORATE]
-        return 0
+        level = (access_level or ContentAccessLevel.FREE).strip().lower()
+        level = ACCESS_LEVEL_ALIASES.get(level, level)
+        if level in CONTENT_ACCESS_RANK:
+            return CONTENT_ACCESS_RANK[level]
+        return PLAN_SLUG_TO_RANK.get(level, 0)
 
     @staticmethod
     def can_use_schedule(user) -> bool:
@@ -181,6 +207,7 @@ class SubscriptionAccessService:
                 return True
             if user.is_staff or user.is_superuser:
                 return True
+        # Inclusive ladder: teacher content is also open on pro / premium / school.
         return SubscriptionAccessService.get_content_rank_for_user(user) >= required
 
     @staticmethod

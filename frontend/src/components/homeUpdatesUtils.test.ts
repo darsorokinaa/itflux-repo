@@ -4,6 +4,8 @@ import {
   paginateItems,
   sanitizeUpdateUrl,
   updateLinkText,
+  firstUrlInUpdateText,
+  resolveUpdateHref,
   HOME_UPDATES_DEFAULT_LINK_TEXT,
 } from "./homeUpdatesUtils";
 
@@ -53,6 +55,8 @@ describe("sanitizeUpdateUrl", () => {
   it("keeps site paths and http(s) urls", () => {
     expect(sanitizeUpdateUrl("/cabinet")).toBe("/cabinet");
     expect(sanitizeUpdateUrl("https://itflux.ru/cabinet")).toBe("https://itflux.ru/cabinet");
+    expect(sanitizeUpdateUrl("cabinet")).toBe("/cabinet");
+    expect(sanitizeUpdateUrl("www.example.com/page")).toBe("https://www.example.com/page");
   });
 
   it("rejects unsafe or empty values", () => {
@@ -66,5 +70,13 @@ describe("updateLinkText", () => {
   it("falls back to the default label", () => {
     expect(updateLinkText("")).toBe(HOME_UPDATES_DEFAULT_LINK_TEXT);
     expect(updateLinkText("В кабинет")).toBe("В кабинет");
+  });
+});
+
+describe("resolveUpdateHref", () => {
+  it("prefers the url field and otherwise takes a url from the description", () => {
+    expect(firstUrlInUpdateText("Смотрите https://itflux.ru/cabinet завтра")).toBe("https://itflux.ru/cabinet");
+    expect(resolveUpdateHref({ url: "/lessons", description: "https://example.com" })).toBe("/lessons");
+    expect(resolveUpdateHref({ url: "", description: "Открыть /cabinet" })).toBe("/cabinet");
   });
 });

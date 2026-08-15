@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { ExternalLink, Map, Search } from "lucide-react";
+import AccessGateBadge from "../components/AccessGateBadge";
 import CatalogEngagementBar from "../components/CatalogEngagementBar";
 import StateView from "../components/StateView";
+import { isCatalogLocked } from "../accessGate/accessGate";
+import { useAccessGate, useCabinetAuthed } from "../hooks/useAccessGate";
 import { CATALOG_ORDERING_OPTIONS, registerCatalogView } from "../utils/catalogEngagement";
 
 function mediaUrl(url) {
@@ -19,9 +22,10 @@ function getOpenUrl(item) {
   return null;
 }
 
-function InterestingCard({ item, onEngagementChange }) {
+function InterestingCard({ item, onEngagementChange, onLockedOpen }) {
   const coverUrl = mediaUrl(item.cover_image_url);
-  const openUrl = getOpenUrl(item);
+  const locked = isCatalogLocked(item);
+  const openUrl = locked ? null : getOpenUrl(item);
   const accent = item.accent_color || "#1F3A8A";
   const bannerStyle = coverUrl
     ? {
@@ -44,6 +48,11 @@ function InterestingCard({ item, onEngagementChange }) {
         style={bannerStyle}
       >
         {item.tag ? <span className="interesting-card__tag">{item.tag}</span> : null}
+        <AccessGateBadge
+          minPlan={item.access?.min_plan}
+          accessLevel={item.access_level}
+          allowed={item.access?.allowed}
+        />
         {!coverUrl ? (
           <Map className="interesting-card__icon" size={48} strokeWidth={1.6} aria-hidden="true" />
         ) : null}
@@ -61,7 +70,11 @@ function InterestingCard({ item, onEngagementChange }) {
           isLiked={item.is_liked}
           onChange={(next) => onEngagementChange?.(item.slug, next)}
         />
-        {openUrl ? (
+        {locked ? (
+          <button type="button" className="interesting-card__btn" onClick={() => onLockedOpen?.(item)}>
+            Открыть
+          </button>
+        ) : openUrl ? (
           <a
             href={openUrl}
             className="interesting-card__btn"
@@ -90,6 +103,11 @@ export default function InterestingPage() {
   const [ordering, setOrdering] = useState("newest");
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+  const authed = useCabinetAuthed();
+  const { modal: accessGateModal, openGate } = useAccessGate({
+    authenticated: authed,
+    sourcePage: "/interesting",
+  });
 
   const handleEngagementChange = useCallback((slug, next) => {
     setItems((prev) =>
@@ -105,6 +123,16 @@ export default function InterestingPage() {
       ),
     );
   }, []);
+
+  const handleLockedOpen = useCallback((item) => {
+    openGate({
+      reason: authed ? "insufficient_plan" : "anonymous",
+      resourceType: "interesting",
+      requiredPlan: item?.access?.min_plan,
+      resourceId: item?.slug,
+      returnUrl: "/interesting",
+    });
+  }, [authed, openGate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -216,12 +244,14 @@ export default function InterestingPage() {
                   key={item.id}
                   item={item}
                   onEngagementChange={handleEngagementChange}
+                  onLockedOpen={handleLockedOpen}
                 />
               ))}
             </section>
           )}
         </main>
       </div>
+      {accessGateModal}
     </div>
   );
 }

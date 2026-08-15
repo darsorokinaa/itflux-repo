@@ -47,6 +47,13 @@ class UpdateApiTests(TestCase):
         self.assertEqual(item["url"], "/cabinet")
         self.assertEqual(item["link_text"], "Подробнее")
 
+    def test_url_without_scheme_or_slash_is_normalized(self):
+        Update.objects.create(title="Кабинет", url="cabinet", show=True)
+        Update.objects.create(title="Сайт", url="www.example.com/page", show=True)
+        payload = {item["title"]: item["url"] for item in self.client.get(reverse("api_updates")).json()["updates"]}
+        self.assertEqual(payload["Кабинет"], "/cabinet")
+        self.assertEqual(payload["Сайт"], "https://www.example.com/page")
+
     def test_unsafe_url_is_stripped(self):
         Update.objects.create(
             title="Вредоносная ссылка",

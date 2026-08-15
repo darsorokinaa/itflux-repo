@@ -1705,12 +1705,9 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
 
     if create:
         if request is not None:
-            from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
+            from Cabinet.subscription_access import SubscriptionAccessService
 
-            try:
-                SubscriptionAccessService.enforce_variant_creation(request)
-            except AccessDenied as exc:
-                raise ValueError(exc.message) from exc
+            SubscriptionAccessService.enforce_variant_creation(request)
         new_variant = Variant.objects.create(
             var_subject=subject_instance,
             level=level_instance,
@@ -3623,9 +3620,15 @@ def api_support_info(request, level, subject):
 
 def _public_update_href(value: str) -> str:
     """Разрешаем только относительные пути сайта и http(s)."""
-    raw = (value or "").strip()
+    raw = (value or "").strip().strip("\"'«»")
     if not raw:
         return ""
+    if raw.lower().startswith("www."):
+        raw = "https://" + raw
+    elif re.match(r"^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}([/:?#].*)?$", raw, re.I):
+        raw = "https://" + raw
+    elif re.match(r"^[a-z][a-z0-9/_-]*$", raw, re.I) and "." not in raw:
+        raw = "/" + raw
     if raw.startswith("/") and not raw.startswith("//"):
         return raw
     parsed = urlparse(raw)
@@ -4034,6 +4037,8 @@ def api_lesson_detail(request, slug):
         # Метаданные доступны, полный контент — только при доступе
         lesson_data["teacher_goal"] = ""
         lesson_data["student_result"] = ""
+        lesson_data["file_url"] = None
+        lesson_data["archive_url"] = None
         lesson_data["locked"] = True
         return JsonResponse({"lesson": lesson_data, "upgrade_required": True, **AccessDenied(
             "CONTENT_ACCESS_DENIED",
@@ -4227,6 +4232,8 @@ def api_interesting_detail(request, slug):
     data["access"] = access
     if not access["allowed"] and not _lesson_viewer_is_teacher_or_admin(request):
         data["locked"] = True
+        data["file_url"] = None
+        data["archive_url"] = None
         return JsonResponse(
             {
                 "item": data,

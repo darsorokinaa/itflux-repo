@@ -7,6 +7,7 @@ import {
   useLocation,
 } from "react-router-dom";
 import { FileText, Target, CircleHelp } from "lucide-react";
+import { useAnonLimitModal } from "../hooks/useAnonLimitModal";
 
 const SUBJECT_NAMES = {
   inf: "Информатика",
@@ -126,6 +127,7 @@ function TasksPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [prepActionError, setPrepActionError] = useState(null);
+  const { modal: anonLimitModal, openFromError: openAnonLimitFromError } = useAnonLimitModal();
 
   /** Подтемы для тренажёра: список по номерам заданий (только для одиночных заданий) */
   const [subtopicsByTask, setSubtopicsByTask] = useState([]);
@@ -379,7 +381,17 @@ function TasksPage() {
           }
         }
         if (!res.ok) {
-          throw new Error(data?.error || res.statusText || "Не удалось сформировать вариант");
+          const limitPayload = data?.code ? data : data?.error;
+          const limitMsg =
+            (typeof limitPayload === "object" && limitPayload?.message) ||
+            data?.message ||
+            (typeof data?.error === "string" ? data.error : null);
+          const err = new Error(
+            limitMsg || res.statusText || "Не удалось сформировать вариант"
+          );
+          err.data = typeof limitPayload === "object" ? limitPayload : data;
+          err.code = err.data?.code;
+          throw err;
         }
         if (!data?.variant_id) {
           throw new Error("Сервер не вернул номер варианта");
@@ -401,6 +413,7 @@ function TasksPage() {
   };
 
   const handleVariantGenerationError = (err) => {
+    if (openAnonLimitFromError(err)) return;
     const message = err?.message || "Не удалось сформировать вариант";
     setPrepActionError(message);
   };
@@ -1621,6 +1634,7 @@ function TasksPage() {
           </section>
         </>
       )}
+      {anonLimitModal}
     </>,
   );
 }

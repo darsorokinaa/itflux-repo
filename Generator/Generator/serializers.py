@@ -7,6 +7,25 @@ from .models import (
 )
 
 
+class CatalogAccessMixin:
+    """Метаданные карточки + access gate. Файлы закрытого контента не отдаём."""
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else None
+        if user is not None and not getattr(user, "is_authenticated", False):
+            user = None
+        from Cabinet.subscription_access import SubscriptionAccessService
+
+        gate = SubscriptionAccessService.serialize_access_gate(user, instance)
+        data["access"] = gate
+        if not gate["allowed"]:
+            data["file_url"] = None
+            data["archive_url"] = None
+        return data
+
+
 class TaskSerializer(serializers.ModelSerializer):
     task_title = serializers.CharField(source="task.task_title", read_only=True)
     task_number = serializers.IntegerField(source="task.task_number", read_only=True)
@@ -26,7 +45,7 @@ class TaskSerializer(serializers.ModelSerializer):
         ]
 
 
-class LessonCatalogSerializer(serializers.ModelSerializer):
+class LessonCatalogSerializer(CatalogAccessMixin, serializers.ModelSerializer):
     cover_image_url = serializers.SerializerMethodField()
     card_background_image_url = serializers.SerializerMethodField()
     file_url = serializers.SerializerMethodField()
@@ -144,7 +163,7 @@ class LessonAdminSerializer(serializers.ModelSerializer):
         return LessonCatalogSerializer(context=self.context).get_archive_url(obj)
 
 
-class InterestingCatalogSerializer(serializers.ModelSerializer):
+class InterestingCatalogSerializer(CatalogAccessMixin, serializers.ModelSerializer):
     cover_image_url = serializers.SerializerMethodField()
     file_url = serializers.SerializerMethodField()
     archive_url = serializers.SerializerMethodField()

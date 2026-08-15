@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAnonLimitModal } from "../hooks/useAnonLimitModal";
 import type { WorkbookTask } from "../utils/buildWorkbookHtml";
 
 type VariantCreateBarProps = {
@@ -22,6 +23,7 @@ export default function VariantCreateBar({
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { modal: anonLimitModal, openFromError } = useAnonLimitModal();
 
   const countLabel = useMemo(() => {
     const n = tasks.length;
@@ -55,7 +57,14 @@ export default function VariantCreateBar({
       );
       window.clearTimeout(timeoutId);
       const text = await res.text();
-      let data: { variant_id?: number; error?: string; message?: string; min_plan?: string } | null = null;
+      let data: {
+        variant_id?: number;
+        error?: string | { code?: string; message?: string };
+        message?: string;
+        code?: string;
+        feature?: string;
+        min_plan?: string;
+      } | null = null;
       if (text) {
         try {
           data = JSON.parse(text);
@@ -68,12 +77,17 @@ export default function VariantCreateBar({
         }
       }
       if (!res.ok) {
-        const limitMsg = data?.message || data?.error;
-        throw new Error(
-          limitMsg ||
+        const limitPayload = data?.code ? data : data?.error;
+        const err = new Error(
+          (typeof limitPayload === "object" && limitPayload?.message) ||
+            data?.message ||
+            (typeof data?.error === "string" ? data.error : "") ||
             res.statusText ||
             "Не удалось сформировать вариант"
-        );
+        ) as Error & { data?: unknown; code?: string };
+        err.data = typeof limitPayload === "object" ? limitPayload : data;
+        err.code = (err.data as { code?: string } | undefined)?.code;
+        throw err;
       }
       if (!data?.variant_id) {
         throw new Error("Сервер не вернул номер варианта");
@@ -84,7 +98,9 @@ export default function VariantCreateBar({
       onCreated();
     } catch (err) {
       window.clearTimeout(timeoutId);
-      if (err instanceof Error && err.name === "AbortError") {
+      if (openFromError(err)) {
+        setError(null);
+      } else if (err instanceof Error && err.name === "AbortError") {
         setError("Сервер не ответил вовремя. Попробуйте ещё раз.");
       } else {
         setError(err instanceof Error ? err.message : "Не удалось сформировать вариант");
@@ -92,7 +108,7 @@ export default function VariantCreateBar({
     } finally {
       setSubmitting(false);
     }
-  }, [level, navigate, onCreated, subject, subjectName, submitting, tasks]);
+  }, [level, navigate, onCreated, openFromError, subject, subjectName, submitting, tasks]);
 
   if (!active) return null;
 
@@ -114,6 +130,7 @@ export default function VariantCreateBar({
           {submitting ? "Формируем…" : "Создать вариант"}
         </button>
       </div>
+      {anonLimitModal}
     </div>
   );
 }
