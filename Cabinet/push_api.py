@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from django.db.models import Q
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -48,6 +49,8 @@ class PushSubscribeView(APIView):
         subscription = data.get("subscription") or data
         endpoint = subscription.get("endpoint") or ""
         keys = subscription.get("keys") or {}
+        mode = str(data.get("mode") or "enable").strip().lower()
+        activate = mode != "sync"
         try:
             sub = upsert_subscription(
                 request.user,
@@ -56,19 +59,24 @@ class PushSubscribeView(APIView):
                 auth=keys.get("auth") or data.get("auth") or "",
                 user_agent=request.META.get("HTTP_USER_AGENT", ""),
                 device_label=(data.get("device_label") or "")[:120],
+                activate=activate,
             )
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
 
         prefs = get_or_create_preferences(request.user)
-        if not prefs.push_enabled:
+        # Только явное «Включить» поднимает глобальный канал. Тихая синхронизация
+        # после deploy не должна включать то, что пользователь выключил.
+        if activate and not prefs.push_enabled:
             prefs.push_enabled = True
             prefs.save(update_fields=["push_enabled", "updated_at"])
 
         return Response({
             "ok": True,
             "device": serialize_device(sub),
-            "push_enabled": True,
+            "push_enabled": prefs.push_enabled,
+            "disabled_by_user": bool(sub.disabled_by_user),
+            "synced": not activate,
         })
 
 
@@ -79,13 +87,15 @@ class PushUnsubscribeView(APIView):
         data = request.data or {}
         endpoint = data.get("endpoint") or ""
         device_id = data.get("device_id") or data.get("id")
+        reason = str(data.get("reason") or "user").strip().lower()
+        by_user = reason == "user"
         if device_id:
             updated = PushSubscription.objects.filter(
                 pk=device_id,
                 user=request.user,
-            ).update(is_active=False)
+            ).update(is_active=False, disabled_by_user=by_user)
         else:
-            updated = deactivate_endpoint(endpoint, user=request.user)
+            updated = deactivate_endpoint(endpoint, user=request.user, by_user=by_user)
         return Response({"ok": True, "deactivated": updated})
 
 
@@ -94,11 +104,15 @@ class PushDevicesView(APIView):
 
     def get(self, request):
         current_endpoint = (request.query_params.get("endpoint") or "").strip() or None
+        qs = PushSubscription.objects.filter(user=request.user)
+        if current_endpoint:
+            qs = qs.filter(Q(is_active=True) | Q(endpoint=current_endpoint))
+        else:
+            qs = qs.filter(is_active=True)
         devices = [
             serialize_device(sub, current_endpoint=current_endpoint)
-            for sub in PushSubscription.objects.filter(user=request.user).order_by("-updated_at")[:20]
+            for sub in qs.order_by("-is_active", "-updated_at")[:20]
         ]
-        # Активные сверху, затем по дате; одинаковые лейблы различаются датой в serialize_device
         prefs = get_or_create_preferences(request.user)
         return Response({
             "configured": webpush_configured(),

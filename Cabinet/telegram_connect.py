@@ -231,6 +231,7 @@ def disconnect_telegram(user: User) -> None:
 
 
 def update_notification_preferences(user: User, data: dict) -> dict:
+    """Patch only provided fields. Never reset unspecified prefs to defaults."""
     prefs = get_or_create_preferences(user)
     bool_fields = (
         "notify_lesson_created",

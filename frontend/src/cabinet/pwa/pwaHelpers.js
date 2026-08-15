@@ -133,32 +133,83 @@ export async function subscribeWebPush({ publicKey, deviceLabel = "" } = {}) {
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
     throw new Error("Браузер не поддерживает push-уведомления");
   }
-  const permission = await Notification.requestPermission();
-  if (permission !== "granted") {
-    throw new Error("Разрешение на уведомления не выдано");
+  const alreadyGranted = typeof Notification !== "undefined"
+    && Notification.permission === "granted";
+  if (!alreadyGranted) {
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      throw new Error("Разрешение на уведомления не выдано");
+    }
   }
   const reg = await getPushRegistration();
   if (!reg?.pushManager) {
     throw new Error("Service Worker ещё не готов — обновите страницу и попробуйте снова");
   }
-  // Старая подписка после смены VAPID-ключей становится невалидной —
-  // всегда пересоздаём при явном «Включить».
-  const existing = await reg.pushManager.getSubscription();
-  if (existing) {
+
+  let existing = await reg.pushManager.getSubscription();
+  if (existing && !subscriptionMatchesVapidKey(existing, publicKey)) {
+    // Только смена VAPID-ключей делает старую подписку невалидной.
     try {
       await existing.unsubscribe();
     } catch {
       /* ignore */
     }
+    existing = null;
   }
-  const subscription = await reg.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(publicKey),
-  });
-  return {
-    subscription: subscription.toJSON(),
-    device_label: deviceLabel,
-  };
+  if (existing) {
+    return {
+      subscription: existing.toJSON(),
+      device_label: deviceLabel,
+      reused: true,
+    };
+  }
+
+  try {
+    const subscription = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+    return {
+      subscription: subscription.toJSON(),
+      device_label: deviceLabel,
+      reused: false,
+    };
+  } catch (err) {
+    if (alreadyGranted && isPushGestureError(err)) {
+      const gestureError = new Error("NEED_USER_GESTURE");
+      gestureError.code = "need_user_gesture";
+      throw gestureError;
+    }
+    throw err;
+  }
+}
+
+function subscriptionMatchesVapidKey(subscription, publicKey) {
+  try {
+    const raw = subscription?.options?.applicationServerKey;
+    if (!raw) return true;
+    const existing = new Uint8Array(raw);
+    const expected = urlBase64ToUint8Array(publicKey);
+    if (existing.length !== expected.length) return false;
+    for (let i = 0; i < existing.length; i += 1) {
+      if (existing[i] !== expected[i]) return false;
+    }
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function isPushGestureError(err) {
+  const name = err?.name || "";
+  const message = String(err?.message || "").toLowerCase();
+  return (
+    name === "NotAllowedError"
+    || name === "AbortError"
+    || message.includes("gesture")
+    || message.includes("user activation")
+    || message.includes("not granted")
+  );
 }
 
 function withTimeout(promise, ms, fallback) {
@@ -205,13 +256,18 @@ async function getPushRegistration() {
 }
 
 export async function getCurrentPushEndpoint() {
+  const sub = await getCurrentPushSubscription();
+  return sub?.endpoint || "";
+}
+
+export async function getCurrentPushSubscription() {
   try {
     const reg = await getPushRegistration();
-    if (!reg?.pushManager) return "";
+    if (!reg?.pushManager) return null;
     const sub = await reg.pushManager.getSubscription();
-    return sub?.endpoint || "";
+    return sub ? sub.toJSON() : null;
   } catch {
-    return "";
+    return null;
   }
 }
 

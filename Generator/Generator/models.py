@@ -440,6 +440,12 @@ class SubTopic(models.Model):
         return self.title
 
 
+class UpdateQuerySet(models.QuerySet):
+    def visible(self):
+        """Опубликованные обновления: show=True, сначала новые."""
+        return self.filter(show=True).order_by("-created")
+
+
 class Update(models.Model):
     """Обновления платформы: заголовок, краткое описание и время добавления."""
     SHOW_CHOICES = [
@@ -448,6 +454,20 @@ class Update(models.Model):
     ]
     title = models.CharField(verbose_name="Заголовок", max_length=255)
     description = models.TextField(verbose_name="Краткое описание", blank=True)
+    url = models.CharField(
+        verbose_name="Ссылка",
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="Необязательно. Полный URL или путь на сайте, например /cabinet",
+    )
+    link_text = models.CharField(
+        verbose_name="Текст ссылки",
+        max_length=120,
+        blank=True,
+        default="",
+        help_text="Необязательно. Если пусто и указана ссылка, на сайте будет «Подробнее →».",
+    )
     created = models.DateTimeField(
         verbose_name="Время добавления",
         auto_now_add=True,
@@ -459,6 +479,8 @@ class Update(models.Model):
         choices=SHOW_CHOICES,
         help_text="Показывать это обновление пользователям",
     )
+
+    objects = UpdateQuerySet.as_manager()
 
     class Meta:
         verbose_name = "Обновление"

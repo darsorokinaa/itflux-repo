@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import {
+  ensureCabinetPushSubscription,
   fetchPushDevices,
   fetchPushVapidKey,
+  fetchNotificationPreferences,
   subscribeCabinetPush,
   sendPushTestNotification,
 } from "../../utils/cabinetAuth";
@@ -13,8 +15,8 @@ import {
 import "./pwa-prompts.css";
 
 /**
- * Show enable prompt when push is configured but this browser has no active subscription.
- * Also show when permission is already "granted" but the server has 0 devices (re-bind needed).
+ * Show enable prompt only when the browser has not granted permission yet.
+ * If permission is already granted, restore the existing subscription silently.
  */
 export default function PwaEnableNotificationsPrompt({ role = "teacher", onEnabled }) {
   const [visible, setVisible] = useState(false);
@@ -38,16 +40,43 @@ export default function PwaEnableNotificationsPrompt({ role = "teacher", onEnabl
       return undefined;
     }
 
-    Promise.all([
-      fetchPushVapidKey().catch(() => ({ configured: false })),
-      fetchPushDevices().catch(() => ({ active_count: 0 })),
-    ]).then(([vapid, devices]) => {
+    (async () => {
+      const vapid = await fetchPushVapidKey().catch(() => ({ configured: false }));
       if (cancelled) return;
       const ok = Boolean(vapid?.configured);
       setConfigured(ok);
-      const needsSubscribe = ok && (devices?.active_count || 0) === 0;
+      if (!ok) {
+        setVisible(false);
+        return;
+      }
+
+      if (perm === "granted") {
+        const restored = await ensureCabinetPushSubscription().catch(() => null);
+        if (cancelled) return;
+        if (restored?.ok || restored?.device) {
+          setVisible(false);
+          return;
+        }
+        if (restored?.needs_user_gesture) {
+          setVisible(true);
+          return;
+        }
+        setVisible(false);
+        return;
+      }
+
+      const [devices, prefs] = await Promise.all([
+        fetchPushDevices().catch(() => ({ active_count: 0 })),
+        fetchNotificationPreferences().catch(() => null),
+      ]);
+      if (cancelled) return;
+      if (prefs && prefs.push_enabled === false) {
+        setVisible(false);
+        return;
+      }
+      const needsSubscribe = (devices?.active_count || 0) === 0;
       setVisible(needsSubscribe);
-    });
+    })();
 
     return () => {
       cancelled = true;
@@ -60,7 +89,7 @@ export default function PwaEnableNotificationsPrompt({ role = "teacher", onEnabl
     setBusy(true);
     setError("");
     try {
-      await subscribeCabinetPush();
+      await subscribeCabinetPush("", { mode: "enable" });
       try {
         await sendPushTestNotification();
       } catch {

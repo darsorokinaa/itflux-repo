@@ -3621,11 +3621,26 @@ def api_support_info(request, level, subject):
     return JsonResponse({"items": result})
 
 
+def _public_update_href(value: str) -> str:
+    """Разрешаем только относительные пути сайта и http(s)."""
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("/") and not raw.startswith("//"):
+        return raw
+    parsed = urlparse(raw)
+    if parsed.scheme in ("http", "https") and parsed.netloc:
+        return raw
+    return ""
+
+
 @require_http_methods(["GET"])
 def api_updates(request):
     """Список обновлений платформы (только с show=True), по убыванию времени добавления."""
     items = list(
-        Update.objects.filter(show=True).order_by("-created")[:20].values("id", "title", "description", "created")
+        Update.objects.visible()[:20].values(
+            "id", "title", "description", "created", "url", "link_text"
+        )
     )
     for item in items:
         d = item.get("created")
@@ -3640,6 +3655,8 @@ def api_updates(request):
             item["created_display"] = ""
             item["created_iso"] = ""
         del item["created"]
+        item["url"] = _public_update_href(item.get("url") or "")
+        item["link_text"] = (item.get("link_text") or "").strip()
     return JsonResponse({"updates": items})
 
 

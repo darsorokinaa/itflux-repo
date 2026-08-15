@@ -390,6 +390,12 @@ class NotificationDispatcher:
             )
 
         if CHANNEL_TELEGRAM in channels:
+            logger.info(
+                "notify_telegram event=%s recipient=%s pref_enabled=%s",
+                event_type,
+                recipient.pk,
+                True,
+            )
             try:
                 from .telegram_connect import send_telegram_to_user
 

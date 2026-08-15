@@ -327,7 +327,6 @@ def send_homework_review_digests(*, window_minutes: int) -> int:
 
     teachers = User.objects.filter(
         notification_preferences__homework_review_push_mode=mode,
-        notification_preferences__push_enabled=True,
         is_active=True,
     ).distinct()
 
@@ -375,9 +374,9 @@ def send_homework_review_digests(*, window_minutes: int) -> int:
 def send_overdue_homework_digests(*, mode_filter: str | None = None) -> int:
     """Daily or immediate overdue homework summaries for teachers."""
     from .models import Homework, HomeworkSubmission
+    from .notification_time import user_local_now
 
     now = timezone.now()
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     sent = 0
 
     qs = NotificationPreference.objects.filter(notify_overdue_homework=True).select_related("user")
@@ -396,12 +395,18 @@ def send_overdue_homework_digests(*, mode_filter: str | None = None) -> int:
         if mode == "immediate" and mode_filter == "daily":
             continue
 
-        # Already sent today for daily mode
+        local_now = user_local_now(teacher)
+        local_day_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # Daily / in-app digest: respect user's digest_hour in their timezone.
         if mode in ("daily", "in_app_only"):
+            digest_hour = prefs.digest_hour if prefs.digest_hour is not None else 19
+            if int(digest_hour) != local_now.hour:
+                continue
             if Notification.objects.filter(
                 recipient_user=teacher,
                 payload__type="overdue_homework_digest",
-                created_at__gte=today_start,
+                created_at__gte=local_day_start,
             ).exists():
                 continue
 
@@ -453,7 +458,7 @@ def send_overdue_homework_digests(*, mode_filter: str | None = None) -> int:
             },
             push=use_push,
             push_priority="normal",
-            tag=f"overdue-{teacher.pk}-{today_start.date().isoformat()}",
+            tag=f"overdue-{teacher.pk}-{local_day_start.date().isoformat()}",
         )
         sent += 1
     return sent

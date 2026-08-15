@@ -148,6 +148,9 @@ function BoardExcalidrawInner({
     const onWinResize = () => tryReady();
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("resize", onWinResize);
+    window.addEventListener("orientationchange", onWinResize);
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", onWinResize);
 
     // Повторные попытки на случай анимации layout комнаты урока.
     const timers = [50, 150, 400, 1000].map((ms) => window.setTimeout(() => tryReady(), ms));
@@ -156,6 +159,8 @@ function BoardExcalidrawInner({
       ro?.disconnect();
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("resize", onWinResize);
+      window.removeEventListener("orientationchange", onWinResize);
+      vv?.removeEventListener("resize", onWinResize);
       timers.forEach((id) => window.clearTimeout(id));
     };
   }, [api, onHostReadyRef]);

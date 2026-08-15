@@ -5,6 +5,7 @@ import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
   disconnectTelegram,
+  ensureCabinetPushSubscription,
   fetchNotificationPreferences,
   fetchPushDevices,
   getCabinetHomePath,
@@ -418,8 +419,9 @@ export default function CabinetNotificationsSettingsPage() {
   const { toast, showToast } = useSoonToast();
   const ignoreUnloadRef = useRef(false);
   const autosaveTimer = useRef(null);
+  const restoreAttemptedRef = useRef(false);
 
-  const refreshDevicePushStatus = useCallback(async () => {
+  const refreshDevicePushStatus = useCallback(async (deviceList = []) => {
     try {
       const {
         getCurrentPushEndpoint,
@@ -445,7 +447,16 @@ export default function CabinetNotificationsSettingsPage() {
         return;
       }
       const endpoint = await getCurrentPushEndpoint();
-      setDevicePushStatus(endpoint ? "subscribed" : "stale");
+      if (!endpoint) {
+        setDevicePushStatus("stale");
+        return;
+      }
+      const current = (deviceList || []).find((device) => device.is_current);
+      if (current && (current.disabled_by_user || current.is_active === false)) {
+        setDevicePushStatus("disabled_here");
+        return;
+      }
+      setDevicePushStatus("subscribed");
     } catch {
       setDevicePushStatus("unsupported");
     }
@@ -463,8 +474,9 @@ export default function CabinetNotificationsSettingsPage() {
     ]);
     setPrefs(data);
     setSavedPrefs(data);
-    setDevices(pushDevices?.devices || []);
-    await refreshDevicePushStatus();
+    const list = pushDevices?.devices || [];
+    setDevices(list);
+    await refreshDevicePushStatus(list);
     return data;
   }, [refreshDevicePushStatus]);
 
@@ -485,6 +497,25 @@ export default function CabinetNotificationsSettingsPage() {
       cancelled = true;
     };
   }, [user, reload]);
+
+  useEffect(() => {
+    if (loading || devicePushStatus !== "stale") return undefined;
+    if (prefs && prefs.push_enabled === false) return undefined;
+    if (restoreAttemptedRef.current) return undefined;
+    restoreAttemptedRef.current = true;
+    let cancelled = false;
+    ensureCabinetPushSubscription()
+      .then((result) => {
+        if (cancelled || result?.needs_user_gesture) return;
+        if (result?.ok || result?.device) {
+          reload().catch(() => {});
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, devicePushStatus, prefs, reload]);
 
   useEffect(() => {
     const onBeforeUnload = (event) => {
@@ -651,9 +682,14 @@ export default function CabinetNotificationsSettingsPage() {
       description: "Разрешите уведомления в настройках браузера, затем включите снова.",
     },
     stale: {
-      status: "Подписка устарела — включите повторно",
+      status: "Подписка не найдена — можно восстановить",
       tone: "warn",
-      description: "Разрешение есть, но активной подписки на этом устройстве нет.",
+      description: "Разрешение есть, но браузер потерял подписку. Нажмите «Восстановить уведомления».",
+    },
+    disabled_here: {
+      status: "Отключены на этом устройстве",
+      tone: "muted",
+      description: "На этом устройстве уведомления выключены. Другие устройства не затронуты.",
     },
     unsupported: {
       status: "Устройство не поддерживает Web Push",
@@ -752,21 +788,29 @@ export default function CabinetNotificationsSettingsPage() {
               }
               actions={pushConfigured ? (
                 <>
-                  <button
-                    type="button"
-                    className="cb-btn cb-btn--primary cb-btn--sm"
-                    disabled={Boolean(busy) || devicePushStatus === "unsupported"}
-                    onClick={() => runAction(
-                      "push-on",
-                      async () => {
-                        await subscribeCabinetPush();
-                        await sendPushTestNotification();
-                      },
-                      "Тестовое уведомление отправлено",
-                    )}
-                  >
-                    {busy === "push-on" ? "Подключаем…" : "Включить на этом устройстве"}
-                  </button>
+                  {devicePushStatus === "subscribed" ? null : (
+                    <button
+                      type="button"
+                      className="cb-btn cb-btn--primary cb-btn--sm"
+                      disabled={Boolean(busy) || devicePushStatus === "unsupported" || devicePushStatus === "denied"}
+                      onClick={() => runAction(
+                        "push-on",
+                        async () => {
+                          await subscribeCabinetPush("", { mode: "enable" });
+                          await sendPushTestNotification();
+                        },
+                        devicePushStatus === "stale"
+                          ? "Уведомления восстановлены"
+                          : "Тестовое уведомление отправлено",
+                      )}
+                    >
+                      {busy === "push-on"
+                        ? "Подключаем…"
+                        : devicePushStatus === "stale"
+                          ? "Восстановить уведомления"
+                          : "Включить на этом устройстве"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="cb-btn cb-btn--outline cb-btn--sm"
@@ -784,13 +828,13 @@ export default function CabinetNotificationsSettingsPage() {
                   <button
                     type="button"
                     className="cb-btn cb-btn--outline cb-btn--sm"
-                    disabled={Boolean(busy) || devicePushStatus !== "subscribed"}
+                    disabled={Boolean(busy) || (devicePushStatus !== "subscribed" && devicePushStatus !== "disabled_here")}
                     onClick={() => runAction(
                       "push-off",
                       async () => {
-                        const { unsubscribeCurrentPush } = await import("../pwa/pwaHelpers");
-                        const endpoint = await unsubscribeCurrentPush();
-                        if (endpoint) await unsubscribeCabinetPushDevice(endpoint);
+                        const { getCurrentPushEndpoint } = await import("../pwa/pwaHelpers");
+                        const endpoint = await getCurrentPushEndpoint();
+                        if (endpoint) await unsubscribeCabinetPushDevice(endpoint, { reason: "user" });
                       },
                       "Уведомления отключены на этом устройстве",
                     )}
@@ -897,11 +941,7 @@ export default function CabinetNotificationsSettingsPage() {
                             onClick={() => runAction(
                               `dev-${device.id}`,
                               async () => {
-                                if (device.is_current) {
-                                  const { unsubscribeCurrentPush } = await import("../pwa/pwaHelpers");
-                                  await unsubscribeCurrentPush().catch(() => {});
-                                }
-                                await unsubscribeCabinetPushDevice(device.id);
+                                await unsubscribeCabinetPushDevice(device.id, { reason: "user" });
                               },
                               device.is_current
                                 ? "Уведомления отключены на этом устройстве"

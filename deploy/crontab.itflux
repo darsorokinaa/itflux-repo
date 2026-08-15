@@ -19,9 +19,9 @@ LOG=/var/log/itflux
 # Еженедельная финансовая сводка (понедельник, час из prefs.digest_hour)
 15 * * * 1 APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh send_billing_digests --weekly >>/var/log/itflux/cron-billing-weekly.log 2>&1
 
-# Просроченные ДЗ: частый immediate + утренний daily
+# Просроченные ДЗ: частый immediate + daily по prefs.digest_hour (TZ пользователя)
 */30 * * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh send_overdue_homework_digests --mode=immediate >>/var/log/itflux/cron-overdue-immediate.log 2>&1
-30 7 * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh send_overdue_homework_digests --mode=daily >>/var/log/itflux/cron-overdue-daily.log 2>&1
+25 * * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh send_overdue_homework_digests --mode=daily >>/var/log/itflux/cron-overdue-daily.log 2>&1
 
 # Окончание подписки платформы (7/3/1) + автопродление + переход на Старт
 # (наследие notify_subscription_expiring сохранено, но основной job — process_subscriptions)

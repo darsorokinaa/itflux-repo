@@ -768,8 +768,8 @@ class SeasonalThemePreferenceAdmin(admin.ModelAdmin):
 
 @admin.register(PushSubscription)
 class PushSubscriptionAdmin(admin.ModelAdmin):
-    list_display = ("user", "device_label", "is_active", "last_seen_at", "created_at")
-    list_filter = ("is_active",)
+    list_display = ("user", "device_label", "is_active", "disabled_by_user", "last_seen_at", "created_at")
+    list_filter = ("is_active", "disabled_by_user")
     search_fields = ("user__username", "user__email", "endpoint", "device_label")
     readonly_fields = ("created_at", "updated_at", "last_seen_at")
 

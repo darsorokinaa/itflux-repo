@@ -829,3 +829,263 @@ class TelegramChannelAutoTests(TestCase):
         )
         self.assertTrue(result.skipped)
         mock_tg.assert_not_called()
+
+
+class NotificationRegressionScenariosTests(TestCase):
+    """Scenarios A–F: persist prefs, restore push, never auto-enable after opt-out."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="push_reg", password="pass")
+        profile, _ = Profile.objects.update_or_create(
+            user=self.user, defaults={"role": Profile.Role.TEACHER}
+        )
+        Profile.objects.filter(pk=profile.pk).update(role=Profile.Role.TEACHER)
+        profile.refresh_from_db()
+        self.user.profile = profile
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def _fake_pywebpush(self, *, side_effect=None):
+        import sys
+        from types import ModuleType, SimpleNamespace
+
+        previous = sys.modules.get("pywebpush")
+        fake = ModuleType("pywebpush")
+
+        class WebPushException(Exception):
+            def __init__(self, message="", response=None):
+                super().__init__(message)
+                self.response = response
+
+        fake.WebPushException = WebPushException
+        fake.webpush = MagicMock(side_effect=side_effect)
+        sys.modules["pywebpush"] = fake
+
+        def _restore():
+            if previous is None:
+                sys.modules.pop("pywebpush", None)
+            else:
+                sys.modules["pywebpush"] = previous
+
+        self.addCleanup(_restore)
+        return fake, SimpleNamespace
+
+    def test_a_deploy_keeps_push_enabled_and_same_endpoint(self):
+        from Cabinet.webpush import upsert_subscription
+
+        prefs = get_or_create_preferences(self.user)
+        prefs.push_enabled = True
+        prefs.save(update_fields=["push_enabled"])
+        first = upsert_subscription(
+            self.user,
+            endpoint="https://push.example/device-a",
+            p256dh="p" * 30,
+            auth="a" * 20,
+            activate=True,
+        )
+        after_deploy = upsert_subscription(
+            self.user,
+            endpoint="https://push.example/device-a",
+            p256dh="p" * 30,
+            auth="a" * 20,
+            activate=False,
+        )
+        prefs.refresh_from_db()
+        self.assertTrue(prefs.push_enabled)
+        self.assertEqual(first.pk, after_deploy.pk)
+        self.assertTrue(after_deploy.is_active)
+        self.assertEqual(
+            PushSubscription.objects.filter(user=self.user).count(),
+            1,
+        )
+        fake, _ = self._fake_pywebpush()
+        with patch("Cabinet.webpush.webpush_configured", return_value=True), patch(
+            "Cabinet.webpush._load_vapid", return_value=object()
+        ):
+            result = send_web_push_to_user(
+                self.user,
+                title="После обновления",
+                body="ok",
+                create_log=False,
+                force=True,
+            )
+        self.assertEqual(result["sent"], 1)
+        fake.webpush.assert_called_once()
+
+    def test_b_user_disable_survives_sync_after_deploy(self):
+        from Cabinet.webpush import deactivate_endpoint, upsert_subscription
+
+        prefs = get_or_create_preferences(self.user)
+        prefs.push_enabled = True
+        prefs.save(update_fields=["push_enabled"])
+        upsert_subscription(
+            self.user,
+            endpoint="https://push.example/device-b",
+            p256dh="p" * 30,
+            auth="a" * 20,
+            activate=True,
+        )
+        deactivate_endpoint(
+            "https://push.example/device-b",
+            user=self.user,
+            by_user=True,
+        )
+        synced = upsert_subscription(
+            self.user,
+            endpoint="https://push.example/device-b",
+            p256dh="p" * 30,
+            auth="a" * 20,
+            activate=False,
+        )
+        prefs.refresh_from_db()
+        self.assertTrue(prefs.push_enabled)
+        self.assertTrue(synced.disabled_by_user)
+        self.assertFalse(synced.is_active)
+        fake, _ = self._fake_pywebpush()
+        with patch("Cabinet.webpush.webpush_configured", return_value=True), patch(
+            "Cabinet.webpush._load_vapid", return_value=object()
+        ):
+            result = send_web_push_to_user(
+                self.user,
+                title="Не должно уйти",
+                body="x",
+                create_log=False,
+            )
+        fake.webpush.assert_not_called()
+        self.assertEqual(result["reason"], "no_devices")
+
+    def test_c_frontend_resubmits_lost_backend_subscription(self):
+        from Cabinet.webpush import upsert_subscription
+
+        prefs = get_or_create_preferences(self.user)
+        prefs.push_enabled = True
+        prefs.save(update_fields=["push_enabled"])
+        PushSubscription.objects.filter(user=self.user).delete()
+        restored = upsert_subscription(
+            self.user,
+            endpoint="https://push.example/lost-then-found",
+            p256dh="p" * 30,
+            auth="a" * 20,
+            activate=False,
+        )
+        self.assertTrue(restored.is_active)
+        self.assertFalse(restored.disabled_by_user)
+        self.assertEqual(
+            PushSubscription.objects.filter(
+                user=self.user, endpoint="https://push.example/lost-then-found"
+            ).count(),
+            1,
+        )
+
+    def test_d_new_preference_field_does_not_reset_existing(self):
+        prefs = get_or_create_preferences(self.user)
+        prefs.notify_homework = True
+        prefs.notify_payment_received = False
+        prefs.save(update_fields=["notify_homework", "notify_payment_received"])
+        resp = self.client.patch(
+            "/api/cabinet/settings/notifications/",
+            {"notify_new_student": False},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        prefs.refresh_from_db()
+        self.assertTrue(prefs.notify_homework)
+        self.assertFalse(prefs.notify_payment_received)
+        self.assertFalse(prefs.notify_new_student)
+        again = get_or_create_preferences(self.user)
+        self.assertTrue(again.notify_homework)
+        self.assertFalse(again.notify_payment_received)
+
+    def test_e_disabled_type_skips_all_channels(self):
+        prefs = get_or_create_preferences(self.user)
+        prefs.notify_homework = False
+        prefs.notify_system = True
+        prefs.telegram_enabled = True
+        prefs.telegram_chat_id = "111"
+        prefs.in_app_enabled = True
+        prefs.push_enabled = True
+        prefs.save()
+        self.assertEqual(self.user.profile.role, Profile.Role.TEACHER)
+        with patch("Cabinet.telegram_connect.send_telegram_to_user") as mock_tg, patch(
+            "Cabinet.webpush.send_web_push_to_user"
+        ) as mock_push:
+            skipped = NotificationDispatcher.notify(
+                self.user,
+                NotificationEventType.HOMEWORK_SUBMITTED,
+                title="ДЗ",
+                message="x",
+                skip_actor=False,
+            )
+            other = NotificationDispatcher.notify(
+                self.user,
+                NotificationEventType.SYSTEM_ANNOUNCEMENT,
+                title="Система",
+                message="y",
+                skip_actor=False,
+                create_push=False,
+                create_telegram=True,
+            )
+        self.assertTrue(skipped.skipped)
+        self.assertIn("pref_disabled", skipped.reason)
+        mock_tg.assert_called_once()
+        mock_push.assert_not_called()
+        self.assertFalse(other.skipped)
+        self.assertEqual(
+            Notification.objects.filter(
+                recipient_user=self.user,
+                event_type=NotificationEventType.HOMEWORK_SUBMITTED,
+            ).count(),
+            0,
+        )
+
+    def test_f_push_off_in_app_on_creates_only_cabinet(self):
+        prefs = get_or_create_preferences(self.user)
+        prefs.push_enabled = False
+        prefs.in_app_enabled = True
+        prefs.notify_system = True
+        prefs.save()
+        with patch("Cabinet.webpush.send_web_push_to_user") as mock_push:
+            result = NotificationDispatcher.notify(
+                self.user,
+                NotificationEventType.SYSTEM_ANNOUNCEMENT,
+                title="Только кабинет",
+                message="x",
+                skip_actor=False,
+            )
+        self.assertFalse(result.skipped, result.reason)
+        self.assertIsNotNone(result.in_app)
+        self.assertIn("in_app", result.channels)
+        self.assertNotIn("push", result.channels)
+        mock_push.assert_not_called()
+
+    def test_gone_subscription_does_not_disable_global_push(self):
+        prefs = get_or_create_preferences(self.user)
+        prefs.push_enabled = True
+        prefs.save(update_fields=["push_enabled"])
+        sub = PushSubscription.objects.create(
+            user=self.user,
+            endpoint="https://push.example/gone",
+            p256dh="p" * 30,
+            auth="a" * 20,
+            is_active=True,
+        )
+        fake, SimpleNamespace = self._fake_pywebpush()
+        fake.webpush.side_effect = fake.WebPushException(
+            "410 Gone",
+            response=SimpleNamespace(status_code=410),
+        )
+        with patch("Cabinet.webpush.webpush_configured", return_value=True), patch(
+            "Cabinet.webpush._load_vapid", return_value=object()
+        ):
+            send_web_push_to_user(
+                self.user,
+                title="t",
+                body="b",
+                create_log=False,
+                force=True,
+            )
+        sub.refresh_from_db()
+        prefs.refresh_from_db()
+        self.assertFalse(sub.is_active)
+        self.assertTrue(prefs.push_enabled)
+        self.assertFalse(sub.disabled_by_user)

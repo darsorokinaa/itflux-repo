@@ -1,5 +1,7 @@
 /* Service worker «Цифровой поток» — Web Push + безопасное обновление.
  * Не кэширует HTML/API/материалы (нет fetch handler, нет runtime cache API store).
+ * URL всегда /sw.js (без hash сборки), scope = / — иначе каждый deploy
+ * создавал бы новую регистрацию и терял PushSubscription.
  * Плейсхолдер версии подменяется при vite build. */
 const APP_VERSION = "__ITFLUX_APP_VERSION__";
 const SW_VERSION = `itflux-sw-${APP_VERSION}`;

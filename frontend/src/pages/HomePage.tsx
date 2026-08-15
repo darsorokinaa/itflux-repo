@@ -7,6 +7,7 @@ import {
   CompassIcon,
 } from "lucide-react";
 import HeroSection from "../components/HeroSection";
+import HomeUpdatesBlock from "../components/HomeUpdatesBlock";
 import { type LevelId } from "../data/levels";
 import { formatTasksCount } from "../utils/formatTasksCount";
 import { formatIntRu } from "../utils/formatIntRu";
@@ -123,6 +124,7 @@ export default function HomePage() {
 
       <div className="digital-flow-page__wrap">
         <main className="home-page__main">
+          <HomeUpdatesBlock />
           <HeroSection
             tasksCountLabel={heroTasksCountLabel}
             subjectsCountLabel={heroSubjectsCountLabel}

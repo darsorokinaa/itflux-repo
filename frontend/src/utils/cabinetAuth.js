@@ -173,7 +173,7 @@ export async function logoutCabinetAndDetachPush() {
       await Promise.race([
         cabinetFetch("/push/unsubscribe/", {
           method: "POST",
-          body: JSON.stringify({ endpoint }),
+          body: JSON.stringify({ endpoint, reason: "logout" }),
         }).catch(() => null),
         new Promise((resolve) => {
           window.setTimeout(() => resolve(null), 2000);
@@ -231,7 +231,7 @@ export async function sendPushTestNotification({ allDevices = false } = {}) {
   });
 }
 
-export async function subscribeCabinetPush(deviceLabel = "") {
+export async function subscribeCabinetPush(deviceLabel = "", { mode = "enable" } = {}) {
   const vapid = await fetchPushVapidKey();
   if (!vapid?.configured || !vapid.public_key) {
     throw new Error("Web Push не настроен на сервере");
@@ -240,37 +240,59 @@ export async function subscribeCabinetPush(deviceLabel = "") {
   const payload = await subscribeWebPush({
     publicKey: vapid.public_key,
     deviceLabel,
+    mode,
   });
   return cabinetFetch("/push/subscribe/", {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, mode }),
   });
 }
 
 /**
- * If the browser already allowed notifications but the server has no active
- * subscription for this user, re-subscribe silently (no permission prompt).
+ * Restore Web Push after deploy / reload without a permission prompt.
+ *
+ * If the browser already has a PushSubscription, sync it (upsert by endpoint).
+ * If permission is granted, the user has push enabled, and the subscription
+ * was lost, try to recreate it. Never auto-enable after the user turned push off.
  */
 export async function ensureCabinetPushSubscription() {
   try {
-    const { notificationPermission } = await import("../cabinet/pwa/pwaHelpers");
-    if (notificationPermission() !== "granted") return null;
-    const [vapid, devices] = await Promise.all([
-      fetchPushVapidKey().catch(() => null),
-      fetchPushDevices().catch(() => null),
-    ]);
-    if (!vapid?.configured) return null;
-    if ((devices?.active_count || 0) > 0) return devices;
-    return await subscribeCabinetPush();
+    const helpers = await import("../cabinet/pwa/pwaHelpers");
+    if (helpers.notificationPermission() !== "granted") return null;
+    const vapid = await fetchPushVapidKey().catch(() => null);
+    if (!vapid?.configured || !vapid.public_key) return null;
+
+    const existing = await helpers.getCurrentPushSubscription();
+    if (existing) {
+      return await cabinetFetch("/push/subscribe/", {
+        method: "POST",
+        body: JSON.stringify({
+          subscription: existing,
+          mode: "sync",
+        }),
+      });
+    }
+
+    const prefs = await fetchNotificationPreferences().catch(() => null);
+    if (prefs && prefs.push_enabled === false) return null;
+
+    try {
+      return await subscribeCabinetPush("", { mode: "sync" });
+    } catch (err) {
+      if (err?.code === "need_user_gesture") {
+        return { needs_user_gesture: true };
+      }
+      return null;
+    }
   } catch {
     return null;
   }
 }
 
-export function unsubscribeCabinetPushDevice(deviceIdOrEndpoint) {
+export function unsubscribeCabinetPushDevice(deviceIdOrEndpoint, { reason = "user" } = {}) {
   const body = typeof deviceIdOrEndpoint === "number" || /^\d+$/.test(String(deviceIdOrEndpoint))
-    ? { device_id: Number(deviceIdOrEndpoint) }
-    : { endpoint: String(deviceIdOrEndpoint || "") };
+    ? { device_id: Number(deviceIdOrEndpoint), reason }
+    : { endpoint: String(deviceIdOrEndpoint || ""), reason };
   return cabinetFetch("/push/unsubscribe/", {
     method: "POST",
     body: JSON.stringify(body),

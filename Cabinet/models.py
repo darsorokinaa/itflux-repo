@@ -2582,6 +2582,12 @@ class PushSubscription(models.Model):
     user_agent = models.CharField("User-Agent", max_length=500, blank=True)
     device_label = models.CharField("Устройство", max_length=120, blank=True)
     is_active = models.BooleanField("Активна", default=True)
+    disabled_by_user = models.BooleanField(
+        "Отключена пользователем",
+        default=False,
+        help_text="True, если пользователь нажал «Отключить на этом устройстве». "
+        "Не путать с истекшей подпиской (404/410).",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     last_seen_at = models.DateTimeField(null=True, blank=True)

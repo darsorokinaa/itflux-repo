@@ -95,6 +95,10 @@ import {
   type BoardLoadPhase,
 } from "../boards/boardLifecycle";
 import { compactBoardScene } from "../boards/boardSceneCompact";
+import {
+  bindBoardVisualViewport,
+  lockBoardPageScroll,
+} from "../boards/boardMobileShell";
 import "../styles/boards.css";
 
 const TEACHER_CURSOR = { background: "#2563eb", stroke: "#1d4ed8" };
@@ -149,6 +153,7 @@ type ExcalidrawAPI = {
   updateScene: (payload: Record<string, unknown>) => void;
   addFiles?: (files: unknown[]) => void;
   resetScene?: () => void;
+  refresh?: () => void;
 };
 
 /** Dev-only диагностика синка доски. Не пишет содержимое dataURL/base64. */
@@ -405,6 +410,8 @@ export default function CabinetBoardEditorPage() {
   const pendingRemoteSceneFrameRef = useRef<{ scene: CollabScene; meta: { fromSaved?: boolean; version?: number; cleared?: boolean; lite?: boolean } } | null>(null);
   const cursorApplyRafRef = useRef<number | null>(null);
   const [followingTeacher, setFollowingTeacher] = useState(false);
+  const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
+  const [cssImmersive, setCssImmersive] = useState(false);
   const boardNamesRef = useRef({ owner: "", student: "" });
   const uploadingFileIdsRef = useRef(new Set<string>());
   /** Постоянные API URL вне Excalidraw — BinaryFileData не сохраняет itfluxStableURL. */
@@ -2424,6 +2431,31 @@ export default function CabinetBoardEditorPage() {
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [exportOpen, moreOpen]);
 
+  useEffect(() => lockBoardPageScroll(), []);
+
+  useEffect(() => {
+    const onFs = () => {
+      const active = Boolean(document.fullscreenElement);
+      setIsNativeFullscreen(active);
+      if (active) setCssImmersive(false);
+    };
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+
+  useEffect(() => {
+    return bindBoardVisualViewport(
+      () => editorRootRef.current,
+      () => {
+        try {
+          apiRef.current?.refresh?.();
+        } catch {
+          /* ignore */
+        }
+      },
+    );
+  }, [loading, loadPhase, board]);
+
   const applyBackground = (color: string) => {
     setBgColor(color);
     bgColorRef.current = color;
@@ -2628,15 +2660,25 @@ export default function CabinetBoardEditorPage() {
   };
 
   const toggleFullscreen = async () => {
+    const node = editorRootRef.current;
     try {
-      if (!document.fullscreenElement) {
-        await document.documentElement.requestFullscreen();
-      } else {
+      if (document.fullscreenElement) {
         await document.exitFullscreen();
+        return;
+      }
+      if (cssImmersive) {
+        setCssImmersive(false);
+        return;
+      }
+      const target = node || document.documentElement;
+      if (target.requestFullscreen) {
+        await target.requestFullscreen();
+        return;
       }
     } catch {
-      showNotice("Полноэкранный режим недоступен");
+      /* iOS Safari often rejects Fullscreen API */
     }
+    setCssImmersive(true);
   };
 
   const handleImageUpload = async (
@@ -2671,10 +2713,18 @@ export default function CabinetBoardEditorPage() {
 
   if (loading || loadPhase === "loading_scene" || loadPhase === "loading_files") {
     return (
-      <div className="cb-board-editor" aria-busy="true">
+      <div className="cb-board-editor" aria-busy="true" ref={editorRootRef}>
+        <header className="cb-board-editor__top">
+          <div className="cb-board-editor__left">
+            <Link to="/cabinet/boards" className="cb-board-editor__back" aria-label="Назад">
+              <CabinetIcon name="arrowLeft" />
+            </Link>
+            <h1 className="cb-board-editor__title cb-board-editor__title--readonly">Доска</h1>
+          </div>
+        </header>
         <div className="cb-board-editor__skeleton">
-          <p>{phaseLabel(loadPhase)}</p>
-          <p className="cb-board-editor__skeleton-hint">Открываем доску</p>
+          <p>Загружаем доску…</p>
+          <p className="cb-board-editor__skeleton-hint">{phaseLabel(loadPhase)}</p>
         </div>
       </div>
     );
@@ -2682,7 +2732,7 @@ export default function CabinetBoardEditorPage() {
 
   if (loadError || loadPhase === "error" || !board || !initialData) {
     return (
-      <div className="cb-board-editor">
+      <div className="cb-board-editor" ref={editorRootRef}>
         <div className="cb-board-editor__top">
           <Link to="/cabinet/boards" className="cb-board-editor__back" aria-label="Назад">
             <CabinetIcon name="arrowLeft" />
@@ -2751,6 +2801,7 @@ export default function CabinetBoardEditorPage() {
     burgerOpen ? "cb-board-editor--burger" : "",
     hasSelection ? "cb-board-editor--selection" : "",
     boardTheme === "dark" ? "cb-board-editor--dark" : "",
+    cssImmersive ? "cb-board-editor--immersive" : "",
   ].filter(Boolean).join(" ");
 
   return (
@@ -2825,7 +2876,7 @@ export default function CabinetBoardEditorPage() {
             </div>
           ) : null}
           {collaborative && !canManage ? (
-            <div className="cb-board-editor__follow" role="group" aria-label="Слежение за учителем">
+            <div className="cb-board-editor__follow cb-board-editor__desktop-only" role="group" aria-label="Слежение за учителем">
               {followingTeacher ? (
                 <button
                   type="button"
@@ -2866,11 +2917,11 @@ export default function CabinetBoardEditorPage() {
 
         <div className="cb-board-editor__right">
           {allowExport ? (
-            <div className="cb-board-editor__menu">
+            <div className="cb-board-editor__menu cb-board-editor__desktop-only">
               <button
                 type="button"
                 className="cb-board-editor__iconbtn"
-                onClick={() => { setExportOpen((v) => !v); setMoreOpen(false); }}
+                onClick={() => { setExportOpen((v) => !v); setMoreOpen(false); setBurgerOpen(false); }}
                 aria-label="Экспорт"
                 title="Экспорт"
               >
@@ -2891,17 +2942,17 @@ export default function CabinetBoardEditorPage() {
             type="button"
             className="cb-board-editor__iconbtn"
             onClick={toggleFullscreen}
-            aria-label="Полный экран"
-            title="Полный экран"
+            aria-label={isNativeFullscreen || cssImmersive ? "Выйти из полного экрана" : "На весь экран"}
+            title={isNativeFullscreen || cssImmersive ? "Выйти из полного экрана" : "На весь экран"}
           >
-            <CabinetIcon name="expand" />
+            <CabinetIcon name={isNativeFullscreen || cssImmersive ? "close" : "expand"} />
           </button>
 
           <div className="cb-board-editor__menu">
             <button
               type="button"
               className="cb-board-editor__iconbtn"
-              onClick={() => { setMoreOpen((v) => !v); setExportOpen(false); }}
+              onClick={() => { setMoreOpen((v) => !v); setExportOpen(false); setBurgerOpen(false); }}
               aria-label="Ещё"
               title="Ещё"
               aria-expanded={moreOpen}
@@ -2910,6 +2961,32 @@ export default function CabinetBoardEditorPage() {
             </button>
             {moreOpen ? (
               <div className="cb-board-editor__menu-panel" role="menu">
+                {collaborative && !canManage ? (
+                  <div className="cb-board-editor__mobile-only">
+                    {followingTeacher ? (
+                      <button type="button" onClick={() => { setMoreOpen(false); stopFollowTeacher("Слежение выключено"); }}>
+                        Выключить слежение
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => { setMoreOpen(false); startFollowTeacher(); }}>
+                        Следить за учителем
+                      </button>
+                    )}
+                    {!followingTeacher ? (
+                      <button type="button" onClick={() => { setMoreOpen(false); returnToTeacherViewport(); }}>
+                        К области учителя
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                {allowExport ? (
+                  <div className="cb-board-editor__mobile-only">
+                    <button type="button" onClick={() => { setMoreOpen(false); void handleExportPng(); }}>Скачать PNG</button>
+                    <button type="button" onClick={() => { setMoreOpen(false); void handleExportSvg(); }}>Скачать SVG</button>
+                    <button type="button" onClick={() => { setMoreOpen(false); void handleExportExcalidraw(); }}>Скачать .excalidraw</button>
+                    <button type="button" onClick={() => { setMoreOpen(false); void handleCopyImage(); }}>Копировать изображение</button>
+                  </div>
+                ) : null}
                 {canManage ? (
                   <button type="button" onClick={() => { setMoreOpen(false); setAccessOpen(true); }}>
                     Настройки доступа
@@ -2940,7 +3017,7 @@ export default function CabinetBoardEditorPage() {
 
       <div className="cb-board-editor__canvas">
         {!excalidrawReady ? (
-          <div className="cb-board-editor__skeleton">Загрузка редактора…</div>
+          <div className="cb-board-editor__skeleton">Загружаем доску…</div>
         ) : null}
 
         {/* Панель настроек холста — взаимоисключаема с SelectedShapeActions */}

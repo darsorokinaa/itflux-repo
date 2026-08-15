@@ -14,7 +14,7 @@ from .choices import NotificationChannel, NotificationStatus
 from .models import Notification, PushDeliveryLog, PushSubscription
 from .notification_links import resolve_notification_url
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("cabinet.notifications")
 
 
 def _prefs(user):
@@ -147,7 +147,16 @@ def _record_delivery(
             error_message=(error_message or "")[:500],
         )
     except Exception:
-        logger.exception("Failed to write PushDeliveryLog for user %s", user.pk)
+        logger.exception("push_log_failed user=%s", user.pk)
+    logger.info(
+        "push_delivery event=%s user=%s channel=push sub=%s found=%s status=%s http=%s",
+        (event_type or "")[:64],
+        user.pk,
+        subscription.pk if subscription else None,
+        bool(subscription),
+        status,
+        http_status,
+    )
 
 
 def send_web_push_to_user(
@@ -174,6 +183,11 @@ def send_web_push_to_user(
     """
     empty = {"sent": 0, "active": 0, "reason": "", "errors": []}
     if not webpush_configured():
+        logger.info(
+            "push_skip event=%s user=%s reason=not_configured",
+            event_type or "",
+            user.pk,
+        )
         return {**empty, "reason": "not_configured"}
 
     prefs = _prefs(user)
@@ -237,6 +251,11 @@ def send_web_push_to_user(
         qs = qs.filter(endpoint=only_endpoint)
     qs = list(qs)
     if not qs:
+        logger.info(
+            "push_skip event=%s user=%s reason=no_devices",
+            resolved_event,
+            user.pk,
+        )
         return {**empty, "reason": "no_devices"}
 
     for sub in qs:
@@ -282,7 +301,13 @@ def send_web_push_to_user(
             status_code = getattr(getattr(exc, "response", None), "status_code", None)
             err_text = str(exc)[:300]
             errors.append(err_text)
-            logger.info("Web push failed for sub %s: %s", sub.pk, exc)
+            logger.info(
+                "push_failed event=%s user=%s sub=%s http=%s",
+                resolved_event,
+                user.pk,
+                sub.pk,
+                status_code,
+            )
             # 404/410 — endpoint мёртв; 401/403 + pkhash — подписка от другого VAPID
             low = err_text.lower()
             key_mismatch = "pkhash" in low or "mismatch" in low
@@ -299,7 +324,7 @@ def send_web_push_to_user(
                     subscription=sub,
                     notification=notification,
                     event_type=resolved_event,
-                    status=PushDeliveryLog.DeliveryStatus.INVALID_SUBSCRIPTION,
+                    status=PushDeliveryLog.DeliveryStatus.GONE,
                     http_status=status_code,
                     error_message=err_text,
                 )
@@ -471,7 +496,14 @@ def upsert_subscription(
     auth: str,
     user_agent: str = "",
     device_label: str = "",
+    activate: bool = True,
 ) -> PushSubscription:
+    """Create or update a subscription identified by endpoint (never duplicate).
+
+    activate=True — явное «Включить на этом устройстве»: снимает disabled_by_user.
+    activate=False — тихая синхронизация после обновления страницы/deploy:
+    не включает устройство, которое пользователь сам отключил.
+    """
     endpoint = (endpoint or "").strip()
     p256dh = (p256dh or "").strip()
     auth = (auth or "").strip()
@@ -481,6 +513,7 @@ def upsert_subscription(
     # Re-bind endpoint to current user (logout / switch account on same device)
     PushSubscription.objects.filter(endpoint=endpoint).exclude(user=user).update(
         is_active=False,
+        disabled_by_user=False,
     )
 
     key_version = vapid_key_fingerprint()
@@ -494,6 +527,7 @@ def upsert_subscription(
             "user_agent": (user_agent or "")[:500],
             "device_label": (auto_label or "")[:120],
             "is_active": True,
+            "disabled_by_user": False,
             "last_seen_at": timezone.now(),
             "vapid_key_version": key_version,
         },
@@ -507,18 +541,38 @@ def upsert_subscription(
             sub.device_label = device_label[:120]
         elif not sub.device_label:
             sub.device_label = (auto_label or "")[:120]
-        sub.is_active = True
         sub.last_seen_at = timezone.now()
         sub.vapid_key_version = key_version
+        if activate:
+            sub.disabled_by_user = False
+            sub.is_active = True
+        elif sub.disabled_by_user:
+            sub.is_active = False
+        else:
+            sub.is_active = True
         sub.save()
+    logger.info(
+        "push_upsert user=%s sub=%s created=%s active=%s disabled_by_user=%s activate=%s",
+        user.pk,
+        sub.pk,
+        created,
+        sub.is_active,
+        sub.disabled_by_user,
+        activate,
+    )
     return sub
 
 
-def deactivate_endpoint(endpoint: str, user: User | None = None) -> int:
+def deactivate_endpoint(
+    endpoint: str,
+    user: User | None = None,
+    *,
+    by_user: bool = False,
+) -> int:
     qs = PushSubscription.objects.filter(endpoint=(endpoint or "").strip())
     if user is not None:
         qs = qs.filter(user=user)
-    return qs.update(is_active=False)
+    return qs.update(is_active=False, disabled_by_user=by_user)
 
 
 def deactivate_user_subscriptions(user: User) -> int:
@@ -593,6 +647,7 @@ def serialize_device(sub: PushSubscription, *, current_endpoint: str | None = No
         "last_seen_at": sub.last_seen_at.isoformat() if sub.last_seen_at else None,
         "last_error_at": sub.last_error_at.isoformat() if sub.last_error_at else None,
         "is_active": sub.is_active,
+        "disabled_by_user": bool(sub.disabled_by_user),
         "is_current": is_current,
         "vapid_key_version": sub.vapid_key_version or "",
     }

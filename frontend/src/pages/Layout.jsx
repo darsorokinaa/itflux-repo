@@ -26,7 +26,7 @@ function Layout() {
   const isBoardEditorPage =
     /^\/cabinet\/boards\/[^/]+$/.test(pathNorm)
     || /^\/teacher\/boards\/[^/]+$/.test(pathNorm);
-  const isChromelessPage = isLessonViewerPage || isInteractivePlayPage;
+  const isChromelessPage = isLessonViewerPage || isInteractivePlayPage || isBoardEditorPage;
   /** Экзамен/вариант: своя залипающая панель действий снизу — нижнюю навигацию там не показываем. */
   const isExamVariantPage = /^\/(oge|ege|vpr)\/[^/]+\/variant\//.test(pathNorm);
   const isMarketingHome =

@@ -561,13 +561,18 @@ class CatalogContentViewDedupAdmin(admin.ModelAdmin):
 
 @admin.register(Update)
 class UpdateAdmin(admin.ModelAdmin):
-    list_display = ("id", "created", "title", "show")
+    list_display = ("id", "created", "title", "show", "has_link")
     list_editable = ("show",)
     list_filter = ("show",)
-    search_fields = ("title", "description")
+    search_fields = ("title", "description", "url", "link_text")
     date_hierarchy = "created"
     ordering = ["-created"]
     readonly_fields = ("created",)
+    fields = ("title", "description", "url", "link_text", "show", "created")
+
+    @admin.display(description="Ссылка", boolean=True)
+    def has_link(self, obj):
+        return bool((obj.url or "").strip())
 
 
 @admin.register(ErrorReport)
