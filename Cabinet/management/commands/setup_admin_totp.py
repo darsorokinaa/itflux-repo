@@ -83,6 +83,15 @@ class Command(BaseCommand):
                     "Передайте --ensure-staff, чтобы выдать доступ в /admin/."
                 )
 
+        allowed = getattr(settings, "ADMIN_OTP_ALLOWED_USERNAMES", None)
+        if allowed is not None and username.strip().lower() not in allowed:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"OTP-вход в /admin/ сейчас разрешён только: {', '.join(sorted(allowed))}. "
+                    f"{username} устройство получит, но войти не сможет, пока ограничение не снимут."
+                )
+            )
+
         if options["replace"]:
             deleted, _ = TOTPDevice.objects.filter(user=user).delete()
             self.stdout.write(f"Удалено устройств: {deleted}")

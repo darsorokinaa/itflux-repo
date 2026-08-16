@@ -325,6 +325,16 @@ def create_single_event(
         if item is not None:
             PlanSyncService.link_event_to_plan(event, item)
             event.refresh_from_db()
+        else:
+            from .lesson_plan_content_sync import LessonLearningPlanSyncService
+
+            LessonLearningPlanSyncService.attach_event_to_student_plan(event, teacher=teacher)
+            event.refresh_from_db()
+    else:
+        from .lesson_plan_content_sync import LessonLearningPlanSyncService
+
+        LessonLearningPlanSyncService.attach_event_to_student_plan(event, teacher=teacher)
+        event.refresh_from_db()
 
     log_change(event, changed_by=teacher, change_type=ScheduleChangeType.CREATED, new_data=event_snapshot(event))
     if notify and data.get("notify_participants", True):
@@ -431,16 +441,23 @@ def create_series(
     item_id = series_data.get("lesson_plan_item") or series_data.get("lesson_plan_item_id")
     if item_id:
         first_item = LessonPlanItem.objects.filter(pk=item_id).first()
+    skip_plan = bool(series_data.get("skip_plan") or series_data.get("unplanned"))
     if first_item is not None and events:
         PlanSyncService.link_event_to_plan(events[0], first_item)
         events[0].refresh_from_db()
-    if series_data.get("skip_plan") or series_data.get("unplanned"):
+    if skip_plan:
         from .choices import LessonContentSource
 
         for event in events:
             event.plan_sync_enabled = False
             event.content_source = LessonContentSource.MANUAL
             event.save(update_fields=["plan_sync_enabled", "content_source", "updated_at"])
+    else:
+        from .lesson_plan_content_sync import LessonLearningPlanSyncService
+
+        for event in events:
+            LessonLearningPlanSyncService.attach_event_to_student_plan(event, teacher=teacher)
+            event.refresh_from_db()
 
     if notify and series.notify_on_create:
         for event in events[:1]:

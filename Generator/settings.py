@@ -205,6 +205,20 @@ elif _admin_otp in ("0", "false", "no", "off"):
 else:
     ADMIN_OTP_REQUIRED = not DEBUG
 
+# Временно: OTP-вход в /admin/ только для этих username.
+# Снять ограничение: ADMIN_OTP_ALLOWED_USERNAMES=*
+_admin_otp_users = (
+    os.environ.get("ADMIN_OTP_ALLOWED_USERNAMES") or "admin_dasha,darsorokinaa"
+).strip()
+if _admin_otp_users.lower() in ("*", "all"):
+    ADMIN_OTP_ALLOWED_USERNAMES = None
+else:
+    ADMIN_OTP_ALLOWED_USERNAMES = frozenset(
+        name.strip().lower()
+        for name in _admin_otp_users.split(",")
+        if name.strip()
+    )
+
 # Разрешаем iframe на том же origin (урок встраивает страницу варианта).
 X_FRAME_OPTIONS = "SAMEORIGIN"
 

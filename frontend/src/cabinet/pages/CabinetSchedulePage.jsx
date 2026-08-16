@@ -2812,6 +2812,13 @@ export default function CabinetSchedulePage() {
           startingId={startingId}
           creatingLinkId={creatingLinkId}
           billingBadges={billingBadges}
+          onEventUpdated={(patch) => {
+            if (!patch) return;
+            const id = patch.id || selectedEvent?.id;
+            if (!id) return;
+            setEvents((prev) => prev.map((ev) => (ev.id === id ? { ...ev, ...patch } : ev)));
+            setSelectedEvent((prev) => (prev?.id === id ? { ...prev, ...patch } : prev));
+          }}
           onRegisterPayment={(ev, payableBadges = []) => {
             const rows = payableBadges.length
               ? payableBadges

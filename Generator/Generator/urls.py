@@ -11,10 +11,11 @@ from Cabinet.subscription_api import PaymentWebhookView
 from Cabinet.views import api_teacher_application, api_teacher_community_feedback
 
 # MFA для /admin/ (TOTP). Включение: ADMIN_OTP_REQUIRED=true или prod DEBUG=False.
+# Доп. ограничение: ADMIN_OTP_ALLOWED_USERNAMES (по умолчанию admin_dasha, darsorokinaa).
 if getattr(settings, "ADMIN_OTP_REQUIRED", False):
-    from django_otp.admin import OTPAdminSite
+    from Generator.admin_otp import RestrictedOTPAdminSite
 
-    admin.site.__class__ = OTPAdminSite
+    admin.site.__class__ = RestrictedOTPAdminSite
 
 
 def media_serve(request, path):

@@ -42,6 +42,7 @@ from .plan_schedule import (
     events_for_enrollment,
     get_active_enrollment,
     plan_items_for_enrollment,
+    resolve_plan_item_for_event,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,52 @@ class LessonLearningPlanSyncService:
     }
 
     # ── Публичный интерфейс ───────────────────────────────────────────────
+
+    @classmethod
+    def _is_auto_materials_item(cls, item: LessonPlanItem | None) -> bool:
+        return bool(
+            item
+            and item.plan_id
+            and (item.plan.description or "") == AUTO_MATERIALS_PLAN_DESCRIPTION
+        )
+
+    @classmethod
+    def _linked_real_plan_item(cls, event: ScheduleEvent) -> LessonPlanItem | None:
+        item = event.lesson_plan_item
+        if item is None or cls._is_auto_materials_item(item):
+            return None
+        return item
+
+    @classmethod
+    @transaction.atomic
+    def attach_event_to_student_plan(cls, event: ScheduleEvent, *, teacher) -> ScheduleEvent:
+        """После создания занятия: нет плана — создать; урок вне плана — добавить пункт.
+
+        Учебный план с ещё не занятыми слотами не трогаем (связь по слоту, без FK),
+        чтобы отмена со сдвигом темы продолжала работать.
+        """
+        if not event.student_id:
+            return event
+        if cls._linked_real_plan_item(event) is not None:
+            return event
+
+        enrollment = get_active_enrollment(event)
+        if enrollment is not None:
+            resolved, _ = resolve_plan_item_for_event(event)
+            if resolved is not None and not cls._is_auto_materials_item(resolved):
+                return event
+
+        try:
+            cls.create_plan_item_from_lesson(event, teacher=teacher)
+        except LessonPlanSyncError as exc:
+            logger.info(
+                "skip auto plan attach event=%s code=%s message=%s",
+                event.pk,
+                getattr(exc, "code", ""),
+                exc,
+            )
+        event.refresh_from_db()
+        return event
 
     @classmethod
     @transaction.atomic
@@ -205,7 +252,9 @@ class LessonLearningPlanSyncService:
 
         _set_guard(True)
         try:
-            if mode == "create_item" or (mode == "update_linked" and not event.lesson_plan_item_id):
+            if mode == "create_item" or (
+                mode == "update_linked" and cls._linked_real_plan_item(event) is None
+            ):
                 result = cls.create_plan_item_from_lesson(
                     event,
                     teacher=teacher,
@@ -394,7 +443,7 @@ class LessonLearningPlanSyncService:
         resolve_conflict = (resolve_conflict or "").strip() or None
 
         content_updates = {k: data[k] for k in CONTENT_FIELDS if k in data}
-        linked = event.lesson_plan_item
+        linked = cls._linked_real_plan_item(event)
 
         if linked and event.plan_sync_enabled and content_updates and not resolve_conflict:
             conflicts = cls._detect_conflicts(event, linked, content_updates)
@@ -474,7 +523,7 @@ class LessonLearningPlanSyncService:
                 plan_result = cls.sync_lesson_to_plan(
                     event,
                     teacher=teacher,
-                    mode="update_linked" if event.lesson_plan_item_id else "create_item",
+                    mode="update_linked" if cls._linked_real_plan_item(event) else "create_item",
                     student_ids=student_ids,
                     confirm_all_students=confirm_all_students,
                 )
@@ -809,10 +858,9 @@ class LessonLearningPlanSyncService:
     ) -> Optional[LessonPlanEnrollment]:
         """Создаёт план обучения и назначение для ученика «на лету».
 
-        Срабатывает, когда учитель добавляет тему в карточку урока, а у ученика
-        ещё нет ни одного плана обучения — вместо ошибки заводим план по
-        предмету занятия (или общий, если предмет не указан) и сразу назначаем
-        его ученику, чтобы тема не потерялась.
+        Срабатывает при создании занятия без плана и при сохранении темы
+        в карточке урока, если у ученика ещё нет активного плана — заводим
+        план по предмету занятия (или общий) и сразу назначаем его ученику.
         """
         from .plan_subjects import get_plan_subject_label
 
