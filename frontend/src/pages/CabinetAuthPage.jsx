@@ -214,7 +214,23 @@ export default function CabinetAuthPage() {
       }
       await goAfterAuth();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось зарегистрироваться");
+      if (err?.code === "already_registered" || err?.status === 409) {
+        setMode("login");
+        setInfo("Вы уже зарегистрированы. Войдите в аккаунт, чтобы продолжить.");
+        if (registerForm.email) {
+          setLoginForm((prev) => ({ ...prev, login: registerForm.email }));
+        }
+        setError("");
+      } else if (err?.code === "email_exists") {
+        setMode("login");
+        setInfo("Пользователь с таким email уже зарегистрирован. Войдите в существующий аккаунт.");
+        if (registerForm.email) {
+          setLoginForm((prev) => ({ ...prev, login: registerForm.email }));
+        }
+        setError("");
+      } else {
+        setError(err instanceof Error ? err.message : "Не удалось зарегистрироваться");
+      }
     } finally {
       setSubmitting(false);
     }

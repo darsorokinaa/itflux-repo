@@ -89,6 +89,9 @@ def _plan_item_to_json(item, *, lesson_number=None):
         "homeworkMaterials": [_material_to_json(m) for m in item.homework_materials.all()],
         "homeworkInteractives": [_interactive_to_json(i) for i in item.homework_interactives.all()],
         "homeworkDescription": item.homework_description or "",
+        "status": item.status,
+        "statusLabel": item.get_status_display() if hasattr(item, "get_status_display") else item.status,
+        "completedAt": item.completed_at.isoformat() if getattr(item, "completed_at", None) else None,
     }
 
 
@@ -261,11 +264,22 @@ def schedule_event_to_json(event):
         audience = ", ".join(p["name"] for p in participants if p["role"] != "organizer")
 
     overrides = set(event.manual_override_fields or [])
-    topic = event.topic or ""
+    stored_topic = event.topic or ""
     subtopic = event.subtopic or ""
     description = event.description or ""
     goal = event.goal or ""
     homework_description = event.homework_description or ""
+
+    planned_topic = ""
+    if plan_item_json:
+        planned_topic = (plan_item_json.get("topic") or "").strip()
+        if not planned_topic:
+            plan_title = (plan_item_json.get("title") or "").strip()
+            if plan_title and plan_title.lower() not in {
+                (event.title or "").strip().lower(),
+                (audience or "").strip().lower(),
+            }:
+                planned_topic = plan_title
 
     use_plan_topic = (
         bool(event.plan_sync_enabled)
@@ -276,18 +290,9 @@ def schedule_event_to_json(event):
             ScheduleEvent.Status.CANCELLED,
         )
     )
-    if plan_item_json and use_plan_topic:
-        plan_topic = (plan_item_json.get("topic") or "").strip()
-        plan_title = (plan_item_json.get("title") or "").strip()
-        # Не подставляем title пункта плана (часто имя ученика) как «тему» —
-        # иначе в шапке комнаты получается «Имя · Имя».
-        if plan_topic:
-            topic = plan_topic
-        elif not topic and plan_title and plan_title.lower() not in {
-            (event.title or "").strip().lower(),
-            (audience or "").strip().lower(),
-        }:
-            topic = plan_title
+    topic = stored_topic
+    if plan_item_json and use_plan_topic and not stored_topic:
+        topic = planned_topic
         if "subtopic" not in overrides:
             subtopic = plan_item_json.get("subtopic") or subtopic
         if "description" not in overrides:
@@ -296,6 +301,18 @@ def schedule_event_to_json(event):
             goal = plan_item_json.get("goal") or goal
         if "homework_description" not in overrides:
             homework_description = plan_item_json.get("homeworkDescription") or homework_description
+    elif plan_item_json and use_plan_topic and stored_topic:
+        if "subtopic" not in overrides and not event.subtopic:
+            subtopic = plan_item_json.get("subtopic") or subtopic
+        if "description" not in overrides and not event.description:
+            description = plan_item_json.get("description") or description
+        if "goal" not in overrides and not event.goal:
+            goal = plan_item_json.get("goal") or goal
+        if "homework_description" not in overrides and not event.homework_description:
+            homework_description = plan_item_json.get("homeworkDescription") or homework_description
+    elif plan_item_json and use_plan_topic:
+        if planned_topic:
+            topic = planned_topic
 
     has_plan = plan_item_json is not None or get_active_enrollment(event) is not None
     assigned_homework = _assigned_homework_to_json(
@@ -314,6 +331,8 @@ def schedule_event_to_json(event):
         "endTime": local_end.strftime("%H:%M"),
         "title": event.title,
         "topic": topic,
+        "plannedTopic": planned_topic,
+        "actualTopic": stored_topic or topic,
         "subtopic": subtopic,
         "description": description,
         "goal": goal,

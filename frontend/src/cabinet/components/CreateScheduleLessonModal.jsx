@@ -4,6 +4,7 @@ import CabinetIcon from "../CabinetIcons";
 import {
   billingPlanCheck,
   fetchGroups,
+  fetchNextPlanItem,
   fetchStudentSubjects,
   fetchStudents,
 } from "../../utils/cabinetAuth";
@@ -126,6 +127,9 @@ export default function CreateScheduleLessonModal({
   const [studentSubjects, setStudentSubjects] = useState([]);
   const [studentSubjectId, setStudentSubjectId] = useState("");
   const [subjectsLoading, setSubjectsLoading] = useState(false);
+  const [nextPlanItem, setNextPlanItem] = useState(null);
+  const [planLinkMode, setPlanLinkMode] = useState(lessonPlanItemId ? "use" : "suggest");
+  const [selectedPlanItemId, setSelectedPlanItemId] = useState(lessonPlanItemId || null);
 
   useEffect(() => {
     if (defaultDate) setDate(defaultDate);
@@ -234,6 +238,33 @@ export default function CreateScheduleLessonModal({
     return () => { cancelled = true; };
   }, [isIndividual, studentId]);
 
+  useEffect(() => {
+    if (lessonPlanItemId) {
+      setSelectedPlanItemId(lessonPlanItemId);
+      setPlanLinkMode("use");
+      return undefined;
+    }
+    const sid = studentId || (selectedStudentIds.length === 1 ? selectedStudentIds[0] : "");
+    if (!sid && !groupId) {
+      setNextPlanItem(null);
+      return undefined;
+    }
+    let cancelled = false;
+    fetchNextPlanItem({
+      studentId: sid || undefined,
+      groupId: groupId || undefined,
+      studentSubjectId: studentSubjectId || undefined,
+    })
+      .then((data) => {
+        if (cancelled) return;
+        setNextPlanItem(data?.item || null);
+      })
+      .catch(() => {
+        if (!cancelled) setNextPlanItem(null);
+      });
+    return () => { cancelled = true; };
+  }, [studentId, selectedStudentIds, groupId, studentSubjectId, lessonPlanItemId]);
+
   const audienceLabel = useMemo(() => {
     if (groupId) {
       const g = groups.find((x) => String(x.id) === String(groupId));
@@ -301,8 +332,9 @@ export default function CreateScheduleLessonModal({
       recurrence_count: repeatEndMode === "count" && repeatCount ? Number(repeatCount) : undefined,
       reminder_minutes: reminderMinutes || undefined,
       notify_participants: notifyParticipants,
-      lesson_plan_item: lessonPlanItemId || undefined,
-      lesson_plan_item_id: lessonPlanItemId || undefined,
+      lesson_plan_item: planLinkMode === "skip" ? undefined : (selectedPlanItemId || lessonPlanItemId || undefined),
+      lesson_plan_item_id: planLinkMode === "skip" ? undefined : (selectedPlanItemId || lessonPlanItemId || undefined),
+      skip_plan: planLinkMode === "skip" || undefined,
       student_subject: studentSubjectId ? Number(studentSubjectId) : undefined,
       student_subject_id: studentSubjectId ? Number(studentSubjectId) : undefined,
       force,
@@ -377,6 +409,38 @@ export default function CreateScheduleLessonModal({
         </div>
         <form className="cb-sch-form cb-sch-form--sections" onSubmit={(e) => handleSubmit(e, false)}>
           {error ? <p className="cb-sch-form__error" role="alert">{error}</p> : null}
+          {!lessonPlanItemId && nextPlanItem ? (
+            <section className="cb-sch-form__section">
+              <h3>План уроков</h3>
+              <p className="cb-sch-field-hint">
+                Следующая тема по плану: {nextPlanItem.topic || nextPlanItem.title}
+              </p>
+              <div className="cb-sch-form__row" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className={`cb-btn cb-btn--sm ${planLinkMode === "use" ? "cb-btn--primary" : "cb-btn--outline"}`}
+                  onClick={() => {
+                    setPlanLinkMode("use");
+                    setSelectedPlanItemId(nextPlanItem.id);
+                    const nextTopic = (nextPlanItem.topic || nextPlanItem.title || "").trim();
+                    if (nextTopic && !topic.trim()) setTopic(nextTopic);
+                  }}
+                >
+                  Использовать
+                </button>
+                <button
+                  type="button"
+                  className={`cb-btn cb-btn--sm ${planLinkMode === "skip" ? "cb-btn--primary" : "cb-btn--outline"}`}
+                  onClick={() => {
+                    setPlanLinkMode("skip");
+                    setSelectedPlanItemId(null);
+                  }}
+                >
+                  Без привязки к плану
+                </button>
+              </div>
+            </section>
+          ) : null}
           {lessonPlanItemId ? (
             <section className="cb-sch-form__section">
               <h3>Занятие из плана</h3>

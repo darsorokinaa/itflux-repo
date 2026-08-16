@@ -307,12 +307,9 @@ class SubscriptionAccessService:
     def can_create_variant(request: HttpRequest) -> bool:
         user = getattr(request, "user", None)
         if user and getattr(user, "is_authenticated", False):
-            plan = SubscriptionAccessService.get_effective_plan(user)
-            limit = plan.max_variants_monthly
-            if limit is None:
-                return True
-            usage = SubscriptionAccessService.get_teacher_monthly_usage(user)
-            return usage.variants_created < limit
+            from .tariff_usage import TariffUsageService
+
+            return TariffUsageService.is_within_limit(user, "variant_generations")
         usage = SubscriptionAccessService.get_or_create_anonymous_usage(request)
         return usage.variants_created < ANON_VARIANTS_LIMIT
 
@@ -320,12 +317,9 @@ class SubscriptionAccessService:
     def can_create_workbook(request: HttpRequest) -> bool:
         user = getattr(request, "user", None)
         if user and getattr(user, "is_authenticated", False):
-            plan = SubscriptionAccessService.get_effective_plan(user)
-            limit = plan.max_workbooks_monthly
-            if limit is None:
-                return True
-            usage = SubscriptionAccessService.get_teacher_monthly_usage(user)
-            return usage.workbooks_created < limit
+            from .tariff_usage import TariffUsageService
+
+            return TariffUsageService.is_within_limit(user, "workbooks")
         usage = SubscriptionAccessService.get_or_create_anonymous_usage(request)
         return usage.workbooks_created < ANON_WORKBOOKS_LIMIT
 

@@ -21,7 +21,7 @@ from django.views.decorators.http import require_http_methods
 logger = logging.getLogger(__name__)
 
 from .models import Profile, ScheduleEvent, TeacherApplication, TeacherCommunityFeedback
-from .invitations import invite_accept_api_payload, try_accept_invite_token
+from .invitations import invite_accept_api_payload
 from .plan_catalog import can_publish_catalog_lesson_plan
 from .task_tags import can_edit_task_tags
 from .rate_limit import client_ip, rate_limit_check, rate_limit_json_response
@@ -109,16 +109,20 @@ def api_login(request):
 
     login_id = (data.get("login") or data.get("username") or data.get("email") or "").strip()
     password = data.get("password") or ""
+    if isinstance(password, str):
+        password = password.strip()
 
     if not login_id or not password:
         return JsonResponse({"ok": False, "error": "Введите логин и пароль"}, status=400)
 
     user = _find_user_by_login(login_id)
     if user is None:
+        logger.info("login failed reason=unknown_login")
         return JsonResponse({"ok": False, "error": "Неверный логин или пароль"}, status=403)
 
     auth_user = authenticate(request, username=user.username, password=password)
     if auth_user is None:
+        logger.info("login failed reason=bad_password user=%s", user.id)
         return JsonResponse({"ok": False, "error": "Неверный логин или пароль"}, status=403)
 
     access_error = _profile_access_error(auth_user.profile)
@@ -128,13 +132,31 @@ def api_login(request):
     login(request, auth_user)
     Profile.objects.filter(pk=auth_user.profile.pk).update(last_activity=timezone.now())
 
-    invite_result = try_accept_invite_token(auth_user, data.get("invite_token"))
+    invite_token = (data.get("invite_token") or "").strip()
+    invite_result = None
+    invite_error = None
+    if invite_token:
+        from .invitations import InvitationError, accept_student_invitation
+
+        try:
+            invite_result = accept_student_invitation(invite_token, auth_user)
+        except InvitationError as exc:
+            invite_error = exc
+            logger.info(
+                "login invite not accepted user=%s code=%s",
+                auth_user.id,
+                exc.code,
+            )
     payload = {"ok": True, "user": _profile_payload(auth_user)}
     if invite_result:
         student, invitation = invite_result
         payload["invite_accepted"] = True
         payload["student_id"] = student.id
         payload["invite"] = invite_accept_api_payload(student, invitation, auth_user)
+    elif invite_error is not None:
+        payload["invite_accepted"] = False
+        payload["invite_error"] = str(invite_error)
+        payload["invite_error_code"] = invite_error.code
     return JsonResponse(payload)
 
 
@@ -150,7 +172,11 @@ def api_register(request):
     username = (data.get("username") or "").strip()
     email = (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
+    if isinstance(password, str):
+        password = password.strip()
     password_confirm = data.get("password_confirm") or password
+    if isinstance(password_confirm, str):
+        password_confirm = password_confirm.strip()
     name = (data.get("name") or "").strip()
     surname = (data.get("surname") or "").strip()
     role = (data.get("role") or Profile.Role.STUDENT).strip()
@@ -162,6 +188,37 @@ def api_register(request):
         role = Profile.Role.PARENT
     elif invite_token:
         role = Profile.Role.STUDENT
+
+    if invite_token:
+        from .invitations import resolve_invitation_for_user
+
+        invite_preview = resolve_invitation_for_user(invite_token, None)
+        if invite_preview is None:
+            return JsonResponse(
+                {"ok": False, "error": "Приглашение недействительно или истекло", "code": "invite_invalid"},
+                status=400,
+            )
+        invite_status = invite_preview.get("status")
+        if invite_status in ("already_registered", "accepted"):
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "Вы уже зарегистрированы. Войдите в аккаунт, чтобы продолжить.",
+                    "code": "already_registered",
+                    "invite": invite_preview,
+                },
+                status=409,
+            )
+        if invite_status != "pending":
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": invite_preview.get("message") or "Приглашение недоступно.",
+                    "code": invite_status,
+                    "invite": invite_preview,
+                },
+                status=400,
+            )
 
     if not email:
         return JsonResponse({"ok": False, "error": "Укажите email"}, status=400)
@@ -179,7 +236,14 @@ def api_register(request):
         suffix += 1
 
     if User.objects.filter(email__iexact=email).exists():
-        return JsonResponse({"ok": False, "error": "Пользователь с таким email уже зарегистрирован"}, status=400)
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "Пользователь с таким email уже зарегистрирован. Войдите в существующий аккаунт.",
+                "code": "email_exists",
+            },
+            status=400,
+        )
 
     if role not in Profile.Role.values:
         role = Profile.Role.STUDENT
@@ -206,7 +270,19 @@ def api_register(request):
     profile.save(update_fields=["name", "surname", "role"])
 
     login(request, user)
-    invite_result = try_accept_invite_token(user, invite_token) if invite_token else None
+    invite_result = None
+    if invite_token:
+        from .invitations import InvitationError, accept_student_invitation
+
+        try:
+            invite_result = accept_student_invitation(invite_token, user)
+        except InvitationError as exc:
+            logger.warning(
+                "register invite accept failed user=%s code=%s",
+                user.id,
+                exc.code,
+            )
+            invite_result = None
 
     parent_invite_result = None
     if parent_invite_token:
@@ -239,7 +315,8 @@ def api_register(request):
     if role == Profile.Role.TEACHER:
         from .registration_promo import apply_registration_promo
 
-        # Если рефералка уже выдала Премиум — акция не затрёт более выгодный срок.
+        # Выдача только если акция launch-premium активна в админке.
+        # Иначе учитель остаётся на «Старте». Уже выданный Premium не трогаем.
         registration_promo = apply_registration_promo(user)
 
     payload = {"ok": True, "user": _profile_payload(user)}
@@ -717,6 +794,7 @@ def api_schedule_create(request):
             "reminder_minutes": data.get("reminder_minutes"),
             "notify_participants": notify,
             "student_subject_id": student_subject_id,
+            "skip_plan": data.get("skip_plan") or data.get("unplanned"),
         }
         if series_data["recurrence_until"] and isinstance(series_data["recurrence_until"], str):
             series_data["recurrence_until"] = dt.strptime(series_data["recurrence_until"], "%Y-%m-%d").date()
@@ -765,6 +843,7 @@ def api_schedule_create(request):
                 "reminder_minutes": data.get("reminder_minutes"),
                 "notify_participants": notify,
                 "student_subject_id": student_subject_id,
+                "skip_plan": data.get("skip_plan") or data.get("unplanned"),
             },
             student_ids=student_ids,
             group_id=group_id,

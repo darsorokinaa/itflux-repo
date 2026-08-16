@@ -150,6 +150,13 @@
   margin-top: 16px;
 }
 
+.td-usage {
+  grid-column: 1 / -1;
+}
+.td-usage .upg-usage {
+  margin: 0;
+}
+
 .td-main-column,
 .td-side-column {
   min-width: 0;

@@ -222,27 +222,43 @@ TARIFFS = [
 ]
 
 
+REQUIRED_PUBLIC_SLUGS = ("start", "teacher", "pro", "premium")
+
+
+def apply_tariff_catalog() -> list[tuple[str, bool]]:
+    """Создаёт или обновляет каталог тарифов. Не мутирует TARIFFS."""
+    results = []
+    for raw in TARIFFS:
+        slug = raw["slug"]
+        defaults = {key: value for key, value in raw.items() if key != "slug"}
+        _, created = TariffPlan.objects.update_or_create(slug=slug, defaults=defaults)
+        results.append((slug, created))
+    for legacy_slug in ("repetitor", "profi"):
+        legacy = TariffPlan.objects.filter(slug=legacy_slug).first()
+        if legacy:
+            legacy.is_active = False
+            legacy.is_public = False
+            legacy.save(update_fields=["is_active", "is_public", "updated_at"])
+    return results
+
+
+def ensure_default_tariff_plans() -> int:
+    """Если нет полного набора публичных тарифов — заполняет каталог."""
+    existing = set(
+        TariffPlan.objects.filter(slug__in=REQUIRED_PUBLIC_SLUGS).values_list("slug", flat=True)
+    )
+    if existing.issuperset(REQUIRED_PUBLIC_SLUGS):
+        return 0
+    return len(apply_tariff_catalog())
+
+
 class Command(BaseCommand):
     help = "Создаёт или обновляет тарифные планы"
 
     def handle(self, *args, **kwargs):
-        for data in TARIFFS:
-            slug = data.pop("slug")
-            plan, created = TariffPlan.objects.update_or_create(
-                slug=slug,
-                defaults=data,
-            )
-            data["slug"] = slug
+        for slug, created in apply_tariff_catalog():
+            plan = TariffPlan.objects.get(slug=slug)
             action = "Создан" if created else "Обновлён"
             self.stdout.write(f"  {action}: {plan.name} ({slug})")
-
-        # Deactivate legacy plans if still present (subscriptions remapped in migration).
-        for legacy_slug in ("repetitor", "profi"):
-            legacy = TariffPlan.objects.filter(slug=legacy_slug).first()
-            if legacy:
-                legacy.is_active = False
-                legacy.is_public = False
-                legacy.save(update_fields=["is_active", "is_public", "updated_at"])
-                self.stdout.write(f"  Деактивирован legacy: {legacy_slug}")
 
         self.stdout.write(self.style.SUCCESS(f"\nГотово: {len(TARIFFS)} тарифов."))

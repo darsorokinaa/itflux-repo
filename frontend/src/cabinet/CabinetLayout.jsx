@@ -308,6 +308,7 @@ export default function CabinetLayout() {
     currentPlan: subscription.currentPlan,
     subscription: subscription.subscription,
     subscriptionLoading: subscription.loading,
+    usageItems: subscription.usageItems,
     refreshSubscription: subscription.refreshUsage,
     navCounts,
   };

@@ -19,8 +19,9 @@ import {
   syncSubscriptionPayment,
   validatePromoCode,
 } from "../../utils/cabinetAuth";
-import { notifySubscriptionChanged } from "../hooks/useSubscription";
+import { notifySubscriptionChanged, useSubscription } from "../hooks/useSubscription";
 import SupportContactLink from "../components/SupportContactLink";
+import TariffUsageBlock from "../components/TariffUsageBlock";
 import { openSupport } from "../support";
 
 function isLocalFrontendHost() {
@@ -1093,6 +1094,7 @@ function FaqSection() {
 }
 
 export default function CabinetUpgradePage() {
+  const subscriptionUsage = useSubscription();
   const [plansData, setPlansData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selecting, setSelecting] = useState(null);
@@ -1634,6 +1636,12 @@ export default function CabinetUpgradePage() {
             onCancelSubscription={handleCancelSubscription}
             onCancelPending={handleCancelPending}
             managing={managing}
+          />
+
+          <TariffUsageBlock
+            items={plansData?.usage_items?.length ? plansData.usage_items : subscriptionUsage.usageItems}
+            loading={loading || subscriptionUsage.loading}
+            onViewPlans={scrollToPlans}
           />
 
           {promoDetailsOpen && registrationPromo ? (

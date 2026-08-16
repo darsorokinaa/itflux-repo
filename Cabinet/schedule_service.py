@@ -5,7 +5,7 @@ from datetime import datetime
 from django.db.models import Q
 from django.utils import timezone
 
-from .choices import ParticipantRole, ParticipantStatus, RecurrenceType, ScheduleChangeType, SeriesStatus
+from .choices import LessonContentSource, ParticipantRole, ParticipantStatus, RecurrenceType, ScheduleChangeType, SeriesStatus
 from .models import (
     ScheduleEvent,
     ScheduleEventChangeLog,
@@ -311,6 +311,21 @@ def create_single_event(
         event.student_id = student_ids[0]
         event.save(update_fields=["student"])
 
+    from .plan_sync import PlanSyncService
+    from .models import LessonPlanItem
+
+    skip_plan = bool(data.get("skip_plan") or data.get("unplanned"))
+    item_id = data.get("lesson_plan_item") or data.get("lesson_plan_item_id")
+    if skip_plan:
+        event.plan_sync_enabled = False
+        event.content_source = LessonContentSource.MANUAL
+        event.save(update_fields=["plan_sync_enabled", "content_source", "updated_at"])
+    elif item_id:
+        item = LessonPlanItem.objects.filter(pk=item_id).first()
+        if item is not None:
+            PlanSyncService.link_event_to_plan(event, item)
+            event.refresh_from_db()
+
     log_change(event, changed_by=teacher, change_type=ScheduleChangeType.CREATED, new_data=event_snapshot(event))
     if notify and data.get("notify_participants", True):
         NotificationService.notify_event_created(event)
@@ -409,6 +424,24 @@ def create_series(
                 if update_fields:
                     event.save(update_fields=update_fields)
 
+    from .plan_sync import PlanSyncService
+    from .models import LessonPlanItem
+
+    first_item = None
+    item_id = series_data.get("lesson_plan_item") or series_data.get("lesson_plan_item_id")
+    if item_id:
+        first_item = LessonPlanItem.objects.filter(pk=item_id).first()
+    if first_item is not None and events:
+        PlanSyncService.link_event_to_plan(events[0], first_item)
+        events[0].refresh_from_db()
+    if series_data.get("skip_plan") or series_data.get("unplanned"):
+        from .choices import LessonContentSource
+
+        for event in events:
+            event.plan_sync_enabled = False
+            event.content_source = LessonContentSource.MANUAL
+            event.save(update_fields=["plan_sync_enabled", "content_source", "updated_at"])
+
     if notify and series.notify_on_create:
         for event in events[:1]:
             NotificationService.notify_event_created(event)
@@ -443,6 +476,12 @@ def move_event(event, *, starts_at, ends_at, changed_by, notify=True):
         from .billing_service import sync_moved_event_billing
 
         sync_moved_event_billing(event)
+    except Exception:
+        pass
+    try:
+        from .plan_sync import PlanSyncService
+
+        PlanSyncService.on_event_rescheduled(event)
     except Exception:
         pass
     return event
@@ -550,12 +589,10 @@ def move_event_with_scope(event, *, starts_at, ends_at, changed_by, scope=None, 
 
 
 def cancel_event(event, *, changed_by, notify=True, plan_cancel_action=None):
-    from .plan_schedule import apply_plan_cancel_action
+    from .plan_sync import PlanSyncService
     from .video_meeting_service import cancel_meeting_for_event
 
     old = event_snapshot(event)
-    if plan_cancel_action:
-        apply_plan_cancel_action(event, plan_cancel_action)
 
     # Обычная отмена не создаёт долг и снимает автоначисление, если оно уже было.
     try:
@@ -571,6 +608,8 @@ def cancel_event(event, *, changed_by, notify=True, plan_cancel_action=None):
 
     event.status = ScheduleEvent.Status.CANCELLED
     event.save(update_fields=["status", "updated_at"])
+    PlanSyncService.on_event_cancelled(event, plan_cancel_action=plan_cancel_action)
+    event.refresh_from_db()
     cancel_meeting_for_event(event)
     log_change(
         event,

@@ -57,9 +57,14 @@ class Command(BaseCommand):
             f"до {deadline.isoformat()} · план «{slug}» · {months} мес."
         )
         self.stdout.write(
-            "Завершить можно в админке: Cabinet → Акции → снять «Активна» "
-            "или изменить «Можно получить до»."
+            "Включить/выключить можно в админке: Cabinet → Акции → «Активна». "
+            "Уже выданные Premium не отзываются."
         )
+        if not promo.is_active and not force:
+            self.stdout.write(self.style.WARNING(
+                "Акция выключена (is_active=False): новым учителям тариф не выдаётся. "
+                "Команда ничего не изменит, пока не включите акцию или не передадите --force."
+            ))
 
         teachers = (
             User.objects.filter(profile__role=Profile.Role.TEACHER)

@@ -7,7 +7,7 @@ import StudentSubjectsBlock from "./StudentSubjectsBlock";
 import BillingPaymentModal from "./BillingPaymentModal";
 import BillingPackageModal from "./BillingPackageModal";
 import BillingTermsModal from "./BillingTermsModal";
-import { buildInvitationUrl, notifyBillingChanged } from "../../utils/cabinetAuth";
+import { buildInvitationUrl, notifyBillingChanged, resetStudentAccess } from "../../utils/cabinetAuth";
 import {
   GROUP_EXAM_OPTIONS,
   STUDENT_DIRECTION_OPTIONS,
@@ -59,6 +59,8 @@ export function StudentFormModal({ student, onClose, onSave, onArchive, onDelete
   const [packageOpen, setPackageOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   const [billingKey, setBillingKey] = useState(0);
+  const [accessReset, setAccessReset] = useState(null);
+  const [accessResetting, setAccessResetting] = useState(false);
 
   useEffect(() => {
     setForm(student?.raw ? studentFormFromApi(student.raw) : emptyStudentForm());
@@ -116,6 +118,27 @@ export function StudentFormModal({ student, onClose, onSave, onArchive, onDelete
     } catch (err) {
       setError(err.message || "Не удалось удалить ученика");
       setSaving(false);
+    }
+  };
+
+  const handleResetAccess = async () => {
+    if (!isEdit) return;
+    setAccessResetting(true);
+    setError("");
+    try {
+      const data = await resetStudentAccess(student.id);
+      setAccessReset(data);
+      if (data?.url) {
+        try {
+          await navigator.clipboard.writeText(data.url);
+        } catch {
+          // ignore clipboard errors
+        }
+      }
+    } catch (err) {
+      setError(err.message || "Не удалось создать ссылку восстановления");
+    } finally {
+      setAccessResetting(false);
     }
   };
 
@@ -232,6 +255,25 @@ export function StudentFormModal({ student, onClose, onSave, onArchive, onDelete
           />
         ) : null}
         {isEdit ? <StudentParentsAccessBlock studentId={student.id} /> : null}
+        {isEdit ? (
+          <div className="cb-modal-form__block">
+            <button
+              type="button"
+              className="cb-btn cb-btn--outline cb-btn--sm"
+              onClick={handleResetAccess}
+              disabled={accessResetting}
+            >
+              {accessResetting ? "Создаём ссылку…" : "Восстановить доступ"}
+            </button>
+            {accessReset?.url ? (
+              <p className="cb-sch-form__hint" role="status">
+                {accessReset.message || "Ссылка создана и скопирована."}
+                {" "}
+                <a href={accessReset.url}>{accessReset.url}</a>
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         <FormActions
           formId="student-edit-form"
           onCancel={onClose}

@@ -6,6 +6,7 @@ import { CabinetEmptyState } from "./CabinetSectionUi";
 import CabinetModal from "./components/CabinetModal";
 import HomeworkAssignModal from "./components/HomeworkAssignModal";
 import TeacherOnboardingCard from "./components/TeacherOnboardingCard";
+import TariffUsageBlock from "./components/TariffUsageBlock";
 import ConnectionCheckButton from "./connectionCheck/ConnectionCheckButton";
 import { closeConnectionCheck } from "./connectionCheck/openConnectionCheck";
 import LastCheckHint from "./connectionCheck/LastCheckHint";
@@ -148,7 +149,7 @@ function mapTodayLesson(ev, now) {
 }
 
 export default function CabinetDashboard() {
-  const { user, currentPlan, subscription, subscriptionLoading } = useOutletContext();
+  const { user, currentPlan, subscription, subscriptionLoading, usageItems } = useOutletContext();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -438,6 +439,13 @@ export default function CabinetDashboard() {
       ) : null}
 
       <div className="td-workspace">
+        <div className="td-usage">
+          <TariffUsageBlock
+            items={usageItems}
+            loading={subscriptionLoading}
+            onViewPlans={() => navigate("/cabinet/upgrade")}
+          />
+        </div>
         {onboardingVisible ? (
           <TeacherOnboardingCard
             onboarding={onboarding}

@@ -103,8 +103,6 @@ def planned_topic_for_event(event: ScheduleEvent) -> str:
         return text
 
     topic = _clean(getattr(event, "topic", None) or "")
-    if topic:
-        return topic
 
     item = getattr(event, "lesson_plan_item", None)
     if item is None:
@@ -112,12 +110,14 @@ def planned_topic_for_event(event: ScheduleEvent) -> str:
 
         item, _lesson_number = resolve_plan_item_for_event(event)
     if item is not None:
-        topic = _clean(item.topic or "")
-        if topic:
-            return topic
-        topic = _clean(item.title or "")
-        if topic:
-            return topic
+        planned = _clean(item.topic or "")
+        if planned:
+            return planned
+        planned = _clean(item.title or "")
+        if planned:
+            return planned
+    if topic:
+        return topic
     lesson = getattr(event, "lesson", None)
     if lesson is not None:
         topic = _clean(lesson.topic or "")

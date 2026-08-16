@@ -180,6 +180,53 @@ export default function CabinetJoinPage() {
     return <JoinedSuccess result={joined} homePath={homePath} />;
   }
 
+  if (preview?.status === "already_registered") {
+    const loginHrefWithInvite = `/cabinet/login?invite=${encodeURIComponent(token)}`;
+    return (
+      <div className="cabinet-auth-page">
+        <div className="cabinet-auth-card">
+          <div className="cabinet-auth-head">
+            <span className="cabinet-auth-badge">Уже есть аккаунт</span>
+            <h1 className="cabinet-auth-title">Вы уже зарегистрированы</h1>
+            <p className="cabinet-auth-lead">
+              {preview.message || "Войдите в аккаунт, чтобы продолжить."}
+            </p>
+          </div>
+          {preview.login_hint ? (
+            <p className="cabinet-auth-muted">Логин: {preview.login_hint}</p>
+          ) : null}
+          <Link
+            to={loginHrefWithInvite}
+            className="cabinet-auth-submit"
+            style={{ display: "inline-block", textAlign: "center", textDecoration: "none" }}
+          >
+            Войти
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (preview?.status === "wrong_account") {
+    return (
+      <div className="cabinet-auth-page">
+        <div className="cabinet-auth-card">
+          <h1 className="cabinet-auth-title">Ссылка для другого аккаунта</h1>
+          <p className="cabinet-auth-error" role="alert">
+            {preview.message}
+          </p>
+          <Link
+            to="/cabinet/login"
+            className="cabinet-auth-submit"
+            style={{ display: "inline-block", textAlign: "center", textDecoration: "none" }}
+          >
+            Сменить аккаунт
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (error && !preview) {
     return (
       <div className="cabinet-auth-page">

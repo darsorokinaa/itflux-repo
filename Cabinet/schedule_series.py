@@ -153,7 +153,6 @@ def generate_events_for_series(series, date_from=None, date_to=None, *, copy_par
                 group=series.group,
                 student_subject=series.student_subject,
                 lesson=series.lesson,
-                lesson_plan_item=series.lesson_plan_item,
                 homework=series.homework,
                 timezone=series.timezone,
                 telemost_url=series.meeting_url,

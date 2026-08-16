@@ -515,6 +515,9 @@ const PlanSyncSection = forwardRef(function PlanSyncSection({ event, disabled, o
 
       <label className="cb-sch-field">
         <span>Тема урока</span>
+        {event?.plannedTopic && event.plannedTopic !== topic ? (
+          <span className="cb-sch-form__hint">По плану: {event.plannedTopic}</span>
+        ) : null}
         <input
           type="text"
           value={topic}

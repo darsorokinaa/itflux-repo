@@ -13014,6 +13014,28 @@ button.cb-sch-event {
   margin-bottom: 4px;
 }
 
+.cb-lesson-list-card__status {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e8eef8;
+  color: #3d4f73;
+  white-space: nowrap;
+}
+.cb-lesson-list-card__status--completed {
+  background: #d9f5e5;
+  color: #0f7a42;
+}
+.cb-lesson-list-card__status--planned {
+  background: #e7efff;
+  color: #2456c7;
+}
+.cb-lesson-list-card__status--skipped {
+  background: #f3e8d8;
+  color: #8a5a12;
+}
+
 .cb-lesson-list-card__title {
   margin: 0;
   font-size: 0.95rem;
@@ -15733,6 +15755,140 @@ button.cb-sch-event {
   flex-wrap: wrap;
   gap: 8px;
   flex-shrink: 0;
+}
+
+/* Использование тарифа */
+.upg-usage {
+  margin: 0 0 16px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid var(--upg-line);
+  background: #fff;
+}
+.upg-usage__title {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--upg-ink);
+  line-height: 1.35;
+}
+.upg-usage__loading {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--upg-muted);
+}
+.upg-usage__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.upg-usage__row {
+  flex: 1 1 0;
+  min-width: 108px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.upg-usage__row--near {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+.upg-usage__row--full {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+.upg-usage__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #64748b;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.upg-usage__frac {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #0f172a;
+  white-space: nowrap;
+}
+.upg-usage__row--full .upg-usage__frac {
+  color: #b91c1c;
+}
+.upg-usage__bar {
+  flex: 1 1 auto;
+  height: 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.upg-usage__row--near .upg-usage__bar {
+  background: #fde68a;
+}
+.upg-usage__row--full .upg-usage__bar {
+  background: #fecaca;
+}
+.upg-usage__bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #2563eb;
+}
+.upg-usage__row--near .upg-usage__bar-fill {
+  background: #d97706;
+}
+.upg-usage__row--full .upg-usage__bar-fill {
+  background: #dc2626;
+}
+.upg-usage__track {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.upg-usage__pct {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #64748b;
+  min-width: 2.2em;
+  text-align: right;
+}
+.upg-usage__unlimited {
+  margin: 0;
+  font-size: 0.68rem;
+  color: var(--upg-muted);
+  line-height: 1.2;
+}
+.upg-usage__cap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 10px;
+}
+.upg-usage__cap p {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #b91c1c;
+}
+
+@media (max-width: 900px) {
+  .upg-usage__list {
+    flex-wrap: wrap;
+  }
+  .upg-usage__row {
+    flex: 1 1 calc(33.33% - 8px);
+    min-width: 140px;
+  }
 }
 
 .upg-promo-details {

@@ -190,6 +190,20 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         student.delete()
         return Response({"ok": True, "deleted_id": student_id}, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["post"], url_path="reset-access")
+    def reset_access(self, request, pk=None):
+        """Создать ссылку восстановления доступа. Текущий пароль не показывается."""
+        from .student_access import StudentAccessError, create_student_access_reset
+
+        student = self.get_object()
+        try:
+            payload = create_student_access_reset(
+                self.get_teacher(), student, request=request
+            )
+        except StudentAccessError as exc:
+            return Response({"detail": str(exc), "code": exc.code}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(payload)
+
     @action(detail=True, methods=["get", "post"], url_path="subjects")
     def subjects(self, request, pk=None):
         student = self.get_object()
@@ -813,16 +827,24 @@ class InvitationPreviewView(APIView):
         user = request.user if request.user.is_authenticated else None
         payload = resolve_invitation_for_user(token, user)
         if payload is None:
-            return Response({"error": "Приглашение недействительно или истекло."}, status=404)
-        return Response(payload)
+            return Response({"error": "Приглашение недействительно или истекло.", "status": "invalid"}, status=404)
+        status_code = 200
+        if payload.get("status") in ("expired", "cancelled"):
+            status_code = 410
+        return Response(payload, status=status_code)
 
 
 class InvitationAcceptView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, token):
+        from .invitations import InvitationError
+
         try:
             student, invitation = accept_student_invitation(token, request.user)
+        except InvitationError as exc:
+            status_code = 409 if exc.code == "wrong_account" else 400
+            return Response({"error": str(exc), "code": exc.code}, status=status_code)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         return Response(invite_accept_api_payload(student, invitation, request.user))
@@ -967,13 +989,6 @@ class LessonViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         if self.action in ("create", "update", "partial_update"):
             return LessonWriteSerializer
         return LessonListSerializer
-
-    def create(self, request, *args, **kwargs):
-        try:
-            SubscriptionLimitService.raise_if_lesson_limit_reached(self.get_teacher())
-        except LimitExceeded as exc:
-            return Response(exc.to_dict(), status=status.HTTP_403_FORBIDDEN)
-        return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         serializer.save(teacher=self.get_teacher())

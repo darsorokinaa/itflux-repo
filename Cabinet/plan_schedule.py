@@ -105,23 +105,50 @@ def plan_item_by_slot(event, enrollment):
         return None, None
 
     index = plan_slot_index(event, enrollment)
-    if index is None or index >= len(plan_items):
+    if index is None:
         return None, None
 
-    item = plan_items[index]
-    lesson_number = item.order or (index + 1)
-    return item, lesson_number
+    completed_event = event.status in (
+        ScheduleEvent.Status.DONE,
+        ScheduleEvent.Status.COMPLETED,
+    )
+    i = index
+    while 0 <= i < len(plan_items):
+        item = plan_items[i]
+        lesson_number = item.order or (i + 1)
+        linked_to_self = (
+            item.scheduled_event_id == event.pk
+            or event.lesson_plan_item_id == item.id
+        )
+        if item.status in (PlanItemStatus.COMPLETED, PlanItemStatus.SKIPPED):
+            if linked_to_self or completed_event:
+                return item, lesson_number
+            i += 1
+            continue
+        return item, lesson_number
+    return None, None
 
 
 def resolve_plan_item_for_event(event):
     """
     One schedule lesson → one plan item.
-    Priority: explicit scheduled_event link → slot in enrollment plan → direct FK.
+    Priority: explicit scheduled_event link → event.lesson_plan_item FK →
+    slot in enrollment plan (legacy fallback) → series FK if still free.
+    Тема не используется как ключ связи.
     """
     linked = list(event.plan_items.order_by("order", "id")[:2])
     if len(linked) == 1:
         item = linked[0]
         return item, item.order or None
+    if len(linked) > 1 and event.lesson_plan_item_id:
+        for item in linked:
+            if item.id == event.lesson_plan_item_id:
+                return item, item.order or None
+
+    if event.lesson_plan_item_id:
+        item = event.lesson_plan_item
+        if item is not None:
+            return item, item.order or None
 
     enrollment = get_active_enrollment(event)
     if enrollment:
@@ -129,13 +156,14 @@ def resolve_plan_item_for_event(event):
         if item:
             return item, lesson_number
 
-    if event.lesson_plan_item_id:
-        item = event.lesson_plan_item
-        return item, item.order or None
-
     if event.series_id and event.series.lesson_plan_item_id:
         item = event.series.lesson_plan_item
-        return item, item.order or None
+        if item is not None and item.status not in (
+            PlanItemStatus.COMPLETED,
+            PlanItemStatus.SKIPPED,
+        ):
+            if item.scheduled_event_id in (None, event.pk):
+                return item, item.order or None
 
     return None, None
 

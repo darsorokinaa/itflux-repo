@@ -620,6 +620,21 @@ export function acceptInvitation(token) {
   });
 }
 
+export function resetStudentAccess(studentId) {
+  return cabinetFetch(`/students/${studentId}/reset-access/`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function fetchNextPlanItem({ studentId, groupId, studentSubjectId } = {}) {
+  const params = {};
+  if (studentId) params.student_id = studentId;
+  if (groupId) params.group_id = groupId;
+  if (studentSubjectId) params.student_subject_id = studentSubjectId;
+  return cabinetFetch(buildCabinetQueryPath("/schedule/next-plan-item/", params), { method: "GET" });
+}
+
 export function fetchInvitations(params = {}) {
   return cabinetFetch(buildCabinetQueryPath("/invitations/", params), { method: "GET" });
 }

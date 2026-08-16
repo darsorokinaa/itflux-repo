@@ -444,8 +444,10 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="complete")
     def complete(self, request, pk=None):
         event = self.get_object()
-        event.status = ScheduleEvent.Status.COMPLETED
-        event.save(update_fields=["status", "updated_at"])
+        from .plan_sync import PlanSyncService
+
+        PlanSyncService.mark_event_completed(event, teacher=request.user, ensure_journal=True)
+        event.refresh_from_db()
         try:
             from .billing_service import auto_finalize_after_lesson_complete
 
@@ -453,6 +455,37 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
         except Exception:
             pass
         return Response(ScheduleEventSerializer(event).data)
+
+    @action(detail=False, methods=["get"], url_path="next-plan-item")
+    def next_plan_item(self, request):
+        from .plan_sync import PlanSyncService
+        from .plan_schedule import get_active_enrollment
+        from .schedule_events import _plan_item_to_json
+
+        student_id = request.query_params.get("student_id")
+        group_id = request.query_params.get("group_id")
+        student_subject_id = request.query_params.get("student_subject_id")
+        if not student_id and not group_id:
+            return Response({"item": None, "enrollment_id": None})
+        event = ScheduleEvent(
+            owner=self.get_teacher(),
+            student_id=int(student_id) if student_id else None,
+            group_id=int(group_id) if group_id else None,
+            student_subject_id=int(student_subject_id) if student_subject_id else None,
+            starts_at=timezone.now(),
+            ends_at=timezone.now(),
+            title="",
+        )
+        enrollment = get_active_enrollment(event)
+        if enrollment is None:
+            return Response({"item": None, "enrollment_id": None})
+        item = PlanSyncService.get_next_plan_item(enrollment)
+        return Response({
+            "enrollment_id": enrollment.pk,
+            "plan_id": enrollment.plan_id,
+            "plan_title": enrollment.plan.title if enrollment.plan_id else "",
+            "item": _plan_item_to_json(item) if item else None,
+        })
 
     @action(detail=True, methods=["post"], url_path="move")
     def move(self, request, pk=None):

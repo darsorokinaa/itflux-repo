@@ -1067,8 +1067,10 @@ class PromotionAdmin(admin.ModelAdmin):
         for name, opts in fieldsets:
             if name == "Основное":
                 opts = {**opts, "description": (
-                    "Стартовая акция при регистрации. Чтобы завершить: снимите «Активна» "
-                    "или поставьте дату «Можно получить до». Код launch-premium не меняйте."
+                    "Стартовая акция при регистрации. Сейчас выключена: новые учителя "
+                    "получают «Старт». Чтобы снова выдавать Premium — включите «Активна» "
+                    "и проверьте даты. Уже выданные Premium не отзываются. "
+                    "Код launch-premium не меняйте."
                 )}
             result.append((name, opts))
         return result

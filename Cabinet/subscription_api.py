@@ -16,6 +16,7 @@ Endpoints:
 
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
+import logging
 
 from django.conf import settings
 from django.utils import timezone
@@ -27,6 +28,15 @@ from .models import Interactive, Lesson, Material, Payment, ReferralLink, Tariff
 from .permissions import IsCabinetTeacher
 from .subscription_access import AccessDenied, SubscriptionAccessService
 from .subscription_service import SubscriptionLimitService
+
+logger = logging.getLogger(__name__)
+
+
+def _ensure_tariff_catalog():
+    """Если в БД нет Старт/Учитель/Профи/Премиум — заполняет каталог."""
+    from .management.commands.seed_tariffs import ensure_default_tariff_plans
+
+    ensure_default_tariff_plans()
 
 
 def _plan_is_free(plan) -> bool:
@@ -346,37 +356,28 @@ class SubscriptionUsageView(APIView):
 
     def get(self, request):
         # Сначала эффективный план (может демотировать истёкший → Старт).
+        _ensure_tariff_catalog()
         SubscriptionLimitService.get_or_create_subscription(request.user)
-        plan = SubscriptionLimitService.get_current_plan(request.user)
+        from .tariff_usage import TariffUsageService
+
+        payload = TariffUsageService.get_tariff_usage(request.user)
+        plan = payload["plan"]
         sub = (
             TeacherSubscription.objects.select_related("plan", "scheduled_plan")
             .get(teacher=request.user)
         )
-        # После возможной демоции plan на подписке должен совпадать с effective.
         if sub.plan_id != plan.pk:
             sub.plan = plan
-        usage = SubscriptionLimitService.get_usage(request.user)
-        monthly = SubscriptionAccessService.get_teacher_monthly_usage(request.user)
 
         return Response({
             "plan": _plan_short(plan),
             "subscription": _subscription_payload(sub),
-            "limits": {
-                "students": plan.max_students,
-                "groups": plan.max_groups,
-                "lessons": plan.max_lessons,
-                "interactives": plan.max_interactives,
-                "variants_monthly": plan.max_variants_monthly,
-                "workbooks_monthly": plan.max_workbooks_monthly,
-            },
-            "usage": {
-                "students": usage["students"],
-                "groups": usage["groups"],
-                "lessons": usage["lessons"],
-                "interactives": monthly.interactives_created,
-                "variants": monthly.variants_created,
-                "workbooks": monthly.workbooks_created,
-            },
+            "tariff": payload["tariff"],
+            "period_start": payload["period_start"],
+            "period_end": payload["period_end"],
+            "usage_items": payload["usage"],
+            "limits": TariffUsageService.limits_dict(plan),
+            "usage": TariffUsageService.usage_dict(payload),
             "features": {
                 "homework": plan.has_homework,
                 "review": plan.has_review,
@@ -401,6 +402,8 @@ class SubscriptionPlansView(APIView):
             serialize_promotion,
         )
         from .registration_promo import promo_payload
+
+        _ensure_tariff_catalog()
 
         plans = (
             TariffPlan.objects.filter(is_active=True)
@@ -433,6 +436,15 @@ class SubscriptionPlansView(APIView):
             for item in list_displayable_promotions(request.user)
         ]
 
+        from .tariff_usage import TariffUsageService
+
+        usage_payload = None
+        try:
+            usage_payload = TariffUsageService.get_tariff_usage(request.user)
+        except Exception:
+            logger.exception("Failed to build tariff usage payload")
+            usage_payload = None
+
         return Response({
             "current_slug": current_plan.slug,
             "plans": plan_payloads,
@@ -442,6 +454,11 @@ class SubscriptionPlansView(APIView):
             "anonymous": _anonymous_payload(),
             "referral": _referral_program_payload(request.user),
             "payments_enabled": bool(getattr(settings, "PAYMENTS_ENABLED", False)),
+            "tariff": usage_payload["tariff"] if usage_payload else {
+                "code": current_plan.slug,
+                "name": current_plan.name,
+            },
+            "usage_items": usage_payload["usage"] if usage_payload else [],
             "billing": {
                 "year_savings_months": year_savings,
                 "year_savings_label": (
@@ -467,6 +484,8 @@ class PublicPricingPlansView(APIView):
             serialize_promotion,
         )
         from .registration_promo import promo_payload
+
+        _ensure_tariff_catalog()
 
         plans = (
             TariffPlan.objects.filter(is_active=True, is_public=True)

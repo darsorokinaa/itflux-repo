@@ -59,6 +59,11 @@ function LessonPlanItemCard({ item, plan, onOpen }) {
       <div className="cb-lesson-list-card__body">
         <div className="cb-lesson-list-card__head">
           <h4 className="cb-lesson-list-card__title">{item.title || `Занятие ${item.order}`}</h4>
+          {item.statusLabel ? (
+            <span className={`cb-lesson-list-card__status cb-lesson-list-card__status--${item.status || "not_started"}`}>
+              {item.statusLabel}
+            </span>
+          ) : null}
         </div>
         {topicLine ? (
           <p className="cb-lesson-list-card__topic">{topicLine}</p>

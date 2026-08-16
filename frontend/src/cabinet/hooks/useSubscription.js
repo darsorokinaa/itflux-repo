@@ -25,6 +25,7 @@ const INITIAL_STATE = {
   currentPlan: null,
   limits: { students: 5, groups: 2, lessons: 10, interactives: 5, ai_requests: 10 },
   usage: { students: 0, groups: 0, lessons: 0, interactives: 0, ai_requests: 0 },
+  usageItems: [],
   features: {
     homework: true,
     review: true,
@@ -51,6 +52,7 @@ export function useSubscription() {
         currentPlan: data.plan,
         limits: data.limits,
         usage: data.usage,
+        usageItems: data.usage_items || [],
         features: data.features,
         subscription: data.subscription,
         loading: false,
@@ -84,11 +86,11 @@ export function useSubscription() {
   return {
     ...state,
     refreshUsage: load,
-    canCreateStudent: usage.students < limits.students,
-    canCreateGroup: usage.groups < limits.groups,
-    canCreateLesson: usage.lessons < limits.lessons,
-    canCreateInteractive: usage.interactives < limits.interactives,
-    canUseAI: usage.ai_requests < limits.ai_requests,
+    canCreateStudent: limits.students == null || usage.students < limits.students,
+    canCreateGroup: limits.groups == null || usage.groups < limits.groups,
+    canCreateLesson: true,
+    canCreateInteractive: limits.interactives == null || usage.interactives < limits.interactives,
+    canUseAI: limits.ai_requests == null || usage.ai_requests < limits.ai_requests,
   };
 }
 

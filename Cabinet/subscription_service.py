@@ -5,15 +5,12 @@ SubscriptionLimitService — проверка тарифных лимитов у
 Никаких данных других пользователей здесь не используется.
 """
 
-import uuid
 from datetime import date
 from typing import Optional
 
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils import timezone
-
-from .choices import GroupStatus, InteractiveStatus, LessonStatus, StudentStatus
 
 
 class LimitExceeded(Exception):
@@ -60,12 +57,24 @@ class SubscriptionLimitService:
         return sub  # возвращаем даже истёкшую — caller решает что делать
 
     @staticmethod
-    def get_or_create_subscription(teacher: User, *, apply_promo: bool = True):
-        """Возвращает подписку, создавая бесплатный тариф при необходимости."""
+    def get_or_create_subscription(teacher: User, *, apply_promo: bool = False):
+        """Возвращает подписку, создавая бесплатный тариф «Старт» при необходимости.
+
+        Всегда читает строку из БД (без кэша related-object): webhook/оплата
+        могут обновить expires_at параллельно.
+
+        apply_promo=True — явная выдача стартовой акции (если она активна в админке).
+        По умолчанию не выдаём: новые учителя остаются на «Старте», уже полученные
+        Premium не трогаем. Регистрация вызывает apply_registration_promo отдельно.
+        """
         from .models import TariffPlan, TeacherSubscription
-        try:
-            sub = teacher.subscription
-        except TeacherSubscription.DoesNotExist:
+
+        sub = (
+            TeacherSubscription.objects.select_related("plan")
+            .filter(teacher=teacher)
+            .first()
+        )
+        if sub is None:
             start_plan = TariffPlan.objects.filter(slug="start", is_active=True).first()
             if not start_plan:
                 start_plan, _ = TariffPlan.objects.get_or_create(
@@ -77,14 +86,16 @@ class SubscriptionLimitService:
                 plan=start_plan,
                 status=TeacherSubscription.Status.ACTIVE,
             )
+            sub = TeacherSubscription.objects.select_related("plan").get(pk=sub.pk)
         if apply_promo:
             from .registration_promo import ensure_registration_promo
 
             ensure_registration_promo(teacher)
-            try:
-                sub = TeacherSubscription.objects.select_related("plan").get(teacher=teacher)
-            except TeacherSubscription.DoesNotExist:
-                pass
+            sub = (
+                TeacherSubscription.objects.select_related("plan")
+                .filter(teacher=teacher)
+                .first()
+            ) or sub
         return sub
 
     @staticmethod
@@ -163,57 +174,49 @@ class SubscriptionLimitService:
 
     @staticmethod
     def get_usage(teacher: User) -> dict:
-        """Полный срез текущего использования ресурсов учителя."""
-        from .models import Student, StudentGroup, Lesson, Interactive
-        ai_usage = SubscriptionLimitService.get_ai_usage(teacher)
+        """Полный срез текущего использования ресурсов учителя.
+
+        Интерактивы/варианты/тетради — за текущий календарный месяц
+        (как can_create_interactive / enforce_variant_creation).
+        Ученики/группы/уроки — фактическое текущее количество.
+        """
+        from .tariff_usage import TariffUsageService
+
+        counts = TariffUsageService.collect_counts(teacher)
         return {
-            "students": Student.objects.filter(
-                teacher=teacher
-            ).exclude(status=StudentStatus.ARCHIVED).count(),
-            "groups": StudentGroup.objects.filter(
-                teacher=teacher
-            ).exclude(status=GroupStatus.ARCHIVED).count(),
-            "lessons": Lesson.objects.filter(
-                teacher=teacher
-            ).exclude(status=LessonStatus.ARCHIVED).count(),
-            "interactives": Interactive.objects.filter(
-                teacher=teacher
-            ).exclude(status=InteractiveStatus.ARCHIVED).count(),
-            "ai_requests": ai_usage.used_requests,
+            "students": counts["students"],
+            "groups": counts["groups"],
+            "lessons": counts["lessons"],
+            "interactives": counts["interactives"],
+            "variants": counts["variants"],
+            "workbooks": counts["workbooks"],
+            "ai_requests": counts["ai_requests"],
+            "storage_bytes": counts["storage_bytes"],
         }
 
     # ── can_* методы ─────────────────────────────────────────────────────────
 
     @staticmethod
     def can_create_student(teacher: User) -> bool:
-        plan = SubscriptionLimitService.get_current_plan(teacher)
-        usage = SubscriptionLimitService.get_usage(teacher)
-        return usage["students"] < plan.max_students
+        from .tariff_usage import TariffUsageService
+
+        return TariffUsageService.is_within_limit(teacher, "students")
 
     @staticmethod
     def can_create_group(teacher: User) -> bool:
-        plan = SubscriptionLimitService.get_current_plan(teacher)
-        if plan.max_groups is None:
-            return True
-        usage = SubscriptionLimitService.get_usage(teacher)
-        return usage["groups"] < plan.max_groups
+        from .tariff_usage import TariffUsageService
+
+        return TariffUsageService.is_within_limit(teacher, "groups")
 
     @staticmethod
     def can_create_lesson(teacher: User) -> bool:
-        plan = SubscriptionLimitService.get_current_plan(teacher)
-        usage = SubscriptionLimitService.get_usage(teacher)
-        return usage["lessons"] < plan.max_lessons
+        return True
 
     @staticmethod
     def can_create_interactive(teacher: User) -> bool:
-        plan = SubscriptionLimitService.get_current_plan(teacher)
-        limit = plan.max_interactives
-        if limit is None:
-            return True
-        from .subscription_access import SubscriptionAccessService
+        from .tariff_usage import TariffUsageService
 
-        usage = SubscriptionAccessService.get_teacher_monthly_usage(teacher)
-        return usage.interactives_created < limit
+        return TariffUsageService.is_within_limit(teacher, "interactives")
 
     @staticmethod
     def can_use_ai(teacher: User, cost_units: int = 1) -> bool:
@@ -230,61 +233,54 @@ class SubscriptionLimitService:
 
     @staticmethod
     def raise_if_student_limit_reached(teacher: User):
-        plan = SubscriptionLimitService.get_current_plan(teacher)
-        usage = SubscriptionLimitService.get_usage(teacher)
-        if usage["students"] >= plan.max_students:
+        from .tariff_usage import TariffUsageService
+
+        item = TariffUsageService.get_item(teacher, "students")
+        if item and not item["unlimited"] and item["exhausted"]:
             raise LimitExceeded(
                 code="STUDENT_LIMIT_REACHED",
                 message="Лимит учеников исчерпан",
-                limit=plan.max_students,
-                current=usage["students"],
-                recommended_plan=_get_next_plan_slug(plan.slug),
+                limit=item["limit"],
+                current=item["used"],
+                recommended_plan=_get_next_plan_slug(
+                    SubscriptionLimitService.get_current_plan(teacher).slug
+                ),
             )
 
     @staticmethod
     def raise_if_group_limit_reached(teacher: User):
-        plan = SubscriptionLimitService.get_current_plan(teacher)
-        if plan.max_groups is None:
-            return
-        usage = SubscriptionLimitService.get_usage(teacher)
-        if usage["groups"] >= plan.max_groups:
+        from .tariff_usage import TariffUsageService
+
+        item = TariffUsageService.get_item(teacher, "groups")
+        if item and not item["unlimited"] and item["exhausted"]:
             raise LimitExceeded(
                 code="GROUP_LIMIT_REACHED",
                 message="Лимит групп исчерпан",
-                limit=plan.max_groups,
-                current=usage["groups"],
-                recommended_plan=_get_next_plan_slug(plan.slug),
+                limit=item["limit"],
+                current=item["used"],
+                recommended_plan=_get_next_plan_slug(
+                    SubscriptionLimitService.get_current_plan(teacher).slug
+                ),
             )
 
     @staticmethod
     def raise_if_lesson_limit_reached(teacher: User):
-        plan = SubscriptionLimitService.get_current_plan(teacher)
-        usage = SubscriptionLimitService.get_usage(teacher)
-        if usage["lessons"] >= plan.max_lessons:
-            raise LimitExceeded(
-                code="LESSON_LIMIT_REACHED",
-                message="Лимит уроков исчерпан",
-                limit=plan.max_lessons,
-                current=usage["lessons"],
-                recommended_plan=_get_next_plan_slug(plan.slug),
-            )
+        return
 
     @staticmethod
     def raise_if_interactive_limit_reached(teacher: User):
-        plan = SubscriptionLimitService.get_current_plan(teacher)
-        limit = plan.max_interactives
-        if limit is None:
-            return
-        from .subscription_access import SubscriptionAccessService
+        from .tariff_usage import TariffUsageService
 
-        usage = SubscriptionAccessService.get_teacher_monthly_usage(teacher)
-        if usage.interactives_created >= limit:
+        item = TariffUsageService.get_item(teacher, "interactives")
+        if item and not item["unlimited"] and item["exhausted"]:
             raise LimitExceeded(
                 code="INTERACTIVE_LIMIT_REACHED",
                 message="Лимит создания интерактивов на этот месяц исчерпан",
-                limit=limit,
-                current=usage.interactives_created,
-                recommended_plan=_get_next_plan_slug(plan.slug),
+                limit=item["limit"],
+                current=item["used"],
+                recommended_plan=_get_next_plan_slug(
+                    SubscriptionLimitService.get_current_plan(teacher).slug
+                ),
             )
 
     @staticmethod
