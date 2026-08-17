@@ -68,6 +68,7 @@ export function applyScreenshareOperation(map, op) {
         points: normalizePoints(ann.points?.length ? ann.points : prev?.points),
         authorId: ann.authorId ?? op.authorId ?? op.author_id ?? prev?.authorId,
         displayName: ann.displayName || op.displayName || op.display_name || prev?.displayName,
+        coordSpace: ann.coordSpace || ann.coord_space || prev?.coordSpace || "screenshare_v1",
       });
     }
   } else if (action === "annotation_deleted") {

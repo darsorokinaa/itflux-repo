@@ -166,14 +166,29 @@ export function getMaterialViewportTransform({
   };
 }
 
-/** Map pointer client coords → normalized content coords [0,1]. */
-export function clientToContentNorm(clientX, clientY, transform) {
+/** Map pointer client coords → normalized content coords [0,1]. Outside content → null. */
+export function clientToContentNorm(clientX, clientY, transform, { clamp = false } = {}) {
   const w = transform?.rect?.width;
   const h = transform?.rect?.height;
   if (!w || !h) return null;
+  const x = (Number(clientX) - transform.rect.left) / w;
+  const y = (Number(clientY) - transform.rect.top) / h;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  if (x < 0 || x > 1 || y < 0 || y > 1) {
+    if (!clamp) return null;
+    return { x: clamp01(x), y: clamp01(y) };
+  }
+  return { x, y };
+}
+
+/** Map normalized content coords → 0..1 of the overlay surface (includes letterbox offset). */
+export function contentNormToSurfaceNorm(nx, ny, transform) {
+  const sw = Number(transform?.surfaceRect?.width) || 0;
+  const sh = Number(transform?.surfaceRect?.height) || 0;
+  if (!sw || !sh) return { x: clamp01(nx), y: clamp01(ny) };
   return {
-    x: clamp01((Number(clientX) - transform.rect.left) / w),
-    y: clamp01((Number(clientY) - transform.rect.top) / h),
+    x: ((Number(transform.offsetX) || 0) + clamp01(nx) * (Number(transform.renderedWidth) || 0)) / sw,
+    y: ((Number(transform.offsetY) || 0) + clamp01(ny) * (Number(transform.renderedHeight) || 0)) / sh,
   };
 }
 

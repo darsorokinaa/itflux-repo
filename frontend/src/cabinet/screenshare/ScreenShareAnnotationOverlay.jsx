@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
+import AnnotationToolbar from "../annotations/AnnotationToolbar";
+import { useAnnotationSession } from "../annotations/AnnotationContext";
+import { useElementClientRect } from "../annotations/useElementClientRect";
+import {
+  appendStrokePoint,
+  createStroke,
+  isMatchingActivePointer,
+  isStrokePointerHeld,
+  shouldIgnorePointerDown,
+} from "../annotations/pointerStroke";
 import {
   DRAWING_TOOLS,
   LASER_TTL_MS,
@@ -9,35 +20,37 @@ import {
   POINTER_THROTTLE_MS,
   STROKE_FLUSH_MS,
   TOOLS,
-  WIDTHS,
   newAnnotationId,
   participantColor,
 } from "./constants";
 import {
-  applyScreenshareOperation,
   findAnnotationAt,
   lastOwnAnnotationId,
 } from "./annotationModel";
 import {
-  clientToNormalized,
+  COORD_SPACE,
   computeScreenShareContentRect,
-  normalizedToOverlay,
+  normalizedToVisible,
+  pointerToNormalized,
   strokeWidthPx,
 } from "./contentRect";
 
-function pointsToPath(points, contentRect, hostRect) {
+function pointsToPath(points, contentRect, visibleRect) {
   if (!points?.length) return "";
-  return points.map((pt, index) => {
-    const p = normalizedToOverlay(pt.x, pt.y, contentRect, hostRect);
-    if (!p) return "";
-    return `${index === 0 ? "M" : "L"}${p.x.toFixed(2)} ${p.y.toFixed(2)}`;
-  }).join(" ");
+  const parts = [];
+  for (let index = 0; index < points.length; index += 1) {
+    const pt = points[index];
+    const p = normalizedToVisible(pt.x, pt.y, contentRect, visibleRect);
+    if (!p) continue;
+    parts.push(`${index === 0 || parts.length === 0 ? "M" : "L"}${p.x.toFixed(2)} ${p.y.toFixed(2)}`);
+  }
+  return parts.join(" ");
 }
 
-function arrowHead(points, contentRect, hostRect) {
+function arrowHead(points, contentRect, visibleRect) {
   if (!points || points.length < 2) return null;
-  const a = normalizedToOverlay(points[points.length - 2].x, points[points.length - 2].y, contentRect, hostRect);
-  const b = normalizedToOverlay(points[points.length - 1].x, points[points.length - 1].y, contentRect, hostRect);
+  const a = normalizedToVisible(points[points.length - 2].x, points[points.length - 2].y, contentRect, visibleRect);
+  const b = normalizedToVisible(points[points.length - 1].x, points[points.length - 1].y, contentRect, visibleRect);
   if (!a || !b) return null;
   const angle = Math.atan2(b.y - a.y, b.x - a.x);
   const len = 12;
@@ -54,13 +67,13 @@ function arrowHead(points, contentRect, hostRect) {
   ];
 }
 
-function AnnotationShape({ ann, contentRect, hostRect }) {
+function AnnotationShape({ ann, contentRect, visibleRect }) {
   const pts = ann.points || [];
   const color = ann.color || "#ef4444";
-  const sw = strokeWidthPx(ann.width || 3, contentRect.width);
+  const sw = strokeWidthPx(ann.width || 3, visibleRect?.width || contentRect?.width);
   const tool = ann.tool || "pen";
   if (tool === "text" && pts[0]) {
-    const p = normalizedToOverlay(pts[0].x, pts[0].y, contentRect, hostRect);
+    const p = normalizedToVisible(pts[0].x, pts[0].y, contentRect, visibleRect);
     if (!p) return null;
     return (
       <text
@@ -77,8 +90,8 @@ function AnnotationShape({ ann, contentRect, hostRect }) {
     );
   }
   if ((tool === "rect" || tool === "ellipse") && pts.length >= 2) {
-    const a = normalizedToOverlay(pts[0].x, pts[0].y, contentRect, hostRect);
-    const b = normalizedToOverlay(pts[1].x, pts[1].y, contentRect, hostRect);
+    const a = normalizedToVisible(pts[0].x, pts[0].y, contentRect, visibleRect);
+    const b = normalizedToVisible(pts[1].x, pts[1].y, contentRect, visibleRect);
     if (!a || !b) return null;
     const x = Math.min(a.x, b.x);
     const y = Math.min(a.y, b.y);
@@ -97,32 +110,27 @@ function AnnotationShape({ ann, contentRect, hostRect }) {
         />
       );
     }
-    return (
-      <rect x={x} y={y} width={w} height={h} fill="none" stroke={color} strokeWidth={sw} />
-    );
+    return <rect x={x} y={y} width={w} height={h} fill="none" stroke={color} strokeWidth={sw} />;
   }
   if (tool === "line" && pts.length >= 2) {
-    const a = normalizedToOverlay(pts[0].x, pts[0].y, contentRect, hostRect);
-    const b = normalizedToOverlay(pts[pts.length - 1].x, pts[pts.length - 1].y, contentRect, hostRect);
+    const a = normalizedToVisible(pts[0].x, pts[0].y, contentRect, visibleRect);
+    const b = normalizedToVisible(pts[pts.length - 1].x, pts[pts.length - 1].y, contentRect, visibleRect);
     if (!a || !b) return null;
     return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={color} strokeWidth={sw} />;
   }
   if (tool === "arrow" && pts.length >= 2) {
-    const a = normalizedToOverlay(pts[0].x, pts[0].y, contentRect, hostRect);
-    const b = normalizedToOverlay(pts[pts.length - 1].x, pts[pts.length - 1].y, contentRect, hostRect);
-    const head = arrowHead([pts[0], pts[pts.length - 1]], contentRect, hostRect);
+    const a = normalizedToVisible(pts[0].x, pts[0].y, contentRect, visibleRect);
+    const b = normalizedToVisible(pts[pts.length - 1].x, pts[pts.length - 1].y, contentRect, visibleRect);
+    const head = arrowHead([pts[0], pts[pts.length - 1]], contentRect, visibleRect);
     if (!a || !b || !head) return null;
     return (
       <g>
         <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={color} strokeWidth={sw} />
-        <polygon
-          points={head.map((p) => `${p.x},${p.y}`).join(" ")}
-          fill={color}
-        />
+        <polygon points={head.map((p) => `${p.x},${p.y}`).join(" ")} fill={color} />
       </g>
     );
   }
-  const d = pointsToPath(pts, contentRect, hostRect);
+  const d = pointsToPath(pts, contentRect, visibleRect);
   if (!d) return null;
   const highlighter = tool === "highlighter" || tool === "marker";
   return (
@@ -147,11 +155,14 @@ export default function ScreenShareAnnotationOverlay({
   currentUserId = null,
   displayName = "",
   sessionId = "",
-  contentWidth = 1920,
-  contentHeight = 1080,
+  contentWidth = 0,
+  contentHeight = 0,
   annotations = [],
   remoteLasers = {},
   tileView = false,
+  objectFit = "contain",
+  targetRef = null,
+  showToolbar = true,
   onReportLayout,
   onStrokeStart,
   onStrokeUpdate,
@@ -160,61 +171,54 @@ export default function ScreenShareAnnotationOverlay({
   onPointer,
   onErase,
   onUndo,
+  onRedo,
   onClearMine,
   onClearAll,
   onSetParticipantsCanAnnotate,
 }) {
-  const hostRef = useRef(null);
-  const [hostBox, setHostBox] = useState(null);
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [tool, setTool] = useState(TOOLS.POINTER);
-  const [color, setColor] = useState(() => participantColor(currentUserId));
-  const [width, setWidth] = useState(3);
+  const session = useAnnotationSession();
+  const hostFallbackRef = useRef(null);
+  const geometryTarget = targetRef || hostFallbackRef;
+  const hostBox = useElementClientRect(geometryTarget, {
+    enabled: active,
+    live: active,
+  });
+
+  const [localTool, setLocalTool] = useState(TOOLS.POINTER);
+  const [localColor, setLocalColor] = useState(() => participantColor(currentUserId));
+  const [localWidth, setLocalWidth] = useState(3);
   const [localStroke, setLocalStroke] = useState(null);
   const [textDraft, setTextDraft] = useState(null);
+  const [redoStack, setRedoStack] = useState([]);
   const drawingRef = useRef(null);
+  const activePointerRef = useRef(null);
   const pendingPointsRef = useRef([]);
   const flushTimerRef = useRef(null);
   const pointerThrottleRef = useRef(0);
+  const rafRef = useRef(0);
+  const captureNodeRef = useRef(null);
+
+  const tool = session?.tool ?? localTool;
+  const color = session?.color ?? localColor;
+  const width = session?.width ?? localWidth;
+  const setTool = session?.setTool ?? setLocalTool;
+  const setColor = session?.setColor ?? setLocalColor;
+  const setWidth = session?.setWidth ?? setLocalWidth;
+  const panelOpen = session ? session.enabled && session.target === "screenshare" : tool !== TOOLS.POINTER;
 
   useEffect(() => {
-    setColor((prev) => (PALETTE.includes(prev) ? prev : participantColor(currentUserId)));
-  }, [currentUserId]);
+    if (!session) {
+      setLocalColor((prev) => (PALETTE.includes(prev) ? prev : participantColor(currentUserId)));
+    }
+  }, [currentUserId, session]);
 
   useEffect(() => {
     if (!active) {
-      setPanelOpen(false);
-      setTool(TOOLS.POINTER);
+      drawingRef.current = null;
+      activePointerRef.current = null;
       setLocalStroke(null);
       setTextDraft(null);
-      drawingRef.current = null;
     }
-  }, [active]);
-
-  useEffect(() => {
-    const node = hostRef.current;
-    if (!node) return undefined;
-    const update = () => {
-      const rect = node.getBoundingClientRect();
-      setHostBox({
-        left: rect.left,
-        top: rect.top,
-        width: rect.width,
-        height: rect.height,
-      });
-    };
-    update();
-    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
-    ro?.observe(node);
-    window.addEventListener("resize", update);
-    window.addEventListener("orientationchange", update);
-    document.addEventListener("fullscreenchange", update);
-    return () => {
-      ro?.disconnect();
-      window.removeEventListener("resize", update);
-      window.removeEventListener("orientationchange", update);
-      document.removeEventListener("fullscreenchange", update);
-    };
   }, [active]);
 
   const layout = useMemo(
@@ -223,18 +227,32 @@ export default function ScreenShareAnnotationOverlay({
       contentWidth,
       contentHeight,
       compact,
+      tileView,
+      objectFit,
     }),
-    [hostBox, contentWidth, contentHeight, compact],
+    [hostBox, contentWidth, contentHeight, compact, tileView, objectFit],
   );
 
   useEffect(() => {
-    if (!active || !layout?.content?.width) return;
+    if (!active || !layout?.visible?.width) return;
     onReportLayout?.(layout);
   }, [active, layout, onReportLayout]);
 
-  const capturing = panelOpen && DRAWING_TOOLS.has(tool) && canAnnotate;
+  const capturing = Boolean(
+    active && panelOpen && DRAWING_TOOLS.has(tool) && canAnnotate && !tileView,
+  );
   const contentRect = layout.content;
-  const hostRect = layout.host;
+  const visibleRect = layout.visible;
+
+  const bumpLocalStroke = useCallback(() => {
+    if (rafRef.current) return;
+    rafRef.current = window.requestAnimationFrame(() => {
+      rafRef.current = 0;
+      const drawing = drawingRef.current;
+      if (!drawing || drawing.tool === TOOLS.LASER) return;
+      setLocalStroke({ ...drawing, points: [...drawing.points] });
+    });
+  }, []);
 
   const flushPoints = useCallback((end = false) => {
     const drawing = drawingRef.current;
@@ -243,7 +261,11 @@ export default function ScreenShareAnnotationOverlay({
       return;
     }
     const batch = pendingPointsRef.current.splice(0, MAX_POINTS_PER_BATCH);
-    onStrokeUpdate?.({ ...drawing, points: batch });
+    onStrokeUpdate?.({
+      ...drawing,
+      points: batch,
+      coordSpace: COORD_SPACE,
+    });
     if (pendingPointsRef.current.length) {
       flushTimerRef.current = window.setTimeout(() => flushPoints(end), STROKE_FLUSH_MS);
       return;
@@ -258,23 +280,74 @@ export default function ScreenShareAnnotationOverlay({
   }, [flushPoints]);
 
   const toNorm = useCallback((event) => {
-    if (!contentRect?.width) return null;
-    return clientToNormalized(event.clientX, event.clientY, contentRect);
-  }, [contentRect]);
+    if (!layout?.content?.width) return null;
+    return pointerToNormalized(event.clientX, event.clientY, layout);
+  }, [layout]);
+
+  const finishShape = useCallback(() => {
+    const drawing = drawingRef.current;
+    activePointerRef.current = null;
+    if (rafRef.current) {
+      window.cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    }
+    if (flushTimerRef.current) {
+      window.clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    drawingRef.current = null;
+    if (!drawing) {
+      setLocalStroke(null);
+      return;
+    }
+    if (drawing.tool === TOOLS.LASER) {
+      setLocalStroke(null);
+      return;
+    }
+    if (drawing.tool === TOOLS.PEN || drawing.tool === TOOLS.HIGHLIGHTER) {
+      if (pendingPointsRef.current.length) flushPoints(true);
+      else onStrokeEnd?.(drawing);
+    } else if (drawing.points?.length >= 2) {
+      onObjectUpsert?.({ ...drawing, completed: true, coordSpace: COORD_SPACE });
+    }
+    setLocalStroke(null);
+    setRedoStack([]);
+  }, [flushPoints, onObjectUpsert, onStrokeEnd]);
+
+  const releaseCapture = useCallback((event) => {
+    const node = event?.currentTarget || captureNodeRef.current;
+    if (!node || event?.pointerId == null) return;
+    try {
+      node.releasePointerCapture?.(event.pointerId);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const onPointerDown = useCallback((event) => {
     if (!capturing) return;
-    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (shouldIgnorePointerDown(event)) return;
+    if (activePointerRef.current != null) return;
     const point = toNorm(event);
     if (!point) return;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+    captureNodeRef.current = event.currentTarget;
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      /* ignore */
+    }
+    activePointerRef.current = event.pointerId;
     if (tool === TOOLS.TEXT) {
       setTextDraft({
         x: point.x,
         y: point.y,
-        overlay: normalizedToOverlay(point.x, point.y, contentRect, hostRect),
+        overlay: normalizedToVisible(point.x, point.y, contentRect, visibleRect),
         value: "",
       });
+      activePointerRef.current = null;
+      releaseCapture(event);
       return;
     }
     if (tool === TOOLS.ERASER) {
@@ -284,27 +357,33 @@ export default function ScreenShareAnnotationOverlay({
         point.y,
       );
       if (hit) onErase?.(hit);
+      activePointerRef.current = null;
+      releaseCapture(event);
       return;
     }
     if (tool === TOOLS.LASER) {
       onPointer?.(point);
-      drawingRef.current = { tool: TOOLS.LASER };
+      drawingRef.current = { id: `laser-${event.pointerId}`, tool: TOOLS.LASER };
       return;
     }
-    if (!canAnnotate) return;
-    const stroke = {
+    if (!canAnnotate) {
+      activePointerRef.current = null;
+      releaseCapture(event);
+      return;
+    }
+    const stroke = createStroke({
       id: newAnnotationId(),
       tool,
       color,
       width,
-      points: [point],
+      point,
       authorId: currentUserId,
       displayName,
-      completed: false,
-    };
+      coordSpace: COORD_SPACE,
+    });
     drawingRef.current = stroke;
     pendingPointsRef.current = [];
-    setLocalStroke(stroke);
+    setLocalStroke({ ...stroke, points: [...stroke.points] });
     if (tool === TOOLS.PEN || tool === TOOLS.HIGHLIGHTER) {
       onStrokeStart?.(stroke);
     }
@@ -316,17 +395,24 @@ export default function ScreenShareAnnotationOverlay({
     contentRect,
     currentUserId,
     displayName,
-    hostRect,
     onErase,
     onPointer,
     onStrokeStart,
+    releaseCapture,
     toNorm,
     tool,
+    visibleRect,
     width,
   ]);
 
   const onPointerMove = useCallback((event) => {
     if (!capturing) return;
+    if (!isMatchingActivePointer(event, activePointerRef.current)) return;
+    if ((event.pointerType === "mouse" || event.pointerType === "pen") && !isStrokePointerHeld(event, activePointerRef.current)) {
+      finishShape();
+      releaseCapture(event);
+      return;
+    }
     const point = toNorm(event);
     if (!point) return;
     if (tool === TOOLS.LASER && drawingRef.current?.tool === TOOLS.LASER) {
@@ -339,45 +425,43 @@ export default function ScreenShareAnnotationOverlay({
     }
     const drawing = drawingRef.current;
     if (!drawing || drawing.tool === TOOLS.LASER) return;
+    if (drawing.id && event.pointerId !== activePointerRef.current) return;
     if (tool === TOOLS.PEN || tool === TOOLS.HIGHLIGHTER) {
-      drawing.points = [...drawing.points, point];
+      appendStrokePoint(drawing, point);
       pendingPointsRef.current.push(point);
-      setLocalStroke({ ...drawing, points: [...drawing.points] });
+      bumpLocalStroke();
       scheduleFlush();
       return;
     }
     drawing.points = [drawing.points[0], point];
-    setLocalStroke({ ...drawing, points: [...drawing.points] });
-  }, [capturing, onPointer, scheduleFlush, toNorm, tool]);
-
-  const finishShape = useCallback(() => {
-    const drawing = drawingRef.current;
-    if (!drawing) return;
-    if (flushTimerRef.current) {
-      window.clearTimeout(flushTimerRef.current);
-      flushTimerRef.current = null;
-    }
-    if (drawing.tool === TOOLS.LASER) {
-      drawingRef.current = null;
-      return;
-    }
-    if (drawing.tool === TOOLS.PEN || drawing.tool === TOOLS.HIGHLIGHTER) {
-      flushPoints(true);
-    } else if (drawing.points?.length >= 2) {
-      onObjectUpsert?.({ ...drawing, completed: true });
-    }
-    drawingRef.current = null;
-    setLocalStroke(null);
-  }, [flushPoints, onObjectUpsert]);
+    bumpLocalStroke();
+  }, [bumpLocalStroke, capturing, finishShape, onPointer, releaseCapture, scheduleFlush, toNorm, tool]);
 
   const onPointerUp = useCallback((event) => {
-    try {
-      event.currentTarget.releasePointerCapture?.(event.pointerId);
-    } catch {
-      /* ignore */
-    }
+    if (activePointerRef.current != null && event.pointerId !== activePointerRef.current) return;
+    releaseCapture(event);
     finishShape();
-  }, [finishShape]);
+  }, [finishShape, releaseCapture]);
+
+  useEffect(() => {
+    if (!capturing) return undefined;
+    const abortStroke = () => {
+      if (!drawingRef.current && activePointerRef.current == null) return;
+      finishShape();
+    };
+    const onBlur = () => abortStroke();
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") abortStroke();
+    };
+    window.addEventListener("blur", onBlur);
+    document.addEventListener("visibilitychange", onVisibility);
+    document.addEventListener("fullscreenchange", abortStroke);
+    return () => {
+      window.removeEventListener("blur", onBlur);
+      document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener("fullscreenchange", abortStroke);
+    };
+  }, [capturing, finishShape]);
 
   const commitText = useCallback(() => {
     const draft = textDraft;
@@ -394,6 +478,7 @@ export default function ScreenShareAnnotationOverlay({
       authorId: currentUserId,
       displayName,
       completed: true,
+      coordSpace: COORD_SPACE,
     });
   }, [canAnnotate, color, currentUserId, displayName, onObjectUpsert, textDraft, width]);
 
@@ -402,148 +487,127 @@ export default function ScreenShareAnnotationOverlay({
     [annotations],
   );
   const canUndo = Boolean(lastOwnAnnotationId(annotationMap, currentUserId));
+  const canRedo = redoStack.length > 0;
+
+  const handleUndo = useCallback(() => {
+    const id = lastOwnAnnotationId(annotationMap, currentUserId);
+    if (!id) return;
+    const item = annotationMap.get(id);
+    if (item) setRedoStack((prev) => [...prev, item]);
+    onUndo?.();
+  }, [annotationMap, currentUserId, onUndo]);
+
+  const handleRedo = useCallback(() => {
+    const item = redoStack[redoStack.length - 1];
+    if (!item) return;
+    setRedoStack((prev) => prev.slice(0, -1));
+    onRedo?.(item);
+    onObjectUpsert?.(item);
+  }, [onObjectUpsert, onRedo, redoStack]);
 
   if (!active) return null;
 
-  const tools = [
-    [TOOLS.POINTER, "Указка"],
-    [TOOLS.LASER, "Лазер"],
-    [TOOLS.PEN, "Перо"],
-    [TOOLS.HIGHLIGHTER, "Маркер"],
-    [TOOLS.LINE, "Линия"],
-    [TOOLS.ARROW, "Стрелка"],
-    [TOOLS.RECT, "Прямоуг."],
-    [TOOLS.ELLIPSE, "Овал"],
-    [TOOLS.TEXT, "Текст"],
-    [TOOLS.ERASER, "Ластик"],
-  ];
+  const visible = visibleRect?.width > 0 && visibleRect?.height > 0;
+  const toolbarHint = tileView
+    ? "Для точных координат выйдите из режима плиток в конференции."
+    : "";
 
-  return (
-    <div
-      ref={hostRef}
-      className={`ss-annot${compact ? " ss-annot--compact" : ""}${capturing ? " is-capturing" : ""}`}
+  const svg = visible ? (
+    <svg
+      className={`ss-annot__svg${capturing ? " is-capturing" : ""}`}
+      width={visibleRect.width}
+      height={visibleRect.height}
+      viewBox={`0 0 ${visibleRect.width} ${visibleRect.height}`}
+      preserveAspectRatio="none"
+      style={{
+        position: "fixed",
+        left: visibleRect.left,
+        top: visibleRect.top,
+        width: visibleRect.width,
+        height: visibleRect.height,
+        pointerEvents: capturing ? "auto" : "none",
+        touchAction: capturing ? "none" : "auto",
+        zIndex: 45,
+      }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onLostPointerCapture={onPointerUp}
     >
-      <button
-        type="button"
-        className={`ss-annot__toggle${panelOpen ? " is-open" : ""}`}
-        onClick={() => setPanelOpen((v) => !v)}
-        aria-pressed={panelOpen}
-      >
-        ✏ Аннотации
-      </button>
-
-      {panelOpen ? (
-        <div className="ss-annot__panel" role="toolbar" aria-label="Инструменты аннотаций">
-          <div className="ss-annot__tools">
-            {tools.map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                className={tool === id ? "is-active" : ""}
-                disabled={!canAnnotate && id !== TOOLS.POINTER}
-                onClick={() => setTool(id)}
-                title={label}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="ss-annot__style">
-            {PALETTE.map((c) => (
-              <button
-                key={c}
-                type="button"
-                className={`ss-annot__swatch${color === c ? " is-active" : ""}`}
-                style={{ background: c }}
-                aria-label={`Цвет ${c}`}
-                disabled={!canAnnotate}
-                onClick={() => setColor(c)}
-              />
-            ))}
-            <select
-              className="ss-annot__width"
-              value={width}
-              disabled={!canAnnotate}
-              onChange={(e) => setWidth(Number(e.target.value))}
-              aria-label="Толщина"
-            >
-              {WIDTHS.map((w) => (
-                <option key={w} value={w}>{w}px</option>
-              ))}
-            </select>
-          </div>
-          <div className="ss-annot__actions">
-            <button type="button" disabled={!canAnnotate || !canUndo} onClick={() => onUndo?.()}>
-              Отменить
-            </button>
-            <button type="button" disabled={!canAnnotate} onClick={() => onClearMine?.()}>
-              Очистить свои
-            </button>
-            {canManage ? (
-              <>
-                <button type="button" onClick={() => onClearAll?.()}>Очистить все</button>
-                <button
-                  type="button"
-                  className={participantsCanAnnotate ? "is-active" : ""}
-                  onClick={() => onSetParticipantsCanAnnotate?.(!participantsCanAnnotate)}
-                >
-                  {participantsCanAnnotate ? "Запретить участникам" : "Разрешить участникам"}
-                </button>
-              </>
-            ) : null}
-          </div>
-          {!canAnnotate ? (
-            <p className="ss-annot__hint">Преподаватель запретил рисовать. Аннотации остаются видны.</p>
-          ) : null}
-          {tileView ? (
-            <p className="ss-annot__hint">Для точных координат выйдите из режима плиток в конференции.</p>
-          ) : null}
-        </div>
-      ) : null}
-
-      <svg
-        className="ss-annot__svg"
-        width="100%"
-        height="100%"
-        style={{ pointerEvents: capturing ? "auto" : "none" }}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-      >
-        {[...annotationMap.values()].map((ann) => (
+      {[...annotationMap.values()]
+        .filter((ann) => !localStroke || ann.id !== localStroke.id)
+        .map((ann) => (
           <AnnotationShape
             key={ann.id}
             ann={ann}
             contentRect={contentRect}
-            hostRect={hostRect}
+            visibleRect={visibleRect}
           />
         ))}
-        {localStroke ? (
-          <AnnotationShape ann={localStroke} contentRect={contentRect} hostRect={hostRect} />
-        ) : null}
-        {Object.entries(remoteLasers).map(([id, laser]) => {
-          const p = normalizedToOverlay(laser.x, laser.y, contentRect, hostRect);
-          if (!p) return null;
-          const age = Date.now() - (laser.at || 0);
-          if (age > LASER_TTL_MS) return null;
-          return (
-            <g key={id}>
-              <circle cx={p.x} cy={p.y} r="7" fill={laser.color || "#ef4444"} opacity="0.85" />
-              {laser.displayName ? (
-                <text x={p.x + 10} y={p.y - 8} fill="#fff" fontSize="11" fontWeight="650">
-                  {laser.displayName}
-                </text>
-              ) : null}
-            </g>
-          );
-        })}
-      </svg>
+      {localStroke ? (
+        <AnnotationShape ann={localStroke} contentRect={contentRect} visibleRect={visibleRect} />
+      ) : null}
+      {Object.entries(remoteLasers).map(([id, laser]) => {
+        const p = normalizedToVisible(laser.x, laser.y, contentRect, visibleRect);
+        if (!p) return null;
+        const age = Date.now() - (laser.at || 0);
+        if (age > LASER_TTL_MS) return null;
+        return (
+          <g key={id}>
+            <circle cx={p.x} cy={p.y} r="7" fill={laser.color || "#ef4444"} opacity="0.85" />
+            {laser.displayName ? (
+              <text x={p.x + 10} y={p.y - 8} fill="#fff" fontSize="11" fontWeight="650">
+                {laser.displayName}
+              </text>
+            ) : null}
+          </g>
+        );
+      })}
+    </svg>
+  ) : null;
 
-      {textDraft?.overlay ? (
+  const toolbar = showToolbar && panelOpen ? (
+    <div className={`ann-toolbar-slot${compact ? " is-compact" : ""}`}>
+      <AnnotationToolbar
+        tool={tool}
+        color={color}
+        width={width}
+        canAnnotate={canAnnotate}
+        canManage={canManage}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        participantsCanAnnotate={participantsCanAnnotate}
+        compact={compact}
+        hint={toolbarHint}
+        onToolChange={setTool}
+        onColorChange={setColor}
+        onWidthChange={setWidth}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onClearMine={onClearMine}
+        onClearAll={onClearAll}
+        onSetParticipantsCanAnnotate={onSetParticipantsCanAnnotate}
+      />
+    </div>
+  ) : null;
+
+  return (
+    <>
+      {targetRef ? null : (
+        <div ref={hostFallbackRef} className="ss-annot ss-annot--measure" aria-hidden="true" />
+      )}
+      {typeof document !== "undefined" && svg ? createPortal(svg, document.body) : svg}
+      {typeof document !== "undefined" && toolbar ? createPortal(toolbar, document.body) : toolbar}
+      {textDraft?.overlay && visible ? createPortal(
         <input
           className="ss-annot__text"
-          style={{ left: textDraft.overlay.x, top: textDraft.overlay.y }}
+          style={{
+            position: "fixed",
+            left: visibleRect.left + textDraft.overlay.x,
+            top: visibleRect.top + textDraft.overlay.y,
+            zIndex: 56,
+          }}
           autoFocus
           maxLength={MAX_TEXT_LEN}
           value={textDraft.value}
@@ -556,8 +620,9 @@ export default function ScreenShareAnnotationOverlay({
             }
             if (e.key === "Escape") setTextDraft(null);
           }}
-        />
+        />,
+        document.body,
       ) : null}
-    </div>
+    </>
   );
 }

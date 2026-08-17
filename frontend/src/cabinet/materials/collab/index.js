@@ -7,6 +7,7 @@ export {
   clamp01,
   clientToContentNorm,
   contentNormToClient,
+  contentNormToSurfaceNorm,
   getContainedMediaRect,
   getMaterialViewportTransform,
   getVisibleContentViewport,

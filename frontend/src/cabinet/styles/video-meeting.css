@@ -2560,134 +2560,20 @@ body.vl-room-fullscreen .student-cabinet-nav {
   }
 }
 
-/* Аннотации поверх демонстрации экрана (не Excalidraw). */
-.ss-annot {
+/* Аннотации: overlay совпадает с content rect screen share, панель — floating. */
+.ss-annot--measure {
   position: absolute;
   inset: 0;
-  z-index: 3;
   pointer-events: none;
+  z-index: 0;
 }
 
-.ss-annot.is-capturing {
-  pointer-events: auto;
+.ss-annot__svg.is-capturing {
   touch-action: none;
 }
 
-.ss-annot__toggle,
-.ss-annot__panel,
 .ss-annot__text {
-  pointer-events: auto;
-}
-
-.ss-annot__toggle {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 4;
-  appearance: none;
-  border: 0;
-  border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  background: rgba(15, 23, 42, 0.82);
-  color: #f8fafc;
-  cursor: pointer;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
-}
-
-.ss-annot__toggle.is-open,
-.ss-annot__toggle:hover {
-  background: #2563eb;
-}
-
-.ss-annot__panel {
-  position: absolute;
-  top: 44px;
-  left: 10px;
-  z-index: 4;
-  max-width: min(420px, calc(100% - 20px));
-  padding: 8px;
-  border-radius: 12px;
-  background: rgba(15, 23, 42, 0.92);
-  color: #e2e8f0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ss-annot__tools,
-.ss-annot__style,
-.ss-annot__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.ss-annot__panel button {
-  appearance: none;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(30, 41, 59, 0.9);
-  color: #e2e8f0;
-  border-radius: 8px;
-  padding: 4px 7px;
-  font-size: 0.7rem;
-  font-weight: 650;
-  cursor: pointer;
-}
-
-.ss-annot__panel button.is-active {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: #fff;
-}
-
-.ss-annot__panel button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.ss-annot__swatch {
-  width: 18px;
-  height: 18px;
-  padding: 0 !important;
-  border-radius: 999px !important;
-}
-
-.ss-annot__swatch.is-active {
-  outline: 2px solid #fff;
-}
-
-.ss-annot__width {
-  border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(30, 41, 59, 0.9);
-  color: #e2e8f0;
-  font-size: 0.7rem;
-  padding: 3px 4px;
-}
-
-.ss-annot__hint {
-  margin: 0;
-  font-size: 0.68rem;
-  color: #94a3b8;
-}
-
-.ss-annot__svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  touch-action: none;
-}
-
-.ss-annot:not(.is-capturing) .ss-annot__svg {
-  touch-action: auto;
-}
-
-.ss-annot__text {
-  position: absolute;
-  z-index: 5;
+  z-index: 56;
   min-width: 120px;
   border: 1px solid #2563eb;
   border-radius: 6px;
@@ -2695,18 +2581,159 @@ body.vl-room-fullscreen .student-cabinet-nav {
   font-size: 0.85rem;
   background: #fff;
   color: #0f172a;
+  pointer-events: auto;
 }
 
-.ss-annot--compact .ss-annot__toggle {
-  top: 6px;
-  left: 6px;
-  padding: 4px 8px;
-  font-size: 0.68rem;
+.ann-toolbar-slot {
+  position: fixed;
+  top: calc(var(--vl-header-height, 56px) + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 55;
+  max-width: calc(100vw - 16px);
+  pointer-events: none;
 }
 
-.ss-annot--compact .ss-annot__panel {
-  max-width: min(280px, calc(100% - 12px));
-  top: 36px;
-  left: 6px;
-  padding: 6px;
+.ann-toolbar-slot.is-compact {
+  top: auto;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  left: 12px;
+  transform: none;
+}
+
+.ann-toolbar {
+  pointer-events: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 4px 6px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #e2e8f0;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(8px);
+}
+
+.ann-toolbar__group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ann-toolbar__group + .ann-toolbar__group {
+  padding-left: 6px;
+  border-left: 1px solid rgba(148, 163, 184, 0.28);
+}
+
+.ann-toolbar button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #e2e8f0;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  gap: 2px;
+}
+
+.ann-toolbar button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ann-toolbar button.is-active {
+  background: #2563eb;
+  color: #fff;
+}
+
+.ann-toolbar button:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.22);
+}
+
+.ann-toolbar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ann-toolbar__swatch {
+  width: 16px !important;
+  height: 16px !important;
+  border-radius: 999px !important;
+  border: 1px solid rgba(255, 255, 255, 0.35) !important;
+}
+
+.ann-toolbar__swatch.is-active {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+.ann-toolbar__width {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: #cbd5e1;
+}
+
+.ann-toolbar__width-mark {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.ann-toolbar__width select {
+  border: 0;
+  background: transparent;
+  color: #e2e8f0;
+  font-size: 0.7rem;
+  padding: 0 2px;
+}
+
+.ann-toolbar__text {
+  font-size: 0.62rem;
+  font-weight: 650;
+  display: none;
+}
+
+.ann-toolbar button:has(.ann-toolbar__text) {
+  width: auto;
+  padding: 0 6px;
+}
+
+.ann-toolbar button:has(.ann-toolbar__text) .ann-toolbar__text {
+  display: inline;
+}
+
+.ann-toolbar__hint {
+  margin: 0;
+  width: 100%;
+  font-size: 0.65rem;
+  color: #94a3b8;
+}
+
+@media (max-width: 720px) {
+  .ann-toolbar-slot {
+    top: auto;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    left: 8px;
+    right: 8px;
+    transform: none;
+  }
+
+  .ann-toolbar {
+    padding: 3px 4px;
+  }
+
+  .ann-toolbar button {
+    width: 26px;
+    height: 26px;
+  }
+
+  .ann-toolbar__group--shapes {
+    display: none;
+  }
 }

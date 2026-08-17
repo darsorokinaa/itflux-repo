@@ -85,6 +85,8 @@ import {
   lastOwnAnnotationId,
 } from "../screenshare/annotationModel";
 import { LASER_TTL_MS } from "../screenshare/constants";
+import { AnnotationProvider } from "../annotations/AnnotationContext";
+import { AnnotationHeaderButton } from "../annotations/AnnotationToolbar";
 import { useFloatingDrag } from "../useFloatingDrag";
 import "../styles/video-meeting.css";
 import "../styles/live-variant-answers.css";
@@ -277,6 +279,11 @@ export default function VideoMeetingPage() {
   const [screenshareSession, setScreenshareSession] = useState(null);
   const [screenshareAnnotations, setScreenshareAnnotations] = useState([]);
   const [screenshareLasers, setScreenshareLasers] = useState({});
+  const [screenshareLayout, setScreenshareLayout] = useState({
+    tileView: false,
+    contentWidth: 0,
+    contentHeight: 0,
+  });
   const screenshareSeenRef = useRef(new Set());
   const lastShareReportRef = useRef("");
   const screenShareApiRef = useRef(null);
@@ -590,7 +597,12 @@ export default function VideoMeetingPage() {
           };
           const collab = materialCollabRef.current;
           if (!collab || !snap) return;
-          const key = `${snap.active ? 1 : 0}|${snap.presenterJitsiId || ""}|${snap.localSharing ? 1 : 0}|${snap.contentWidth || 0}x${snap.contentHeight || 0}`;
+          const key = `${snap.active ? 1 : 0}|${snap.presenterJitsiId || ""}|${snap.localSharing ? 1 : 0}|${snap.contentWidth || 0}x${snap.contentHeight || 0}|${snap.tileView ? 1 : 0}`;
+          setScreenshareLayout({
+            tileView: Boolean(snap.tileView),
+            contentWidth: Number(snap.contentWidth) || 0,
+            contentHeight: Number(snap.contentHeight) || 0,
+          });
           if (key === lastShareReportRef.current) return;
           lastShareReportRef.current = key;
           collab.reportScreenshare({
@@ -2022,6 +2034,21 @@ export default function VideoMeetingPage() {
     || "Урок";
   const headerSub = whenLabel || "";
   const syncedWorkspaceOpen = Boolean(materialSession?.material);
+  const materialKind = materialSession?.material?.type || materialSession?.material?.kind || "";
+  const materialIsBoard = materialKind === "board"
+    || Boolean(materialSession?.material?.boardId)
+    || /\/cabinet\/boards\//i.test(String(materialSession?.material?.openUrl || materialSession?.material?.url || ""));
+  const materialAnnotatable = Boolean(
+    syncedWorkspaceOpen
+    && !materialIsBoard
+    && (
+      canManage
+      || (
+        materialSession?.interactionMode === "collaborative"
+        && ["annotate", "edit_content", "full"].includes(String(materialSession?.collaborationPermission || ""))
+      )
+    ),
+  );
   const workspaceOpen = (Boolean(workspaceMaterial) || syncedWorkspaceOpen) && !focusCall;
   const workspaceTitle = workspaceMaterial?.title
     || materialSession?.material?.title
@@ -2127,6 +2154,15 @@ export default function VideoMeetingPage() {
   }, []);
 
   return (
+    <AnnotationProvider
+      screenshareActive={Boolean(screenshareActive && showJitsi)}
+      materialAnnotatable={materialAnnotatable}
+      workspaceOpen={workspaceOpen}
+      focusCall={focusCall}
+      canAnnotate={screenshareCanAnnotate || materialAnnotatable}
+      canManage={canManage}
+      currentUserId={detail?.viewerUserId ?? null}
+    >
     <div
       ref={pageRootRef}
       className={[
@@ -2199,6 +2235,12 @@ export default function VideoMeetingPage() {
               Материалы{materialsCount ? ` · ${materialsCount}` : ""}
             </button>
           ) : null}
+
+          <AnnotationHeaderButton
+            onEnable={() => {
+              setCallCollapsed(false);
+            }}
+          />
 
           <button
             type="button"
@@ -2781,8 +2823,10 @@ export default function VideoMeetingPage() {
               currentUserId={detail?.viewerUserId ?? null}
               displayName={displayName}
               sessionId={screenshareSession?.sessionId || ""}
-              contentWidth={screenshareSession?.contentWidth || 1920}
-              contentHeight={screenshareSession?.contentHeight || 1080}
+              contentWidth={screenshareSession?.contentWidth || screenshareLayout.contentWidth || 0}
+              contentHeight={screenshareSession?.contentHeight || screenshareLayout.contentHeight || 0}
+              tileView={Boolean(screenshareLayout.tileView)}
+              targetRef={containerRef}
               annotations={screenshareAnnotations}
               remoteLasers={screenshareLasers}
               onStrokeStart={(ann) => {
@@ -2966,5 +3010,6 @@ export default function VideoMeetingPage() {
         onAttachInteractive={resourcePicker === "homework" ? onAttachHomeworkInteractive : onAttachPlanInteractive}
       />
     </div>
+    </AnnotationProvider>
   );
 }

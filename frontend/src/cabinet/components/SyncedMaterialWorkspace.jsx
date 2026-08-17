@@ -12,12 +12,21 @@ import {
   getCapabilitiesForKind,
   getMaterialViewportTransform,
   clientToContentNorm,
+  contentNormToSurfaceNorm,
   getVisibleContentViewport,
   pxWidthToNorm,
   resolveStrokeWidthPx,
   isContentCoordSpace,
 } from "../materials/collab";
 import SpreadsheetMaterialView from "./SpreadsheetMaterialView";
+import { useAnnotationSession } from "../annotations/AnnotationContext";
+import AnnotationToolbar from "../annotations/AnnotationToolbar";
+import {
+  isMatchingActivePointer,
+  isStrokePointerHeld,
+  shouldIgnorePointerDown,
+} from "../annotations/pointerStroke";
+import { DRAWING_TOOLS, TOOLS } from "../screenshare/constants";
 
 const PEN_COLORS = ["#e11d48", "#2563eb", "#16a34a", "#ca8a04", "#7c3aed", "#0f172a"];
 const WIDTHS = [2, 3, 5, 8];
@@ -145,6 +154,14 @@ function roleCursorClass(role) {
   return role === "teacher" || role === "staff" ? "is-teacher" : "is-student";
 }
 
+function materialToolFromSession(tool) {
+  if (!tool || tool === TOOLS.POINTER || tool === TOOLS.LASER) return "pointer";
+  if (tool === TOOLS.HIGHLIGHTER) return "highlighter";
+  if (tool === TOOLS.ERASER) return "eraser";
+  if (DRAWING_TOOLS.has(tool)) return "pen";
+  return "hand";
+}
+
 /**
  * Рабочая область синхронного материала с аннотациями и указателем.
  */
@@ -193,6 +210,7 @@ export default function SyncedMaterialWorkspace({
   const mediaRef = useRef(null);
   const hitRef = useRef(null);
   const drawingRef = useRef(null);
+  const activePointerRef = useRef(null);
   const interactiveRootRef = useRef(null);
   const iframeRef = useRef(null);
   const htmlBridgeRef = useRef(null);
@@ -200,12 +218,13 @@ export default function SyncedMaterialWorkspace({
   const redoStackRef = useRef([]);
   const fieldDebounceRef = useRef(new Map());
   const transformRef = useRef(null);
+  const annotation = useAnnotationSession();
   const prefs = useMemo(() => loadToolPrefs(), []);
   const [localStroke, setLocalStroke] = useState(null);
   const [localPointer, setLocalPointer] = useState(null);
-  const [tool, setTool] = useState("hand");
-  const [penColor, setPenColor] = useState(prefs.color);
-  const [penWidth, setPenWidth] = useState(prefs.width);
+  const [localTool, setLocalTool] = useState("hand");
+  const [localColor, setLocalColor] = useState(prefs.color);
+  const [localWidth, setLocalWidth] = useState(prefs.width);
   const [customColor, setCustomColor] = useState(prefs.color);
   const [interactive, setInteractive] = useState(null);
   const [interactiveError, setInteractiveError] = useState("");
@@ -236,6 +255,12 @@ export default function SyncedMaterialWorkspace({
   // На доске Excalidraw рисование — внутри iframe; overlay «Перо» только мешает стилусу.
   const showTools = (canManage || (isCollaborative && ["annotate", "edit_content", "full"].includes(collaborationPermission))) && !isBoard;
   const canNavigate = ((canManage && isController) || independent || isCollaborative || localBrowsingAway) && !isBoard;
+  const sessionDriven = Boolean(annotation?.enabled && annotation.target === "material" && showTools);
+  const tool = sessionDriven
+    ? materialToolFromSession(annotation.tool)
+    : (annotation ? "hand" : localTool);
+  const penColor = sessionDriven ? annotation.color : localColor;
+  const penWidth = sessionDriven ? annotation.width : localWidth;
   const drawToolActive = tool === "pen" || tool === "highlighter" || tool === "pointer" || tool === "eraser";
   const toolsCaptureInput = showTools && drawToolActive && (canManage || !contentLocked || tool === "pointer");
   const effectivelyFollowing = canManage || (!localBrowsingAway && followingTeacher && !independent);
@@ -417,13 +442,23 @@ export default function SyncedMaterialWorkspace({
     transformRef.current = tx;
     if (tx?.renderedWidth && tx?.renderedHeight) {
       setSurfaceSize((prev) => {
+        const next = {
+          width: tx.renderedWidth,
+          height: tx.renderedHeight,
+          offsetX: tx.offsetX || 0,
+          offsetY: tx.offsetY || 0,
+          surfaceW: tx.surfaceRect?.width || tx.renderedWidth,
+          surfaceH: tx.surfaceRect?.height || tx.renderedHeight,
+        };
         if (
-          Math.abs(prev.width - tx.renderedWidth) < 0.5
-          && Math.abs(prev.height - tx.renderedHeight) < 0.5
+          Math.abs(prev.width - next.width) < 0.5
+          && Math.abs(prev.height - next.height) < 0.5
+          && Math.abs((prev.offsetX || 0) - next.offsetX) < 0.5
+          && Math.abs((prev.offsetY || 0) - next.offsetY) < 0.5
         ) {
           return prev;
         }
-        return { width: tx.renderedWidth, height: tx.renderedHeight };
+        return next;
       });
     }
     return tx;
@@ -445,9 +480,15 @@ export default function SyncedMaterialWorkspace({
     }
     const onWin = () => refreshTransform();
     window.addEventListener("resize", onWin);
+    window.visualViewport?.addEventListener("resize", onWin);
+    window.visualViewport?.addEventListener("scroll", onWin);
+    document.addEventListener("fullscreenchange", onWin);
     return () => {
       ro?.disconnect();
       window.removeEventListener("resize", onWin);
+      window.visualViewport?.removeEventListener("resize", onWin);
+      window.visualViewport?.removeEventListener("scroll", onWin);
+      document.removeEventListener("fullscreenchange", onWin);
     };
   }, [refreshTransform, url, showImage, showPdf, showInteractive, isSpreadsheet, text, page]);
 
@@ -459,21 +500,49 @@ export default function SyncedMaterialWorkspace({
 
   const contentWidthForStroke = surfaceSize.width || transformRef.current?.renderedWidth || 1000;
 
+  const finishStroke = useCallback(() => {
+    const stroke = drawingRef.current;
+    drawingRef.current = null;
+    activePointerRef.current = null;
+    if (!stroke) {
+      setLocalStroke(null);
+      return;
+    }
+    if (stroke.points.length < 2) {
+      setLocalStroke(null);
+      return;
+    }
+    onDrawComplete?.(stroke);
+    undoStackRef.current.push({ type: "add", annotation: stroke });
+    redoStackRef.current = [];
+    setLocalStroke(null);
+  }, [onDrawComplete]);
+
   const handlePointerMove = useCallback((e) => {
     if (!toolsCaptureInput) return;
-    const p = toNorm(e.clientX, e.clientY);
-    if (!p) return;
     if (tool === "pointer") {
+      const p = toNorm(e.clientX, e.clientY);
+      if (!p) return;
       setLocalPointer(p);
       if (canManage) onSendPointer?.(p.x, p.y);
       else onSendCursor?.(p.x, p.y);
       return;
     }
+    if (!isMatchingActivePointer(e, activePointerRef.current)) return;
+    if ((e.pointerType === "mouse" || e.pointerType === "pen") && !isStrokePointerHeld(e, activePointerRef.current)) {
+      activePointerRef.current = null;
+      finishStroke();
+      return;
+    }
+    const p = toNorm(e.clientX, e.clientY);
+    if (!p) return;
     if (tool === "pen" || tool === "highlighter" || tool === "eraser") {
       onSendCursor?.(p.x, p.y);
     }
     if (!drawingRef.current) return;
     if (tool === "eraser") return;
+    const last = drawingRef.current.points[drawingRef.current.points.length - 1];
+    if (last && last[0] === p.x && last[1] === p.y) return;
     drawingRef.current.points.push([p.x, p.y]);
     const stroke = {
       ...drawingRef.current,
@@ -481,11 +550,16 @@ export default function SyncedMaterialWorkspace({
     };
     setLocalStroke(stroke);
     onDrawPreview?.(stroke);
-  }, [canManage, onDrawPreview, onSendCursor, onSendPointer, toNorm, tool, toolsCaptureInput]);
+  }, [canManage, finishStroke, onDrawPreview, onSendCursor, onSendPointer, toNorm, tool, toolsCaptureInput]);
 
   const handlePointerDown = useCallback((e) => {
     if (!toolsCaptureInput) return;
     if (tool !== "pen" && tool !== "highlighter" && tool !== "pointer" && tool !== "eraser") return;
+    if (shouldIgnorePointerDown(e)) return;
+    if (activePointerRef.current != null) return;
+    refreshTransform();
+    const p = toNorm(e.clientX, e.clientY);
+    if (!p) return;
     e.preventDefault();
     e.stopPropagation();
     try {
@@ -493,9 +567,7 @@ export default function SyncedMaterialWorkspace({
     } catch {
       /* ignore */
     }
-    refreshTransform();
-    const p = toNorm(e.clientX, e.clientY);
-    if (!p) return;
+    activePointerRef.current = e.pointerId;
     if (tool === "pointer") {
       setLocalPointer(p);
       if (canManage) onSendPointer?.(p.x, p.y);
@@ -517,6 +589,12 @@ export default function SyncedMaterialWorkspace({
         undoStackRef.current.push({ type: "delete", annotation: hit });
         redoStackRef.current = [];
       }
+      activePointerRef.current = null;
+      try {
+        e.currentTarget.releasePointerCapture?.(e.pointerId);
+      } catch {
+        /* ignore */
+      }
       return;
     }
     const uiWidth = tool === "highlighter" ? Math.max(12, penWidth * 3) : penWidth;
@@ -527,7 +605,7 @@ export default function SyncedMaterialWorkspace({
       color: tool === "highlighter" ? "rgba(250, 204, 21, 0.55)" : penColor,
       width: normWidth,
       coordSpace: COORD_SPACE_CONTENT_V1,
-      points: [[p.x, p.y], [p.x + 0.0001, p.y]],
+      points: [[p.x, p.y]],
       page,
       created_at: Date.now(),
       version: 1,
@@ -552,24 +630,8 @@ export default function SyncedMaterialWorkspace({
     toolsCaptureInput,
   ]);
 
-  const finishStroke = useCallback(() => {
-    const stroke = drawingRef.current;
-    drawingRef.current = null;
-    if (!stroke) {
-      setLocalStroke(null);
-      return;
-    }
-    if (stroke.points.length < 2) {
-      setLocalStroke(null);
-      return;
-    }
-    onDrawComplete?.(stroke);
-    undoStackRef.current.push({ type: "add", annotation: stroke });
-    redoStackRef.current = [];
-    setLocalStroke(null);
-  }, [onDrawComplete]);
-
   const handlePointerUp = useCallback((e) => {
+    if (activePointerRef.current != null && e?.pointerId !== activePointerRef.current) return;
     try {
       e?.currentTarget?.releasePointerCapture?.(e.pointerId);
     } catch {
@@ -577,6 +639,23 @@ export default function SyncedMaterialWorkspace({
     }
     finishStroke();
   }, [finishStroke]);
+
+  useEffect(() => {
+    if (!toolsCaptureInput) return undefined;
+    const abortStroke = () => {
+      if (!drawingRef.current && activePointerRef.current == null) return;
+      finishStroke();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") abortStroke();
+    };
+    window.addEventListener("blur", abortStroke);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("blur", abortStroke);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [finishStroke, toolsCaptureInput]);
 
   useEffect(() => {
     if (tool !== "pointer") setLocalPointer(null);
@@ -864,55 +943,59 @@ export default function SyncedMaterialWorkspace({
         notice={notice || (localBrowsingAway && !canManage ? "Вы временно не следуете за учителем" : "")}
         presenceLabel={presenceLabel}
         capabilities={capabilities}
-        tools={showTools ? (
+        tools={(showTools && !annotation) || canNavigate ? (
           <div className="vl-collab-tools" role="toolbar" aria-label="Инструменты">
-            <button type="button" className={tool === "hand" ? "is-active" : ""} onClick={() => setTool("hand")} title="Курсор / просмотр">Курсор</button>
-            <button type="button" className={tool === "pointer" ? "is-active" : ""} onClick={() => setTool("pointer")} title="Указка">Указка</button>
-            <button type="button" className={tool === "pen" ? "is-active" : ""} disabled={contentLocked && !canManage} onClick={() => setTool("pen")} title="Перо">Перо</button>
-            <button type="button" className={tool === "eraser" ? "is-active" : ""} disabled={contentLocked && !canManage} onClick={() => setTool("eraser")} title="Ластик">Ластик</button>
-            <label className="vl-collab-tools__color" title="Цвет">
-              <span className="vl-collab-tools__swatches">
-                {PEN_COLORS.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    className={`vl-swatch${penColor === c ? " is-active" : ""}`}
-                    style={{ background: c }}
-                    aria-label={c}
-                    onClick={() => { setPenColor(c); setCustomColor(c); setTool("pen"); }}
+            {showTools && !annotation ? (
+              <>
+                <button type="button" className={tool === "hand" ? "is-active" : ""} onClick={() => setLocalTool("hand")} title="Курсор / просмотр">Курсор</button>
+                <button type="button" className={tool === "pointer" ? "is-active" : ""} onClick={() => setLocalTool("pointer")} title="Указка">Указка</button>
+                <button type="button" className={tool === "pen" ? "is-active" : ""} disabled={contentLocked && !canManage} onClick={() => setLocalTool("pen")} title="Перо">Перо</button>
+                <button type="button" className={tool === "eraser" ? "is-active" : ""} disabled={contentLocked && !canManage} onClick={() => setLocalTool("eraser")} title="Ластик">Ластик</button>
+                <label className="vl-collab-tools__color" title="Цвет">
+                  <span className="vl-collab-tools__swatches">
+                    {PEN_COLORS.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        className={`vl-swatch${penColor === c ? " is-active" : ""}`}
+                        style={{ background: c }}
+                        aria-label={c}
+                        onClick={() => { setLocalColor(c); setCustomColor(c); setLocalTool("pen"); }}
+                      />
+                    ))}
+                  </span>
+                  <input
+                    type="color"
+                    value={customColor.startsWith("#") ? customColor : "#e11d48"}
+                    onChange={(e) => {
+                      setCustomColor(e.target.value);
+                      setLocalColor(e.target.value);
+                      setLocalTool("pen");
+                    }}
+                    aria-label="Свой цвет"
                   />
-                ))}
-              </span>
-              <input
-                type="color"
-                value={customColor.startsWith("#") ? customColor : "#e11d48"}
-                onChange={(e) => {
-                  setCustomColor(e.target.value);
-                  setPenColor(e.target.value);
-                  setTool("pen");
-                }}
-                aria-label="Свой цвет"
-              />
-            </label>
-            <label className="vl-collab-tools__width" title="Толщина">
-              <select
-                value={penWidth}
-                onChange={(e) => setPenWidth(Number(e.target.value) || 3)}
-                aria-label="Толщина линии"
-              >
-                {WIDTHS.map((w) => <option key={w} value={w}>{w}px</option>)}
-              </select>
-            </label>
-            <button type="button" disabled={contentLocked && !canManage} onClick={handleUndo} title="Отменить">↩</button>
-            <button type="button" disabled={contentLocked && !canManage} onClick={handleRedo} title="Повторить">↪</button>
-            <button
-              type="button"
-              disabled={contentLocked && !canManage}
-              onClick={() => onClearOwnAnnotations?.()}
-              title="Очистить свои пометки"
-            >
-              Очистить
-            </button>
+                </label>
+                <label className="vl-collab-tools__width" title="Толщина">
+                  <select
+                    value={penWidth}
+                    onChange={(e) => setLocalWidth(Number(e.target.value) || 3)}
+                    aria-label="Толщина линии"
+                  >
+                    {WIDTHS.map((w) => <option key={w} value={w}>{w}px</option>)}
+                  </select>
+                </label>
+                <button type="button" disabled={contentLocked && !canManage} onClick={handleUndo} title="Отменить">↩</button>
+                <button type="button" disabled={contentLocked && !canManage} onClick={handleRedo} title="Повторить">↪</button>
+                <button
+                  type="button"
+                  disabled={contentLocked && !canManage}
+                  onClick={() => onClearOwnAnnotations?.()}
+                  title="Очистить свои пометки"
+                >
+                  Очистить
+                </button>
+              </>
+            ) : null}
             {canNavigate ? (
               <>
                 <button
@@ -939,6 +1022,27 @@ export default function SyncedMaterialWorkspace({
           else onCloseLocal?.();
         }}
       />
+      {sessionDriven ? (
+        <div className="ann-toolbar-slot">
+          <AnnotationToolbar
+            tool={annotation.tool}
+            color={annotation.color}
+            width={annotation.width}
+            canAnnotate={!(contentLocked && !canManage)}
+            canManage={canManage}
+            canUndo={undoStackRef.current.length > 0}
+            canRedo={redoStackRef.current.length > 0}
+            compact={false}
+            onToolChange={annotation.setTool}
+            onColorChange={annotation.setColor}
+            onWidthChange={annotation.setWidth}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            onClearMine={onClearOwnAnnotations}
+            showShapes={false}
+          />
+        </div>
+      ) : null}
       {canManage && studentOptions.length > 0 ? (
         <div className="vl-student-viewport-bar" role="group" aria-label="Область просмотра ученика">
           <label className="vl-student-viewport-bar__select">
@@ -1049,9 +1153,13 @@ export default function SyncedMaterialWorkspace({
               {allStrokes
                 .filter((a) => !a.page || Number(a.page) === page)
                 .map((ann) => {
+                  const tx = transformRef.current;
                   const pts = (ann.points || [])
                     .filter((p) => Array.isArray(p) && p.length >= 2)
-                    .map((p) => `${Number(p[0])},${Number(p[1])}`)
+                    .map((p) => {
+                      const mapped = contentNormToSurfaceNorm(Number(p[0]), Number(p[1]), tx);
+                      return `${mapped.x},${mapped.y}`;
+                    })
                     .join(" ");
                   if (!pts) return null;
                   const px = resolveStrokeWidthPx(ann, surfaceSize.width);
@@ -1102,29 +1210,44 @@ export default function SyncedMaterialWorkspace({
             {localPointer && tool === "pointer" ? (
               <div
                 className="vl-local-pointer"
-                style={{ left: `${localPointer.x * 100}%`, top: `${localPointer.y * 100}%` }}
+                style={(() => {
+                  const mapped = contentNormToSurfaceNorm(localPointer.x, localPointer.y, transformRef.current);
+                  return { left: `${mapped.x * 100}%`, top: `${mapped.y * 100}%` };
+                })()}
                 aria-hidden="true"
               />
             ) : null}
-            {remoteCursors.map((cursor) => (
-              <div
-                key={cursor.clientId || cursor.authorId || `${cursor.x}-${cursor.y}`}
-                className={`vl-remote-cursor ${roleCursorClass(cursor.authorRole || cursor.role)}`}
-                style={{ left: `${cursor.x * 100}%`, top: `${cursor.y * 100}%` }}
-                aria-hidden="true"
-              >
-                <span className="vl-remote-cursor__dot" />
-                <span className="vl-remote-cursor__label">{cursor.displayName || "Участник"}</span>
-              </div>
-            ))}
+            {remoteCursors.map((cursor) => {
+              const mapped = contentNormToSurfaceNorm(cursor.x, cursor.y, transformRef.current);
+              return (
+                <div
+                  key={cursor.clientId || cursor.authorId || `${cursor.x}-${cursor.y}`}
+                  className={`vl-remote-cursor ${roleCursorClass(cursor.authorRole || cursor.role)}`}
+                  style={{ left: `${mapped.x * 100}%`, top: `${mapped.y * 100}%` }}
+                  aria-hidden="true"
+                >
+                  <span className="vl-remote-cursor__dot" />
+                  <span className="vl-remote-cursor__label">{cursor.displayName || "Участник"}</span>
+                </div>
+              );
+            })}
             {toolsCaptureInput ? (
               <div
                 ref={hitRef}
                 className={`vl-synced-hit vl-synced-hit--${tool}`}
+                style={{
+                  left: surfaceSize.offsetX || 0,
+                  top: surfaceSize.offsetY || 0,
+                  width: surfaceSize.width,
+                  height: surfaceSize.height,
+                  right: "auto",
+                  bottom: "auto",
+                }}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
                 onPointerCancel={handlePointerUp}
+                onLostPointerCapture={handlePointerUp}
                 role="presentation"
               />
             ) : null}

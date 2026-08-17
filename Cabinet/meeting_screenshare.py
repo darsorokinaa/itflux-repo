@@ -151,6 +151,7 @@ def normalize_annotation(raw: dict, *, author_id: int, author_role: str, display
         "authorRole": str(author_role or "")[:32],
         "displayName": str(display_name or "")[:MAX_DISPLAY_NAME],
         "createdAt": raw.get("createdAt") or raw.get("created_at"),
+        "coordSpace": str(raw.get("coordSpace") or raw.get("coord_space") or "screenshare_v1")[:32],
     }
 
 

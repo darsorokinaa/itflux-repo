@@ -3,6 +3,7 @@ import {
   COORD_SPACE_CONTENT_V1,
   clientToContentNorm,
   contentNormToClient,
+  contentNormToSurfaceNorm,
   getContainedMediaRect,
   getMaterialViewportTransform,
   getVisibleContentViewport,
@@ -102,6 +103,26 @@ describe("content-space mapping across viewports", () => {
       y: 80 + legacyTeacher.y * 500,
     };
     expect(Math.abs(legacyOnStudent.y - studentClient.y)).toBeGreaterThan(1);
+  });
+
+  it("returns null for pointers in letterbox when clamp is off", () => {
+    const teacherMedia = {
+      getBoundingClientRect: () => fakeRect(200, 100, 1200, 800),
+      naturalWidth: 1920,
+      naturalHeight: 1080,
+    };
+    const teacherSurface = {
+      getBoundingClientRect: () => fakeRect(200, 100, 1200, 800),
+    };
+    const tx = getMaterialViewportTransform({
+      surfaceEl: teacherSurface,
+      mediaEl: teacherMedia,
+      kind: "image",
+      zoom: 1,
+    });
+    expect(clientToContentNorm(tx.rect.left, tx.rect.top - 8, tx)).toBeNull();
+    const surface = contentNormToSurfaceNorm(0, 0, tx);
+    expect(surface.y).toBeGreaterThanOrEqual(0);
   });
 
   it("accounts for zoom via getBoundingClientRect of scaled surface", () => {

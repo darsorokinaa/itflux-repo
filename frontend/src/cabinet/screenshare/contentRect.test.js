@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  OBJECT_FIT,
   clientToNormalized,
   computeScreenShareContentRect,
   getContainedContentRect,
+  getFittedContentRect,
   normalizedToClient,
+  pointInRect,
+  pointerToNormalized,
+  resolveChromeInsets,
 } from "./contentRect";
 import {
   applyScreenshareOperation,
@@ -51,6 +56,71 @@ describe("screen-share content rect", () => {
     expect(clientToNormalized(a.x, a.y, teacher)).toEqual(norm);
     expect(clientToNormalized(b.x, b.y, phone).x).toBeCloseTo(0.41, 5);
     expect(clientToNormalized(b.x, b.y, phone).y).toBeCloseTo(0.32, 5);
+  });
+
+  it("computes contain letterbox for 1920×1080 inside 1200×800", () => {
+    const box = getFittedContentRect(
+      { left: 0, top: 0, width: 1200, height: 800 },
+      1920,
+      1080,
+      OBJECT_FIT.CONTAIN,
+    );
+    expect(box.width).toBeCloseTo(1200);
+    expect(box.height).toBeCloseTo(675);
+    expect(box.offsetX).toBeCloseTo(0);
+    expect(box.offsetY).toBeCloseTo(62.5);
+  });
+
+  it("computes cover crop for mismatched aspect", () => {
+    const box = getFittedContentRect(
+      { left: 10, top: 20, width: 400, height: 400 },
+      1920,
+      1080,
+      OBJECT_FIT.COVER,
+    );
+    expect(box.height).toBeCloseTo(400);
+    expect(box.width).toBeGreaterThan(400);
+    expect(box.offsetX).toBeLessThan(0);
+  });
+
+  it("does not zero chrome in compact/split-screen", () => {
+    const chrome = resolveChromeInsets(360, 248, { compact: true });
+    expect(chrome.bottom).toBeGreaterThan(0);
+  });
+
+  it("ignores pointers in letterbox and keeps normalized coords after resize", () => {
+    const layout = computeScreenShareContentRect({
+      hostRect: { left: 0, top: 0, width: 1200, height: 800 },
+      contentWidth: 1920,
+      contentHeight: 1080,
+      compact: true,
+    });
+    expect(pointInRect(layout.content.left - 4, layout.content.top + 10, layout.visible)).toBe(false);
+    expect(pointerToNormalized(layout.content.left - 4, layout.content.top + 10, layout)).toBeNull();
+    const inside = pointerToNormalized(
+      layout.content.left + layout.content.width * 0.25,
+      layout.content.top + layout.content.height * 0.4,
+      layout,
+    );
+    expect(inside.x).toBeCloseTo(0.25, 5);
+    expect(inside.y).toBeCloseTo(0.4, 5);
+
+    const resized = computeScreenShareContentRect({
+      hostRect: { left: 0, top: 0, width: 600, height: 900 },
+      contentWidth: 1920,
+      contentHeight: 1080,
+      compact: true,
+    });
+    const replayed = normalizedToClient(inside.x, inside.y, resized.content);
+    const back = clientToNormalized(replayed.x, replayed.y, resized.content);
+    expect(back.x).toBeCloseTo(0.25, 5);
+    expect(back.y).toBeCloseTo(0.4, 5);
+  });
+
+  it("does not clamp out-of-content pointers", () => {
+    const rect = { left: 100, top: 50, width: 200, height: 100 };
+    expect(clientToNormalized(90, 60, rect)).toBeNull();
+    expect(clientToNormalized(90, 60, rect, { clamp: true })).toEqual({ x: 0, y: 0.1 });
   });
 });
 

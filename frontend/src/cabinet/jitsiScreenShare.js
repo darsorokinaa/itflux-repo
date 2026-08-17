@@ -41,34 +41,27 @@ export function extractTrackResolution(stats, participantId) {
   const resolution = stats?.resolution;
   if (!resolution || typeof resolution !== "object") return null;
 
-  const pickSize = (node) => {
-    if (!node || typeof node !== "object") return null;
+  const pickLargest = (node, best = null) => {
+    if (!node || typeof node !== "object") return best;
     const w = Number(node.width || node.w);
     const h = Number(node.height || node.h);
-    if (w > 0 && h > 0) return { width: w, height: h };
-    for (const value of Object.values(node)) {
-      if (value && typeof value === "object") {
-        const inner = pickSize(value);
-        if (inner) return inner;
-      }
+    let next = best;
+    if (w > 0 && h > 0) {
+      const area = w * h;
+      if (!next || area > next.width * next.height) next = { width: w, height: h };
     }
-    return null;
+    for (const value of Object.values(node)) {
+      if (value && typeof value === "object") next = pickLargest(value, next);
+    }
+    return next;
   };
 
   const pid = safeStr(participantId);
   if (pid && resolution[pid]) {
-    const sized = pickSize(resolution[pid]);
+    const sized = pickLargest(resolution[pid]);
     if (sized) return sized;
   }
-  const direct = pickSize(resolution);
-  if (direct) return direct;
-  let best = null;
-  for (const value of Object.values(resolution)) {
-    const sized = pickSize(value);
-    if (!sized) continue;
-    if (!best || sized.width * sized.height > best.width * best.height) best = sized;
-  }
-  return best;
+  return pickLargest(resolution);
 }
 
 export function buildScreenShareSnapshot({

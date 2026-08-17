@@ -24,6 +24,18 @@ describe("extractTrackResolution", () => {
     };
     expect(extractTrackResolution(stats, "abc")).toEqual({ width: 1920, height: 1080 });
   });
+
+  it("prefers the largest nested track (desktop over camera)", () => {
+    const stats = {
+      resolution: {
+        abc: {
+          camera: { width: 640, height: 360 },
+          desktop: { width: 1920, height: 1080 },
+        },
+      },
+    };
+    expect(extractTrackResolution(stats, "abc")).toEqual({ width: 1920, height: 1080 });
+  });
 });
 
 describe("buildScreenShareSnapshot", () => {
