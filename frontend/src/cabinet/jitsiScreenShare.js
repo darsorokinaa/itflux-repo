@@ -37,6 +37,16 @@ export function parseSharingParticipantIds(raw) {
   return [];
 }
 
+export function extractDisplaySurface(event) {
+  const details = event?.details || event || {};
+  const raw = details.displaySurface || details.sourceType || event?.displaySurface || event?.sourceType || "";
+  const value = String(raw).toLowerCase();
+  if (value === "browser" || value === "tab" || value === "application-tab") return "browser";
+  if (value === "window" || value === "application") return "window";
+  if (value === "monitor" || value === "screen" || value === "monitor-surface") return "monitor";
+  return value;
+}
+
 export function extractTrackResolution(stats, participantId) {
   const resolution = stats?.resolution;
   if (!resolution || typeof resolution !== "object") return null;
@@ -72,6 +82,7 @@ export function buildScreenShareSnapshot({
   contentHeight = null,
   largeVideoId = "",
   tileView = false,
+  displaySurface = "",
 } = {}) {
   const ids = [...new Set((sharingIds || []).map(safeStr).filter(Boolean))];
   const presenterJitsiId = ids[0] || (localSharing ? safeStr(localId) : "");
@@ -85,6 +96,7 @@ export function buildScreenShareSnapshot({
     contentHeight: contentHeight ? Number(contentHeight) : null,
     largeVideoId: safeStr(largeVideoId),
     tileView: Boolean(tileView),
+    displaySurface: safeStr(displaySurface),
   };
 }
 
@@ -102,6 +114,7 @@ export function attachScreenSharePresence(api, { onChange, pollMs = 2500 } = {})
   let contentHeight = null;
   let largeVideoId = "";
   let tileView = false;
+  let displaySurface = "";
   let pollTimer = null;
 
   const emit = (reason = "update") => {
@@ -114,6 +127,7 @@ export function attachScreenSharePresence(api, { onChange, pollMs = 2500 } = {})
       contentHeight,
       largeVideoId,
       tileView,
+      displaySurface,
     });
     onChange?.(snap, reason);
     return snap;
@@ -167,6 +181,7 @@ export function attachScreenSharePresence(api, { onChange, pollMs = 2500 } = {})
 
   listen(api, "screenSharingStatusChanged", (event) => {
     localSharing = Boolean(event?.on);
+    displaySurface = event?.on ? (extractDisplaySurface(event) || displaySurface) : "";
     void refresh("screenSharingStatusChanged");
   }, listeners);
 
@@ -205,6 +220,7 @@ export function attachScreenSharePresence(api, { onChange, pollMs = 2500 } = {})
       contentHeight,
       largeVideoId,
       tileView,
+      displaySurface,
     }),
     pinDesktop(participantId) {
       const id = safeStr(participantId);

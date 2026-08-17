@@ -78,7 +78,9 @@ import {
   isFollowContentAction,
   isNavigationAction,
 } from "../materials/collab";
+import { SCREEN_SHARE_ANNOTATIONS_V2 } from "../featureFlags";
 import ScreenShareAnnotationOverlay from "../screenshare/ScreenShareAnnotationOverlay";
+import ScreenShareAnnotationV2 from "../annotations/v2/ScreenShareAnnotationV2";
 import {
   applyScreenshareOperation,
   annotationsFromList,
@@ -283,8 +285,11 @@ export default function VideoMeetingPage() {
     tileView: false,
     contentWidth: 0,
     contentHeight: 0,
+    displaySurface: "",
+    localSharing: false,
   });
   const screenshareSeenRef = useRef(new Set());
+  const ssAnnV2EngineRef = useRef(null);
   const lastShareReportRef = useRef("");
   const screenShareApiRef = useRef(null);
   const remoteCursorTimersRef = useRef(new Map());
@@ -597,11 +602,13 @@ export default function VideoMeetingPage() {
           };
           const collab = materialCollabRef.current;
           if (!collab || !snap) return;
-          const key = `${snap.active ? 1 : 0}|${snap.presenterJitsiId || ""}|${snap.localSharing ? 1 : 0}|${snap.contentWidth || 0}x${snap.contentHeight || 0}|${snap.tileView ? 1 : 0}`;
+          const key = `${snap.active ? 1 : 0}|${snap.presenterJitsiId || ""}|${snap.localSharing ? 1 : 0}|${snap.contentWidth || 0}x${snap.contentHeight || 0}|${snap.tileView ? 1 : 0}|${snap.displaySurface || ""}`;
           setScreenshareLayout({
             tileView: Boolean(snap.tileView),
             contentWidth: Number(snap.contentWidth) || 0,
             contentHeight: Number(snap.contentHeight) || 0,
+            displaySurface: snap.displaySurface || "",
+            localSharing: Boolean(snap.localSharing),
           });
           if (key === lastShareReportRef.current) return;
           lastShareReportRef.current = key;
@@ -1603,6 +1610,9 @@ export default function VideoMeetingPage() {
         setScreenshareSession(session || null);
         const list = session?.annotations || [];
         setScreenshareAnnotations(list);
+        ssAnnV2EngineRef.current?.loadSnapshot(list, {
+          revision: ssAnnV2EngineRef.current.store.sourceRevision,
+        });
         if (!session?.active && !session?.sessionId) {
           setScreenshareLasers({});
         }
@@ -1623,6 +1633,10 @@ export default function VideoMeetingPage() {
         if (opId) {
           if (screenshareSeenRef.current.has(opId)) return;
           screenshareSeenRef.current.add(opId);
+        }
+        if (SCREEN_SHARE_ANNOTATIONS_V2 && ssAnnV2EngineRef.current) {
+          ssAnnV2EngineRef.current.applyRemote(op);
+          return;
         }
         setScreenshareAnnotations((prev) => {
           const map = applyScreenshareOperation(annotationsFromList(prev), {
@@ -1673,6 +1687,7 @@ export default function VideoMeetingPage() {
       setScreenshareAnnotations([]);
       setScreenshareLasers({});
       screenshareSeenRef.current.clear();
+      ssAnnV2EngineRef.current = null;
     };
   }, [applyMaterialSession, meetingUuid, pageState, showMaterialNotice, showMaterialsToast]);
 
@@ -2236,11 +2251,13 @@ export default function VideoMeetingPage() {
             </button>
           ) : null}
 
-          <AnnotationHeaderButton
-            onEnable={() => {
-              setCallCollapsed(false);
-            }}
-          />
+          {!(SCREEN_SHARE_ANNOTATIONS_V2 && screenshareActive && !materialAnnotatable) ? (
+            <AnnotationHeaderButton
+              onEnable={() => {
+                setCallCollapsed(false);
+              }}
+            />
+          ) : null}
 
           <button
             type="button"
@@ -2814,70 +2831,110 @@ export default function VideoMeetingPage() {
               id="jitsi-container"
               ref={containerRef}
             />
-            <ScreenShareAnnotationOverlay
-              active={screenshareActive && showJitsi && !(compactCall && callCollapsed)}
-              compact={compactCall}
-              canManage={canManage}
-              canAnnotate={screenshareCanAnnotate}
-              participantsCanAnnotate={screenshareSession?.participantsCanAnnotate !== false}
-              currentUserId={detail?.viewerUserId ?? null}
-              displayName={displayName}
-              sessionId={screenshareSession?.sessionId || ""}
-              contentWidth={screenshareSession?.contentWidth || screenshareLayout.contentWidth || 0}
-              contentHeight={screenshareSession?.contentHeight || screenshareLayout.contentHeight || 0}
-              tileView={Boolean(screenshareLayout.tileView)}
-              targetRef={containerRef}
-              annotations={screenshareAnnotations}
-              remoteLasers={screenshareLasers}
-              onStrokeStart={(ann) => {
-                setScreenshareAnnotations((prev) => [...prev.filter((a) => a.id !== ann.id), ann]);
-                sendScreenshareOp("stroke_start", { annotation: ann, screenShareSessionId: screenshareSession?.sessionId });
-              }}
-              onStrokeUpdate={(ann) => {
-                setScreenshareAnnotations((prev) => prev.map((a) => (
-                  a.id === ann.id ? { ...a, points: [...(a.points || []), ...(ann.points || [])] } : a
-                )));
-                sendScreenshareOp("stroke_update", { annotation: { id: ann.id, tool: ann.tool, color: ann.color, width: ann.width, points: ann.points }, screenShareSessionId: screenshareSession?.sessionId });
-              }}
-              onStrokeEnd={(ann) => {
-                sendScreenshareOp("stroke_end", { annotation: { id: ann.id, tool: ann.tool, points: [] }, screenShareSessionId: screenshareSession?.sessionId });
-              }}
-              onObjectUpsert={(ann) => {
-                setScreenshareAnnotations((prev) => [...prev.filter((a) => a.id !== ann.id), ann]);
-                sendScreenshareOp("object_upsert", { annotation: ann, screenShareSessionId: screenshareSession?.sessionId });
-              }}
-              onPointer={(point) => {
-                const sid = screenshareSession?.sessionId;
-                if (!sid) return;
-                materialCollabRef.current?.sendScreensharePointer(point, sid);
-              }}
-              onErase={(ann) => {
-                setScreenshareAnnotations((prev) => prev.filter((a) => a.id !== ann.id));
-                sendScreenshareOp("annotation_deleted", { id: ann.id, screenShareSessionId: screenshareSession?.sessionId });
-              }}
-              onUndo={() => {
-                const map = annotationsFromList(screenshareAnnotations);
-                const id = lastOwnAnnotationId(map, detail?.viewerUserId);
-                if (!id) return;
-                setScreenshareAnnotations((prev) => prev.filter((a) => a.id !== id));
-                sendScreenshareOp("annotation_deleted", { id, screenShareSessionId: screenshareSession?.sessionId });
-              }}
-              onClearMine={() => {
-                const uid = Number(detail?.viewerUserId);
-                setScreenshareAnnotations((prev) => prev.filter((a) => Number(a.authorId) !== uid));
-                sendScreenshareOp("clear_mine", { screenShareSessionId: screenshareSession?.sessionId });
-              }}
-              onClearAll={() => {
-                setScreenshareAnnotations([]);
-                sendScreenshareOp("clear_all", { screenShareSessionId: screenshareSession?.sessionId });
-              }}
-              onSetParticipantsCanAnnotate={(enabled) => {
-                materialCollabRef.current?.setScreensharePermission(
-                  enabled,
-                  screenshareSession?.sessionId,
-                );
-              }}
-            />
+            {SCREEN_SHARE_ANNOTATIONS_V2 ? (
+              <ScreenShareAnnotationV2
+                active={screenshareActive && showJitsi}
+                compact={compactCall}
+                canManage={canManage}
+                canAnnotate={screenshareCanAnnotate}
+                participantsCanAnnotate={screenshareSession?.participantsCanAnnotate !== false}
+                currentUserId={detail?.viewerUserId ?? null}
+                displayName={displayName}
+                sessionId={screenshareSession?.sessionId || ""}
+                contentWidth={screenshareSession?.contentWidth || screenshareLayout.contentWidth || 0}
+                contentHeight={screenshareSession?.contentHeight || screenshareLayout.contentHeight || 0}
+                displaySurface={screenshareLayout.displaySurface || ""}
+                localSharing={Boolean(screenshareLayout.localSharing)}
+                tileView={Boolean(screenshareLayout.tileView)}
+                targetRef={containerRef}
+                remoteLasers={screenshareLasers}
+                onEngineReady={(engine) => {
+                  ssAnnV2EngineRef.current = engine;
+                }}
+                onSend={(action, payload) => {
+                  sendScreenshareOp(action, {
+                    ...payload,
+                    screenShareSessionId: screenshareSession?.sessionId,
+                  });
+                }}
+                onPointer={(point) => {
+                  const sid = screenshareSession?.sessionId;
+                  if (!sid) return;
+                  materialCollabRef.current?.sendScreensharePointer(point, sid);
+                }}
+                onSetParticipantsCanAnnotate={(enabled) => {
+                  materialCollabRef.current?.setScreensharePermission(
+                    enabled,
+                    screenshareSession?.sessionId,
+                  );
+                }}
+              />
+            ) : (
+              <ScreenShareAnnotationOverlay
+                active={screenshareActive && showJitsi && !(compactCall && callCollapsed)}
+                compact={compactCall}
+                canManage={canManage}
+                canAnnotate={screenshareCanAnnotate}
+                participantsCanAnnotate={screenshareSession?.participantsCanAnnotate !== false}
+                currentUserId={detail?.viewerUserId ?? null}
+                displayName={displayName}
+                sessionId={screenshareSession?.sessionId || ""}
+                contentWidth={screenshareSession?.contentWidth || screenshareLayout.contentWidth || 0}
+                contentHeight={screenshareSession?.contentHeight || screenshareLayout.contentHeight || 0}
+                tileView={Boolean(screenshareLayout.tileView)}
+                targetRef={containerRef}
+                annotations={screenshareAnnotations}
+                remoteLasers={screenshareLasers}
+                onStrokeStart={(ann) => {
+                  setScreenshareAnnotations((prev) => [...prev.filter((a) => a.id !== ann.id), ann]);
+                  sendScreenshareOp("stroke_start", { annotation: ann, screenShareSessionId: screenshareSession?.sessionId });
+                }}
+                onStrokeUpdate={(ann) => {
+                  setScreenshareAnnotations((prev) => prev.map((a) => (
+                    a.id === ann.id ? { ...a, points: [...(a.points || []), ...(ann.points || [])] } : a
+                  )));
+                  sendScreenshareOp("stroke_update", { annotation: { id: ann.id, tool: ann.tool, color: ann.color, width: ann.width, points: ann.points }, screenShareSessionId: screenshareSession?.sessionId });
+                }}
+                onStrokeEnd={(ann) => {
+                  sendScreenshareOp("stroke_end", { annotation: { id: ann.id, tool: ann.tool, points: [] }, screenShareSessionId: screenshareSession?.sessionId });
+                }}
+                onObjectUpsert={(ann) => {
+                  setScreenshareAnnotations((prev) => [...prev.filter((a) => a.id !== ann.id), ann]);
+                  sendScreenshareOp("object_upsert", { annotation: ann, screenShareSessionId: screenshareSession?.sessionId });
+                }}
+                onPointer={(point) => {
+                  const sid = screenshareSession?.sessionId;
+                  if (!sid) return;
+                  materialCollabRef.current?.sendScreensharePointer(point, sid);
+                }}
+                onErase={(ann) => {
+                  setScreenshareAnnotations((prev) => prev.filter((a) => a.id !== ann.id));
+                  sendScreenshareOp("annotation_deleted", { id: ann.id, screenShareSessionId: screenshareSession?.sessionId });
+                }}
+                onUndo={() => {
+                  const map = annotationsFromList(screenshareAnnotations);
+                  const id = lastOwnAnnotationId(map, detail?.viewerUserId);
+                  if (!id) return;
+                  setScreenshareAnnotations((prev) => prev.filter((a) => a.id !== id));
+                  sendScreenshareOp("annotation_deleted", { id, screenShareSessionId: screenshareSession?.sessionId });
+                }}
+                onClearMine={() => {
+                  const uid = Number(detail?.viewerUserId);
+                  setScreenshareAnnotations((prev) => prev.filter((a) => Number(a.authorId) !== uid));
+                  sendScreenshareOp("clear_mine", { screenShareSessionId: screenshareSession?.sessionId });
+                }}
+                onClearAll={() => {
+                  setScreenshareAnnotations([]);
+                  sendScreenshareOp("clear_all", { screenShareSessionId: screenshareSession?.sessionId });
+                }}
+                onSetParticipantsCanAnnotate={(enabled) => {
+                  materialCollabRef.current?.setScreensharePermission(
+                    enabled,
+                    screenshareSession?.sessionId,
+                  );
+                }}
+              />
+            )}
           </div>
         </main>
 

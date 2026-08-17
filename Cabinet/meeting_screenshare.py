@@ -42,6 +42,7 @@ MUTATING_ACTIONS = frozenset({
     "stroke_start",
     "stroke_update",
     "stroke_end",
+    "stroke_cancel",
     "object_upsert",
     "annotation_deleted",
     "clear_mine",
@@ -152,10 +153,31 @@ def normalize_annotation(raw: dict, *, author_id: int, author_role: str, display
         "displayName": str(display_name or "")[:MAX_DISPLAY_NAME],
         "createdAt": raw.get("createdAt") or raw.get("created_at"),
         "coordSpace": str(raw.get("coordSpace") or raw.get("coord_space") or "screenshare_v1")[:32],
+        "sourceRevision": _safe_nonneg_int(raw.get("sourceRevision") or raw.get("source_revision")),
+        "sequence": _safe_nonneg_int(raw.get("sequence")),
+        "widthNormalized": _optional_width_normalized(raw),
     }
 
 
-def get_active_screenshare_session(meeting: VideoMeeting) -> MeetingScreenShareSession | None:
+def _optional_width_normalized(raw: dict) -> float | None:
+    value = raw.get("widthNormalized") if "widthNormalized" in raw else raw.get("width_normalized")
+    if value is None or value == "":
+        return None
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not (n == n) or n <= 0:
+        return None
+    return max(0.0002, min(0.08, n))
+
+
+def _safe_nonneg_int(value: Any, cap: int = 1_000_000) -> int:
+    try:
+        n = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(cap, n))
     return (
         MeetingScreenShareSession.objects.filter(meeting=meeting, is_active=True)
         .order_by("-started_at")
@@ -476,7 +498,7 @@ def apply_screenshare_operation(
                 raise VideoMeetingError("Пустое обновление штриха", code="invalid_annotation")
             by_id[ann["id"]] = ann
 
-    elif action_name == "annotation_deleted":
+    elif action_name in ("annotation_deleted", "stroke_cancel"):
         ann_id = str(body.get("id") or body.get("annotation_id") or body.get("annotationId") or "")[:64]
         existing = by_id.get(ann_id)
         if existing is None:
@@ -525,7 +547,7 @@ def apply_screenshare_operation(
     op_payload: dict[str, Any] = {}
     if action_name in ("stroke_start", "stroke_update", "stroke_end", "object_upsert"):
         op_payload = {"annotation": by_id.get(ann["id"], ann)}
-    elif action_name == "annotation_deleted":
+    elif action_name in ("annotation_deleted", "stroke_cancel"):
         op_payload = {"id": ann["id"]}
 
     return {

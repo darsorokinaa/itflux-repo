@@ -3,6 +3,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   attachScreenSharePresence,
   buildScreenShareSnapshot,
+  extractDisplaySurface,
   extractTrackResolution,
   parseSharingParticipantIds,
 } from "./jitsiScreenShare";
@@ -35,6 +36,14 @@ describe("extractTrackResolution", () => {
       },
     };
     expect(extractTrackResolution(stats, "abc")).toEqual({ width: 1920, height: 1080 });
+  });
+});
+
+describe("extractDisplaySurface", () => {
+  it("maps Jitsi sourceType / getDisplayMedia displaySurface", () => {
+    expect(extractDisplaySurface({ on: true, details: { displaySurface: "browser" } })).toBe("browser");
+    expect(extractDisplaySurface({ details: { sourceType: "screen" } })).toBe("monitor");
+    expect(extractDisplaySurface({ sourceType: "window" })).toBe("window");
   });
 });
 
@@ -75,13 +84,14 @@ describe("attachScreenSharePresence", () => {
     };
     const onChange = vi.fn();
     const handle = attachScreenSharePresence(api, { onChange, pollMs: 60000 });
-    listeners.get("screenSharingStatusChanged")?.({ on: true });
+    listeners.get("screenSharingStatusChanged")?.({ on: true, details: { displaySurface: "browser" } });
     await vi.waitFor(() => {
       expect(onChange).toHaveBeenCalled();
     });
     const last = onChange.mock.calls.at(-1)[0];
     expect(last.localSharing).toBe(true);
     expect(last.sharingIds).toContain("p2");
+    expect(last.displaySurface).toBe("browser");
     handle.dispose();
   });
 });
