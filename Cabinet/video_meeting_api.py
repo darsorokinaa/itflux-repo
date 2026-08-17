@@ -234,7 +234,10 @@ class VideoMeetingJoinConfigView(APIView):
             config = build_join_config(meeting=meeting, user=request.user, request=request)
         except VideoMeetingError as exc:
             return _error_response(exc, meeting=meeting)
-        return Response(config)
+        response = Response(config)
+        response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response["Pragma"] = "no-cache"
+        return response
 
 
 class VideoMeetingStartView(APIView):

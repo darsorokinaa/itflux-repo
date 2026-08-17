@@ -139,7 +139,7 @@ def generate_jitsi_jwt(
     now = timezone.now()
     iat = int(now.timestamp())
     # Небольшой запас на рассинхрон часов Django/Jitsi.
-    nbf = int((now - timedelta(seconds=30)).timestamp())
+    nbf = int((now - timedelta(seconds=60)).timestamp())
     exp = int((now + timedelta(seconds=ttl)).timestamp())
     user_info = build_user_info(user, request)
     display_name = user_info["displayName"]

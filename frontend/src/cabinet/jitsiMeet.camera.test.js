@@ -27,6 +27,14 @@ describe("meeting camera preference", () => {
     expect(buildJitsiConfigOverwrite({ startWithVideoMuted: false }).startWithVideoMuted).toBe(false);
   });
 
+  it("keeps lobby off and forces JVB (no P2P) for school NAT", () => {
+    const cfg = buildJitsiConfigOverwrite();
+    expect(cfg.disableLobbyMode).toBe(true);
+    expect(cfg.p2p).toEqual({ enabled: false });
+    expect(cfg.channelLastN).toBe(8);
+    expect(cfg.enableNoAudioDetection).toBe(true);
+  });
+
   it("encodes startWithVideoMuted in embed URL", () => {
     const urlOn = buildJitsiEmbedUrl({
       domain: "meet.example.com",

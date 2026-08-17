@@ -1,7 +1,15 @@
+import mimetypes
+import os
+import re
+
 from django.contrib import admin
+from django.contrib.admin.utils import unquote
+from django.contrib.admin.widgets import AdminFileWidget
 from django.db.models import Count, Q
 from django import forms
-from django.utils.html import format_html, strip_tags
+from django.http import FileResponse, Http404
+from django.urls import path, reverse
+from django.utils.html import format_html, format_html_join, strip_tags
 from django_ckeditor_5.widgets import CKEditor5Widget
 
 from .models import (
@@ -38,6 +46,129 @@ from .models import (
     username_for_created_by,
 )
 
+
+_STORED_DOWNLOAD_FIELDS = ("file", "archive")
+_STORED_DOWNLOAD_LABELS = {
+    "file": "Скачать файл",
+    "archive": "Скачать архив",
+}
+_STORED_DOWNLOAD_LIST_LABELS = {
+    "file": "файл",
+    "archive": "архив",
+}
+
+
+def _attachment_filename(obj, file_field) -> str:
+    stored = os.path.basename(getattr(file_field, "name", "") or "")
+    ext = os.path.splitext(stored)[1]
+    base = getattr(obj, "slug", None) or getattr(obj, "title", None) or "file"
+    base = re.sub(r"[^\w.\-]+", "_", str(base), flags=re.UNICODE).strip("._") or "file"
+    return f"{base}{ext}"
+
+
+class AdminStoredFileWidget(AdminFileWidget):
+    """Виджет файла в админке с кнопкой скачивания."""
+
+    def __init__(self, *args, download_url="", download_label="Скачать файл", **kwargs):
+        self.download_url = download_url
+        self.download_label = download_label
+        super().__init__(*args, **kwargs)
+
+    def render(self, name, value, attrs=None, renderer=None):
+        html = super().render(name, value, attrs, renderer)
+        if not (self.download_url and value):
+            return html
+        return format_html(
+            '{}<p class="file-download-action" style="margin:8px 0 0;">'
+            '<a class="button" href="{}">{}</a></p>',
+            html,
+            self.download_url,
+            self.download_label,
+        )
+
+
+class AdminStoredFileDownloadMixin:
+    """Скачивание file/archive из карточки урока и «Интересного»."""
+
+    def get_urls(self):
+        opts = self.model._meta
+        extra = [
+            path(
+                "<path:object_id>/download/<str:field_name>/",
+                self.admin_site.admin_view(self.download_stored_file_view),
+                name=f"{opts.app_label}_{opts.model_name}_download_stored",
+            ),
+        ]
+        return extra + super().get_urls()
+
+    def _stored_download_url(self, obj, field_name):
+        if not obj or not obj.pk:
+            return ""
+        file_field = getattr(obj, field_name, None)
+        if not file_field or not getattr(file_field, "name", None):
+            return ""
+        opts = obj._meta
+        return reverse(
+            f"admin:{opts.app_label}_{opts.model_name}_download_stored",
+            args=[obj.pk, field_name],
+        )
+
+    def get_form(self, request, obj=None, **kwargs):
+        form_class = super().get_form(request, obj, **kwargs)
+        download_widgets = {}
+        if obj is not None:
+            for field_name in _STORED_DOWNLOAD_FIELDS:
+                url = self._stored_download_url(obj, field_name)
+                if url:
+                    download_widgets[field_name] = (url, _STORED_DOWNLOAD_LABELS[field_name])
+
+        if not download_widgets:
+            return form_class
+
+        class FormWithDownload(form_class):
+            def __init__(self, *args, **inner_kwargs):
+                super().__init__(*args, **inner_kwargs)
+                for fname, (url, label) in download_widgets.items():
+                    field = self.fields.get(fname)
+                    if field is None:
+                        continue
+                    field.widget = AdminStoredFileWidget(
+                        download_url=url,
+                        download_label=label,
+                        attrs=getattr(field.widget, "attrs", None),
+                    )
+
+        return FormWithDownload
+
+    def download_stored_file_view(self, request, object_id, field_name):
+        if field_name not in _STORED_DOWNLOAD_FIELDS:
+            raise Http404()
+        obj = self.get_object(request, unquote(object_id))
+        if obj is None:
+            raise Http404()
+        if not self.has_view_permission(request, obj):
+            raise Http404()
+        file_field = getattr(obj, field_name, None)
+        if not file_field or not getattr(file_field, "name", None):
+            raise Http404()
+        try:
+            fh = file_field.open("rb")
+        except OSError as exc:
+            raise Http404() from exc
+        filename = _attachment_filename(obj, file_field)
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        return FileResponse(fh, as_attachment=True, filename=filename, content_type=content_type)
+
+    @admin.display(description="Скачать")
+    def stored_files_download(self, obj):
+        items = []
+        for field_name in _STORED_DOWNLOAD_FIELDS:
+            url = self._stored_download_url(obj, field_name)
+            if url:
+                items.append((url, _STORED_DOWNLOAD_LIST_LABELS[field_name]))
+        if not items:
+            return "—"
+        return format_html_join(" ", '<a class="button" href="{}">{}</a>', items)
 
 
 class SearchByIdMixin:
@@ -419,7 +550,7 @@ class TaskPreviewAdmin(admin.ModelAdmin):
 
 
 @admin.register(Lesson)
-class LessonAdmin(admin.ModelAdmin):
+class LessonAdmin(AdminStoredFileDownloadMixin, admin.ModelAdmin):
     list_display = (
         "id",
         "title",
@@ -433,6 +564,7 @@ class LessonAdmin(admin.ModelAdmin):
         "status",
         "views_count",
         "likes_count_display",
+        "stored_files_download",
         "updated_at",
     )
     list_filter = (
@@ -497,7 +629,7 @@ class LessonAdmin(admin.ModelAdmin):
 
 
 @admin.register(InterestingItem)
-class InterestingItemAdmin(admin.ModelAdmin):
+class InterestingItemAdmin(AdminStoredFileDownloadMixin, admin.ModelAdmin):
     list_display = (
         "id",
         "title",
@@ -507,6 +639,7 @@ class InterestingItemAdmin(admin.ModelAdmin):
         "sort_order",
         "views_count",
         "likes_count_display",
+        "stored_files_download",
         "updated_at",
     )
     list_filter = ("status", "access_level", "tag")

@@ -869,7 +869,9 @@ def sync_state_payload(meeting: VideoMeeting, user: User) -> dict:
         session and user_can_collaborate(session, user, access.role)
     )
     from .meeting_present import serialize_presented
-    return {
+    from .meeting_screenshare import screenshare_sync_payload
+
+    payload = {
         "type": "material.sync_state",
         "meetingUuid": str(meeting.uuid),
         "role": access.role,
@@ -878,3 +880,5 @@ def sync_state_payload(meeting: VideoMeeting, user: User) -> dict:
         "materialSession": serialize_material_session(session, user=user, include_state=True),
         "presented": serialize_presented(meeting, user=user),
     }
+    payload.update(screenshare_sync_payload(meeting))
+    return payload

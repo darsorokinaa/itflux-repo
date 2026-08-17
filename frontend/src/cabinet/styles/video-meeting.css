@@ -1048,6 +1048,27 @@
   font-size: 0.9rem;
 }
 
+.video-lesson-jitsi-host {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.video-lesson-jitsi-host[hidden] {
+  display: none !important;
+}
+
+.video-lesson-page--compact .video-lesson-jitsi-host {
+  min-height: 0;
+  height: auto;
+  flex: 1 1 auto;
+}
+
 #jitsi-container {
   flex: 1 1 auto;
   width: 100%;
@@ -1140,6 +1161,12 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+.video-lesson-media-warning--info {
+  background: rgba(15, 23, 42, 0.92);
+  border-color: rgba(96, 165, 250, 0.45);
+  color: #e2e8f0;
 }
 
 .video-lesson-media-warning {
@@ -2531,4 +2558,155 @@ body.vl-room-fullscreen .student-cabinet-nav {
   .vl-collab-bar .video-lesson-btn {
     min-height: 40px;
   }
+}
+
+/* Аннотации поверх демонстрации экрана (не Excalidraw). */
+.ss-annot {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.ss-annot.is-capturing {
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.ss-annot__toggle,
+.ss-annot__panel,
+.ss-annot__text {
+  pointer-events: auto;
+}
+
+.ss-annot__toggle {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 4;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: rgba(15, 23, 42, 0.82);
+  color: #f8fafc;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
+}
+
+.ss-annot__toggle.is-open,
+.ss-annot__toggle:hover {
+  background: #2563eb;
+}
+
+.ss-annot__panel {
+  position: absolute;
+  top: 44px;
+  left: 10px;
+  z-index: 4;
+  max-width: min(420px, calc(100% - 20px));
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ss-annot__tools,
+.ss-annot__style,
+.ss-annot__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ss-annot__panel button {
+  appearance: none;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(30, 41, 59, 0.9);
+  color: #e2e8f0;
+  border-radius: 8px;
+  padding: 4px 7px;
+  font-size: 0.7rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.ss-annot__panel button.is-active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.ss-annot__panel button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ss-annot__swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0 !important;
+  border-radius: 999px !important;
+}
+
+.ss-annot__swatch.is-active {
+  outline: 2px solid #fff;
+}
+
+.ss-annot__width {
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(30, 41, 59, 0.9);
+  color: #e2e8f0;
+  font-size: 0.7rem;
+  padding: 3px 4px;
+}
+
+.ss-annot__hint {
+  margin: 0;
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+
+.ss-annot__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.ss-annot:not(.is-capturing) .ss-annot__svg {
+  touch-action: auto;
+}
+
+.ss-annot__text {
+  position: absolute;
+  z-index: 5;
+  min-width: 120px;
+  border: 1px solid #2563eb;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 0.85rem;
+  background: #fff;
+  color: #0f172a;
+}
+
+.ss-annot--compact .ss-annot__toggle {
+  top: 6px;
+  left: 6px;
+  padding: 4px 8px;
+  font-size: 0.68rem;
+}
+
+.ss-annot--compact .ss-annot__panel {
+  max-width: min(280px, calc(100% - 12px));
+  top: 36px;
+  left: 6px;
+  padding: 6px;
 }

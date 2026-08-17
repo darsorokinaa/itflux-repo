@@ -207,7 +207,6 @@ export default function MeetingCallDock() {
       setVisible(true);
       setCallElsewhere(false);
       try {
-        claimMeetingCall(meetingUuid, ownerIdRef.current);
         holdingCallRef.current = true;
         const config = await fetchVideoMeetingJoinConfig(meetingUuid);
         if (cancelled) return;
@@ -254,6 +253,7 @@ export default function MeetingCallDock() {
           return;
         }
         apiRef.current = wrapped;
+        claimMeetingCall(meetingUuid, ownerIdRef.current);
         try {
           await recordVideoMeetingJoin(meetingUuid, { jitsiParticipantId: "" });
         } catch {

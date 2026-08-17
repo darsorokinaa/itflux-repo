@@ -36,6 +36,12 @@ import {
   setMeetingCameraEnabled,
   setMeetingMicEnabled,
 } from "../jitsiMeet";
+import {
+  CALL_STATES,
+  createCallSessionId,
+  createCallStateMachine,
+  jwtNeedsAttention,
+} from "../jitsiCallState";
 import { closeConnectionCheck } from "../connectionCheck/openConnectionCheck";
 import { abortJitsiConnectionProbe } from "../connectionCheck/jitsiProbe";
 import { stopAllConnectionCheckStreams } from "../connectionCheck/mediaCleanup";
@@ -72,6 +78,13 @@ import {
   isFollowContentAction,
   isNavigationAction,
 } from "../materials/collab";
+import ScreenShareAnnotationOverlay from "../screenshare/ScreenShareAnnotationOverlay";
+import {
+  applyScreenshareOperation,
+  annotationsFromList,
+  lastOwnAnnotationId,
+} from "../screenshare/annotationModel";
+import { LASER_TTL_MS } from "../screenshare/constants";
 import { useFloatingDrag } from "../useFloatingDrag";
 import "../styles/video-meeting.css";
 import "../styles/live-variant-answers.css";
@@ -126,6 +139,9 @@ function mapJoinError(err) {
   if (err?.status === 404 || code === "not_found") return "Конференция не найдена";
   if (code === "jwt_missing" || code === "jwt_config") {
     return "Сервер отклонил доступ (конфигурация входа)";
+  }
+  if (code === "jitsi_auth") {
+    return "Сервер конференции отклонил токен входа. Обновите страницу урока. Локально JITSI_APP_SECRET в Generator/.env должен совпадать с Prosody на lesson.itflux-academy.ru.";
   }
   if (code === "jitsi_join_timeout" || code === "join_timeout") {
     return "Не удалось соединиться с сервером конференции. Нажмите «Повторить» или откройте в новой вкладке.";
@@ -258,6 +274,12 @@ export default function VideoMeetingPage() {
   const [diagOpen, setDiagOpen] = useState(false);
   const [diagSnapshot, setDiagSnapshot] = useState(null);
   const materialCollabRef = useRef(null);
+  const [screenshareSession, setScreenshareSession] = useState(null);
+  const [screenshareAnnotations, setScreenshareAnnotations] = useState([]);
+  const [screenshareLasers, setScreenshareLasers] = useState({});
+  const screenshareSeenRef = useRef(new Set());
+  const lastShareReportRef = useRef("");
+  const screenShareApiRef = useRef(null);
   const remoteCursorTimersRef = useRef(new Map());
   const remoteApplyGuardRef = useRef(createRemoteApplyGuard());
   const seenOpIdsRef = useRef(new Set());
@@ -278,6 +300,21 @@ export default function VideoMeetingPage() {
   const openedPresentKeyRef = useRef("");
   const canManageRef = useRef(false);
   const callOwnerIdRef = useRef(`page-${Math.random().toString(36).slice(2, 10)}`);
+  const tabSessionIdRef = useRef(
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `tab-${Math.random().toString(36).slice(2, 12)}`,
+  );
+  const callSessionIdRef = useRef(createCallSessionId());
+  const callStateRef = useRef(null);
+  if (!callStateRef.current) {
+    callStateRef.current = createCallStateMachine({
+      diagnostics: { browserTabSessionId: tabSessionIdRef.current },
+    });
+  }
+  const intendedMediaRef = useRef({ micOn: false, camOn: false, screenSharing: false, screenTrackActive: null });
+  const initGenRef = useRef(0);
+  const abortRef = useRef(null);
   const [roleLabel, setRoleLabel] = useState("");
   const [isModerator, setIsModerator] = useState(false);
   const [moderatorLoginHint, setModeratorLoginHint] = useState("");
@@ -293,6 +330,13 @@ export default function VideoMeetingPage() {
 
   const disposeApi = useCallback(() => {
     jitsiInitRef.current = false;
+    initGenRef.current += 1;
+    try {
+      abortRef.current?.abort();
+    } catch {
+      /* ignore */
+    }
+    abortRef.current = null;
     if (apiRef.current) {
       try {
         apiRef.current.executeCommand?.("hangup");
@@ -306,10 +350,12 @@ export default function VideoMeetingPage() {
       }
       apiRef.current = null;
     }
+    screenShareApiRef.current = null;
+    lastShareReportRef.current = "";
     if (containerRef.current) {
       containerRef.current.innerHTML = "";
     }
-    setParticipantCount(1);
+    setParticipantCount(null);
     setConnectionHint("");
   }, []);
 
@@ -376,13 +422,27 @@ export default function VideoMeetingPage() {
     const micWasEnabled = getMeetingMicEnabled(meetingUuid) === true;
     const startWithAudioMuted = !micWasEnabled;
     jitsiInitRef.current = true;
+    const initGen = initGenRef.current + 1;
+    initGenRef.current = initGen;
+    const abort = new AbortController();
+    abortRef.current = abort;
     setError("");
     setMediaWarning("");
     setConnectionHint("Подключение к конференции…");
     setPageState("live");
+    callStateRef.current?.transition(CALL_STATES.initializing, "init");
+    intendedMediaRef.current = {
+      micOn: !startWithAudioMuted,
+      camOn: !startWithVideoMuted,
+      screenSharing: false,
+      screenTrackActive: null,
+    };
 
     try {
       const config = await fetchVideoMeetingJoinConfig(meetingUuid);
+      if (initGenRef.current !== initGen || abort.signal.aborted) {
+        return;
+      }
       if (config?.meeting?.status && config.meeting.status !== "live") {
         jitsiInitRef.current = false;
         setPageState(config.meeting.status === "finished" ? "finished" : "waiting");
@@ -439,6 +499,11 @@ export default function VideoMeetingPage() {
         ...config,
         startWithVideoMuted,
         startWithAudioMuted,
+        diagnostics: {
+          ...(config.diagnostics || {}),
+          browserTabSessionId: tabSessionIdRef.current,
+          callSessionId: callSessionIdRef.current,
+        },
         meeting: {
           ...(config.meeting || {}),
           subject,
@@ -456,6 +521,10 @@ export default function VideoMeetingPage() {
         setDirectMeetUrl("");
       }
       setShowJoinFallback(false);
+      if (jwtNeedsAttention(config.diagnostics?.jwtExp)) {
+        setConnectionHint("Сессия входа скоро истечёт. При обрыве откройте урок заново с платформы.");
+      }
+      callStateRef.current?.transition(CALL_STATES.connecting, "jitsi-create");
 
       const showModeratorToast = () => {
         setModeratorToast("Вы стали организатором встречи");
@@ -469,14 +538,21 @@ export default function VideoMeetingPage() {
       };
 
       const wrapped = await createJitsiMeetSession(joinConfig, containerRef.current, {
+        signal: abort.signal,
         onParticipantCount: (n) => {
           if (typeof n === "number" && n >= 0) setParticipantCount(n);
+        },
+        onPresence: (snap) => {
+          if (typeof snap?.count === "number" && snap.count >= 0) {
+            setParticipantCount(snap.count);
+          }
         },
         onJoined: (event) => {
           setJoinState("joined");
           setConnectionHint("");
           setShowJoinFallback(false);
           participantIdRef.current = event?.id || "";
+          callStateRef.current?.transition(CALL_STATES.joined, "videoConferenceJoined");
           if (event?.roomName && config.roomName && event.roomName !== config.roomName) {
             setMediaWarning(
               "Комната у вас и у ученика не совпадает. Обновите страницу у обоих участников.",
@@ -485,11 +561,60 @@ export default function VideoMeetingPage() {
         },
         onBecameModerator: showModeratorToast,
         onMediaWarning: (msg) => setMediaWarning(msg || ""),
+        onConnectionHint: (msg) => setConnectionHint(msg || ""),
+        onConnectionState: (next, why) => {
+          if (next === "joined") callStateRef.current?.transition(CALL_STATES.joined, why);
+          else if (next === "reconnecting") {
+            callStateRef.current?.transition(CALL_STATES.reconnecting, why);
+            void apiRef.current?.reconcileParticipants?.("connection-state");
+          } else if (next === "degraded") {
+            callStateRef.current?.transition(CALL_STATES.degraded, why);
+          }
+        },
+        getIntendedMedia: () => intendedMediaRef.current,
         onAudioMuteStatusChanged: (payload) => {
-          setMeetingMicEnabled(meetingUuid, !payload?.muted);
+          const on = !payload?.muted;
+          setMeetingMicEnabled(meetingUuid, on);
+          intendedMediaRef.current = { ...intendedMediaRef.current, micOn: on };
+        },
+        onVideoMuteStatusChanged: (payload) => {
+          const on = !payload?.muted;
+          setMeetingCameraEnabled(meetingUuid, on);
+          intendedMediaRef.current = { ...intendedMediaRef.current, camOn: on };
+        },
+        onScreenShare: (snap) => {
+          intendedMediaRef.current = {
+            ...intendedMediaRef.current,
+            screenSharing: Boolean(snap?.localSharing || snap?.active),
+            screenTrackActive: snap?.active ? true : false,
+          };
+          const collab = materialCollabRef.current;
+          if (!collab || !snap) return;
+          const key = `${snap.active ? 1 : 0}|${snap.presenterJitsiId || ""}|${snap.localSharing ? 1 : 0}|${snap.contentWidth || 0}x${snap.contentHeight || 0}`;
+          if (key === lastShareReportRef.current) return;
+          lastShareReportRef.current = key;
+          collab.reportScreenshare({
+            active: Boolean(snap.active),
+            localSharing: Boolean(snap.localSharing),
+            presenterJitsiId: snap.presenterJitsiId || snap.localId || "",
+            contentWidth: snap.contentWidth,
+            contentHeight: snap.contentHeight,
+          });
+          if (snap.active && snap.presenterJitsiId) {
+            screenShareApiRef.current?.pinDesktop?.(snap.presenterJitsiId);
+          }
         },
       });
+      if (initGenRef.current !== initGen || abort.signal.aborted) {
+        try {
+          wrapped.dispose();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
       apiRef.current = wrapped;
+      screenShareApiRef.current = wrapped.screenShare || null;
       claimMeetingCall(meetingUuid, callOwnerIdRef.current);
       setJoinState(wrapped.mode === "external-api" ? "joined" : "embedded");
       if (wrapped.mode !== "external-api") {
@@ -514,20 +639,28 @@ export default function VideoMeetingPage() {
 
       try {
         cancelPendingLeave();
-        await recordVideoMeetingJoin(meetingUuid, { jitsiParticipantId: "" });
+        await recordVideoMeetingJoin(meetingUuid, {
+          jitsiParticipantId: participantIdRef.current || "",
+        });
       } catch {
         /* посещаемость не должна ломать конференцию */
       }
     } catch (err) {
+      if (initGenRef.current !== initGen || abort.signal.aborted || err?.code === "jitsi_aborted") {
+        jitsiInitRef.current = false;
+        return;
+      }
       jitsiInitRef.current = false;
       disposeApi();
       if (err?.code === "not_live" || err?.status === 409) {
+        callStateRef.current?.transition(CALL_STATES.ended, err?.code || "not-live");
         const st = err?.data?.status || "scheduled";
         if (st === "finished") setPageState("finished");
         else if (st === "cancelled") setPageState("cancelled");
         else setPageState("waiting");
         return;
       }
+      callStateRef.current?.transition(CALL_STATES.failed, err?.code || "init-error");
       if (err?.message === "Не удалось загрузить Jitsi Meet") {
         setError("Не удалось соединиться с сервером (external_api.js)");
       } else if (err?.message === "jitsi_join_timeout" || err?.code === "jitsi_join_timeout") {
@@ -847,6 +980,25 @@ export default function VideoMeetingPage() {
     window.addEventListener("pagehide", onPageHide);
     return () => window.removeEventListener("pagehide", onPageHide);
   }, [sendLeave]);
+
+  useEffect(() => {
+    if (pageState !== "live") return undefined;
+    const reconcile = (reason) => {
+      const api = apiRef.current;
+      if (!api?.reconcileParticipants) return;
+      void api.reconcileParticipants(reason);
+    };
+    const onOnline = () => reconcile("online");
+    const onVisible = () => {
+      if (document.visibilityState === "visible") reconcile("visible");
+    };
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [pageState]);
 
   const onStartLesson = async () => {
     if (!meetingUuid || starting) return;
@@ -1435,6 +1587,65 @@ export default function VideoMeetingPage() {
         }
         setMaterialSyncStatus("error");
       },
+      onScreenshareSync: (session) => {
+        setScreenshareSession(session || null);
+        const list = session?.annotations || [];
+        setScreenshareAnnotations(list);
+        if (!session?.active && !session?.sessionId) {
+          setScreenshareLasers({});
+        }
+      },
+      onScreensharePermission: (payload) => {
+        const session = payload?.screenshareSession;
+        if (session) {
+          setScreenshareSession(session);
+        } else {
+          setScreenshareSession((prev) => prev ? {
+            ...prev,
+            participantsCanAnnotate: payload?.participantsCanAnnotate,
+          } : prev);
+        }
+      },
+      onScreenshareOperation: (op) => {
+        const opId = op.operation_id || op.operationId;
+        if (opId) {
+          if (screenshareSeenRef.current.has(opId)) return;
+          screenshareSeenRef.current.add(opId);
+        }
+        setScreenshareAnnotations((prev) => {
+          const map = applyScreenshareOperation(annotationsFromList(prev), {
+            ...op,
+            authorId: op.author_id,
+            displayName: op.display_name,
+          });
+          return [...map.values()];
+        });
+      },
+      onScreensharePointer: (payload) => {
+        const point = payload?.payload || payload;
+        const authorId = payload?.author_id;
+        if (authorId == null || typeof point?.x !== "number") return;
+        const key = String(authorId);
+        setScreenshareLasers((prev) => ({
+          ...prev,
+          [key]: {
+            x: point.x,
+            y: point.y,
+            displayName: payload.display_name || "",
+            color: prev[key]?.color,
+            at: Date.now(),
+          },
+        }));
+        window.setTimeout(() => {
+          setScreenshareLasers((prev) => {
+            const current = prev[key];
+            if (!current || Date.now() - current.at < LASER_TTL_MS - 50) return prev;
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+        }, LASER_TTL_MS);
+      },
     });
     materialCollabRef.current = collab;
     return () => {
@@ -1446,6 +1657,10 @@ export default function VideoMeetingPage() {
       setRemotePreviews({});
       setStudentViewports({});
       setMaterialPresence([]);
+      setScreenshareSession(null);
+      setScreenshareAnnotations([]);
+      setScreenshareLasers({});
+      screenshareSeenRef.current.clear();
     };
   }, [applyMaterialSession, meetingUuid, pageState, showMaterialNotice, showMaterialsToast]);
 
@@ -1773,6 +1988,22 @@ export default function VideoMeetingPage() {
     };
     void openAddMaterials(tabMap[actionId] || "library");
   }, [openAddHomework, openAddMaterials]);
+
+  const screenshareActive = Boolean(screenshareSession?.active || screenshareSession?.sessionId);
+  const screenshareCanAnnotate = Boolean(
+    canManage || screenshareSession?.participantsCanAnnotate !== false,
+  );
+  const sendScreenshareOp = useCallback((action, payload) => {
+    const collab = materialCollabRef.current;
+    const sid = screenshareSession?.sessionId || screenshareSession?.screenShareSessionId;
+    if (!collab || !sid) return;
+    const { operationId } = collab.sendScreenshareOperation({
+      action,
+      payload,
+      sessionId: sid,
+    }) || {};
+    if (operationId) screenshareSeenRef.current.add(operationId);
+  }, [screenshareSession]);
 
   const materialsCount = canManage
     ? (materialRows.length + homeworkRows.length + (boardInfo?.board ? 1 : 0))
@@ -2523,10 +2754,87 @@ export default function VideoMeetingPage() {
           ) : null}
 
           <div
-            id="jitsi-container"
-            ref={containerRef}
+            className="video-lesson-jitsi-host"
             hidden={!showJitsi || (compactCall && callCollapsed)}
-          />
+          >
+            {connectionHint ? (
+              <div className="video-lesson-media-warning video-lesson-media-warning--info" role="status">
+                {connectionHint}
+              </div>
+            ) : null}
+            {mediaWarning ? (
+              <div className="video-lesson-media-warning" role="status">
+                <span>{mediaWarning}</span>
+                <button type="button" aria-label="Закрыть" onClick={() => setMediaWarning("")}>×</button>
+              </div>
+            ) : null}
+            <div
+              id="jitsi-container"
+              ref={containerRef}
+            />
+            <ScreenShareAnnotationOverlay
+              active={screenshareActive && showJitsi && !(compactCall && callCollapsed)}
+              compact={compactCall}
+              canManage={canManage}
+              canAnnotate={screenshareCanAnnotate}
+              participantsCanAnnotate={screenshareSession?.participantsCanAnnotate !== false}
+              currentUserId={detail?.viewerUserId ?? null}
+              displayName={displayName}
+              sessionId={screenshareSession?.sessionId || ""}
+              contentWidth={screenshareSession?.contentWidth || 1920}
+              contentHeight={screenshareSession?.contentHeight || 1080}
+              annotations={screenshareAnnotations}
+              remoteLasers={screenshareLasers}
+              onStrokeStart={(ann) => {
+                setScreenshareAnnotations((prev) => [...prev.filter((a) => a.id !== ann.id), ann]);
+                sendScreenshareOp("stroke_start", { annotation: ann, screenShareSessionId: screenshareSession?.sessionId });
+              }}
+              onStrokeUpdate={(ann) => {
+                setScreenshareAnnotations((prev) => prev.map((a) => (
+                  a.id === ann.id ? { ...a, points: [...(a.points || []), ...(ann.points || [])] } : a
+                )));
+                sendScreenshareOp("stroke_update", { annotation: { id: ann.id, tool: ann.tool, color: ann.color, width: ann.width, points: ann.points }, screenShareSessionId: screenshareSession?.sessionId });
+              }}
+              onStrokeEnd={(ann) => {
+                sendScreenshareOp("stroke_end", { annotation: { id: ann.id, tool: ann.tool, points: [] }, screenShareSessionId: screenshareSession?.sessionId });
+              }}
+              onObjectUpsert={(ann) => {
+                setScreenshareAnnotations((prev) => [...prev.filter((a) => a.id !== ann.id), ann]);
+                sendScreenshareOp("object_upsert", { annotation: ann, screenShareSessionId: screenshareSession?.sessionId });
+              }}
+              onPointer={(point) => {
+                const sid = screenshareSession?.sessionId;
+                if (!sid) return;
+                materialCollabRef.current?.sendScreensharePointer(point, sid);
+              }}
+              onErase={(ann) => {
+                setScreenshareAnnotations((prev) => prev.filter((a) => a.id !== ann.id));
+                sendScreenshareOp("annotation_deleted", { id: ann.id, screenShareSessionId: screenshareSession?.sessionId });
+              }}
+              onUndo={() => {
+                const map = annotationsFromList(screenshareAnnotations);
+                const id = lastOwnAnnotationId(map, detail?.viewerUserId);
+                if (!id) return;
+                setScreenshareAnnotations((prev) => prev.filter((a) => a.id !== id));
+                sendScreenshareOp("annotation_deleted", { id, screenShareSessionId: screenshareSession?.sessionId });
+              }}
+              onClearMine={() => {
+                const uid = Number(detail?.viewerUserId);
+                setScreenshareAnnotations((prev) => prev.filter((a) => Number(a.authorId) !== uid));
+                sendScreenshareOp("clear_mine", { screenShareSessionId: screenshareSession?.sessionId });
+              }}
+              onClearAll={() => {
+                setScreenshareAnnotations([]);
+                sendScreenshareOp("clear_all", { screenShareSessionId: screenshareSession?.sessionId });
+              }}
+              onSetParticipantsCanAnnotate={(enabled) => {
+                materialCollabRef.current?.setScreensharePermission(
+                  enabled,
+                  screenshareSession?.sessionId,
+                );
+              }}
+            />
+          </div>
         </main>
 
         {showAside ? (

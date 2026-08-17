@@ -166,6 +166,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
         version = ms?.version || data.server_revision || version;
         handlers.onSyncState?.(data);
         if (data.presented !== undefined) handlers.onPresented?.(data.presented);
+        if (data.screenshareSession !== undefined) handlers.onScreenshareSync?.(data.screenshareSession);
         return;
       }
       if (data.type === "material.opened") {
@@ -242,10 +243,35 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
         return;
       }
       if (data.type === "material.operation_ack") {
-        if (data.version) version = data.version;
+        if (data.version) version = data.materialSession?.version || data.version;
         const opId = data.operation_id || data.operationId;
         if (opId) pendingOps.delete(opId);
         handlers.onOperationAck?.(data);
+        return;
+      }
+      if (data.type === "screenshare.started" || data.type === "screenshare.ended" || data.type === "screenshare.state") {
+        handlers.onScreenshareSync?.(data.screenshareSession || null, data.type);
+        return;
+      }
+      if (data.type === "screenshare.permission") {
+        handlers.onScreensharePermission?.(data);
+        return;
+      }
+      if (data.type === "screenshare.operation") {
+        const opId = data.operation_id || data.operationId;
+        if (markSeen(opId)) return;
+        pendingOps.delete(opId);
+        handlers.onScreenshareOperation?.(data);
+        return;
+      }
+      if (data.type === "screenshare.pointer") {
+        handlers.onScreensharePointer?.(data);
+        return;
+      }
+      if (data.type === "screenshare.operation_ack") {
+        const opId = data.operation_id || data.operationId;
+        if (opId) pendingOps.delete(opId);
+        handlers.onScreenshareOperationAck?.(data);
       }
     };
 
@@ -378,6 +404,39 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     sendPointer: (x, y) => sendPointerThrottled(x, y),
     sendAnnotationPreview,
     sendStudentViewport: (payload) => sendStudentViewportThrottled(payload),
+    reportScreenshare: (payload) => send({
+      type: "screenshare.report",
+      ...payload,
+    }),
+    setScreensharePermission: (participantsCanAnnotate, sessionIdValue) => send({
+      type: "screenshare.set_permission",
+      participantsCanAnnotate: Boolean(participantsCanAnnotate),
+      sessionId: sessionIdValue,
+    }),
+    sendScreenshareOperation: ({ action, payload, operationId, sessionId: sid } = {}) => {
+      const opId = operationId || newId();
+      markSeen(opId);
+      pendingOps.set(opId, { action, at: Date.now() });
+      const ok = send({
+        type: action === "pointer" ? "screenshare.pointer" : "screenshare.operation",
+        action,
+        session_id: sid,
+        screenShareSessionId: sid,
+        operation_id: opId,
+        payload: payload || {},
+      });
+      return { ok, operationId: opId };
+    },
+    sendScreensharePointer: throttle((payload, sessionIdValue) => {
+      send({
+        type: "screenshare.pointer",
+        action: "pointer",
+        session_id: sessionIdValue,
+        screenShareSessionId: sessionIdValue,
+        operation_id: newId(),
+        payload: payload || {},
+      });
+    }, THROTTLE.POINTER_MS),
     close: () => {
       closed = true;
       if (reconnectTimer) window.clearTimeout(reconnectTimer);

@@ -176,15 +176,30 @@ function PassportMiniCell({ label, value, meta }) {
   );
 }
 
-function AboutField({ label, value, empty = "Не указан", multiline = false }) {
+function AboutField({ label, value, empty = "Не указан", multiline = false, onEdit = null }) {
   const text = value && String(value).trim() ? String(value).trim() : empty;
   const isEmpty = !value || !String(value).trim();
   return (
-    <div className={`cb-lesson-card__about-field${multiline ? " cb-lesson-card__about-field--multiline" : ""}`}>
+    <div className={`cb-lesson-card__about-field${multiline ? " cb-lesson-card__about-field--multiline" : ""}${onEdit ? " cb-lesson-card__about-field--editable" : ""}`}>
       <span className="cb-lesson-card__about-label">{label}</span>
-      <span className={`cb-lesson-card__about-value${isEmpty ? " is-empty" : ""}${multiline ? " is-multiline" : ""}`}>
+      <span
+        className={`cb-lesson-card__about-value${isEmpty ? " is-empty" : ""}${multiline ? " is-multiline" : ""}${onEdit ? " is-clickable" : ""}`}
+        title={onEdit ? "Дважды нажмите, чтобы изменить" : undefined}
+        onDoubleClick={onEdit || undefined}
+      >
         {text}
       </span>
+      {onEdit ? (
+        <button
+          type="button"
+          className="cb-lesson-card__about-edit"
+          onClick={onEdit}
+          aria-label={`Изменить: ${label}`}
+          title="Изменить"
+        >
+          <CabinetIcon name="pencil" />
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -209,6 +224,12 @@ function AboutEditor({
   const [subjects, setSubjects] = useState([]);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [focusField, setFocusField] = useState(null);
+  const topicInputRef = useRef(null);
+  const subtopicInputRef = useRef(null);
+  const descriptionInputRef = useRef(null);
+  const subjectInputRef = useRef(null);
   const savedRef = useRef({
     topic: topic || "",
     subtopic: subtopic || "",
@@ -217,6 +238,8 @@ function AboutEditor({
   });
 
   useEffect(() => {
+    setEditing(false);
+    setFocusField(null);
     setTopicDraft(topic || "");
     setSubtopicDraft(subtopic || "");
     setDescriptionDraft(description || "");
@@ -256,34 +279,117 @@ function AboutEditor({
     hasRealPlanLink || Boolean(event.studentId)
   );
 
-  const saveContent = async (fields) => {
-    if (!Object.keys(fields).length) return;
-    setSaving(true);
+  const startEditing = (field = "topic") => {
+    const nextSaved = {
+      topic: topic || "",
+      subtopic: subtopic || "",
+      description: description || "",
+      subjectId: event.studentSubjectId ? String(event.studentSubjectId) : "",
+    };
+    savedRef.current = nextSaved;
+    setTopicDraft(nextSaved.topic);
+    setSubtopicDraft(nextSaved.subtopic);
+    setDescriptionDraft(nextSaved.description);
+    setSubjectId(nextSaved.subjectId);
     setStatus("");
+    setFocusField(field);
+    setEditing(true);
+  };
+
+  const cancelEditing = () => {
+    setTopicDraft(savedRef.current.topic || "");
+    setSubtopicDraft(savedRef.current.subtopic || "");
+    setDescriptionDraft(savedRef.current.description || "");
+    setSubjectId(savedRef.current.subjectId || "");
+    setFocusField(null);
+    setStatus("");
+    setEditing(false);
+  };
+
+  useEffect(() => {
+    if (!editing || !focusField) return;
+    const map = {
+      subject: subjectInputRef,
+      topic: topicInputRef,
+      subtopic: subtopicInputRef,
+      description: descriptionInputRef,
+    };
+    const el = map[focusField]?.current;
+    if (!el) return;
+    el.focus();
+    if (typeof el.select === "function" && el.tagName === "INPUT") el.select();
+  }, [editing, focusField]);
+
+  const saveContent = async (fields) => {
+    if (!Object.keys(fields).length) return false;
     const payload = {
       ...fields,
       sync_action: shouldSyncToPlan ? "lesson_and_plan" : "lesson_only",
     };
+    let data;
+    let savedOnlyOnLesson = false;
     try {
-      let data;
-      let savedOnlyOnLesson = false;
-      try {
-        data = await updateScheduleEventContent(event.id, payload);
-      } catch (err) {
-        if (err?.status === 409) {
-          data = await updateScheduleEventContent(event.id, {
-            ...fields,
-            sync_action: "lesson_only",
-          });
-          savedOnlyOnLesson = true;
-        } else {
-          throw err;
-        }
+      data = await updateScheduleEventContent(event.id, payload);
+    } catch (err) {
+      if (err?.status === 409) {
+        data = await updateScheduleEventContent(event.id, {
+          ...fields,
+          sync_action: "lesson_only",
+        });
+        savedOnlyOnLesson = true;
+      } else {
+        throw err;
       }
-      if (data?.scheduleEvent) onEventUpdated?.(data.scheduleEvent);
-      if (fields.topic !== undefined) savedRef.current.topic = fields.topic;
-      if (fields.subtopic !== undefined) savedRef.current.subtopic = fields.subtopic;
-      if (fields.description !== undefined) savedRef.current.description = fields.description;
+    }
+    if (data?.scheduleEvent) onEventUpdated?.(data.scheduleEvent);
+    if (fields.topic !== undefined) savedRef.current.topic = fields.topic;
+    if (fields.subtopic !== undefined) savedRef.current.subtopic = fields.subtopic;
+    if (fields.description !== undefined) savedRef.current.description = fields.description;
+    return savedOnlyOnLesson;
+  };
+
+  const saveSubject = async (nextId) => {
+    if (nextId === savedRef.current.subjectId) return;
+    const selected = subjects.find((item) => String(item.id) === nextId);
+    await updateScheduleEvent(event.id, {
+      student_subject: nextId ? Number(nextId) : null,
+      student_subject_id: nextId ? Number(nextId) : null,
+      notify_participants: false,
+    });
+    savedRef.current.subjectId = nextId;
+    onEventUpdated?.({
+      id: event.id,
+      studentSubjectId: nextId ? Number(nextId) : null,
+      studentSubjectLabel: selected ? subjectOptionLabel(selected) : "",
+    });
+  };
+
+  const commitAbout = async () => {
+    const topicNext = topicDraft.trim();
+    const subtopicNext = subtopicDraft.trim();
+    const descriptionNext = descriptionDraft.trim();
+    const contentFields = {};
+    if (topicNext !== (savedRef.current.topic || "").trim()) contentFields.topic = topicNext;
+    if (subtopicNext !== (savedRef.current.subtopic || "").trim()) contentFields.subtopic = subtopicNext;
+    if (descriptionNext !== (savedRef.current.description || "").trim()) contentFields.description = descriptionNext;
+    const subjectChanged = subjectId !== savedRef.current.subjectId;
+
+    if (!Object.keys(contentFields).length && !subjectChanged) {
+      setEditing(false);
+      setFocusField(null);
+      setStatus("");
+      return;
+    }
+
+    setSaving(true);
+    setStatus("");
+    try {
+      const savedOnlyOnLesson = Object.keys(contentFields).length
+        ? await saveContent(contentFields)
+        : false;
+      if (subjectChanged) await saveSubject(subjectId);
+      setEditing(false);
+      setFocusField(null);
       setStatus(savedOnlyOnLesson ? "Сохранено только в занятии" : "Сохранено");
     } catch (err) {
       setStatus(err?.message || "Не удалось сохранить");
@@ -292,128 +398,163 @@ function AboutEditor({
     }
   };
 
-  const commitTopic = () => {
-    const next = topicDraft.trim();
-    if (next === (savedRef.current.topic || "").trim()) return;
-    saveContent({ topic: next });
-  };
-
-  const commitSubtopic = () => {
-    const next = subtopicDraft.trim();
-    if (next === (savedRef.current.subtopic || "").trim()) return;
-    saveContent({ subtopic: next });
-  };
-
-  const commitDescription = () => {
-    const next = descriptionDraft.trim();
-    if (next === (savedRef.current.description || "").trim()) return;
-    saveContent({ description: next });
-  };
-
-  const handleSubjectChange = async (nextId) => {
-    setSubjectId(nextId);
-    if (nextId === savedRef.current.subjectId) return;
-    setSaving(true);
-    setStatus("");
-    try {
-      const selected = subjects.find((item) => String(item.id) === nextId);
-      await updateScheduleEvent(event.id, {
-        student_subject: nextId ? Number(nextId) : null,
-        student_subject_id: nextId ? Number(nextId) : null,
-        notify_participants: false,
-      });
-      savedRef.current.subjectId = nextId;
-      onEventUpdated?.({
-        id: event.id,
-        studentSubjectId: nextId ? Number(nextId) : null,
-        studentSubjectLabel: selected ? subjectOptionLabel(selected) : "",
-      });
-      setStatus("Сохранено");
-    } catch (err) {
-      setSubjectId(savedRef.current.subjectId);
-      setStatus(err?.message || "Не удалось сохранить предмет");
-    } finally {
-      setSaving(false);
+  const handleAboutKeyDown = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      cancelEditing();
+      return;
+    }
+    if (e.key === "Enter" && e.target?.tagName === "INPUT") {
+      e.preventDefault();
+      commitAbout();
     }
   };
 
+  const statusLine = saving ? "Сохранение…" : status;
+
   return (
-    <div className="cb-lesson-card__about cb-lesson-card__about--edit">
-      <label className="cb-lesson-card__about-field">
-        <span className="cb-lesson-card__about-label">Предмет</span>
-        {event.studentId ? (
-          <select
-            className={`cb-lesson-card__about-input${!subjectId ? " is-empty" : ""}`}
-            value={subjectId}
-            onChange={(e) => handleSubjectChange(e.target.value)}
-            disabled={saving}
+    <>
+      <div className="cb-lesson-card__section-head">
+        <h3 className="cb-lesson-card__section-title cb-lesson-card__section-title--plain">О занятии</h3>
+        {!editing ? (
+          <button
+            type="button"
+            className="cb-lesson-card__section-add"
+            onClick={() => startEditing("topic")}
           >
-            <option value="">Не указан</option>
-            {subjects.length
-              ? subjects.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {subjectOptionLabel(item)}
-                </option>
-              ))
-              : subjectId
-                ? <option value={subjectId}>{subjectLabel || "Предмет"}</option>
-                : null}
-          </select>
-        ) : (
-          <span className={`cb-lesson-card__about-value${!subjectLabel ? " is-empty" : ""}`}>
-            {subjectLabel || "Не указан"}
-          </span>
-        )}
-      </label>
-      <AboutField label="Курс" value={courseTitle} empty="Не указан" />
-      <label className="cb-lesson-card__about-field">
-        <span className="cb-lesson-card__about-label">Тема</span>
-        <input
-          type="text"
-          className={`cb-lesson-card__about-input${!topicDraft.trim() ? " is-empty" : ""}`}
-          value={topicDraft}
-          placeholder="Не указана"
-          onChange={(e) => { setTopicDraft(e.target.value); setStatus(""); }}
-          onBlur={commitTopic}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") e.currentTarget.blur();
-          }}
-          disabled={saving}
-        />
-      </label>
-      <label className="cb-lesson-card__about-field">
-        <span className="cb-lesson-card__about-label">Подтема</span>
-        <input
-          type="text"
-          className={`cb-lesson-card__about-input${!subtopicDraft.trim() ? " is-empty" : ""}`}
-          value={subtopicDraft}
-          placeholder="Не указана"
-          onChange={(e) => { setSubtopicDraft(e.target.value); setStatus(""); }}
-          onBlur={commitSubtopic}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") e.currentTarget.blur();
-          }}
-          disabled={saving}
-        />
-      </label>
-      <label className="cb-lesson-card__about-field cb-lesson-card__about-field--multiline">
-        <span className="cb-lesson-card__about-label">Описание</span>
-        <textarea
-          className={`cb-lesson-card__about-input cb-lesson-card__about-textarea${!descriptionDraft.trim() ? " is-empty" : ""}`}
-          rows={2}
-          value={descriptionDraft}
-          placeholder="Описание не добавлено"
-          onChange={(e) => { setDescriptionDraft(e.target.value); setStatus(""); }}
-          onBlur={commitDescription}
-          disabled={saving}
-        />
-      </label>
-      {status ? (
-        <p className="cb-lesson-card__about-status" role="status">{saving ? "Сохранение…" : status}</p>
-      ) : saving ? (
-        <p className="cb-lesson-card__about-status" role="status">Сохранение…</p>
-      ) : null}
-    </div>
+            Изменить
+          </button>
+        ) : null}
+      </div>
+      {editing ? (
+        <div
+          className="cb-lesson-card__about cb-lesson-card__about--edit"
+          onKeyDown={handleAboutKeyDown}
+        >
+          <label className="cb-lesson-card__about-field">
+            <span className="cb-lesson-card__about-label">Предмет</span>
+            {event.studentId ? (
+              <select
+                ref={subjectInputRef}
+                className={`cb-lesson-card__about-input${!subjectId ? " is-empty" : ""}`}
+                value={subjectId}
+                onChange={(e) => { setSubjectId(e.target.value); setStatus(""); }}
+                disabled={saving}
+              >
+                <option value="">Не указан</option>
+                {subjects.length
+                  ? subjects.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {subjectOptionLabel(item)}
+                    </option>
+                  ))
+                  : subjectId
+                    ? <option value={subjectId}>{subjectLabel || "Предмет"}</option>
+                    : null}
+              </select>
+            ) : (
+              <span className={`cb-lesson-card__about-value${!subjectLabel ? " is-empty" : ""}`}>
+                {subjectLabel || "Не указан"}
+              </span>
+            )}
+          </label>
+          <AboutField label="Курс" value={courseTitle} empty="Не указан" />
+          <label className="cb-lesson-card__about-field">
+            <span className="cb-lesson-card__about-label">Тема</span>
+            <input
+              ref={topicInputRef}
+              type="text"
+              className={`cb-lesson-card__about-input${!topicDraft.trim() ? " is-empty" : ""}`}
+              value={topicDraft}
+              placeholder="Не указана"
+              onChange={(e) => { setTopicDraft(e.target.value); setStatus(""); }}
+              disabled={saving}
+            />
+          </label>
+          <label className="cb-lesson-card__about-field">
+            <span className="cb-lesson-card__about-label">Подтема</span>
+            <input
+              ref={subtopicInputRef}
+              type="text"
+              className={`cb-lesson-card__about-input${!subtopicDraft.trim() ? " is-empty" : ""}`}
+              value={subtopicDraft}
+              placeholder="Не указана"
+              onChange={(e) => { setSubtopicDraft(e.target.value); setStatus(""); }}
+              disabled={saving}
+            />
+          </label>
+          <label className="cb-lesson-card__about-field cb-lesson-card__about-field--multiline">
+            <span className="cb-lesson-card__about-label">Описание</span>
+            <textarea
+              ref={descriptionInputRef}
+              className={`cb-lesson-card__about-input cb-lesson-card__about-textarea${!descriptionDraft.trim() ? " is-empty" : ""}`}
+              rows={2}
+              value={descriptionDraft}
+              placeholder="Описание не добавлено"
+              onChange={(e) => { setDescriptionDraft(e.target.value); setStatus(""); }}
+              disabled={saving}
+            />
+          </label>
+          <div className="cb-lesson-card__about-actions">
+            <button
+              type="button"
+              className="cb-lesson-card__about-cancel"
+              onClick={cancelEditing}
+              disabled={saving}
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              className="cb-lesson-card__about-save"
+              onClick={commitAbout}
+              disabled={saving}
+            >
+              {saving ? "Сохранение…" : "Сохранить"}
+            </button>
+          </div>
+          {statusLine ? (
+            <p className="cb-lesson-card__about-status" role="status">{statusLine}</p>
+          ) : null}
+        </div>
+      ) : (
+        <div className="cb-lesson-card__about">
+          {event.studentId ? (
+            <AboutField
+              label="Предмет"
+              value={subjectLabel}
+              empty="Не указан"
+              onEdit={() => startEditing("subject")}
+            />
+          ) : (
+            <AboutField label="Предмет" value={subjectLabel} empty="Не указан" />
+          )}
+          <AboutField label="Курс" value={courseTitle} empty="Не указан" />
+          <AboutField
+            label="Тема"
+            value={topic}
+            empty="Не указана"
+            onEdit={() => startEditing("topic")}
+          />
+          <AboutField
+            label="Подтема"
+            value={subtopic}
+            empty="Не указана"
+            onEdit={() => startEditing("subtopic")}
+          />
+          <AboutField
+            label="Описание"
+            value={description}
+            empty="Описание не добавлено"
+            multiline
+            onEdit={() => startEditing("description")}
+          />
+          {statusLine ? (
+            <p className="cb-lesson-card__about-status" role="status">{statusLine}</p>
+          ) : null}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1168,7 +1309,6 @@ export default function EventDetailCard({
 
               {showAbout ? (
                 <section className="cb-lesson-card__section cb-lesson-card__section--compact cb-lesson-card__section--about">
-                  <h3 className="cb-lesson-card__section-title cb-lesson-card__section-title--plain">О занятии</h3>
                   {canEditAbout ? (
                     <AboutEditor
                       event={event}
@@ -1180,18 +1320,21 @@ export default function EventDetailCard({
                       onEventUpdated={onEventUpdated}
                     />
                   ) : (
-                    <div className="cb-lesson-card__about">
-                      <AboutField label="Предмет" value={subject} empty="Не указан" />
-                      <AboutField label="Курс" value={courseTitle} empty="Не указан" />
-                      <AboutField label="Тема" value={lessonTopic} empty="Не указана" />
-                      {subtopic ? <AboutField label="Подтема" value={subtopic} /> : null}
-                      <AboutField
-                        label="Описание"
-                        value={description}
-                        empty="Описание не добавлено"
-                        multiline
-                      />
-                    </div>
+                    <>
+                      <h3 className="cb-lesson-card__section-title cb-lesson-card__section-title--plain">О занятии</h3>
+                      <div className="cb-lesson-card__about">
+                        <AboutField label="Предмет" value={subject} empty="Не указан" />
+                        <AboutField label="Курс" value={courseTitle} empty="Не указан" />
+                        <AboutField label="Тема" value={lessonTopic} empty="Не указана" />
+                        {subtopic ? <AboutField label="Подтема" value={subtopic} /> : null}
+                        <AboutField
+                          label="Описание"
+                          value={description}
+                          empty="Описание не добавлено"
+                          multiline
+                        />
+                      </div>
+                    </>
                   )}
                 </section>
               ) : null}

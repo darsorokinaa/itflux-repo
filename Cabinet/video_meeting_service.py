@@ -266,44 +266,53 @@ def get_or_create_meeting_for_event(
     event: ScheduleEvent,
     created_by: User,
 ) -> tuple[VideoMeeting, bool]:
-    """Комната создаётся один раз на событие; повторный вызов не меняет room_name/статус."""
+    """Комната создаётся один раз на событие; повторный вызов не меняет room_name/статус.
+
+    Конкурентный первый вход сериализуется lock'ом строки ScheduleEvent, чтобы
+    два запроса не создали две конференции.
+    """
     if event.status == ScheduleEvent.Status.CANCELLED:
         raise VideoMeetingError("Нельзя создать комнату для отменённого урока", code="cancelled", status=409)
     if event.status in (ScheduleEvent.Status.DONE, ScheduleEvent.Status.COMPLETED):
         raise VideoMeetingError("Нельзя создать комнату для завершённого урока", code="finished", status=409)
 
-    existing = VideoMeeting.objects.filter(schedule_event=event).first()
-    if existing is not None:
-        if existing.status == VideoMeeting.Status.CANCELLED:
-            raise VideoMeetingError("Видеокомната этого урока отменена", code="cancelled", status=409)
-        return existing, False
-
-    access = resolve_access(created_by, event)
-    if not access.allowed or access.role not in ("teacher", "staff"):
-        raise VideoMeetingError("Только учитель урока может создать видеокомнату", code="forbidden", status=403)
-
     with transaction.atomic():
-        _ensure_organizer(event, event.owner)
+        locked_event = ScheduleEvent.objects.select_for_update().get(pk=event.pk)
+        if locked_event.status == ScheduleEvent.Status.CANCELLED:
+            raise VideoMeetingError("Нельзя создать комнату для отменённого урока", code="cancelled", status=409)
+        if locked_event.status in (ScheduleEvent.Status.DONE, ScheduleEvent.Status.COMPLETED):
+            raise VideoMeetingError("Нельзя создать комнату для завершённого урока", code="finished", status=409)
+
+        existing = VideoMeeting.objects.filter(schedule_event=locked_event).first()
+        if existing is not None:
+            if existing.status == VideoMeeting.Status.CANCELLED:
+                raise VideoMeetingError("Видеокомната этого урока отменена", code="cancelled", status=409)
+            return existing, False
+
+        access = resolve_access(created_by, locked_event)
+        if not access.allowed or access.role not in ("teacher", "staff"):
+            raise VideoMeetingError("Только учитель урока может создать видеокомнату", code="forbidden", status=403)
+
+        _ensure_organizer(locked_event, locked_event.owner)
         try:
-            meeting, created = VideoMeeting.objects.select_for_update().get_or_create(
-                schedule_event=event,
-                defaults={
-                    "room_name": generate_secure_room_name(),
-                    "created_by": created_by,
-                    "status": VideoMeeting.Status.SCHEDULED,
-                },
+            meeting = VideoMeeting.objects.create(
+                schedule_event=locked_event,
+                room_name=generate_secure_room_name(),
+                created_by=created_by,
+                status=VideoMeeting.Status.SCHEDULED,
             )
+            created = True
         except IntegrityError:
-            meeting = VideoMeeting.objects.select_for_update().get(schedule_event=event)
+            meeting = VideoMeeting.objects.select_for_update().get(schedule_event=locked_event)
             created = False
 
         if created:
             update_fields = []
-            if event.meeting_provider in ("", MeetingProvider.NONE, MeetingProvider.MANUAL):
-                event.meeting_provider = MeetingProvider.JITSI
+            if locked_event.meeting_provider in ("", MeetingProvider.NONE, MeetingProvider.MANUAL):
+                locked_event.meeting_provider = MeetingProvider.JITSI
                 update_fields.append("meeting_provider")
             if update_fields:
-                event.save(update_fields=update_fields + ["updated_at"])
+                locked_event.save(update_fields=update_fields + ["updated_at"])
         return meeting, created
 
 
@@ -330,6 +339,9 @@ def start_meeting(*, meeting: VideoMeeting, user: User) -> VideoMeeting:
                 code="invalid_status",
                 status=409,
             )
+
+        # Нормализуем room_name до первого входа в Jitsi. После LIVE имя замораживается.
+        ensure_muc_safe_room_name(locked, allow_mutate=True)
 
         locked.status = VideoMeeting.Status.LIVE
         locked.actual_started_at = timezone.now()
@@ -656,17 +668,33 @@ def list_attendance_for_teacher(*, meeting: VideoMeeting, user: User) -> list[di
     return coalesce_attendance_sessions(rows)
 
 
-def ensure_muc_safe_room_name(meeting: VideoMeeting) -> str:
-    """Если в БД осталось имя с '-' / '_', нормализуем один раз (та же комната для всех)."""
+def ensure_muc_safe_room_name(meeting: VideoMeeting, *, allow_mutate: bool = False) -> str:
+    """Канонический room_name. После старта урока имя нельзя менять — иначе участники разойдутся по MUC."""
     current = meeting.room_name or ""
     safe = sanitize_room_name(current)
     if safe == current:
         return current
+    meeting.refresh_from_db(fields=["status", "room_name"])
+    current = meeting.room_name or ""
+    safe = sanitize_room_name(current)
+    if safe == current:
+        return current
+    # LIVE/FINISHED: оба клиента должны получить тот же идентификатор, что уже в Jitsi.
+    if not allow_mutate or meeting.status != VideoMeeting.Status.SCHEDULED:
+        logger.warning(
+            "jitsi_room_name_frozen meeting_uuid=%s status=%s room_name=%s",
+            meeting.uuid,
+            meeting.status,
+            current,
+        )
+        return current
     with transaction.atomic():
         locked = VideoMeeting.objects.select_for_update().get(pk=meeting.pk)
+        if locked.status != VideoMeeting.Status.SCHEDULED:
+            meeting.room_name = locked.room_name
+            return locked.room_name
         safe = sanitize_room_name(locked.room_name or "")
         if safe != locked.room_name:
-            # Гарантируем уникальность при коллизии.
             candidate = safe
             suffix = 0
             while VideoMeeting.objects.filter(room_name=candidate).exclude(pk=locked.pk).exists():
@@ -686,7 +714,8 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
     meeting.refresh_from_db(fields=["status", "room_name"])
     if meeting.status != VideoMeeting.Status.LIVE:
         raise VideoMeetingError("Урок ещё не начат", code="not_live", status=409)
-    room_name = ensure_muc_safe_room_name(meeting)
+    # join-config никогда не генерирует и не переименовывает комнату.
+    room_name = ensure_muc_safe_room_name(meeting, allow_mutate=False)
     event = meeting.schedule_event
     user_info = build_user_info(user, request)
     display_name = str(user_info.get("displayName") or "").strip()
@@ -697,11 +726,15 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
 
     jwt_token = None
     try:
+        configured_ttl = int(getattr(settings, "JITSI_TOKEN_TTL_SECONDS", 7200) or 7200)
+        # Live-урок 60–120 мин не должен обрываться из-за exp. Не wildcard и не бессрочный токен.
+        live_ttl = max(configured_ttl, 4 * 3600)
         jwt_token = generate_jitsi_jwt(
             room_name=room_name,
             user=user,
             is_moderator=access.is_moderator,
             request=request,
+            ttl_seconds=live_ttl,
         )
     except JitsiConfigError as exc:
         raise VideoMeetingError(str(exc), code="jwt_config", status=503) from exc

@@ -7944,6 +7944,14 @@ button.cb-sch-event {
   padding: 0;
 }
 
+.cb-lesson-card__section--about .cb-lesson-card__section-head {
+  margin-bottom: 8px;
+}
+
+.cb-lesson-card__section--about .cb-lesson-card__section-head .cb-lesson-card__section-title--plain {
+  margin: 0;
+}
+
 .cb-lesson-card__section--about .cb-lesson-card__about {
   padding: 12px 14px;
   border-radius: 16px;
@@ -8091,6 +8099,88 @@ button.cb-sch-event {
 .cb-lesson-card__about-field--multiline {
   grid-template-columns: 72px minmax(0, 1fr);
   align-items: start;
+}
+
+.cb-lesson-card__about-field--editable {
+  grid-template-columns: 72px minmax(0, 1fr) 28px;
+  align-items: center;
+}
+
+.cb-lesson-card__about-field--editable.cb-lesson-card__about-field--multiline {
+  align-items: start;
+}
+
+.cb-lesson-card__about-value.is-clickable {
+  cursor: text;
+}
+
+.cb-lesson-card__about-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #94A3B8;
+  cursor: pointer;
+}
+
+.cb-lesson-card__about-edit:hover {
+  color: #2563EB;
+  background: #EFF6FF;
+}
+
+.cb-lesson-card__about-edit svg {
+  width: 14px;
+  height: 14px;
+}
+
+.cb-lesson-card__about-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.cb-lesson-card__about-cancel,
+.cb-lesson-card__about-save {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.cb-lesson-card__about-cancel {
+  border: 1px solid #E2E8F0;
+  background: #FFFFFF;
+  color: #475569;
+}
+
+.cb-lesson-card__about-cancel:hover:not(:disabled) {
+  background: #F8FAFC;
+}
+
+.cb-lesson-card__about-save {
+  border: none;
+  background: #2563EB;
+  color: #FFFFFF;
+}
+
+.cb-lesson-card__about-save:hover:not(:disabled) {
+  background: #1D4ED8;
+}
+
+.cb-lesson-card__about-cancel:disabled,
+.cb-lesson-card__about-save:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .cb-lesson-card__about-value.is-multiline {

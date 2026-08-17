@@ -84,6 +84,7 @@ from .models import (
     TeacherSubscription,
     TelegramConnectToken,
 )
+from .meeting_screenshare_models import MeetingScreenShareSession
 
 
 @admin.register(Profile)
@@ -704,6 +705,23 @@ class VideoMeetingAdmin(admin.ModelAdmin):
     @admin.display(description="Подключений")
     def attendance_count(self, obj):
         return obj.attendance_sessions.count()
+
+
+@admin.register(MeetingScreenShareSession)
+class MeetingScreenShareSessionAdmin(admin.ModelAdmin):
+    list_display = (
+        "uuid",
+        "meeting",
+        "presenter_user",
+        "is_active",
+        "participants_can_annotate",
+        "version",
+        "started_at",
+        "ended_at",
+    )
+    list_filter = ("is_active", "participants_can_annotate")
+    search_fields = ("uuid", "meeting__uuid", "presenter_jitsi_id")
+    readonly_fields = ("uuid", "started_at", "updated_at")
 
 
 @admin.register(MeetingAttendance)

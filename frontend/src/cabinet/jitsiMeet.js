@@ -3,8 +3,27 @@
  *
  * roomName — только из backend join-config.
  * По умолчанию External API + prejoin выкл. (без кнопки «Присоединиться»).
- * Fallback — iframe с теми же параметрами.
+ * iframe — только явный ?jitsiEmbed=1 или публичный Jitsi без JWT.
+ * JWT-уроки нельзя молча переводить в iframe: иначе участники попадают
+ * в разные MUC (token vs guest) и не видят друг друга.
  */
+
+import {
+  attachConferencePresence,
+  createBrowserTabSessionId,
+  isJitsiAuthJoinFailure,
+  shouldFallbackToIframe,
+} from "./jitsiParticipants";
+import { attachScreenSharePresence } from "./jitsiScreenShare";
+import { attachMediaWatchdog } from "./jitsiMediaWatchdog";
+import { createCallSessionId } from "./jitsiCallState";
+
+export {
+  createBrowserTabSessionId,
+  shouldFallbackToIframe,
+  createCallSessionId,
+  isJitsiAuthJoinFailure,
+};
 
 const SCRIPT_ID = "jitsi-external-api-script";
 /** Таймаут входа в конференцию и загрузки External API — из реального урока. */
@@ -174,6 +193,22 @@ export function buildJitsiConfigOverwrite({
     hideConferenceSubject: false,
     hideConferenceTimer: false,
     disableModeratorIndicator: false,
+    enableClosePage: false,
+    // 1:1 учитель–ученик почти всегда за разными NAT. P2P даёт «видим в списке,
+    // но нет звука/видео». Медиа идёт через JVB.
+    p2p: { enabled: false },
+    channelLastN: 8,
+    startBitrate: 400,
+    disableSimulcast: false,
+    enableNoAudioDetection: true,
+    enableNoisyMicDetection: true,
+    stereo: false,
+    constraints: {
+      video: {
+        height: { ideal: 360, max: 720 },
+        width: { ideal: 640, max: 1280 },
+      },
+    },
     // Скрываем дефолтный тост «Получены права модератора» — показываем свой.
     disabledNotifications: [
       "notify.moderator",
@@ -282,11 +317,16 @@ export function registerJoinDiagnostics(api, { onMediaWarning, diagnostics } = {
           }
         }
         if (eventName === "passwordRequired") {
-          // На своём Jitsi с JWT это почти всегда token-auth, а не пароль комнаты.
+          // Комнаты платформы без пользовательского пароля. Не подставляем stale password.
+          console.warn("[JITSI_PASSWORD_REQUIRED]", {
+            authMode: diagnostics?.authMode || "",
+            meetingUuid: diagnostics?.meetingUuid || null,
+            roomName: diagnostics?.roomName || null,
+          });
           onMediaWarning?.(
             diagnostics?.authMode === "jwt"
-              ? "Jitsi запросил авторизацию (JWT). Обновите страницу урока — не вводите пароль вручную и не открывайте сырую ссылку Jitsi без токена."
-              : "Сервер запрашивает пароль/авторизацию для комнаты.",
+              ? "Jitsi запросил авторизацию (JWT). Не вводите пароль вручную — обновите страницу урока или откройте вход заново с платформы."
+              : "Сервер запрашивает пароль/авторизацию для комнаты. Пароль комнаты платформа не задаёт.",
           );
         }
         if (eventName === "conferenceFailed") {
@@ -354,83 +394,25 @@ export function buildJitsiEmbedUrl(config) {
   return `https://${domain}/${encodeURIComponent(roomName)}${q ? `?${q}` : ""}#${hashParts.join("&")}`;
 }
 
-function wireParticipantListeners(api, {
-  onParticipantCount,
-  onJoined,
-  onMediaWarning,
-  onBecameModerator,
-  onAudioMuteStatusChanged,
-  subject,
-  diagnostics,
-}) {
-  const bump = () => {
-    try {
-      const n = api.getNumberOfParticipants();
-      if (typeof n === "number") onParticipantCount?.(n);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const applySubject = () => {
-    const title = String(subject || "").trim();
-    if (!title) return;
-    try {
-      api.executeCommand("subject", title);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  api.addListener("videoConferenceJoined", (event) => {
-    let participantCount = null;
-    try {
-      participantCount = api.getNumberOfParticipants();
-    } catch {
-      /* ignore */
-    }
-    console.info("[Jitsi] videoConferenceJoined", {
-      roomName: event?.roomName,
-      configuredRoomName: diagnostics?.roomName || null,
-      participantId: event?.id,
-      participantCount,
-      role: diagnostics?.role || null,
-      meetingUuid: diagnostics?.meetingUuid || null,
-    });
-    applySubject();
-    onJoined?.(event);
-    bump();
+function wireParticipantListeners(api, hooks) {
+  const presence = attachConferencePresence(api, hooks);
+  const screenShare = attachScreenSharePresence(api, {
+    onChange: hooks.onScreenShare,
   });
-  api.addListener("participantJoined", (event) => {
-    let participantCount = null;
-    try {
-      participantCount = api.getNumberOfParticipants();
-    } catch {
-      /* ignore */
-    }
-    console.info("[Jitsi] participantJoined", {
-      participantId: event?.id,
-      participantCount,
-    });
-    bump();
+  const watchdog = attachMediaWatchdog(api, {
+    diagnostics: hooks.diagnostics,
+    getIntended: hooks.getIntendedMedia,
+    onWarning: hooks.onMediaWarning,
+    onHint: hooks.onConnectionHint,
+    onConnectionState: hooks.onConnectionState,
+    onAudioMuteStatusChanged: hooks.onAudioMuteStatusChanged,
+    onVideoMuteStatusChanged: hooks.onVideoMuteStatusChanged,
   });
-  api.addListener("participantLeft", (event) => {
-    console.info("[Jitsi] participantLeft", { participantId: event?.id });
-    bump();
+  registerJoinDiagnostics(api, {
+    onMediaWarning: hooks.onMediaWarning,
+    diagnostics: hooks.diagnostics,
   });
-  api.addListener("participantRoleChanged", (event) => {
-    console.info("[Jitsi] Role changed", { role: event?.role });
-    if (String(event?.role || "").toLowerCase() === "moderator") {
-      onBecameModerator?.();
-    }
-  });
-  if (typeof onAudioMuteStatusChanged === "function") {
-    api.addListener("audioMuteStatusChanged", (event) => {
-      onAudioMuteStatusChanged(event);
-    });
-  }
-
-  registerJoinDiagnostics(api, { onMediaWarning, diagnostics });
+  return { presence, screenShare, watchdog };
 }
 
 export function createJitsiIframeEmbed(config, container, {
@@ -531,6 +513,11 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
   });
 
   const JitsiMeetExternalAPI = await loadJitsiExternalApi(domain);
+  if (hooks.signal?.aborted) {
+    const err = new Error("Подключение к конференции отменено");
+    err.code = "jitsi_aborted";
+    throw err;
+  }
   container.innerHTML = "";
 
   const subject = resolveJitsiSubject(config);
@@ -576,42 +563,108 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     throw err;
   }
 
+  const diagnostics = {
+    ...(config.diagnostics || {}),
+    roomName,
+    domain,
+    meetingUuid: config.meeting?.uuid,
+    lessonId: config.diagnostics?.lessonId || config.event?.lessonId || "",
+    userId: config.diagnostics?.userId || "",
+    authMode: config.authMode || "",
+    role: config.meeting?.role || config.diagnostics?.role || "",
+    browserTabSessionId: config.diagnostics?.browserTabSessionId || createBrowserTabSessionId(),
+    callSessionId: config.diagnostics?.callSessionId || createCallSessionId(),
+  };
+
   const api = new JitsiMeetExternalAPI(domain, options);
-  wireParticipantListeners(api, {
-    ...hooks,
-    subject,
-    diagnostics: {
-      ...(config.diagnostics || {}),
-      roomName,
-      domain,
-      meetingUuid: config.meeting?.uuid,
-      authMode: config.authMode || "",
-      role: config.meeting?.role || config.diagnostics?.role || "",
-    },
-  });
 
   let conferenceJoined = false;
-  const joined = await new Promise((resolve) => {
+  let authFailed = false;
+  const joinedWait = new Promise((resolve) => {
     let settled = false;
+    let timer = 0;
     const finish = (ok) => {
       if (settled) return;
       settled = true;
       window.clearTimeout(timer);
+      hooks.signal?.removeEventListener?.("abort", onAbort);
       resolve(ok);
+    };
+    const onAbort = () => finish(false);
+    const onAuthFail = (eventName, event) => {
+      if (!isJitsiAuthJoinFailure(event)) return;
+      authFailed = true;
+      console.error(`[Jitsi] ${eventName} auth rejected`, {
+        roomName,
+        meetingUuid: diagnostics.meetingUuid,
+        domain,
+        hasJwt: Boolean(config.jwt),
+        authMode: config.authMode || "",
+      });
+      finish(false);
     };
     api.addListener("videoConferenceJoined", () => {
       conferenceJoined = true;
       finish(true);
     });
-    const timer = window.setTimeout(() => {
+    api.addListener("connectionFailed", (event) => onAuthFail("connectionFailed", event));
+    api.addListener("conferenceFailed", (event) => onAuthFail("conferenceFailed", event));
+    api.addListener("passwordRequired", (event) => onAuthFail("passwordRequired", event || { name: "passwordRequired" }));
+    timer = window.setTimeout(() => {
       if (!conferenceJoined) {
-        console.error("[Jitsi] videoConferenceJoined was not received");
+        console.error("[Jitsi] videoConferenceJoined was not received", {
+          roomName,
+          meetingUuid: diagnostics.meetingUuid,
+          tab: diagnostics.browserTabSessionId,
+        });
       }
       finish(false);
     }, JOIN_TIMEOUT_MS);
+    if (hooks.signal?.aborted) {
+      finish(false);
+    } else {
+      hooks.signal?.addEventListener?.("abort", onAbort, { once: true });
+    }
   });
 
+  const { presence, screenShare, watchdog } = wireParticipantListeners(api, {
+    ...hooks,
+    subject,
+    diagnostics,
+  });
+
+  let joined = await joinedWait;
+  // Восстанавливаемся только если videoConferenceJoined уже проставил local id.
+  // Свой превью-тайл / getNumberOfParticipants()===1 при rejected JWT — не join.
+  if (!joined && !authFailed && !hooks.signal?.aborted) {
+    try {
+      const snap = presence.snapshot?.() || {};
+      if (snap.localParticipant?.id) {
+        conferenceJoined = true;
+        joined = true;
+        await presence.reconcile?.("join-timeout-recover");
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   if (!joined) {
+    try {
+      watchdog.dispose?.();
+    } catch {
+      /* ignore */
+    }
+    try {
+      screenShare.dispose?.();
+    } catch {
+      /* ignore */
+    }
+    try {
+      presence.dispose?.();
+    } catch {
+      /* ignore */
+    }
     try {
       api.dispose();
     } catch {
@@ -619,10 +672,19 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     }
     container.innerHTML = "";
     const err = new Error("Не удалось войти во встречу");
-    err.code = "jitsi_join_timeout";
-    err.category = config.authMode === "jwt" && !config.jwt
-      ? "jwt_missing"
-      : "join_timeout";
+    if (hooks.signal?.aborted) {
+      err.code = "jitsi_aborted";
+      err.category = "aborted";
+    } else if (authFailed) {
+      err.code = "jitsi_auth";
+      err.category = "jitsi_auth";
+    } else if (config.authMode === "jwt" && !config.jwt) {
+      err.code = "jitsi_join_timeout";
+      err.category = "jwt_missing";
+    } else {
+      err.code = "jitsi_join_timeout";
+      err.category = "join_timeout";
+    }
     throw err;
   }
 
@@ -630,7 +692,26 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     api,
     mode: "external-api",
     roomName,
+    presence,
+    screenShare,
+    watchdog,
+    callSessionId: diagnostics.callSessionId,
     dispose: () => {
+      try {
+        watchdog.dispose?.();
+      } catch {
+        /* ignore */
+      }
+      try {
+        screenShare.dispose?.();
+      } catch {
+        /* ignore */
+      }
+      try {
+        presence.dispose?.();
+      } catch {
+        /* ignore */
+      }
       try {
         api.dispose();
       } catch {
@@ -650,12 +731,15 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
       }
     },
     getNumberOfParticipants: () => {
+      const snap = presence.snapshot?.();
+      if (snap && typeof snap.count === "number") return snap.count;
       try {
         return api.getNumberOfParticipants();
       } catch {
         return null;
       }
     },
+    reconcileParticipants: (reason = "manual") => presence.reconcile?.(reason),
     getIFrame: () => {
       try {
         return api.getIFrame?.() || null;
@@ -677,11 +761,18 @@ export async function createJitsiMeetSession(config, container, hooks = {}) {
 
   const {
     onParticipantCount,
+    onPresence,
     onJoined,
     onMediaWarning,
     onBecameModerator,
     onAudioMuteStatusChanged,
+    onVideoMuteStatusChanged,
+    onScreenShare,
+    onConnectionHint,
+    onConnectionState,
+    getIntendedMedia,
     preferIframe = false,
+    signal,
   } = hooks;
 
   const forceIframe =
@@ -692,25 +783,48 @@ export async function createJitsiMeetSession(config, container, hooks = {}) {
   // Обогащаем subject из хука/конфига, чтобы iframe и API видели одно название.
   const enriched = {
     ...config,
+    diagnostics: {
+      ...(config.diagnostics || {}),
+      browserTabSessionId:
+        config.diagnostics?.browserTabSessionId || createBrowserTabSessionId(),
+      callSessionId: config.diagnostics?.callSessionId || createCallSessionId(),
+    },
     meeting: {
       ...(config.meeting || {}),
       subject: resolveJitsiSubject(config),
     },
   };
 
+  const sessionHooks = {
+    onParticipantCount,
+    onPresence,
+    onJoined,
+    onMediaWarning,
+    onBecameModerator,
+    onAudioMuteStatusChanged,
+    onVideoMuteStatusChanged,
+    onScreenShare,
+    onConnectionHint,
+    onConnectionState,
+    getIntendedMedia,
+    signal,
+  };
+
   sessionInitializing = true;
   try {
+    if (signal?.aborted) {
+      const err = new Error("Подключение к конференции отменено");
+      err.code = "jitsi_aborted";
+      throw err;
+    }
     if (!forceIframe) {
       try {
-        return await createJitsiExternalApiEmbed(enriched, container, {
-          onParticipantCount,
-          onJoined,
-          onMediaWarning,
-          onBecameModerator,
-          onAudioMuteStatusChanged,
-        });
+        return await createJitsiExternalApiEmbed(enriched, container, sessionHooks);
       } catch (err) {
-        if (err?.code !== "jitsi_join_timeout" && err?.message !== "Не удалось загрузить Jitsi Meet") {
+        if (err?.code === "jitsi_aborted" || signal?.aborted) {
+          throw err;
+        }
+        if (!shouldFallbackToIframe(err, enriched, { forceIframe: false })) {
           throw err;
         }
         console.warn("[Jitsi] External API недоступен, fallback iframe", err?.code || err?.message);

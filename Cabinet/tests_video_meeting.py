@@ -325,19 +325,63 @@ class VideoMeetingApiTests(TestCase):
             self.assertNotIn("_", name)
             self.assertGreater(len(name), 20)
 
-    def test_hyphenated_room_name_normalized_on_join(self):
+    def test_hyphenated_room_name_normalized_on_start_not_on_live_join(self):
         meeting = self._create_meeting()
         meeting.room_name = "digital-stream-Aa_Bb123"
         meeting.save(update_fields=["room_name"])
         start_meeting(meeting=meeting, user=self.teacher)
-        safe = ensure_muc_safe_room_name(meeting)
-        self.assertEqual(safe, "digitalstreamaabb123")
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.room_name, "digitalstreamaabb123")
         self.assertEqual(sanitize_room_name("digital-stream-x_y"), "digitalstreamxy")
         self.client.force_login(self.student_user)
         res = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data["roomName"], "digitalstreamaabb123")
+        self.assertEqual(res.data["diagnostics"]["jwtRoom"], res.data["roomName"])
         self.assertNotIn("-", res.data["roomName"])
+
+    def test_live_room_name_is_frozen_even_if_unsafe(self):
+        """Нельзя переименовать комнату, когда кто-то уже мог войти в Jitsi."""
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        meeting.room_name = "legacy-room_Name"
+        meeting.save(update_fields=["room_name"])
+        frozen = ensure_muc_safe_room_name(meeting, allow_mutate=False)
+        self.assertEqual(frozen, "legacy-room_Name")
+        self.client.force_login(self.teacher)
+        teacher = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/")
+        self.client.force_login(self.student_user)
+        student = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/")
+        self.assertEqual(teacher.status_code, 200)
+        self.assertEqual(student.status_code, 200)
+        self.assertEqual(teacher.data["roomName"], "legacy-room_Name")
+        self.assertEqual(student.data["roomName"], teacher.data["roomName"])
+        teacher_jwt = decode_jitsi_jwt_unsafe_for_tests(teacher.data["jwt"])
+        student_jwt = decode_jitsi_jwt_unsafe_for_tests(student.data["jwt"])
+        self.assertEqual(teacher_jwt["room"], teacher.data["roomName"])
+        self.assertEqual(student_jwt["room"], student.data["roomName"])
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.room_name, "legacy-room_Name")
+
+    def test_join_config_is_not_cached(self):
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        self.client.force_login(self.student_user)
+        res = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("no-store", res["Cache-Control"])
+
+    def test_join_config_jwt_covers_long_lesson(self):
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        self.client.force_login(self.student_user)
+        res = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/")
+        self.assertEqual(res.status_code, 200)
+        payload = decode_jitsi_jwt_unsafe_for_tests(res.data["jwt"])
+        self.assertEqual(payload["room"], res.data["roomName"])
+        self.assertGreaterEqual(payload["exp"] - payload["iat"], 4 * 3600 - 5)
+        self.assertLessEqual(payload["exp"] - payload["iat"], 8 * 3600)
+        self.assertNotEqual(payload["room"], "*")
 
     def test_teacher_and_student_share_domain_and_room(self):
         from Cabinet.video_meeting_service import build_join_config
@@ -421,6 +465,7 @@ class VideoMeetingApiTests(TestCase):
         self.assertIn("iat", t_payload)
         self.assertIn("nbf", t_payload)
         self.assertLessEqual(t_payload["nbf"], t_payload["iat"])
+        self.assertGreaterEqual(t_payload["iat"] - t_payload["nbf"], 50)
         self.assertIn("exp", t_payload)
         self.assertTrue(bool(t_payload["context"]["user"]["name"]))
 

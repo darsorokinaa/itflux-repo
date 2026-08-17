@@ -4416,3 +4416,6 @@ from .student_library_folder_models import (  # noqa: E402
     StudentMaterialFolder,
     StudentMaterialPlacement,
 )
+
+# ── Аннотации поверх демонстрации экрана ──────────────────────────────────────
+from .meeting_screenshare_models import MeetingScreenShareSession  # noqa: E402, F401

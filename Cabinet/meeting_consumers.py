@@ -17,6 +17,12 @@ from .meeting_material_session import (
     set_interaction_mode,
     sync_state_payload,
 )
+from .meeting_screenshare import (
+    apply_screenshare_operation,
+    report_screenshare_state,
+    serialize_screenshare_session,
+    set_screenshare_permission,
+)
 from .video_meeting_service import VideoMeetingError, get_meeting_by_uuid, resolve_access
 
 logger = logging.getLogger(__name__)
@@ -163,6 +169,27 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
             await self._handle_follow_status(data)
             return
 
+        if msg_type in (
+            "screenshare.report",
+            "screenshare.state",
+            "annotation.session.report",
+        ):
+            await self._handle_screenshare_report(data)
+            return
+        if msg_type in ("screenshare.set_permission", "screenshare.permission"):
+            await self._handle_screenshare_permission(data)
+            return
+        if msg_type in (
+            "screenshare.operation",
+            "screenshare.pointer",
+            "annotation.stroke.start",
+            "annotation.stroke.update",
+            "annotation.stroke.end",
+            "annotation.pointer",
+        ):
+            await self._handle_screenshare_operation(data, msg_type)
+            return
+
         await self._send_error("Неизвестный тип сообщения", code="unknown_type")
 
     async def _handle_follow_status(self, data: dict):
@@ -189,6 +216,102 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
             bool(following),
         )
 
+    async def _handle_screenshare_report(self, data: dict):
+        payload = data.get("payload") if isinstance(data.get("payload"), dict) else data
+        active = payload.get("active")
+        if active is None:
+            active = payload.get("on")
+        try:
+            session = await self._report_screenshare(payload, bool(active))
+        except VideoMeetingError as exc:
+            await self._send_error(exc.message, code=exc.code)
+            return
+        except Exception:
+            logger.exception("screenshare_report_failed meeting=%s", self.meeting_uuid)
+            await self._send_error("Не удалось обновить демонстрацию экрана", code="server_error")
+            return
+        if not bool(active) and session is not None and session.is_active:
+            return
+        serialized = serialize_screenshare_session(session) if session else None
+        is_active = bool(serialized and serialized.get("active"))
+        await self._broadcast({
+            "type": "screenshare.started" if is_active else "screenshare.ended",
+            "meetingUuid": str(self.meeting_uuid),
+            "screenshareSession": serialized if is_active else None,
+            "author_id": self.user.pk,
+            "author_role": self.role,
+        })
+
+    async def _handle_screenshare_permission(self, data: dict):
+        payload = data.get("payload") if isinstance(data.get("payload"), dict) else data
+        enabled = payload.get("participantsCanAnnotate")
+        if enabled is None:
+            enabled = payload.get("participants_can_annotate")
+        if enabled is None:
+            enabled = payload.get("enabled")
+        try:
+            session = await self._set_screenshare_permission(payload, bool(enabled))
+        except VideoMeetingError as exc:
+            await self._send_error(exc.message, code=exc.code)
+            return
+        serialized = serialize_screenshare_session(session)
+        await self._broadcast({
+            "type": "screenshare.permission",
+            "meetingUuid": str(self.meeting_uuid),
+            "screenshareSession": serialized,
+            "participantsCanAnnotate": serialized.get("participantsCanAnnotate") if serialized else False,
+            "author_id": self.user.pk,
+            "author_role": self.role,
+        })
+
+    async def _handle_screenshare_operation(self, data: dict, msg_type: str):
+        action = data.get("action") or ""
+        if not action:
+            if msg_type == "screenshare.pointer" or msg_type == "annotation.pointer":
+                action = "pointer"
+            elif msg_type.endswith("stroke.start"):
+                action = "stroke_start"
+            elif msg_type.endswith("stroke.update"):
+                action = "stroke_update"
+            elif msg_type.endswith("stroke.end"):
+                action = "stroke_end"
+            else:
+                action = "object_upsert"
+        try:
+            result = await self._apply_screenshare_operation(data, action)
+        except VideoMeetingError as exc:
+            await self._send_error(
+                exc.message,
+                code=exc.code,
+                extra={"operation_id": data.get("operation_id") or data.get("operationId")},
+            )
+            return
+        except Exception:
+            logger.exception("screenshare_op_failed meeting=%s", self.meeting_uuid)
+            await self._send_error("Ошибка применения аннотации", code="server_error")
+            return
+
+        if result.get("duplicate"):
+            await self.send(text_data=json.dumps({
+                "type": "screenshare.operation_ack",
+                "duplicate": True,
+                "operation_id": data.get("operation_id") or data.get("operationId"),
+                "version": result.get("version"),
+            }, ensure_ascii=False))
+            return
+
+        operation = result.get("operation")
+        if not operation:
+            return
+        await self._broadcast(operation)
+        if not result.get("ephemeral"):
+            await self.send(text_data=json.dumps({
+                "type": "screenshare.operation_ack",
+                "duplicate": False,
+                "operation_id": operation.get("operation_id"),
+                "version": operation.get("version"),
+            }, ensure_ascii=False))
+
     async def meeting_material_event(self, event):
         payload = event.get("payload")
         if not payload:
@@ -199,6 +322,8 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
             "material.pointer",
             "material.annotation_preview",
             "material.student_viewport",
+            "screenshare.pointer",
+            "screenshare.stroke_update",
         ):
             if payload.get("author_id") == getattr(self.user, "id", None):
                 return
@@ -457,3 +582,56 @@ class VideoMeetingConsumer(AsyncWebsocketConsumer):
             .first()
         )
         return serialize_material_session(fresh, user=self.user, include_state=True)
+
+    @database_sync_to_async
+    def _report_screenshare(self, payload: dict, active: bool):
+        meeting = get_meeting_by_uuid(self.meeting_uuid)
+        return report_screenshare_state(
+            meeting=meeting,
+            user=self.user,
+            active=active,
+            local_sharing=bool(payload.get("localSharing") or payload.get("local_sharing")),
+            presenter_jitsi_id=str(
+                payload.get("presenterJitsiId")
+                or payload.get("presenter_jitsi_id")
+                or ""
+            ),
+            content_width=payload.get("contentWidth") or payload.get("content_width"),
+            content_height=payload.get("contentHeight") or payload.get("content_height"),
+        )
+
+    @database_sync_to_async
+    def _set_screenshare_permission(self, payload: dict, enabled: bool):
+        meeting = get_meeting_by_uuid(self.meeting_uuid)
+        return set_screenshare_permission(
+            meeting=meeting,
+            user=self.user,
+            participants_can_annotate=enabled,
+            session_id=payload.get("session_id")
+            or payload.get("sessionId")
+            or payload.get("screenShareSessionId"),
+        )
+
+    @database_sync_to_async
+    def _apply_screenshare_operation(self, data: dict, action: str):
+        meeting = get_meeting_by_uuid(self.meeting_uuid)
+        payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+        if not payload:
+            payload = {
+                key: value
+                for key, value in data.items()
+                if key not in ("type", "action", "operation_id", "operationId")
+            }
+        return apply_screenshare_operation(
+            meeting=meeting,
+            user=self.user,
+            action=action,
+            payload=payload,
+            operation_id=str(data.get("operation_id") or data.get("operationId") or ""),
+            session_id=(
+                data.get("session_id")
+                or data.get("sessionId")
+                or data.get("screenShareSessionId")
+                or payload.get("screenShareSessionId")
+            ),
+        )
