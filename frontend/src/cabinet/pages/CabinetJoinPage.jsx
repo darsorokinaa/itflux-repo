@@ -1,13 +1,18 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import {
   acceptInvitation,
   fetchCabinetSession,
   fetchInvitationPreview,
   getCabinetHomePath,
+  logoutCabinetAndDetachPush,
   openTelegramConnect,
 } from "../../utils/cabinetAuth";
 import { usePageTitle } from "../hooks/usePageTitle";
+import {
+  inviteLoginPath,
+  rememberInviteToken,
+} from "../inviteAuth";
 
 function formatExpiry(iso) {
   if (!iso) return "";
@@ -96,12 +101,14 @@ function JoinedSuccess({ result, homePath }) {
 
 export default function CabinetJoinPage() {
   const { token } = useParams();
+  const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [preview, setPreview] = useState(null);
   const [joined, setJoined] = useState(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(location.state?.inviteError || "");
   const [session, setSession] = useState(null);
   const [accepting, setAccepting] = useState(false);
+  const [switching, setSwitching] = useState(false);
 
   const joinTitle = joined
     ? "Вы присоединились к платформе"
@@ -112,9 +119,9 @@ export default function CabinetJoinPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const authError = location.state?.inviteError || "";
     async function load() {
       setLoading(true);
-      setError("");
       try {
         const [invite, sess] = await Promise.all([
           fetchInvitationPreview(token),
@@ -126,27 +133,44 @@ export default function CabinetJoinPage() {
         if (invite?.status === "accepted") {
           setJoined(invite);
           setPreview(null);
+          setError("");
         } else {
           setPreview(invite);
           setJoined(null);
+          setError(authError);
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err.message || "Приглашение недействительно");
+          setError(err.message || authError || "Приглашение недействительно");
         }
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
-    if (token) load();
+    if (token) {
+      rememberInviteToken(token);
+      load();
+    }
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, location.state?.inviteError]);
 
-  const loginHref = `/cabinet/login?invite=${encodeURIComponent(token)}`;
-  const registerHref = `/cabinet/login?invite=${encodeURIComponent(token)}&mode=register`;
+  const loginHref = inviteLoginPath(token);
+  const registerHref = inviteLoginPath(token, { mode: "register" });
   const homePath = getCabinetHomePath(session);
+
+  const handleSwitchAccount = async () => {
+    setSwitching(true);
+    setError("");
+    rememberInviteToken(token);
+    try {
+      await logoutCabinetAndDetachPush();
+    } catch {
+      /* всё равно уходим на логин с invite */
+    }
+    window.location.assign(inviteLoginPath(token));
+  };
 
   const handleAccept = async () => {
     setAccepting(true);
@@ -215,13 +239,14 @@ export default function CabinetJoinPage() {
           <p className="cabinet-auth-error" role="alert">
             {preview.message}
           </p>
-          <Link
-            to="/cabinet/login"
+          <button
+            type="button"
             className="cabinet-auth-submit"
-            style={{ display: "inline-block", textAlign: "center", textDecoration: "none" }}
+            disabled={switching}
+            onClick={handleSwitchAccount}
           >
-            Сменить аккаунт
-          </Link>
+            {switching ? "Выходим…" : "Сменить аккаунт"}
+          </button>
         </div>
       </div>
     );
@@ -291,9 +316,19 @@ export default function CabinetJoinPage() {
               {accepting ? "Подключаем…" : "Принять приглашение"}
             </button>
           ) : (
-            <p className="cabinet-auth-error">
-              Войдите как ученик, чтобы принять приглашение.
-            </p>
+            <>
+              <p className="cabinet-auth-error">
+                Войдите как ученик, чтобы принять приглашение.
+              </p>
+              <button
+                type="button"
+                className="cabinet-auth-submit"
+                disabled={switching}
+                onClick={handleSwitchAccount}
+              >
+                {switching ? "Выходим…" : "Сменить аккаунт"}
+              </button>
+            </>
           )
         ) : (
           <div className="cb-invite-preview__actions">

@@ -2,6 +2,7 @@
 
 import logging
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
@@ -136,6 +137,7 @@ def _schedule_qs(students):
         "owner", "owner__profile", "lesson", "student", "student_subject", "group",
         "lesson_plan_item", "lesson_plan_item__plan",
         "series", "series__lesson_plan_item", "series__lesson_plan_item__plan",
+        "journal",
     ).prefetch_related("plan_items", "plan_items__plan").distinct()
 
 
@@ -255,6 +257,15 @@ def _student_display_names(students):
 
 
 def _schedule_event_topic(event, students):
+    try:
+        journal = event.journal
+    except ObjectDoesNotExist:
+        journal = None
+    if journal is not None:
+        actual = (journal.actual_topic or "").strip()
+        if actual:
+            return actual
+
     plan_item, _ = resolve_plan_item_for_event(event)
     if plan_item:
         label = (getattr(plan_item, "title", None) or getattr(plan_item, "topic", None) or "").strip()
@@ -1491,11 +1502,10 @@ class StudentAssignmentDetailView(StudentScopedView):
         if roster is None:
             return Response({"error": "Ученик не найден."}, status=status.HTTP_403_FORBIDDEN)
 
+        from .homework_submit import HomeworkSubmitError, submit_homework_for_student
         from .submission_files import (
             collect_uploaded_submission_files,
-            save_submission_files,
             serialize_submission_files,
-            submission_has_files,
             validate_submission_uploads,
         )
         from .upload_validation import UploadValidationError
@@ -1517,59 +1527,26 @@ class StudentAssignmentDetailView(StudentScopedView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        existing = (
-            HomeworkSubmission.objects.filter(homework=hw, student=roster)
-            .prefetch_related("file_attachments")
-            .order_by("-submitted_at", "-id")
-            .first()
-        )
-        old_status = existing.status if existing else None
-        if existing and existing.status == SubmissionStatus.CHECKED:
-            return Response(
-                {"error": "Работа уже проверена."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        if existing and existing.submitted_at and existing.status == SubmissionStatus.SUBMITTED:
-            # Уже сдали: можно только дослать файлы, если их ещё не было.
-            if not uploaded_files or submission_has_files(existing):
-                return Response(
-                    {"error": "Работа уже отправлена на проверку."},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
-        submission = existing
-        if submission is None:
-            submission = HomeworkSubmission(
+        try:
+            outcome = submit_homework_for_student(
                 homework=hw,
                 student=roster,
-                status=SubmissionStatus.SUBMITTED,
+                answer_text=answer_text or None,
+                uploaded_files=uploaded_files,
             )
-        # При досылке только файла не затираем уже сохранённый текст ответа.
-        if answer_text or not (existing and existing.submitted_at):
-            submission.answer_text = answer_text
-        submission.status = SubmissionStatus.SUBMITTED
-        submission.submitted_at = timezone.now()
+        except HomeworkSubmitError as exc:
+            return Response(
+                {"error": exc.message, "code": exc.code},
+                status=exc.status,
+            )
 
-        # Надёжный путь для прода: сразу в FileField (cabinet/homework/),
-        # без зависимости от квоты «Мои файлы».
-        if uploaded_files:
-            save_submission_files(submission, uploaded_files)
-        else:
-            submission.save()
-
-        from .homework_api import _ensure_review_item, _notify_homework_submitted
-
-        review_item = _ensure_review_item(submission)
-        _notify_homework_submitted(
-            submission,
-            review_item,
-            is_resubmit=old_status in (SubmissionStatus.RETURNED, SubmissionStatus.NEEDS_REVISION),
-        )
+        submission = outcome.submission
         attached_files = serialize_submission_files(submission, for_student=True)
         attached_name = attached_files[0]["name"] if attached_files else ""
         return Response({
             "ok": True,
             "status": "submitted",
+            "already_submitted": outcome.already_submitted,
             "attached_file_url": attached_files[0]["url"] if attached_files else "",
             "attached_file_name": attached_name,
             "attached_files": attached_files,

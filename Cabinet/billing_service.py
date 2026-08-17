@@ -236,6 +236,55 @@ def record_is_debt(record: EventBillingRecord) -> bool:
     return record_due_amount(record) > 0
 
 
+def financial_state_code(record: EventBillingRecord | None) -> str:
+    """Канонический код финансового состояния урока. Не дублирует engine."""
+    if record is None:
+        return "no_record"
+    if record.delivery_status == DeliveryStatus.RESCHEDULED:
+        return "rescheduled"
+    if record.delivery_status in CANCELLED_DELIVERY_STATUSES and not record_is_debt(record):
+        return "cancelled"
+    if record_price_missing(record) or record.financial_status == FinancialStatus.NEEDS_DECISION:
+        return "price_not_set"
+    if record.is_free:
+        return "free"
+    if record.financial_status == FinancialStatus.PAID_FROM_PACKAGE:
+        return "package"
+    if record.financial_status == FinancialStatus.PAID:
+        return "paid"
+    if record_is_debt(record):
+        if record.financial_status == FinancialStatus.PARTIALLY_PAID:
+            return "partially_paid"
+        return "unpaid"
+    if record.delivery_status not in (DeliveryStatus.CONDUCTED, DeliveryStatus.NO_SHOW):
+        return "not_conducted"
+    if record.financial_status == FinancialStatus.NOT_BILLABLE:
+        return "not_billable"
+    return record.financial_status or "unknown"
+
+
+def debt_records_q() -> Q:
+    """Queryset-фильтр, согласованный с record_is_debt() (без вычисления due в SQL)."""
+    return (
+        Q(
+            delivery_status__in=(DeliveryStatus.CONDUCTED, DeliveryStatus.NO_SHOW),
+            financial_status__in=(
+                FinancialStatus.AWAITING_PAYMENT,
+                FinancialStatus.PARTIALLY_PAID,
+            ),
+            charged_amount__gt=0,
+        )
+        | Q(
+            delivery_status__in=CANCELLED_DELIVERY_STATUSES,
+            financial_status__in=(
+                FinancialStatus.AWAITING_PAYMENT,
+                FinancialStatus.PARTIALLY_PAID,
+            ),
+            charged_amount__gt=0,
+        )
+    ) & ~Q(delivery_status=DeliveryStatus.RESCHEDULED)
+
+
 def record_price_missing(record: EventBillingRecord) -> bool:
     if record.financial_status == FinancialStatus.NEEDS_DECISION:
         return True
@@ -3741,6 +3790,7 @@ def serialize_event_billing(record: EventBillingRecord) -> dict:
         "due_amount": str(due),
         "price_missing": price_missing,
         "is_debt": is_debt,
+        "state_code": financial_state_code(record),
         "currency": record.currency,
         "price_source": record.price_source,
         "price_source_label": record.price_source_label,
@@ -3757,6 +3807,32 @@ def serialize_event_billing(record: EventBillingRecord) -> dict:
         "can_charge_from_package": record.financial_status in UNPAID_FINANCIAL_STATUSES
         and record.delivery_status in CHARGEABLE_DELIVERY_STATUSES,
     }
+
+
+def get_lesson_financial_state(record: EventBillingRecord | None) -> dict:
+    """Единый read-model для дашборда, карточки ученика и списка оплат."""
+    if record is None:
+        return {
+            "state_code": "no_record",
+            "status": "no_record",
+            "is_debt": False,
+            "lesson_amount": "0",
+            "paid_amount": "0",
+            "debt_amount": "0",
+            "payment_status": None,
+            "financial_status": None,
+            "delivery_status": None,
+            "billing_record_id": None,
+            "price_missing": False,
+        }
+    data = serialize_event_billing(record)
+    data["state_code"] = financial_state_code(record)
+    data["status"] = data["state_code"]
+    data["lesson_amount"] = data.get("charged_amount") or data.get("calculated_amount") or "0"
+    data["debt_amount"] = data.get("due_amount") or "0"
+    data["payment_status"] = data.get("financial_status")
+    data["billing_record_id"] = data.get("id")
+    return data
 
 
 def _month_bounds(year=None, month=None):
@@ -3997,16 +4073,10 @@ def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
     if expected < 0:
         expected = ZERO
 
-    # Неоплаченные проведённые уроки — только с реальным начислением.
+    # Неоплаченные проведённые уроки — тот же фильтр, что record_is_debt().
     unpaid_qs = EventBillingRecord.objects.filter(
         billing_account__teacher=teacher,
-        delivery_status__in=(DeliveryStatus.CONDUCTED, DeliveryStatus.NO_SHOW),
-        financial_status__in=(
-            FinancialStatus.AWAITING_PAYMENT,
-            FinancialStatus.PARTIALLY_PAID,
-        ),
-        charged_amount__gt=0,
-    ).exclude(archived_student)
+    ).filter(debt_records_q()).exclude(archived_student)
     unpaid_count = unpaid_qs.count()
     unpaid_charged = unpaid_qs.aggregate(t=Sum("charged_amount"))["t"] or ZERO
     unpaid_paid = unpaid_qs.aggregate(t=Sum("paid_amount"))["t"] or ZERO
@@ -4573,6 +4643,7 @@ def event_billing_badge(event: ScheduleEvent, student_ids=None) -> list[dict]:
                 "price_source_label": r.price_source_label,
                 "price_missing": price_missing,
                 "is_debt": is_debt,
+                "state_code": financial_state_code(r),
                 "is_free": r.is_free,
             }
         )

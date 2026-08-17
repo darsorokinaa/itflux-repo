@@ -214,9 +214,12 @@ def _student_subject_label(event):
 
 
 def schedule_event_to_json(event):
-    local_start = timezone.localtime(event.starts_at)
-    local_end = timezone.localtime(event.ends_at)
-    today = timezone.localdate()
+    from .schedule_service import resolve_schedule_timezone
+
+    event_tz = resolve_schedule_timezone(event=event)
+    local_start = event.starts_at.astimezone(event_tz)
+    local_end = event.ends_at.astimezone(event_tz)
+    today = timezone.now().astimezone(event_tz).date()
     link = (event.telemost_url or "").strip() or None
     is_online = event.format == ScheduleEvent.Format.ONLINE
     video_meeting_json = None

@@ -99,6 +99,9 @@ function topicFieldsFromLesson(lesson) {
 
 function lessonStatusMeta(lesson, attendance) {
   const status = String(lesson.status || "").toLowerCase();
+  if ((lesson.is_offline || lesson.isOffline) && status === "completed") {
+    return { label: "Вне платформы", tone: "success" };
+  }
   if (status === "completed") {
     return { label: "Проведён", tone: "success" };
   }
@@ -142,6 +145,7 @@ function flattenRows(scopeType, lessons) {
         comment: lesson.teacher_comment || "",
         attendance: lesson.attendance_status,
         status: lesson.status,
+        isOffline: Boolean(lesson.is_offline),
         homeworkId: lesson.homework_id || null,
         canOpenOutcomes: Boolean(lesson.schedule_event_id) && String(lesson.status || "") === "completed",
       };
@@ -159,6 +163,7 @@ function flattenRows(scopeType, lessons) {
       plannedTopic: topics.plannedTopic,
       actualTopic: topics.actualTopic,
       status: lesson.status,
+      isOffline: Boolean(lesson.is_offline),
       homeworkId: lesson.homework_id || null,
       canOpenOutcomes: Boolean(lesson.schedule_event_id) && String(lesson.status || "") === "completed",
     };

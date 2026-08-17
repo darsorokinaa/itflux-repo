@@ -613,3 +613,66 @@ class InteractiveBoardApiTests(TestCase):
         bad = self.client.get("/api/cabinet/interactive-boards/?schedule_event=local-abc")
         self.assertEqual(bad.status_code, 200, bad.content)
         self.assertEqual(bad.json(), [])
+
+    def test_scene_persist_reuses_asset_for_same_dataurl(self):
+        board = InteractiveBoard.objects.create(owner=self.teacher, title="Dedup")
+        self._auth(self.teacher)
+        data_url = "data:image/png;base64," + base64.b64encode(MINI_PNG).decode()
+        payload = {
+            "scene_data": {
+                "elements": [
+                    {"id": "img1", "type": "image", "fileId": "f1", "isDeleted": False, "version": 1}
+                ],
+                "appState": {},
+                "files": {"f1": {"mimeType": "image/png", "dataURL": data_url}},
+            },
+            "version": 1,
+        }
+        first = self.client.patch(
+            f"/api/cabinet/interactive-boards/{board.id}/",
+            payload,
+            format="json",
+        )
+        self.assertEqual(first.status_code, 200, first.content)
+        payload["version"] = first.json()["version"]
+        second = self.client.patch(
+            f"/api/cabinet/interactive-boards/{board.id}/",
+            payload,
+            format="json",
+        )
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertEqual(InteractiveBoardAsset.objects.filter(board=board).count(), 1)
+        scene_url = (second.json()["scene_data"]["files"]["f1"].get("dataURL") or "")
+        self.assertIn("/assets/", scene_url)
+
+    def test_scene_get_does_not_require_orphan_assets(self):
+        board = InteractiveBoard.objects.create(owner=self.teacher, title="Orphans")
+        used = InteractiveBoardAsset(
+            board=board,
+            mime_type="image/png",
+            original_name="used.png",
+            size_bytes=len(MINI_PNG),
+            created_by=self.teacher,
+        )
+        used.file.save("used.png", io.BytesIO(MINI_PNG), save=True)
+        for i in range(5):
+            orphan = InteractiveBoardAsset(
+                board=board,
+                mime_type="image/png",
+                original_name=f"orphan-{i}.png",
+                size_bytes=len(MINI_PNG),
+                created_by=self.teacher,
+            )
+            orphan.file.save(f"orphan-{i}.png", io.BytesIO(MINI_PNG), save=True)
+        path = f"/api/cabinet/interactive-boards/{board.id}/assets/{used.id}/"
+        board.scene_data = {
+            "elements": [],
+            "appState": {},
+            "files": {"f1": {"mimeType": "image/png", "dataURL": path, "url": path}},
+        }
+        board.save(update_fields=["scene_data"])
+        self._auth(self.teacher)
+        res = self.client.get(f"/api/cabinet/interactive-boards/{board.id}/")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(InteractiveBoardAsset.objects.filter(board=board).count(), 6)
+        self.assertIn(str(used.id), res.json()["scene_data"]["files"]["f1"]["dataURL"])

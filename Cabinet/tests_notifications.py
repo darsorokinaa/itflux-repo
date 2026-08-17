@@ -505,6 +505,110 @@ class ScheduleNotifyDedupTests(TestCase):
         after = Notification.objects.filter(recipient_user=self.student_user).count()
         self.assertEqual(before, after)
 
+    def test_updated_retry_does_not_duplicate(self):
+        from Cabinet.notifications import NotificationService
+
+        NotificationService.notify_event_updated(self.event)
+        NotificationService.notify_event_updated(self.event)
+        self.assertEqual(
+            Notification.objects.filter(
+                recipient_user=self.student_user,
+                channel=NotificationChannel.IN_APP,
+                event_type=NotificationEventType.LESSON_UPDATED,
+            ).count(),
+            1,
+        )
+
+    @patch("Cabinet.telegram_connect.send_telegram_to_user", return_value=True)
+    def test_in_app_duplicate_does_not_block_telegram(self, mock_tg):
+        from Cabinet.notifications import NotificationService, get_or_create_preferences
+
+        prefs = get_or_create_preferences(self.student_user)
+        prefs.telegram_enabled = False
+        prefs.telegram_chat_id = ""
+        prefs.save()
+        NotificationService.notify_event_updated(self.event)
+        self.assertEqual(
+            Notification.objects.filter(
+                recipient_user=self.student_user,
+                channel=NotificationChannel.TELEGRAM,
+            ).count(),
+            0,
+        )
+        prefs.telegram_enabled = True
+        prefs.telegram_chat_id = "123456"
+        prefs.save()
+        NotificationService.notify_event_updated(self.event)
+        self.assertEqual(
+            Notification.objects.filter(
+                recipient_user=self.student_user,
+                channel=NotificationChannel.TELEGRAM,
+            ).count(),
+            1,
+        )
+        NotificationService.notify_event_updated(self.event)
+        self.assertEqual(
+            Notification.objects.filter(
+                recipient_user=self.student_user,
+                channel=NotificationChannel.TELEGRAM,
+            ).count(),
+            1,
+        )
+        self.assertEqual(mock_tg.call_count, 1)
+
+    def test_cancelled_event_skips_queued_reminder(self):
+        from django.core.management import call_command
+        from Cabinet.notifications import get_or_create_preferences
+        from Cabinet.schedule_service import cancel_event
+
+        now = timezone.now()
+        self.event.starts_at = now + timedelta(minutes=10)
+        self.event.ends_at = now + timedelta(minutes=70)
+        self.event.status = self.event.Status.PLANNED
+        self.event.save(update_fields=["starts_at", "ends_at", "status", "updated_at"])
+        prefs = get_or_create_preferences(self.student_user)
+        prefs.lesson_reminder_minutes = [10]
+        prefs.save(update_fields=["lesson_reminder_minutes"])
+        cancel_event(self.event, changed_by=self.teacher, notify=False)
+        before = Notification.objects.filter(
+            recipient_user=self.student_user,
+            event_type=NotificationEventType.LESSON_REMINDER,
+        ).count()
+        call_command("send_lesson_reminders")
+        after = Notification.objects.filter(
+            recipient_user=self.student_user,
+            event_type=NotificationEventType.LESSON_REMINDER,
+        ).count()
+        self.assertEqual(before, after)
+
+    def test_moved_event_does_not_remind_old_time(self):
+        from django.core.management import call_command
+        from Cabinet.notifications import get_or_create_preferences
+        from Cabinet.schedule_service import move_event
+
+        now = timezone.now()
+        self.event.starts_at = now + timedelta(minutes=10)
+        self.event.ends_at = now + timedelta(minutes=70)
+        self.event.save(update_fields=["starts_at", "ends_at", "updated_at"])
+        prefs = get_or_create_preferences(self.student_user)
+        prefs.lesson_reminder_minutes = [10]
+        prefs.save(update_fields=["lesson_reminder_minutes"])
+        move_event(
+            self.event,
+            starts_at=now + timedelta(hours=5),
+            ends_at=now + timedelta(hours=6),
+            changed_by=self.teacher,
+            notify=False,
+        )
+        call_command("send_lesson_reminders")
+        self.assertEqual(
+            Notification.objects.filter(
+                recipient_user=self.student_user,
+                event_type=NotificationEventType.LESSON_REMINDER,
+            ).count(),
+            0,
+        )
+
 
 class SystemAnnouncementPrefTests(TestCase):
     def test_notify_system_toggle(self):

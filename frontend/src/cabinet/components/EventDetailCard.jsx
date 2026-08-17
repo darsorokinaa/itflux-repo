@@ -74,17 +74,7 @@ function billingBadgeMod(status) {
 }
 
 function payableBadges(badges = []) {
-  return badges.filter((b) => {
-    if (b.price_missing) return false;
-    if (b.delivery_status === "rescheduled") return false;
-    if (b.delivery_status === "cancelled_by_student" || b.delivery_status === "cancelled_by_teacher") {
-      return Number(b.amount || 0) > 0 && b.is_debt !== false;
-    }
-    return (
-      ["awaiting_payment", "partially_paid"].includes(b.financial_status)
-      && (b.is_debt === true || Number(b.amount || 0) > 0)
-    );
-  });
+  return badges.filter((b) => b.is_debt === true);
 }
 
 function LessonBillingBlock({

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import copy
+import hashlib
 import json
 import os
 import re
@@ -437,6 +438,57 @@ def board_asset_api_path(board_id, asset_id) -> str:
     return f"/api/cabinet/interactive-boards/{board_id}/assets/{asset_id}/"
 
 
+def board_asset_content_sha256(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def get_or_create_board_asset(
+    board: InteractiveBoard,
+    *,
+    content: bytes,
+    mime: str,
+    file_id: str,
+    user: User | None,
+) -> tuple[InteractiveBoardAsset, bool]:
+    """Один blob на доску не создаёт новый asset при каждом autosave."""
+    digest = board_asset_content_sha256(content)
+    existing = (
+        InteractiveBoardAsset.objects.filter(board=board, content_sha256=digest)
+        .order_by("created_at")
+        .first()
+    )
+    if existing is not None:
+        return existing, False
+
+    ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}.get(mime, ".bin")
+    original_name = f"{file_id}{ext}"
+    legacy = (
+        InteractiveBoardAsset.objects.filter(
+            board=board,
+            original_name=original_name,
+            size_bytes=len(content),
+            content_sha256="",
+        )
+        .order_by("created_at")
+        .first()
+    )
+    if legacy is not None:
+        legacy.content_sha256 = digest
+        legacy.save(update_fields=["content_sha256"])
+        return legacy, False
+
+    asset = InteractiveBoardAsset(
+        board=board,
+        mime_type=mime,
+        original_name=original_name,
+        content_sha256=digest,
+        size_bytes=len(content),
+        created_by=user,
+    )
+    asset.file.save(original_name, ContentFile(content), save=True)
+    return asset, True
+
+
 def _data_url_payload(data_url: str) -> tuple[str, bytes] | None:
     if not isinstance(data_url, str) or not data_url.startswith("data:") or "," not in data_url:
         return None
@@ -502,15 +554,13 @@ def persist_large_scene_files(board: InteractiveBoard, scene: dict, user: User) 
             raise serializers.ValidationError({"scene_data": exc.message}) from exc
 
         # dataURL всегда выносим в asset — inline base64 раздувает PATCH «иногда».
-        ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[mime]
-        asset = InteractiveBoardAsset(
-            board=board,
-            mime_type=mime,
-            original_name=f"{file_id}{ext}",
-            size_bytes=len(content),
-            created_by=user,
+        asset, _created = get_or_create_board_asset(
+            board,
+            content=content,
+            mime=mime,
+            file_id=str(file_id),
+            user=user,
         )
-        asset.file.save(f"{file_id}{ext}", ContentFile(content), save=True)
         path = board_asset_api_path(board.id, asset.id)
         new_meta = dict(meta)
         new_meta["dataURL"] = path
@@ -524,15 +574,47 @@ def persist_large_scene_files(board: InteractiveBoard, scene: dict, user: User) 
     return scene
 
 
+def _scene_asset_lookups(board: InteractiveBoard, files: dict) -> tuple[dict, dict]:
+    """Только ассеты, на которые ссылается текущая scene — не assets.all()."""
+    asset_ids = []
+    media_names = []
+    for meta in files.values():
+        if not isinstance(meta, dict):
+            continue
+        data_url = meta.get("dataURL") or meta.get("url") or ""
+        if not isinstance(data_url, str):
+            continue
+        match = ASSET_URL_RE.search(data_url)
+        if match:
+            try:
+                asset_ids.append(uuid.UUID(match.group("asset_id")))
+            except (ValueError, TypeError):
+                continue
+            continue
+        if "/media/cabinet/boards" in data_url:
+            media_names.append(data_url.rsplit("/", 1)[-1].split("?", 1)[0])
+
+    by_id = {}
+    if asset_ids:
+        for asset in board.assets.filter(pk__in=asset_ids):
+            by_id[asset.id] = asset
+
+    by_name = {}
+    for name in set(media_names):
+        if not name:
+            continue
+        asset = board.assets.filter(file__endswith=name).first()
+        if asset is not None:
+            by_name[name] = asset
+    return by_id, by_name
+
+
 def rewrite_scene_asset_urls(board: InteractiveBoard, scene: dict) -> dict:
     """На чтении подменяем старые /media/... на защищённые API URL."""
     files = scene.get("files")
     if not isinstance(files, dict) or not files:
         return scene
-    assets = {a.id: a for a in board.assets.all()}
-    by_name = {}
-    for a in assets.values():
-        by_name[os.path.basename(a.file.name)] = a
+    _by_id, by_name = _scene_asset_lookups(board, files)
 
     updated = {}
     changed = False
@@ -1355,15 +1437,13 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[mime]
-        asset = InteractiveBoardAsset(
-            board=board,
-            mime_type=mime,
-            original_name=getattr(uploaded, "name", "") or f"{file_id}{ext}",
-            size_bytes=len(raw),
-            created_by=request.user,
+        asset, _created = get_or_create_board_asset(
+            board,
+            content=raw,
+            mime=mime,
+            file_id=str(file_id),
+            user=request.user,
         )
-        asset.file.save(f"{file_id}{ext}", ContentFile(raw), save=True)
         path = board_asset_api_path(board.id, asset.id)
 
         return Response({

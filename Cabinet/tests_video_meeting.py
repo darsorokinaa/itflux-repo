@@ -568,6 +568,41 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(teacher_rows[0]["durationSeconds"], 70 * 60)
         self.assertEqual(teacher_rows[0]["sessionCount"], 2)
 
+    def test_repeat_leave_is_idempotent(self):
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        record_attendance_join(
+            meeting=meeting, user=self.student_user, jitsi_participant_id="p1"
+        )
+        first = record_attendance_leave(
+            meeting=meeting, user=self.student_user, jitsi_participant_id="p1"
+        )
+        second = record_attendance_leave(
+            meeting=meeting, user=self.student_user, jitsi_participant_id="p1"
+        )
+        self.assertIsNotNone(first.left_at)
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(
+            MeetingAttendance.objects.filter(meeting=meeting, user=self.student_user).count(),
+            1,
+        )
+
+    def test_teacher_and_student_attendance_are_independent(self):
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        teacher_row = record_attendance_join(
+            meeting=meeting, user=self.teacher, jitsi_participant_id="teacher-jitsi"
+        )
+        student_row = record_attendance_join(
+            meeting=meeting, user=self.student_user, jitsi_participant_id="student-jitsi"
+        )
+        self.assertNotEqual(teacher_row.pk, student_row.pk)
+        self.assertEqual(teacher_row.jitsi_participant_id, "teacher-jitsi")
+        self.assertEqual(student_row.jitsi_participant_id, "student-jitsi")
+        record_attendance_leave(meeting=meeting, user=self.student_user)
+        teacher_row.refresh_from_db()
+        self.assertIsNone(teacher_row.left_at)
+
     def test_finish_closes_open_attendance(self):
         meeting = self._create_meeting()
         start_meeting(meeting=meeting, user=self.teacher)
@@ -957,3 +992,140 @@ class VideoMeetingApiTests(TestCase):
         m2, _ = get_or_create_meeting_for_event(event=other, created_by=self.teacher)
         self.assertNotEqual(m1.room_name, m2.room_name)
         self.assertNotEqual(m1.uuid, m2.uuid)
+
+    def test_finish_does_not_complete_schedule_event(self):
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        self.event.refresh_from_db()
+        self.assertEqual(self.event.status, ScheduleEvent.Status.PLANNED)
+        self.client.force_login(self.teacher)
+        res = self.client.post(f"/api/video-meetings/{meeting.uuid}/finish/")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.event.refresh_from_db()
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.status, VideoMeeting.Status.FINISHED)
+        self.assertEqual(self.event.status, ScheduleEvent.Status.PLANNED)
+        self.assertEqual(res.data["eventStatus"], ScheduleEvent.Status.PLANNED)
+        next_step = res.data["nextStep"]
+        self.assertEqual(next_step["action"], "complete_lesson_journal")
+        self.assertFalse(next_step["autoCompletesLesson"])
+        self.assertIn(f"/cabinet/journal/lesson/{self.event.pk}", next_step["path"])
+
+    def test_stale_watchdog_dry_run_does_not_close_room(self):
+        from Cabinet.video_meeting_service import expire_stale_live_meetings
+
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        now = timezone.now()
+        ScheduleEvent.objects.filter(pk=self.event.pk).update(
+            starts_at=now - timedelta(hours=20),
+            ends_at=now - timedelta(hours=19),
+        )
+        VideoMeeting.objects.filter(pk=meeting.pk).update(
+            updated_at=now - timedelta(hours=10),
+            actual_started_at=now - timedelta(hours=20),
+        )
+        report = expire_stale_live_meetings(now=now, dry_run=True)
+        self.assertEqual(len(report["expired"]), 1)
+        meeting.refresh_from_db()
+        self.event.refresh_from_db()
+        self.assertEqual(meeting.status, VideoMeeting.Status.LIVE)
+        self.assertEqual(self.event.status, ScheduleEvent.Status.PLANNED)
+
+    def test_stale_watchdog_expires_abandoned_live_without_completing_lesson(self):
+        from Cabinet.video_meeting_service import expire_stale_live_meetings
+
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        now = timezone.now()
+        ScheduleEvent.objects.filter(pk=self.event.pk).update(
+            starts_at=now - timedelta(hours=20),
+            ends_at=now - timedelta(hours=19),
+        )
+        VideoMeeting.objects.filter(pk=meeting.pk).update(
+            updated_at=now - timedelta(hours=10),
+            actual_started_at=now - timedelta(hours=20),
+        )
+        report = expire_stale_live_meetings(now=now, dry_run=False)
+        self.assertEqual(len(report["expired"]), 1)
+        meeting.refresh_from_db()
+        self.event.refresh_from_db()
+        self.assertEqual(meeting.status, VideoMeeting.Status.FINISHED)
+        self.assertIsNotNone(meeting.actual_finished_at)
+        self.assertEqual(self.event.status, ScheduleEvent.Status.PLANNED)
+
+    def test_stale_watchdog_keeps_live_room_before_end_grace(self):
+        from Cabinet.video_meeting_service import expire_stale_live_meetings
+
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        now = timezone.now()
+        ScheduleEvent.objects.filter(pk=self.event.pk).update(
+            starts_at=now - timedelta(hours=3),
+            ends_at=now - timedelta(hours=2),
+        )
+        VideoMeeting.objects.filter(pk=meeting.pk).update(
+            updated_at=now - timedelta(hours=10),
+            actual_started_at=now - timedelta(hours=3),
+        )
+        report = expire_stale_live_meetings(now=now, dry_run=False)
+        self.assertEqual(report["checked"], 0)
+        self.assertEqual(report["expired"], [])
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.status, VideoMeeting.Status.LIVE)
+
+    def test_stale_watchdog_keeps_recently_active_live_room(self):
+        from Cabinet.video_meeting_service import expire_stale_live_meetings
+
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        now = timezone.now()
+        ScheduleEvent.objects.filter(pk=self.event.pk).update(
+            starts_at=now - timedelta(hours=20),
+            ends_at=now - timedelta(hours=19),
+        )
+        VideoMeeting.objects.filter(pk=meeting.pk).update(
+            updated_at=now - timedelta(minutes=20),
+            actual_started_at=now - timedelta(hours=20),
+        )
+        report = expire_stale_live_meetings(now=now, dry_run=False)
+        self.assertEqual(report["expired"], [])
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.status, VideoMeeting.Status.LIVE)
+
+    def test_stale_watchdog_keeps_room_with_recent_open_attendance(self):
+        from Cabinet.video_meeting_service import expire_stale_live_meetings
+
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        record_attendance_join(
+            meeting=meeting,
+            user=self.teacher,
+            jitsi_participant_id="moderator-1",
+        )
+        now = timezone.now()
+        ScheduleEvent.objects.filter(pk=self.event.pk).update(
+            starts_at=now - timedelta(hours=20),
+            ends_at=now - timedelta(hours=19),
+        )
+        VideoMeeting.objects.filter(pk=meeting.pk).update(
+            updated_at=now - timedelta(hours=10),
+            actual_started_at=now - timedelta(hours=20),
+        )
+        report = expire_stale_live_meetings(now=now, dry_run=False)
+        self.assertEqual(report["expired"], [])
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.status, VideoMeeting.Status.LIVE)
+
+    def test_live_status_poll_touches_activity(self):
+        from Cabinet.video_meeting_service import LIVE_ACTIVITY_TOUCH_INTERVAL
+
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        stale = timezone.now() - LIVE_ACTIVITY_TOUCH_INTERVAL - timedelta(minutes=1)
+        VideoMeeting.objects.filter(pk=meeting.pk).update(updated_at=stale)
+        self.client.force_login(self.teacher)
+        res = self.client.get(f"/api/video-meetings/{meeting.uuid}/status/")
+        self.assertEqual(res.status_code, 200, res.content)
+        meeting.refresh_from_db()
+        self.assertGreater(meeting.updated_at, stale)

@@ -27,6 +27,7 @@ from Cabinet.journal_service import (
     attendance_to_delivery_status,
     complete_journal,
     compute_overall_score,
+    create_offline_journal,
     get_or_create_journal,
     publish_record,
     update_journal,
@@ -450,7 +451,7 @@ class JournalModelTests(JournalTestBase):
             JournalAuditLog.objects.filter(journal=journal, action="update").exists()
         )
 
-    @patch("Cabinet.journal_notifications.send_telegram_to_user", return_value=True)
+    @patch("Cabinet.telegram_connect.send_telegram_to_user", return_value=True)
     def test_telegram_on_publish_not_on_autosave(self, mock_tg):
         from Cabinet.notifications import get_or_create_preferences
 
@@ -480,7 +481,7 @@ class JournalModelTests(JournalTestBase):
         complete_journal(journal, self.teacher, force=True)
         publish_record(record, self.teacher, notify=True)
         mock_tg.assert_called()
-        # повторное автосохранение не шлёт
+        # повторное автосохранение приватной заметки не шлёт Telegram
         mock_tg.reset_mock()
         update_journal(
             journal,
@@ -488,7 +489,7 @@ class JournalModelTests(JournalTestBase):
             {
                 "version": LessonJournal.objects.get(pk=journal.pk).version,
                 "student_records": [
-                    {"id": record.id, "teacher_comment": "Правка без notify"}
+                    {"id": record.id, "private_note": "Правка без notify"}
                 ],
             },
         )
@@ -593,7 +594,6 @@ class JournalModelTests(JournalTestBase):
         record.attendance_status = AttendanceStatus.PRESENT
         record.variant_result = {
             "score_percent": 90,
-            "tasks": [{"ok": True}, {"ok": True}],
         }
         record.save(update_fields=["attendance_status", "variant_result", "updated_at"])
 
@@ -944,3 +944,121 @@ class JournalTopicsSyncTests(JournalTestBase):
         lesson = resp.data["lessons"][0]
         self.assertEqual(lesson["planned_topic"], "План А")
         self.assertEqual(lesson["actual_topic"], "Факт Б")
+
+    def test_complete_copies_factual_topic_to_event_not_plan(self):
+        plan = LessonPlan.objects.create(
+            teacher=self.teacher,
+            title="План",
+            direction=Direction.OGE,
+            subject=PlanSubject.INFORMATICS,
+            exam_type=ExamType.OGE,
+            status=PlanStatus.PUBLISHED,
+        )
+        LessonPlanEnrollment.objects.create(
+            teacher=self.teacher,
+            plan=plan,
+            student=self.student,
+            format=PlanFormat.INDIVIDUAL,
+            status=EnrollmentStatus.ACTIVE,
+        )
+        item = LessonPlanItem.objects.create(
+            plan=plan,
+            order=1,
+            title="Системы счисления",
+            topic="Системы счисления",
+        )
+        event = self._individual_event(lesson_plan_item=item)
+        journal = get_or_create_journal(event, self.teacher)
+        record = journal.student_records.get()
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "actual_topic": "Практика ОГЭ по переводу",
+                "student_records": [
+                    {"id": record.id, "attendance_status": AttendanceStatus.PRESENT}
+                ],
+            },
+        )
+        complete_journal(journal, self.teacher, force=True)
+        event.refresh_from_db()
+        item.refresh_from_db()
+        journal.refresh_from_db()
+        self.assertEqual(journal.actual_topic, "Практика ОГЭ по переводу")
+        self.assertEqual(event.topic, "Практика ОГЭ по переводу")
+        self.assertEqual(item.topic, "Системы счисления")
+        from Cabinet.student_api import _schedule_event_topic
+
+        self.assertEqual(_schedule_event_topic(event, [self.student]), "Практика ОГЭ по переводу")
+
+    def test_complete_is_idempotent(self):
+        from Cabinet.billing_models import EventBillingRecord
+
+        event = self._individual_event()
+        journal = get_or_create_journal(event, self.teacher)
+        record = journal.student_records.get()
+        update_journal(
+            journal,
+            self.teacher,
+            {
+                "actual_topic": "Тема",
+                "student_records": [
+                    {"id": record.id, "attendance_status": AttendanceStatus.PRESENT}
+                ],
+            },
+        )
+        first = complete_journal(journal, self.teacher, force=True)
+        version = first.version
+        second = complete_journal(first, self.teacher, force=True)
+        self.assertEqual(second.status, JournalStatus.COMPLETED)
+        self.assertEqual(second.version, version)
+        self.assertEqual(LessonJournal.objects.filter(schedule_event=event).count(), 1)
+        self.assertEqual(
+            JournalAuditLog.objects.filter(journal=first, action="completed").count(),
+            1,
+        )
+        records = EventBillingRecord.objects.filter(event=event, student=self.student)
+        self.assertLessEqual(records.count(), 1)
+
+    def test_offline_journal_create_without_meeting_or_debt(self):
+        from Cabinet.billing_models import EventBillingRecord
+        from Cabinet.billing_service import record_is_debt
+        from Cabinet.models import VideoMeeting
+
+        resp = self.client.post(
+            "/api/cabinet/journal/lessons/",
+            {
+                "student_id": self.student.id,
+                "lesson_date": timezone.localdate().isoformat(),
+                "starts_time": "11:00",
+                "duration_minutes": 45,
+                "actual_topic": "Офлайн разбор",
+                "lesson_summary": "Провели у ученика дома",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        self.assertTrue(resp.data["is_offline"])
+        self.assertEqual(resp.data["status"], JournalStatus.DRAFT)
+        self.assertEqual(resp.data["actual_topic"], "Офлайн разбор")
+        event_id = resp.data["schedule_event_id"]
+        event = ScheduleEvent.objects.get(pk=event_id)
+        self.assertEqual(event.format, ScheduleEvent.Format.OFFLINE)
+        self.assertEqual(event.status, ScheduleEvent.Status.PLANNED)
+        self.assertFalse(VideoMeeting.objects.filter(schedule_event=event).exists())
+        self.assertFalse(EventBillingRecord.objects.filter(event=event).exists())
+
+        journal = LessonJournal.objects.get(schedule_event=event)
+        complete_journal(journal, self.teacher, force=True)
+        event.refresh_from_db()
+        self.assertEqual(event.status, ScheduleEvent.Status.COMPLETED)
+        self.assertEqual(event.topic, "Офлайн разбор")
+        recs = list(EventBillingRecord.objects.filter(event=event))
+        for rec in recs:
+            if rec.financial_status == "needs_decision":
+                self.assertFalse(record_is_debt(rec))
+
+    def test_create_offline_journal_requires_audience(self):
+        with self.assertRaises(JournalError) as ctx:
+            create_offline_journal(self.teacher, {"lesson_date": timezone.localdate().isoformat()})
+        self.assertEqual(ctx.exception.code, "audience_required")

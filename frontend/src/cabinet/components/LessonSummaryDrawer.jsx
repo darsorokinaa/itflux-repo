@@ -728,7 +728,7 @@ export default function LessonSummaryDrawer({
         {journal && !loading ? (
           <section className="jl-recap" aria-label="Результаты занятия">
             <h3 className="jl-recap__title">
-              {fromMeeting ? "Урок завершён" : "Результаты занятия"}
+              {fromMeeting ? "Подтвердите проведение занятия" : "Результаты занятия"}
             </h3>
             <p className="jl-recap__meta">
               {[

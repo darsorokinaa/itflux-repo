@@ -11,6 +11,7 @@ from typing import Literal
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,11 @@ from .schedule_series import _ensure_organizer
 
 # Краткий разрыв (reload вкладки, Strict Mode, мигание сети) не считается уходом.
 ATTENDANCE_RECONNECT_GRACE = timedelta(seconds=180)
+
+# Watchdog LIVE-комнат: не закрывать только потому, что комната давно создана.
+STALE_LIVE_AFTER_EVENT_END = timedelta(hours=12)
+STALE_LIVE_INACTIVITY = timedelta(hours=6)
+LIVE_ACTIVITY_TOUCH_INTERVAL = timedelta(minutes=2)
 
 
 class VideoMeetingError(Exception):
@@ -349,11 +355,72 @@ def start_meeting(*, meeting: VideoMeeting, user: User) -> VideoMeeting:
         return locked
 
 
+def _close_live_meeting_locked(locked: VideoMeeting, *, now, reason: str) -> dict:
+    """
+    Техническое закрытие видеокомнаты.
+
+    Не меняет ScheduleEvent.status и не трогает биллинг: факт окончания звонка
+    не равен факту проведённого оплачиваемого занятия.
+    """
+    presented_payload = dict(locked.presented_payload or {})
+    locked.status = VideoMeeting.Status.FINISHED
+    if locked.actual_finished_at is None:
+        locked.actual_finished_at = now
+    locked.presented_kind = ""
+    locked.presented_payload = {}
+    locked.presented_at = None
+    locked.presented_by = None
+    locked.save(
+        update_fields=[
+            "status",
+            "actual_finished_at",
+            "presented_kind",
+            "presented_payload",
+            "presented_at",
+            "presented_by",
+            "updated_at",
+        ]
+    )
+
+    try:
+        from .meeting_material_session import finalize_material_sessions_for_meeting
+
+        finalize_material_sessions_for_meeting(locked)
+    except Exception:
+        logger.exception(
+            "Failed to finalize material sessions meeting=%s reason=%s",
+            locked.uuid,
+            reason,
+        )
+
+    open_sessions = (
+        MeetingAttendance.objects.select_for_update()
+        .filter(meeting=locked, left_at__isnull=True)
+    )
+    for session in open_sessions:
+        session.left_at = now
+        session.duration_seconds = max(
+            0, int((session.left_at - session.joined_at).total_seconds())
+        )
+        session.save(update_fields=["left_at", "duration_seconds"])
+
+    logger.info(
+        "video meeting closed meeting=%s event=%s reason=%s event_status=%s",
+        locked.uuid,
+        locked.schedule_event_id,
+        reason,
+        locked.schedule_event.status,
+    )
+    return presented_payload
+
+
 def finish_meeting(*, meeting: VideoMeeting, user: User) -> VideoMeeting:
     assert_can_manage_meeting(user, meeting)
     now = timezone.now()
     with transaction.atomic():
-        locked = VideoMeeting.objects.select_for_update().get(pk=meeting.pk)
+        locked = VideoMeeting.objects.select_for_update().select_related("schedule_event").get(
+            pk=meeting.pk
+        )
         if locked.status == VideoMeeting.Status.FINISHED:
             return locked
         if locked.status == VideoMeeting.Status.CANCELLED:
@@ -365,47 +432,9 @@ def finish_meeting(*, meeting: VideoMeeting, user: User) -> VideoMeeting:
                 status=409,
             )
 
-        presented_payload = dict(locked.presented_payload or {})
-
-        locked.status = VideoMeeting.Status.FINISHED
-        if locked.actual_finished_at is None:
-            locked.actual_finished_at = now
-        locked.presented_kind = ""
-        locked.presented_payload = {}
-        locked.presented_at = None
-        locked.presented_by = None
-        locked.save(
-            update_fields=[
-                "status",
-                "actual_finished_at",
-                "presented_kind",
-                "presented_payload",
-                "presented_at",
-                "presented_by",
-                "updated_at",
-            ]
+        presented_payload = _close_live_meeting_locked(
+            locked, now=now, reason="teacher_finish"
         )
-
-        try:
-            from .meeting_material_session import finalize_material_sessions_for_meeting
-
-            finalize_material_sessions_for_meeting(locked)
-        except Exception:
-            logger.exception(
-                "Failed to finalize material sessions meeting=%s",
-                locked.uuid,
-            )
-
-        open_sessions = (
-            MeetingAttendance.objects.select_for_update()
-            .filter(meeting=locked, left_at__isnull=True)
-        )
-        for session in open_sessions:
-            session.left_at = now
-            session.duration_seconds = max(
-                0, int((session.left_at - session.joined_at).total_seconds())
-            )
-            session.save(update_fields=["left_at", "duration_seconds"])
 
         # Подробные результаты live-варианта → журнал (если на уроке был вариант).
         try:
@@ -423,6 +452,135 @@ def finish_meeting(*, meeting: VideoMeeting, user: User) -> VideoMeeting:
             )
 
         return locked
+
+
+def lesson_journal_next_step(event: ScheduleEvent) -> dict:
+    return {
+        "action": "complete_lesson_journal",
+        "label": "Завершить занятие и заполнить журнал",
+        "path": f"/cabinet/journal/lesson/{event.pk}?from=meeting",
+        "eventId": event.pk,
+        "eventStatus": event.status,
+        "autoCompletesLesson": False,
+    }
+
+
+def touch_live_meeting_activity(meeting: VideoMeeting, *, now=None) -> None:
+    """Heartbeat открытой LIVE-комнаты: не чаще, чем раз в LIVE_ACTIVITY_TOUCH_INTERVAL."""
+    if meeting.status != VideoMeeting.Status.LIVE:
+        return
+    now = now or timezone.now()
+    last = meeting.updated_at
+    if last and now - last < LIVE_ACTIVITY_TOUCH_INTERVAL:
+        return
+    VideoMeeting.objects.filter(
+        pk=meeting.pk,
+        status=VideoMeeting.Status.LIVE,
+    ).update(updated_at=now)
+    meeting.updated_at = now
+
+
+def _recent_open_attendance_exists(meeting: VideoMeeting, *, now, inactivity) -> bool:
+    return meeting.attendance_sessions.filter(
+        left_at__isnull=True,
+        joined_at__gte=now - inactivity,
+    ).exists()
+
+
+def is_stale_live_meeting(
+    meeting: VideoMeeting,
+    *,
+    now=None,
+    after_event_end=STALE_LIVE_AFTER_EVENT_END,
+    inactivity=STALE_LIVE_INACTIVITY,
+) -> bool:
+    now = now or timezone.now()
+    if meeting.status != VideoMeeting.Status.LIVE:
+        return False
+    event = meeting.schedule_event
+    if event.ends_at >= now - after_event_end:
+        return False
+    last_activity = meeting.updated_at or meeting.actual_started_at or meeting.created_at
+    if last_activity and last_activity >= now - inactivity:
+        return False
+    if _recent_open_attendance_exists(meeting, now=now, inactivity=inactivity):
+        return False
+    return True
+
+
+def expire_stale_live_meetings(
+    *,
+    now=None,
+    dry_run=True,
+    after_event_end=STALE_LIVE_AFTER_EVENT_END,
+    inactivity=STALE_LIVE_INACTIVITY,
+) -> dict:
+    """
+    Переводит явно протухшие LIVE-комнаты в finished.
+
+    Не проводит занятие: ScheduleEvent и биллинг не меняются.
+    """
+    now = now or timezone.now()
+    stale_before = now - inactivity
+    candidates = (
+        VideoMeeting.objects.filter(
+            status=VideoMeeting.Status.LIVE,
+            schedule_event__ends_at__lt=now - after_event_end,
+        )
+        .filter(Q(updated_at__lt=stale_before) | Q(updated_at__isnull=True))
+        .select_related("schedule_event")
+        .order_by("id")
+    )
+    report = {
+        "dry_run": dry_run,
+        "checked": 0,
+        "expired": [],
+        "skipped": [],
+    }
+    for meeting in candidates:
+        report["checked"] += 1
+        if not is_stale_live_meeting(
+            meeting, now=now, after_event_end=after_event_end, inactivity=inactivity
+        ):
+            report["skipped"].append(
+                {
+                    "uuid": str(meeting.uuid),
+                    "event_id": meeting.schedule_event_id,
+                    "reason": "recent_activity_or_open_attendance",
+                }
+            )
+            continue
+        row = {
+            "uuid": str(meeting.uuid),
+            "event_id": meeting.schedule_event_id,
+            "event_status": meeting.schedule_event.status,
+            "ends_at": meeting.schedule_event.ends_at.isoformat(),
+            "updated_at": meeting.updated_at.isoformat() if meeting.updated_at else None,
+        }
+        if dry_run:
+            report["expired"].append(row)
+            continue
+        with transaction.atomic():
+            locked = (
+                VideoMeeting.objects.select_for_update()
+                .select_related("schedule_event")
+                .get(pk=meeting.pk)
+            )
+            if not is_stale_live_meeting(
+                locked, now=now, after_event_end=after_event_end, inactivity=inactivity
+            ):
+                report["skipped"].append(
+                    {
+                        "uuid": str(meeting.uuid),
+                        "event_id": meeting.schedule_event_id,
+                        "reason": "changed_before_lock",
+                    }
+                )
+                continue
+            _close_live_meeting_locked(locked, now=now, reason="stale_watchdog")
+            row["event_status_after"] = locked.schedule_event.status
+            report["expired"].append(row)
+    return report
 
 
 def cancel_meeting_for_event(event: ScheduleEvent) -> VideoMeeting | None:
@@ -525,6 +683,12 @@ def record_attendance_join(
                 recent.save(update_fields=["left_at", "duration_seconds"])
             return recent
 
+        if not participant_id:
+            logger.info(
+                "attendance join without jitsi_participant_id meeting=%s user=%s",
+                meeting.uuid,
+                user.pk,
+            )
         session = MeetingAttendance.objects.create(
             meeting=meeting,
             user=user,

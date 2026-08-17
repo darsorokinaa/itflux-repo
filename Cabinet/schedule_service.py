@@ -1,7 +1,9 @@
 """Schedule event business logic: create, move, cancel, conflicts, change log."""
 
 from datetime import datetime
+import zoneinfo
 
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -16,6 +18,22 @@ from .models import (
 )
 from .notifications import NotificationService
 from .schedule_series import DEFAULT_HORIZON_DAYS, generate_events_for_series, sync_event_participants
+
+DEFAULT_SCHEDULE_TIMEZONE = "Europe/Moscow"
+
+
+def conducted_event_statuses():
+    """Проведённые занятия: исторические синонимы done и completed."""
+    return (ScheduleEvent.Status.DONE, ScheduleEvent.Status.COMPLETED)
+
+
+def series_edit_excluded_statuses():
+    """Массовые операции серии не трогают отменённые и уже проведённые занятия."""
+    return (
+        ScheduleEvent.Status.CANCELLED,
+        ScheduleEvent.Status.DONE,
+        ScheduleEvent.Status.COMPLETED,
+    )
 
 
 def log_change(event, *, changed_by, change_type, old_data=None, new_data=None, message="", series=None):
@@ -50,7 +68,27 @@ def normalize_series_scope(scope):
     return "single"
 
 
-def coerce_schedule_datetime(value):
+def resolve_schedule_timezone(tz_name=None, *, event=None, teacher=None):
+    """Часовой пояс события / профиля учителя. Не timezone процесса Django."""
+    name = (tz_name or "").strip()
+    if not name and event is not None:
+        name = (getattr(event, "timezone", None) or "").strip()
+        if not name:
+            series = getattr(event, "series", None)
+            if series is not None:
+                name = (getattr(series, "timezone", None) or "").strip()
+    if not name and teacher is not None:
+        profile = getattr(teacher, "profile", None)
+        name = (getattr(profile, "timezone", None) or "").strip()
+    name = name or DEFAULT_SCHEDULE_TIMEZONE
+    try:
+        return zoneinfo.ZoneInfo(name)
+    except Exception:
+        return zoneinfo.ZoneInfo(DEFAULT_SCHEDULE_TIMEZONE)
+
+
+def coerce_schedule_datetime(value, *, tz=None, tz_name=None, event=None, teacher=None):
+    """Naive datetime → timezone события/учителя (не TIME_ZONE сервера). Aware оставляем как есть."""
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -79,16 +117,23 @@ def coerce_schedule_datetime(value):
             else:
                 return None
     if timezone.is_naive(parsed):
-        return timezone.make_aware(parsed, timezone.get_current_timezone())
+        zone = tz or resolve_schedule_timezone(tz_name, event=event, teacher=teacher)
+        return timezone.make_aware(parsed, zone)
     return parsed
 
 
-def normalize_event_update_data(data):
+def normalize_event_update_data(data, *, event=None, teacher=None):
     """Приводит PATCH-поля события к типам модели."""
     normalized = dict(data)
+    tz_name = normalized.get("timezone")
     for key in ("starts_at", "ends_at"):
         if key in normalized:
-            parsed = coerce_schedule_datetime(normalized[key])
+            parsed = coerce_schedule_datetime(
+                normalized[key],
+                tz_name=tz_name,
+                event=event,
+                teacher=teacher,
+            )
             if parsed is not None:
                 normalized[key] = parsed
     if "telemost_url" in normalized or "link" in normalized:
@@ -121,13 +166,13 @@ SERIES_SHARED_EVENT_FIELDS = (
 )
 
 
-def extract_shared_event_data(data):
-    normalized = normalize_event_update_data(data)
+def extract_shared_event_data(data, *, event=None, teacher=None):
+    normalized = normalize_event_update_data(data, event=event, teacher=teacher)
     return {key: normalized[key] for key in SERIES_SHARED_EVENT_FIELDS if key in normalized}
 
 
 def update_series_template(series, data, *, reference_event=None):
-    normalized = normalize_event_update_data(data)
+    normalized = normalize_event_update_data(data, event=reference_event)
     fields_to_update = []
     for series_field, data_key in (
         ("title", "title"),
@@ -144,10 +189,12 @@ def update_series_template(series, data, *, reference_event=None):
         series.meeting_url = normalized["telemost_url"]
         fields_to_update.append("meeting_url")
     if reference_event and "starts_at" in normalized:
-        series.start_time = normalized["starts_at"].time()
+        tz = _event_timezone(reference_event)
+        series.start_time = normalized["starts_at"].astimezone(tz).time()
         fields_to_update.append("start_time")
     if reference_event and "ends_at" in normalized:
-        series.end_time = normalized["ends_at"].time()
+        tz = _event_timezone(reference_event)
+        series.end_time = normalized["ends_at"].astimezone(tz).time()
         fields_to_update.append("end_time")
     if fields_to_update:
         fields_to_update.append("updated_at")
@@ -156,7 +203,7 @@ def update_series_template(series, data, *, reference_event=None):
 
 def events_for_series_scope(series, event, scope):
     qs = ScheduleEvent.objects.filter(series=series).exclude(
-        status__in=[ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.COMPLETED],
+        status__in=series_edit_excluded_statuses(),
     )
     if scope == "following":
         qs = qs.filter(starts_at__gte=event.starts_at)
@@ -171,7 +218,7 @@ def find_orphan_series_events(event, scope):
         title=event.title,
         series_id__isnull=True,
     ).exclude(
-        status__in=[ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.COMPLETED],
+        status__in=series_edit_excluded_statuses(),
     )
     if event.student_id:
         qs = qs.filter(student_id=event.student_id)
@@ -276,13 +323,17 @@ def create_single_event(
                     allow_empty=False,
                 )
 
+    tz_name = data.get("timezone") or DEFAULT_SCHEDULE_TIMEZONE
+    starts_at = coerce_schedule_datetime(data["starts_at"], tz_name=tz_name, teacher=teacher)
+    ends_at = coerce_schedule_datetime(data["ends_at"], tz_name=tz_name, teacher=teacher)
+
     event = ScheduleEvent.objects.create(
         owner=teacher,
         title=data["title"],
         description=data.get("description", ""),
         topic=data.get("topic", ""),
-        starts_at=data["starts_at"],
-        ends_at=data["ends_at"],
+        starts_at=starts_at,
+        ends_at=ends_at,
         event_type=data.get("event_type", ScheduleEvent.EventType.GROUP_LESSON),
         format=data.get("format", ScheduleEvent.Format.ONLINE),
         lesson_id=data.get("lesson"),
@@ -290,7 +341,7 @@ def create_single_event(
         homework_id=data.get("homework"),
         group=group,
         student_subject=student_subject,
-        timezone=data.get("timezone", "Europe/Moscow"),
+        timezone=data.get("timezone", DEFAULT_SCHEDULE_TIMEZONE),
         telemost_url=data.get("telemost_url", data.get("meeting_url", "")),
         meeting_provider=data.get("meeting_provider", "none"),
         location=data.get("location", ""),
@@ -468,6 +519,8 @@ def create_series(
 
 def move_event(event, *, starts_at, ends_at, changed_by, notify=True):
     old = event_snapshot(event)
+    starts_at = coerce_schedule_datetime(starts_at, event=event, teacher=changed_by)
+    ends_at = coerce_schedule_datetime(ends_at, event=event, teacher=changed_by)
     event.original_start_at = event.original_start_at or event.starts_at
     event.starts_at = starts_at
     event.ends_at = ends_at
@@ -511,8 +564,9 @@ def _move_event_shifted(event, *, start_delta, duration, changed_by, notify=True
 
 
 def _only_time_of_day_changed(event, *, starts_at):
-    edited_local = timezone.localtime(event.starts_at)
-    new_local = timezone.localtime(starts_at)
+    tz = _event_timezone(event)
+    edited_local = event.starts_at.astimezone(tz)
+    new_local = starts_at.astimezone(tz) if timezone.is_aware(starts_at) else timezone.make_aware(starts_at, tz)
     return edited_local.date() == new_local.date()
 
 
@@ -533,8 +587,9 @@ def _event_timezone(event):
 
 def _move_events_to_time_of_day(events, *, new_start, new_end, changed_by):
     """Выставляет одинаковое время суток, сохраняя дату каждого занятия."""
-    new_start_local = timezone.localtime(new_start)
-    new_end_local = timezone.localtime(new_end)
+    ref_tz = _event_timezone(events[0]) if events else resolve_schedule_timezone()
+    new_start_local = new_start.astimezone(ref_tz)
+    new_end_local = new_end.astimezone(ref_tz)
     duration = new_end - new_start
     moved = []
     for ev in events:
@@ -557,6 +612,8 @@ def _move_events_to_time_of_day(events, *, new_start, new_end, changed_by):
 def move_event_with_scope(event, *, starts_at, ends_at, changed_by, scope=None, notify=True):
     """scope: single | following | series (None = single)."""
     scope = normalize_series_scope(scope)
+    starts_at = coerce_schedule_datetime(starts_at, event=event, teacher=changed_by)
+    ends_at = coerce_schedule_datetime(ends_at, event=event, teacher=changed_by)
     start_delta = starts_at - event.starts_at
     duration = ends_at - starts_at
 
@@ -590,8 +647,9 @@ def move_event_with_scope(event, *, starts_at, ends_at, changed_by, scope=None, 
 
     if event.series_id:
         series = event.series
-        series.start_time = timezone.localtime(starts_at).time()
-        series.end_time = timezone.localtime(ends_at).time()
+        tz = _event_timezone(event)
+        series.start_time = starts_at.astimezone(tz).time()
+        series.end_time = ends_at.astimezone(tz).time()
         series.save(update_fields=["start_time", "end_time", "updated_at"])
 
     if notify and moved:
@@ -609,36 +667,47 @@ def cancel_event(event, *, changed_by, notify=True, plan_cancel_action=None):
     from .plan_sync import PlanSyncService
     from .video_meeting_service import cancel_meeting_for_event
 
-    old = event_snapshot(event)
-
-    # Обычная отмена не создаёт долг и снимает автоначисление, если оно уже было.
-    try:
-        from .billing_service import sync_cancelled_event_billing
-
-        sync_cancelled_event_billing(
-            event,
-            teacher=changed_by or event.owner,
-            comment="Отмена урока",
+    with transaction.atomic():
+        locked = (
+            ScheduleEvent.objects.select_for_update(of=("self",))
+            .filter(pk=event.pk)
+            .first()
         )
-    except Exception:
-        pass
+        if locked is None:
+            return event
+        if locked.status == ScheduleEvent.Status.CANCELLED:
+            return locked
 
-    event.status = ScheduleEvent.Status.CANCELLED
-    event.save(update_fields=["status", "updated_at"])
-    PlanSyncService.on_event_cancelled(event, plan_cancel_action=plan_cancel_action)
-    event.refresh_from_db()
-    cancel_meeting_for_event(event)
-    log_change(
-        event,
-        changed_by=changed_by,
-        change_type=ScheduleChangeType.CANCELLED,
-        old_data=old,
-        new_data=event_snapshot(event),
-    )
-    if notify:
-        skip_user_id = changed_by.pk if changed_by else None
-        NotificationService.notify_event_cancelled(event, skip_user_id=skip_user_id)
-    return event
+        old = event_snapshot(locked)
+
+        # Обычная отмена не создаёт долг и снимает автоначисление, если оно уже было.
+        try:
+            from .billing_service import sync_cancelled_event_billing
+
+            sync_cancelled_event_billing(
+                locked,
+                teacher=changed_by or locked.owner,
+                comment="Отмена урока",
+            )
+        except Exception:
+            pass
+
+        locked.status = ScheduleEvent.Status.CANCELLED
+        locked.save(update_fields=["status", "updated_at"])
+        PlanSyncService.on_event_cancelled(locked, plan_cancel_action=plan_cancel_action)
+        locked.refresh_from_db()
+        cancel_meeting_for_event(locked)
+        log_change(
+            locked,
+            changed_by=changed_by,
+            change_type=ScheduleChangeType.CANCELLED,
+            old_data=old,
+            new_data=event_snapshot(locked),
+        )
+        if notify:
+            skip_user_id = changed_by.pk if changed_by else None
+            NotificationService.notify_event_cancelled(locked, skip_user_id=skip_user_id)
+        return locked
 
 
 def cancel_event_with_scope(event, *, changed_by, scope=None, notify=True, plan_cancel_action=None):
@@ -651,7 +720,7 @@ def cancel_event_with_scope(event, *, changed_by, scope=None, notify=True, plan_
         cancel_series(
             event.series,
             changed_by=changed_by,
-            from_date=event.starts_at.date(),
+            from_date=event.starts_at.astimezone(_event_timezone(event)).date(),
             notify=notify,
             plan_cancel_action=plan_cancel_action,
         )
@@ -661,7 +730,7 @@ def cancel_event_with_scope(event, *, changed_by, scope=None, notify=True, plan_
 
 def cancel_series(series, *, changed_by, from_date=None, notify=True, plan_cancel_action=None):
     qs = ScheduleEvent.objects.filter(series=series).exclude(
-        status=ScheduleEvent.Status.CANCELLED,
+        status__in=series_edit_excluded_statuses(),
     )
     if from_date:
         qs = qs.filter(starts_at__date__gte=from_date)
@@ -686,7 +755,7 @@ def cancel_series(series, *, changed_by, from_date=None, notify=True, plan_cance
 
 
 def update_event(event, *, changed_by, data, notify=True):
-    data = normalize_event_update_data(data)
+    data = normalize_event_update_data(data, event=event, teacher=changed_by)
     old = event_snapshot(event)
     fields = [
         "title", "description", "topic", "subtopic", "goal", "homework_description",
@@ -803,14 +872,14 @@ def remove_participant(participant, *, changed_by, notify=True):
 
 def apply_series_edit(event, *, scope, changed_by, data, notify=True):
     """scope: single | following | series — общие поля без перезаписи дат всех занятий одной."""
-    data = normalize_event_update_data(data)
+    data = normalize_event_update_data(data, event=event, teacher=changed_by)
     scope = normalize_series_scope(scope)
 
     scope_events = list(events_for_edit_scope(event, scope))
     if scope == "single" or len(scope_events) <= 1:
         return update_event(event, changed_by=changed_by, data=data, notify=notify)
 
-    shared = extract_shared_event_data(data)
+    shared = extract_shared_event_data(data, event=event, teacher=changed_by)
     if not shared:
         return event
 

@@ -19,8 +19,6 @@ import {
   finishVideoMeeting,
   openMeetingMaterialSession,
   presentVideoMeetingResource,
-  recordVideoMeetingJoin,
-  recordVideoMeetingLeave,
   setMeetingMaterialFollowPolicy,
   setMeetingMaterialPermission,
   startVideoMeeting,
@@ -47,7 +45,8 @@ import { abortJitsiConnectionProbe } from "../connectionCheck/jitsiProbe";
 import { stopAllConnectionCheckStreams } from "../connectionCheck/mediaCleanup";
 import { clearPrimedMedia } from "../connectionCheck/mediaDevices";
 import ConfirmActionModal from "../components/ConfirmActionModal";
-import { openLessonSummaryTab } from "../journal/openLessonSummary";
+import { lessonJournalFromMeetingPath, openLessonSummaryTab } from "../journal/openLessonSummary";
+import { getMeetingAttendanceTracker } from "../meetingAttendance";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import VideoLessonMaterialsPanel from "../components/VideoLessonMaterialsPanel";
 import SyncedMaterialWorkspace from "../components/SyncedMaterialWorkspace";
@@ -119,11 +118,6 @@ function formatWhen(startsAt, endsAt) {
 const STATUS_POLL_MS = 12000;
 const PRESENT_POLL_MS = 10000;
 const LIVE_ANSWERS_POLL_MS = 2000;
-
-function getCsrfToken() {
-  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
-  return match ? decodeURIComponent(match[1]) : "";
-}
 
 function mapJoinError(err) {
   const code = err?.code || err?.data?.code || err?.category;
@@ -244,9 +238,6 @@ export default function VideoMeetingPage() {
   const { meetingUuid } = useParams();
   const containerRef = useRef(null);
   const apiRef = useRef(null);
-  const leavingRef = useRef(false);
-  const leaveTimerRef = useRef(null);
-  const participantIdRef = useRef("");
   const returnUrlRef = useRef("/cabinet/schedule");
   const jitsiInitRef = useRef(false);
   const pollTimerRef = useRef(null);
@@ -378,50 +369,19 @@ export default function VideoMeetingPage() {
     }
   }, []);
 
+  const attendanceTracker = useMemo(
+    () => getMeetingAttendanceTracker(meetingUuid || ""),
+    [meetingUuid],
+  );
+
   const sendLeave = useCallback((immediate = false) => {
-    if (!meetingUuid) return;
-    if (leaveTimerRef.current) {
-      window.clearTimeout(leaveTimerRef.current);
-      leaveTimerRef.current = null;
-    }
-    const run = () => {
-      if (leavingRef.current) return;
-      leavingRef.current = true;
-      const csrf = getCsrfToken();
-      const url = `/api/video-meetings/${meetingUuid}/attendance/leave/`;
-      const form = new FormData();
-      if (csrf) form.append("csrfmiddlewaretoken", csrf);
-      if (participantIdRef.current) {
-        form.append("jitsiParticipantId", participantIdRef.current);
-      }
-      try {
-        if (navigator.sendBeacon) {
-          navigator.sendBeacon(url, form);
-          return;
-        }
-      } catch {
-        /* fallback below */
-      }
-      void recordVideoMeetingLeave(meetingUuid, {
-        jitsiParticipantId: participantIdRef.current,
-      }).catch(() => {});
-    };
-    if (immediate) {
-      run();
-      return;
-    }
-    // Даём время на remount / reload — сервер склеит короткие разрывы,
-    // а если join успеет раньше, leave отменим.
-    leaveTimerRef.current = window.setTimeout(run, 2500);
-  }, [meetingUuid]);
+    if (immediate) attendanceTracker.leaveImmediate();
+    else attendanceTracker.onUnmount();
+  }, [attendanceTracker]);
 
   const cancelPendingLeave = useCallback(() => {
-    if (leaveTimerRef.current) {
-      window.clearTimeout(leaveTimerRef.current);
-      leaveTimerRef.current = null;
-    }
-    leavingRef.current = false;
-  }, []);
+    attendanceTracker.cancelPendingLeave();
+  }, [attendanceTracker]);
 
   const initializeJitsi = useCallback(async () => {
     if (!meetingUuid || jitsiInitRef.current || apiRef.current) {
@@ -438,6 +398,7 @@ export default function VideoMeetingPage() {
     initGenRef.current = initGen;
     const abort = new AbortController();
     abortRef.current = abort;
+    attendanceTracker.cancelPendingLeave();
     setError("");
     setMediaWarning("");
     setConnectionHint("Подключение к конференции…");
@@ -563,13 +524,16 @@ export default function VideoMeetingPage() {
           setJoinState("joined");
           setConnectionHint("");
           setShowJoinFallback(false);
-          participantIdRef.current = event?.id || "";
           callStateRef.current?.transition(CALL_STATES.joined, "videoConferenceJoined");
+          void attendanceTracker.onVerifiedJoin(event);
           if (event?.roomName && config.roomName && event.roomName !== config.roomName) {
             setMediaWarning(
               "Комната у вас и у ученика не совпадает. Обновите страницу у обоих участников.",
             );
           }
+        },
+        onLeft: () => {
+          attendanceTracker.onConferenceLeft();
         },
         onBecameModerator: showModeratorToast,
         onMediaWarning: (msg) => setMediaWarning(msg || ""),
@@ -656,14 +620,7 @@ export default function VideoMeetingPage() {
         /* ignore */
       }
 
-      try {
-        cancelPendingLeave();
-        await recordVideoMeetingJoin(meetingUuid, {
-          jitsiParticipantId: participantIdRef.current || "",
-        });
-      } catch {
-        /* посещаемость не должна ломать конференцию */
-      }
+      attendanceTracker.cancelPendingLeave();
     } catch (err) {
       if (initGenRef.current !== initGen || abort.signal.aborted || err?.code === "jitsi_aborted") {
         jitsiInitRef.current = false;
@@ -689,7 +646,7 @@ export default function VideoMeetingPage() {
       }
       setPageState("error");
     }
-  }, [cancelPendingLeave, disposeApi, meetingUuid]);
+  }, [attendanceTracker, disposeApi, meetingUuid]);
 
   /** Первый вход — спросить про камеру; повторный (док/материалы) — взять сохранённый выбор. */
   const requestJoin = useCallback(async ({ skipCameraPrompt = false } = {}) => {
@@ -995,10 +952,15 @@ export default function VideoMeetingPage() {
   }, [detail?.canManage, meetingUuid, pageState, presented?.kind, presented?.homeworkId, presented?.presentedAt]);
 
   useEffect(() => {
-    const onPageHide = () => sendLeave(true);
+    const onPageHide = () => attendanceTracker.onPageHide();
+    const onBeforeUnload = () => attendanceTracker.onPageHide();
     window.addEventListener("pagehide", onPageHide);
-    return () => window.removeEventListener("pagehide", onPageHide);
-  }, [sendLeave]);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, [attendanceTracker]);
 
   useEffect(() => {
     if (pageState !== "live") return undefined;
@@ -1054,7 +1016,6 @@ export default function VideoMeetingPage() {
       setPageState("finished");
       setFinishConfirm(false);
       await loadFinishedAttendance(true);
-      if (isModerator && event?.id) openLessonSummaryTab(event.id, { fromMeeting: true });
     } catch (err) {
       setError(err?.message || "Не удалось завершить урок");
     } finally {
@@ -2291,10 +2252,10 @@ export default function VideoMeetingPage() {
               className="video-lesson-btn video-lesson-btn--danger"
               disabled={finishing}
               onClick={() => setFinishConfirm(true)}
-              aria-label="Завершить урок"
+              aria-label="Завершить звонок"
             >
               {finishing ? "…" : (
-                <>Завершить<span className="video-lesson-btn__label-tail"> урок</span></>
+                <>Завершить<span className="video-lesson-btn__label-tail"> звонок</span></>
               )}
             </button>
           ) : null}
@@ -2688,7 +2649,9 @@ export default function VideoMeetingPage() {
 
           {pageState === "finished" || attendance != null ? (
             <div className="video-lesson-state" style={{ position: "relative" }}>
-              <p className="video-lesson-state__title">Урок завершён</p>
+              <p className="video-lesson-state__title">
+                {canManage ? "Видеозвонок завершён" : "Урок завершён"}
+              </p>
               <p className="video-lesson-state__text">
                 {canManage
                   ? [
@@ -2728,13 +2691,21 @@ export default function VideoMeetingPage() {
                 </div>
               ) : null}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", marginTop: 12 }}>
+                {canManage && event?.id && lessonJournalFromMeetingPath(event.id) ? (
+                  <Link
+                    to={lessonJournalFromMeetingPath(event.id)}
+                    className="video-lesson-btn video-lesson-btn--primary"
+                  >
+                    Завершить занятие и заполнить журнал
+                  </Link>
+                ) : null}
                 {canManage && event?.id ? (
                   <button
                     type="button"
-                    className="video-lesson-btn video-lesson-btn--primary"
+                    className="video-lesson-btn"
                     onClick={() => openLessonSummaryTab(event.id, { fromMeeting: true })}
                   >
-                    Заполнить результаты занятия · около 1 минуты
+                    Журнал в новой вкладке
                   </button>
                 ) : null}
                 {canManage ? (
@@ -2986,9 +2957,9 @@ export default function VideoMeetingPage() {
 
       <ConfirmActionModal
         open={finishConfirm}
-        title="Завершить урок?"
-        text="Все участники будут отключены от встречи. Это действие нельзя отменить."
-        confirmLabel="Завершить"
+        title="Завершить видеозвонок?"
+        text="Все участники будут отключены от встречи. Это не отмечает занятие как проведённое — журнал нужно заполнить отдельно."
+        confirmLabel="Завершить звонок"
         danger
         loading={finishing}
         onClose={() => {

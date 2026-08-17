@@ -249,6 +249,7 @@ export function attachConferencePresence(api, {
   onPresence,
   onParticipantCount,
   onJoined,
+  onLeft,
   onBecameModerator,
   onMediaWarning,
   diagnostics = {},
@@ -371,6 +372,7 @@ export function attachConferencePresence(api, {
       participantId: store.localId,
     });
     if (!disposed && joinedOnce) {
+      onLeft?.({ id: store.localId });
       void reconcile("videoConferenceLeft");
     }
   });

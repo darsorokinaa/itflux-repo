@@ -4,7 +4,6 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   fetchVideoMeetingJoinConfig,
   fetchVideoMeetingStatus,
-  recordVideoMeetingJoin,
 } from "../../utils/cabinetAuth";
 import {
   createJitsiMeetSession,
@@ -13,6 +12,7 @@ import {
   resolveJitsiDisplayName,
   setMeetingMicEnabled,
 } from "../jitsiMeet";
+import { getMeetingAttendanceTracker } from "../meetingAttendance";
 import {
   claimMeetingCall,
   getMeetingCallOwner,
@@ -101,6 +101,7 @@ export default function MeetingCallDock() {
     let returning = false;
     setError("");
     ownerIdRef.current = newOwnerId();
+    const attendance = getMeetingAttendanceTracker(meetingUuid);
 
     const dispose = () => {
       initRef.current = false;
@@ -208,6 +209,7 @@ export default function MeetingCallDock() {
       setCallElsewhere(false);
       try {
         holdingCallRef.current = true;
+        attendance.cancelPendingLeave();
         const config = await fetchVideoMeetingJoinConfig(meetingUuid);
         if (cancelled) return;
         if (config?.meeting?.status && config.meeting.status !== "live") {
@@ -243,6 +245,12 @@ export default function MeetingCallDock() {
           onAudioMuteStatusChanged: (payload) => {
             setMeetingMicEnabled(meetingUuid, !payload?.muted);
           },
+          onJoined: (event) => {
+            void attendance.onVerifiedJoin(event);
+          },
+          onLeft: () => {
+            attendance.onConferenceLeft();
+          },
         });
         if (cancelled) {
           try {
@@ -250,15 +258,11 @@ export default function MeetingCallDock() {
           } catch {
             /* ignore */
           }
+          attendance.onUnmount();
           return;
         }
         apiRef.current = wrapped;
         claimMeetingCall(meetingUuid, ownerIdRef.current);
-        try {
-          await recordVideoMeetingJoin(meetingUuid, { jitsiParticipantId: "" });
-        } catch {
-          /* ignore */
-        }
       } catch (err) {
         if (!cancelled) {
           initRef.current = false;
@@ -268,6 +272,11 @@ export default function MeetingCallDock() {
       }
     };
 
+    const onPageHide = () => attendance.onPageHide();
+    const onBeforeUnload = () => attendance.onPageHide();
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("beforeunload", onBeforeUnload);
+
     const timer = window.setTimeout(() => {
       void start();
     }, 80);
@@ -276,8 +285,11 @@ export default function MeetingCallDock() {
       cancelled = true;
       window.clearTimeout(timer);
       window.clearInterval(pollId);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("beforeunload", onBeforeUnload);
       unsub();
       dispose();
+      attendance.onUnmount();
       releaseMeetingCall(meetingUuid, ownerIdRef.current);
     };
   }, [inIframe, location.pathname, location.search, meetingUuid, navigate, onMeetingPage]);

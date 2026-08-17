@@ -683,6 +683,7 @@ class LessonPlanCatalogTests(TestCase):
             {
                 "title": "Общий шаблон",
                 "direction": "oge",
+                "subject": "informatics",
                 "status": "draft",
                 "is_public": True,
             },
@@ -730,6 +731,7 @@ class LessonPlanCatalogTests(TestCase):
             {
                 "title": "Чужой шаблон",
                 "direction": "oge",
+                "subject": "informatics",
                 "is_public": True,
             },
             format="json",
@@ -1838,6 +1840,70 @@ class HomeworkSubmissionApiTests(TestCase):
         submission = HomeworkSubmission.objects.get(homework=hw, student=self.student)
         self.assertEqual(submission.file_attachments.count(), 0)
 
+    def test_student_retry_same_text_is_idempotent(self):
+        from rest_framework.test import APIClient
+        from Cabinet.models import HomeworkSubmission
+
+        hw = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="ДЗ: Текст",
+            status="assigned",
+        )
+        client = APIClient()
+        client.force_login(self.student_user)
+        first = client.post(
+            f"/api/cabinet/student/assignments/{hw.pk}/",
+            {"answer_text": "Ответ один"},
+            format="multipart",
+        )
+        self.assertEqual(first.status_code, 200, first.content)
+        second = client.post(
+            f"/api/cabinet/student/assignments/{hw.pk}/",
+            {"answer_text": "Ответ один"},
+            format="multipart",
+        )
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertTrue(second.json().get("already_submitted"))
+        self.assertEqual(
+            HomeworkSubmission.objects.filter(homework=hw, student=self.student).count(),
+            1,
+        )
+        submission = HomeworkSubmission.objects.get(homework=hw, student=self.student)
+        self.assertEqual(submission.answer_text, "Ответ один")
+
+    def test_student_new_text_updates_same_submission(self):
+        from rest_framework.test import APIClient
+        from Cabinet.models import HomeworkSubmission
+
+        hw = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="ДЗ: Текст 2",
+            status="assigned",
+        )
+        client = APIClient()
+        client.force_login(self.student_user)
+        first = client.post(
+            f"/api/cabinet/student/assignments/{hw.pk}/",
+            {"answer_text": "Старый"},
+            format="multipart",
+        )
+        self.assertEqual(first.status_code, 200, first.content)
+        second = client.post(
+            f"/api/cabinet/student/assignments/{hw.pk}/",
+            {"answer_text": "Новый ответ после сбоя сети"},
+            format="multipart",
+        )
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertFalse(second.json().get("already_submitted"))
+        self.assertEqual(
+            HomeworkSubmission.objects.filter(homework=hw, student=self.student).count(),
+            1,
+        )
+        submission = HomeworkSubmission.objects.get(homework=hw, student=self.student)
+        self.assertEqual(submission.answer_text, "Новый ответ после сбоя сети")
+
 
 class ReviewApiTests(TestCase):
     def setUp(self):
@@ -2756,16 +2822,13 @@ class PlatformVariantHomeworkSubmitChainTests(TestCase):
         detail = other.get(f"/api/cabinet/review/{review.pk}/")
         self.assertIn(detail.status_code, (403, 404))
 
-    def test_resubmit_is_idempotent(self):
+    def test_resubmit_same_payload_is_idempotent(self):
         from Cabinet.models import HomeworkSubmission, ReviewItem
 
         homework = self._assign_platform_variant()
         first = self._submit_variant(homework)
         self.assertEqual(first.status_code, 200, first.content)
-        second = self._submit_variant(
-            homework,
-            result={"by_task_id": {"1": "99"}, "checked": {"1": False}},
-        )
+        second = self._submit_variant(homework)
         self.assertEqual(second.status_code, 200, second.content)
         self.assertTrue(second.json().get("already_submitted"))
 
@@ -2785,6 +2848,35 @@ class PlatformVariantHomeworkSubmitChainTests(TestCase):
         )
         submission = HomeworkSubmission.objects.get(homework=homework, student=self.student)
         self.assertEqual(submission.result_payload["by_task_id"]["1"], "42")
+
+    def test_resubmit_new_payload_updates_same_row(self):
+        from Cabinet.models import HomeworkSubmission, ReviewItem
+
+        homework = self._assign_platform_variant()
+        first = self._submit_variant(homework)
+        self.assertEqual(first.status_code, 200, first.content)
+        second = self._submit_variant(
+            homework,
+            result={"by_task_id": {"1": "99"}, "checked": {"1": False}},
+        )
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertFalse(second.json().get("already_submitted"))
+        self.assertEqual(
+            HomeworkSubmission.objects.filter(homework=homework, student=self.student).count(),
+            1,
+        )
+        self.assertEqual(
+            ReviewItem.objects.filter(
+                teacher=self.teacher,
+                source_type="homework",
+                source_id=HomeworkSubmission.objects.get(
+                    homework=homework, student=self.student
+                ).pk,
+            ).count(),
+            1,
+        )
+        submission = HomeworkSubmission.objects.get(homework=homework, student=self.student)
+        self.assertEqual(submission.result_payload["by_task_id"]["1"], "99")
 
     def test_submit_binds_correct_subject_among_several(self):
         homework = self._assign_platform_variant(student_subject=self.subject_math)

@@ -479,6 +479,10 @@ def _resolve_access(request, homework_id: int):
         student = students.first()
         if not student:
             return None, None, Response({"detail": "Нет доступа к заданию."}, status=status.HTTP_403_FORBIDDEN)
+        # Live-вариант с урока специально исключён из очереди ДЗ, но ученик
+        # на занятии должен сохранять ответы по показанному заданию.
+        if is_live_meeting_homework(homework):
+            return homework, student, None
         if not _homework_qs(students).filter(pk=homework_id).exists():
             return None, None, Response({"detail": "Нет доступа к заданию."}, status=status.HTTP_403_FORBIDDEN)
         return homework, student, None
@@ -491,25 +495,12 @@ def _resolve_access(request, homework_id: int):
 
 
 def _get_or_create_submission(homework: Homework, student: Student) -> HomeworkSubmission:
-    qs = HomeworkSubmission.objects.filter(homework=homework, student=student).order_by(
-        "-submitted_at", "-id"
-    )
-    existing = qs.first()
-    if existing is not None:
-        return existing
-    try:
-        submission, _ = HomeworkSubmission.objects.get_or_create(
-            homework=homework,
-            student=student,
-            defaults={},
-        )
-        return submission
-    except HomeworkSubmission.MultipleObjectsReturned:
-        return (
-            HomeworkSubmission.objects.filter(homework=homework, student=student)
-            .order_by("-submitted_at", "-id")
-            .first()
-        )
+    from django.db import transaction
+
+    from .homework_submit import get_or_create_locked_submission
+
+    with transaction.atomic():
+        return get_or_create_locked_submission(homework, student)
 
 
 def _safe_upload_filename(name: str) -> str:
@@ -915,7 +906,8 @@ class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
             variant_id = extract_variant_id(task.description)
             if variant_id:
                 break
-        merged = recompute_variant_checked(merged, variant_id) or merged
+        if not is_live_meeting_homework(homework):
+            merged = recompute_variant_checked(merged, variant_id) or merged
         submission.result_payload = merged
         computed = compute_score_percent(merged)
         if computed is not None:
@@ -1080,16 +1072,13 @@ class HomeworkAssignmentUploadAnswerView(HomeworkAssignmentBaseView):
 
 class HomeworkAssignmentSubmitView(HomeworkAssignmentBaseView):
     def post(self, request, homework_id: int):
-        from django.db import transaction
-
         homework, student, err = self.resolve(request, homework_id)
         if err:
             return err
         result = _parse_result_body(request)
 
-        submission = _get_or_create_submission(homework, student)
-        old_status = submission.status
-        old_submitted_at = submission.submitted_at
+        from .homework_submit import HomeworkSubmitError, submit_homework_for_student
+
         teacher = homework.teacher
         variant_id = None
         for task in homework.tasks.filter(is_active=True):
@@ -1097,23 +1086,36 @@ class HomeworkAssignmentSubmitView(HomeworkAssignmentBaseView):
             if variant_id:
                 break
 
-        if submission.status == SubmissionStatus.CHECKED:
+        try:
+            outcome = submit_homework_for_student(
+                homework=homework,
+                student=student,
+                result=result,
+            )
+        except HomeworkSubmitError as exc:
             logger.info(
-                "homework.submit rejected checked student_id=%s homework_id=%s "
-                "submission_id=%s teacher_id=%s variant_id=%s",
+                "homework.submit rejected code=%s student_id=%s homework_id=%s teacher_id=%s",
+                exc.code,
                 getattr(student, "pk", None),
                 homework_id,
-                submission.pk,
                 getattr(teacher, "pk", None),
-                variant_id,
+            )
+            return Response({"error": exc.message, "code": exc.code}, status=exc.status)
+        except Exception:
+            logger.exception(
+                "homework.submit failed student_id=%s homework_id=%s teacher_id=%s",
+                getattr(student, "pk", None),
+                homework_id,
+                getattr(teacher, "pk", None),
             )
             return Response(
-                {"error": "Работа уже проверена."},
-                status=status.HTTP_403_FORBIDDEN,
+                {"error": "Не удалось сохранить отправку. Попробуйте ещё раз."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-        # Идемпотентность: повторная отправка возвращает уже сданную работу.
-        if submission.submitted_at and submission.status == SubmissionStatus.SUBMITTED:
-            review_item = _ensure_review_item(submission)
+
+        submission = outcome.submission
+        review_item = outcome.review_item
+        if outcome.already_submitted:
             logger.info(
                 "homework.submit idempotent student_id=%s homework_id=%s "
                 "submission_id=%s teacher_id=%s variant_id=%s review_id=%s",
@@ -1128,41 +1130,10 @@ class HomeworkAssignmentSubmitView(HomeworkAssignmentBaseView):
                 "ok": True,
                 "status": "submitted",
                 "already_submitted": True,
-                "submitted_at": submission.submitted_at.isoformat(),
+                "submitted_at": submission.submitted_at.isoformat() if submission.submitted_at else None,
                 "submission_id": submission.pk,
                 "review_id": getattr(review_item, "pk", None),
             })
-
-        try:
-            with transaction.atomic():
-                from .homework_attempts import maybe_snapshot_before_resubmit
-
-                maybe_snapshot_before_resubmit(submission)
-                if result is not None:
-                    merged = _merge_result_payload(submission.result_payload, result)
-                    submission.result_payload = merged
-                    computed = compute_score_percent(merged)
-                    if computed is not None:
-                        submission.score = computed
-                submission.status = SubmissionStatus.SUBMITTED
-                submission.submitted_at = timezone.now()
-                submission.save()
-                review_item = _ensure_review_item(submission)
-        except Exception:
-            logger.exception(
-                "homework.submit failed student_id=%s homework_id=%s "
-                "submission_id=%s teacher_id=%s variant_id=%s old_status=%s",
-                getattr(student, "pk", None),
-                homework_id,
-                submission.pk,
-                getattr(teacher, "pk", None),
-                variant_id,
-                old_status,
-            )
-            return Response(
-                {"error": "Не удалось сохранить отправку. Попробуйте ещё раз."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
 
         queue_reason = explain_homework_missing_from_teacher_queue(submission)
         if queue_reason != "ok":
@@ -1177,25 +1148,15 @@ class HomeworkAssignmentSubmitView(HomeworkAssignmentBaseView):
                 queue_reason,
             )
 
-        _notify_homework_submitted(
-            submission,
-            review_item,
-            is_resubmit=old_status in (SubmissionStatus.RETURNED, SubmissionStatus.NEEDS_REVISION),
-        )
         logger.info(
             "homework.submit ok student_id=%s homework_id=%s submission_id=%s "
-            "attempt_id=%s teacher_id=%s variant_id=%s old_status=%s new_status=%s "
-            "old_submitted_at=%s new_submitted_at=%s review_id=%s score=%s",
+            "teacher_id=%s variant_id=%s resubmit=%s review_id=%s score=%s",
             getattr(student, "pk", None),
             homework_id,
             submission.pk,
-            submission.pk,
             getattr(teacher, "pk", None),
             variant_id,
-            old_status,
-            submission.status,
-            old_submitted_at.isoformat() if old_submitted_at else None,
-            submission.submitted_at.isoformat() if submission.submitted_at else None,
+            outcome.is_resubmit,
             getattr(review_item, "pk", None),
             submission.score,
         )

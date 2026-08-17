@@ -43,6 +43,7 @@ from .journal_service import (
     bulk_mark_present,
     complete_journal,
     copy_scores_from_previous,
+    create_offline_journal,
     dashboard_attention,
     ensure_default_criteria,
     ensure_default_tags,
@@ -213,9 +214,40 @@ class JournalLessonsListView(APIView):
                     "status": j.status,
                     "fill_status": fill_status_for_journal(j),
                     "attendance_summary": attendance_summary,
+                    "format": event.format if event else None,
+                    "is_offline": bool(event and event.format == ScheduleEvent.Format.OFFLINE),
                 }
             )
         return Response({"results": items, "count": len(items)})
+
+    def post(self, request):
+        try:
+            journal = create_offline_journal(
+                request.user,
+                request.data if isinstance(request.data, dict) else {},
+            )
+        except JournalError as e:
+            return _err(e)
+        journal = (
+            LessonJournal.objects.select_related(
+                "schedule_event",
+                "group",
+                "student",
+                "homework",
+                "previous_homework",
+                "assessment_template",
+            )
+            .prefetch_related(
+                Prefetch(
+                    "student_records",
+                    queryset=StudentLessonRecord.objects.select_related("student").prefetch_related(
+                        "criterion_scores__criterion", "tags"
+                    ),
+                )
+            )
+            .get(pk=journal.pk)
+        )
+        return Response(serialize_journal(journal), status=status.HTTP_201_CREATED)
 
 
 class JournalLessonDetailView(APIView):
@@ -489,6 +521,11 @@ class JournalStudentView(APIView):
                         "next_lesson_plan": r.journal.next_lesson_plan,
                         "recommendations": r.journal.recommendations,
                         "status": r.journal.status,
+                        "is_offline": bool(
+                            r.journal.schedule_event_id
+                            and r.journal.schedule_event
+                            and r.journal.schedule_event.format == ScheduleEvent.Format.OFFLINE
+                        ),
                         "criterion_scores": serialize_record(r)["criterion_scores"],
                     }
                     for r in records
@@ -638,6 +675,11 @@ class JournalGroupView(APIView):
                         "actual_topic": j.actual_topic,
                         "fill_status": fill_status_for_journal(j),
                         "status": j.status,
+                        "is_offline": bool(
+                            j.schedule_event_id
+                            and j.schedule_event
+                            and j.schedule_event.format == ScheduleEvent.Format.OFFLINE
+                        ),
                         "homework_id": j.homework_id,
                         "lesson_summary": j.lesson_summary,
                         "material_covered": j.material_covered,

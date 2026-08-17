@@ -591,7 +591,7 @@ export function compactLessonBillingLabel(badge) {
   const status = badge.financial_status;
   const delivery = badge.delivery_status;
   const amount = Number(badge.amount || 0);
-  const isDebt = badge.is_debt === true || (amount > 0 && (status === "awaiting_payment" || status === "partially_paid"));
+  const isDebt = badge.is_debt === true;
   if (delivery === "rescheduled" && !isDebt) return "Перенесено";
   if ((delivery === "cancelled_by_student" || delivery === "cancelled_by_teacher") && !isDebt) {
     return "Отменено";
@@ -605,11 +605,12 @@ export function compactLessonBillingLabel(badge) {
     return badge.label?.startsWith("Абонемент") ? badge.label : "Оплачено из абонемента";
   }
   if (status === "awaiting_payment") {
-    if (amount > 0) return `К оплате · ${formatMoney(amount, badge.currency)}`;
-    return "К оплате";
+    if (isDebt && amount > 0) return `К оплате · ${formatMoney(amount, badge.currency)}`;
+    if (isDebt) return "К оплате";
+    return badge.label || financialStatusLabel(status);
   }
   if (status === "partially_paid") {
-    if (amount > 0) return `Частично оплачен · долг ${formatMoney(amount, badge.currency)}`;
+    if (isDebt && amount > 0) return `Частично оплачен · долг ${formatMoney(amount, badge.currency)}`;
     return "Частично оплачен";
   }
   if (status === "not_charged") {

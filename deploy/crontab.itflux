@@ -28,5 +28,8 @@ LOG=/var/log/itflux
 20 */1 * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh process_subscriptions >>/var/log/itflux/cron-subscriptions.log 2>&1
 15 9 * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh notify_subscription_expiring --days 7 3 1 >>/var/log/itflux/cron-sub-expiring.log 2>&1
 
+# Watchdog зависших LIVE-видеокомнат (не проводит занятие, не трогает биллинг)
+*/15 * * * * APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh expire_stale_live_meetings --apply >>/var/log/itflux/cron-stale-meetings.log 2>&1
+
 # Очистка анонимных счётчиков
 0 3 * * 0 APP_DIR=/opt/itfluxacademy/itflux /opt/itfluxacademy/itflux/deploy/run_management.sh cleanup_anonymous_usage >>/var/log/itflux/cron-anon-cleanup.log 2>&1

@@ -271,18 +271,19 @@ def api_register(request):
 
     login(request, user)
     invite_result = None
+    invite_error = None
     if invite_token:
         from .invitations import InvitationError, accept_student_invitation
 
         try:
             invite_result = accept_student_invitation(invite_token, user)
         except InvitationError as exc:
+            invite_error = exc
             logger.warning(
                 "register invite accept failed user=%s code=%s",
                 user.id,
                 exc.code,
             )
-            invite_result = None
 
     parent_invite_result = None
     if parent_invite_token:
@@ -320,11 +321,20 @@ def api_register(request):
         registration_promo = apply_registration_promo(user)
 
     payload = {"ok": True, "user": _profile_payload(user)}
-    if invite_result:
-        student, invitation = invite_result
-        payload["invite_accepted"] = True
-        payload["student_id"] = student.id
-        payload["invite"] = invite_accept_api_payload(student, invitation, user)
+    if invite_token:
+        if invite_result:
+            student, invitation = invite_result
+            payload["invite_accepted"] = True
+            payload["student_id"] = student.id
+            payload["invite"] = invite_accept_api_payload(student, invitation, user)
+        else:
+            payload["invite_accepted"] = False
+            payload["invite_error"] = (
+                str(invite_error) if invite_error else "Не удалось принять приглашение"
+            )
+            payload["invite_error_code"] = (
+                invite_error.code if invite_error else "invite_accept_failed"
+            )
     if parent_invite_result:
         payload["parent_invite_accepted"] = True
         payload["redirect"] = "/cabinet/parent"
@@ -552,8 +562,8 @@ def api_telemost_start(request):
 
     event_title = (payload.get("title") or "").strip()
     event_topic = (payload.get("topic") or "").strip()
-    starts_at = _parse_schedule_datetime(payload.get("starts_at"))
-    ends_at = _parse_schedule_datetime(payload.get("ends_at"))
+    starts_at = _parse_schedule_datetime(payload.get("starts_at"), teacher=request.user)
+    ends_at = _parse_schedule_datetime(payload.get("ends_at"), teacher=request.user)
     if event_id and (not starts_at or not ends_at or not event_title):
         local_event = _get_schedule_event(request.user, event_id)
         if local_event:
@@ -631,17 +641,15 @@ def _get_schedule_event(user, event_id):
     return ScheduleEvent.objects.select_related("series").filter(owner=user, pk=pk).first()
 
 
-def _parse_schedule_datetime(value):
-    if not value:
-        return None
-    text = str(value).strip()
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if timezone.is_naive(parsed):
-        return timezone.make_aware(parsed, timezone.get_current_timezone())
-    return parsed
+def _parse_schedule_datetime(value, *, tz_name=None, event=None, teacher=None):
+    from .schedule_service import coerce_schedule_datetime
+
+    return coerce_schedule_datetime(
+        value,
+        tz_name=tz_name,
+        event=event,
+        teacher=teacher,
+    )
 
 
 def _schedule_times_equal(left, right):
@@ -689,8 +697,9 @@ def api_schedule_create(request):
         return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
 
     title = (data.get("title") or "").strip()
-    starts_at = _parse_schedule_datetime(data.get("starts_at"))
-    ends_at = _parse_schedule_datetime(data.get("ends_at"))
+    tz_name = (data.get("timezone") or "").strip() or None
+    starts_at = _parse_schedule_datetime(data.get("starts_at"), tz_name=tz_name, teacher=request.user)
+    ends_at = _parse_schedule_datetime(data.get("ends_at"), tz_name=tz_name, teacher=request.user)
     if not title:
         return JsonResponse({"ok": False, "error": "Укажите название урока."}, status=400)
     if not starts_at or not ends_at:
@@ -729,7 +738,7 @@ def api_schedule_create(request):
 
     from datetime import datetime as dt
 
-    from .schedule_service import check_conflicts, create_series, create_single_event
+    from .schedule_service import check_conflicts, create_series, create_single_event, resolve_schedule_timezone
     from .video_meeting_service import get_or_create_meeting_for_event
 
     recurrence_type = (data.get("recurrence_type") or data.get("repeat_type") or "none").strip()
@@ -768,7 +777,8 @@ def api_schedule_create(request):
     student_subject_id = data.get("student_subject_id") or data.get("student_subject")
 
     if recurrence_type and recurrence_type != "none":
-        start_date = starts_at.date()
+        zone = resolve_schedule_timezone(tz_name, teacher=request.user)
+        start_date = starts_at.astimezone(zone).date()
         series_data = {
             "title": title,
             "description": (data.get("description") or "").strip(),
@@ -777,10 +787,10 @@ def api_schedule_create(request):
             "lesson": data.get("lesson_id") or data.get("lesson"),
             "lesson_plan_item": data.get("lesson_plan_item_id") or data.get("lesson_plan_item"),
             "homework": data.get("homework_id") or data.get("homework"),
-            "timezone": data.get("timezone") or "Europe/Moscow",
+            "timezone": data.get("timezone") or zone.key,
             "start_date": start_date,
-            "start_time": starts_at.time(),
-            "end_time": ends_at.time(),
+            "start_time": starts_at.astimezone(zone).time(),
+            "end_time": ends_at.astimezone(zone).time(),
             "recurrence_type": recurrence_type,
             "recurrence_interval": int(data.get("recurrence_interval") or data.get("repeat_interval") or 1),
             "recurrence_weekdays": data.get("recurrence_weekdays") or data.get("repeat_weekdays") or [],
@@ -892,12 +902,22 @@ def api_schedule_update(request, event_id):
         new_start = original_start
         new_end = original_end
         if "starts_at" in data:
-            parsed = coerce_schedule_datetime(data.get("starts_at"))
+            parsed = coerce_schedule_datetime(
+                data.get("starts_at"),
+                event=event,
+                teacher=request.user,
+                tz_name=data.get("timezone"),
+            )
             if parsed is None:
                 return JsonResponse({"ok": False, "error": "Некорректная дата или время начала."}, status=400)
             new_start = parsed
         if "ends_at" in data:
-            parsed = coerce_schedule_datetime(data.get("ends_at"))
+            parsed = coerce_schedule_datetime(
+                data.get("ends_at"),
+                event=event,
+                teacher=request.user,
+                tz_name=data.get("timezone"),
+            )
             if parsed is None:
                 return JsonResponse({"ok": False, "error": "Некорректная дата или время окончания."}, status=400)
             new_end = parsed
@@ -1018,8 +1038,16 @@ def api_schedule_check_conflicts(request):
     if data is None:
         return JsonResponse({"ok": False, "error": "Некорректный JSON"}, status=400)
 
-    starts_at = _parse_schedule_datetime(data.get("starts_at"))
-    ends_at = _parse_schedule_datetime(data.get("ends_at"))
+    starts_at = _parse_schedule_datetime(
+        data.get("starts_at"),
+        tz_name=data.get("timezone"),
+        teacher=request.user,
+    )
+    ends_at = _parse_schedule_datetime(
+        data.get("ends_at"),
+        tz_name=data.get("timezone"),
+        teacher=request.user,
+    )
     if not starts_at or not ends_at:
         return JsonResponse({"ok": False, "error": "Укажите starts_at и ends_at."}, status=400)
 

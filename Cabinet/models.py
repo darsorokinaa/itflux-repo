@@ -1707,6 +1707,12 @@ class HomeworkSubmission(models.Model):
         verbose_name = "Сдача ДЗ"
         verbose_name_plural = "Сдачи ДЗ"
         ordering = ["-submitted_at", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["homework", "student"],
+                name="cabinet_unique_homework_student_submission",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.student} — {self.homework.title}"
@@ -4214,6 +4220,7 @@ class InteractiveBoardAsset(models.Model):
     file = models.FileField("Файл", upload_to="cabinet/boards/%Y/%m/")
     mime_type = models.CharField("MIME-тип", max_length=64, blank=True)
     original_name = models.CharField("Исходное имя", max_length=255, blank=True)
+    content_sha256 = models.CharField("SHA-256 содержимого", max_length=64, blank=True, default="", db_index=True)
     size_bytes = models.PositiveIntegerField("Размер", default=0)
     created_by = models.ForeignKey(
         User,

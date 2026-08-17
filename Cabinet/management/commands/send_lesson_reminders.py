@@ -7,6 +7,12 @@ from Cabinet.models import EventReminderLog, ScheduleEvent
 from Cabinet.notifications import NotificationService, get_or_create_preferences
 
 
+ACTIVE_REMINDER_STATUSES = (
+    ScheduleEvent.Status.PLANNED,
+    ScheduleEvent.Status.MOVED,
+)
+
+
 class Command(BaseCommand):
     help = "Send lesson reminders for upcoming schedule events (24h / 1h / 10m by user prefs)"
 
@@ -16,7 +22,7 @@ class Command(BaseCommand):
         # Смотрим события в ближайшие 25 часов — покрывает 24ч-напоминание.
         # PLANNED и MOVED: после переноса урок остаётся актуальным.
         events = ScheduleEvent.objects.filter(
-            status__in=[ScheduleEvent.Status.PLANNED, ScheduleEvent.Status.MOVED],
+            status__in=ACTIVE_REMINDER_STATUSES,
             starts_at__gt=now,
             starts_at__lte=now + timedelta(hours=25),
         ).prefetch_related(
@@ -27,6 +33,13 @@ class Command(BaseCommand):
         )
 
         for event in events:
+            # Финальная проверка актуального состояния (отмена / перенос после выборки).
+            event.refresh_from_db(fields=["status", "starts_at", "timezone"])
+            if event.status not in ACTIVE_REMINDER_STATUSES:
+                continue
+            if event.starts_at <= now:
+                continue
+
             for participant in event.participants.filter(notification_enabled=True):
                 user = participant.user or (
                     participant.student.user if participant.student else None
@@ -39,12 +52,10 @@ class Command(BaseCommand):
                     continue
 
                 for minutes in minutes_list:
-                    # Окно ±2 минуты вокруг целевого момента (cron каждые 5 мин)
                     window_start = event.starts_at - timedelta(minutes=minutes + 2)
                     window_end = event.starts_at - timedelta(minutes=max(0, minutes - 2))
                     if not (window_start <= now <= window_end):
                         continue
-                    # Дополнительная защита: starts_at ещё в будущем
                     if event.starts_at <= now:
                         continue
                     if EventReminderLog.objects.filter(

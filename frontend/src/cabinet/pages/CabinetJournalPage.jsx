@@ -7,6 +7,7 @@ import {
   fetchJournalStudentErrorsSummary,
   fetchStudents,
   normalizeCabinetList,
+  createOfflineJournalLesson,
 } from "../../utils/cabinetAuth";
 import JournalAttentionBlock, {
   buildJournalAttentionItems,
@@ -31,6 +32,111 @@ function initialsFromName(name) {
   if (!parts.length) return "?";
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return `${parts[0][0] || ""}${parts[parts.length - 1][0] || ""}`.toUpperCase();
+}
+
+function todayIsoDate() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function OfflineLessonForm({ studentId, groupId, onCreated }) {
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState(todayIsoDate);
+  const [time, setTime] = useState("12:00");
+  const [duration, setDuration] = useState(60);
+  const [topic, setTopic] = useState("");
+  const [summary, setSummary] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  if (!studentId && !groupId) return null;
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const created = await createOfflineJournalLesson({
+        student_id: studentId || undefined,
+        group_id: groupId || undefined,
+        lesson_date: date,
+        starts_time: time,
+        duration_minutes: Number(duration) || 60,
+        actual_topic: topic,
+        lesson_summary: summary,
+      });
+      setTopic("");
+      setSummary("");
+      setOpen(false);
+      onCreated?.(created);
+    } catch (err) {
+      setError(err?.message || "Не удалось добавить занятие");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="jg-offline-form">
+      {!open ? (
+        <button type="button" className="jg-btn jg-btn--secondary jg-btn--sm" onClick={() => setOpen(true)}>
+          Занятие вне платформы
+        </button>
+      ) : (
+        <form className="jg-offline-form__card" onSubmit={submit}>
+          <h3>Занятие вне платформы</h3>
+          <p>Урок прошёл без видеозвонка и без записи в расписании. Биллинг создаётся только после завершения журнала.</p>
+          <div className="jg-offline-form__grid">
+            <label>
+              Дата
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+            </label>
+            <label>
+              Время
+              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} required />
+            </label>
+            <label>
+              Минуты
+              <input
+                type="number"
+                min={1}
+                max={1440}
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+              />
+            </label>
+          </div>
+          <label>
+            Фактическая тема
+            <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Что прошли на уроке" />
+          </label>
+          <label>
+            Заметки
+            <textarea rows={2} value={summary} onChange={(e) => setSummary(e.target.value)} />
+          </label>
+          {error ? <p className="jg-offline-form__error">{error}</p> : null}
+          <div className="jg-offline-form__actions">
+            <button type="submit" className="jg-btn jg-btn--primary jg-btn--sm" disabled={saving}>
+              {saving ? "Сохранение…" : "Добавить в журнал"}
+            </button>
+            <button
+              type="button"
+              className="jg-btn jg-btn--ghost jg-btn--sm"
+              onClick={() => {
+                setOpen(false);
+                setError("");
+              }}
+            >
+              Отмена
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
+  );
 }
 
 export default function CabinetJournalPage() {
@@ -396,6 +502,16 @@ export default function CabinetJournalPage() {
       ) : (
         <div className="jg-page__content">
           <div ref={lessonsRef}>
+            <OfflineLessonForm
+              studentId={studentId}
+              groupId={groupId}
+              onCreated={(created) => {
+                void loadJournal();
+                if (created?.schedule_event_id) {
+                  openLessonSummaryTab(created.schedule_event_id);
+                }
+              }}
+            />
             <JournalLessonsTable
               scopeType={scopeMode}
               lessons={lessons}

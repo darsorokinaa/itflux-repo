@@ -126,6 +126,7 @@ describe("billingFormat", () => {
       financial_status: "awaiting_payment",
       amount: "1600",
       currency: "RUB",
+      is_debt: true,
     })).toContain("К оплате");
     expect(compactLessonBillingLabel({ financial_status: "needs_decision" })).toBe("Стоимость не задана");
     expect(compactLessonBillingLabel({

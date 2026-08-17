@@ -629,21 +629,9 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
   });
 
   let joined = await joinedWait;
-  // Учитель один в комнате — норма. Не рвём сессию, если Jitsi уже видит локального
-  // участника, а videoConferenceJoined задержался. При not-allowed authFailed=true.
-  if (!joined && !authFailed && !hooks.signal?.aborted) {
-    try {
-      const snap = presence.snapshot?.() || {};
-      const n = api.getNumberOfParticipants?.();
-      if (snap.localParticipant?.id || (typeof n === "number" && n >= 1)) {
-        conferenceJoined = true;
-        joined = true;
-        await presence.reconcile?.("join-timeout-recover");
-      }
-    } catch {
-      /* ignore */
-    }
-  }
+  // participants>=1 и локальный snapshot — не доказательство входа:
+  // getNumberOfParticipants() считает текущего пользователя. Без
+  // videoConferenceJoined не фиксируем join и не открываем сессию.
 
   if (!joined) {
     try {
@@ -759,6 +747,8 @@ export async function createJitsiMeetSession(config, container, hooks = {}) {
     onParticipantCount,
     onPresence,
     onJoined,
+    onLeft,
+    onEmbedded,
     onMediaWarning,
     onBecameModerator,
     onAudioMuteStatusChanged,
@@ -795,6 +785,7 @@ export async function createJitsiMeetSession(config, container, hooks = {}) {
     onParticipantCount,
     onPresence,
     onJoined,
+    onLeft,
     onMediaWarning,
     onBecameModerator,
     onAudioMuteStatusChanged,
@@ -837,7 +828,8 @@ export async function createJitsiMeetSession(config, container, hooks = {}) {
 
     return createJitsiIframeEmbed(enriched, container, {
       onEmbedded: (event) => {
-        onJoined?.(event);
+        // Iframe load ≠ вход в конференцию. Посещаемость не пишем.
+        onEmbedded?.(event);
         onParticipantCount?.(null);
       },
       onMediaWarning,

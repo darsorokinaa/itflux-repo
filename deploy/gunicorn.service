@@ -34,7 +34,7 @@ Environment="DEBUG=false"
 # Несекретные defaults (переопределяются EnvironmentFile при необходимости)
 Environment="CHANNEL_LAYER_BACKEND=inmemory"
 Environment="ITFLUX_PUBLIC_HOME_URL=https://test.itflux.ru"
-Environment="ADMIN_OTP_REQUIRED=false"
+Environment="ADMIN_OTP_REQUIRED=true"
 
 # Обязательные переменные задайте в /etc/itflux/itflux.env:
 #   SECRET_KEY, DJANGO_ALLOWED_HOSTS, PGDATABASE, PGUSER, PGPASSWORD, PGHOST, PGPORT,

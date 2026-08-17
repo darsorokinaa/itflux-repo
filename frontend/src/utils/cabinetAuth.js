@@ -1942,6 +1942,13 @@ export function fetchJournalLessons(params = {}) {
   return cabinetFetch(buildCabinetQueryPath("/journal/lessons/", params), { method: "GET" });
 }
 
+export function createOfflineJournalLesson(payload) {
+  return cabinetFetch("/journal/lessons/", {
+    method: "POST",
+    body: JSON.stringify(payload || {}),
+  });
+}
+
 export function fetchJournalLesson(lessonId) {
   return cabinetFetch(`/journal/lessons/${lessonId}/`, { method: "GET" });
 }

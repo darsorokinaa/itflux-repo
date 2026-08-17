@@ -39,6 +39,7 @@ from .video_meeting_service import (
     get_event_for_teacher,
     get_meeting_by_uuid,
     get_or_create_meeting_for_event,
+    lesson_journal_next_step,
     lesson_meeting_audience,
     lesson_meeting_subject,
     list_attendance_for_teacher,
@@ -49,6 +50,7 @@ from .video_meeting_service import (
     serialize_meeting_compact,
     serialize_meeting_summary,
     start_meeting,
+    touch_live_meeting_activity,
     ui_state_message,
 )
 
@@ -195,6 +197,7 @@ class VideoMeetingStatusView(APIView):
 
         event = meeting.schedule_event
         state = meeting_join_window_state(event, meeting)
+        touch_live_meeting_activity(meeting)
         return Response({
             "uuid": str(meeting.uuid),
             "status": meeting.status,
@@ -274,6 +277,8 @@ class VideoMeetingFinishView(APIView):
                 meeting, event=meeting.schedule_event, user=request.user
             ),
             "meeting": serialize_meeting_compact(meeting),
+            "eventStatus": meeting.schedule_event.status,
+            "nextStep": lesson_journal_next_step(meeting.schedule_event),
         })
 
 

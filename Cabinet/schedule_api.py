@@ -24,6 +24,7 @@ from .schedule_service import (
     cancel_event_with_scope,
     cancel_series,
     check_conflicts,
+    coerce_schedule_datetime,
     create_series,
     create_single_event,
     move_event_with_scope,
@@ -121,6 +122,11 @@ class ScheduleSeriesViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             changed_by=request.user,
             from_date=from_date,
             notify=request.data.get("notify_participants", True),
+            plan_cancel_action=(
+                request.data.get("plan_cancel_action")
+                or request.data.get("planOnCancel")
+                or ""
+            ).strip() or None,
         )
         return Response({"cancelled": len(events)})
 
@@ -428,17 +434,19 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
         event = self.get_object()
         scope = request.data.get("scope")
         notify = request.data.get("notify_participants", True)
-        if scope == "series" and event.series_id:
-            cancel_series(event.series, changed_by=request.user, notify=notify)
-        elif scope == "following" and event.series_id:
-            cancel_series(
-                event.series,
-                changed_by=request.user,
-                from_date=event.starts_at.date(),
-                notify=notify,
-            )
-        else:
-            cancel_event_with_scope(event, changed_by=request.user, scope=scope, notify=notify)
+        plan_cancel_action = (
+            request.data.get("plan_cancel_action")
+            or request.data.get("planOnCancel")
+            or ""
+        ).strip() or None
+        cancel_event_with_scope(
+            event,
+            changed_by=request.user,
+            scope=scope,
+            notify=notify,
+            plan_cancel_action=plan_cancel_action,
+        )
+        event.refresh_from_db()
         return Response(ScheduleEventSerializer(event).data)
 
     @action(detail=True, methods=["post"], url_path="complete")
@@ -490,14 +498,20 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="move")
     def move(self, request, pk=None):
         event = self.get_object()
-        starts_at = request.data.get("starts_at")
-        ends_at = request.data.get("ends_at")
+        starts_at = coerce_schedule_datetime(
+            request.data.get("starts_at"),
+            event=event,
+            teacher=request.user,
+            tz_name=request.data.get("timezone"),
+        )
+        ends_at = coerce_schedule_datetime(
+            request.data.get("ends_at"),
+            event=event,
+            teacher=request.user,
+            tz_name=request.data.get("timezone"),
+        )
         scope = request.data.get("scope")
         notify = request.data.get("notify_participants", True)
-        if isinstance(starts_at, str):
-            starts_at = datetime.fromisoformat(starts_at)
-        if isinstance(ends_at, str):
-            ends_at = datetime.fromisoformat(ends_at)
         move_event_with_scope(
             event,
             starts_at=starts_at,
@@ -543,12 +557,16 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="check-conflicts")
     def check_conflicts_action(self, request):
-        starts_at = request.data.get("starts_at")
-        ends_at = request.data.get("ends_at")
-        if isinstance(starts_at, str):
-            starts_at = datetime.fromisoformat(starts_at)
-        if isinstance(ends_at, str):
-            ends_at = datetime.fromisoformat(ends_at)
+        starts_at = coerce_schedule_datetime(
+            request.data.get("starts_at"),
+            teacher=self.get_teacher(),
+            tz_name=request.data.get("timezone"),
+        )
+        ends_at = coerce_schedule_datetime(
+            request.data.get("ends_at"),
+            teacher=self.get_teacher(),
+            tz_name=request.data.get("timezone"),
+        )
         conflicts = check_conflicts(
             teacher=self.get_teacher(),
             starts_at=starts_at,

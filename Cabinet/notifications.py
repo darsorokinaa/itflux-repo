@@ -1,8 +1,10 @@
 """Schedule-event notification helpers (delegates prefs to notification_dispatch)."""
 
+import hashlib
 import html
 import logging
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from django.utils import timezone
 
@@ -86,80 +88,90 @@ def _dispatch_to_user(
     notifications = []
     resolved_type = event_type or (payload or {}).get("event_type") or ""
 
-    if prefs.in_app_enabled and participant.notification_enabled:
-        if event_key and Notification.objects.filter(
+    def _channel_exists(channel):
+        if not event_key:
+            return False
+        return Notification.objects.filter(
             recipient_user=user,
-            channel=NotificationChannel.IN_APP,
+            channel=channel,
             event_key=event_key,
-        ).exists():
-            return notifications
-        n = _create_notification(
-            user=user,
-            title=title,
-            message=message,
-            channel=NotificationChannel.IN_APP,
-            payload=payload,
-            status=NotificationStatus.SENT,
-            event_type=resolved_type,
-            event_key=event_key,
-        )
-        n.sent_at = timezone.now()
-        n.save(update_fields=["sent_at"])
-        notifications.append(n)
+        ).exists()
+
+    if prefs.in_app_enabled and participant.notification_enabled:
+        if not _channel_exists(NotificationChannel.IN_APP):
+            n = _create_notification(
+                user=user,
+                title=title,
+                message=message,
+                channel=NotificationChannel.IN_APP,
+                payload=payload,
+                status=NotificationStatus.SENT,
+                event_type=resolved_type,
+                event_key=event_key,
+            )
+            n.sent_at = timezone.now()
+            n.save(update_fields=["sent_at"])
+            notifications.append(n)
 
     vk_user_id = (participant.vk_user_id or prefs.vk_user_id or "").strip()
     if prefs.vk_enabled and vk_user_id and participant.notification_enabled:
-        vk_text = vk_formatter() if vk_formatter else message
-        ok, err = VKNotificationService.send_message(vk_user_id, vk_text, payload)
-        status = NotificationStatus.SENT if ok else (
-            NotificationStatus.SKIPPED if err == "VK not configured" else NotificationStatus.FAILED
-        )
-        n = _create_notification(
-            user=user,
-            title=title,
-            message=vk_text,
-            channel=NotificationChannel.VK,
-            payload=payload,
-            status=status,
-        )
-        if ok:
-            n.sent_at = timezone.now()
-            n.save(update_fields=["sent_at"])
-        elif err:
-            n.error_message = err
-            n.save(update_fields=["error_message"])
-        notifications.append(n)
+        if not _channel_exists(NotificationChannel.VK):
+            vk_text = vk_formatter() if vk_formatter else message
+            ok, err = VKNotificationService.send_message(vk_user_id, vk_text, payload)
+            status = NotificationStatus.SENT if ok else (
+                NotificationStatus.SKIPPED if err == "VK not configured" else NotificationStatus.FAILED
+            )
+            n = _create_notification(
+                user=user,
+                title=title,
+                message=vk_text,
+                channel=NotificationChannel.VK,
+                payload=payload,
+                status=status,
+                event_type=resolved_type,
+                event_key=event_key,
+            )
+            if ok:
+                n.sent_at = timezone.now()
+                n.save(update_fields=["sent_at"])
+            elif err:
+                n.error_message = err
+                n.save(update_fields=["error_message"])
+            notifications.append(n)
 
     if prefs.telegram_connected and participant.notification_enabled:
         from .models import Profile
         from .telegram_connect import platform_path_url, send_telegram_to_user
         from Generator.telegram_utils import escape_telegram_html
 
-        # Постоянные маршруты платформы — без одноразовых/секретных токенов.
-        role = getattr(getattr(user, "profile", None), "role", None)
-        if role == Profile.Role.STUDENT:
-            cabinet_path = "/cabinet/student/lessons"
-        else:
-            cabinet_path = "/cabinet/schedule/"
-        cabinet_url = platform_path_url(cabinet_path)
-        tg_text = (
-            f"{escape_telegram_html(title)}\n\n{escape_telegram_html(message)}\n\n"
-            f'<a href="{html.escape(cabinet_url, quote=True)}">Открыть в кабинете</a>'
-        )
-        ok = send_telegram_to_user(user, tg_text)
-        status = NotificationStatus.SENT if ok else NotificationStatus.FAILED
-        n = _create_notification(
-            user=user,
-            title=title,
-            message=message,
-            channel=NotificationChannel.TELEGRAM,
-            payload={**payload, "cabinet_url": cabinet_url},
-            status=status,
-        )
-        if ok:
-            n.sent_at = timezone.now()
-            n.save(update_fields=["sent_at"])
-        notifications.append(n)
+        if not _channel_exists(NotificationChannel.TELEGRAM):
+            # Постоянные маршруты платформы — без одноразовых/секретных токенов.
+            role = getattr(getattr(user, "profile", None), "role", None)
+            if role == Profile.Role.STUDENT:
+                cabinet_path = "/cabinet/student/lessons"
+            else:
+                cabinet_path = "/cabinet/schedule/"
+            cabinet_url = platform_path_url(cabinet_path)
+            tg_text = (
+                f"{escape_telegram_html(title)}\n\n{escape_telegram_html(message)}\n\n"
+                f'<a href="{html.escape(cabinet_url, quote=True)}">Открыть в кабинете</a>'
+            )
+            ok = send_telegram_to_user(user, tg_text)
+            status = NotificationStatus.SENT if ok else NotificationStatus.FAILED
+            n = _create_notification(
+                user=user,
+                title=title,
+                message=message,
+                channel=NotificationChannel.TELEGRAM,
+                payload={**payload, "cabinet_url": cabinet_url},
+                status=status,
+                event_type=resolved_type,
+                event_key=event_key,
+            )
+            if ok:
+                n.sent_at = timezone.now()
+                n.save(update_fields=["sent_at"])
+            notifications.append(n)
 
     if prefs.push_enabled and participant.notification_enabled:
         from .webpush import send_web_push_to_user
@@ -256,9 +268,16 @@ def _notify_all(
             if field and not getattr(get_or_create_preferences(user), field, True):
                 continue
         try:
-            event_key = ""
-            if dedup_suffix:
-                event_key = f"{event_code}:{event.pk}:{user.pk}:{dedup_suffix}"
+            event_key = _schedule_event_key(
+                event_code,
+                event,
+                user,
+                change_type=change_type,
+                title=title,
+                message=message,
+                dedup_suffix=dedup_suffix,
+                extra_payload=extra_payload,
+            )
             all_notes.extend(
                 _dispatch_to_user(
                     user,
@@ -279,7 +298,7 @@ class NotificationService:
     @staticmethod
     def notify_event_created(event):
         title = "Новое занятие"
-        message = f'Занятие «{event.title}» запланировано на {_local_time(event.starts_at)}.'
+        message = f'Занятие «{event.title}» запланировано на {_local_time(event.starts_at, event)}.'
         return _notify_all(
             event,
             title,
@@ -412,7 +431,7 @@ class NotificationService:
     def notify_before_lesson(event, minutes):
         audience = _event_audience_label(event)
         topic = (getattr(event, "topic", None) or "").strip()
-        time_only = timezone.localtime(event.starts_at).strftime("%H:%M") if event.starts_at else ""
+        time_only = _local_dt(event.starts_at, event).strftime("%H:%M") if event.starts_at else ""
 
         if minutes >= 1400:
             title = "Урок завтра"
@@ -457,7 +476,49 @@ def _event_audience_label(event):
     return f"{names[0]} и ещё {len(names) - 1}"
 
 
-def _local_time(dt):
+def _event_tz(event):
+    name = (getattr(event, "timezone", None) or "").strip() or "Europe/Moscow"
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return timezone.get_current_timezone()
+
+
+def _local_dt(dt, event=None):
+    if not isinstance(dt, datetime):
+        return dt
+    tzinfo = _event_tz(event) if event is not None else None
+    if tzinfo is not None:
+        return timezone.localtime(dt, tzinfo)
+    return timezone.localtime(dt)
+
+
+def _local_time(dt, event=None):
     if isinstance(dt, datetime):
-        return timezone.localtime(dt).strftime("%d.%m.%Y, %H:%M")
+        return _local_dt(dt, event).strftime("%d.%m.%Y, %H:%M")
     return str(dt)
+
+
+def _schedule_event_key(
+    event_code,
+    event,
+    user,
+    *,
+    change_type=None,
+    title="",
+    message="",
+    dedup_suffix="",
+    extra_payload=None,
+) -> str:
+    if dedup_suffix:
+        suffix = str(dedup_suffix)
+    elif change_type == "moved":
+        suffix = event.starts_at.isoformat() if event.starts_at else "moved"
+    elif change_type == "updated":
+        digest = hashlib.sha256(f"{title}\n{message}".encode("utf-8")).hexdigest()[:16]
+        suffix = digest
+    elif change_type == "reminder":
+        suffix = str((extra_payload or {}).get("reminder_minutes") or "reminder")
+    else:
+        suffix = change_type or "event"
+    return f"{event_code}:{event.pk}:{user.pk}:{suffix}"

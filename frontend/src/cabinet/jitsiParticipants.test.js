@@ -193,6 +193,21 @@ describe("attachConferencePresence", () => {
     expect(presence.snapshot().count).toBe(2);
     presence.dispose();
   });
+
+  it("notifies onLeft after a verified conference join", () => {
+    const api = fakeApi({ participants: [{ participantId: "t" }] });
+    const onLeft = vi.fn();
+    const presence = attachConferencePresence(api, {
+      diagnostics: { roomName: "r" },
+      onLeft,
+    });
+    api.emit("videoConferenceLeft", {});
+    expect(onLeft).not.toHaveBeenCalled();
+    api.emit("videoConferenceJoined", { id: "t" });
+    api.emit("videoConferenceLeft", {});
+    expect(onLeft).toHaveBeenCalledWith({ id: "t" });
+    presence.dispose();
+  });
 });
 
 describe("isJitsiAuthJoinFailure", () => {

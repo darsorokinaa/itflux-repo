@@ -10,7 +10,7 @@ from Cabinet import homework_api
 from Cabinet.subscription_api import PaymentWebhookView
 from Cabinet.views import api_teacher_application, api_teacher_community_feedback
 
-# MFA для /admin/ (TOTP). Сейчас временно выкл. (ADMIN_OTP_REQUIRED=False в settings).
+# MFA для /admin/ (TOTP). Включение: ADMIN_OTP_REQUIRED=true или prod DEBUG=False.
 # Доп. ограничение: ADMIN_OTP_ALLOWED_USERNAMES (по умолчанию admin_dasha, darsorokinaa).
 if getattr(settings, "ADMIN_OTP_REQUIRED", False):
     from Generator.admin_otp import RestrictedOTPAdminSite

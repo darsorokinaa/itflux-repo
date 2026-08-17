@@ -11,6 +11,11 @@ import {
 } from "../utils/cabinetAuth";
 import { usePageTitle } from "../cabinet/hooks/usePageTitle";
 import { safeReturnPath, takeReturnPath } from "../accessGate/accessGate";
+import {
+  inviteAuthFollowUp,
+  readStoredInviteToken,
+  rememberInviteToken,
+} from "../cabinet/inviteAuth";
 
 const GUIDE_OPEN_ON_REGISTER_KEY = "cabinet-guide-open-on-register";
 
@@ -29,7 +34,7 @@ export default function CabinetAuthPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
-  const inviteToken = searchParams.get("invite") || "";
+  const inviteToken = searchParams.get("invite") || readStoredInviteToken();
   const parentInviteToken = searchParams.get("parent_invite") || "";
   const referralCode = searchParams.get("ref") || searchParams.get("referral") || "";
   const redirectTo = safeReturnPath(location.state?.from)
@@ -63,6 +68,10 @@ export default function CabinetAuthPage() {
     surname: "",
     role: "student",
   });
+
+  useEffect(() => {
+    if (inviteToken) rememberInviteToken(inviteToken);
+  }, [inviteToken]);
 
   useEffect(() => {
     const nextMode = searchParams.get("mode");
@@ -129,7 +138,15 @@ export default function CabinetAuthPage() {
     };
   }, [navigate, redirectTo, mode]);
 
-  const goAfterAuth = async () => {
+  const goAfterAuth = async (authResult = null) => {
+    const inviteFollow = inviteAuthFollowUp({ inviteToken, result: authResult });
+    if (inviteFollow.kind === "invite-retry") {
+      navigate(inviteFollow.path, {
+        replace: true,
+        state: { inviteError: inviteFollow.error, inviteErrorCode: inviteFollow.code },
+      });
+      return;
+    }
     // После входа по parent_invite сразу принимаем приглашение, как при регистрации.
     if (parentInviteToken) {
       try {
@@ -179,8 +196,8 @@ export default function CabinetAuthPage() {
     setError("");
     setSubmitting(true);
     try {
-      await loginCabinet(authPayload(loginForm));
-      await goAfterAuth();
+      const result = await loginCabinet(authPayload(loginForm));
+      await goAfterAuth(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось войти");
     } finally {
@@ -212,7 +229,7 @@ export default function CabinetAuthPage() {
       } catch {
         // ignore storage errors
       }
-      await goAfterAuth();
+      await goAfterAuth(result);
     } catch (err) {
       if (err?.code === "already_registered" || err?.status === 409) {
         setMode("login");

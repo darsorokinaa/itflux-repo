@@ -1728,3 +1728,107 @@ class LessonBillingLifecycleTests(BillingTestBase):
         self.assertEqual(Decimal(serialize_account(self.account)["debt_amount"]), Decimal("1200.00"))
         register_payment(teacher=self.teacher, student=self.student, amount=Decimal("1200"))
         self.assertEqual(Decimal(serialize_account(self.account)["debt_amount"]), Decimal("0.00"))
+
+
+class FinancialReadModelTests(BillingTestBase):
+    def _align(self, rec, *, is_debt, state_code=None):
+        from Cabinet.billing_service import (
+            dashboard_summary,
+            event_billing_badge,
+            get_lesson_financial_state,
+            record_is_debt,
+            serialize_account,
+            serialize_event_billing,
+        )
+
+        rec.refresh_from_db()
+        serialized = serialize_event_billing(rec)
+        state = get_lesson_financial_state(rec)
+        badges = event_billing_badge(rec.event, student_ids=[rec.student_id])
+        self.assertEqual(record_is_debt(rec), is_debt)
+        self.assertEqual(serialized["is_debt"], is_debt)
+        self.assertEqual(state["is_debt"], is_debt)
+        self.assertEqual(badges[0]["is_debt"], is_debt)
+        if state_code:
+            self.assertEqual(serialized["state_code"], state_code)
+            self.assertEqual(state["state_code"], state_code)
+            self.assertEqual(badges[0]["state_code"], state_code)
+        account = serialize_account(rec.billing_account)
+        dash = dashboard_summary(self.teacher)
+        if is_debt:
+            self.assertGreater(Decimal(account["debt_amount"]), 0)
+            self.assertGreater(Decimal(dash["unpaid_lessons_amount"]), 0)
+        return serialized, state, account, dash
+
+    def test_no_record_is_not_debt(self):
+        from Cabinet.billing_service import get_lesson_financial_state
+
+        state = get_lesson_financial_state(None)
+        self.assertFalse(state["is_debt"])
+        self.assertEqual(state["state_code"], "no_record")
+
+    def test_unspecified_price_not_debt_across_surfaces(self):
+        self.account.settings.default_lesson_price = None
+        self.account.settings.save()
+        event = self._event()
+        rec = finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="charge", idempotency_key="frm-1"
+        )[0]
+        serialized, state, account, dash = self._align(rec, is_debt=False, state_code="price_not_set")
+        self.assertEqual(Decimal(account["debt_amount"]), Decimal("0.00"))
+        self.assertEqual(Decimal(dash["unpaid_lessons_amount"]), Decimal("0.00"))
+        self.assertTrue(serialized["price_missing"])
+
+    def test_conducted_unpaid_is_debt_everywhere(self):
+        event = self._event()
+        rec = finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="charge", idempotency_key="frm-2"
+        )[0]
+        self._align(rec, is_debt=True, state_code="unpaid")
+
+    def test_paid_is_not_debt(self):
+        event = self._event()
+        rec = finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="charge", idempotency_key="frm-3"
+        )[0]
+        register_payment(teacher=self.teacher, student=self.student, amount=Decimal("1600"))
+        rec.refresh_from_db()
+        self._align(rec, is_debt=False, state_code="paid")
+
+    def test_package_is_not_money_debt(self):
+        create_package(
+            teacher=self.teacher,
+            student=self.student,
+            title="4",
+            unit_type=PackageUnitType.LESSON,
+            total_units=Decimal("4"),
+            purchase_amount=Decimal("4000"),
+        )
+        event = self._event()
+        rec = finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="package", idempotency_key="frm-4"
+        )[0]
+        self._align(rec, is_debt=False, state_code="package")
+
+    def test_free_lesson_is_not_debt(self):
+        self.account.settings.default_lesson_price = Decimal("0")
+        self.account.settings.save()
+        event = self._event()
+        rec = finalize_event_billing(
+            event=event, teacher=self.teacher, financial_action="charge", idempotency_key="frm-5"
+        )[0]
+        self._align(rec, is_debt=False, state_code="free")
+
+    def test_rescheduled_is_not_debt(self):
+        event = self._event()
+        move_event(
+            event,
+            starts_at=event.starts_at + timedelta(days=1),
+            ends_at=event.ends_at + timedelta(days=1),
+            changed_by=self.teacher,
+            notify=False,
+        )
+        rec = EventBillingRecord.objects.filter(event=event, student=self.student).first()
+        if rec is None:
+            return
+        self._align(rec, is_debt=False, state_code="rescheduled")

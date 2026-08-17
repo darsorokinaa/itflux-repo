@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import secrets
-from datetime import timedelta
+from datetime import datetime, date as dt_date, time as dt_time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Avg, Count, Q, Prefetch
 from django.utils import timezone
 
@@ -39,7 +40,7 @@ from .journal_models import (
     StudentLessonRecord,
     StudentLessonRecordTag,
 )
-from .models import Homework, HomeworkSubmission, ScheduleEvent, Student, StudentGroup
+from .models import Homework, HomeworkSubmission, ScheduleEvent, Student, StudentGroup, StudentSubject
 from .submission_files import submission_has_files
 
 
@@ -376,6 +377,7 @@ def infer_previous_homework_status(homework: Homework | None, student: Student) 
 
 
 @transaction.atomic
+@transaction.atomic
 def get_or_create_journal(event: ScheduleEvent, teacher: User) -> LessonJournal:
     if event.owner_id != teacher.id:
         raise JournalError("Урок принадлежит другому учителю", code="forbidden", status=403)
@@ -394,28 +396,186 @@ def get_or_create_journal(event: ScheduleEvent, teacher: User) -> LessonJournal:
     template = resolve_assessment_template(teacher, event=event)
     settings = get_or_create_journal_settings(teacher)
 
-    journal = LessonJournal.objects.create(
-        schedule_event=event,
-        teacher=teacher,
-        group=event.group,
-        student=event.student if not event.group_id else None,
-        lesson_date=timezone.localtime(event.starts_at).date(),
-        started_at=event.starts_at,
-        finished_at=event.ends_at,
-        planned_duration_minutes=duration,
-        actual_duration_minutes=duration,
-        planned_topic=planned,
-        actual_topic="",
-        assessment_template=template,
-        homework=event.homework,
-        overall_score_mode=settings.overall_score_mode,
-        created_by=teacher,
-        updated_by=teacher,
-        edit_token=secrets.token_hex(16),
-    )
+    try:
+        journal = LessonJournal.objects.create(
+            schedule_event=event,
+            teacher=teacher,
+            group=event.group,
+            student=event.student if not event.group_id else None,
+            lesson_date=timezone.localtime(event.starts_at).date(),
+            started_at=event.starts_at,
+            finished_at=event.ends_at,
+            planned_duration_minutes=duration,
+            actual_duration_minutes=duration,
+            planned_topic=planned,
+            actual_topic="",
+            assessment_template=template,
+            homework=event.homework,
+            overall_score_mode=settings.overall_score_mode,
+            created_by=teacher,
+            updated_by=teacher,
+            edit_token=secrets.token_hex(16),
+        )
+    except IntegrityError:
+        journal = LessonJournal.objects.filter(schedule_event=event).select_for_update().first()
+        if journal is None:
+            raise
+        _ensure_student_records(journal, event, teacher)
+        return journal
     write_audit(actor=teacher, action="created", journal=journal)
     _ensure_student_records(journal, event, teacher)
     return journal
+
+
+def _teacher_timezone_name(teacher: User) -> str:
+    profile = getattr(teacher, "profile", None)
+    name = (getattr(profile, "timezone", None) or "").strip()
+    return name or "Europe/Moscow"
+
+
+def _zoneinfo(name: str):
+    try:
+        return ZoneInfo((name or "").strip() or "Europe/Moscow")
+    except Exception:
+        return ZoneInfo("Europe/Moscow")
+
+
+def _parse_offline_starts(payload: dict, tz_name: str) -> datetime:
+    tzinfo = _zoneinfo(tz_name)
+    raw_dt = payload.get("starts_at")
+    if raw_dt:
+        text = str(raw_dt).replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError as exc:
+            raise JournalError("Некорректное время начала", code="bad_starts_at") from exc
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed, tzinfo)
+        return parsed
+
+    raw_date = payload.get("lesson_date") or payload.get("date")
+    if not raw_date:
+        raise JournalError("Укажите дату занятия", code="date_required")
+    try:
+        lesson_date = dt_date.fromisoformat(str(raw_date)[:10])
+    except ValueError as exc:
+        raise JournalError("Некорректная дата занятия", code="bad_date") from exc
+
+    raw_time = str(payload.get("starts_time") or payload.get("time") or "12:00").strip()
+    try:
+        parts = raw_time.split(":")
+        hour = int(parts[0])
+        minute = int(parts[1]) if len(parts) > 1 else 0
+        clock = dt_time(hour=hour, minute=minute)
+    except (TypeError, ValueError) as exc:
+        raise JournalError("Некорректное время начала", code="bad_time") from exc
+    naive = datetime.combine(lesson_date, clock)
+    return timezone.make_aware(naive, tzinfo)
+
+
+@transaction.atomic
+def create_offline_journal(teacher: User, payload: dict) -> LessonJournal:
+    """Занятие вне платформы: реальный ScheduleEvent (offline), без VideoMeeting.
+
+    Журнал создаётся черновиком. Биллинг не финализируется до complete_journal.
+    """
+    if not isinstance(payload, dict):
+        raise JournalError("Некорректные данные", code="invalid_payload")
+
+    student_id = payload.get("student_id")
+    group_id = payload.get("group_id")
+    has_student = student_id not in (None, "", 0, "0")
+    has_group = group_id not in (None, "", 0, "0")
+    if has_student == has_group:
+        raise JournalError("Укажите ученика или группу", code="audience_required")
+
+    student = None
+    group = None
+    if has_student:
+        student = Student.objects.filter(pk=student_id, teacher=teacher).first()
+        if student is None:
+            raise JournalError("Ученик не найден", code="student_not_found", status=404)
+    else:
+        group = StudentGroup.objects.filter(pk=group_id, teacher=teacher).first()
+        if group is None:
+            raise JournalError("Группа не найдена", code="group_not_found", status=404)
+
+    student_subject = None
+    subject_id = payload.get("student_subject_id")
+    if subject_id not in (None, "", 0, "0"):
+        qs = StudentSubject.objects.filter(pk=subject_id, student__teacher=teacher)
+        if student is not None:
+            qs = qs.filter(student=student)
+        student_subject = qs.first()
+        if student_subject is None:
+            raise JournalError("Предмет не найден", code="subject_not_found", status=404)
+
+    try:
+        duration = int(payload.get("duration_minutes") or payload.get("actual_duration_minutes") or 60)
+    except (TypeError, ValueError) as exc:
+        raise JournalError("Некорректная продолжительность", code="bad_duration") from exc
+    if duration <= 0 or duration > 24 * 60:
+        raise JournalError("Продолжительность должна быть от 1 до 1440 минут", code="bad_duration")
+
+    tz_name = (payload.get("timezone") or "").strip() or _teacher_timezone_name(teacher)
+    starts_at = _parse_offline_starts(payload, tz_name)
+    ends_at = starts_at + timedelta(minutes=duration)
+
+    actual_topic = (payload.get("actual_topic") or payload.get("topic") or "").strip()[:500]
+    planned_topic = (payload.get("planned_topic") or "").strip()[:500]
+    title = (payload.get("title") or actual_topic or planned_topic or "Занятие вне платформы")[:200]
+
+    event = ScheduleEvent.objects.create(
+        owner=teacher,
+        title=title,
+        topic=actual_topic or planned_topic,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        event_type=(
+            ScheduleEvent.EventType.GROUP_LESSON if group is not None else ScheduleEvent.EventType.INDIVIDUAL_LESSON
+        ),
+        format=ScheduleEvent.Format.OFFLINE,
+        status=ScheduleEvent.Status.PLANNED,
+        student=student,
+        group=group,
+        student_subject=student_subject,
+        timezone=tz_name,
+    )
+    journal = get_or_create_journal(event, teacher)
+
+    extra = {}
+    if actual_topic:
+        extra["actual_topic"] = actual_topic
+    if planned_topic:
+        extra["planned_topic"] = planned_topic
+    for field in (
+        "lesson_summary",
+        "material_covered",
+        "material_to_repeat",
+        "next_lesson_plan",
+        "recommendations",
+        "actual_duration_minutes",
+        "homework_id",
+        "homework_skipped",
+        "student_records",
+    ):
+        if field in payload:
+            extra[field] = payload[field]
+    if extra:
+        journal = update_journal(journal, teacher, extra)
+    return journal
+
+
+def _sync_factual_topic_to_event(journal: LessonJournal) -> None:
+    """Односторонняя запись фактической темы в карточку занятия. План не трогаем."""
+    actual = (journal.actual_topic or "").strip()
+    event = journal.schedule_event
+    if event is None or not actual:
+        return
+    if (event.topic or "").strip() == actual:
+        return
+    event.topic = actual[:500]
+    event.save(update_fields=["topic", "updated_at"])
 
 
 def _strip_answer_html(html: str) -> str:
@@ -982,8 +1142,11 @@ def _sync_planned_topic_to_lesson_and_plan(journal: LessonJournal, teacher: User
         return {"synced": False, "reason": "no_event"}
 
     planned = (journal.planned_topic or "").strip()
+    actual = (journal.actual_topic or "").strip()
     event_updates = []
-    if (event.topic or "").strip() != planned:
+    # После complete фактическая тема — SoT карточки занятия. Плановую пишем только в план.
+    keep_factual_on_event = bool(actual) and journal.status == JournalStatus.COMPLETED
+    if not keep_factual_on_event and (event.topic or "").strip() != planned:
         event.topic = planned[:500]
         event_updates.append("topic")
     # Убрать topic из manual overrides, чтобы план мог снова синхронизироваться
@@ -1105,6 +1268,8 @@ def update_lesson_topics(
 
     if "planned_topic" in changed:
         _sync_planned_topic_to_lesson_and_plan(journal, teacher)
+    if "actual_topic" in changed and journal.status == JournalStatus.COMPLETED:
+        _sync_factual_topic_to_event(journal)
 
     return _reload_journal(journal.pk)
 
@@ -1220,6 +1385,8 @@ def update_journal(
         journal.updated_by = teacher
         journal.version += 1
         journal.save()
+        if "actual_topic" in changed and journal.status == JournalStatus.COMPLETED:
+            _sync_factual_topic_to_event(journal)
     return _reload_journal(journal.pk)
 
 
@@ -1251,6 +1418,7 @@ def _update_student_record(journal: LessonJournal, teacher: User, rp: dict) -> S
         raise JournalError("Ученик не принадлежит учителю", code="forbidden", status=403)
 
     touched = dict(record.fields_touched or {})
+    changed_now: set[str] = set()
     simple_fields = [
         "attendance_status",
         "late_minutes",
@@ -1288,6 +1456,7 @@ def _update_student_record(journal: LessonJournal, teacher: User, rp: dict) -> S
             )
             setattr(record, field, new)
             touched[field] = True
+            changed_now.add(field)
 
     if "overall_score" in rp:
         val = rp["overall_score"]
@@ -1361,9 +1530,9 @@ def _update_student_record(journal: LessonJournal, teacher: User, rp: dict) -> S
                 notify_journal_recommendation_added,
             )
 
-            if touched.get("teacher_comment"):
+            if "teacher_comment" in changed_now:
                 notify_journal_comment_added(record)
-            if touched.get("recommendation"):
+            if "recommendation" in changed_now:
                 notify_journal_recommendation_added(record)
         except Exception:
             pass
@@ -1393,25 +1562,29 @@ def _acquire_edit_lock(journal: LessonJournal, teacher: User, tab_token: str) ->
 
 @transaction.atomic
 def complete_journal(journal: LessonJournal, teacher: User, *, force: bool = False) -> LessonJournal:
+    journal = LessonJournal.objects.select_for_update().select_related("schedule_event").get(pk=journal.pk)
+    already_completed = journal.status == JournalStatus.COMPLETED
+
     settings = get_or_create_journal_settings(teacher)
     records = list(journal.student_records.all())
-    if settings.require_attendance and not force:
-        unmarked = [r for r in records if r.attendance_status == AttendanceStatus.NOT_MARKED]
-        if unmarked:
-            raise JournalError(
-                f"Не отмечена посещаемость у {len(unmarked)} уч. Подтвердите или отметьте.",
-                code="attendance_required",
-                status=400,
-            )
-    if settings.require_topic and not (journal.actual_topic or "").strip() and not force:
-        raise JournalError("Укажите фактическую тему урока", code="topic_required")
-    if settings.require_comment and not force:
-        missing = [r for r in records if not (r.teacher_comment or "").strip()]
-        if missing:
-            raise JournalError(
-                f"Нет комментария у {len(missing)} уч.",
-                code="comment_required",
-            )
+    if not already_completed:
+        if settings.require_attendance and not force:
+            unmarked = [r for r in records if r.attendance_status == AttendanceStatus.NOT_MARKED]
+            if unmarked:
+                raise JournalError(
+                    f"Не отмечена посещаемость у {len(unmarked)} уч. Подтвердите или отметьте.",
+                    code="attendance_required",
+                    status=400,
+                )
+        if settings.require_topic and not (journal.actual_topic or "").strip() and not force:
+            raise JournalError("Укажите фактическую тему урока", code="topic_required")
+        if settings.require_comment and not force:
+            missing = [r for r in records if not (r.teacher_comment or "").strip()]
+            if missing:
+                raise JournalError(
+                    f"Нет комментария у {len(missing)} уч.",
+                    code="comment_required",
+                )
 
     event = journal.schedule_event
     if event.status not in {
@@ -1421,6 +1594,17 @@ def complete_journal(journal: LessonJournal, teacher: User, *, force: bool = Fal
     }:
         event.status = ScheduleEvent.Status.COMPLETED
         event.save(update_fields=["status", "updated_at"])
+
+    _sync_factual_topic_to_event(journal)
+
+    if already_completed:
+        try:
+            from .billing_service import auto_finalize_after_lesson_complete
+
+            auto_finalize_after_lesson_complete(event=event, teacher=teacher)
+        except Exception:
+            pass
+        return _reload_journal(journal.pk)
 
     journal.status = JournalStatus.COMPLETED
     journal.completed_at = timezone.now()
@@ -1442,7 +1626,7 @@ def complete_journal(journal: LessonJournal, teacher: User, *, force: bool = Fal
         for record in records:
             publish_record(record, teacher, notify=True)
 
-    return journal
+    return _reload_journal(journal.pk)
 
 
 @transaction.atomic
@@ -2502,6 +2686,8 @@ def serialize_journal(journal: LessonJournal, *, for_student: bool = False) -> d
         "completed_at": journal.completed_at.isoformat() if journal.completed_at else None,
         "updated_at": journal.updated_at.isoformat() if journal.updated_at else None,
         "is_group": bool(journal.group_id),
+        "format": event.format if event else None,
+        "is_offline": bool(event and event.format == ScheduleEvent.Format.OFFLINE),
         "student_records": student_records_data,
         "billing_hint": {
             "note": "Посещаемость из журнала используется модулем оплат. Не выбирайте её повторно.",

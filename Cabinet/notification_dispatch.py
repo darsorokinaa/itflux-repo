@@ -287,29 +287,33 @@ class NotificationDispatcher:
             payload.setdefault("source_object_id", getattr(related_object, "pk", None))
 
         event_key = dedup_key or None
+        existing_in_app = None
         if event_key:
-            existing = Notification.objects.filter(
+            existing_in_app = Notification.objects.filter(
                 recipient_user=recipient,
                 event_key=event_key,
                 channel=NotificationChannel.IN_APP,
             ).first()
-            if existing:
-                result.skipped = True
-                result.reason = "duplicate"
-                result.in_app = existing
+            if existing_in_app:
+                result.in_app = existing_in_app
                 logger.info(
-                    "notify_skip event=%s recipient=%s reason=duplicate key=%s",
+                    "notify_in_app_skip event=%s recipient=%s reason=duplicate key=%s",
                     event_type,
                     recipient.pk,
                     event_key,
                 )
-                return result
 
         priority = definition.priority if definition else "important"
         urgent = bool(definition.urgent) if definition else False
 
-        in_app_note = None
-        if CHANNEL_IN_APP in channels or (force and create_in_app is not False and CHANNEL_IN_APP in (force_channels or {CHANNEL_IN_APP})):
+        in_app_note = existing_in_app
+        if (
+            not existing_in_app
+            and (
+                CHANNEL_IN_APP in channels
+                or (force and create_in_app is not False and CHANNEL_IN_APP in (force_channels or {CHANNEL_IN_APP}))
+            )
+        ):
             if prefs.in_app_enabled or force:
                 try:
                     with transaction.atomic():
@@ -333,23 +337,22 @@ class NotificationDispatcher:
                         event_key=event_key,
                         channel=NotificationChannel.IN_APP,
                     ).first()
-                    result.skipped = True
-                    result.reason = "duplicate"
                     result.in_app = existing
+                    in_app_note = existing
                     logger.info(
-                        "notify_skip event=%s recipient=%s reason=duplicate_integrity",
+                        "notify_in_app_skip event=%s recipient=%s reason=duplicate_integrity",
                         event_type,
                         recipient.pk,
                     )
-                    return result
-                result.in_app = in_app_note
-                result.channels.append(CHANNEL_IN_APP)
-                logger.info(
-                    "notify_in_app event=%s recipient=%s notification_id=%s",
-                    event_type,
-                    recipient.pk,
-                    in_app_note.pk,
-                )
+                else:
+                    result.in_app = in_app_note
+                    result.channels.append(CHANNEL_IN_APP)
+                    logger.info(
+                        "notify_in_app event=%s recipient=%s notification_id=%s",
+                        event_type,
+                        recipient.pk,
+                        in_app_note.pk,
+                    )
 
         push_title = title
         push_body = message
@@ -396,44 +399,65 @@ class NotificationDispatcher:
                 recipient.pk,
                 True,
             )
-            try:
-                from .telegram_connect import send_telegram_to_user
-
-                if getattr(prefs, "push_privacy_mode", False) and not force:
-                    text = telegram_text or (
-                        f"{private_title or 'Новое уведомление'}\n\n"
-                        f"{private_message or 'На платформе появилось новое событие'}"
-                    )
-                else:
-                    text = telegram_text or f"{title}\n\n{message}"
-                ok = send_telegram_to_user(recipient, text)
-                Notification.objects.create(
+            existing_tg = None
+            if event_key:
+                existing_tg = Notification.objects.filter(
                     recipient_user=recipient,
-                    recipient_student=recipient_student,
-                    recipient_teacher=recipient_teacher,
-                    actor=actor,
                     channel=NotificationChannel.TELEGRAM,
-                    event_type=event_type,
-                    event_key=(f"{event_key}:tg" if event_key else ""),
-                    title=title[:255],
-                    message=message,
-                    payload=payload,
-                    status=NotificationStatus.SENT if ok else NotificationStatus.FAILED,
-                    sent_at=timezone.now() if ok else None,
-                    is_read=True,
-                )
-                if ok:
-                    result.channels.append(CHANNEL_TELEGRAM)
-            except Exception:
-                logger.exception(
-                    "notify_telegram_failed event=%s recipient=%s",
+                    event_key=event_key,
+                ).first()
+            if existing_tg:
+                logger.info(
+                    "notify_telegram_skip event=%s recipient=%s reason=duplicate key=%s",
                     event_type,
                     recipient.pk,
+                    event_key,
                 )
+            else:
+                try:
+                    from .telegram_connect import send_telegram_to_user
+
+                    if getattr(prefs, "push_privacy_mode", False) and not force:
+                        text = telegram_text or (
+                            f"{private_title or 'Новое уведомление'}\n\n"
+                            f"{private_message or 'На платформе появилось новое событие'}"
+                        )
+                    else:
+                        text = telegram_text or f"{title}\n\n{message}"
+                    ok = send_telegram_to_user(recipient, text)
+                    try:
+                        Notification.objects.create(
+                            recipient_user=recipient,
+                            recipient_student=recipient_student,
+                            recipient_teacher=recipient_teacher,
+                            actor=actor,
+                            channel=NotificationChannel.TELEGRAM,
+                            event_type=event_type,
+                            event_key=event_key or "",
+                            title=title[:255],
+                            message=message,
+                            payload=payload,
+                            status=NotificationStatus.SENT if ok else NotificationStatus.FAILED,
+                            sent_at=timezone.now() if ok else None,
+                            is_read=True,
+                        )
+                    except IntegrityError:
+                        ok = False
+                    if ok:
+                        result.channels.append(CHANNEL_TELEGRAM)
+                except Exception:
+                    logger.exception(
+                        "notify_telegram_failed event=%s recipient=%s",
+                        event_type,
+                        recipient.pk,
+                    )
 
         if not result.channels and not result.in_app:
             result.skipped = True
             result.reason = push_result.get("reason") or "not_delivered"
+        elif not result.channels and existing_in_app:
+            result.skipped = True
+            result.reason = "duplicate"
         return result
 
     @classmethod

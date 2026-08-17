@@ -100,6 +100,19 @@ class PlanSyncService:
                 ]
             ).values_list("id", flat=True)
         )
+        linked_busy = ScheduleEvent.objects.filter(
+            lesson_plan_item__plan_id=enrollment.plan_id,
+        ).exclude(
+            status__in=[
+                ScheduleEvent.Status.CANCELLED,
+                ScheduleEvent.Status.COMPLETED,
+                ScheduleEvent.Status.DONE,
+            ]
+        )
+        if exclude_event is not None:
+            linked_busy = linked_busy.exclude(pk=exclude_event.pk)
+        busy_ids.update(linked_busy.values_list("lesson_plan_item_id", flat=True))
+        busy_ids.discard(None)
         if exclude_event is not None:
             busy_ids.discard(
                 getattr(exclude_event, "lesson_plan_item_id", None)
@@ -141,9 +154,38 @@ class PlanSyncService:
     @transaction.atomic
     def link_event_to_plan(cls, event, item, *, copy_topic=True):
         """Явная связь событие ↔ пункт плана по ID."""
-        from .models import ScheduleEvent
+        from .models import LessonPlanItem, ScheduleEvent
 
         if item is None:
+            return event
+        item = LessonPlanItem.objects.select_for_update().filter(pk=item.pk).first()
+        if item is None:
+            return event
+        terminal = {
+            ScheduleEvent.Status.CANCELLED,
+            ScheduleEvent.Status.COMPLETED,
+            ScheduleEvent.Status.DONE,
+        }
+        taken_by_other = (
+            ScheduleEvent.objects.select_for_update()
+            .filter(lesson_plan_item_id=item.pk)
+            .exclude(pk=event.pk)
+            .exclude(status__in=terminal)
+            .exists()
+        )
+        other_scheduled = item.scheduled_event
+        if (
+            other_scheduled is not None
+            and other_scheduled.pk != event.pk
+            and other_scheduled.status not in terminal
+        ):
+            taken_by_other = True
+        if taken_by_other:
+            logger.info(
+                "skip double plan link event=%s item=%s already assigned",
+                event.pk,
+                item.pk,
+            )
             return event
         event.lesson_plan_item = item
         update_event_fields = ["lesson_plan_item", "updated_at"]
@@ -197,11 +239,17 @@ class PlanSyncService:
         """Привязать следующее свободное занятие плана, если явной связи ещё нет."""
         if event.lesson_plan_item_id and not force:
             return event.lesson_plan_item
-        enrollment, item = cls.suggest_next_for_event(event)
-        if item is None:
-            return None
-        cls.link_event_to_plan(event, item)
-        return item
+        for _ in range(8):
+            enrollment, item = cls.suggest_next_for_event(event)
+            if item is None:
+                return None
+            cls.link_event_to_plan(event, item)
+            event.refresh_from_db()
+            if event.lesson_plan_item_id == item.id:
+                return item
+            if event.lesson_plan_item_id:
+                return event.lesson_plan_item
+        return None
 
     @classmethod
     def assign_plan_items_to_events(cls, events, *, first_item=None):
@@ -232,6 +280,11 @@ class PlanSyncService:
                 continue
             cls.link_event_to_plan(event, item)
             event.refresh_from_db()
+            if not event.lesson_plan_item_id:
+                fallback = cls.get_next_plan_item(enrollment, exclude_event=event)
+                if fallback is not None and fallback.id != item.id:
+                    cls.link_event_to_plan(event, fallback)
+                    event.refresh_from_db()
         if remaining:
             logger.info(
                 "unplanned series events after plan exhausted count=%s enrollment=%s",

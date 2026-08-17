@@ -15,11 +15,15 @@ export function lessonSummaryPath(eventId) {
   return pk ? `/cabinet/journal/lesson/${pk}` : null;
 }
 
+export function lessonJournalFromMeetingPath(eventId) {
+  const path = lessonSummaryPath(eventId);
+  return path ? `${path}?from=meeting` : null;
+}
+
 /** Opens detailed lesson summary in a new browser tab. */
 export function openLessonSummaryTab(eventId, { fromMeeting = false } = {}) {
-  const path = lessonSummaryPath(eventId);
+  const path = fromMeeting ? lessonJournalFromMeetingPath(eventId) : lessonSummaryPath(eventId);
   if (!path) return false;
-  const url = fromMeeting ? `${path}?from=meeting` : path;
-  window.open(url, "_blank", "noopener,noreferrer");
+  window.open(path, "_blank", "noopener,noreferrer");
   return true;
 }
