@@ -40,3 +40,6 @@ Cabinet/board_scene_backups/
 
 # Локальный скрипт импорта (не коммитить)
 import_tasks_universal.py
+
+# User/media files
+Generator/media/
