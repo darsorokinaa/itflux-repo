@@ -204,6 +204,8 @@ elif _admin_otp in ("0", "false", "no", "off"):
     ADMIN_OTP_REQUIRED = False
 else:
     ADMIN_OTP_REQUIRED = not DEBUG
+# Временно: OTP-вход в /admin/ отключён. Вернуть — удалить строку ниже.
+ADMIN_OTP_REQUIRED = False
 
 # Временно: OTP-вход в /admin/ только для этих username.
 # Снять ограничение: ADMIN_OTP_ALLOWED_USERNAMES=*
