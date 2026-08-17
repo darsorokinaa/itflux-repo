@@ -215,9 +215,14 @@ export default function PricingPage() {
           } else if (!isContact && offerLive && offer.pricing?.current != null) {
             price = formatPrice(offer.pricing.current);
           }
+          const showPromoCaption =
+            !isContact &&
+            offerLive &&
+            offer.benefit_type !== "free_period" &&
+            offer.pricing?.renewal;
           const priceSuffix =
-            !isContact && (offerLive || Number(rawPrice) > 0)
-              ? period === "year" && !offerLive
+            !isContact && !offerLive && Number(rawPrice) > 0
+              ? period === "year"
                 ? "/год"
                 : "/мес"
               : "";
@@ -251,12 +256,17 @@ export default function PricingPage() {
                   <span className="pricing-card__price-note"> индивидуально</span>
                 ) : null}
               </p>
+              {showPromoCaption ? (
+                <p className="pricing-card__now">сейчас · далее {formatPrice(offer.pricing.renewal)}/мес</p>
+              ) : null}
+              {offerLive && offer.benefit_type === "free_period" && offer.pricing?.renewal ? (
+                <p className="pricing-card__now">
+                  {offer.free_months} мес. · далее {formatPrice(offer.pricing.renewal)}/мес
+                </p>
+              ) : null}
               {offerLive && offer.ends_at ? (
                 <p className="pricing-card__caveat">
                   Доступно до {formatOfferUntil(offer.ends_at)}
-                  {offer.pricing?.renewal && offer.benefit_type !== "free_period"
-                    ? ` · далее ${formatPrice(offer.pricing.renewal)}/мес`
-                    : ""}
                 </p>
               ) : null}
               <PlanFeatures plan={plan} />

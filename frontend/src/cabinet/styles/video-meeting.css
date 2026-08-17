@@ -2759,10 +2759,10 @@ body.vl-room-fullscreen .student-cabinet-nav {
 
 .ss-ann-v2-toolbar-slot {
   position: fixed;
-  top: calc(var(--vl-header-height, 56px) + 8px);
+  top: calc(var(--vl-header-height, 56px) + 10px);
   left: 50%;
   transform: translateX(-50%);
-  z-index: 55;
+  z-index: 12000;
   max-width: calc(100vw - 16px);
   pointer-events: none;
 }
@@ -2797,6 +2797,13 @@ body.vl-room-fullscreen .student-cabinet-nav {
   );
   cursor: grab;
   flex: 0 0 auto;
+}
+
+.ss-ann-v2-toolbar__title {
+  padding: 0 6px 0 2px;
+  font: 650 12px/1 Inter, system-ui, sans-serif;
+  color: #e2e8f0;
+  white-space: nowrap;
 }
 
 .ss-ann-v2-toolbar__sep {

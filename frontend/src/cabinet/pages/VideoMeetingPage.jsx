@@ -2017,6 +2017,7 @@ export default function VideoMeetingPage() {
   }, [openAddHomework, openAddMaterials]);
 
   const screenshareActive = Boolean(screenshareSession?.active || screenshareSession?.sessionId);
+  const screenshareUiActive = Boolean(screenshareActive || screenshareLayout.localSharing);
   const screenshareCanAnnotate = Boolean(
     canManage || screenshareSession?.participantsCanAnnotate !== false,
   );
@@ -2170,7 +2171,7 @@ export default function VideoMeetingPage() {
 
   return (
     <AnnotationProvider
-      screenshareActive={Boolean(screenshareActive && showJitsi)}
+      screenshareActive={Boolean(screenshareUiActive && showJitsi)}
       materialAnnotatable={materialAnnotatable}
       workspaceOpen={workspaceOpen}
       focusCall={focusCall}
@@ -2251,13 +2252,26 @@ export default function VideoMeetingPage() {
             </button>
           ) : null}
 
-          {!(SCREEN_SHARE_ANNOTATIONS_V2 && screenshareActive && !materialAnnotatable) ? (
+          {SCREEN_SHARE_ANNOTATIONS_V2 && screenshareUiActive ? (
+            <button
+              type="button"
+              className="video-lesson-btn video-lesson-btn--ghost is-active"
+              onClick={() => {
+                setCallCollapsed(false);
+                window.dispatchEvent(new CustomEvent("itflux-ss-ann-open"));
+              }}
+              title="Панель аннотаций демонстрации"
+            >
+              <CabinetIcon name="pencil" />
+              <span className="video-lesson-btn__label">Аннотации</span>
+            </button>
+          ) : (
             <AnnotationHeaderButton
               onEnable={() => {
                 setCallCollapsed(false);
               }}
             />
-          ) : null}
+          )}
 
           <button
             type="button"
@@ -2833,7 +2847,7 @@ export default function VideoMeetingPage() {
             />
             {SCREEN_SHARE_ANNOTATIONS_V2 ? (
               <ScreenShareAnnotationV2
-                active={screenshareActive && showJitsi}
+                active={screenshareUiActive && showJitsi}
                 compact={compactCall}
                 canManage={canManage}
                 canAnnotate={screenshareCanAnnotate}

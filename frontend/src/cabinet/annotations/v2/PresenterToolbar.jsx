@@ -39,6 +39,7 @@ export default function PresenterToolbar({
       onPointerDown={onPointerDownDrag}
     >
       <span className="ss-ann-v2-toolbar__grip" title="Переместить" aria-hidden="true" />
+      <span className="ss-ann-v2-toolbar__title">Аннотации</span>
       {TOOLS_ROW.map((item) => (
         <button
           key={item.id}

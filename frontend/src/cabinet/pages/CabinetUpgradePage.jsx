@@ -624,6 +624,13 @@ function PlanCard({
     referralEligible && !isFree && !isContact && basePrice > 0 && !offerLive
       ? Math.round(basePrice * (1 - Number(referralPercent || 50) / 100))
       : null;
+  const promoApplies =
+    Boolean(promoDiscount?.valid) &&
+    promoDiscount.plan_slug === plan.slug &&
+    (promoDiscount.final_amount != null || Number(promoDiscount.extra_free_months) > 0);
+  const renewalPrice = promoApplies
+    ? promoDiscount.renewal_price ?? offer?.pricing?.renewal ?? basePrice
+    : offer?.pricing?.renewal ?? basePrice;
 
   let priceMain;
   let priceSub = null;
@@ -631,27 +638,27 @@ function PlanCard({
   if (isContact) {
     priceMain = "По запросу";
     priceSub = "Стоимость рассчитывается индивидуально";
-  } else if (offerLive && offer.benefit_type === "free_period") {
+  } else if (promoApplies && Number(promoDiscount.extra_free_months) > 0) {
     priceWas = formatMoney(basePrice);
     priceMain = "Бесплатно";
-    priceSub = `${offer.free_months} ${offer.free_months === 1 ? "месяц" : offer.free_months < 5 ? "месяца" : "месяцев"} · далее ${formatMoney(offer.pricing?.renewal || basePrice)}/мес`;
-  } else if (offerLive && offer.pricing?.current != null) {
-    priceWas = formatMoney(offer.pricing.original || basePrice);
-    priceMain = formatMoney(offer.pricing.current);
-    priceSub = `первый период · далее ${formatMoney(offer.pricing.renewal || basePrice)}/мес`;
-  } else if (isFree || priceMonth === 0) {
-    priceMain = "Бесплатно";
-  } else if (
-    promoDiscount?.valid &&
-    promoDiscount.plan_slug === plan.slug &&
-    promoDiscount.final_amount != null
-  ) {
-    priceWas = formatMoney(basePrice);
+    priceSub = `${promoDiscount.extra_free_months} ${monthsWord(promoDiscount.extra_free_months)} · далее ${formatMoney(renewalPrice)}/мес`;
+  } else if (promoApplies) {
+    priceWas = formatMoney(promoDiscount.base_price ?? offer?.pricing?.original ?? basePrice);
     priceMain = formatMoney(promoDiscount.final_amount);
     priceSub =
       promoDiscount.applied_discount_source === "referral"
-        ? "первый месяц по приглашению"
-        : promoDiscount.message || "с учётом скидки";
+        ? `первый месяц · далее ${formatMoney(renewalPrice)}/мес`
+        : `сейчас · далее ${formatMoney(renewalPrice)}/мес`;
+  } else if (offerLive && offer.benefit_type === "free_period") {
+    priceWas = formatMoney(basePrice);
+    priceMain = "Бесплатно";
+    priceSub = `${offer.free_months} ${monthsWord(offer.free_months)} · далее ${formatMoney(offer.pricing?.renewal || basePrice)}/мес`;
+  } else if (offerLive && offer.pricing?.current != null) {
+    priceWas = formatMoney(offer.pricing.original || basePrice);
+    priceMain = formatMoney(offer.pricing.current);
+    priceSub = `сейчас · далее ${formatMoney(offer.pricing.renewal || basePrice)}/мес`;
+  } else if (isFree || priceMonth === 0) {
+    priceMain = "Бесплатно";
   } else if (referralFirstPrice != null && period === "month") {
     priceWas = formatMoney(priceMonth);
     priceMain = formatMoney(referralFirstPrice);
@@ -686,7 +693,7 @@ function PlanCard({
         ) : plan.is_recommended ? (
           <span className="upg-card__badge">{plan.badge_text || "Рекомендуем"}</span>
         ) : null}
-        {offerLive ? <span className="upg-card__badge upg-card__badge--offer">Специальное предложение</span> : null}
+        {offerLive || promoApplies ? <span className="upg-card__badge upg-card__badge--offer">Специальное предложение</span> : null}
         {offer && !offerLive && offer.status === "ended" ? (
           <span className="upg-card__badge upg-card__badge--muted">Акция завершена</span>
         ) : null}
@@ -1408,18 +1415,18 @@ export default function CabinetUpgradePage() {
       const source = data.applied_discount_source;
       let message;
       if (source === "referral") {
-        message = data.message || `Реферальная скидка −${formatMoney(data.applied_discount || data.discount)} · к оплате ${formatMoney(data.final_amount || data.final_price)}`;
-      } else if (data.discount_type === "bonus_days" || source === "promo" && data.applied_discount_type === "bonus_days") {
+        message = "Скидка по приглашению применена";
+      } else if (data.discount_type === "bonus_days" || (source === "promo" && data.applied_discount_type === "bonus_days")) {
         message = `+${data.bonus_days || data.discount_value} бонусных дней`;
+      } else if (source === "promotion") {
+        message = "Акция применена";
       } else {
-        message =
-          data.message ||
-          `✓ ${data.code || code}: −${formatMoney(data.applied_discount || data.discount)} · к оплате ${formatMoney(data.final_amount || data.final_price)}`;
+        message = "Промокод применён";
       }
       setPromoState({
         valid: true,
-        message,
         ...data,
+        message,
       });
     } catch (err) {
       setPromoState({

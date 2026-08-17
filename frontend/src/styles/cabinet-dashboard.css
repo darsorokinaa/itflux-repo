@@ -15646,8 +15646,9 @@ select.cb-lesson-card__about-input.is-empty {
 .cum-promo__btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .cum-promo__msg {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   font-weight: 600;
+  line-height: 1.35;
 }
 .cum-promo__msg--ok { color: #10B981; }
 .cum-promo__msg--err { color: #DC2626; }
@@ -16168,8 +16169,10 @@ select.cb-lesson-card__about-input.is-empty {
 .upg-promo__btn:hover:not(:disabled) { background: #cbd5e1; }
 .upg-promo__btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .upg-promo__msg {
-  margin: 0 0 12px;
-  font-size: 0.84rem;
+  margin: 0 0 10px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  font-weight: 600;
 }
 .upg-promo__msg--ok { color: #059669; }
 .upg-promo__msg--err { color: #dc2626; }
@@ -16319,9 +16322,10 @@ select.cb-lesson-card__about-input.is-empty {
 }
 .upg-card__price-sub {
   margin-top: 2px;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   color: var(--upg-muted);
   font-weight: 550;
+  line-height: 1.35;
 }
 .upg-card__price-note {
   margin-top: 4px;

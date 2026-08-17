@@ -12,6 +12,11 @@ import PresenterToolbar from "./PresenterToolbar";
 import { resolvePresenterOverlayPlan } from "./overlays/presenterAdapter";
 import { closeDocumentPipWindow, documentPipAvailable, openDocumentPipWindow } from "./overlays/documentPip";
 
+function portalRoot() {
+  if (typeof document === "undefined") return null;
+  return document.fullscreenElement || document.body;
+}
+
 function lasersToList(remoteLasers) {
   if (!remoteLasers) return [];
   if (Array.isArray(remoteLasers)) return remoteLasers;
@@ -50,11 +55,11 @@ export default function ScreenShareAnnotationV2({
   onSendRef.current = onSend;
   onPointerRef.current = onPointer;
   const [pipWindow, setPipWindow] = useState(null);
-  const [pipFailed, setPipFailed] = useState(false);
   const [toolbarDismissed, setToolbarDismissed] = useState(false);
   const [tool, setTool] = useState(TOOLS.POINTER);
   const [color, setColor] = useState(() => participantColor(currentUserId));
   const [width, setWidth] = useState(3);
+  const [fsTick, setFsTick] = useState(0);
 
   const hostBox = useElementClientRect(targetRef, {
     enabled: active,
@@ -202,6 +207,17 @@ export default function ScreenShareAnnotationV2({
   }, [active]);
 
   useEffect(() => {
+    const open = () => setToolbarDismissed(false);
+    window.addEventListener("itflux-ss-ann-open", open);
+    const onFs = () => setFsTick((n) => n + 1);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => {
+      window.removeEventListener("itflux-ss-ann-open", open);
+      document.removeEventListener("fullscreenchange", onFs);
+    };
+  }, []);
+
+  useEffect(() => {
     if (active) return undefined;
     const pip = pipWindowRef.current;
     pipWindowRef.current = null;
@@ -218,13 +234,9 @@ export default function ScreenShareAnnotationV2({
   const openPip = async () => {
     if (!documentPipAvailable()) return;
     const win = await openDocumentPipWindow();
-    if (!win) {
-      setPipFailed(true);
-      return;
-    }
+    if (!win) return;
     pipWindowRef.current = win;
     setPipWindow(win);
-    setPipFailed(false);
     const onClose = () => {
       if (pipWindowRef.current === win) {
         pipWindowRef.current = null;
@@ -234,34 +246,6 @@ export default function ScreenShareAnnotationV2({
     win.addEventListener("pagehide", onClose);
     win.addEventListener("unload", onClose);
   };
-
-  useEffect(() => {
-    if (!active || !localSharing || pipWindow || pipFailed) return undefined;
-    if (!plan.pipAvailable) return undefined;
-    let cancelled = false;
-    void openDocumentPipWindow().then((win) => {
-      if (cancelled) {
-        closeDocumentPipWindow(win);
-        return;
-      }
-      if (!win) {
-        setPipFailed(true);
-        return;
-      }
-      pipWindowRef.current = win;
-      setPipWindow(win);
-      const onClose = () => {
-        if (pipWindowRef.current === win) {
-          pipWindowRef.current = null;
-          setPipWindow(null);
-        }
-      };
-      win.addEventListener("pagehide", onClose);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [active, localSharing, plan.pipAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!active) return null;
 
@@ -309,9 +293,11 @@ export default function ScreenShareAnnotationV2({
     />
   );
 
+  const host = portalRoot() || document.body;
+  void fsTick;
   const toolbarPortal = pipWindow?.document?.body
     ? createPortal(toolbar, pipWindow.document.body)
-    : (toolbar && createPortal(
+    : createPortal(
       <div
         ref={drag.nodeRef}
         className={`ss-ann-v2-toolbar-slot${compact ? " is-compact" : ""}`}
@@ -322,8 +308,8 @@ export default function ScreenShareAnnotationV2({
       >
         {toolbar}
       </div>,
-      document.body,
-    ));
+      host,
+    );
 
   return (
     <>
@@ -344,7 +330,7 @@ export default function ScreenShareAnnotationV2({
           ref={viewportCanvasRef}
           className="ss-ann-v2-platform is-drawing"
         />,
-        document.body,
+        host,
       ) : null}
       {toolbarPortal}
     </>

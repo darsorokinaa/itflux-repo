@@ -125,6 +125,14 @@
   text-decoration: line-through;
 }
 
+.pricing-card__now {
+  margin: -0.55rem 0 0.85rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--pricing-muted);
+  line-height: 1.35;
+}
+
 .pricing-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

@@ -15,7 +15,13 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { validatePromoCode } from "../../utils/cabinetAuth";
 
-function PlanCard({ plan, isCurrent, onSelect }) {
+function formatRub(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return `${Math.round(n).toLocaleString("ru-RU")} ₽`;
+}
+
+function PlanCard({ plan, isCurrent, onSelect, promoDiscount }) {
   const l = plan.limits || {};
   const summary = [
     l.students != null ? `${l.students} учеников` : null,
@@ -24,31 +30,52 @@ function PlanCard({ plan, isCurrent, onSelect }) {
   ].filter(Boolean).join(" · ");
 
   const offer = plan.promotion?.can_redeem ? plan.promotion : null;
+  const promoApplies =
+    Boolean(promoDiscount?.valid) &&
+    promoDiscount.plan_slug === plan.slug &&
+    promoDiscount.final_amount != null;
   let price =
     Number(plan.price_month) === 0
       ? "Бесплатно"
       : `${Number(plan.price_month).toLocaleString("ru-RU")} ₽/мес`;
-  if (offer?.benefit_type === "free_period") {
+  let priceNote = summary;
+  if (promoApplies) {
+    price = `${formatRub(promoDiscount.final_amount)} сейчас`;
+    priceNote = promoDiscount.renewal_price
+      ? `далее ${formatRub(promoDiscount.renewal_price)}/мес`
+      : "с учётом скидки";
+  } else if (offer?.benefit_type === "free_period") {
     price = `${offer.free_months} мес. бесплатно`;
+    priceNote = offer.pricing?.renewal
+      ? `далее ${formatRub(offer.pricing.renewal)}/мес`
+      : summary;
   } else if (offer?.pricing?.current != null) {
-    price = `${Number(offer.pricing.current).toLocaleString("ru-RU")} ₽/мес`;
+    price = `${formatRub(offer.pricing.current)} сейчас`;
+    priceNote = offer.pricing.renewal
+      ? `далее ${formatRub(offer.pricing.renewal)}/мес`
+      : summary;
   }
 
   return (
     <div className={`cum-plan-card${isCurrent ? " cum-plan-card--current" : ""}${plan.is_recommended ? " cum-plan-card--recommended" : ""}`}>
       {plan.is_recommended && <span className="cum-badge">Оптимально</span>}
       {isCurrent && <span className="cum-badge cum-badge--current">Текущий</span>}
-      {offer ? <span className="cum-badge">Акция</span> : null}
+      {offer || promoApplies ? <span className="cum-badge">Акция</span> : null}
       <div className="cum-plan-name">{plan.name}</div>
       <div className="cum-plan-price">{price}</div>
-      {offer?.pricing?.original && offer.benefit_type !== "free_period" ? (
-        <div className="cum-plan-summary">
-          <s>{Number(offer.pricing.original).toLocaleString("ru-RU")} ₽</s>
-          {offer.pricing.renewal ? ` · далее ${Number(offer.pricing.renewal).toLocaleString("ru-RU")} ₽/мес` : ""}
-        </div>
-      ) : (
-        <div className="cum-plan-summary">{summary}</div>
-      )}
+      <div className="cum-plan-summary">
+        {promoApplies && promoDiscount.base_price ? (
+          <s>{formatRub(promoDiscount.base_price)}</s>
+        ) : offer?.pricing?.original && offer.benefit_type !== "free_period" ? (
+          <s>{formatRub(offer.pricing.original)}</s>
+        ) : null}
+        {((promoApplies && promoDiscount.base_price) ||
+          (offer?.pricing?.original && offer.benefit_type !== "free_period")) &&
+        priceNote
+          ? " · "
+          : null}
+        {priceNote}
+      </div>
       {!isCurrent && (
         <button type="button" className="cum-plan-btn" onClick={() => onSelect(plan.slug)}>
           {offer?.button_text || `Перейти на ${plan.name}`}
@@ -89,7 +116,11 @@ export default function CompactUpgradeModal({
     setPromoState(null);
     try {
       const data = await validatePromoCode(code, recommendedSlug);
-      setPromoState({ valid: true, message: `−${data.discount} ₽`, discount: data });
+      setPromoState({
+        valid: true,
+        ...data,
+        message: "Промокод применён",
+      });
     } catch (err) {
       setPromoState({ valid: false, message: err.data?.message || "Промокод не найден" });
     } finally {
@@ -116,6 +147,7 @@ export default function CompactUpgradeModal({
               plan={p}
               isCurrent={p.slug === currentSlug}
               onSelect={onSelectPlan}
+              promoDiscount={promoState}
             />
           ))}
         </div>
