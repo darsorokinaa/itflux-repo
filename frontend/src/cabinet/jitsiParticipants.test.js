@@ -196,9 +196,9 @@ describe("attachConferencePresence", () => {
 });
 
 describe("isJitsiAuthJoinFailure", () => {
-  it("detects Jitsi not-allowed / passwordRequired", () => {
+  it("detects Jitsi not-allowed, not first-join passwordRequired", () => {
     expect(isJitsiAuthJoinFailure({ error: "connection.connectionError.not-allowed" })).toBe(true);
-    expect(isJitsiAuthJoinFailure({ name: "passwordRequired" })).toBe(true);
+    expect(isJitsiAuthJoinFailure({ name: "passwordRequired" })).toBe(false);
     expect(isJitsiAuthJoinFailure({ error: { message: "authentication failed" } })).toBe(true);
     expect(isJitsiAuthJoinFailure({ error: "conference.focusDisconnected" })).toBe(false);
     expect(isJitsiAuthJoinFailure(null)).toBe(false);

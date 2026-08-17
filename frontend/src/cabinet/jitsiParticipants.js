@@ -409,14 +409,14 @@ export function isJitsiAuthJoinFailure(event) {
   walk(event);
   const blob = parts.join(" ").toLowerCase();
   if (!blob) return false;
+  // passwordRequired на пустой комнате — штатный первый вход учителя (ждёт ученика),
+  // не отказ JWT. Режем только явный not-allowed / authentication failed.
   return (
-    blob.includes("passwordrequired")
-    || blob.includes("password required")
-    || blob.includes("not-allowed")
+    blob.includes("not-allowed")
     || blob.includes("not allowed")
     || blob.includes("accessdenied")
     || blob.includes("access denied")
-    || blob.includes("authentication")
+    || blob.includes("authentication failed")
     || blob.includes("not-authorized")
     || blob.includes("tokenauth")
     || blob.includes("invalid token")

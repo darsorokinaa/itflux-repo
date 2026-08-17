@@ -317,17 +317,13 @@ export function registerJoinDiagnostics(api, { onMediaWarning, diagnostics } = {
           }
         }
         if (eventName === "passwordRequired") {
-          // Комнаты платформы без пользовательского пароля. Не подставляем stale password.
+          // Пустая комната: Jitsi может запросить пароль до фокуса Jicofo.
+          // Не срываем ожидание ученика и не подставляем stale password.
           console.warn("[JITSI_PASSWORD_REQUIRED]", {
             authMode: diagnostics?.authMode || "",
             meetingUuid: diagnostics?.meetingUuid || null,
             roomName: diagnostics?.roomName || null,
           });
-          onMediaWarning?.(
-            diagnostics?.authMode === "jwt"
-              ? "Jitsi запросил авторизацию (JWT). Не вводите пароль вручную — обновите страницу урока или откройте вход заново с платформы."
-              : "Сервер запрашивает пароль/авторизацию для комнаты. Пароль комнаты платформа не задаёт.",
-          );
         }
         if (eventName === "conferenceFailed") {
           onMediaWarning?.(
@@ -609,7 +605,6 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     });
     api.addListener("connectionFailed", (event) => onAuthFail("connectionFailed", event));
     api.addListener("conferenceFailed", (event) => onAuthFail("conferenceFailed", event));
-    api.addListener("passwordRequired", (event) => onAuthFail("passwordRequired", event || { name: "passwordRequired" }));
     timer = window.setTimeout(() => {
       if (!conferenceJoined) {
         console.error("[Jitsi] videoConferenceJoined was not received", {
@@ -634,12 +629,13 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
   });
 
   let joined = await joinedWait;
-  // Восстанавливаемся только если videoConferenceJoined уже проставил local id.
-  // Свой превью-тайл / getNumberOfParticipants()===1 при rejected JWT — не join.
+  // Учитель один в комнате — норма. Не рвём сессию, если Jitsi уже видит локального
+  // участника, а videoConferenceJoined задержался. При not-allowed authFailed=true.
   if (!joined && !authFailed && !hooks.signal?.aborted) {
     try {
       const snap = presence.snapshot?.() || {};
-      if (snap.localParticipant?.id) {
+      const n = api.getNumberOfParticipants?.();
+      if (snap.localParticipant?.id || (typeof n === "number" && n >= 1)) {
         conferenceJoined = true;
         joined = true;
         await presence.reconcile?.("join-timeout-recover");
