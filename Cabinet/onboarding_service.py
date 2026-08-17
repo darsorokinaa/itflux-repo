@@ -2,7 +2,8 @@
 Activation / onboarding state for teachers.
 
 Computed from existing Cabinet tables. No progress rows, no extra flags.
-The checklist is hidden once the teacher has actually run a first lesson.
+Visible checklist: add student → send invite → create lesson.
+Hidden once the teacher has a real schedule event.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.db.models import Q
 
-from .choices import HomeworkStatus, StudentStatus, StudentSubjectStatus
+from .choices import HomeworkStatus, InvitationStatus, StudentStatus, StudentSubjectStatus
 from .journal_models import JournalStatus, LessonJournal
 from .models import (
     Homework,
@@ -21,54 +22,49 @@ from .models import (
     ScheduleEvent,
     ScheduleEventMaterial,
     Student,
+    StudentInvitation,
     StudentSubject,
     VideoMeeting,
 )
 
 ACTIVATION_STEP_KEYS = (
     "student",
-    "subject",
+    "invite",
     "schedule",
-    "materials",
-    "conduct",
 )
 
 STEP_LABELS = {
     "registered": "Зарегистрироваться",
     "student": "Добавить ученика",
+    "invite": "Отправить приглашение",
+    "schedule": "Создать занятие",
     "subject": "Добавить предмет",
-    "schedule": "Запланировать занятие",
     "materials": "Подготовить материалы",
     "conduct": "Провести первое занятие",
 }
 
 CTA_BY_STEP = {
     "student": {
-        "label": "Добавить первого ученика",
+        "label": "Добавить ученика",
         "href": "/cabinet/students?invite=1",
-        "hint": "После этого можно сразу поставить занятие в расписание — ждать входа ученика не нужно.",
+        "hint": "Это займёт пару минут. Занятие можно поставить сразу — ждать входа ученика не нужно.",
+        "title": "Добавьте первого ученика",
     },
-    "subject": {
-        "label": "Настроить предмет ученика",
-        "href": "/cabinet/students",
-        "hint": "Предмет нужен, чтобы подобрать материалы и корректно вести журнал.",
+    "invite": {
+        "label": "Отправить приглашение",
+        "href": "/cabinet/students?tab=invites",
+        "hint": "Скопируйте ссылку и отправьте ученику. После входа он появится в списке как подключённый.",
+        "title": "Ученик добавлен. Теперь отправьте приглашение",
     },
     "schedule": {
-        "label": "Запланировать первое занятие",
+        "label": "Создать занятие",
         "href": "/cabinet/schedule",
-        "hint": "Материалы можно добавить сразу внутри карточки занятия.",
-    },
-    "materials": {
-        "label": "Подготовить занятие",
-        "href": "/cabinet/schedule",
-        "hint": "Добавьте доску, готовый урок, интерактив, вариант или файл. Можно продолжить без материалов.",
-    },
-    "conduct": {
-        "label": "Всё готово к первому уроку",
-        "href": "/cabinet/schedule",
-        "hint": "Откройте карточку занятия и начните урок в существующей комнате.",
+        "hint": "Первое занятие можно поставить в календарь сразу после подключения ученика.",
+        "title": "Создайте первое занятие",
     },
 }
+
+ONBOARDING_UX_VERSION = 2
 
 _ACTIVE_EVENT_STATUSES = (
     ScheduleEvent.Status.PLANNED,
@@ -238,6 +234,13 @@ def _next_event_id_for_materials(teacher: User) -> int | None:
     return _first_event_id(teacher)
 
 
+def teacher_has_pending_invite(teacher: User) -> bool:
+    return StudentInvitation.objects.filter(
+        teacher=teacher,
+        status=InvitationStatus.PENDING,
+    ).exists()
+
+
 def _href_with_student(base: str, student_id: int | None) -> str:
     if not student_id:
         return base
@@ -260,8 +263,13 @@ def _href_with_event(base: str, event_id: int | None, *, prepare: bool = False) 
 
 
 def build_teacher_onboarding_state(teacher: User) -> dict[str, Any]:
-    """Return a JSON-safe payload for the teacher cabinet home."""
+    """Return a JSON-safe payload for the teacher cabinet home.
+
+    State is derived from the database, not from a stored frontend flag.
+    """
     has_student = teacher_has_student(teacher)
+    has_connected = teacher_has_connected_student(teacher)
+    has_pending_invite = teacher_has_pending_invite(teacher)
     has_subject = teacher_has_subject(teacher)
     has_event = teacher_has_schedule_event(teacher)
     has_materials = teacher_has_lesson_materials(teacher)
@@ -270,39 +278,36 @@ def build_teacher_onboarding_state(teacher: User) -> dict[str, Any]:
     flags = {
         "registered": True,
         "student": has_student,
-        "subject": has_subject,
+        "invite": has_connected,
         "schedule": has_event,
+        "subject": has_subject,
         "materials": has_materials,
         "conduct": has_conducted,
     }
 
+    if has_event:
+        next_key = None
+    elif not has_student:
+        next_key = "student"
+    elif not has_connected:
+        next_key = "invite"
+    else:
+        next_key = "schedule"
+
     activation_done = sum(1 for key in ACTIVATION_STEP_KEYS if flags[key])
-    next_key = None if has_conducted else next(
-        (key for key in ACTIVATION_STEP_KEYS if not flags[key]),
-        None,
-    )
+    visible = next_key is not None
 
     student_id = _first_student_id(teacher) if has_student else None
-    event_id = None
-    if next_key in ("materials", "conduct") or has_event:
-        event_id = (
-            _next_event_id_for_materials(teacher)
-            if next_key == "materials"
-            else _first_event_id(teacher)
-        )
+    event_id = _first_event_id(teacher) if has_event else None
 
     cta = None
     if next_key:
         spec = dict(CTA_BY_STEP[next_key])
         href = spec["href"]
-        if next_key == "subject":
-            href = _href_with_student("/cabinet/students", student_id)
+        if next_key == "invite" and not has_pending_invite:
+            href = "/cabinet/students?invite=1"
         elif next_key == "schedule":
             href = _href_with_student("/cabinet/schedule", student_id)
-        elif next_key == "materials":
-            href = _href_with_event("/cabinet/schedule", event_id, prepare=True)
-        elif next_key == "conduct":
-            href = _href_with_event("/cabinet/schedule", event_id, prepare=False)
         spec["href"] = href
         spec["step"] = next_key
         cta = spec
@@ -324,15 +329,17 @@ def build_teacher_onboarding_state(teacher: User) -> dict[str, Any]:
     )
 
     return {
-        "visible": not has_conducted,
+        "visible": visible,
         "completed_steps": activation_done,
         "total_steps": len(ACTIVATION_STEP_KEYS),
         "next_step": next_key,
         "cta": cta,
         "steps": steps,
+        "ux_version": ONBOARDING_UX_VERSION,
         "flags": {
             "has_student": has_student,
-            "has_connected_student": teacher_has_connected_student(teacher),
+            "has_connected_student": has_connected,
+            "has_pending_invite": has_pending_invite,
             "has_subject": has_subject,
             "has_schedule_event": has_event,
             "has_materials": has_materials,

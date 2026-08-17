@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from . import (
+    activation_api,
     ai_api,
     api_views,
     billing_api,
@@ -85,6 +86,11 @@ urlpatterns = [
         "internal/activation/",
         api_views.ActivationMetricsView.as_view(),
         name="cabinet_internal_activation",
+    ),
+    path(
+        "activation-events/",
+        activation_api.ActivationIntentEventView.as_view(),
+        name="cabinet_activation_events",
     ),
     path("student/dashboard/", student_api.StudentDashboardView.as_view(), name="student_dashboard"),
     path("student/lessons/", student_api.StudentLessonsView.as_view(), name="student_lessons"),

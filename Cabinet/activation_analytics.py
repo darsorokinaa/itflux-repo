@@ -7,14 +7,32 @@ or room URLs are included.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Any
 
 from django.contrib.auth.models import User
-from django.db.models import Min, Q
+from django.db.models import Count, Min, Q
 from django.utils import timezone
 
-from .choices import StudentStatus
+from .activation_events import (
+    ADD_STUDENT_CLICKED,
+    ADD_STUDENT_CTA_VIEWED,
+    CORE_ACTIVATED,
+    FIRST_CABINET_OPENED,
+    LESSON_CREATED,
+    REPEAT_CORE,
+    STUDENT_CREATED,
+    STUDENT_FORM_OPENED,
+    STUDENT_FORM_VALIDATION_FAILED,
+    STUDENT_INVITE_ACCEPTED,
+    STUDENT_INVITE_CREATED,
+    STUDENT_INVITE_OPENED,
+    STUDENTS_PAGE_OPENED,
+    SUBJECT_CREATED,
+    TEACHER_REGISTERED,
+)
+from .activation_models import ActivationEvent
+from .choices import InvitationStatus, StudentStatus
 from .journal_models import JournalStatus, LessonJournal
 from .models import (
     Homework,
@@ -25,6 +43,7 @@ from .models import (
     ScheduleEvent,
     ScheduleEventMaterial,
     Student,
+    StudentInvitation,
     StudentSubject,
     VideoMeeting,
 )
@@ -34,6 +53,22 @@ from .onboarding_service import (
 )
 
 NUDGE_MAX_AGE_DAYS = 30
+
+# Date of the activation-instrumentation + shortened onboarding ship.
+# Cohorts before this date are "before onboarding change".
+ONBOARDING_UX_CUTOVER = datetime(2026, 8, 17, tzinfo=dt_timezone.utc)
+
+TARGET_REGISTRATION_TO_STUDENT = 50.0
+TARGET_STUDENT_TO_CONNECTED = 60.0
+TARGET_REGISTRATION_TO_CORE = 25.0
+TARGET_CORE_TO_REPEAT = 40.0
+
+BASELINE = {
+    "registration_to_student_created": 37.6,
+    "student_created_to_connected": 43.4,
+    "registration_to_core": 17.0,
+    "core_to_repeat": 33.3,
+}
 
 
 def _teacher_qs():
@@ -250,6 +285,98 @@ def _activation_at(
     return min(candidates)
 
 
+def _hours(delta: timedelta | None) -> float | None:
+    if delta is None:
+        return None
+    return round(delta.total_seconds() / 3600.0, 3)
+
+
+def _percentile(values: list[float], p: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return round(ordered[0], 3)
+    rank = (len(ordered) - 1) * p
+    low = int(rank)
+    high = min(low + 1, len(ordered) - 1)
+    if low == high:
+        return round(ordered[low], 3)
+    frac = rank - low
+    return round(ordered[low] + (ordered[high] - ordered[low]) * frac, 3)
+
+
+def _spread(values: list[float]) -> dict[str, float | None]:
+    if len(values) < 5:
+        return {
+            "n": len(values),
+            "p25": None,
+            "median": _percentile(values, 0.5) if values else None,
+            "p75": None,
+        }
+    return {
+        "n": len(values),
+        "p25": _percentile(values, 0.25),
+        "median": _percentile(values, 0.5),
+        "p75": _percentile(values, 0.75),
+    }
+
+
+def _funnel_table(stages: list[tuple[str, int]], registered: int) -> list[dict[str, Any]]:
+    rows = []
+    prev = None
+    for key, count in stages:
+        rows.append(
+            {
+                "stage": key,
+                "users": count,
+                "pct_of_registrations": _pct(count, registered),
+                "pct_of_previous": _pct(count, prev) if prev is not None else None,
+            }
+        )
+        prev = count
+    return rows
+
+
+def _first_invite_at_by_teacher() -> dict[int, datetime]:
+    rows = StudentInvitation.objects.values("teacher_id").annotate(first_at=Min("created_at"))
+    return {row["teacher_id"]: row["first_at"] for row in rows}
+
+
+def _first_accepted_at_by_teacher() -> dict[int, datetime]:
+    rows = (
+        StudentInvitation.objects.filter(
+            status=InvitationStatus.ACCEPTED,
+            accepted_at__isnull=False,
+        )
+        .values("teacher_id")
+        .annotate(first_at=Min("accepted_at"))
+    )
+    return {row["teacher_id"]: row["first_at"] for row in rows}
+
+
+def _event_firsts_by_teacher(event_names: tuple[str, ...]) -> dict[str, dict[int, datetime]]:
+    out: dict[str, dict[int, datetime]] = {name: {} for name in event_names}
+    rows = (
+        ActivationEvent.objects.filter(event_name__in=event_names)
+        .values("user_id", "event_name")
+        .annotate(first_at=Min("occurred_at"))
+    )
+    for row in rows:
+        out[row["event_name"]][row["user_id"]] = row["first_at"]
+    return out
+
+
+def _target_row(actual: float | None, goal: float, baseline: float) -> dict[str, Any]:
+    met = actual is not None and actual >= goal
+    return {
+        "actual": actual,
+        "goal": goal,
+        "baseline": baseline,
+        "met": met,
+    }
+
+
 def build_activation_report(*, now=None) -> dict[str, Any]:
     now = now or timezone.now()
     teachers = list(_teacher_qs().only("id", "date_joined"))
@@ -385,6 +512,344 @@ def build_activation_report(*, now=None) -> dict[str, Any]:
         if total_hw >= 2:
             second_homework += 1
 
+    event_firsts = _event_firsts_by_teacher(
+        (
+            TEACHER_REGISTERED,
+            FIRST_CABINET_OPENED,
+            ADD_STUDENT_CTA_VIEWED,
+            ADD_STUDENT_CLICKED,
+            STUDENT_FORM_OPENED,
+            STUDENT_FORM_VALIDATION_FAILED,
+            STUDENT_CREATED,
+            STUDENT_INVITE_CREATED,
+            STUDENT_INVITE_OPENED,
+            STUDENT_INVITE_ACCEPTED,
+            STUDENTS_PAGE_OPENED,
+            SUBJECT_CREATED,
+            LESSON_CREATED,
+            CORE_ACTIVATED,
+            REPEAT_CORE,
+        )
+    )
+    invites = _first_invite_at_by_teacher()
+    accepted = _first_accepted_at_by_teacher()
+
+    def _first_at(tid: int, event_name: str, fallback: dict[int, datetime] | None = None):
+        at = event_firsts.get(event_name, {}).get(tid)
+        if at is not None:
+            return at
+        if fallback is not None:
+            return fallback.get(tid)
+        return None
+
+    teachers_with_events = set(
+        ActivationEvent.objects.filter(user_id__in=teacher_ids).values_list("user_id", flat=True)
+    )
+
+    cabinet_opened_ids = set()
+    for teacher in teachers:
+        if _first_at(teacher.pk, FIRST_CABINET_OPENED) is not None:
+            cabinet_opened_ids.add(teacher.pk)
+            continue
+        last_login = teacher.last_login
+        if last_login and last_login > teacher.date_joined + timedelta(minutes=2):
+            cabinet_opened_ids.add(teacher.pk)
+
+    add_clicked_ids = set(event_firsts.get(ADD_STUDENT_CLICKED, {}))
+    form_opened_ids = set(event_firsts.get(STUDENT_FORM_OPENED, {}))
+    cta_viewed_ids = set(event_firsts.get(ADD_STUDENT_CTA_VIEWED, {}))
+    students_page_ids = set(event_firsts.get(STUDENTS_PAGE_OPENED, {}))
+    validation_ids = set(event_firsts.get(STUDENT_FORM_VALIDATION_FAILED, {}))
+    invite_opened_ids = set(event_firsts.get(STUDENT_INVITE_OPENED, {}))
+
+    n_cabinet = len(cabinet_opened_ids)
+    n_cta = len(cta_viewed_ids)
+    n_click = len(add_clicked_ids)
+    n_form = len(form_opened_ids)
+    n_invite = _count(invites)
+    n_invite_opened = len(invite_opened_ids)
+    n_accepted = _count(accepted) if accepted else n_connected
+
+    first_30_stages = _funnel_table(
+        [
+            ("Registered", total),
+            ("Cabinet opened", n_cabinet),
+            ("Add student clicked", n_click),
+            ("Student form opened", n_form),
+            ("Student created", n_student),
+            ("Invite created", n_invite),
+            ("Invite opened", n_invite_opened),
+            ("Invite accepted", n_accepted),
+            ("Subject created", n_subject),
+            ("Lesson created", n_event),
+        ],
+        total,
+    )
+
+    def _pair_hours(start_map, end_map, subset=None):
+        values = []
+        members = subset if subset is not None else teachers
+        for teacher in members:
+            start = start_map(teacher)
+            end = end_map(teacher)
+            if start and end and end >= start:
+                hours = _hours(end - start)
+                if hours is not None:
+                    values.append(hours)
+        return _spread(values)
+
+    time_to_action = {
+        "registration_to_cabinet": _pair_hours(
+            lambda t: t.date_joined,
+            lambda t: _first_at(t.pk, FIRST_CABINET_OPENED),
+        ),
+        "registration_to_add_student_click": _pair_hours(
+            lambda t: t.date_joined,
+            lambda t: _first_at(t.pk, ADD_STUDENT_CLICKED),
+        ),
+        "registration_to_student_created": _pair_hours(
+            lambda t: t.date_joined,
+            lambda t: _first_at(t.pk, STUDENT_CREATED, students),
+        ),
+        "student_created_to_invite_created": _pair_hours(
+            lambda t: _first_at(t.pk, STUDENT_CREATED, students),
+            lambda t: _first_at(t.pk, STUDENT_INVITE_CREATED, invites),
+        ),
+        "invite_created_to_invite_opened": _pair_hours(
+            lambda t: _first_at(t.pk, STUDENT_INVITE_CREATED, invites),
+            lambda t: _first_at(t.pk, STUDENT_INVITE_OPENED),
+        ),
+        "invite_opened_to_accepted": _pair_hours(
+            lambda t: _first_at(t.pk, STUDENT_INVITE_OPENED),
+            lambda t: _first_at(t.pk, STUDENT_INVITE_ACCEPTED, accepted),
+        ),
+        "accepted_to_subject": _pair_hours(
+            lambda t: _first_at(t.pk, STUDENT_INVITE_ACCEPTED, accepted),
+            lambda t: subjects.get(t.pk),
+        ),
+        "subject_to_lesson": _pair_hours(
+            lambda t: subjects.get(t.pk),
+            lambda t: events.get(t.pk),
+        ),
+        "unit": "hours",
+        "note": (
+            "p25/p75 только при n≥5. Invite opened недоступен ретроспективно "
+            "без instrumentation events."
+        ),
+    }
+
+    buckets = {
+        "0_1_min": 0,
+        "1_5_min": 0,
+        "5_15_min": 0,
+        "15_30_min": 0,
+        "after_30_min": 0,
+        "never_student": 0,
+    }
+    for teacher in teachers:
+        created_at = _first_at(teacher.pk, STUDENT_CREATED, students)
+        if created_at is None:
+            buckets["never_student"] += 1
+            continue
+        delta = created_at - teacher.date_joined
+        minutes = delta.total_seconds() / 60.0
+        if minutes <= 1:
+            buckets["0_1_min"] += 1
+        elif minutes <= 5:
+            buckets["1_5_min"] += 1
+        elif minutes <= 15:
+            buckets["5_15_min"] += 1
+        elif minutes <= 30:
+            buckets["15_30_min"] += 1
+        else:
+            buckets["after_30_min"] += 1
+
+    never_counts = {
+        "registered_never_logged_in_again": 0,
+        "logged_in_no_action": 0,
+        "browsed_content_only": 0,
+        "opened_student_page": 0,
+        "clicked_add_student": 0,
+        "opened_form": 0,
+        "validation_failure": 0,
+        "abandoned_form": 0,
+        "created_student_no_invite": 0,
+        "invite_created_never_opened": 0,
+        "invite_opened_not_accepted": 0,
+        "accepted_no_subject": 0,
+        "subject_no_lesson": 0,
+        "lesson_created_or_beyond": 0,
+    }
+    for teacher in teachers:
+        tid = teacher.pk
+        has_lesson = tid in events
+        has_subj = tid in subjects
+        has_acc = tid in accepted or tid in connected
+        has_inv_open = tid in invite_opened_ids
+        has_inv = tid in invites
+        has_stu = tid in students
+        has_val = tid in validation_ids
+        has_form = tid in form_opened_ids
+        has_click = tid in add_clicked_ids
+        has_stu_page = tid in students_page_ids or tid in cta_viewed_ids
+        has_cabinet = tid in cabinet_opened_ids
+        if has_lesson:
+            never_counts["lesson_created_or_beyond"] += 1
+        elif has_subj:
+            never_counts["subject_no_lesson"] += 1
+        elif has_acc:
+            never_counts["accepted_no_subject"] += 1
+        elif has_inv_open:
+            never_counts["invite_opened_not_accepted"] += 1
+        elif has_inv:
+            never_counts["invite_created_never_opened"] += 1
+        elif has_stu:
+            never_counts["created_student_no_invite"] += 1
+        elif has_val:
+            never_counts["validation_failure"] += 1
+        elif has_form:
+            never_counts["abandoned_form"] += 1
+        elif has_click:
+            never_counts["clicked_add_student"] += 1
+        elif has_stu_page:
+            never_counts["opened_student_page"] += 1
+        elif has_cabinet:
+            never_counts["logged_in_no_action"] += 1
+        else:
+            never_counts["registered_never_logged_in_again"] += 1
+
+    never_touched = {
+        "total_teachers": total,
+        "segments": [
+            {
+                "key": key,
+                "count": count,
+                "pct": _pct(count, total),
+            }
+            for key, count in never_counts.items()
+        ],
+        "note": (
+            "Каждый учитель ровно в одном сегменте — самый дальний пройденный шаг. "
+            "Шаги clicked/form/invite opened для учителей до instrumentation "
+            "недоступны и схлопываются в соседний известный шаг."
+        ),
+        "instrumentation_teachers": len(teachers_with_events),
+    }
+
+    source_rows = (
+        Profile.objects.filter(user_id__in=teacher_ids, role=Profile.Role.TEACHER)
+        .values("acquisition_source")
+        .annotate(teachers=Count("user_id"))
+    )
+    acquisition = []
+    for row in source_rows:
+        bucket = row["acquisition_source"] or "unknown"
+        ids = list(
+            Profile.objects.filter(
+                user_id__in=teacher_ids,
+                role=Profile.Role.TEACHER,
+                acquisition_source=row["acquisition_source"],
+            ).values_list("user_id", flat=True)
+        )
+        n = len(ids)
+        n_stu = sum(1 for i in ids if i in students)
+        n_core = sum(
+            1
+            for i in ids
+            if i in video_finished
+            or (i in homework and i in submissions)
+            or i in journals
+            or i in events_done
+        )
+        acquisition.append(
+            {
+                "source": bucket,
+                "teachers": n,
+                "student_created": n_stu,
+                "student_created_rate": _pct(n_stu, n),
+                "core": n_core,
+                "core_rate": _pct(n_core, n),
+            }
+        )
+    if not acquisition:
+        acquisition = [
+            {
+                "source": "unknown",
+                "teachers": total,
+                "student_created": n_student,
+                "student_created_rate": _pct(n_student, total),
+                "core": core_any,
+                "core_rate": _pct(core_any, total),
+                "note": "UTM/source начали сохраняться с новой регистрацией. Ретроспектива не выдумывается.",
+            }
+        ]
+
+    def _cohort_metrics(members: list[User]) -> dict[str, Any]:
+        ids = [t.pk for t in members]
+        n = len(ids)
+        n_stu = sum(1 for i in ids if i in students)
+        n_conn = sum(1 for i in ids if i in connected)
+        n_sub = sum(1 for i in ids if i in subjects)
+        n_les = sum(1 for i in ids if i in events)
+        n_core = sum(
+            1
+            for i in ids
+            if i in video_finished
+            or (i in homework and i in submissions)
+            or i in journals
+            or i in events_done
+        )
+        return {
+            "teachers": n,
+            "student_created": {"count": n_stu, "rate": _pct(n_stu, n)},
+            "connected": {"count": n_conn, "rate": _pct(n_conn, n)},
+            "subject": {"count": n_sub, "rate": _pct(n_sub, n)},
+            "lesson": {"count": n_les, "rate": _pct(n_les, n)},
+            "core": {"count": n_core, "rate": _pct(n_core, n)},
+        }
+
+    before = [t for t in teachers if t.date_joined < ONBOARDING_UX_CUTOVER]
+    after = [t for t in teachers if t.date_joined >= ONBOARDING_UX_CUTOVER]
+    week_cohorts = []
+    current_week = _week_start(now)
+    for week, members in sorted(by_week.items(), reverse=True)[:16]:
+        age_days = (now.date() - week.date()).days
+        mature_enough_repeat = age_days >= 7
+        row = {
+            "week_start": week.date().isoformat(),
+            "incomplete_week": week == current_week,
+            **_cohort_metrics(members),
+        }
+        if not mature_enough_repeat:
+            row["repeat_core"] = {
+                "excluded": True,
+                "note": "Когорта младше 7 дней — Repeat/D7 не сравниваем.",
+            }
+        week_cohorts.append(row)
+
+    n_repeat = len(event_firsts.get(REPEAT_CORE, {})) or second_event
+
+    student_created_rate = _pct(n_student, total)
+    connected_from_student = _pct(n_connected, n_student)
+    core_rate = _pct(core_any, total)
+    repeat_rate = _pct(n_repeat, core_any)
+
+    targets = {
+        "registration_to_student_created": _target_row(
+            student_created_rate, TARGET_REGISTRATION_TO_STUDENT, BASELINE["registration_to_student_created"]
+        ),
+        "student_created_to_connected": _target_row(
+            connected_from_student, TARGET_STUDENT_TO_CONNECTED, BASELINE["student_created_to_connected"]
+        ),
+        "registration_to_core": _target_row(
+            core_rate, TARGET_REGISTRATION_TO_CORE, BASELINE["registration_to_core"]
+        ),
+        "core_to_repeat": _target_row(
+            repeat_rate, TARGET_CORE_TO_REPEAT, BASELINE["core_to_repeat"]
+        ),
+    }
+    targets_met = sum(1 for row in targets.values() if row["met"])
+
     return {
         "generated_at": _iso(now),
         "teachers_total": total,
@@ -443,6 +908,62 @@ def build_activation_report(*, now=None) -> dict[str, Any]:
             "any": {"count": core_any, "rate": _pct(core_any, total)},
         },
         "cohorts_weekly": cohorts,
+        "dashboard_priority": "activation_funnel",
+        "health": {
+            "lead_with": "activation_funnel",
+            "targets_met": targets_met,
+            "targets_total": len(targets),
+            "note": (
+                "Не интерпретировать как «здоровый продукт» по одному числу. "
+                "Незрелые retention-метрики и незавершённая неделя не сравниваются WoW."
+            ),
+        },
+        "targets": targets,
+        "baseline": BASELINE,
+        "first_30_minutes": {
+            "funnel": first_30_stages,
+            "time_to_action": time_to_action,
+            "time_to_student_buckets": buckets,
+            "cta_viewed": {"count": n_cta, "rate": _pct(n_cta, total)},
+        },
+        "never_touched": never_touched,
+        "acquisition": {
+            "sources": acquisition,
+            "note": "source → student_created → CORE. Пустой source = unknown, ретроспектива не заполняется.",
+        },
+        "cohort_comparison": {
+            "cutover": ONBOARDING_UX_CUTOVER.date().isoformat(),
+            "before_onboarding_change": _cohort_metrics(before),
+            "after_onboarding_change": _cohort_metrics(after),
+            "weekly": week_cohorts,
+        },
+        "lifecycle_reminders": {
+            "enabled": False,
+            "note": "Предложено, не включено. Сначала собираем события воронки.",
+            "proposed_triggers": [
+                {
+                    "after": "hours:4",
+                    "state": "no_student",
+                    "copy": "Добавьте первого ученика — это займёт пару минут.",
+                },
+                {
+                    "after": "hours:4",
+                    "state": "student_no_invite_accepted",
+                    "copy": "Отправьте приглашение ученику, чтобы он подключился к занятиям.",
+                },
+                {
+                    "after": "hours:24",
+                    "state": "connected_no_lesson",
+                    "copy": "Создайте первое занятие в расписании.",
+                },
+            ],
+            "rules": [
+                "respect notification settings",
+                "один reminder на конкретный state",
+                "дедуп по event_key",
+                "прекращать сразу после выполнения действия",
+            ],
+        },
         "retention": {
             "registration_d7": {
                 "eligible": len(mature),

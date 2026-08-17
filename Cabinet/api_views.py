@@ -175,6 +175,15 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             status=status.HTTP_405_METHOD_NOT_ALLOWED,
         )
 
+    def list(self, request, *args, **kwargs):
+        try:
+            from .activation_events import record_students_page_opened
+
+            record_students_page_opened(self.get_teacher(), request=request)
+        except Exception:
+            pass
+        return super().list(request, *args, **kwargs)
+
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
         instance = self.get_object()
@@ -225,6 +234,19 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         plan_id = serializer.validated_data.pop("plan_id", None)
         subject = serializer.save(student=student)
+        try:
+            from .activation_events import SUBJECT_CREATED, record_event
+
+            record_event(
+                SUBJECT_CREATED,
+                self.get_teacher(),
+                object_type="subject",
+                object_id=subject.pk,
+                source="student_subjects",
+                request=request,
+            )
+        except Exception:
+            pass
         if plan_id:
             plan = get_object_or_404(LessonPlan, pk=plan_id)
             if plan.teacher_id not in (None, self.get_teacher().id) and plan.status != PlanStatus.PUBLISHED:
@@ -828,6 +850,41 @@ class InvitationPreviewView(APIView):
         payload = resolve_invitation_for_user(token, user)
         if payload is None:
             return Response({"error": "Приглашение недействительно или истекло.", "status": "invalid"}, status=404)
+        try:
+            from .activation_events import (
+                STUDENT_INVITE_OPENED,
+                STUDENT_INVITE_WRONG_ACCOUNT,
+                record_event,
+            )
+            from .models import StudentInvitation
+
+            invitation = (
+                StudentInvitation.objects.filter(token=token)
+                .select_related("teacher")
+                .first()
+            )
+            if invitation is not None:
+                record_event(
+                    STUDENT_INVITE_OPENED,
+                    invitation.teacher,
+                    object_type="invitation",
+                    object_id=invitation.pk,
+                    source="invite_preview",
+                    request=request,
+                )
+                if payload.get("status") == "wrong_account":
+                    actor = str(user.pk) if user is not None else "anon"
+                    record_event(
+                        STUDENT_INVITE_WRONG_ACCOUNT,
+                        invitation.teacher,
+                        object_type="invitation",
+                        object_id=invitation.pk,
+                        source="invite_preview",
+                        extra_idempotency=actor,
+                        request=request,
+                    )
+        except Exception:
+            pass
         status_code = 200
         if payload.get("status") in ("expired", "cancelled"):
             status_code = 410
@@ -843,6 +900,37 @@ class InvitationAcceptView(APIView):
         try:
             student, invitation = accept_student_invitation(token, request.user)
         except InvitationError as exc:
+            try:
+                from .activation_events import (
+                    STUDENT_INVITE_ACCEPT_FAILED,
+                    STUDENT_INVITE_WRONG_ACCOUNT,
+                    record_event,
+                )
+                from .models import StudentInvitation
+
+                invitation_row = (
+                    StudentInvitation.objects.filter(token=token)
+                    .select_related("teacher")
+                    .first()
+                )
+                if invitation_row is not None:
+                    event_name = (
+                        STUDENT_INVITE_WRONG_ACCOUNT
+                        if exc.code == "wrong_account"
+                        else STUDENT_INVITE_ACCEPT_FAILED
+                    )
+                    record_event(
+                        event_name,
+                        invitation_row.teacher,
+                        object_type="invitation",
+                        object_id=invitation_row.pk,
+                        source="invite_accept",
+                        extra_idempotency=str(request.user.pk) if exc.code == "wrong_account" else (exc.code or "failed"),
+                        metadata={"code": exc.code},
+                        request=request,
+                    )
+            except Exception:
+                pass
             status_code = 409 if exc.code == "wrong_account" else 400
             return Response({"error": str(exc), "code": exc.code}, status=status_code)
         except ValueError as exc:
@@ -2263,6 +2351,12 @@ class MaterialViewSet(
 
 class DashboardView(TeacherScopedMixin, APIView):
     def get(self, request):
+        try:
+            from .activation_events import record_teacher_cabinet_presence
+
+            record_teacher_cabinet_presence(request)
+        except Exception:
+            pass
         payload = build_dashboard_payload(request.user)
         serializer = DashboardSerializer(payload)
         return Response(serializer.data)

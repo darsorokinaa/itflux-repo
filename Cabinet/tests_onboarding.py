@@ -70,7 +70,7 @@ class TeacherOnboardingStateTests(TestCase):
         self.assertTrue(state["visible"])
         self.assertEqual(state["next_step"], "student")
         self.assertEqual(state["completed_steps"], 0)
-        self.assertEqual(state["cta"]["label"], "Добавить первого ученика")
+        self.assertEqual(state["cta"]["label"], "Добавить ученика")
         self.assertIn("invite=1", state["cta"]["href"])
         self.assertTrue(state["steps"][0]["done"])
         self.assertEqual(state["steps"][0]["key"], "registered")
@@ -80,9 +80,9 @@ class TeacherOnboardingStateTests(TestCase):
         state = build_teacher_onboarding_state(self.teacher)
         self.assertTrue(state["flags"]["has_student"])
         self.assertFalse(state["flags"]["has_connected_student"])
-        self.assertEqual(state["next_step"], "subject")
+        self.assertEqual(state["next_step"], "invite")
         self.assertEqual(state["context"]["student_id"], student.pk)
-        self.assertIn(f"editStudent={student.pk}", state["cta"]["href"])
+        self.assertIn("invite", state["cta"]["href"])
 
     def test_connected_student_without_subject(self):
         user = User.objects.create_user(username="onb_s", password="pass")
@@ -91,7 +91,7 @@ class TeacherOnboardingStateTests(TestCase):
         self._student(user=user)
         state = build_teacher_onboarding_state(self.teacher)
         self.assertTrue(state["flags"]["has_connected_student"])
-        self.assertEqual(state["next_step"], "subject")
+        self.assertEqual(state["next_step"], "schedule")
 
     def test_subject_then_schedule(self):
         student = self._student()
@@ -99,8 +99,7 @@ class TeacherOnboardingStateTests(TestCase):
             student=student, subject="inf", title="ОГЭ", direction="oge"
         )
         state = build_teacher_onboarding_state(self.teacher)
-        self.assertEqual(state["next_step"], "schedule")
-        self.assertIn(f"student={student.pk}", state["cta"]["href"])
+        self.assertEqual(state["next_step"], "invite")
 
     def test_multiple_subjects_still_one_step(self):
         student = self._student()
@@ -108,17 +107,15 @@ class TeacherOnboardingStateTests(TestCase):
         StudentSubject.objects.create(student=student, subject="math", title="Школа", direction="school")
         state = build_teacher_onboarding_state(self.teacher)
         self.assertTrue(state["flags"]["has_subject"])
-        self.assertEqual(state["next_step"], "schedule")
+        self.assertEqual(state["next_step"], "invite")
 
     def test_event_without_materials(self):
         student = self._student()
         StudentSubject.objects.create(student=student, subject="inf", title="ОГЭ", direction="oge")
-        event = self._event(student=student)
+        self._event(student=student)
         state = build_teacher_onboarding_state(self.teacher)
-        self.assertEqual(state["next_step"], "materials")
-        self.assertEqual(state["context"]["event_id"], event.pk)
-        self.assertIn(f"event={event.pk}", state["cta"]["href"])
-        self.assertIn("prepare=1", state["cta"]["href"])
+        self.assertFalse(state["visible"])
+        self.assertIsNone(state["next_step"])
 
     def test_cancelled_event_does_not_count(self):
         student = self._student()
@@ -127,7 +124,7 @@ class TeacherOnboardingStateTests(TestCase):
         event.status = ScheduleEvent.Status.CANCELLED
         event.save(update_fields=["status"])
         state = build_teacher_onboarding_state(self.teacher)
-        self.assertEqual(state["next_step"], "schedule")
+        self.assertEqual(state["next_step"], "invite")
 
     def test_group_event_counts(self):
         student = self._student()
@@ -146,7 +143,7 @@ class TeacherOnboardingStateTests(TestCase):
         )
         state = build_teacher_onboarding_state(self.teacher)
         self.assertTrue(state["flags"]["has_schedule_event"])
-        self.assertEqual(state["next_step"], "materials")
+        self.assertFalse(state["visible"])
 
     def test_material_then_conduct(self):
         student = self._student()
@@ -156,8 +153,8 @@ class TeacherOnboardingStateTests(TestCase):
         ScheduleEventMaterial.objects.create(event=event, material=material)
         state = build_teacher_onboarding_state(self.teacher)
         self.assertTrue(state["flags"]["has_materials"])
-        self.assertEqual(state["next_step"], "conduct")
-        self.assertEqual(state["cta"]["label"], "Всё готово к первому уроку")
+        self.assertFalse(state["visible"])
+        self.assertIsNone(state["next_step"])
 
     def test_finished_video_hides_onboarding(self):
         student = self._student()
@@ -188,7 +185,7 @@ class TeacherOnboardingStateTests(TestCase):
         own = build_teacher_onboarding_state(self.teacher)
         other = build_teacher_onboarding_state(self.other)
         self.assertEqual(own["next_step"], "student")
-        self.assertEqual(other["next_step"], "subject")
+        self.assertEqual(other["next_step"], "invite")
         self.assertNotEqual(own["context"]["student_id"], other["context"]["student_id"])
 
     def test_dashboard_includes_onboarding(self):
@@ -313,6 +310,8 @@ class ActivationAnalyticsTests(TestCase):
         data = resp.json()
         self.assertIn("funnel", data)
         self.assertIn("cohorts_weekly", data)
+        self.assertIn("first_30_minutes", data)
+        self.assertIn("never_touched", data)
         self.assertIn("core_activation", data)
         self.assertIn("retention", data)
         self.assertGreaterEqual(data["funnel"]["first_student"]["count"], 1)

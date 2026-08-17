@@ -1626,6 +1626,25 @@ def complete_journal(journal: LessonJournal, teacher: User, *, force: bool = Fal
         for record in records:
             publish_record(record, teacher, notify=True)
 
+    try:
+        from .activation_events import LESSON_COMPLETED, maybe_record_core, record_event
+
+        record_event(
+            LESSON_COMPLETED,
+            teacher,
+            object_type="schedule_event",
+            object_id=event.pk,
+            source="journal_complete",
+        )
+        maybe_record_core(
+            teacher,
+            source="journal_complete",
+            object_type="schedule_event",
+            object_id=event.pk,
+        )
+    except Exception:
+        pass
+
     return _reload_journal(journal.pk)
 
 

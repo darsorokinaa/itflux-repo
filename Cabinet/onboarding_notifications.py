@@ -76,8 +76,8 @@ def _nudge_teacher(teacher: User, *, now) -> str:
 
     state = build_teacher_onboarding_state(teacher)
     next_step = state.get("next_step")
-    if next_step == "subject":
-        next_step = "schedule" if state["flags"]["has_student"] else "student"
+    if next_step == "invite":
+        return "no_nudge"
     if next_step not in NUDGE_COPY:
         return "no_nudge"
 

@@ -11,7 +11,7 @@ import ConnectionCheckButton from "./connectionCheck/ConnectionCheckButton";
 import { closeConnectionCheck } from "./connectionCheck/openConnectionCheck";
 import LastCheckHint from "./connectionCheck/LastCheckHint";
 import { shouldRemindBeforeLesson } from "./connectionCheck/storage";
-import { hasSkippedOnboardingMaterials } from "./onboardingStorage";
+import { trackActivationIntent } from "./activationAnalytics";
 import {
   fetchBillingDashboard,
   fetchDashboard,
@@ -257,19 +257,8 @@ export default function CabinetDashboard() {
   const progressItems = data?.progress_overview || [];
   const upcomingActions = data?.upcoming_actions || [];
   const onboarding = data?.onboarding || null;
-  const materialsSkipped = hasSkippedOnboardingMaterials();
   const onboardingVisible = Boolean(onboarding?.visible);
-  const onboardingCta = (() => {
-    if (!onboardingVisible) return null;
-    if (onboarding.next_step === "materials" && materialsSkipped) {
-      const eventId = onboarding.context?.event_id;
-      return {
-        label: "Всё готово к первому уроку",
-        href: eventId ? `/cabinet/schedule?event=${eventId}` : "/cabinet/schedule",
-      };
-    }
-    return onboarding.cta;
-  })();
+  const onboardingCta = onboardingVisible ? onboarding.cta : null;
   const draftsCount = data?.drafts_count ?? 0;
   const lessonsCount = data?.today_lessons_count ?? todayLessons.length;
   const reviewsCount = data?.pending_reviews_count ?? pendingReviews.length;
@@ -391,7 +380,17 @@ export default function CabinetDashboard() {
         </div>
         <div className="td-topbar-actions">
           {onboardingCta ? (
-            <Link to={onboardingCta.href} className="td-button td-button-primary">
+            <Link
+              to={onboardingCta.href}
+              className="td-button td-button-primary"
+              onClick={() => {
+                if (onboarding?.next_step === "student") {
+                  trackActivationIntent("add_student_clicked", { source: "dashboard_topbar" });
+                } else if (onboarding?.next_step === "schedule") {
+                  trackActivationIntent("lesson_creation_started", { source: "dashboard_topbar" });
+                }
+              }}
+            >
               {onboardingCta.label}
             </Link>
           ) : (
@@ -405,7 +404,11 @@ export default function CabinetDashboard() {
               >
                 {assignLoading ? "Загрузка…" : "Выдать задание"}
               </button>
-              <Link to="/cabinet/students?invite=1" className="td-button td-button-glass">Добавить ученика</Link>
+              <Link
+                to="/cabinet/students?invite=1"
+                className="td-button td-button-glass"
+                onClick={() => trackActivationIntent("add_student_clicked", { source: "dashboard_topbar" })}
+              >Добавить ученика</Link>
             </>
           )}
         </div>
@@ -447,10 +450,7 @@ export default function CabinetDashboard() {
           />
         </div>
         {onboardingVisible ? (
-          <TeacherOnboardingCard
-            onboarding={onboarding}
-            materialsSkipped={materialsSkipped}
-          />
+          <TeacherOnboardingCard onboarding={onboarding} />
         ) : null}
         <section className="td-main-column">
           <article className="td-card td-today-board">
@@ -726,7 +726,11 @@ export default function CabinetDashboard() {
                 </span>
                 <span className="td-quick-arrow">→</span>
               </button>
-              <Link to="/cabinet/students?invite=1" className="td-quick-action">
+              <Link
+                to="/cabinet/students?invite=1"
+                className="td-quick-action"
+                onClick={() => trackActivationIntent("add_student_clicked", { source: "dashboard_quick" })}
+              >
                 <span className="td-quick-icon">＋</span>
                 <span>
                   <strong>Добавить ученика</strong>

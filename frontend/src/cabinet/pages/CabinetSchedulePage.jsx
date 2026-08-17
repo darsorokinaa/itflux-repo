@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
+import { trackActivationIntent } from "../activationAnalytics";
 import {
   createScheduleEvent,
   deleteScheduleEvent,
@@ -2150,6 +2151,7 @@ export default function CabinetSchedulePage() {
   useEffect(() => {
     const params = new URLSearchParams(location.search || "");
     if (params.get("create") !== "1") return;
+    trackActivationIntent("lesson_creation_started", { source: "schedule_query" });
     const studentId = params.get("student");
     setCreateDraft({
       studentId: studentId || undefined,

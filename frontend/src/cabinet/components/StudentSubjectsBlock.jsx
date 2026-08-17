@@ -9,6 +9,7 @@ import {
   updateStudentSubject,
 } from "../../utils/cabinetAuth";
 import { STUDENT_DIRECTION_OPTIONS } from "../cabinetMappers";
+import { trackActivationIntent } from "../activationAnalytics";
 
 const EMPTY_FORM = {
   subject: "inf",
@@ -68,6 +69,7 @@ export default function StudentSubjectsBlock({ studentId, onChanged }) {
   }, [studentId]);
 
   const openCreate = () => {
+    trackActivationIntent("subject_creation_started", { source: "student_subjects", objectId: studentId });
     setForm({
       ...EMPTY_FORM,
       subject: subjectOptions[0]?.value || "inf",

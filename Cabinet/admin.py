@@ -83,6 +83,7 @@ from .models import (
     TeacherSavedMaterial,
     TeacherSubscription,
     TelegramConnectToken,
+    ActivationEvent,
 )
 from .meeting_screenshare_models import MeetingScreenShareSession
 
@@ -1363,6 +1364,31 @@ class EventBillingRecordAdmin(admin.ModelAdmin):
 class StudentPaymentAdmin(admin.ModelAdmin):
     list_display = ("paid_at", "student", "amount", "method", "status")
     list_filter = ("status", "method")
+
+
+@admin.register(ActivationEvent)
+class ActivationEventAdmin(admin.ModelAdmin):
+    list_display = ("occurred_at", "event_name", "kind", "user_id", "source")
+    list_filter = ("event_name", "kind", "role")
+    search_fields = ("event_name", "idempotency_key")
+    readonly_fields = (
+        "event_name",
+        "user",
+        "role",
+        "occurred_at",
+        "session_key",
+        "object_type",
+        "object_id",
+        "source",
+        "metadata",
+        "kind",
+        "idempotency_key",
+        "created_at",
+    )
+    ordering = ("-occurred_at",)
+
+    def has_add_permission(self, request):
+        return False
 
 
 @staff_member_required

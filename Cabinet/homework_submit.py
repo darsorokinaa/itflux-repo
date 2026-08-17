@@ -163,6 +163,20 @@ def submit_homework_for_student(
     if not is_open_submit or is_resubmit:
         _notify_homework_submitted(submission, review_item, is_resubmit=is_resubmit)
 
+    try:
+        from .activation_events import maybe_record_core
+
+        teacher = getattr(homework, "teacher", None)
+        if teacher is not None:
+            maybe_record_core(
+                teacher,
+                source="homework_submit",
+                object_type="homework",
+                object_id=homework.pk,
+            )
+    except Exception:
+        pass
+
     return HomeworkSubmitResult(
         submission=submission,
         already_submitted=False,

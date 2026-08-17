@@ -16,8 +16,7 @@ import {
   readStoredInviteToken,
   rememberInviteToken,
 } from "../cabinet/inviteAuth";
-
-const GUIDE_OPEN_ON_REGISTER_KEY = "cabinet-guide-open-on-register";
+import { captureAcquisition, readAcquisition } from "../cabinet/activationAnalytics";
 
 const ROLE_OPTIONS = [
   { value: "student", label: "Ученик" },
@@ -72,6 +71,13 @@ export default function CabinetAuthPage() {
   useEffect(() => {
     if (inviteToken) rememberInviteToken(inviteToken);
   }, [inviteToken]);
+
+  useEffect(() => {
+    captureAcquisition({
+      search: location.search,
+      referrer: typeof document !== "undefined" ? document.referrer : "",
+    });
+  }, [location.search]);
 
   useEffect(() => {
     const nextMode = searchParams.get("mode");
@@ -188,6 +194,10 @@ export default function CabinetAuthPage() {
     if (ref && !inviteToken && !parentInviteToken) {
       next = { ...next, referral_code: ref };
     }
+    const acquisition = readAcquisition();
+    if (acquisition.utm_source || acquisition.utm_medium || acquisition.utm_campaign || acquisition.referrer) {
+      next = { ...next, ...acquisition };
+    }
     return next;
   };
 
@@ -225,7 +235,6 @@ export default function CabinetAuthPage() {
       }
       try {
         sessionStorage.removeItem("cabinet_referral_code");
-        sessionStorage.setItem(GUIDE_OPEN_ON_REGISTER_KEY, "1");
       } catch {
         // ignore storage errors
       }

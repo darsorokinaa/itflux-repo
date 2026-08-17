@@ -95,6 +95,12 @@ def _find_user_by_login(login_id: str):
 def api_me(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False})
+    try:
+        from .activation_events import record_teacher_cabinet_presence
+
+        record_teacher_cabinet_presence(request)
+    except Exception:
+        pass
     return JsonResponse({"authenticated": True, "user": _profile_payload(request.user)})
 
 
@@ -147,6 +153,27 @@ def api_login(request):
                 auth_user.id,
                 exc.code,
             )
+            try:
+                from .activation_events import STUDENT_INVITE_ACCEPT_FAILED, record_event
+                from .models import StudentInvitation
+
+                invitation_row = (
+                    StudentInvitation.objects.filter(token=invite_token)
+                    .select_related("teacher")
+                    .first()
+                )
+                if invitation_row is not None:
+                    record_event(
+                        STUDENT_INVITE_ACCEPT_FAILED,
+                        invitation_row.teacher,
+                        object_type="invitation",
+                        object_id=invitation_row.pk,
+                        source="login",
+                        extra_idempotency=exc.code or "failed",
+                        metadata={"code": exc.code},
+                    )
+            except Exception:
+                pass
     payload = {"ok": True, "user": _profile_payload(auth_user)}
     if invite_result:
         student, invitation = invite_result
@@ -219,6 +246,25 @@ def api_register(request):
                 },
                 status=400,
             )
+        try:
+            from .activation_events import STUDENT_INVITE_REGISTRATION_STARTED, record_event
+            from .models import StudentInvitation
+
+            invitation_row = (
+                StudentInvitation.objects.filter(token=invite_token)
+                .select_related("teacher")
+                .first()
+            )
+            if invitation_row is not None:
+                record_event(
+                    STUDENT_INVITE_REGISTRATION_STARTED,
+                    invitation_row.teacher,
+                    object_type="invitation",
+                    object_id=invitation_row.pk,
+                    source="register",
+                )
+        except Exception:
+            pass
 
     if not email:
         return JsonResponse({"ok": False, "error": "Укажите email"}, status=400)
@@ -267,7 +313,38 @@ def api_register(request):
     profile.name = name
     profile.surname = surname
     profile.role = role
-    profile.save(update_fields=["name", "surname", "role"])
+    profile_update_fields = ["name", "surname", "role"]
+    if role == Profile.Role.TEACHER:
+        from .activation_events import classify_acquisition
+
+        src, medium, campaign = classify_acquisition(
+            referral_code=referral_code,
+            utm_source=data.get("utm_source") or "",
+            utm_medium=data.get("utm_medium") or "",
+            utm_campaign=data.get("utm_campaign") or "",
+            referrer=data.get("referrer") or "",
+        )
+        profile.acquisition_source = src
+        profile.acquisition_medium = medium
+        profile.acquisition_campaign = campaign
+        profile_update_fields.extend(
+            ["acquisition_source", "acquisition_medium", "acquisition_campaign"]
+        )
+    profile.save(update_fields=profile_update_fields)
+
+    if role == Profile.Role.TEACHER:
+        try:
+            from .activation_events import TEACHER_REGISTERED, record_event
+
+            record_event(
+                TEACHER_REGISTERED,
+                user,
+                source="register",
+                metadata={"acquisition_source": profile.acquisition_source or "unknown"},
+                request=request,
+            )
+        except Exception:
+            pass
 
     login(request, user)
     invite_result = None
@@ -284,6 +361,58 @@ def api_register(request):
                 user.id,
                 exc.code,
             )
+            try:
+                from .activation_events import (
+                    STUDENT_INVITE_ACCEPT_FAILED,
+                    STUDENT_INVITE_REGISTRATION_COMPLETED,
+                    record_event,
+                )
+                from .models import StudentInvitation
+
+                invitation_row = (
+                    StudentInvitation.objects.filter(token=invite_token)
+                    .select_related("teacher")
+                    .first()
+                )
+                if invitation_row is not None:
+                    record_event(
+                        STUDENT_INVITE_REGISTRATION_COMPLETED,
+                        invitation_row.teacher,
+                        object_type="invitation",
+                        object_id=invitation_row.pk,
+                        source="register",
+                    )
+                    record_event(
+                        STUDENT_INVITE_ACCEPT_FAILED,
+                        invitation_row.teacher,
+                        object_type="invitation",
+                        object_id=invitation_row.pk,
+                        source="register",
+                        extra_idempotency=exc.code or "failed",
+                        metadata={"code": exc.code},
+                    )
+            except Exception:
+                pass
+        else:
+            try:
+                from .activation_events import STUDENT_INVITE_REGISTRATION_COMPLETED, record_event
+                from .models import StudentInvitation as _StudentInvitation
+
+                invitation_row = (
+                    _StudentInvitation.objects.filter(token=invite_token)
+                    .select_related("teacher")
+                    .first()
+                )
+                if invitation_row is not None:
+                    record_event(
+                        STUDENT_INVITE_REGISTRATION_COMPLETED,
+                        invitation_row.teacher,
+                        object_type="invitation",
+                        object_id=invitation_row.pk,
+                        source="register",
+                    )
+            except Exception:
+                pass
 
     parent_invite_result = None
     if parent_invite_token:

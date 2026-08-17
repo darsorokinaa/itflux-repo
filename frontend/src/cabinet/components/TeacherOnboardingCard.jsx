@@ -1,40 +1,49 @@
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
+import { trackActivationIntent } from "../activationAnalytics";
 
 function progressLabel(done, total) {
   return `${done} из ${total} шагов выполнено`;
 }
 
-export default function TeacherOnboardingCard({ onboarding, materialsSkipped = false }) {
+export default function TeacherOnboardingCard({ onboarding }) {
+  const steps = Array.isArray(onboarding?.steps) ? onboarding.steps : [];
+  const activationSteps = steps.filter((step) => step.key !== "registered");
+  const completed = activationSteps.filter((step) => step.done).length;
+  const total = onboarding?.total_steps || activationSteps.length || 3;
+  const percent = total ? Math.round((completed / total) * 100) : 0;
+  const cta = onboarding?.cta;
+  const title = cta?.title || "Добавьте первого ученика";
+  const nextStep = onboarding?.next_step;
+
+  useEffect(() => {
+    if (!onboarding?.visible) return;
+    if (nextStep === "student") {
+      trackActivationIntent("add_student_cta_viewed", { source: "onboarding_card" });
+    }
+  }, [onboarding?.visible, nextStep]);
+
   if (!onboarding?.visible) return null;
 
-  const steps = Array.isArray(onboarding.steps) ? onboarding.steps : [];
-  const activationSteps = steps.filter((step) => step.key !== "registered");
-  const completed = activationSteps.filter((step) => (
-    step.done || (step.key === "materials" && materialsSkipped)
-  )).length;
-  const total = onboarding.total_steps || activationSteps.length || 5;
-  const percent = total ? Math.round((completed / total) * 100) : 0;
-
-  let cta = onboarding.cta;
-  if (onboarding.next_step === "materials" && materialsSkipped) {
-    const eventId = onboarding.context?.event_id;
-    cta = {
-      label: "Всё готово к первому уроку",
-      href: eventId ? `/cabinet/schedule?event=${eventId}` : "/cabinet/schedule",
-      hint: "Материалы можно добавить позже в карточке занятия.",
-      step: "conduct",
-    };
-  }
+  const onCtaClick = () => {
+    if (onboarding.next_step === "student") {
+      trackActivationIntent("add_student_clicked", { source: "onboarding_card" });
+    } else if (onboarding.next_step === "invite") {
+      trackActivationIntent("student_invite_share_clicked", { source: "onboarding_card" });
+    } else if (onboarding.next_step === "schedule") {
+      trackActivationIntent("lesson_creation_started", { source: "onboarding_card" });
+    }
+  };
 
   return (
-    <article className="td-card td-onboarding" aria-label="Подготовка первого занятия">
+    <article className="td-card td-onboarding" aria-label={title}>
       <div className="td-onboarding__head">
         <div>
-          <h2>Подготовим первое занятие</h2>
+          <h2>{title}</h2>
           <p>{progressLabel(completed, total)}</p>
         </div>
         {cta ? (
-          <Link to={cta.href} className="td-button td-button-primary">
+          <Link to={cta.href} className="td-button td-button-primary" onClick={onCtaClick}>
             {cta.label}
           </Link>
         ) : null}
@@ -53,7 +62,7 @@ export default function TeacherOnboardingCard({ onboarding, materialsSkipped = f
 
       <ol className="td-onboarding__steps">
         {steps.map((step) => {
-          const done = step.done || (step.key === "materials" && materialsSkipped);
+          const done = step.done;
           return (
             <li
               key={step.key}

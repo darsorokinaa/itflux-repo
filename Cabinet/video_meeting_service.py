@@ -352,7 +352,20 @@ def start_meeting(*, meeting: VideoMeeting, user: User) -> VideoMeeting:
         locked.status = VideoMeeting.Status.LIVE
         locked.actual_started_at = timezone.now()
         locked.save(update_fields=["status", "actual_started_at", "updated_at"])
-        return locked
+    try:
+        from .activation_events import LESSON_STARTED, record_event
+
+        owner = meeting.schedule_event.owner if meeting.schedule_event_id else user
+        record_event(
+            LESSON_STARTED,
+            owner,
+            object_type="schedule_event",
+            object_id=meeting.schedule_event_id,
+            source="video_start",
+        )
+    except Exception:
+        logger.exception("lesson_started analytics failed meeting=%s", getattr(meeting, "pk", None))
+    return locked
 
 
 def _close_live_meeting_locked(locked: VideoMeeting, *, now, reason: str) -> dict:
@@ -450,6 +463,26 @@ def finish_meeting(*, meeting: VideoMeeting, user: User) -> VideoMeeting:
                 "Failed to import live variant results into journal meeting=%s",
                 locked.uuid,
             )
+
+        try:
+            from .activation_events import LESSON_COMPLETED, maybe_record_core, record_event
+
+            owner = locked.schedule_event.owner if locked.schedule_event_id else user
+            record_event(
+                LESSON_COMPLETED,
+                owner,
+                object_type="schedule_event",
+                object_id=locked.schedule_event_id,
+                source="video_finish",
+            )
+            maybe_record_core(
+                owner,
+                source="video_finish",
+                object_type="schedule_event",
+                object_id=locked.schedule_event_id,
+            )
+        except Exception:
+            logger.exception("lesson_completed analytics failed meeting=%s", getattr(locked, "pk", None))
 
         return locked
 

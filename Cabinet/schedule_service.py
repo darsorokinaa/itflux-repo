@@ -390,6 +390,18 @@ def create_single_event(
     log_change(event, changed_by=teacher, change_type=ScheduleChangeType.CREATED, new_data=event_snapshot(event))
     if notify and data.get("notify_participants", True):
         NotificationService.notify_event_created(event)
+    try:
+        from .activation_events import LESSON_CREATED, record_event_on_commit
+
+        record_event_on_commit(
+            LESSON_CREATED,
+            teacher,
+            object_type="schedule_event",
+            object_id=event.pk,
+            source="schedule_create",
+        )
+    except Exception:
+        pass
     return event
 
 
@@ -513,6 +525,20 @@ def create_series(
     if notify and series.notify_on_create:
         for event in events[:1]:
             NotificationService.notify_event_created(event)
+
+    try:
+        from .activation_events import LESSON_CREATED, record_event_on_commit
+
+        for event in events:
+            record_event_on_commit(
+                LESSON_CREATED,
+                teacher,
+                object_type="schedule_event",
+                object_id=event.pk,
+                source="schedule_series_create",
+            )
+    except Exception:
+        pass
 
     return series, events
 

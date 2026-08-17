@@ -99,6 +99,15 @@ class Profile(models.Model):
     yandex_refresh_token = models.TextField("Yandex refresh token", blank=True)
     yandex_account_email = models.EmailField("Yandex email", blank=True)
     yandex_calendar_layer_ids = models.CharField("Yandex calendar layer_ids", max_length=255, blank=True)
+    acquisition_source = models.CharField(
+        "Acquisition source",
+        max_length=32,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+    acquisition_medium = models.CharField("Acquisition medium", max_length=32, blank=True, default="")
+    acquisition_campaign = models.CharField("Acquisition campaign", max_length=64, blank=True, default="")
     created_at = models.DateTimeField("Создан", auto_now_add=True, null=True)
     updated_at = models.DateTimeField("Обновлён", auto_now=True, null=True)
 
@@ -4426,3 +4435,4 @@ from .student_library_folder_models import (  # noqa: E402
 
 # ── Аннотации поверх демонстрации экрана ──────────────────────────────────────
 from .meeting_screenshare_models import MeetingScreenShareSession  # noqa: E402, F401
+from .activation_models import ActivationEvent  # noqa: E402, F401

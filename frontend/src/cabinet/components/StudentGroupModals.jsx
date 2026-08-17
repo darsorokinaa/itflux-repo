@@ -8,6 +8,7 @@ import BillingPaymentModal from "./BillingPaymentModal";
 import BillingPackageModal from "./BillingPackageModal";
 import BillingTermsModal from "./BillingTermsModal";
 import { buildInvitationUrl, notifyBillingChanged, resetStudentAccess } from "../../utils/cabinetAuth";
+import { trackActivationIntent } from "../activationAnalytics";
 import {
   GROUP_EXAM_OPTIONS,
   STUDENT_DIRECTION_OPTIONS,
@@ -363,6 +364,7 @@ export function InviteFormModal({ group, onClose, onCreate, onScheduleLesson, on
     setCreatedInvite(null);
     setCopied(false);
     setShowQr(false);
+    trackActivationIntent("student_form_opened", { source: group ? "group_invite" : "invite_modal" });
   }, [group]);
 
   const setField = (field, value) => {
@@ -372,6 +374,15 @@ export function InviteFormModal({ group, onClose, onCreate, onScheduleLesson, on
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!(form.first_name || "").trim()) {
+      setError("Укажите имя ученика");
+      trackActivationIntent("student_form_validation_failed", {
+        source: "invite_modal",
+        metadata: { reason: "first_name" },
+        idempotencyKey: "student_form_validation_failed:first_name",
+      });
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -392,6 +403,11 @@ export function InviteFormModal({ group, onClose, onCreate, onScheduleLesson, on
     try {
       await navigator.clipboard.writeText(inviteUrl);
       setCopied(true);
+      trackActivationIntent("student_invite_copy_clicked", {
+        source: "invite_modal",
+        objectType: "invitation",
+        objectId: createdInvite?.id || null,
+      });
     } catch {
       setCopied(false);
     }
@@ -399,6 +415,11 @@ export function InviteFormModal({ group, onClose, onCreate, onScheduleLesson, on
 
   const handleShare = async () => {
     if (!inviteUrl) return;
+    trackActivationIntent("student_invite_share_clicked", {
+      source: "invite_modal",
+      objectType: "invitation",
+      objectId: createdInvite?.id || null,
+    });
     if (navigator.share) {
       try {
         await navigator.share({

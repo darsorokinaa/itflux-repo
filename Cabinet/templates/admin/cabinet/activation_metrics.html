@@ -2,8 +2,101 @@
 {% block content %}
 <h1>Activation</h1>
 <p>Агрегированные метрики без персональных данных. Сгенерировано: {{ report.generated_at }}</p>
+<p><strong>Главный раздел — воронка активации.</strong> {{ report.health.note }}</p>
+<p>Цели: {{ report.health.targets_met }} из {{ report.health.targets_total }} достигнуты. Не использовать composite score как главный вывод.</p>
 
-<h2>Сводка</h2>
+<h2>FIRST 30 MINUTES ACTIVATION</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Этап</th>
+      <th>Users</th>
+      <th>% от registrations</th>
+      <th>% от предыдущего</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in report.first_30_minutes.funnel %}
+    <tr>
+      <td>{{ row.stage }}</td>
+      <td>{{ row.users }}</td>
+      <td>{{ row.pct_of_registrations }}</td>
+      <td>{{ row.pct_of_previous|default:"—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h3>Time to action (часы, p25 / median / p75 при n≥5)</h3>
+<ul>
+  {% for key, row in report.first_30_minutes.time_to_action.items %}
+    {% if key != "unit" and key != "note" %}
+    <li>{{ key }}: n={{ row.n }}, p25={{ row.p25 }}, median={{ row.median }}, p75={{ row.p75 }}</li>
+    {% endif %}
+  {% endfor %}
+</ul>
+<p>{{ report.first_30_minutes.time_to_action.note }}</p>
+
+<h3>Время до первого ученика</h3>
+<ul>
+  <li>0–1 мин: {{ report.first_30_minutes.time_to_student_buckets.0_1_min }}</li>
+  <li>1–5 мин: {{ report.first_30_minutes.time_to_student_buckets.1_5_min }}</li>
+  <li>5–15 мин: {{ report.first_30_minutes.time_to_student_buckets.5_15_min }}</li>
+  <li>15–30 мин: {{ report.first_30_minutes.time_to_student_buckets.15_30_min }}</li>
+  <li>после 30 мин: {{ report.first_30_minutes.time_to_student_buckets.after_30_min }}</li>
+  <li>так и не создали: {{ report.first_30_minutes.time_to_student_buckets.never_student }}</li>
+</ul>
+
+<h2>NEVER TOUCHED BREAKDOWN</h2>
+<p>{{ report.never_touched.note }}</p>
+<p>Учителей с instrumentation events: {{ report.never_touched.instrumentation_teachers }}</p>
+<table>
+  <thead>
+    <tr><th>Сегмент</th><th>Число</th><th>%</th></tr>
+  </thead>
+  <tbody>
+    {% for row in report.never_touched.segments %}
+    <tr>
+      <td>{{ row.key }}</td>
+      <td>{{ row.count }}</td>
+      <td>{{ row.pct }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Targets vs baseline</h2>
+<ul>
+  <li>Registration → student created: actual {{ report.targets.registration_to_student_created.actual }}% / goal {{ report.targets.registration_to_student_created.goal }}% / baseline {{ report.targets.registration_to_student_created.baseline }}% / met={{ report.targets.registration_to_student_created.met }}</li>
+  <li>Student created → connected: actual {{ report.targets.student_created_to_connected.actual }}% / goal {{ report.targets.student_created_to_connected.goal }}% / baseline {{ report.targets.student_created_to_connected.baseline }}% / met={{ report.targets.student_created_to_connected.met }}</li>
+  <li>Registration → CORE: actual {{ report.targets.registration_to_core.actual }}% / goal {{ report.targets.registration_to_core.goal }}% / baseline {{ report.targets.registration_to_core.baseline }}% / met={{ report.targets.registration_to_core.met }}</li>
+  <li>CORE → Repeat: actual {{ report.targets.core_to_repeat.actual }}% / goal {{ report.targets.core_to_repeat.goal }}% / baseline {{ report.targets.core_to_repeat.baseline }}% / met={{ report.targets.core_to_repeat.met }}</li>
+</ul>
+
+<h2>Acquisition</h2>
+<p>{{ report.acquisition.note }}</p>
+<table>
+  <thead>
+    <tr><th>Source</th><th>Teachers</th><th>Student created</th><th>CORE</th></tr>
+  </thead>
+  <tbody>
+    {% for row in report.acquisition.sources %}
+    <tr>
+      <td>{{ row.source }}</td>
+      <td>{{ row.teachers }}</td>
+      <td>{{ row.student_created }} ({{ row.student_created_rate }}%)</td>
+      <td>{{ row.core }} ({{ row.core_rate }}%)</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Onboarding change cohorts</h2>
+<p>Cutover: {{ report.cohort_comparison.cutover }}</p>
+<p>Before: teachers={{ report.cohort_comparison.before_onboarding_change.teachers }}, student={{ report.cohort_comparison.before_onboarding_change.student_created.rate }}%, core={{ report.cohort_comparison.before_onboarding_change.core.rate }}%</p>
+<p>After: teachers={{ report.cohort_comparison.after_onboarding_change.teachers }}, student={{ report.cohort_comparison.after_onboarding_change.student_created.rate }}%, core={{ report.cohort_comparison.after_onboarding_change.core.rate }}%</p>
+
+<h2>Сводка (не главный вывод)</h2>
 <ul>
   <li>Учителей всего: {{ report.teachers_total }}</li>
   <li>Новые за 7 дней: {{ report.new_teachers_7d }}</li>
@@ -19,7 +112,7 @@
   <li>Другой рабочий цикл: {{ report.core_activation.other_work_cycle.count }} ({{ report.core_activation.other_work_cycle.rate }}%)</li>
 </ul>
 
-<h2>Воронка</h2>
+<h2>Воронка (модели БД)</h2>
 <table>
   <thead>
     <tr><th>Шаг</th><th>Число</th><th>%</th></tr>
@@ -50,19 +143,21 @@
       <th>Урок</th>
       <th>ДЗ</th>
       <th>Сдача</th>
+      <th>Incomplete</th>
     </tr>
   </thead>
   <tbody>
-    {% for row in report.cohorts_weekly %}
+    {% for row in report.cohort_comparison.weekly %}
     <tr>
       <td>{{ row.week_start }}</td>
       <td>{{ row.teachers }}</td>
-      <td>{{ row.added_student }}</td>
-      <td>{{ row.created_event }}</td>
-      <td>{{ row.added_material }}</td>
-      <td>{{ row.conducted_lesson }}</td>
-      <td>{{ row.assigned_homework }}</td>
-      <td>{{ row.received_submission }}</td>
+      <td>{{ row.student_created.count }}</td>
+      <td>{{ row.lesson.count }}</td>
+      <td>—</td>
+      <td>{{ row.core.count }}</td>
+      <td>—</td>
+      <td>—</td>
+      <td>{{ row.incomplete_week }}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -73,4 +168,7 @@
 <p>Registration D7: {{ report.retention.registration_d7.returned }} / {{ report.retention.registration_d7.eligible }} ({{ report.retention.registration_d7.rate }}%)</p>
 <p>{{ report.retention.activation_d7.note }}</p>
 <p>Activation D7: {{ report.retention.activation_d7.returned }} / {{ report.retention.activation_d7.eligible }} ({{ report.retention.activation_d7.rate }}%)</p>
+
+<h2>Lifecycle reminders (не включены)</h2>
+<p>{{ report.lifecycle_reminders.note }}</p>
 {% endblock %}

@@ -22,6 +22,46 @@ def default_invite_expiry():
     return timezone.now() + timedelta(days=14)
 
 
+def _emit_invitation_created_events(invitation, *, student_created_now: bool, student_id=None):
+    try:
+        from .activation_events import STUDENT_CREATED, STUDENT_INVITE_CREATED, record_event_on_commit
+
+        teacher = invitation.teacher
+        if student_created_now and student_id:
+            record_event_on_commit(
+                STUDENT_CREATED,
+                teacher,
+                object_type="student",
+                object_id=int(student_id),
+                source="invitation_create",
+            )
+        record_event_on_commit(
+            STUDENT_INVITE_CREATED,
+            teacher,
+            object_type="invitation",
+            object_id=invitation.pk,
+            source="invitation_create",
+        )
+    except Exception:
+        logger.exception("invitation created analytics failed invitation=%s", getattr(invitation, "pk", None))
+
+
+def _emit_invitation_accepted(invitation, student):
+    try:
+        from .activation_events import STUDENT_INVITE_ACCEPTED, record_event_on_commit
+
+        record_event_on_commit(
+            STUDENT_INVITE_ACCEPTED,
+            invitation.teacher,
+            object_type="invitation",
+            object_id=invitation.pk,
+            source="invitation_accept",
+            metadata={"student_id": student.pk} if student is not None else None,
+        )
+    except Exception:
+        logger.exception("invitation accepted analytics failed invitation=%s", getattr(invitation, "pk", None))
+
+
 def generate_invite_token():
     return secrets.token_urlsafe(32)
 
@@ -58,6 +98,7 @@ def create_student_invitation(
     expires_at=None,
     existing_student=None,
 ):
+    student_created_now = False
     if group is not None and group.teacher_id != teacher.id:
         raise ValueError("Группа принадлежит другому учителю")
 
@@ -93,6 +134,7 @@ def create_student_invitation(
             status=StudentStatus.ACTIVE,
             user=None,
         )
+        student_created_now = True
     elif pre_student is not None:
         update_fields = []
         if clean_first and not pre_student.first_name:
@@ -124,6 +166,11 @@ def create_student_invitation(
                     owner_invite.pk,
                     pre_student.pk,
                 )
+                _emit_invitation_created_events(
+                    owner_invite,
+                    student_created_now=student_created_now,
+                    student_id=pre_student.pk if pre_student else None,
+                )
                 return owner_invite
             invite_pre_student = None
 
@@ -135,7 +182,7 @@ def create_student_invitation(
         pre_student.user_id if pre_student else None,
     )
 
-    return StudentInvitation.objects.create(
+    invitation = StudentInvitation.objects.create(
         token=token,
         teacher=teacher,
         group=group,
@@ -148,6 +195,13 @@ def create_student_invitation(
         message=(message or "").strip(),
         expires_at=expires_at or default_invite_expiry(),
     )
+    _emit_invitation_created_events(
+        invitation,
+        student_created_now=student_created_now,
+        student_id=(invite_pre_student.pk if invite_pre_student else None)
+        or (pre_student.pk if pre_student else None),
+    )
+    return invitation
 
 
 def get_invitation_by_token(token: str):
@@ -432,6 +486,7 @@ def accept_student_invitation(token: str, user: User):
                 user.id,
                 student.pk,
             )
+            _emit_invitation_accepted(invitation, student)
             return student, invitation
         raise InvitationError(
             "Эта ссылка предназначена для другого аккаунта. "
@@ -462,6 +517,7 @@ def accept_student_invitation(token: str, user: User):
                 user.id,
                 student.pk,
             )
+            _emit_invitation_accepted(invitation, student)
             return student, invitation
         raise InvitationError(
             "Эта ссылка предназначена для другого аккаунта. "
@@ -599,6 +655,7 @@ def accept_student_invitation(token: str, user: User):
         except Exception:
             pass
 
+    _emit_invitation_accepted(invitation, student)
     return student, invitation
 
 

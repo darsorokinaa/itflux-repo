@@ -12,6 +12,7 @@ import {
 } from "../CabinetSectionUi";
 import { mapApiGroup, mapApiStudent } from "../cabinetMappers";
 import { GroupFormModal, InviteFormModal, StudentFormModal } from "../components/StudentGroupModals";
+import { trackActivationIntent } from "../activationAnalytics";
 import PlanAttachModal from "../components/PlanAttachModal";
 import HomeworkAssignModal from "../components/HomeworkAssignModal";
 import MaterialsAssignModal from "../components/MaterialsAssignModal";
@@ -825,7 +826,11 @@ function ArchiveTab({
 export default function CabinetStudentsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [mainTab, setMainTab] = useState("active");
+  const [mainTab, setMainTab] = useState(() => (
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "invites"
+      ? "invites"
+      : "active"
+  ));
   const [filter, setFilter] = useState("all");
   const [sectionVisibility, setSectionVisibility] = useState(readSectionVisibility);
   const [inviteFilter, setInviteFilter] = useState("all");
@@ -1070,6 +1075,7 @@ export default function CabinetStudentsPage() {
   }), []);
 
   const openCreateStudent = useCallback(() => {
+    trackActivationIntent("add_student_clicked", { source: "students_page" });
     if (!subscription.loading && !subscription.canCreateStudent) {
       handleApiLimitError({
         code: "STUDENT_LIMIT_REACHED",
@@ -1081,6 +1087,15 @@ export default function CabinetStudentsPage() {
     }
     setInviteModal({ group: null });
   }, [subscription.loading, subscription.canCreateStudent, subscription.usage.students, subscription.limits.students, handleApiLimitError]);
+
+  useEffect(() => {
+    if (searchParams.get("tab") === "invites") {
+      setMainTab("invites");
+      const next = new URLSearchParams(searchParams);
+      next.delete("tab");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     if (searchParams.get("invite") === "1" || searchParams.get("openInvite") === "1") {
@@ -1215,6 +1230,11 @@ export default function CabinetStudentsPage() {
     try {
       await navigator.clipboard.writeText(inviteUrl);
       setCopiedInviteId(invite.id);
+      trackActivationIntent("student_invite_copy_clicked", {
+        source: "students_invites_tab",
+        objectType: "invitation",
+        objectId: invite.id || null,
+      });
       window.setTimeout(() => {
         setCopiedInviteId((prev) => (prev === invite.id ? null : prev));
       }, 1500);

@@ -210,16 +210,9 @@ export default function CabinetLayout() {
   useEffect(() => {
     if (loading || !user || user.role === "student") return;
     try {
-      if (window.sessionStorage.getItem(GUIDE_OPEN_ON_REGISTER_KEY) === "1") {
-        window.sessionStorage.removeItem(GUIDE_OPEN_ON_REGISTER_KEY);
-        setGuideOpen(true);
-        return;
-      }
-      if (window.localStorage.getItem(GUIDE_SEEN_KEY) !== "1") {
-        setGuideOpen(true);
-      }
+      window.sessionStorage.removeItem(GUIDE_OPEN_ON_REGISTER_KEY);
     } catch {
-      setGuideOpen(true);
+      /* ignore */
     }
   }, [loading, user]);
 
