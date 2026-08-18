@@ -284,12 +284,22 @@ urlpatterns = [
         name="billing_account_settings",
     ),
     path(
+        "billing/accounts/<int:account_id>/rebuild/",
+        billing_api.BillingAccountRebuildView.as_view(),
+        name="billing_account_rebuild",
+    ),
+    path(
         "billing/students/<int:student_id>/account/",
         billing_api.BillingAccountByStudentView.as_view(),
         name="billing_account_by_student",
     ),
     path("billing/transactions/", billing_api.BillingTransactionsView.as_view(), name="billing_transactions"),
     path("billing/payments/", billing_api.BillingPaymentsView.as_view(), name="billing_payments"),
+    path(
+        "billing/payments/<uuid:payment_id>/",
+        billing_api.BillingPaymentDetailView.as_view(),
+        name="billing_payment_detail",
+    ),
     path("billing/refunds/", billing_api.BillingRefundsView.as_view(), name="billing_refunds"),
     path("billing/adjustments/", billing_api.BillingAdjustmentsView.as_view(), name="billing_adjustments"),
     path(
@@ -348,6 +358,11 @@ urlpatterns = [
         "billing/event-billing/<uuid:record_id>/mark-paid/",
         billing_api.BillingEventBillingMarkPaidView.as_view(),
         name="billing_event_billing_mark_paid",
+    ),
+    path(
+        "billing/event-billing/<uuid:record_id>/update-charge/",
+        billing_api.BillingEventChargeUpdateView.as_view(),
+        name="billing_event_billing_update_charge",
     ),
     path(
         "billing/unresolved-lessons/",

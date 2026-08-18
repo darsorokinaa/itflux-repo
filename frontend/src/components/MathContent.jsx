@@ -175,8 +175,12 @@ function isBrokenBackendMathSpan(span) {
   if (!span) return false;
   if (span.querySelector(".cases-table")) return false;
   if (span.querySelector("mjx-container")) return false;
+  // array/tabular уже свёрнуты в HTML с правильными колонками: не гоняем
+  // обратно в MathJax — иначе литерал «&» в ячейке (Динамо \& Спартак)
+  // становится разделителем колонок.
+  if (span.querySelector("table.array-table")) return false;
   const text = (span.textContent || "").trim();
-  if (span.querySelector("table.array-table, table")) return true;
+  if (span.querySelector("table")) return true;
   if (/\bmatrix\b/i.test(text)) return true;
   if (span.querySelector("td, th") && text.includes("&")) return true;
   return false;
@@ -201,7 +205,8 @@ function arrayCellToTex(cell) {
     .replace(/≠/g, "\\ne ")
     .replace(/×/g, "\\times ")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()
+    .replace(/[&%#]/g, (ch) => `\\${ch}`);
 }
 
 /** Свёрнутая бэкендом matrix/array-table → cases (если «при») или matrix. */
@@ -342,13 +347,85 @@ function normalizeVectorLetters(value) {
   }).join("");
 }
 
+/** Следующая граница math-фрагмента: $$ / $ / \[ / \( / \begin{array|tabular}. */
+function nextMathRegionStart(html, from) {
+  const n = html.length;
+  let best = n;
+  const consider = (idx) => {
+    if (idx >= from && idx < best) best = idx;
+  };
+  consider(html.indexOf("$$", from) === -1 ? n : html.indexOf("$$", from));
+  consider(html.indexOf("\\[", from) === -1 ? n : html.indexOf("\\[", from));
+  consider(html.indexOf("\\(", from) === -1 ? n : html.indexOf("\\(", from));
+  const arrayIdx = html.indexOf("\\begin{array}", from);
+  const tabularIdx = html.indexOf("\\begin{tabular}", from);
+  consider(arrayIdx === -1 ? n : arrayIdx);
+  consider(tabularIdx === -1 ? n : tabularIdx);
+  let dollar = html.indexOf("$", from);
+  while (dollar !== -1) {
+    if (html.startsWith("$$", dollar)) {
+      dollar = html.indexOf("$", dollar + 2);
+      continue;
+    }
+    consider(dollar);
+    break;
+  }
+  return best;
+}
+
+function mathRegionEnd(html, start) {
+  const n = html.length;
+  if (html.startsWith("$$", start)) {
+    const end = html.indexOf("$$", start + 2);
+    return end === -1 ? n : end + 2;
+  }
+  if (html.startsWith("\\[", start)) {
+    const end = html.indexOf("\\]", start + 2);
+    return end === -1 ? n : end + 2;
+  }
+  if (html.startsWith("\\(", start)) {
+    const end = html.indexOf("\\)", start + 2);
+    return end === -1 ? n : end + 2;
+  }
+  const begin = html.slice(start).match(/^\\begin\{(array|tabular)\}/);
+  if (begin) {
+    const close = `\\end{${begin[1]}}`;
+    const end = html.indexOf(close, start);
+    return end === -1 ? n : end + close.length;
+  }
+  if (html[start] === "$") {
+    const end = html.indexOf("$", start + 1);
+    return end === -1 ? n : end + 1;
+  }
+  return n;
+}
+
+/** Замены вроде \& → & только вне формул: внутри array \& — литерал «И». */
+function applyOutsideMathRegions(html, transform) {
+  if (typeof html !== "string" || !html) return html;
+  const out = [];
+  let i = 0;
+  const n = html.length;
+  while (i < n) {
+    const start = nextMathRegionStart(html, i);
+    if (start > i) out.push(transform(html.slice(i, start)));
+    if (start >= n) break;
+    const end = mathRegionEnd(html, start);
+    out.push(html.slice(start, end));
+    i = end;
+  }
+  return out.join("");
+}
+
 function normalizeEscapedTaskSymbols(raw) {
   if (typeof raw !== "string" || !raw) return raw;
   let s = repairMalformedInlineMathDelimiters(raw)
     .replace(/\\([#+^])/g, "$1")
-    // Только LaTeX \& → &; не трогать &#92; &#92; (перенос строки в array, иначе таблица кодов слипается)
-    .replace(/&#92;\s*&(?:amp;|#38;)/gi, "&")
-    .replace(/\\+&/g, "&")
+    // &#92;&amp; → \&, затем вне math \& → &. Внутри array/$$ \& нельзя
+    // разэкранировать: это литерал «И», не разделитель колонок.
+    .replace(/&#92;\s*&(?:amp;|#38;)/gi, "\\&");
+  s = applyOutsideMathRegions(s, (chunk) => chunk.replace(/\\+&/g, "&"));
+  s = s
     // Исправление для ОГЭ 4: когда перенос строки сливается с \end{array} (получается \\end{array})
     .replace(/\\\\end\{/g, "\\\\ \\end{")
     // Удаляем одиночный "\" перед пробелом, HTML-тегом или концом строки.
@@ -621,7 +698,7 @@ function preparePlainBankTaskHtml(raw, options = {}) {
         fig.replaceWith(table);
       }
     });
-    s = tempDiv.innerHTML;
+    s = sanitizeTexInsideMathDelimiters(tempDiv.innerHTML);
   }
 
   // Соответствие А/Б/В ↔ 1/2/3 (ОГЭ мат. №11) — до choice, иначе 1) 2) путаются с вариантами.
@@ -814,7 +891,17 @@ function polishBankTaskTables(root) {
       continue;
     }
 
-    if (table.classList.contains("array-table")) continue;
+    if (table.classList.contains("array-table")) {
+      table.style.setProperty("border-collapse", "collapse", "important");
+      table.style.setProperty("border", BANK_TASK_TABLE_BORDER, "important");
+      table.style.setProperty("margin", "0.5rem auto", "important");
+      table.style.setProperty("overflow", "visible", "important");
+      for (const cell of table.querySelectorAll("th, td")) {
+        cell.style.setProperty("border", BANK_TASK_TABLE_BORDER, "important");
+        cell.style.setProperty("padding", "6px 10px", "important");
+      }
+      continue;
+    }
     if (
       table.classList.contains("ege-inf-2-truth-table") ||
       table.classList.contains("ege-inf-2-example-table") ||

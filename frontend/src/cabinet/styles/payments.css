@@ -24,6 +24,7 @@
   padding: 8px 0 32px;
   max-width: 100%;
   box-sizing: border-box;
+  overflow-x: clip;
 }
 
 .pay-page * { box-sizing: border-box; }
@@ -2300,4 +2301,209 @@
 
   .pay-btn__full { display: none; }
   .pay-btn__short { display: inline; }
+}
+
+.pay-metrics--hero {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.pay-metrics--hero .pay-metric {
+  padding: 18px 18px 16px;
+}
+
+.pay-metrics--hero .pay-summary__value {
+  font-size: 1.45rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.pay-filters {
+  margin-bottom: 18px;
+}
+
+.pay-filters__hint {
+  margin: 0 0 8px;
+  color: var(--pay-muted);
+  font-size: 0.82rem;
+}
+
+.pay-filters__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.pay-select--compact {
+  min-width: 0;
+  width: auto;
+  max-width: 180px;
+}
+
+.pay-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.86rem;
+  color: var(--pay-text);
+  white-space: nowrap;
+}
+
+.pay-student-list--air {
+  display: grid;
+  gap: 12px;
+}
+
+.pay-student-card--air {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px 20px;
+  align-items: center;
+  padding: 16px 18px;
+  background: var(--pay-surface);
+  border: 1px solid var(--pay-line);
+  border-radius: var(--pay-radius);
+}
+
+.pay-student-card__due {
+  margin: 6px 0 4px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.pay-student-card__due--debt {
+  color: var(--pay-red);
+}
+
+.pay-student-card__due--ok {
+  color: var(--pay-green);
+}
+
+.pay-student-card--air .pay-student-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.pay-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.pay-timeline__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--pay-line);
+}
+
+.pay-timeline__item:last-child {
+  border-bottom: 0;
+}
+
+.pay-timeline__date {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--pay-muted);
+}
+
+.pay-timeline__title {
+  margin: 2px 0 6px;
+  font-weight: 650;
+}
+
+.pay-timeline__status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pay-timeline__amount {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+}
+
+.pay-pill--ok {
+  background: var(--pay-soft-green);
+  color: var(--pay-green);
+}
+
+.pay-pill--warn {
+  background: var(--pay-soft-yellow);
+  color: #9a6a00;
+}
+
+.pay-pill--debt {
+  background: var(--pay-soft-red);
+  color: var(--pay-red);
+}
+
+.pay-drawer-actions--compact {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .pay-metrics--hero {
+    grid-template-columns: 1fr;
+  }
+
+  .pay-student-card--air {
+    grid-template-columns: 1fr;
+  }
+
+  .pay-student-card--air .pay-student-card__actions {
+    justify-content: stretch;
+  }
+
+  .pay-student-card--air .pay-student-card__actions .pay-btn {
+    flex: 1 1 calc(50% - 8px);
+  }
+
+  .pay-filters__row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pay-select--compact,
+  .pay-input--search {
+    max-width: none;
+    width: 100%;
+  }
+
+  .pay-timeline__item {
+    grid-template-columns: 1fr;
+  }
+
+  .pay-timeline__amount {
+    text-align: left;
+    align-items: flex-start;
+  }
+}
+
+.pay-inline-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.pay-inline-edit .pay-input {
+  width: 110px;
+  min-width: 0;
 }

@@ -10,8 +10,9 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Iterable, Optional
 
 from django.contrib.auth.models import User
-from django.db import transaction
-from django.db.models import Q, Sum
+from django.db import IntegrityError, transaction
+from django.db.models import Case, Count, F, Q, Sum, Value, When
+from django.db.models.fields import DecimalField
 from django.utils import timezone
 
 from .billing_models import (
@@ -49,6 +50,21 @@ CANCELLED_DELIVERY_STATUSES = (
     DeliveryStatus.CANCELLED_BY_STUDENT,
     DeliveryStatus.CANCELLED_BY_TEACHER,
 )
+CHARGEABLE_DELIVERY_STATUSES = (
+    DeliveryStatus.CONDUCTED,
+    DeliveryStatus.NO_SHOW,
+)
+PRICE_APPLY_FUTURE_ONLY = "future_only"
+PRICE_APPLY_UNPRICED_ONLY = "unpriced_only"
+PRICE_APPLY_RECALCULATE_UNPAID = "recalculate_unpaid"
+DELIVERY_STATUS_UI = {
+    DeliveryStatus.PLANNED: "Запланирован",
+    DeliveryStatus.CONDUCTED: "Проведён",
+    DeliveryStatus.NO_SHOW: "Неявка",
+    DeliveryStatus.CANCELLED_BY_STUDENT: "Отменён",
+    DeliveryStatus.CANCELLED_BY_TEACHER: "Отменён",
+    DeliveryStatus.RESCHEDULED: "Перенесён",
+}
 
 
 class BillingError(Exception):
@@ -156,6 +172,14 @@ def audit(
     )
 
 
+def charge_ledger_key(record: EventBillingRecord) -> str:
+    return f"charge:{record.id}"
+
+
+def package_ledger_key(record: EventBillingRecord) -> str:
+    return f"package:{record.id}"
+
+
 def _append_tx(
     *,
     billing_account: BillingAccount,
@@ -174,8 +198,9 @@ def _append_tx(
     metadata: Optional[dict] = None,
     reversed_transaction: Optional[BillingTransaction] = None,
     is_reversal: bool = False,
+    ledger_key: Optional[str] = None,
 ) -> BillingTransaction:
-    return BillingTransaction.objects.create(
+    payload = dict(
         billing_account=billing_account,
         student=student,
         transaction_type=transaction_type,
@@ -192,7 +217,12 @@ def _append_tx(
         metadata=metadata or {},
         reversed_transaction=reversed_transaction,
         is_reversal=is_reversal,
+        ledger_key=ledger_key or None,
     )
+    if not ledger_key:
+        return BillingTransaction.objects.create(**payload)
+    with transaction.atomic():
+        return BillingTransaction.objects.create(**payload)
 
 
 def is_price_unspecified(price_or_record) -> bool:
@@ -261,6 +291,37 @@ def financial_state_code(record: EventBillingRecord | None) -> str:
     if record.financial_status == FinancialStatus.NOT_BILLABLE:
         return "not_billable"
     return record.financial_status or "unknown"
+
+
+def payment_status_ui(record: EventBillingRecord) -> tuple[str, str]:
+    """Статус оплаты, отдельно от статуса занятия."""
+    if record.delivery_status == DeliveryStatus.RESCHEDULED and not record_is_debt(record):
+        return "not_billable", "Не начисляется"
+    if record.delivery_status in CANCELLED_DELIVERY_STATUSES and not record_is_debt(record):
+        return "not_billable", "Не начисляется"
+    if record_price_missing(record) or record.financial_status == FinancialStatus.NEEDS_DECISION:
+        return "price_not_set", "Стоимость не задана"
+    if record.is_free or record.financial_status == FinancialStatus.NOT_BILLABLE:
+        return "not_billable", "Не начисляется"
+    if record.financial_status == FinancialStatus.PAID_FROM_PACKAGE:
+        return "paid", "Оплачено"
+    if record.financial_status == FinancialStatus.PAID:
+        return "paid", "Оплачено"
+    if record.financial_status == FinancialStatus.PARTIALLY_PAID:
+        return "partially_paid", "Частично оплачено"
+    if record.financial_status == FinancialStatus.AWAITING_PAYMENT and record_due_amount(record) > 0:
+        return "awaiting_payment", "Ожидает оплаты"
+    if record.financial_status == FinancialStatus.REFUNDED:
+        return "refunded", "Возвращён"
+    return record.financial_status or "unknown", record.get_financial_status_display()
+
+
+def delivery_status_ui(record_or_status) -> tuple[str, str]:
+    if isinstance(record_or_status, EventBillingRecord):
+        status = record_or_status.delivery_status
+    else:
+        status = record_or_status or DeliveryStatus.PLANNED
+    return status, DELIVERY_STATUS_UI.get(status, status or "Запланирован")
 
 
 def debt_records_q() -> Q:
@@ -351,32 +412,61 @@ def mark_record_not_billable(
     record.delivery_status = delivery_status
     record.financial_status = FinancialStatus.NOT_BILLABLE
     record.charged_amount = ZERO
-    record.is_free = True
-    record.finalized_at = timezone.now()
+    # Перенос — не «бесплатный урок»: занятие ещё состоится и должно начислиться позже.
+    record.is_free = delivery_status != DeliveryStatus.RESCHEDULED
+    if delivery_status == DeliveryStatus.RESCHEDULED:
+        record.finalized_at = None
+        record.idempotency_key = ""
+    else:
+        record.finalized_at = timezone.now()
     if comment:
         record.comment = comment
     record.save()
     return record
 
 
+def record_belongs_in_payment_list(record: EventBillingRecord) -> bool:
+    """Что учитель видит в оплатах: реальные уроки и суммы, не служебные 0 ₽ после переноса."""
+    if record.delivery_status in CHARGEABLE_DELIVERY_STATUSES:
+        return True
+    if record_due_amount(record) > 0:
+        return True
+    if record_has_confirmed_payment(record):
+        return True
+    if record_has_active_charge(record) and D(record.charged_amount or 0) > 0:
+        return True
+    return False
+
+
 def compute_account_balance(account: BillingAccount) -> dict:
-    """Баланс > 0 — переплата/аванс; < 0 — задолженность."""
+    """Баланс > 0 — переплата/аванс; < 0 — задолженность.
+
+    К оплате = валидные начисления − платежи + корректировки − возвраты.
+    Переносы и непроведённые занятия в расчёт не входят.
+    """
     qs = BillingTransaction.objects.filter(billing_account=account)
-    payments = ZERO
-    charges = ZERO
-    refunds = ZERO
-    adjustments = ZERO
-    for row in qs.values("transaction_type").annotate(total=Sum("amount")):
-        t = row["transaction_type"]
-        total = D(row["total"] or 0)
-        if t in (TransactionType.PAYMENT, TransactionType.PACKAGE_PURCHASE):
-            payments += total
-        elif t in (TransactionType.CHARGE, TransactionType.WRITE_OFF):
-            charges += total
-        elif t == TransactionType.REFUND:
-            refunds += total
-        elif t in (TransactionType.ADJUSTMENT, TransactionType.DISCOUNT):
-            adjustments += total
+    payments = qs.filter(
+        transaction_type__in=(TransactionType.PAYMENT, TransactionType.PACKAGE_PURCHASE)
+    ).aggregate(t=Sum("amount"))["t"] or ZERO
+    valid_charge = (
+        Q(event_billing__isnull=True)
+        | Q(event_billing__delivery_status__in=CHARGEABLE_DELIVERY_STATUSES)
+        | Q(
+            event_billing__delivery_status__in=CANCELLED_DELIVERY_STATUSES,
+            event_billing__charged_amount__gt=0,
+        )
+    )
+    charges = qs.filter(
+        transaction_type__in=(TransactionType.CHARGE, TransactionType.WRITE_OFF)
+    ).filter(valid_charge).aggregate(t=Sum("amount"))["t"] or ZERO
+    refunds = qs.filter(transaction_type=TransactionType.REFUND).aggregate(t=Sum("amount"))["t"] or ZERO
+    adjustments = qs.filter(
+        transaction_type__in=(TransactionType.ADJUSTMENT, TransactionType.DISCOUNT)
+    ).aggregate(t=Sum("amount"))["t"] or ZERO
+    payments = D(payments)
+    charges = D(charges)
+    refunds = D(refunds)
+    adjustments = D(adjustments)
     balance = payments - charges - refunds + adjustments
     return {
         "paid": payments,
@@ -978,6 +1068,13 @@ def consume_package(
     units = D_units(units)
     if units <= 0:
         raise BillingError("INVALID_UNITS", "Количество единиц должно быть больше 0")
+    if event_billing is not None:
+        existing = BillingTransaction.objects.filter(
+            ledger_key=package_ledger_key(event_billing),
+            is_reversal=False,
+        ).first()
+        if existing:
+            return existing
     teacher_settings = get_or_create_teacher_settings(account.teacher)
     if locked.remaining_units < units and not teacher_settings.allow_negative_balance:
         raise BillingError("INSUFFICIENT_PACKAGE", "Недостаточно единиц абонемента")
@@ -986,18 +1083,32 @@ def consume_package(
         locked.remaining_units = ZERO
         locked.status = PackageStatus.EXHAUSTED
     locked.save(update_fields=["remaining_units", "status", "updated_at"])
-    tx = _append_tx(
-        billing_account=account,
-        student=student,
-        transaction_type=TransactionType.PACKAGE_CONSUMPTION,
-        package_units=units,
-        currency=account.currency,
-        created_by=created_by,
-        event=event,
-        event_billing=event_billing,
-        package=locked,
-        comment=comment or "Списание абонемента",
-    )
+    try:
+        tx = _append_tx(
+            billing_account=account,
+            student=student,
+            transaction_type=TransactionType.PACKAGE_CONSUMPTION,
+            package_units=units,
+            currency=account.currency,
+            created_by=created_by,
+            event=event,
+            event_billing=event_billing,
+            package=locked,
+            comment=comment or "Списание абонемента",
+            ledger_key=package_ledger_key(event_billing) if event_billing is not None else None,
+        )
+    except IntegrityError:
+        locked.remaining_units = D_units(locked.remaining_units + units)
+        if locked.status == PackageStatus.EXHAUSTED and locked.remaining_units > 0:
+            locked.status = PackageStatus.ACTIVE
+        locked.save(update_fields=["remaining_units", "status", "updated_at"])
+        if event_billing is not None:
+            existing = BillingTransaction.objects.filter(
+                ledger_key=package_ledger_key(event_billing)
+            ).first()
+            if existing:
+                return existing
+        raise
     try:
         teacher_settings = get_or_create_teacher_settings(account.teacher)
         threshold = (
@@ -1103,11 +1214,6 @@ UNPAID_FINANCIAL_STATUSES = (
     FinancialStatus.AWAITING_PAYMENT,
     FinancialStatus.PARTIALLY_PAID,
     FinancialStatus.NEEDS_DECISION,
-)
-
-CHARGEABLE_DELIVERY_STATUSES = (
-    DeliveryStatus.CONDUCTED,
-    DeliveryStatus.NO_SHOW,
 )
 
 
@@ -1260,6 +1366,7 @@ def _clear_money_charge_for_package_settle(
             is_reversal=True,
             metadata={"reverses": str(tx.id), "reason": "package_settle"},
         )
+        _release_ledger_key(tx)
         cleared = D(cleared + tx.amount)
         record.charged_amount = D(max(ZERO, D(record.charged_amount or 0) - tx.amount))
 
@@ -1777,6 +1884,27 @@ def _refresh_financial_status(record: EventBillingRecord):
     record.save(update_fields=["financial_status", "updated_at"])
 
 
+def _unallocate_payment(payment: StudentPayment) -> None:
+    """Снять распределение оплаты с уроков. Сам платёж не удаляет."""
+    allocations = list(
+        StudentPaymentAllocation.objects.select_related("event_billing").filter(payment=payment)
+    )
+    for alloc in allocations:
+        record = alloc.event_billing
+        if record is not None:
+            record.paid_amount = D(max(ZERO, D(record.paid_amount or 0) - D(alloc.amount)))
+            record.save(update_fields=["paid_amount", "updated_at"])
+            _refresh_financial_status(record)
+        alloc.delete()
+
+
+def _release_ledger_key(tx: BillingTransaction) -> None:
+    if not tx.ledger_key:
+        return
+    BillingTransaction.objects.filter(pk=tx.pk).update(ledger_key=None)
+    tx.ledger_key = None
+
+
 def _payment_unallocated_amount(payment: StudentPayment) -> Decimal:
     allocated = payment.allocations.aggregate(t=Sum("amount"))["t"] or ZERO
     left = D(payment.amount) - D(allocated) - D(payment.refunded_amount or 0)
@@ -1891,6 +2019,7 @@ def allocate_payment_to_unpaid_lessons(
 
 
 @transaction.atomic
+@transaction.atomic
 def finalize_event_billing(
     *,
     event: ScheduleEvent,
@@ -1913,6 +2042,16 @@ def finalize_event_billing(
     records = ensure_event_billing_records(event)
     if student:
         records = [r for r in records if r.student_id == student.id]
+    if not records:
+        raise BillingError("NO_STUDENTS", "Нет учеников для финансового оформления")
+
+    locked = {
+        r.id: r
+        for r in EventBillingRecord.objects.select_for_update(of=("self",))
+        .select_related("billing_account", "billing_account__settings", "student", "event", "package")
+        .filter(pk__in=[row.id for row in records])
+    }
+    records = [locked[row.id] for row in records if row.id in locked]
     if not records:
         raise BillingError("NO_STUDENTS", "Нет учеников для финансового оформления")
 
@@ -2155,28 +2294,40 @@ def finalize_event_billing(
 
         if calc_amount > 0:
             if not record_has_active_charge(record):
-                tx = _append_tx(
-                    billing_account=account,
-                    student=record.student,
-                    transaction_type=TransactionType.CHARGE,
-                    amount=calc_amount,
-                    currency=account.currency,
-                    created_by=teacher,
-                    event=event,
-                    event_billing=record,
-                    comment=comment or "Начисление за урок",
-                    metadata={"idempotency_key": existing_key} if existing_key else {},
-                )
-                audit(
-                    teacher=teacher,
-                    actor=teacher,
-                    action="charge",
-                    billing_account=account,
-                    entity_type="EventBillingRecord",
-                    entity_id=str(record.id),
-                    new_value={"amount": str(calc_amount)},
-                    related_transaction=tx,
-                )
+                try:
+                    tx = _append_tx(
+                        billing_account=account,
+                        student=record.student,
+                        transaction_type=TransactionType.CHARGE,
+                        amount=calc_amount,
+                        currency=account.currency,
+                        created_by=teacher,
+                        event=event,
+                        event_billing=record,
+                        comment=comment or "Начисление за урок",
+                        metadata={"idempotency_key": existing_key} if existing_key else {},
+                        ledger_key=charge_ledger_key(record),
+                    )
+                except IntegrityError:
+                    existing_tx = BillingTransaction.objects.filter(
+                        ledger_key=charge_ledger_key(record)
+                    ).first()
+                    if existing_tx is None:
+                        raise
+                    tx = existing_tx
+                    record.charged_amount = D(existing_tx.amount)
+                    calc_amount = D(existing_tx.amount)
+                else:
+                    audit(
+                        teacher=teacher,
+                        actor=teacher,
+                        action="charge",
+                        billing_account=account,
+                        entity_type="EventBillingRecord",
+                        entity_id=str(record.id),
+                        new_value={"amount": str(calc_amount)},
+                        related_transaction=tx,
+                    )
 
         # Настройки цены / начисление ≠ оплата. Урок оплачен только из абонемента
         # или после распределения реальной оплаты учителя.
@@ -2193,6 +2344,7 @@ def finalize_event_billing(
             record.finalized_at = timezone.now()
             record.save()
         else:
+            record.is_free = False
             record.finalized_at = timezone.now()
             record.financial_status = FinancialStatus.AWAITING_PAYMENT
             record.save()
@@ -2255,7 +2407,7 @@ def unfinalize_event_billing(
         raise BillingError("FORBIDDEN", "Нет доступа", 403)
 
     records = list(
-        EventBillingRecord.objects.select_for_update()
+        EventBillingRecord.objects.select_for_update(of=("self",))
         .filter(event=event, billing_account__teacher=teacher)
     )
     results = []
@@ -2441,6 +2593,221 @@ def apply_price_to_unpriced_conducted_lessons(
     return updated
 
 
+def recalculate_unpaid_lesson_charges(
+    account: BillingAccount,
+    *,
+    teacher: Optional[User] = None,
+    comment: str = "",
+) -> list[EventBillingRecord]:
+    """Пересчитать сумму только у неоплаченных (или частично оплаченных) занятий.
+
+    Оплаченные исторические уроки не меняются.
+    """
+    teacher = teacher or account.teacher
+    note = comment or "Пересчёт неоплаченных занятий по новой стоимости"
+    candidates = EventBillingRecord.objects.filter(
+        billing_account=account,
+        delivery_status__in=CHARGEABLE_DELIVERY_STATUSES,
+        financial_status__in=(
+            FinancialStatus.AWAITING_PAYMENT,
+            FinancialStatus.PARTIALLY_PAID,
+        ),
+    ).select_related("event", "student", "billing_account")
+    updated = []
+    for record in candidates:
+        if record.financial_status == FinancialStatus.PAID:
+            continue
+        if D(record.paid_amount or 0) > 0 and D(record.paid_amount) >= D(record.charged_amount or 0):
+            continue
+        event = record.event
+        if event is None:
+            continue
+        price = calculate_lesson_price(
+            account=account,
+            duration_minutes=record.actual_duration_minutes
+            or record.planned_duration_minutes
+            or event_duration_minutes(event),
+            direction=getattr(record.student, "direction", "") or "",
+            is_group=bool(event.group_id),
+            ignore_package_type=True,
+        )
+        new_amount = D(price["amount"])
+        if new_amount <= 0 or is_price_unspecified(price):
+            continue
+        if D(record.paid_amount or 0) > new_amount:
+            continue
+        if new_amount == D(record.charged_amount or 0):
+            continue
+        _replace_record_charge(
+            teacher=teacher,
+            record=record,
+            new_amount=new_amount,
+            comment=note,
+            price=price,
+            manual=False,
+        )
+        updated.append(record)
+    return updated
+
+
+def _replace_record_charge(
+    *,
+    teacher: User,
+    record: EventBillingRecord,
+    new_amount: Decimal,
+    comment: str,
+    price: Optional[dict] = None,
+    manual: bool = False,
+) -> EventBillingRecord:
+    record = EventBillingRecord.objects.select_for_update(of=("self",)).select_related(
+        "billing_account", "student", "event"
+    ).get(pk=record.pk)
+    for tx in _active_txs_for_record(record, TransactionType.CHARGE):
+        reverse_transaction(
+            teacher=teacher,
+            tx=tx,
+            comment=comment or "Пересчёт начисления",
+            touch_record=False,
+        )
+    record.charged_amount = D(new_amount)
+    record.calculated_amount = D(new_amount)
+    if price:
+        record.rate = price.get("rate") or record.rate
+        record.billing_type = price.get("billing_type") or record.billing_type
+        record.price_source = price.get("price_source") or record.price_source
+        record.price_source_label = price.get("price_source_label") or record.price_source_label
+    record.manual_override = bool(manual)
+    record.finalized_at = timezone.now()
+    key = charge_ledger_key(record)
+    leftover = BillingTransaction.objects.filter(ledger_key=key).first()
+    if leftover:
+        _release_ledger_key(leftover)
+    if D(new_amount) > 0:
+        _append_tx(
+            billing_account=record.billing_account,
+            student=record.student,
+            transaction_type=TransactionType.CHARGE,
+            amount=D(new_amount),
+            currency=record.currency or record.billing_account.currency,
+            created_by=teacher,
+            event=record.event,
+            event_billing=record,
+            comment=comment or "Начисление за урок",
+            ledger_key=key,
+        )
+        record.financial_status = FinancialStatus.AWAITING_PAYMENT
+        record.is_free = False
+        record.save()
+        allocate_available_payments_to_record(record)
+        record.refresh_from_db()
+        _refresh_financial_status(record)
+    else:
+        record.financial_status = FinancialStatus.NOT_BILLABLE
+        record.save()
+    return record
+
+
+@transaction.atomic
+def update_event_charge_amount(
+    *,
+    teacher: User,
+    record: EventBillingRecord,
+    amount: Decimal,
+    comment: str = "",
+) -> EventBillingRecord:
+    if record.billing_account.teacher_id != teacher.id:
+        raise BillingError("FORBIDDEN", "Нет доступа", 403)
+    new_amount = D(amount)
+    if new_amount < 0:
+        raise BillingError("INVALID_AMOUNT", "Сумма не может быть отрицательной")
+    record = EventBillingRecord.objects.select_for_update().get(pk=record.pk)
+    if record.financial_status == FinancialStatus.PAID and D(record.paid_amount or 0) > new_amount:
+        raise BillingError(
+            "LESSON_PAID",
+            "Оплаченное занятие нельзя уменьшить автоматически. Сначала отмените оплату.",
+        )
+    if D(record.paid_amount or 0) > new_amount:
+        raise BillingError(
+            "AMOUNT_BELOW_PAID",
+            "Новая сумма меньше уже оплаченной. Отмените оплату или укажите сумму не ниже оплаченной.",
+        )
+    return _replace_record_charge(
+        teacher=teacher,
+        record=record,
+        new_amount=new_amount,
+        comment=comment or "Ручное изменение суммы начисления",
+        price={"price_source": PriceSource.MANUAL, "price_source_label": "Задано вручную"},
+        manual=True,
+    )
+
+
+@transaction.atomic
+def update_student_payment(
+    *,
+    teacher: User,
+    payment: StudentPayment,
+    amount: Optional[Decimal] = None,
+    paid_at=None,
+    comment: Optional[str] = None,
+) -> StudentPayment:
+    if payment.billing_account.teacher_id != teacher.id:
+        raise BillingError("FORBIDDEN", "Нет доступа", 403)
+    payment = StudentPayment.objects.select_for_update().select_related("billing_account").get(pk=payment.pk)
+    if payment.status != StudentPaymentStatus.CONFIRMED:
+        raise BillingError("PAYMENT_NOT_ACTIVE", "Можно изменить только подтверждённый платёж")
+    tx = (
+        BillingTransaction.objects.filter(
+            student_payment=payment,
+            transaction_type__in=(TransactionType.PAYMENT, TransactionType.PACKAGE_PURCHASE),
+            is_reversal=False,
+        )
+        .order_by("created_at")
+        .first()
+    )
+    new_amount = D(amount) if amount is not None else D(payment.amount)
+    if new_amount <= 0:
+        raise BillingError("INVALID_AMOUNT", "Сумма должна быть больше 0")
+    if paid_at is not None:
+        payment.paid_at = paid_at
+    if comment is not None:
+        payment.comment = comment
+    if new_amount != D(payment.amount):
+        _unallocate_payment(payment)
+        diff = D(new_amount - D(payment.amount))
+        payment.amount = new_amount
+        payment.save()
+        if tx:
+            _append_tx(
+                billing_account=payment.billing_account,
+                student=payment.student,
+                transaction_type=TransactionType.ADJUSTMENT,
+                amount=diff,
+                currency=payment.currency,
+                created_by=teacher,
+                student_payment=payment,
+                comment=comment or "Изменение суммы оплаты",
+                metadata={"adjusts_payment": str(payment.id)},
+            )
+        if not payment.package_id:
+            allocate_payment_to_unpaid_lessons(
+                account=payment.billing_account,
+                payment=payment,
+            )
+    else:
+        payment.save()
+    audit(
+        teacher=teacher,
+        actor=teacher,
+        action="payment_update",
+        billing_account=payment.billing_account,
+        entity_type="StudentPayment",
+        entity_id=str(payment.id),
+        new_value={"amount": str(payment.amount)},
+        reason=comment or "",
+    )
+    return payment
+
+
 def sync_cancelled_event_billing(
     event: ScheduleEvent,
     *,
@@ -2487,21 +2854,236 @@ def sync_cancelled_event_billing(
 
 
 def sync_moved_event_billing(event: ScheduleEvent) -> list[EventBillingRecord]:
-    """Перенос того же ScheduleEvent — не финансовое событие."""
-    records = list(EventBillingRecord.objects.filter(event=event))
+    """Перенос того же ScheduleEvent — не финансовое событие.
+
+    Старое время не порождает начисление. Если запись уже была, она не должна
+    торчать в оплатах как «0 ₽ / Перенесён», пока урок не проведён.
+    """
+    records = list(EventBillingRecord.objects.filter(event=event).select_related("billing_account"))
     results = []
     for record in records:
-        if record.finalized_at or record_has_active_charge(record) or record_has_confirmed_payment(record):
+        if record.delivery_status in CHARGEABLE_DELIVERY_STATUSES and (
+            record.finalized_at or record_has_active_charge(record) or record_has_confirmed_payment(record)
+        ):
             results.append(record)
             continue
         if record.delivery_status in CANCELLED_DELIVERY_STATUSES:
             results.append(record)
             continue
-        if record.delivery_status != DeliveryStatus.PLANNED:
-            record.delivery_status = DeliveryStatus.PLANNED
-            record.save(update_fields=["delivery_status", "updated_at"])
+        if record_has_confirmed_payment(record):
+            results.append(record)
+            continue
+        teacher = record.billing_account.teacher
+        reverse_auto_finance_for_record(
+            record=record,
+            teacher=teacher,
+            comment="Перенос занятия — начисление не создаётся",
+        )
+        mark_record_not_billable(
+            record,
+            delivery_status=DeliveryStatus.RESCHEDULED,
+            comment="Занятие перенесено",
+        )
         results.append(record)
     return results
+
+
+def _active_charge_amount(record: EventBillingRecord) -> Decimal:
+    return D(sum((tx.amount for tx in _active_txs_for_record(record, TransactionType.CHARGE)), ZERO))
+
+
+def _displayed_account_totals(account: BillingAccount) -> dict:
+    listed = [
+        rec
+        for rec in EventBillingRecord.objects.filter(billing_account=account).select_related("event")
+        if record_belongs_in_payment_list(rec)
+    ]
+    charged = D(sum((D(r.charged_amount or 0) for r in listed), ZERO))
+    paid_on_lessons = D(sum((D(r.paid_amount or 0) for r in listed), ZERO))
+    due = D(sum((record_due_amount(r) for r in listed), ZERO))
+    balance = compute_account_balance(account)
+    return {
+        "charged": charged,
+        "paid": D(balance.get("paid") or 0),
+        "paid_on_lessons": paid_on_lessons,
+        "due": due,
+        "credit": D(balance.get("credit") or 0),
+        "listed_count": len(listed),
+    }
+
+
+def _rebuild_plan(account: BillingAccount) -> dict:
+    problems = []
+    actions = []
+    records = list(
+        EventBillingRecord.objects.filter(billing_account=account).select_related("event", "student")
+    )
+    for record in records:
+        event = record.event
+        event_moved = bool(event and event.status == ScheduleEvent.Status.MOVED)
+        active_charges = _active_txs_for_record(record, TransactionType.CHARGE)
+        ledger_amount = D(sum((tx.amount for tx in active_charges), ZERO))
+        snapshot = D(record.charged_amount or 0)
+
+        is_placeholder = (
+            record.delivery_status in (DeliveryStatus.RESCHEDULED, DeliveryStatus.PLANNED)
+            or (event_moved and record.delivery_status not in CHARGEABLE_DELIVERY_STATUSES)
+        ) and not record_has_confirmed_payment(record)
+
+        if is_placeholder:
+            if active_charges or snapshot > 0 or record_belongs_in_payment_list(record):
+                problems.append("начисление от перенесённого/непроведённого занятия")
+                actions.append({"type": "clear_placeholder", "record_id": str(record.id)})
+            elif record.delivery_status != DeliveryStatus.RESCHEDULED and event_moved:
+                actions.append({"type": "mark_rescheduled", "record_id": str(record.id)})
+            continue
+
+        if record.delivery_status in CANCELLED_DELIVERY_STATUSES and snapshot <= 0:
+            if active_charges:
+                problems.append("начисление отменённого урока")
+                actions.append({"type": "clear_placeholder", "record_id": str(record.id)})
+            continue
+
+        if len(active_charges) > 1:
+            problems.append("дублирующее начисление")
+            keep = sorted(active_charges, key=lambda tx: tx.created_at)[-1]
+            actions.append(
+                {
+                    "type": "collapse_duplicates",
+                    "record_id": str(record.id),
+                    "keep_tx_id": str(keep.id),
+                }
+            )
+        elif ledger_amount != snapshot:
+            problems.append("снимок урока не совпадает с журналом начислений")
+            actions.append({"type": "sync_snapshot", "record_id": str(record.id)})
+
+    current = _displayed_account_totals(account)
+    extra_charges = ZERO
+    for action in actions:
+        rec = next((r for r in records if str(r.id) == action.get("record_id")), None)
+        if rec is None:
+            continue
+        if action["type"] == "clear_placeholder":
+            extra_charges += D(rec.charged_amount or 0)
+        elif action["type"] == "sync_snapshot":
+            extra_charges += D(rec.charged_amount or 0) - _active_charge_amount(rec)
+    correct_charged = D(max(ZERO, current["charged"] - extra_charges))
+    paid = current["paid"]
+    raw = compute_account_balance(account)
+    adjustments = D(raw.get("adjustments") or 0)
+    refunds = D(raw.get("refunded") or 0)
+    net = correct_charged - paid + refunds - adjustments
+    correct_due = net if net > 0 else ZERO
+    unique_problems = list(dict.fromkeys(problems))
+    return {
+        "student_name": account.student.full_name,
+        "student_id": account.student_id,
+        "account_id": account.id,
+        "currency": account.currency,
+        "current_due": current["due"],
+        "current_charged": current["charged"],
+        "current_paid": paid,
+        "correct_due": correct_due,
+        "correct_charged": correct_charged,
+        "correct_paid": paid,
+        "correct_credit": D(abs(net)) if net < 0 else ZERO,
+        "problems": unique_problems,
+        "actions": actions,
+        "needs_repair": bool(unique_problems),
+    }
+
+
+def preview_rebuild_student_balance(account: BillingAccount) -> dict:
+    return _rebuild_plan(account)
+
+
+@transaction.atomic
+def rebuild_student_balance(
+    *,
+    teacher: User,
+    student: Optional[Student] = None,
+    account: Optional[BillingAccount] = None,
+    apply: bool = False,
+) -> dict:
+    """Пересобрать баланс из валидных операций. По умолчанию только отчёт."""
+    if account is None:
+        if student is None:
+            raise BillingError("NO_ACCOUNT", "Укажите ученика")
+        account = get_or_create_billing_account(teacher, student)
+    if account.teacher_id != teacher.id:
+        raise BillingError("FORBIDDEN", "Нет доступа", 403)
+    plan = _rebuild_plan(account)
+    plan["applied"] = False
+    if not apply:
+        return plan
+
+    records = {
+        str(r.id): r
+        for r in EventBillingRecord.objects.select_for_update(of=("self",)).filter(
+            billing_account=account
+        )
+    }
+    for action in plan["actions"]:
+        record = records.get(action.get("record_id") or "")
+        if action["type"] == "clear_placeholder" and record is not None:
+            reverse_auto_finance_for_record(
+                record=record,
+                teacher=teacher,
+                comment="Пересчёт оплат: перенос/отмена без начисления",
+            )
+            event = record.event
+            delivery = DeliveryStatus.RESCHEDULED
+            if event and event.status == ScheduleEvent.Status.CANCELLED:
+                delivery = DeliveryStatus.CANCELLED_BY_TEACHER
+            elif record.delivery_status in CANCELLED_DELIVERY_STATUSES:
+                delivery = record.delivery_status
+            mark_record_not_billable(record, delivery_status=delivery, comment="Пересчёт оплат")
+        elif action["type"] == "mark_rescheduled" and record is not None:
+            mark_record_not_billable(
+                record,
+                delivery_status=DeliveryStatus.RESCHEDULED,
+                comment="Занятие перенесено",
+            )
+        elif action["type"] == "collapse_duplicates" and record is not None:
+            keep_id = action.get("keep_tx_id")
+            for tx in _active_txs_for_record(record, TransactionType.CHARGE):
+                if str(tx.id) == keep_id:
+                    continue
+                reverse_transaction(
+                    teacher=teacher,
+                    tx=tx,
+                    comment="Пересчёт оплат: дубль начисления",
+                    touch_record=False,
+                )
+            keep = BillingTransaction.objects.filter(pk=keep_id).first()
+            record.charged_amount = D(keep.amount) if keep else _active_charge_amount(record)
+            record.save(update_fields=["charged_amount", "updated_at"])
+            _refresh_financial_status(record)
+        elif action["type"] == "sync_snapshot" and record is not None:
+            record.charged_amount = _active_charge_amount(record)
+            record.save(update_fields=["charged_amount", "updated_at"])
+            _refresh_financial_status(record)
+
+    for rec in EventBillingRecord.objects.filter(billing_account=account):
+        allocate_available_payments_to_record(rec)
+
+    plan = _rebuild_plan(account)
+    plan["applied"] = True
+    audit(
+        teacher=teacher,
+        actor=teacher,
+        action="rebuild_balance",
+        billing_account=account,
+        entity_type="BillingAccount",
+        entity_id=str(account.id),
+        new_value={
+            "due": str(plan["correct_due"]),
+            "charged": str(plan["correct_charged"]),
+        },
+        reason="Пересчёт оплат",
+    )
+    return plan
 
 
 def ensure_monthly_period(account: BillingAccount, when) -> MonthlyBillingPeriod:
@@ -2791,6 +3373,7 @@ def reverse_transaction(
     comment: str = "",
     restore_awaiting_payment: bool = False,
     restore_charge_amount: Optional[Decimal] = None,
+    touch_record: bool = True,
 ) -> BillingTransaction:
     if tx.billing_account.teacher_id != teacher.id:
         raise BillingError("FORBIDDEN", "Нет доступа", 403)
@@ -2798,6 +3381,8 @@ def reverse_transaction(
         raise BillingError("ALREADY_REVERSAL", "Нельзя отменить отмену")
     if BillingTransaction.objects.filter(reversed_transaction=tx).exists():
         raise BillingError("ALREADY_REVERSED", "Операция уже была выполнена")
+
+    tx = BillingTransaction.objects.select_for_update().get(pk=tx.pk)
 
     # Reverse package units
     if tx.package_id and tx.package_units:
@@ -2825,6 +3410,16 @@ def reverse_transaction(
     ):
         reverse_amount = D(-tx.amount)
 
+    _release_ledger_key(tx)
+
+    if tx.transaction_type in (TransactionType.PAYMENT, TransactionType.PACKAGE_PURCHASE) and tx.student_payment_id:
+        payment = StudentPayment.objects.select_for_update().filter(pk=tx.student_payment_id).first()
+        if payment:
+            _unallocate_payment(payment)
+            if payment.status == StudentPaymentStatus.CONFIRMED:
+                payment.status = StudentPaymentStatus.CANCELLED
+                payment.save(update_fields=["status", "updated_at"])
+
     rev = _append_tx(
         billing_account=tx.billing_account,
         student=tx.student,
@@ -2842,7 +3437,7 @@ def reverse_transaction(
         is_reversal=True,
         metadata={"reverses": str(tx.id)},
     )
-    if tx.event_billing_id:
+    if touch_record and tx.event_billing_id:
         record = EventBillingRecord.objects.select_for_update().get(pk=tx.event_billing_id)
         if tx.transaction_type == TransactionType.CHARGE:
             record.charged_amount = D(max(ZERO, record.charged_amount - tx.amount))
@@ -2854,18 +3449,22 @@ def reverse_transaction(
                 if restored > 0:
                     record.charged_amount = restored
                     record.calculated_amount = restored
-                    _append_tx(
-                        billing_account=record.billing_account,
-                        student=record.student,
-                        transaction_type=TransactionType.CHARGE,
-                        amount=restored,
-                        currency=record.currency or record.billing_account.currency,
-                        created_by=teacher,
-                        event=record.event,
-                        event_billing=record,
-                        comment=comment or "Восстановление начисления после отмены списания",
-                        metadata={"restored_after_package_refund": str(tx.id)},
-                    )
+                    try:
+                        _append_tx(
+                            billing_account=record.billing_account,
+                            student=record.student,
+                            transaction_type=TransactionType.CHARGE,
+                            amount=restored,
+                            currency=record.currency or record.billing_account.currency,
+                            created_by=teacher,
+                            event=record.event,
+                            event_billing=record,
+                            comment=comment or "Восстановление начисления после отмены списания",
+                            metadata={"restored_after_package_refund": str(tx.id)},
+                            ledger_key=charge_ledger_key(record),
+                        )
+                    except IntegrityError:
+                        pass
                 record.financial_status = FinancialStatus.AWAITING_PAYMENT
                 record.price_source = PriceSource.MANUAL if restored > 0 else record.price_source
                 record.price_source_label = (
@@ -2877,10 +3476,12 @@ def reverse_transaction(
                 record.finalized_at = None
                 record.financial_status = FinancialStatus.NEEDS_DECISION
                 record.save()
-        else:
+        elif tx.transaction_type not in (TransactionType.PAYMENT, TransactionType.PACKAGE_PURCHASE):
             record.finalized_at = None
             record.financial_status = FinancialStatus.NEEDS_DECISION
             record.save()
+        else:
+            _refresh_financial_status(record)
     audit(
         teacher=teacher,
         actor=teacher,
@@ -3494,6 +4095,27 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
         serialize_package(p, include_history=False, reconcile=False) for p in packages_qs
     ]
 
+    lesson_agg = EventBillingRecord.objects.filter(
+        billing_account=account,
+        delivery_status__in=CHARGEABLE_DELIVERY_STATUSES,
+    ).aggregate(
+        charged=Sum("charged_amount"),
+        paid=Sum("paid_amount"),
+        charged_n=Count("id", filter=Q(charged_amount__gt=0)),
+    )
+    lesson_charged = D(lesson_agg["charged"] or 0)
+    lesson_paid = D(lesson_agg["paid"] or 0)
+    charged_lesson_count = int(lesson_agg["charged_n"] or 0)
+    unit_prices = {
+        D(p)
+        for p in EventBillingRecord.objects.filter(
+            billing_account=account,
+            delivery_status__in=CHARGEABLE_DELIVERY_STATUSES,
+            charged_amount__gt=0,
+        ).values_list("charged_amount", flat=True)
+    }
+    unit_price = next(iter(unit_prices)) if len(unit_prices) == 1 else None
+
     data = {
         "id": account.id,
         "student_id": account.student_id,
@@ -3517,6 +4139,15 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
         "suggested_actions": ui["suggested_actions"],
         "debt_amount": str(D(unpaid_amount)),
         "credit_amount": str(credit),
+        "charged_total": str(D(balance.get("charged") or 0)),
+        "paid_total": str(D(balance.get("paid") or 0)),
+        "lesson_stats": {
+            "conducted_charged_count": charged_lesson_count,
+            "charged_amount": str(lesson_charged),
+            "paid_amount": str(lesson_paid),
+            "due_amount": str(D(unpaid_amount)),
+            "unit_price": str(unit_price) if unit_price is not None else None,
+        },
         "packages": packages_list,
         "packages_summary": {
             "active_count": sum(1 for p in packages_list if p.get("status") == PackageStatus.ACTIVE),
@@ -3621,6 +4252,7 @@ def serialize_account(account: BillingAccount, *, include_history: bool = False)
             ]
         else:
             data["package_history"] = []
+        data["lessons"] = serialize_student_lesson_timeline(account)
     return data
 
 
@@ -3666,6 +4298,8 @@ def serialize_transaction(tx: BillingTransaction) -> dict:
             str(tx.reversed_transaction_id) if tx.reversed_transaction_id else None
         ),
         "is_legacy": bool(getattr(tx, "is_legacy", False)),
+        "student_payment_id": str(tx.student_payment_id) if tx.student_payment_id else None,
+        "event_billing_id": str(tx.event_billing_id) if tx.event_billing_id else None,
         "metadata": tx.metadata or {},
         "created_at": tx.created_at.isoformat() if tx.created_at else None,
     }
@@ -3757,12 +4391,14 @@ def serialize_event_billing(record: EventBillingRecord) -> dict:
     due = record_due_amount(record)
     price_missing = record_price_missing(record)
     is_debt = record_is_debt(record)
+    pay_code, pay_label = payment_status_ui(record)
+    delivery_code, delivery_label = delivery_status_ui(record)
     if record.financial_status == FinancialStatus.AWAITING_PAYMENT and is_debt:
-        status_label = "К оплате"
+        status_label = "Ожидает оплаты"
     elif record.financial_status == FinancialStatus.AWAITING_PAYMENT and price_missing:
         status_label = PRICE_UNSPECIFIED_LABEL
     elif record.financial_status == FinancialStatus.PARTIALLY_PAID:
-        status_label = "Частично оплачен"
+        status_label = "Частично оплачено"
     elif record.financial_status == FinancialStatus.NEEDS_DECISION:
         status_label = PRICE_UNSPECIFIED_LABEL
     elif record.delivery_status == DeliveryStatus.RESCHEDULED:
@@ -3776,7 +4412,10 @@ def serialize_event_billing(record: EventBillingRecord) -> dict:
         "event_id": record.event_id,
         "student_id": record.student_id,
         "student_name": record.student.full_name,
-        "delivery_status": record.delivery_status,
+        "delivery_status": delivery_code,
+        "delivery_status_label": delivery_label,
+        "payment_status": pay_code,
+        "payment_status_label": pay_label,
         "financial_status": record.financial_status,
         "financial_status_label": status_label,
         "billing_type": record.billing_type,
@@ -3809,6 +4448,48 @@ def serialize_event_billing(record: EventBillingRecord) -> dict:
     }
 
 
+def serialize_student_lesson_timeline(account: BillingAccount, *, limit: int = 80) -> list[dict]:
+    """Хронология оплат: только финансово значимые занятия, без строк 0 ₽ после переноса."""
+    records = list(
+        EventBillingRecord.objects.filter(billing_account=account).select_related("event", "student")
+    )
+    items = [serialize_event_billing(rec) for rec in records if record_belongs_in_payment_list(rec)]
+    listed_event_ids = {rec.event_id for rec in records if rec.event_id}
+
+    completed = list(
+        ScheduleEvent.objects.filter(owner=account.teacher)
+        .filter(Q(student=account.student) | Q(group__students=account.student))
+        .filter(status__in=(ScheduleEvent.Status.DONE, ScheduleEvent.Status.COMPLETED))
+        .exclude(id__in=listed_event_ids)
+        .order_by("-starts_at")[:limit]
+    )
+    for event in completed:
+        items.append(
+            {
+                "id": None,
+                "event_id": event.id,
+                "student_id": account.student_id,
+                "student_name": account.student.full_name,
+                "delivery_status": DeliveryStatus.CONDUCTED,
+                "delivery_status_label": DELIVERY_STATUS_UI[DeliveryStatus.CONDUCTED],
+                "payment_status": "price_not_set",
+                "payment_status_label": PRICE_UNSPECIFIED_LABEL,
+                "financial_status": None,
+                "financial_status_label": PRICE_UNSPECIFIED_LABEL,
+                "charged_amount": "0.00",
+                "paid_amount": "0.00",
+                "due_amount": "0.00",
+                "price_missing": True,
+                "is_debt": False,
+                "is_free": False,
+                "event_title": event.title or "",
+                "event_starts_at": event.starts_at.isoformat() if event.starts_at else None,
+            }
+        )
+    items.sort(key=lambda row: row.get("event_starts_at") or "", reverse=True)
+    return items[:limit]
+
+
 def get_lesson_financial_state(record: EventBillingRecord | None) -> dict:
     """Единый read-model для дашборда, карточки ученика и списка оплат."""
     if record is None:
@@ -3830,7 +4511,6 @@ def get_lesson_financial_state(record: EventBillingRecord | None) -> dict:
     data["status"] = data["state_code"]
     data["lesson_amount"] = data.get("charged_amount") or data.get("calculated_amount") or "0"
     data["debt_amount"] = data.get("due_amount") or "0"
-    data["payment_status"] = data.get("financial_status")
     data["billing_record_id"] = data.get("id")
     return data
 
@@ -4048,6 +4728,8 @@ def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
         transaction_type=TransactionType.CHARGE,
         occurred_at__gte=month_start,
         occurred_at__lt=month_end,
+    ).exclude(
+        event_billing__delivery_status__in=(DeliveryStatus.RESCHEDULED, DeliveryStatus.PLANNED),
     ).aggregate(t=Sum("amount"))["t"] or ZERO
 
     today_paid = BillingTransaction.objects.filter(
@@ -4117,6 +4799,37 @@ def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
             except BillingError:
                 continue
 
+    credit_total = ZERO
+    type_sign = Case(
+        When(
+            transaction_type__in=(TransactionType.PAYMENT, TransactionType.PACKAGE_PURCHASE),
+            then=F("amount"),
+        ),
+        When(
+            transaction_type__in=(
+                TransactionType.CHARGE,
+                TransactionType.WRITE_OFF,
+                TransactionType.REFUND,
+            ),
+            then=-F("amount"),
+        ),
+        When(
+            transaction_type__in=(TransactionType.ADJUSTMENT, TransactionType.DISCOUNT),
+            then=F("amount"),
+        ),
+        default=Value(0),
+        output_field=DecimalField(max_digits=12, decimal_places=2),
+    )
+    for row in (
+        BillingTransaction.objects.filter(billing_account__teacher=teacher)
+        .exclude(billing_account__student__status=StudentStatus.ARCHIVED)
+        .values("billing_account_id")
+        .annotate(bal=Sum(type_sign))
+    ):
+        bal = D(row["bal"] or 0)
+        if bal > 0:
+            credit_total += bal
+
     return {
         "currency": teacher_settings.currency,
         "year": month_start.year,
@@ -4127,7 +4840,8 @@ def dashboard_summary(teacher: User, *, year=None, month=None) -> dict:
         "month_charged": str(D(month_charged)),
         "unpaid_lessons_count": unpaid_count,
         "unpaid_lessons_amount": str(D(unpaid_amount) if unpaid_amount > 0 else ZERO),
-        "debt_total": str(D(expected)),
+        "debt_total": str(D(unpaid_amount) if unpaid_amount > 0 else ZERO),
+        "credit_total": str(D(credit_total)),
         "expected_incoming": str(D(expected)),
         "conducted_billable_lessons": conducted,
         "low_packages": low_packages,
@@ -4477,7 +5191,14 @@ def update_student_settings(
         old_value=old,
         new_value={"billing_type": settings.billing_type},
     )
-    apply_price_to_unpriced_conducted_lessons(account, teacher=teacher)
+    price_apply_mode = str(data.get("price_apply_mode") or PRICE_APPLY_UNPRICED_ONLY).strip()
+    if price_apply_mode == PRICE_APPLY_FUTURE_ONLY:
+        pass
+    elif price_apply_mode == PRICE_APPLY_RECALCULATE_UNPAID:
+        apply_price_to_unpriced_conducted_lessons(account, teacher=teacher)
+        recalculate_unpaid_lesson_charges(account, teacher=teacher)
+    else:
+        apply_price_to_unpriced_conducted_lessons(account, teacher=teacher)
     return settings
 
 

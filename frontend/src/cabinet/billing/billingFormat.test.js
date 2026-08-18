@@ -48,7 +48,7 @@ describe("billingFormat", () => {
 
   it("maps labels", () => {
     expect(billingTypeLabel("per_lesson")).toBe("За урок");
-    expect(financialStatusLabel("awaiting_payment")).toBe("К оплате");
+    expect(financialStatusLabel("awaiting_payment")).toBe("Ожидает оплаты");
     expect(financialStatusLabel("needs_decision")).toBe("Стоимость не задана");
     expect(transactionTypeLabel("charge")).toBe("Начисление");
   });

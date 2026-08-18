@@ -13,8 +13,8 @@ const BILLING_TYPE_LABELS = {
 const FINANCIAL_STATUS_LABELS = {
   not_specified: "Стоимость не задана",
   not_charged: "Не начислен",
-  awaiting_payment: "К оплате",
-  partially_paid: "Частично оплачен",
+  awaiting_payment: "Ожидает оплаты",
+  partially_paid: "Частично оплачено",
   paid: "Оплачено",
   paid_from_package: "Из абонемента",
   not_billable: "Не подлежит оплате",

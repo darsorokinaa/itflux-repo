@@ -9,7 +9,8 @@ import { formatMoney } from "../billing/billingFormat";
 import "../styles/payments.css";
 
 const MODES = [
-  { id: "per_lesson", label: "За урок" },
+  { id: "per_lesson", label: "Фиксированная стоимость занятия" },
+  { id: "manual", label: "Вручную" },
   { id: "package", label: "Абонемент" },
 ];
 
@@ -40,6 +41,8 @@ export default function BillingTermsModal({
   const [customUnits, setCustomUnits] = useState(false);
   const [packageAmount, setPackageAmount] = useState("");
   const [packageLessonPrice, setPackageLessonPrice] = useState("");
+  const [priceApplyMode, setPriceApplyMode] = useState("unpriced_only");
+  const [initialPrice, setInitialPrice] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -56,11 +59,15 @@ export default function BillingTermsModal({
         setAccount(data);
         const type = data?.billing_type || data?.settings?.billing_type || "per_lesson";
         const isPkg = type === "package_lessons" || type === "package_minutes";
-        setMode(isPkg ? "package" : "per_lesson");
+        const isManual = type === "manual";
+        setMode(isPkg ? "package" : isManual ? "manual" : "per_lesson");
         const price = data?.default_lesson_price
           || data?.settings?.default_lesson_price
           || "";
-        setLessonPrice(price != null && price !== "" ? String(price) : "");
+        const priceStr = price != null && price !== "" ? String(price) : "";
+        setLessonPrice(priceStr);
+        setInitialPrice(priceStr);
+        setPriceApplyMode(priceStr ? "future_only" : "unpriced_only");
         const dur = data?.settings?.default_lesson_duration_minutes || 60;
         setDuration(String(dur));
         setCustomDuration(!DURATION_PRESETS.includes(Number(dur)));
@@ -152,17 +159,19 @@ export default function BillingTermsModal({
     setBusy(true);
     setError("");
     try {
-      if (mode === "per_lesson") {
+      if (mode === "per_lesson" || mode === "manual") {
         const price = Number(lessonPrice);
-        if (!price || price <= 0) {
+        if (mode === "per_lesson" && (!price || price <= 0)) {
           setError("Укажите стоимость одного урока");
           setBusy(false);
           return;
         }
+        const priceChanged = String(lessonPrice || "") !== String(initialPrice || "");
         const updated = await updateBillingAccountSettings(account.id, {
-          billing_type: "per_lesson",
-          default_lesson_price: String(price),
+          billing_type: mode === "manual" ? "manual" : "per_lesson",
+          default_lesson_price: lessonPrice === "" ? "" : String(price || lessonPrice),
           default_lesson_duration_minutes: Number(duration) || 60,
+          price_apply_mode: priceChanged ? priceApplyMode : "future_only",
         });
         onDone?.(updated);
         onClose?.();
@@ -284,9 +293,9 @@ export default function BillingTermsModal({
               ) : null}
             </div>
 
-            {mode === "per_lesson" ? (
+            {mode === "per_lesson" || mode === "manual" ? (
               <div className="pay-field">
-                <label>Стоимость одного урока, ₽</label>
+                <label>Стоимость занятия, ₽</label>
                 <input
                   className="pay-input"
                   type="number"
@@ -294,12 +303,52 @@ export default function BillingTermsModal({
                   step="1"
                   value={lessonPrice}
                   onChange={(e) => setLessonPrice(e.target.value)}
-                  placeholder="1600"
+                  placeholder="1500"
                   autoFocus
                 />
-                <p className="pay-hint" style={{ marginTop: 6 }}>
-                  Это тариф ученика. Поступление денег фиксируйте отдельно через «Добавить оплату».
-                </p>
+                {mode === "manual" ? (
+                  <p className="pay-hint" style={{ marginTop: 6 }}>
+                    Сумму каждого занятия можно будет указать вручную при оформлении.
+                  </p>
+                ) : (
+                  <p className="pay-hint" style={{ marginTop: 6 }}>
+                    Эта цена будет у новых занятий. Оплаченные уроки сами не пересчитываются.
+                  </p>
+                )}
+                {String(lessonPrice || "") !== String(initialPrice || "") && Number(lessonPrice) > 0 ? (
+                  <div className="pay-field" style={{ marginTop: 12 }}>
+                    <label>Как применить новую стоимость?</label>
+                    <label className="pay-radio-row">
+                      <input
+                        type="radio"
+                        name="price-apply"
+                        checked={priceApplyMode === "future_only"}
+                        onChange={() => setPriceApplyMode("future_only")}
+                      />
+                      <span>Только к новым занятиям</span>
+                    </label>
+                    <label className="pay-radio-row">
+                      <input
+                        type="radio"
+                        name="price-apply"
+                        checked={priceApplyMode === "recalculate_unpaid"}
+                        onChange={() => setPriceApplyMode("recalculate_unpaid")}
+                      />
+                      <span>Пересчитать неоплаченные занятия</span>
+                    </label>
+                    {initialPrice === "" ? (
+                      <label className="pay-radio-row">
+                        <input
+                          type="radio"
+                          name="price-apply"
+                          checked={priceApplyMode === "unpriced_only"}
+                          onChange={() => setPriceApplyMode("unpriced_only")}
+                        />
+                        <span>Начислить только урокам без стоимости</span>
+                      </label>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             ) : (
               <>

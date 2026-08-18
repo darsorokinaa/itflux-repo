@@ -54,8 +54,10 @@ from .billing_service import (
     mark_lesson_as_paid_manually,
     preview_charge_lessons_from_package,
     preview_finalize,
+    preview_rebuild_student_balance,
     refund_lesson_package_charge,
     register_payment,
+    rebuild_student_balance,
     reports,
     reverse_transaction,
     send_payment_reminder,
@@ -68,6 +70,8 @@ from .billing_service import (
     unfinalize_event_billing,
     unfreeze_package,
     unresolved_lessons,
+    update_event_charge_amount,
+    update_student_payment,
     update_student_settings,
     update_teacher_settings,
     visible_billing_accounts,
@@ -155,10 +159,13 @@ class BillingAccountsView(APIView):
         low_package = request.query_params.get("low_package") == "1"
         no_package = request.query_params.get("no_package") == "1"
         billing_type = request.query_params.get("billing_type")
+        student_id = request.query_params.get("student_id")
         q = (request.query_params.get("q") or "").strip().lower()
 
         rows = []
         for acc in qs:
+            if student_id and str(acc.student_id) != str(student_id):
+                continue
             data = serialize_account(acc)
             if q and q not in (data["student_name"] or "").lower() and q not in (
                 data.get("payer_name") or ""
@@ -194,6 +201,44 @@ class BillingAccountSettingsView(APIView):
         except BillingError as exc:
             return _err(exc)
         return Response(serialize_account(account, include_history=True))
+
+
+def _serialize_rebuild_plan(plan: dict) -> dict:
+    money_keys = (
+        "current_due",
+        "current_charged",
+        "current_paid",
+        "correct_due",
+        "correct_charged",
+        "correct_paid",
+        "correct_credit",
+    )
+    data = dict(plan)
+    for key in money_keys:
+        if key in data:
+            data[key] = str(data[key])
+    data["problems"] = list(data.get("problems") or [])
+    data["actions"] = data.get("actions") or []
+    return data
+
+
+class BillingAccountRebuildView(APIView):
+    permission_classes = [IsAuthenticated, IsCabinetTeacher]
+
+    def get(self, request, account_id):
+        account = get_object_or_404(BillingAccount, pk=account_id, teacher=request.user)
+        return Response(_serialize_rebuild_plan(preview_rebuild_student_balance(account)))
+
+    def post(self, request, account_id):
+        account = get_object_or_404(BillingAccount, pk=account_id, teacher=request.user)
+        apply = bool((request.data or {}).get("apply"))
+        try:
+            plan = rebuild_student_balance(teacher=request.user, account=account, apply=apply)
+        except BillingError as exc:
+            return _err(exc)
+        payload = _serialize_rebuild_plan(plan)
+        payload["account"] = serialize_account(account, include_history=True)
+        return Response(payload)
 
 
 class BillingAccountByStudentView(APIView):
@@ -276,6 +321,56 @@ class BillingPaymentsView(APIView):
             },
             status=201,
         )
+
+
+class BillingPaymentDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsCabinetTeacher]
+
+    def patch(self, request, payment_id):
+        payment = get_object_or_404(
+            StudentPayment, pk=payment_id, billing_account__teacher=request.user
+        )
+        data = request.data or {}
+        try:
+            payment = update_student_payment(
+                teacher=request.user,
+                payment=payment,
+                amount=_dec(data.get("amount")) if data.get("amount") is not None else None,
+                paid_at=_parse_dt(data.get("paid_at")),
+                comment=data.get("comment") if "comment" in data else None,
+            )
+        except BillingError as exc:
+            return _err(exc)
+        return Response(
+            {
+                "id": str(payment.id),
+                "amount": str(payment.amount),
+                "currency": payment.currency,
+                "status": payment.status,
+                "comment": payment.comment,
+                "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
+            }
+        )
+
+
+class BillingEventChargeUpdateView(APIView):
+    permission_classes = [IsAuthenticated, IsCabinetTeacher]
+
+    def post(self, request, record_id):
+        record = get_object_or_404(
+            EventBillingRecord, pk=record_id, billing_account__teacher=request.user
+        )
+        data = request.data or {}
+        try:
+            record = update_event_charge_amount(
+                teacher=request.user,
+                record=record,
+                amount=_dec(data.get("amount"), Decimal("0")),
+                comment=data.get("comment") or "",
+            )
+        except BillingError as exc:
+            return _err(exc)
+        return Response(serialize_event_billing(record))
 
 
 class BillingRefundsView(APIView):

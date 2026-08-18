@@ -7,7 +7,10 @@
 export function formatOgeInf6TaskHtml(html) {
   if (typeof html !== "string" || !html) return html;
 
-  return html.replace(/\$\$\s*\\begin\{array\}\{[a-z\|]*\}([\s\S]*?)\\end\{array\}\s*\$\$/g, (match, inner) => {
+  // Только {l}/{ll}/… — листинги кода. Не трогаем таблицы вида {|c|c|}
+  // (запросы Динамо \& Спартак и т.п.).
+  return html.replace(/\$\$\s*\\begin\{array\}\{l+\}\s*([\s\S]*?)\\end\{array\}\s*\$\$/g, (match, inner) => {
+    if (/\\hline/.test(inner)) return match;
     let code = inner
       .replace(/\\\\/g, '\n') // replace \\ with newline
       .replace(/\\text\{([^}]+)\}/g, '$1') // replace \text{...} with ...

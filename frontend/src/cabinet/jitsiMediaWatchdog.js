@@ -215,12 +215,6 @@ export function attachMediaWatchdog(api, {
     }
   }, listeners);
 
-  listen(api, "audioAvailabilityChanged", (event) => {
-    if (event?.available === false) {
-      hint("Звук заблокирован браузером. Нажмите на конференцию, чтобы включить аудио.");
-    }
-  }, listeners);
-
   listen(api, "deviceListChanged", () => {
     log("JITSI_DEVICES", { event: "changed" });
     tick();

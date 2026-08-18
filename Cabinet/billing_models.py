@@ -527,6 +527,13 @@ class BillingTransaction(models.Model):
         help_text="Уникальный ключ идемпотентной миграции",
     )
     migration_batch_id = models.CharField(max_length=64, blank=True, default="")
+    ledger_key = models.CharField(
+        max_length=128,
+        blank=True,
+        null=True,
+        unique=True,
+        help_text="Идемпотентный ключ активной операции, например charge:<event_billing_id>",
+    )
 
     class Meta:
         verbose_name = "Финансовая операция"

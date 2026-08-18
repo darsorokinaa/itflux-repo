@@ -17,6 +17,7 @@ export default function BillingPaymentModal({
   defaultStudentId = null,
   defaultAmount = null,
   eventBillingIds = null,
+  simple = false,
   onDone,
 }) {
   const [studentId, setStudentId] = useState(defaultStudentId || "");
@@ -69,7 +70,7 @@ export default function BillingPaymentModal({
     if (!open) return;
     setStudentId(defaultStudentId || "");
     setAmount(defaultAmount != null && defaultAmount !== "" ? String(defaultAmount) : "");
-    setPaidAt("");
+    setPaidAt(new Date().toISOString().slice(0, 10));
     setComment("");
     setPackageId("");
     setSelectedLessonIds(lessonLinked ? [...eventBillingIds] : []);
@@ -156,13 +157,13 @@ export default function BillingPaymentModal({
         student_id: Number(studentId),
         amount: overpayChoice === "reduce" ? String(selectedDue) : amount,
         paid_at: paidAt || undefined,
-        purpose,
+        purpose: simple ? "Оплата" : purpose,
         comment,
       };
-      if (purposeMode === "package" && packageId) {
+      if (!simple && purposeMode === "package" && packageId) {
         payload.package_id = packageId;
       }
-      if (purposeMode === "unpaid") {
+      if (!simple && purposeMode === "unpaid") {
         const ids = lessonLinked ? eventBillingIds : selectedLessonIds;
         if (ids?.length) payload.event_billing_ids = ids;
       }
@@ -234,6 +235,8 @@ export default function BillingPaymentModal({
           </select>
         </div>
 
+        {simple ? null : (
+        <>
         <div className="pay-field">
           <label>Назначение</label>
           <div className="pay-chip-row">
@@ -315,6 +318,8 @@ export default function BillingPaymentModal({
             )}
           </div>
         ) : null}
+        </>
+        )}
 
         <div className="pay-field-row">
           <div className="pay-field">
@@ -329,10 +334,10 @@ export default function BillingPaymentModal({
             />
           </div>
           <div className="pay-field">
-            <label>Дата оплаты</label>
+            <label>Дата</label>
             <input
               className="pay-input"
-              type="datetime-local"
+              type={simple ? "date" : "datetime-local"}
               value={paidAt}
               onChange={(e) => setPaidAt(e.target.value)}
             />

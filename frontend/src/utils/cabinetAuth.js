@@ -1716,6 +1716,31 @@ export function createBillingPayment(payload) {
   });
 }
 
+export function updateBillingPayment(paymentId, payload) {
+  return cabinetFetch(`/billing/payments/${paymentId}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateEventBillingCharge(recordId, payload) {
+  return cabinetFetch(`/billing/event-billing/${recordId}/update-charge/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function previewBillingRebuild(accountId) {
+  return cabinetFetch(`/billing/accounts/${accountId}/rebuild/`, { method: "GET" });
+}
+
+export function applyBillingRebuild(accountId) {
+  return cabinetFetch(`/billing/accounts/${accountId}/rebuild/`, {
+    method: "POST",
+    body: JSON.stringify({ apply: true }),
+  });
+}
+
 export function createBillingRefund(payload) {
   return cabinetFetch("/billing/refunds/", {
     method: "POST",
