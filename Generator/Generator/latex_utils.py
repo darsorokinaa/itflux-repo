@@ -407,7 +407,10 @@ def _split_array_row(row: str) -> list[str]:
         else:
             out.append(c)
     return [
-        cell.strip().replace(PLACEHOLDER, '&').replace(ESC_AMP, '&')
+        html_lib.escape(
+            cell.strip().replace(PLACEHOLDER, '&').replace(ESC_AMP, '&'),
+            quote=False,
+        )
         for cell in ''.join(out).split('&')
     ]
 
