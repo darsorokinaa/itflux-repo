@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from django.contrib.auth.models import User
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
@@ -144,6 +146,36 @@ class CatalogEngagementTests(TestCase):
         res = self.client.get(reverse("api_lessons"), {"ordering": "views"})
         slugs = [x["slug"] for x in res.json()["lessons"] if x["slug"] in ("ord-a", "ord-b")]
         self.assertEqual(slugs[:2], ["ord-b", "ord-a"])
+
+    def test_newest_orders_by_created_not_updated(self):
+        older = _lesson(slug="old-created", title="Older")
+        newer = _lesson(slug="new-created", title="Newer")
+        now = timezone.now()
+        Lesson.objects.filter(pk=older.pk).update(
+            created_at=now - timedelta(days=2),
+            updated_at=now,
+        )
+        Lesson.objects.filter(pk=newer.pk).update(
+            created_at=now - timedelta(hours=1),
+            updated_at=now - timedelta(days=1),
+        )
+        res = self.client.get(reverse("api_lessons"))
+        slugs = [x["slug"] for x in res.json()["lessons"] if x["slug"] in ("old-created", "new-created")]
+        self.assertEqual(slugs[:2], ["new-created", "old-created"])
+
+        older_item = _interesting(slug="old-int", title="Old I")
+        newer_item = _interesting(slug="new-int", title="New I")
+        InterestingItem.objects.filter(pk=older_item.pk).update(
+            created_at=now - timedelta(days=2),
+            updated_at=now,
+        )
+        InterestingItem.objects.filter(pk=newer_item.pk).update(
+            created_at=now - timedelta(hours=1),
+            updated_at=now - timedelta(days=1),
+        )
+        res = self.client.get(reverse("api_interesting"))
+        slugs = [x["slug"] for x in res.json()["items"] if x["slug"] in ("old-int", "new-int")]
+        self.assertEqual(slugs[:2], ["new-int", "old-int"])
 
     def test_list_no_n_plus_one(self):
         from django.db import connection

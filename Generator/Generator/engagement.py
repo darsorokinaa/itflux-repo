@@ -93,13 +93,15 @@ def engagement_payload(obj, request) -> dict[str, Any]:
     }
 
 
-def apply_catalog_ordering(queryset, ordering: str, *, default_order: tuple[str, ...]):
+def apply_catalog_ordering(queryset, ordering: str, *, default_order: tuple[str, ...] | None = None):
+    """Сортировка каталога. «newest» — по дате добавления, не обновления."""
     ordering = (ordering or "newest").strip().lower()
+    newest_order = default_order or ("-created_at", "id")
     if ordering == "views":
-        return queryset.order_by("-views_count", "-updated_at", "id")
+        return queryset.order_by("-views_count", "-created_at", "id")
     if ordering == "likes":
-        return queryset.order_by("-likes_count", "-updated_at", "id")
-    return queryset.order_by(*default_order)
+        return queryset.order_by("-likes_count", "-created_at", "id")
+    return queryset.order_by(*newest_order)
 
 
 @transaction.atomic

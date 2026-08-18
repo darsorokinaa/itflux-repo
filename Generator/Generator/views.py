@@ -3955,7 +3955,7 @@ def api_lessons(request):
     qs = apply_catalog_ordering(
         qs,
         request.GET.get("ordering") or "newest",
-        default_order=("-updated_at", "-created_at"),
+        default_order=("-created_at", "id"),
     )
     lessons = list(qs)
 
@@ -4174,7 +4174,7 @@ def api_interesting(request):
     qs = apply_catalog_ordering(
         qs,
         request.GET.get("ordering") or "newest",
-        default_order=("sort_order", "-updated_at", "-created_at"),
+        default_order=("-created_at", "id"),
     )
     items = list(qs)
     serializer = InterestingCatalogSerializer(items, many=True, context={"request": request})
