@@ -320,7 +320,11 @@ class LessonAccessService:
                 result.message = (
                     "Демоверсия активна. Можно продолжить просмотр до окончания таймера."
                 )
-                result.cta = cls._demo_continue_cta()
+                result.can_purchase = (
+                    cls.is_authenticated(user)
+                    and result.standalone_purchase_available
+                )
+                result.cta = cls._demo_active_cta(result)
                 return result
 
         result.demo_used = bool(demo)
@@ -415,7 +419,7 @@ class LessonAccessService:
                 })
             return actions
         if demo_active:
-            return cls._demo_continue_cta()
+            return cls._demo_active_cta(result)
         if result.demo_available:
             actions.append({"type": "demo", "label": "Открыть демоверсию", "primary": True})
         if result.can_purchase and result.standalone_price is not None:
@@ -433,9 +437,21 @@ class LessonAccessService:
             })
         return actions
 
-    @staticmethod
-    def _demo_continue_cta() -> list[dict]:
-        return [{"type": "demo", "label": "Продолжить демо", "primary": True}]
+    @classmethod
+    def _demo_active_cta(cls, result: LessonAccessResult) -> list[dict]:
+        actions: list[dict] = [
+            {"type": "demo", "label": "Продолжить демо", "primary": False},
+        ]
+        if result.can_purchase and result.standalone_price is not None:
+            price = cls.format_price(result.standalone_price, result.standalone_currency)
+            actions.append({
+                "type": "purchase",
+                "label": f"Купить за {price}",
+                "primary": True,
+            })
+        else:
+            actions[0]["primary"] = True
+        return actions
 
     @staticmethod
     def format_price(amount, currency: str = "RUB") -> str:

@@ -490,6 +490,10 @@ class LessonAccessStateTests(LessonAccessBase):
         self.assertEqual(access.to_dict()["content_mode"], "demo")
         self.assertTrue(access.to_dict()["can_continue_demo"])
         self.assertEqual(access.cta[0]["label"], "Продолжить демо")
+        self.assertFalse(access.cta[0]["primary"])
+        self.assertEqual(access.cta[1]["type"], "purchase")
+        self.assertIn("790", access.cta[1]["label"])
+        self.assertTrue(access.can_purchase)
         self.assertTrue(access.can_view)
 
     def test_purchased_user_gets_open_cta_only(self):

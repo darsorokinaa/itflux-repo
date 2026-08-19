@@ -120,6 +120,30 @@ export function lessonHasActiveDemo(lesson) {
   return access?.demo_active === true || access?.can_continue_demo === true;
 }
 
+export function lessonCanPurchase(lesson) {
+  const access = lesson?.access || {};
+  return Boolean(
+    access.can_purchase
+    && access.standalone_purchase_available
+    && access.standalone_price != null,
+  );
+}
+
+export function formatLessonPrice(amount, currency = "RUB") {
+  if (amount == null) return "";
+  const number = Number(amount);
+  if (Number.isNaN(number)) return String(amount);
+  const formatted = Number.isInteger(number)
+    ? number.toLocaleString("ru-RU")
+    : number.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return currency === "RUB" ? `${formatted} ₽` : `${formatted} ${currency}`;
+}
+
+export function lessonPurchaseLabel(lesson) {
+  const access = lesson?.access || {};
+  return `Купить за ${formatLessonPrice(access.standalone_price, access.standalone_currency)}`;
+}
+
 export function getLessonOpenUrl(lesson) {
   if (!lesson?.slug) return null;
   if (lessonHasActiveDemo(lesson)) {

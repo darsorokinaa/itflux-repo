@@ -6232,6 +6232,31 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   cursor: not-allowed;
 }
 
+.lesson-card-v3__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-self: flex-start;
+}
+
+.lesson-card-v3__btn--ghost {
+  background: #fff;
+  color: #3f2f22 !important;
+  border: 1px solid #e0d3c2;
+}
+
+.lesson-card-v3__btn--ghost:hover {
+  background: #faf7f2;
+}
+
+.lesson-card-v3__btn--purchase {
+  background: #c2410c;
+}
+
+.lesson-card-v3__btn--purchase:hover {
+  background: #9a3412;
+}
+
 .lessons-library-v3__empty {
   margin: 8px 0 0;
   border-radius: 12px;

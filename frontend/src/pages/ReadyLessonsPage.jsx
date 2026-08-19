@@ -7,8 +7,9 @@ import LessonPreviewModal from "../components/LessonPreviewModal";
 import StateView from "../components/StateView";
 import { isCatalogLocked } from "../accessGate/accessGate";
 import { useAccessGate, useCabinetAuthed } from "../hooks/useAccessGate";
-import { getLessonContentUrl, getLessonCardActionLabel, lessonHasActiveDemo } from "../cabinet/lessonCardUtils";
+import { getLessonContentUrl, getLessonCardActionLabel, lessonCanPurchase, lessonHasActiveDemo, lessonPurchaseLabel } from "../cabinet/lessonCardUtils";
 import { CATALOG_ORDERING_OPTIONS, registerCatalogView } from "../utils/catalogEngagement";
+import { purchaseReadyLesson } from "../utils/cabinetAuth";
 import "../styles/material-access.css";
 
 const patternInf = new URL("../assets/subject-patterns/inf.svg", import.meta.url).href;
@@ -80,7 +81,7 @@ const INCLUDES = [
   { id: "notes", label: "Заметки", Icon: StickyNote },
 ];
 
-function LessonCard({ lesson, onEngagementChange, onLockedOpen }) {
+function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson }) {
   const subjectTheme = getSubjectTheme(lesson.subject);
   const status = lesson.status || "published";
   const statusLabel = STATUS_LABELS[status];
@@ -88,6 +89,7 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen }) {
   const difficultyLabel = DIFFICULTY_LABELS[lesson.difficulty];
   const locked = isCatalogLocked(lesson);
   const demoActive = lessonHasActiveDemo(lesson);
+  const purchaseAvailable = lessonCanPurchase(lesson);
   const canOpenLesson = Boolean(
     lesson.slug && (lesson.archive_url || lesson.file_url || demoActive || locked),
   );
@@ -208,6 +210,25 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen }) {
           <button type="button" className="lesson-card-v3__btn" onClick={() => onLockedOpen?.(lesson)}>
             Подробнее
           </button>
+        ) : demoActive && purchaseAvailable ? (
+          <div className="lesson-card-v3__actions">
+            <a
+              href={lessonUrl}
+              className="lesson-card-v3__btn lesson-card-v3__btn--ghost"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={handleOpen}
+            >
+              Продолжить демо
+            </a>
+            <button
+              type="button"
+              className="lesson-card-v3__btn lesson-card-v3__btn--purchase"
+              onClick={() => onPurchaseLesson?.(lesson)}
+            >
+              {lessonPurchaseLabel(lesson)}
+            </button>
+          </div>
         ) : canOpenLesson ? (
           <a
             href={lessonUrl}
@@ -270,6 +291,24 @@ export default function ReadyLessonsPage() {
     if (!lesson?.slug) return;
     setSearchParams({ preview: lesson.slug }, { replace: false });
   }, [setSearchParams]);
+
+  const handlePurchaseLesson = useCallback(async (lesson) => {
+    if (!lesson?.slug) return;
+    if (!authed) {
+      handleLockedOpen(lesson);
+      return;
+    }
+    try {
+      const result = await purchaseReadyLesson(lesson.slug, `les-${lesson.id}-${Date.now()}`);
+      if (result?.payment_url) {
+        window.location.href = result.payment_url;
+        return;
+      }
+      reloadLessons();
+    } catch {
+      handleLockedOpen(lesson);
+    }
+  }, [authed, handleLockedOpen, reloadLessons]);
 
   const closePreview = useCallback(() => {
     const next = new URLSearchParams(searchParams);
@@ -575,6 +614,7 @@ export default function ReadyLessonsPage() {
                     lesson={lesson}
                     onEngagementChange={handleEngagementChange}
                     onLockedOpen={handleLockedOpen}
+                    onPurchaseLesson={handlePurchaseLesson}
                   />
                 ))}
               </div>
