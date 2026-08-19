@@ -1,6 +1,7 @@
 """API and PDF views — React SPA."""
 import json
 import logging
+import mimetypes
 import os
 import re
 import io
@@ -878,6 +879,39 @@ def _frontend_public_file(filename: str):
         if path and Path(path).is_file():
             return Path(path)
     return None
+
+
+_FRONTEND_PUBLIC_TYPES = {
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".mjs": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".wasm": "application/wasm",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".zip": "application/zip",
+    ".map": "application/json",
+    ".txt": "text/plain; charset=utf-8",
+}
+
+
+def frontend_public_tree(request, prefix, relpath):
+    """Локальные шрифты и vendor (MathJax, Bootstrap, Pyodide) без зарубежных CDN."""
+    prefix = (prefix or "").strip("/")
+    if prefix not in ("fonts", "vendor"):
+        return HttpResponse(status=404)
+    normalized = (relpath or "").replace("\\", "/").lstrip("/")
+    if not normalized or ".." in normalized.split("/"):
+        return HttpResponse(status=404)
+    path = _frontend_public_file(f"{prefix}/{normalized}")
+    if not path:
+        return HttpResponse(status=404)
+    suffix = path.suffix.lower()
+    content_type = _FRONTEND_PUBLIC_TYPES.get(suffix) or mimetypes.guess_type(str(path))[0]
+    resp = FileResponse(open(path, "rb"), content_type=content_type)
+    resp["Cache-Control"] = "public, max-age=604800"
+    return resp
 
 
 def service_worker(request):

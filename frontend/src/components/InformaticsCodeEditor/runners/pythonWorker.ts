@@ -6,7 +6,7 @@
 
 import { PYODIDE_SECURITY_PREAMBLE } from "../pythonSecurity";
 
-const PYODIDE_BASE = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
+const PYODIDE_BASE = "/vendor/pyodide/";
 const MAX_OUTPUT_CHARS = 32_000;
 
 type RunMessage = {

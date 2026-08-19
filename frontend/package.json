@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check:release": "node scripts/check-release-build.mjs"
+    "check:release": "node scripts/check-release-build.mjs",
+    "vendor:offline": "node scripts/vendor-offline-assets.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

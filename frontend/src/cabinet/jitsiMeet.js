@@ -99,6 +99,7 @@ export function loadJitsiExternalApi(domain, { timeoutMs = JITSI_SCRIPT_LOAD_TIM
     const script = document.createElement("script");
     script.id = SCRIPT_ID;
     script.async = true;
+    // Свой Jitsi (lesson.itflux-academy.ru) — без VPN. meet.jit.si в РФ часто недоступен.
     script.src = `https://${host}/libs/external_api.min.js`;
     attach(script);
     document.head.appendChild(script);

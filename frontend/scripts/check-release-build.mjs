@@ -53,7 +53,11 @@ ok("service worker update + push-only caching policy");
 const index = fs.readFileSync(indexHtml, "utf8");
 if (!index.includes("window.__APP_VERSION__")) fail("index.html missing __APP_VERSION__");
 if (!index.includes(String(version.version))) fail("index.html version mismatch");
+if (/fonts\.googleapis\.com|fonts\.gstatic\.com|cdn\.jsdelivr\.net|unpkg\.com/.test(index)) {
+  fail("index.html must not load Google Fonts / jsDelivr / unpkg (blocked without VPN)");
+}
 ok("index.html embeds app version");
+ok("index.html has no blocked CDN URLs");
 
 const mains = fs.readdirSync(assetsDir).filter((f) => /^main-[a-zA-Z0-9_-]+\.js$/.test(f));
 if (!mains.length) fail("no hashed main-*.js chunks");

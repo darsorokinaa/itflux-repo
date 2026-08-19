@@ -4,7 +4,7 @@ import { RUN_LIMITS, truncateOutput, withExecutionTimeout } from "../limits";
 import { createSkulptInputfun, type StdinOptions } from "../stdinProvider";
 import type { RunResult } from "../types";
 
-const SKULPT_BASE = "https://cdn.jsdelivr.net/npm/skulpt@1.2.0/dist/";
+const SKULPT_BASE = "/vendor/skulpt/";
 
 declare global {
   interface Window {

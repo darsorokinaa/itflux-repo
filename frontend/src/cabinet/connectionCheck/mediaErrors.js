@@ -19,6 +19,12 @@ function permissionHint(kind, userAgent) {
   const family = browserFamily(userAgent);
   const device = kind === "microphone" ? "микрофона" : "камеры";
   if (family === "safari-ios" || family === "ios-chrome") {
+    const standalone = typeof window !== "undefined"
+      && (window.navigator.standalone === true
+        || window.matchMedia?.("(display-mode: standalone)")?.matches);
+    if (standalone) {
+      return `На iPhone звонок из иконки на рабочем столе часто блокирует ${device}. Откройте этот урок в Safari (не из ярлыка) и разрешите доступ.`;
+    }
     return `На iPhone или iPad откройте Настройки → Safari (или Chrome) → ${kind === "microphone" ? "Микрофон" : "Камера"} и разрешите доступ для этого сайта.`;
   }
   if (family === "safari") {

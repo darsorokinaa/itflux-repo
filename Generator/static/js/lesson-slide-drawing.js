@@ -275,10 +275,16 @@
   }
 
   function init() {
+    if (document.querySelector(".lesson-draw-root")) return;
     if (window.matchMedia && window.matchMedia("(max-width: 479px)").matches) return;
 
     var slides = Array.prototype.slice.call(document.querySelectorAll(".deck .slide"));
+    if (!slides.length) slides = Array.prototype.slice.call(document.querySelectorAll(".reveal .slides > section"));
     if (!slides.length) slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+    if (!slides.length) {
+      var fallbackHost = document.querySelector(".deck, .reveal, .slides, main, .page");
+      slides = [fallbackHost || document.body];
+    }
     if (!slides.length) return;
 
     var state = {
@@ -302,7 +308,6 @@
       canvas.className = "lesson-draw-canvas";
       canvas.setAttribute("aria-hidden", "true");
       layer.appendChild(canvas);
-      slide.appendChild(layer);
       return {
         index: index,
         slide: slide,
@@ -489,7 +494,11 @@
 
     chrome.appendChild(panelWrap);
     chrome.appendChild(toggleBtn);
+    slideStates.forEach(function (entry) {
+      root.appendChild(entry.layer);
+    });
     root.appendChild(chrome);
+    root.setAttribute("data-lesson-draw", "v2");
     document.body.appendChild(root);
 
     function activeSlide() {
@@ -503,12 +512,33 @@
       return state.activeIndex;
     }
 
+    function hostRect(el) {
+      if (!el || el === document.body || el === document.documentElement) {
+        return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+      }
+      return el.getBoundingClientRect();
+    }
+
+    function syncLayerBox(entry) {
+      var rect = hostRect(entry.slide);
+      var layer = entry.layer;
+      layer.style.position = "fixed";
+      layer.style.left = Math.round(rect.left) + "px";
+      layer.style.top = Math.round(rect.top) + "px";
+      layer.style.width = Math.max(1, Math.round(rect.width)) + "px";
+      layer.style.height = Math.max(1, Math.round(rect.height)) + "px";
+      layer.style.right = "auto";
+      layer.style.bottom = "auto";
+      layer.style.margin = "0";
+    }
+
     function fitCanvas(entry) {
+      syncLayerBox(entry);
       var canvas = entry.canvas;
-      var slide = entry.slide;
+      var rect = entry.layer.getBoundingClientRect();
       var dpr = window.devicePixelRatio || 1;
-      var w = Math.max(1, Math.floor(slide.clientWidth * dpr));
-      var h = Math.max(1, Math.floor(slide.clientHeight * dpr));
+      var w = Math.max(1, Math.floor(rect.width * dpr));
+      var h = Math.max(1, Math.floor(rect.height * dpr));
       if (canvas.width !== w || canvas.height !== h) {
         canvas.width = w;
         canvas.height = h;
@@ -943,10 +973,18 @@
     panel.addEventListener("pointercancel", endDrag);
 
     window.addEventListener("resize", function () {
+      slideStates.forEach(fitCanvas);
       if (!chrome.classList.contains("is-placed")) return;
       var rect = chrome.getBoundingClientRect();
       persistChromePos(placeChrome(rect.left, rect.top));
     });
+    window.addEventListener(
+      "scroll",
+      function () {
+        slideStates.forEach(syncLayerBox);
+      },
+      true
+    );
 
     state.activeIndex = getActiveIndex();
     syncUi();

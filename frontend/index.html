@@ -3,6 +3,7 @@
 
 <head>
   <meta charset="UTF-8" />
+  <script src="/vendor/boot-watchdog.js"></script>
 
   <!-- Яндекс.Метрика подключается только после согласия на cookie (см. utils/analytics.js). -->
 
@@ -41,12 +42,10 @@
   <meta name="apple-mobile-web-app-title" content="Цифровой поток" />
   <meta name="mobile-web-app-capable" content="yes" />
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=TikTok+Sans:wght@400;500;600;700;800&family=Manrope:wght@400;500;700;800&family=Onest:wght@600;700;800;900&family=Nunito:wght@400;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/fonts/site.css" />
   <link rel="preload" as="font" type="font/ttf" href="/fonts/Bounded-Variable.ttf" crossorigin />
 
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="/vendor/bootstrap/bootstrap.min.css" rel="stylesheet" />
 
   <script>
     window.MathJax = {
@@ -65,7 +64,8 @@
     };
   </script>
 
-  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  <script async src="/vendor/mathjax/tex-mml-chtml.js"></script>
+  <script defer src="/vendor/bootstrap/bootstrap.min.js"></script>
 
 </head>
 

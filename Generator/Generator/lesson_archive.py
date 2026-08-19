@@ -6,11 +6,13 @@ import json
 import mimetypes
 import re
 import zipfile
+from pathlib import Path
 
 from django.http import Http404, HttpResponse
 from django.templatetags.static import static
 
 _ARCHIVE_SKIP_PREFIXES = ("__MACOSX/",)
+_DRAWING_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
 def _archive_entry_skipped(name: str) -> bool:
@@ -84,14 +86,28 @@ def inject_lesson_content_styles(html: str, request) -> str:
 
 
 def inject_lesson_drawing_assets(html: str, request, slug: str) -> str:
-    css_url = request.build_absolute_uri(static("css/lesson-slide-drawing.css"))
-    js_url = request.build_absolute_uri(static("js/lesson-slide-drawing.js"))
+    """Встраиваем CSS/JS в HTML, чтобы панель не зависела от кэша /static/."""
+    if 'id="lesson-slide-drawing-js"' in html:
+        return html
+    css_path = _DRAWING_STATIC_DIR / "css" / "lesson-slide-drawing.css"
+    js_path = _DRAWING_STATIC_DIR / "js" / "lesson-slide-drawing.js"
     config = json.dumps({"slug": slug}, ensure_ascii=False)
-    block = (
-        f'<link rel="stylesheet" href="{css_url}">\n'
-        f"<script>window.__LESSON_DRAWING__={config};</script>\n"
-        f'<script src="{js_url}" defer></script>\n'
-    )
+    if css_path.is_file() and js_path.is_file():
+        css = css_path.read_text(encoding="utf-8")
+        js = js_path.read_text(encoding="utf-8").replace("</", "<\\/")
+        block = (
+            f'<style id="lesson-slide-drawing-css">\n{css}\n</style>\n'
+            f"<script>window.__LESSON_DRAWING__={config};</script>\n"
+            f'<script id="lesson-slide-drawing-js">\n{js}\n</script>\n'
+        )
+    else:
+        css_url = request.build_absolute_uri(static("css/lesson-slide-drawing.css"))
+        js_url = request.build_absolute_uri(static("js/lesson-slide-drawing.js"))
+        block = (
+            f'<link rel="stylesheet" href="{css_url}?v=2">\n'
+            f"<script>window.__LESSON_DRAWING__={config};</script>\n"
+            f'<script src="{js_url}?v=2"></script>\n'
+        )
     if re.search(r"</body>", html, re.I):
         return re.sub(r"</body>", block + "</body>", html, count=1, flags=re.I)
     return html + block

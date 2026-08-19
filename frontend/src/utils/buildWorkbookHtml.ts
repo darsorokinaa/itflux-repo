@@ -1570,9 +1570,7 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${docTitle} | Цифровой поток</title>
   ${origin ? `<base href="${escapeHtml(origin)}/">` : ""}
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=PT+Serif:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/fonts/workbook.css" />
   <script>
     window.MathJax = {
       tex: {
@@ -1587,7 +1585,7 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
       startup: { typeset: false }
     };
   </script>
-  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  <script async src="/vendor/mathjax/tex-mml-chtml.js"></script>
   <style>${workbookPrintCss()}</style>
 </head>
 <body class="${bodyClasses}">

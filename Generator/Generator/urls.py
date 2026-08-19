@@ -184,6 +184,8 @@ urlpatterns = [
     path("sw.js", views.service_worker),
     path("manifest.webmanifest", views.web_manifest),
     path("version.json", views.app_version_json),
+    re_path(r"^fonts/(?P<relpath>.+)$", views.frontend_public_tree, {"prefix": "fonts"}),
+    re_path(r"^vendor/(?P<relpath>.+)$", views.frontend_public_tree, {"prefix": "vendor"}),
     path("robots.txt", views.robots_txt),
     path("sitemap.xml", views.sitemap_xml),
     re_path(r"^(?P<filename>yandex_[0-9a-f]+\.html)$", views.yandex_webmaster_verification),

@@ -29,3 +29,6 @@ createRoot(document.getElementById('root')).render(
     <App />
   </StrictMode>,
 )
+
+window.__ITFLUX_BOOTED = true
+document.getElementById("itflux-boot-recover")?.remove()

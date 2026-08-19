@@ -47,6 +47,7 @@ import { clearPrimedMedia } from "../connectionCheck/mediaDevices";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import { lessonJournalFromMeetingPath, openLessonSummaryTab } from "../journal/openLessonSummary";
 import { getMeetingAttendanceTracker } from "../meetingAttendance";
+import { isIosStandaloneDisplay } from "../pwa/pwaHelpers";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import VideoLessonMaterialsPanel from "../components/VideoLessonMaterialsPanel";
 import SyncedMaterialWorkspace from "../components/SyncedMaterialWorkspace";
@@ -142,7 +143,10 @@ function mapJoinError(err) {
     return "Сервер конференции отклонил токен входа. Обновите страницу урока. Локально JITSI_APP_SECRET в Generator/.env должен совпадать с Prosody на lesson.itflux-academy.ru.";
   }
   if (code === "jitsi_join_timeout" || code === "join_timeout") {
-    return "Не удалось соединиться с сервером конференции. Нажмите «Повторить» или откройте в новой вкладке.";
+    return "Не удалось соединиться с сервером конференции. Нажмите «Повторить» или откройте звонок в Safari / Chrome — не с иконки на рабочем столе.";
+  }
+  if (code === "jitsi_script" || code === "jitsi_script_timeout" || code === "jitsi_public_blocked") {
+    return "Не удалось открыть видеозвонок. Если урок открыт с иконки на рабочем столе, зайдите через Safari или Chrome. На iPhone камера из ярлыка часто не включается.";
   }
   if (code === "display_name") {
     return "Не указано имя участника";
@@ -329,6 +333,7 @@ export default function VideoMeetingPage() {
   const [displayName, setDisplayName] = useState("");
   const [directMeetUrl, setDirectMeetUrl] = useState("");
   const [showJoinFallback, setShowJoinFallback] = useState(false);
+  const iosStandalone = useMemo(() => isIosStandaloneDisplay(), []);
   const moderatorToastTimerRef = useRef(null);
 
   const disposeApi = useCallback(() => {
@@ -637,8 +642,8 @@ export default function VideoMeetingPage() {
         return;
       }
       callStateRef.current?.transition(CALL_STATES.failed, err?.code || "init-error");
-      if (err?.message === "Не удалось загрузить Jitsi Meet") {
-        setError("Не удалось соединиться с сервером (external_api.js)");
+      if (err?.code === "jitsi_script" || err?.code === "jitsi_script_timeout" || err?.message === "Не удалось загрузить Jitsi Meet") {
+        setError(mapJoinError({ ...err, code: err?.code || "jitsi_script" }));
       } else if (err?.message === "jitsi_join_timeout" || err?.code === "jitsi_join_timeout") {
         setError(mapJoinError({ ...err, code: "jitsi_join_timeout" }));
       } else {
@@ -2746,7 +2751,7 @@ export default function VideoMeetingPage() {
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    Открыть в новой вкладке
+                    Открыть звонок в браузере
                   </a>
                 ) : null}
                 <Link to={returnUrl} className="video-lesson-btn">
@@ -2804,6 +2809,25 @@ export default function VideoMeetingPage() {
             {connectionHint ? (
               <div className="video-lesson-media-warning video-lesson-media-warning--info" role="status">
                 {connectionHint}
+              </div>
+            ) : null}
+            {iosStandalone ? (
+              <div className="video-lesson-media-warning video-lesson-media-warning--info" role="status">
+                <span>
+                  На iPhone звонок из иконки на рабочем столе часто не включает камеру и микрофон.
+                  Откройте этот урок в Safari.
+                </span>
+                {directMeetUrl ? (
+                  <a
+                    className="video-lesson-btn video-lesson-btn--primary"
+                    href={directMeetUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ marginTop: 8 }}
+                  >
+                    Открыть звонок в Safari
+                  </a>
+                ) : null}
               </div>
             ) : null}
             {mediaWarning ? (

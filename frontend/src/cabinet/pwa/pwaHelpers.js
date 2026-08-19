@@ -19,6 +19,11 @@ export function isIosDevice() {
     || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 
+/** iPhone/iPad «На экран Домой»: WebRTC/iframe звонка часто не стартует. */
+export function isIosStandaloneDisplay() {
+  return isIosDevice() && isStandaloneDisplay();
+}
+
 export function notificationPermission() {
   if (typeof Notification === "undefined") return "unsupported";
   return Notification.permission;
