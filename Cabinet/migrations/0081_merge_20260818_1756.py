@@ -1,6 +1,32 @@
 # Parallel branch that was already applied on some production servers before lesson-shop merge.
+# Idempotent index rename: safe when indexes were already renamed on prod.
 
 from django.db import migrations
+
+
+def rename_activation_indexes(apps, schema_editor):
+    connection = schema_editor.connection
+    if connection.vendor != "postgresql":
+        return
+    renames = (
+        ("Cabinet_act_user_id_evt_idx", "Cabinet_act_user_id_7d47c8_idx"),
+        ("Cabinet_act_event_n_time_idx", "Cabinet_act_event_n_0116cd_idx"),
+    )
+    with connection.cursor() as cursor:
+        for old_name, new_name in renames:
+            cursor.execute(
+                """
+                SELECT indexname FROM pg_indexes
+                WHERE schemaname = current_schema()
+                  AND indexname = ANY(%s)
+                """,
+                [[old_name, new_name]],
+            )
+            names = {row[0] for row in cursor.fetchall()}
+            if old_name in names:
+                cursor.execute(
+                    f'ALTER INDEX "{old_name}" RENAME TO "{new_name}"'
+                )
 
 
 class Migration(migrations.Migration):
@@ -10,14 +36,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RenameIndex(
-            model_name="activationevent",
-            new_name="Cabinet_act_user_id_7d47c8_idx",
-            old_name="Cabinet_act_user_id_evt_idx",
-        ),
-        migrations.RenameIndex(
-            model_name="activationevent",
-            new_name="Cabinet_act_event_n_0116cd_idx",
-            old_name="Cabinet_act_event_n_time_idx",
-        ),
+        migrations.RunPython(rename_activation_indexes, migrations.RunPython.noop),
     ]
