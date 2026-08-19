@@ -54,8 +54,19 @@
     return Math.hypot(px - qx, py - qy);
   }
 
-  function hitPencil(stroke, x, y) {
-    var pad = stroke.size + 6;
+  function canvasScale(canvas) {
+    if (!canvas) return 1;
+    var rect = canvas.getBoundingClientRect();
+    return canvas.width / Math.max(rect.width, 1e-6);
+  }
+
+  function padFor(stroke, scale) {
+    var s = scale && isFinite(scale) && scale > 0 ? scale : 1;
+    return Math.max(16 * s, (stroke.size + 14) * s);
+  }
+
+  function hitPencil(stroke, x, y, scale) {
+    var pad = padFor(stroke, scale);
     var pts = stroke.points || [];
     for (var i = 0; i < pts.length; i++) {
       if (Math.hypot(x - pts[i].x, y - pts[i].y) <= pad) return true;
@@ -66,8 +77,8 @@
     return false;
   }
 
-  function hitRectStroke(stroke, x, y) {
-    var pad = stroke.size + 6;
+  function hitRectStroke(stroke, x, y, scale) {
+    var pad = padFor(stroke, scale);
     var start = stroke.start;
     var end = stroke.end;
     var x0 = Math.min(start.x, end.x) - pad;
@@ -77,26 +88,26 @@
     return x >= x0 && x <= x1 && y >= y0 && y <= y1;
   }
 
-  function hitCircleStroke(stroke, x, y) {
-    var pad = stroke.size + 6;
+  function hitCircleStroke(stroke, x, y, scale) {
+    var pad = padFor(stroke, scale);
     var cx = (stroke.start.x + stroke.end.x) / 2;
     var cy = (stroke.start.y + stroke.end.y) / 2;
     var r = Math.min(Math.abs(stroke.end.x - stroke.start.x), Math.abs(stroke.end.y - stroke.start.y)) / 2;
     return Math.hypot(x - cx, y - cy) <= r + pad;
   }
 
-  function hitLineArrowStroke(stroke, x, y) {
-    var pad = stroke.size + 6;
+  function hitLineArrowStroke(stroke, x, y, scale) {
+    var pad = padFor(stroke, scale);
     return distPointToSegment(x, y, stroke.start.x, stroke.start.y, stroke.end.x, stroke.end.y) <= pad;
   }
 
-  function findHitStroke(strokes, x, y) {
+  function findHitStroke(strokes, x, y, scale) {
     for (var i = strokes.length - 1; i >= 0; i--) {
       var s = strokes[i];
-      if (s.tool === "pencil" && hitPencil(s, x, y)) return s;
-      if (s.tool === "shape" && s.shape === "rect" && hitRectStroke(s, x, y)) return s;
-      if (s.tool === "shape" && s.shape === "circle" && hitCircleStroke(s, x, y)) return s;
-      if (s.tool === "shape" && (s.shape === "line" || s.shape === "arrow") && hitLineArrowStroke(s, x, y)) return s;
+      if (s.tool === "pencil" && hitPencil(s, x, y, scale)) return s;
+      if (s.tool === "shape" && s.shape === "rect" && hitRectStroke(s, x, y, scale)) return s;
+      if (s.tool === "shape" && s.shape === "circle" && hitCircleStroke(s, x, y, scale)) return s;
+      if (s.tool === "shape" && (s.shape === "line" || s.shape === "arrow") && hitLineArrowStroke(s, x, y, scale)) return s;
     }
     return null;
   }
@@ -245,6 +256,8 @@
       '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.65" aria-hidden="true"><path d="M18 15l-6-6-6 6" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 9v12" stroke-linecap="round"/></svg>',
     fabPencil:
       '<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.65" aria-hidden="true"><path d="M12 19h9" stroke-linecap="round"/><path d="M14.83 4.17 19 8.34 8.34 19H4v-4.34L14.83 4.17z" stroke-linejoin="round"/><path d="M16.5 2.5l5 5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    grip:
+      '<svg width="14" height="18" viewBox="0 0 14 18" fill="currentColor" aria-hidden="true"><circle cx="4" cy="3" r="1.4"/><circle cx="10" cy="3" r="1.4"/><circle cx="4" cy="9" r="1.4"/><circle cx="10" cy="9" r="1.4"/><circle cx="4" cy="15" r="1.4"/><circle cx="10" cy="15" r="1.4"/></svg>',
   };
 
   function makeToolBtn(iconKey, titleText) {
@@ -323,13 +336,13 @@
     var toolbar = document.createElement("div");
     toolbar.className = "toolbar-row1";
 
-    var btnCursor = makeToolBtn("cursor", "Курсор — прокрутка и выделение текста");
-    var btnPencil = makeToolBtn("pencil", "Карандаш");
-    var btnEraser = makeToolBtn("eraser", "Ластик");
+    var btnCursor = makeToolBtn("cursor", "Курсор (V) — прокрутка и выделение текста");
+    var btnPencil = makeToolBtn("pencil", "Карандаш (P)");
+    var btnEraser = makeToolBtn("eraser", "Ластик (E)");
 
     var shapesWrap = document.createElement("div");
     shapesWrap.className = "exam-drawing-panel__shapes-wrap";
-    var btnShapes = makeToolBtn("shapes", "Фигуры");
+    var btnShapes = makeToolBtn("shapes", "Фигуры (S)");
     btnShapes.setAttribute("aria-haspopup", "true");
 
     var popover = document.createElement("div");
@@ -347,7 +360,13 @@
       pick.className = "exam-drawing-panel__shape-pick";
       pick.dataset.shape = kind;
       pick.textContent =
-        kind === "line" ? "Линия" : kind === "rect" ? "Прямоугольник" : kind === "circle" ? "Окружность" : "Стрелка";
+        kind === "line"
+          ? "Линия (L)"
+          : kind === "rect"
+            ? "Прямоугольник (R)"
+            : kind === "circle"
+              ? "Окружность (O)"
+              : "Стрелка (A)";
       pick.addEventListener("click", function () {
         state.shapeKind = kind;
         state.tool = "shape";
@@ -370,8 +389,8 @@
     sep1.className = "toolbar-row1__sep";
     sep1.setAttribute("aria-hidden", "true");
 
-    var btnUndo = makeToolBtn("undo", "Отменить последнее действие");
-    var btnRedo = makeToolBtn("redo", "Вернуть отменённое действие");
+    var btnUndo = makeToolBtn("undo", "Отменить (Ctrl+Z)");
+    var btnRedo = makeToolBtn("redo", "Вернуть (Ctrl+Shift+Z)");
 
     var sep2 = document.createElement("div");
     sep2.className = "toolbar-row1__sep";
@@ -380,6 +399,14 @@
     var btnClear = makeToolBtn("deleteAll", "Стереть всё");
     btnClear.className = "toolbar-row1__btn toolbar-row1__btn--danger";
 
+    var dragHandle = document.createElement("button");
+    dragHandle.type = "button";
+    dragHandle.className = "lesson-draw-handle";
+    dragHandle.title = "Перетащить панель";
+    dragHandle.setAttribute("aria-label", "Перетащить панель");
+    dragHandle.appendChild(svgFromHtml(ICONS.grip));
+
+    toolbar.appendChild(dragHandle);
     toolbar.appendChild(btnCursor);
     toolbar.appendChild(btnPencil);
     toolbar.appendChild(btnEraser);
@@ -508,8 +535,11 @@
         var isActive = i === state.activeIndex;
         var showLayer = isActive && (state.boardOpen || entry.strokes.length > 0);
         entry.layer.style.display = showLayer ? "" : "none";
-        entry.layer.classList.toggle("is-visible", state.boardOpen && isActive);
+        entry.layer.classList.toggle("is-visible", showLayer);
         var interactive = state.boardOpen && isActive && state.tool && state.tool !== "cursor";
+        entry.layer.classList.toggle("is-interactive", interactive);
+        entry.layer.classList.toggle("is-drawing", interactive && state.tool !== "eraser");
+        entry.layer.classList.toggle("is-eraser", interactive && state.tool === "eraser");
         entry.canvas.classList.toggle("is-drawing", interactive && state.tool !== "eraser");
         entry.canvas.classList.toggle("is-eraser", interactive && state.tool === "eraser");
         fitCanvas(entry);
@@ -556,7 +586,7 @@
 
     toggleBtn.addEventListener("click", function () {
       state.boardOpen = !state.boardOpen;
-      if (state.boardOpen) state.tool = "cursor";
+      if (state.boardOpen) state.tool = "pencil";
       else {
         state.tool = null;
         state.draft = null;
@@ -565,32 +595,38 @@
       syncUi();
     });
 
-    btnCursor.addEventListener("click", function () {
-      state.tool = "cursor";
-      syncUi();
-    });
-    btnPencil.addEventListener("click", function () {
-      state.tool = "pencil";
-      syncUi();
-    });
-    btnEraser.addEventListener("click", function () {
-      state.tool = "eraser";
-      syncUi();
-    });
-    btnUndo.addEventListener("click", function () {
+    function undoLast() {
       var entry = activeSlide();
       if (!entry.strokes.length) return;
       state.redoStack.push(entry.strokes.pop());
       persistActive();
       syncUi();
-    });
-    btnRedo.addEventListener("click", function () {
+    }
+    function redoLast() {
       if (!state.redoStack.length) return;
       var entry = activeSlide();
       entry.strokes.push(state.redoStack.pop());
       persistActive();
       syncUi();
+    }
+    function setTool(tool, shapeKind) {
+      state.tool = tool;
+      if (shapeKind) state.shapeKind = shapeKind;
+      if (tool !== "shape") popover.classList.remove("is-open");
+      syncUi();
+    }
+
+    btnCursor.addEventListener("click", function () {
+      setTool("cursor");
     });
+    btnPencil.addEventListener("click", function () {
+      setTool("pencil");
+    });
+    btnEraser.addEventListener("click", function () {
+      setTool("eraser");
+    });
+    btnUndo.addEventListener("click", undoLast);
+    btnRedo.addEventListener("click", redoLast);
     btnClear.addEventListener("click", function () {
       if (!window.confirm("Очистить все пометки на этом слайде?")) return;
       var entry = activeSlide();
@@ -613,18 +649,20 @@
     });
 
     function eraseAt(entry, x, y) {
-      var hit = findHitStroke(entry.strokes, x, y);
-      if (!hit) return;
+      var hit = findHitStroke(entry.strokes, x, y, canvasScale(entry.canvas));
+      if (!hit) return false;
       state.redoStack = [];
       entry.strokes = entry.strokes.filter(function (s) {
         return s.id !== hit.id;
       });
       persistActive();
-      syncUi();
+      if (entry.ctx) redrawAll(entry.ctx, entry.canvas, entry.strokes, null, null);
+      return true;
     }
 
     slideStates.forEach(function (entry) {
-      entry.canvas.addEventListener("pointerdown", function (e) {
+      var surface = entry.layer;
+      surface.addEventListener("pointerdown", function (e) {
         if (!state.boardOpen || entry.index !== state.activeIndex) return;
         if (state.tool === "cursor" || !state.tool) return;
         if (e.pointerType === "mouse" && e.button !== 0) return;
@@ -635,7 +673,7 @@
           eraseAt(entry, pt.x, pt.y);
           state.drawing = true;
           try {
-            entry.canvas.setPointerCapture(e.pointerId);
+            surface.setPointerCapture(e.pointerId);
           } catch (err) {}
           return;
         }
@@ -662,20 +700,20 @@
           state.drawing = true;
         }
         try {
-          entry.canvas.setPointerCapture(e.pointerId);
+          surface.setPointerCapture(e.pointerId);
         } catch (err2) {}
         syncUi();
       });
 
-      entry.canvas.addEventListener("pointermove", function (e) {
+      surface.addEventListener("pointermove", function (e) {
         if (entry.index !== state.activeIndex) return;
         var pt = clientToCanvas(entry.canvas, e.clientX, e.clientY);
         if (state.tool === "eraser" && state.boardOpen) {
           if (state.drawing) {
             e.preventDefault();
             eraseAt(entry, pt.x, pt.y);
-          } else {
-            var hit = findHitStroke(entry.strokes, pt.x, pt.y);
+          } else if (surface.classList.contains("is-interactive")) {
+            var hit = findHitStroke(entry.strokes, pt.x, pt.y, canvasScale(entry.canvas));
             state.hoveredId = hit ? hit.id : null;
             syncLayers();
           }
@@ -699,7 +737,7 @@
           state.drawing = false;
           state.hoveredId = null;
           try {
-            entry.canvas.releasePointerCapture(e.pointerId);
+            surface.releasePointerCapture(e.pointerId);
           } catch (err) {}
           syncUi();
           return;
@@ -707,7 +745,7 @@
         if (!state.drawing) return;
         state.drawing = false;
         try {
-          entry.canvas.releasePointerCapture(e.pointerId);
+          surface.releasePointerCapture(e.pointerId);
         } catch (err2) {}
         var draft = state.draft;
         state.draft = null;
@@ -726,18 +764,188 @@
         syncUi();
       }
 
-      entry.canvas.addEventListener("pointerup", endPointer);
-      entry.canvas.addEventListener("pointercancel", endPointer);
+      surface.addEventListener("pointerup", endPointer);
+      surface.addEventListener("pointercancel", endPointer);
 
-      // На iPad/Safari `touch-action: none` не всегда блокирует прокрутку при
-      // рисовании пальцем/стилусом — гасим жесты явно, пока доска открыта.
       function blockTouch(e) {
         if (!state.boardOpen || entry.index !== state.activeIndex) return;
         if (state.tool === "cursor" || !state.tool) return;
         e.preventDefault();
       }
-      entry.canvas.addEventListener("touchstart", blockTouch, { passive: false });
-      entry.canvas.addEventListener("touchmove", blockTouch, { passive: false });
+      surface.addEventListener("touchstart", blockTouch, { passive: false });
+      surface.addEventListener("touchmove", blockTouch, { passive: false });
+    });
+
+    function isEditableTarget(el) {
+      if (!el || el === document.body) return false;
+      var tag = (el.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return true;
+      if (el.isContentEditable) return true;
+      return false;
+    }
+
+    window.addEventListener(
+      "keydown",
+      function (e) {
+        if (!state.boardOpen) return;
+        if (isEditableTarget(e.target)) return;
+        var meta = e.ctrlKey || e.metaKey;
+        if (meta && (e.key === "z" || e.key === "Z")) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.shiftKey) redoLast();
+          else undoLast();
+          return;
+        }
+        if (meta && (e.key === "y" || e.key === "Y")) {
+          e.preventDefault();
+          e.stopPropagation();
+          redoLast();
+          return;
+        }
+        if (meta || e.altKey) return;
+        var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+        if (k === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          if (popover.classList.contains("is-open")) {
+            popover.classList.remove("is-open");
+            return;
+          }
+          setTool("cursor");
+          return;
+        }
+        var handled = true;
+        if (k === "v") setTool("cursor");
+        else if (k === "p") setTool("pencil");
+        else if (k === "e") setTool("eraser");
+        else if (k === "s") {
+          state.tool = "shape";
+          popover.classList.toggle("is-open");
+          syncUi();
+        } else if (k === "l") setTool("shape", "line");
+        else if (k === "r") setTool("shape", "rect");
+        else if (k === "o") setTool("shape", "circle");
+        else if (k === "a") setTool("shape", "arrow");
+        else if (k === "1") {
+          state.strokeWidth = WIDTHS[0];
+          syncUi();
+        } else if (k === "2") {
+          state.strokeWidth = WIDTHS[1];
+          syncUi();
+        } else if (k === "3") {
+          state.strokeWidth = WIDTHS[2];
+          syncUi();
+        } else handled = false;
+        if (!handled) return;
+        e.preventDefault();
+        e.stopPropagation();
+      },
+      true
+    );
+
+    var panelPosKey = storagePrefix + "panel-pos";
+    var dragState = {
+      active: false,
+      moved: false,
+      pointerId: null,
+      dx: 0,
+      dy: 0,
+      left: 0,
+      top: 0,
+    };
+
+    function clampPanelPos(left, top) {
+      var pad = 8;
+      var w = chrome.offsetWidth || 320;
+      var h = chrome.offsetHeight || 120;
+      var maxL = Math.max(pad, window.innerWidth - w - pad);
+      var maxT = Math.max(pad, window.innerHeight - h - pad);
+      return {
+        left: Math.min(Math.max(pad, left), maxL),
+        top: Math.min(Math.max(pad, top), maxT),
+      };
+    }
+
+    function placeChrome(left, top) {
+      var pos = clampPanelPos(left, top);
+      chrome.classList.add("is-placed");
+      chrome.style.left = pos.left + "px";
+      chrome.style.top = pos.top + "px";
+      chrome.style.right = "auto";
+      chrome.style.bottom = "auto";
+      return pos;
+    }
+
+    function persistChromePos(pos) {
+      try {
+        localStorage.setItem(panelPosKey, JSON.stringify(pos));
+      } catch (err) {}
+    }
+
+    try {
+      var savedPos = JSON.parse(localStorage.getItem(panelPosKey) || "null");
+      if (savedPos && typeof savedPos.left === "number" && typeof savedPos.top === "number") {
+        placeChrome(savedPos.left, savedPos.top);
+      }
+    } catch (errPos) {}
+
+    function isDragHandleTarget(el) {
+      if (!el) return false;
+      if (dragHandle === el || dragHandle.contains(el)) return true;
+      if (!panel.contains(el)) return false;
+      if (el.closest("button")) return false;
+      if (el.closest("a")) return false;
+      if (popover.contains(el)) return false;
+      return true;
+    }
+
+    panel.addEventListener("pointerdown", function (e) {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      if (!isDragHandleTarget(e.target)) return;
+      var rect = chrome.getBoundingClientRect();
+      dragState.active = true;
+      dragState.moved = false;
+      dragState.pointerId = e.pointerId;
+      dragState.dx = e.clientX - rect.left;
+      dragState.dy = e.clientY - rect.top;
+      dragState.left = rect.left;
+      dragState.top = rect.top;
+      chrome.classList.add("is-dragging");
+      try {
+        panel.setPointerCapture(e.pointerId);
+      } catch (errCap) {}
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    panel.addEventListener("pointermove", function (e) {
+      if (!dragState.active || e.pointerId !== dragState.pointerId) return;
+      var left = e.clientX - dragState.dx;
+      var top = e.clientY - dragState.dy;
+      if (Math.abs(left - dragState.left) > 3 || Math.abs(top - dragState.top) > 3) dragState.moved = true;
+      placeChrome(left, top);
+      e.preventDefault();
+    });
+
+    function endDrag(e) {
+      if (!dragState.active || (e && e.pointerId !== dragState.pointerId)) return;
+      dragState.active = false;
+      chrome.classList.remove("is-dragging");
+      try {
+        panel.releasePointerCapture(dragState.pointerId);
+      } catch (errRel) {}
+      var rect = chrome.getBoundingClientRect();
+      persistChromePos(placeChrome(rect.left, rect.top));
+    }
+
+    panel.addEventListener("pointerup", endDrag);
+    panel.addEventListener("pointercancel", endDrag);
+
+    window.addEventListener("resize", function () {
+      if (!chrome.classList.contains("is-placed")) return;
+      var rect = chrome.getBoundingClientRect();
+      persistChromePos(placeChrome(rect.left, rect.top));
     });
 
     state.activeIndex = getActiveIndex();
