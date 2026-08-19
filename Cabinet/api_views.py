@@ -392,9 +392,14 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get", "post"], url_path="material-folders")
     def material_folders(self, request, pk=None):
-        from .models import StudentMaterialFolder
         from .student_library_overlay import attach_library_folders, serialize_folder
         from .student_api import build_teacher_student_library
+        from .student_library_folder_services import (
+            StudentFolderServiceError,
+            create_student_material_folder,
+            folder_direct_item_counts,
+            student_folder_queryset,
+        )
 
         student = self.get_object()
         teacher = self.get_teacher()
@@ -406,21 +411,26 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         name = (request.data.get("name") or "").strip()
         if not name:
             return Response({"error": "Название папки обязательно."}, status=status.HTTP_400_BAD_REQUEST)
-        if len(name) > 80:
-            return Response({"error": "Слишком длинное название."}, status=status.HTTP_400_BAD_REQUEST)
-        if StudentMaterialFolder.objects.filter(teacher=teacher, student=student, name=name).exists():
-            return Response({"error": "Папка с таким названием уже есть."}, status=status.HTTP_400_BAD_REQUEST)
         subject_id = request.data.get("student_subject_id") or request.data.get("student_subject")
         subject = None
         if subject_id:
             subject = student.subjects.filter(pk=subject_id).first()
-        folder = StudentMaterialFolder.objects.create(
-            teacher=teacher,
-            student=student,
-            name=name,
-            student_subject=subject,
+        parent_id = request.data.get("parent_id", request.data.get("parent"))
+        try:
+            folder = create_student_material_folder(
+                teacher=teacher,
+                student=student,
+                name=name,
+                parent_id=parent_id,
+                student_subject=subject,
+            )
+        except StudentFolderServiceError as exc:
+            return Response({"error": str(exc), "code": exc.code}, status=exc.status)
+        counts = folder_direct_item_counts(teacher=teacher, student=student, folder_ids=[folder.id])
+        return Response(
+            serialize_folder(folder, item_count=counts.get(folder.id, 0), teacher=teacher),
+            status=status.HTTP_201_CREATED,
         )
-        return Response(serialize_folder(folder, teacher=teacher), status=status.HTTP_201_CREATED)
 
     @action(
         detail=True,
@@ -428,32 +438,38 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         url_path=r"material-folders/(?P<folder_id>[0-9]+)",
     )
     def material_folder_detail(self, request, pk=None, folder_id=None):
-        from .models import StudentMaterialFolder
         from .student_library_overlay import serialize_folder
+        from .student_library_folder_services import (
+            StudentFolderServiceError,
+            folder_direct_item_counts,
+            get_owned_student_folder,
+            move_student_material_folder,
+            rename_student_material_folder,
+        )
 
         student = self.get_object()
         teacher = self.get_teacher()
-        folder = StudentMaterialFolder.objects.filter(
-            pk=folder_id, teacher=teacher, student=student,
-        ).first()
-        if folder is None:
-            return Response({"error": "Папка не найдена."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            folder = get_owned_student_folder(teacher=teacher, student=student, folder_id=folder_id)
+        except StudentFolderServiceError as exc:
+            return Response({"error": str(exc), "code": exc.code}, status=exc.status)
         if request.method == "DELETE":
             folder.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
-        name = request.data.get("name")
-        if name is not None:
-            name = str(name).strip()
-            if not name:
-                return Response({"error": "Название папки обязательно."}, status=status.HTTP_400_BAD_REQUEST)
-            clash = StudentMaterialFolder.objects.filter(
-                teacher=teacher, student=student, name=name,
-            ).exclude(pk=folder.pk).exists()
-            if clash:
-                return Response({"error": "Папка с таким названием уже есть."}, status=status.HTTP_400_BAD_REQUEST)
-            folder.name = name
-            folder.save(update_fields=["name", "updated_at"])
-        return Response(serialize_folder(folder, teacher=teacher))
+        data = request.data or {}
+        if "name" in data:
+            try:
+                folder = rename_student_material_folder(folder=folder, name=data.get("name"))
+            except StudentFolderServiceError as exc:
+                return Response({"error": str(exc), "code": exc.code}, status=exc.status)
+        if "parent_id" in data or "parent" in data:
+            parent_id = data.get("parent_id", data.get("parent"))
+            try:
+                folder = move_student_material_folder(folder=folder, parent_id=parent_id)
+            except StudentFolderServiceError as exc:
+                return Response({"error": str(exc), "code": exc.code}, status=exc.status)
+        counts = folder_direct_item_counts(teacher=teacher, student=student, folder_ids=[folder.id])
+        return Response(serialize_folder(folder, item_count=counts.get(folder.id, 0), teacher=teacher))
 
     @action(detail=True, methods=["post"], url_path="material-placements")
     def material_placements(self, request, pk=None):

@@ -23,13 +23,15 @@ import CabinetModal from "./CabinetModal";
 import CabinetFloatingMenu from "./CabinetFloatingMenu";
 import ConfirmActionModal from "./ConfirmActionModal";
 import MyFileAssignModal from "./MyFileAssignModal";
+import StudentFilesWorkspace from "./StudentFilesWorkspace";
 import CabinetIcon from "../CabinetIcons";
 import "../styles/my-files.css";
 
-const SECTIONS = [
-  { id: "my", label: "Мои файлы" },
-  { id: "recent", label: "Недавние" },
-  { id: "trash", label: "Корзина" },
+const WORKSPACES = [
+  { id: "my", label: "Мои файлы", section: "my" },
+  { id: "students", label: "Файлы учеников" },
+  { id: "recent", label: "Недавние", section: "recent" },
+  { id: "trash", label: "Корзина", section: "trash" },
 ];
 
 const KIND_OPTIONS = [
@@ -233,9 +235,33 @@ export default function MyFilesManager({
   multiSelect = false,
   onSelect,
   acceptKinds,
+  workspace: controlledWorkspace,
+  onWorkspaceChange,
+  studentId: controlledStudentId,
+  onStudentChange,
+  studentFolderId: controlledStudentFolderId,
+  onStudentFolderChange,
 }) {
-  const [section, setSection] = useState("my");
+  const [workspace, setWorkspace] = useState(controlledWorkspace || "my");
+  const [navOpen, setNavOpen] = useState(false);
   const [folderId, setFolderId] = useState(null);
+  const activeWorkspace = controlledWorkspace ?? workspace;
+
+  const setActiveWorkspace = (next) => {
+    if (onWorkspaceChange) onWorkspaceChange(next);
+    else setWorkspace(next);
+    setNavOpen(false);
+    if (next !== "my") {
+      setFolderId(null);
+      setSelected(null);
+    }
+  };
+
+  useEffect(() => {
+    if (controlledWorkspace != null) setWorkspace(controlledWorkspace);
+  }, [controlledWorkspace]);
+
+  const apiSection = activeWorkspace === "students" ? "my" : activeWorkspace;
   const [items, setItems] = useState([]);
   const [breadcrumbs, setBreadcrumbs] = useState([{ id: null, name: "Мои файлы" }]);
   const [quota, setQuota] = useState(null);
@@ -287,8 +313,8 @@ export default function MyFilesManager({
     try {
       const data = await fetchMyFiles(
         {
-          section,
-          folder_id: section === "my" ? folderId || "" : "",
+          section: apiSection,
+          folder_id: apiSection === "my" ? folderId || "" : "",
           search: debouncedSearch,
           sort,
           kind,
@@ -314,7 +340,7 @@ export default function MyFilesManager({
       setLoading(false);
     }
   }, [
-    section,
+    apiSection,
     folderId,
     debouncedSearch,
     sort,
@@ -327,8 +353,12 @@ export default function MyFilesManager({
   ]);
 
   useEffect(() => {
+    if (activeWorkspace === "students") {
+      setLoading(false);
+      return;
+    }
     load();
-  }, [load]);
+  }, [load, activeWorkspace]);
 
   const showNotice = (text) => {
     setNotice(text);
@@ -337,8 +367,8 @@ export default function MyFilesManager({
 
   const openItem = async (item) => {
     if (item.kind === "folder") {
-      if (section === "trash") return;
-      setSection("my");
+      if (apiSection === "trash") return;
+      setActiveWorkspace("my");
       setFolderId(item.id);
       setSelected(null);
       return;
@@ -373,7 +403,7 @@ export default function MyFilesManager({
     try {
       for (const file of files) {
         await uploadMyFile(file, {
-          folderId: section === "my" ? folderId : null,
+          folderId: apiSection === "my" ? folderId : null,
           student,
         });
       }
@@ -392,7 +422,7 @@ export default function MyFilesManager({
     if (!name?.trim()) return;
     try {
       await createMyFilesFolder(
-        { name: name.trim(), parent_id: section === "my" ? folderId : null },
+        { name: name.trim(), parent_id: apiSection === "my" ? folderId : null },
         { student },
       );
       showNotice("Папка создана");
@@ -506,22 +536,22 @@ export default function MyFilesManager({
 
   const emptyText = useMemo(() => {
     if (debouncedSearch) return "Ничего не найдено";
-    if (section === "trash") return "Корзина пуста";
-    if (section === "recent") return "Недавних файлов пока нет";
+    if (apiSection === "trash") return "Корзина пуста";
+    if (apiSection === "recent") return "Недавних файлов пока нет";
     return "Здесь пока нет файлов. Загрузите первый материал.";
-  }, [debouncedSearch, section]);
+  }, [debouncedSearch, apiSection]);
 
   return (
     <div className={`cb-files${compact ? " cb-files--compact" : ""}`}>
-      {!compact ? (
+      {!compact && activeWorkspace !== "students" ? (
         <div className="cb-files__toolbar">
-          <button type="button" className="cb-btn cb-btn--primary" onClick={() => fileInputRef.current?.click()} disabled={uploading || section === "trash"}>
+          <button type="button" className="cb-btn cb-btn--primary" onClick={() => fileInputRef.current?.click()} disabled={uploading || apiSection === "trash"}>
             {uploading ? "Загрузка…" : "Загрузить"}
           </button>
-          <button type="button" className="cb-btn cb-btn--outline" onClick={handleCreateFolder} disabled={section === "trash"}>
+          <button type="button" className="cb-btn cb-btn--outline" onClick={handleCreateFolder} disabled={apiSection === "trash"}>
             Создать папку
           </button>
-          {section === "trash" && !student ? (
+          {apiSection === "trash" && !student ? (
             <button
               type="button"
               className="cb-btn cb-btn--outline"
@@ -562,27 +592,47 @@ export default function MyFilesManager({
       )}
 
       <div className="cb-files__layout">
-        {!compact ? (
-          <nav className="cb-files__nav" aria-label="Разделы файлов">
-            {SECTIONS.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                className={`cb-files__nav-btn${section === s.id ? " is-active" : ""}`}
-                onClick={() => {
-                  setSection(s.id);
-                  setFolderId(null);
-                  setSelected(null);
-                }}
-              >
-                {s.label}
-              </button>
-            ))}
-          </nav>
+        {!compact && !student ? (
+          <>
+            <button
+              type="button"
+              className="cb-files__nav-toggle"
+              aria-expanded={navOpen}
+              onClick={() => setNavOpen((v) => !v)}
+            >
+              {WORKSPACES.find((w) => w.id === activeWorkspace)?.label || "Раздел"}
+            </button>
+            <nav className={`cb-files__nav${navOpen ? " is-open" : ""}`} aria-label="Разделы файлов">
+              {WORKSPACES.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={`cb-files__nav-btn${activeWorkspace === s.id ? " is-active" : ""}`}
+                  onClick={() => {
+                    setActiveWorkspace(s.id);
+                    setFolderId(null);
+                    setSelected(null);
+                  }}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </nav>
+          </>
         ) : null}
 
         <div className="cb-files__main">
-          {quota ? (
+          {activeWorkspace === "students" && !student ? (
+            <StudentFilesWorkspace
+              studentId={controlledStudentId}
+              folderId={controlledStudentFolderId}
+              onStudentChange={onStudentChange}
+              onFolderChange={onStudentFolderChange}
+              onNotice={showNotice}
+            />
+          ) : (
+            <>
+          {quota && activeWorkspace === "my" ? (
             <div className="cb-files__quota">
               Использовано {formatBytes(quota.used_bytes)} из {formatBytes(quota.limit_bytes)} ({quotaPercent}%)
               <div className={`cb-files__quota-bar${quota.warning ? " is-warn" : ""}`}>
@@ -602,7 +652,7 @@ export default function MyFilesManager({
                     className={`cb-files__crumb${current ? " is-current" : ""}`}
                     onClick={() => {
                       if (current) return;
-                      setSection("my");
+                      setActiveWorkspace("my");
                       setFolderId(crumb.id);
                     }}
                   >
@@ -647,7 +697,7 @@ export default function MyFilesManager({
             ) : null}
           </div>
 
-          {!student && !compact && section === "my" ? (
+          {!student && !compact && apiSection === "my" ? (
             <div className="cb-files__filters">
               <label className="cb-files__select-wrap">
                 <span className="cb-files__select-label">Ученик</span>
@@ -683,7 +733,7 @@ export default function MyFilesManager({
             </div>
           ) : null}
 
-          {!compact && section === "my" ? (
+          {!compact && apiSection === "my" ? (
             <div
               className={`cb-files__drop${dropActive ? " is-active" : ""}`}
               onDragOver={(e) => {
@@ -723,7 +773,7 @@ export default function MyFilesManager({
                     className={`${view === "grid" && !compact ? "cb-files__tile" : "cb-files__row"}${isSelected ? " is-selected" : ""}`}
                     role="button"
                     tabIndex={0}
-                    draggable={!student && !compact && section === "my"}
+                    draggable={!student && !compact && apiSection === "my"}
                     onDragStart={(e) => {
                       e.dataTransfer.setData("text/plain", JSON.stringify({ id: item.id, kind: item.kind }));
                     }}
@@ -757,7 +807,7 @@ export default function MyFilesManager({
                         {item.kind === "folder"
                           ? "Папка"
                           : `${formatBytes(item.size)} · ${formatDate(item.updated_at)}`}
-                        {section === "trash" && item.days_left != null ? ` · ещё ${item.days_left} дн.` : ""}
+                        {apiSection === "trash" && item.days_left != null ? ` · ещё ${item.days_left} дн.` : ""}
                       </div>
                     </div>
                     {!selectable ? (
@@ -841,6 +891,8 @@ export default function MyFilesManager({
               </div>
             </aside>
           ) : null}
+            </>
+          )}
         </div>
       </div>
 
@@ -849,7 +901,7 @@ export default function MyFilesManager({
         anchorEl={menu?.anchor}
         onClose={() => setMenu(null)}
       >
-        {menu?.item && section !== "trash" ? (
+        {menu?.item && apiSection !== "trash" ? (
           <>
             {menu.item.kind === "file" ? (
               <div className="cb-files__menu-group">

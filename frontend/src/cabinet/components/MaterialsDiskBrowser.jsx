@@ -32,6 +32,24 @@ function thumbTone(item) {
   return "file";
 }
 
+function parentKey(value) {
+  return value == null || value === "" ? null : String(value);
+}
+
+function buildFolderChain(folders, folderId) {
+  if (folderId == null || folderId === "") return [];
+  const byId = Object.fromEntries(folders.map((f) => [String(f.id), f]));
+  const chain = [];
+  let current = byId[String(folderId)];
+  const seen = new Set();
+  while (current && !seen.has(String(current.id))) {
+    seen.add(String(current.id));
+    chain.unshift(current);
+    current = current.parent_id != null ? byId[String(current.parent_id)] : null;
+  }
+  return chain;
+}
+
 export function LibraryDiskThumb({ item, size = "sm" }) {
   const [failed, setFailed] = useState(false);
   if (item?.kind === "folder") {
@@ -103,6 +121,10 @@ export default function MaterialsDiskBrowser({
   error = "",
   emptyText = "Здесь пока нет материалов.",
   canOrganize = false,
+  folderId: controlledFolderId,
+  onFolderChange,
+  rootLabel = "Материалы",
+  breadcrumbPrefix = [],
   onOpenFile,
   onCreateFolder,
   onRenameFolder,
@@ -110,18 +132,27 @@ export default function MaterialsDiskBrowser({
   onMove,
   fileMenuItems,
 }) {
-  const [folderId, setFolderId] = useState(null);
+  const [internalFolderId, setInternalFolderId] = useState(null);
+  const folderId = controlledFolderId !== undefined ? controlledFolderId : internalFolderId;
+  const setFolderId = (id) => {
+    if (onFolderChange) onFolderChange(id);
+    else setInternalFolderId(id);
+  };
+
   const [search, setSearch] = useState("");
   const [view, setView] = useState("grid");
   const [menu, setMenu] = useState(null);
   const [dropOverId, setDropOverId] = useState(null);
   const [folderModal, setFolderModal] = useState(null);
   const [folderName, setFolderName] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
 
-  const currentFolder = useMemo(
-    () => folders.find((f) => String(f.id) === String(folderId)) || null,
+  const folderChain = useMemo(
+    () => buildFolderChain(folders, folderId),
     [folders, folderId],
   );
+
+  const currentFolder = folderChain.length ? folderChain[folderChain.length - 1] : null;
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -135,10 +166,10 @@ export default function MaterialsDiskBrowser({
       ));
       return [...matchedFolders, ...matchedFiles];
     }
-    const inRoot = folderId == null;
-    const folderTiles = inRoot ? folders : [];
+    const currentParent = parentKey(folderId);
+    const folderTiles = folders.filter((f) => parentKey(f.parent_id) === currentParent);
     const files = items.filter((it) => (
-      inRoot ? !it.folder_id : String(it.folder_id) === String(folderId)
+      currentParent == null ? !it.folder_id : String(it.folder_id) === currentParent
     ));
     return [...folderTiles, ...files];
   }, [items, folders, folderId, search]);
@@ -166,8 +197,15 @@ export default function MaterialsDiskBrowser({
     setDropOverId(null);
     if (!canOrganize) return;
     const payload = parseDrag(e);
-    if (!payload.key || payload.kind === "folder") return;
-    onMove?.({ keys: [payload.key], folderId: folder.id });
+    if (!payload.key && !payload.folderId) return;
+    if (payload.kind === "folder" && payload.folderId) {
+      if (String(payload.folderId) === String(folder.id)) return;
+      onMove?.({ folderIds: [payload.folderId], folderId: folder.id });
+      return;
+    }
+    if (payload.key) {
+      onMove?.({ keys: [payload.key], folderId: folder.id });
+    }
   };
 
   const handleDropOnRoot = (e) => {
@@ -175,15 +213,20 @@ export default function MaterialsDiskBrowser({
     setDropOverId(null);
     if (!canOrganize || folderId == null) return;
     const payload = parseDrag(e);
-    if (!payload.key || payload.kind === "folder") return;
-    onMove?.({ keys: [payload.key], folderId: null });
+    if (payload.kind === "folder" && payload.folderId) {
+      onMove?.({ folderIds: [payload.folderId], folderId: null });
+      return;
+    }
+    if (payload.key) {
+      onMove?.({ keys: [payload.key], folderId: null });
+    }
   };
 
   const submitFolderModal = async () => {
     const name = folderName.trim();
     if (!name) return;
     if (folderModal?.mode === "create") {
-      await onCreateFolder?.({ name });
+      await onCreateFolder?.({ name, parentId: folderId });
     } else if (folderModal?.mode === "rename" && folderModal.folder) {
       await onRenameFolder?.(folderModal.folder, { name });
     }
@@ -191,17 +234,49 @@ export default function MaterialsDiskBrowser({
     setFolderName("");
   };
 
+  const crumbs = [
+    ...(breadcrumbPrefix || []),
+    {
+      id: null,
+      name: rootLabel,
+      onClick: () => setFolderId(null),
+    },
+    ...folderChain.map((f) => ({
+      id: f.id,
+      name: f.name,
+      onClick: () => setFolderId(f.id),
+    })),
+  ];
+
   return (
     <div className="cb-files">
       <div className="cb-files__toolbar">
         {canOrganize ? (
-          <button
-            type="button"
-            className="cb-btn cb-btn--outline"
-            onClick={() => { setFolderModal({ mode: "create" }); setFolderName(""); }}
-          >
-            Создать папку
-          </button>
+          <div className="cb-files__create-wrap">
+            <button
+              type="button"
+              className="cb-btn cb-btn--primary"
+              onClick={() => setCreateOpen((v) => !v)}
+              aria-expanded={createOpen}
+            >
+              + Создать
+            </button>
+            {createOpen ? (
+              <div className="cb-files__create-menu" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setCreateOpen(false);
+                    setFolderModal({ mode: "create" });
+                    setFolderName("");
+                  }}
+                >
+                  Создать папку
+                </button>
+              </div>
+            ) : null}
+          </div>
         ) : null}
         <input
           type="search"
@@ -221,23 +296,34 @@ export default function MaterialsDiskBrowser({
         </div>
       </div>
 
-      <div className="cb-files__crumbs">
-        <button
-          type="button"
-          className={`cb-files__crumb${folderId == null ? " is-current" : ""}`}
-          onClick={() => setFolderId(null)}
-          onDragOver={(e) => { if (canOrganize && folderId != null) e.preventDefault(); }}
-          onDrop={handleDropOnRoot}
-        >
-          Материалы
-        </button>
-        {currentFolder ? (
-          <>
-            <span aria-hidden>/</span>
-            <span className="cb-files__crumb is-current">{currentFolder.name}</span>
-          </>
-        ) : null}
-      </div>
+      <nav className="cb-files__crumbs cb-files__crumbs--wrap" aria-label="Путь">
+        {crumbs.map((crumb, idx) => {
+          const current = idx === crumbs.length - 1;
+          return (
+            <span key={`${crumb.id || "root"}-${idx}`} className="cb-files__crumb-wrap">
+              {idx > 0 ? <span className="cb-files__crumb-sep" aria-hidden>/</span> : null}
+              {current ? (
+                <span className="cb-files__crumb is-current">{crumb.name}</span>
+              ) : (
+                <button
+                  type="button"
+                  className="cb-files__crumb"
+                  onClick={() => {
+                    if (crumb.onClick) crumb.onClick();
+                    else setFolderId(crumb.id);
+                  }}
+                  onDragOver={(e) => {
+                    if (canOrganize && crumb.id == null && folderId != null) e.preventDefault();
+                  }}
+                  onDrop={crumb.id == null ? handleDropOnRoot : undefined}
+                >
+                  {crumb.name}
+                </button>
+              )}
+            </span>
+          );
+        })}
+      </nav>
 
       {error ? <div className="cb-files__error">{error}</div> : null}
 
@@ -258,12 +344,13 @@ export default function MaterialsDiskBrowser({
                 className={`${view === "grid" ? "cb-files__tile" : "cb-files__row"}${over ? " is-selected" : ""}`}
                 role="button"
                 tabIndex={0}
-                draggable={canOrganize && !isFolder}
+                draggable={canOrganize}
                 onDragStart={(e) => {
-                  e.dataTransfer.setData("text/plain", JSON.stringify({
-                    key: item.library_key || String(item.id),
-                    kind: isFolder ? "folder" : "file",
-                  }));
+                  e.dataTransfer.setData("text/plain", JSON.stringify(
+                    isFolder
+                      ? { kind: "folder", folderId: item.id }
+                      : { key: item.library_key || String(item.id), kind: "file" },
+                  ));
                   e.dataTransfer.effectAllowed = "move";
                 }}
                 onDragOver={(e) => {
@@ -335,6 +422,17 @@ export default function MaterialsDiskBrowser({
             >
               Переименовать
             </button>
+            {folderId != null ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onMove?.({ folderIds: [menu.item.id], folderId: null });
+                  setMenu(null);
+                }}
+              >
+                Переместить в корень
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => {

@@ -25,6 +25,14 @@ class StudentMaterialFolder(models.Model):
         related_name="material_folders",
         verbose_name="Предмет ученика",
     )
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="children",
+        verbose_name="Родительская папка",
+    )
     name = models.CharField("Название", max_length=80)
     sort_order = models.PositiveIntegerField("Порядок", default=0)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -36,7 +44,7 @@ class StudentMaterialFolder(models.Model):
         ordering = ["sort_order", "name", "id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["teacher", "student", "name"],
+                fields=["teacher", "student", "parent", "name"],
                 name="cabinet_unique_student_material_folder_name",
             ),
         ]

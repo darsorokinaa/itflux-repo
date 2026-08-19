@@ -1173,7 +1173,7 @@ export default function CabinetStudentsPage() {
     await loadData();
   };
   const openAssignMaterialsForStudent = (student) => {
-    navigate(`/cabinet/students/${student.id}/materials`);
+    navigate(`/cabinet/files?space=students&student=${student.id}`);
   };
   const openAssignMaterialsForGroup = (group) => {
     setMaterialsAssignModal({ group });

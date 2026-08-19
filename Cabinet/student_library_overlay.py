@@ -21,6 +21,7 @@ def serialize_folder(folder, *, item_count=0, teacher=None):
     return {
         "id": folder.id,
         "name": folder.name,
+        "parent_id": folder.parent_id,
         "student_subject_id": folder.student_subject_id,
         "item_count": item_count,
         "teacher_id": folder.teacher_id,
@@ -52,7 +53,7 @@ def _attach_library_folders(items, *, students=None, teacher=None, student=None)
         "folder", "folder__teacher", "folder__teacher__profile", "teacher", "teacher__profile",
     )
     folder_qs = StudentMaterialFolder.objects.select_related(
-        "teacher", "teacher__profile", "student_subject",
+        "teacher", "teacher__profile", "student_subject", "parent",
     )
     if teacher is not None and student is not None:
         qs = qs.filter(teacher=teacher, student=student)
@@ -89,9 +90,10 @@ def _attach_library_folders(items, *, students=None, teacher=None, student=None)
         if folder is not None:
             counts[folder.id] = counts.get(folder.id, 0) + 1
 
+    folder_list = list(folder_qs.order_by("sort_order", "name", "id"))
     folders = [
         serialize_folder(folder, item_count=counts.get(folder.id, 0), teacher=folder.teacher)
-        for folder in folder_qs.order_by("sort_order", "name", "id")
+        for folder in folder_list
     ]
     return items, folders
 
