@@ -37,6 +37,7 @@ export default function CabinetAuthPage() {
   const parentInviteToken = searchParams.get("parent_invite") || "";
   const referralCode = searchParams.get("ref") || searchParams.get("referral") || "";
   const redirectTo = safeReturnPath(location.state?.from)
+    || safeReturnPath(searchParams.get("next"))
     || (parentInviteToken ? `/parent/invite/accept/${parentInviteToken}/` : "")
     || (inviteToken ? `/invite/${inviteToken}/` : "");
 

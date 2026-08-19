@@ -192,14 +192,24 @@ class SubscriptionAccessService:
 
     @staticmethod
     def can_access_content(user: Optional[User], content) -> bool:
-        # Ученики открывают контент без ограничения тарифа учителя.
-        if SubscriptionAccessService.is_student_user(user):
+        from Generator.models import Lesson as GeneratorLesson
+        from .models import Material
+
+        if isinstance(content, GeneratorLesson):
+            from .lesson_access import LessonAccessService
+
+            return LessonAccessService.has_full_access(user, content)
+        if isinstance(content, Material):
+            if SubscriptionAccessService.is_student_user(user):
+                return False
+            if not user or not getattr(user, "is_authenticated", False):
+                return False
+        elif SubscriptionAccessService.is_student_user(user):
             return True
         level = getattr(content, "access_level", ContentAccessLevel.FREE) or ContentAccessLevel.FREE
         required = SubscriptionAccessService.content_level_rank(level)
         if required <= 0:
-            return True
-        # Owner/teacher of own content always has access
+            return bool(user and getattr(user, "is_authenticated", False)) if isinstance(content, Material) else True
         if user and getattr(user, "is_authenticated", False):
             teacher_id = getattr(content, "teacher_id", None)
             owner_id = getattr(content, "owner_id", None)
@@ -207,7 +217,6 @@ class SubscriptionAccessService:
                 return True
             if user.is_staff or user.is_superuser:
                 return True
-        # Inclusive ladder: teacher content is also open on pro / premium / school.
         return SubscriptionAccessService.get_content_rank_for_user(user) >= required
 
     @staticmethod
@@ -456,12 +465,28 @@ class SubscriptionAccessService:
 
     @staticmethod
     def serialize_access_gate(user: Optional[User], content) -> dict[str, Any]:
+        from Generator.models import Lesson as GeneratorLesson
+        from .models import Material
+
+        if isinstance(content, GeneratorLesson):
+            from .lesson_access import LessonAccessService
+
+            result = LessonAccessService.get_access(user, content)
+            return {
+                "allowed": result.is_full,
+                "access_level": getattr(content, "access_level", "free"),
+                "min_plan": result.required_plan,
+                **result.to_dict(),
+            }
         allowed = SubscriptionAccessService.can_access_content(user, content)
-        return {
+        payload = {
             "allowed": allowed,
             "access_level": getattr(content, "access_level", "free"),
             "min_plan": SubscriptionAccessService.get_minimum_plan_for_content(content),
         }
+        if isinstance(content, Material):
+            payload["can_view"] = allowed
+        return payload
 
 
 def cleanup_stale_anonymous_usage(*, days: int = 180) -> int:

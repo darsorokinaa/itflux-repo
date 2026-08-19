@@ -70,6 +70,7 @@ export const CABINET_MORE_GROUPS = [
     label: "Материалы",
     items: [
       { id: "plans", label: "Планы уроков", path: "/cabinet/plans", icon: "plan" },
+      { id: "library", label: "Библиотека", path: "/cabinet/library", icon: "lessons" },
       { id: "interactives", label: "Интерактивы", path: "/cabinet/interactives", icon: "interactives" },
       { id: "boards", label: "Интерактивные доски", path: "/cabinet/boards", icon: "board" },
       { id: "files", label: "Мои файлы", path: "/cabinet/files", icon: "folder" },
@@ -124,6 +125,7 @@ export function isCabinetMobileNavActive(pathname, item) {
 export function getCabinetSectionTitle(pathname) {
   if (pathname === "/cabinet/more") return "Ещё";
   if (pathname.startsWith("/cabinet/settings/notifications")) return "Настройки уведомлений";
+  if (pathname.startsWith("/cabinet/library")) return "Библиотека";
   if (pathname.startsWith("/cabinet/upgrade")) return "Подписка и оплата";
   if (pathname.startsWith("/cabinet/homework/")) return "Редактировать ДЗ";
   if (pathname.startsWith("/cabinet/review/")) return "Проверка";

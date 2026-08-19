@@ -1251,6 +1251,75 @@ export function fetchMaterials(params = {}) {
   return cabinetFetch(`/materials/${suffix}`, { method: "GET" });
 }
 
+export function fetchMaterial(id) {
+  return cabinetFetch(`/materials/${encodeURIComponent(id)}/`, { method: "GET" });
+}
+
+export async function fetchReadyLesson(slug) {
+  const res = await fetch(`/api/lessons/${encodeURIComponent(slug)}/`, {
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = data?.message || data?.detail || data?.error || "Не удалось загрузить урок";
+    throw new Error(typeof message === "string" ? message : "Не удалось загрузить урок");
+  }
+  return data?.lesson || data;
+}
+
+export async function startReadyLessonDemo(slug) {
+  await ensureCsrfCookie();
+  const headers = { Accept: "application/json", "Content-Type": "application/json" };
+  const csrf = getCsrfToken();
+  if (csrf) headers["X-CSRFToken"] = csrf;
+  const res = await fetch(`/api/lessons/${encodeURIComponent(slug)}/demo/`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers,
+    body: JSON.stringify({ terms_accepted: true }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err = new Error(data?.message || data?.detail || "Не удалось открыть демоверсию");
+    err.code = data?.code;
+    throw err;
+  }
+  return data;
+}
+
+export async function purchaseReadyLesson(slug, idempotencyKey) {
+  await ensureCsrfCookie();
+  const headers = { Accept: "application/json", "Content-Type": "application/json" };
+  const csrf = getCsrfToken();
+  if (csrf) headers["X-CSRFToken"] = csrf;
+  const res = await fetch(`/api/lessons/${encodeURIComponent(slug)}/purchase/`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers,
+    body: JSON.stringify(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(data?.message || data?.detail || "Не удалось начать покупку");
+  }
+  return data;
+}
+
+export async function fetchLessonPurchases() {
+  const res = await fetch("/api/lessons/purchases/", {
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(data?.detail || "Не удалось загрузить покупки");
+  }
+  return data;
+}
+
 export async function createTeacherMaterial(payload) {
   await ensureCsrfCookie();
   const isFormData = typeof FormData !== "undefined" && payload instanceof FormData;

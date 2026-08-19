@@ -355,7 +355,9 @@ export function accessGateCopy(
   };
 }
 
-export function isCatalogLocked(item: { access?: { allowed?: boolean } | null } | null | undefined) {
-  if (!item?.access || typeof item.access.allowed !== "boolean") return false;
+export function isCatalogLocked(item: { access?: { allowed?: boolean; can_view?: boolean } | null } | null | undefined) {
+  if (!item?.access) return false;
+  if (typeof item.access.can_view === "boolean") return item.access.can_view === false;
+  if (typeof item.access.allowed !== "boolean") return false;
   return item.access.allowed === false;
 }

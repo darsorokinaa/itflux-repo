@@ -490,6 +490,7 @@ class Material(models.Model):
         choices=ContentAccessLevel.choices,
         default=ContentAccessLevel.FREE,
         db_index=True,
+        help_text="Минимальный тариф: бесплатно после регистрации (Старт), Учитель, Профи, Премиум.",
     )
     published_at = models.DateTimeField("Опубликован", null=True, blank=True)
     is_new = models.BooleanField("Новинка", default=False)
@@ -512,6 +513,123 @@ class Material(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class LessonPurchase(models.Model):
+    """Отдельная покупка готового урока Generator.Lesson. Не зависит от подписки."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Ожидает"
+        PAID = "paid", "Оплачена"
+        REFUNDED = "refunded", "Возврат"
+        CANCELLED = "cancelled", "Отменена"
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="lesson_purchases",
+        verbose_name="Пользователь",
+    )
+    lesson = models.ForeignKey(
+        "Generator.Lesson",
+        on_delete=models.CASCADE,
+        related_name="purchases",
+        verbose_name="Готовый урок",
+    )
+    payment = models.OneToOneField(
+        "Payment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="lesson_purchase",
+        verbose_name="Платёж",
+    )
+    amount = models.DecimalField("Сумма", max_digits=10, decimal_places=2, default=0)
+    currency = models.CharField("Валюта", max_length=8, default="RUB")
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    purchased_at = models.DateTimeField("Куплено", null=True, blank=True)
+    valid_until = models.DateTimeField(
+        "Действует до",
+        null=True,
+        blank=True,
+        help_text="Пусто — бессрочный доступ.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Покупка готового урока"
+        verbose_name_plural = "Покупки готовых уроков"
+        ordering = ["-purchased_at", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "lesson"],
+                condition=models.Q(status="paid"),
+                name="cab_les_purchase_user_lesson_paid_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "status"], name="cab_les_purch_user_status_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} → lesson {self.lesson_id} [{self.status}]"
+
+    def is_active(self) -> bool:
+        if self.status != self.Status.PAID:
+            return False
+        if self.valid_until is None:
+            return True
+        from django.utils import timezone as tz
+
+        return self.valid_until > tz.now()
+
+
+class LessonDemoAccess(models.Model):
+    """Одноразовая demo-session готового урока: UNIQUE(user, lesson)."""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="lesson_demo_accesses",
+        verbose_name="Пользователь",
+    )
+    lesson = models.ForeignKey(
+        "Generator.Lesson",
+        on_delete=models.CASCADE,
+        related_name="demo_accesses",
+        verbose_name="Готовый урок",
+    )
+    opened_at = models.DateTimeField("Открыто")
+    expires_at = models.DateTimeField("Сессия до")
+    session_finished_at = models.DateTimeField("Сессия завершена", null=True, blank=True)
+    terms_accepted_at = models.DateTimeField("Условия приняты", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Демодоступ к готовому уроку"
+        verbose_name_plural = "Демодоступы к готовым урокам"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "lesson"],
+                name="cab_les_demo_user_lesson_uniq",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} demo lesson {self.lesson_id}"
+
+    def is_session_active(self) -> bool:
+        if self.session_finished_at is not None:
+            return False
+        from django.utils import timezone as tz
+
+        return self.expires_at > tz.now()
 
 
 class TeacherSavedMaterial(models.Model):
@@ -3145,6 +3263,11 @@ class Payment(models.Model):
         MONTH = "month", "Месяц"
         YEAR = "year", "Год"
 
+    class Purpose(models.TextChoices):
+        SUBSCRIPTION = "subscription", "Подписка"
+        MATERIAL = "material", "Покупка материала"
+        LESSON = "lesson", "Покупка готового урока"
+
     teacher = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
@@ -3179,6 +3302,13 @@ class Payment(models.Model):
     )
     currency = models.CharField("Валюта", max_length=8, default="RUB")
     status = models.CharField("Статус", max_length=20, choices=Status.choices, default=Status.PENDING)
+    purpose = models.CharField(
+        "Назначение",
+        max_length=20,
+        choices=Purpose.choices,
+        default=Purpose.SUBSCRIPTION,
+        db_index=True,
+    )
     provider = models.CharField("Провайдер", max_length=50, default="mock")
     provider_payment_id = models.CharField("ID платежа провайдера", max_length=255, blank=True)
     order_id = models.CharField(

@@ -202,6 +202,11 @@ class MaterialStatus(models.TextChoices):
     ARCHIVED = "archived", "В архиве"
 
 
+class MaterialDemoMode(models.TextChoices):
+    PARTIAL = "partial", "Ограниченный фрагмент"
+    FULL_WATERMARKED = "full_watermarked", "Весь материал с водяным знаком"
+
+
 class ContentAccessLevel(models.TextChoices):
     """Уровни доступа к материалам библиотеки платформы."""
 

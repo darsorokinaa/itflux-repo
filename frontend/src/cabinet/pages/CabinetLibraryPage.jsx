@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import CabinetHomeworkCard from "../CabinetHomeworkCard";
+import LessonPreviewModal from "../../components/LessonPreviewModal";
 import {
   getLessonOpenUrl,
   libraryLessonMatchesFilter,
@@ -14,12 +15,14 @@ import {
   CabinetEmptyState,
   useSoonToast,
 } from "../CabinetSectionUi";
-import { fetchLibraryNewThisMonth } from "../../utils/cabinetAuth";
+import { fetchLibraryNewThisMonth, fetchLessonPurchases } from "../../utils/cabinetAuth";
 import { isCatalogLocked } from "../../accessGate/accessGate";
 import { useAccessGate } from "../../hooks/useAccessGate";
+import "../../styles/material-access.css";
 
 const SECTIONS = [
   { id: "lessons", label: "Готовые уроки", icon: "lessons", href: "/lessons" },
+  { id: "purchases", label: "Мои покупки", icon: "wallet" },
   { id: "tasks", label: "Банк задач", icon: "tasks", href: "/tasks" },
 ];
 
@@ -32,11 +35,15 @@ const FILTERS = [
 ];
 
 export default function CabinetLibraryPage() {
+  const navigate = useNavigate();
   const [section, setSection] = useState("lessons");
   const [filter, setFilter] = useState("all");
   const [catalogLessons, setCatalogLessons] = useState([]);
   const [lessonsLoading, setLessonsLoading] = useState(false);
   const [lessonsError, setLessonsError] = useState(null);
+  const [purchases, setPurchases] = useState([]);
+  const [purchasesLoading, setPurchasesLoading] = useState(false);
+  const [previewSlug, setPreviewSlug] = useState("");
   const [newItems, setNewItems] = useState([]);
   const { notifySoon, toast } = useSoonToast();
   const { modal: accessGateModal, openGate } = useAccessGate({
@@ -72,6 +79,18 @@ export default function CabinetLibraryPage() {
     if (section === "lessons") loadCatalogLessons();
   }, [section, loadCatalogLessons]);
 
+  const loadPurchases = useCallback(() => {
+    setPurchasesLoading(true);
+    fetchLessonPurchases()
+      .then((data) => setPurchases(Array.isArray(data?.items) ? data.items : []))
+      .catch(() => setPurchases([]))
+      .finally(() => setPurchasesLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (section === "purchases") loadPurchases();
+  }, [section, loadPurchases]);
+
   const lessonCards = useMemo(
     () => catalogLessons
       .filter((lesson) => libraryLessonMatchesFilter(lesson, filter))
@@ -81,14 +100,8 @@ export default function CabinetLibraryPage() {
 
   const handleOpenLesson = useCallback((card) => {
     const lesson = card.lesson;
-    if (isCatalogLocked(lesson)) {
-      openGate({
-        reason: "insufficient_plan",
-        resourceType: "lesson",
-        requiredPlan: lesson?.access?.min_plan,
-        resourceId: lesson?.slug,
-        returnUrl: `/lessons/${encodeURIComponent(lesson?.slug || "")}/view`,
-      });
+    if (isCatalogLocked(lesson) && lesson?.slug) {
+      setPreviewSlug(lesson.slug);
       return;
     }
     const url = getLessonOpenUrl(lesson);
@@ -97,9 +110,10 @@ export default function CabinetLibraryPage() {
       return;
     }
     notifySoon();
-  }, [notifySoon, openGate]);
+  }, [notifySoon]);
 
   const showLessonCatalog = section === "lessons";
+  const showPurchases = section === "purchases";
 
   return (
     <CabinetPageShell className="cb-section--library">
@@ -200,6 +214,31 @@ export default function CabinetLibraryPage() {
             ))}
           </div>
         )
+      ) : showPurchases ? (
+        purchasesLoading ? (
+          <p className="cb-page-hint">Загрузка покупок…</p>
+        ) : purchases.length === 0 ? (
+          <CabinetEmptyState
+            icon="wallet"
+            title="Покупок пока нет"
+            text="Здесь появятся готовые уроки, которые вы купили отдельно — независимо от тарифа."
+          />
+        ) : (
+          <div className="cb-hw-grid">
+            {purchases.map((item) => (
+              <CabinetHomeworkCard
+                key={item.id}
+                subject={item.purchased_at ? new Date(item.purchased_at).toLocaleDateString("ru-RU") : "Покупка"}
+                title={item.title}
+                description={item.price_label || ""}
+                hideProgressBar
+                actionLabel="Открыть"
+                actionPrimary
+                onAction={() => navigate(item.open_url || `/lessons/${item.slug}/view`)}
+              />
+            ))}
+          </div>
+        )
       ) : (
         <CabinetEmptyState
           icon="tasks"
@@ -212,6 +251,11 @@ export default function CabinetLibraryPage() {
       )}
 
       {accessGateModal}
+      <LessonPreviewModal
+        open={Boolean(previewSlug)}
+        slug={previewSlug}
+        onClose={() => setPreviewSlug("")}
+      />
     </CabinetPageShell>
   );
 }

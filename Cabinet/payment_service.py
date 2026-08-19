@@ -60,6 +60,16 @@ class PaymentProviderInterface(abc.ABC):
 
 class MockPaymentProvider(PaymentProviderInterface):
     def create_checkout(self, payment, plan) -> str:
+        meta = payment.metadata if isinstance(getattr(payment, "metadata", None), dict) else {}
+        if meta.get("purpose") == "material" and meta.get("material_id"):
+            return (
+                f"/materials/{meta['material_id']}?payment_id={payment.pk}&status=mock"
+            )
+        if meta.get("purpose") == "lesson" and meta.get("lesson_slug"):
+            slug = meta["lesson_slug"]
+            return f"/lessons?preview={slug}&payment_id={payment.pk}&status=mock"
+        if meta.get("purpose") == "lesson" and meta.get("lesson_id"):
+            return f"/lessons?preview={meta['lesson_id']}&payment_id={payment.pk}&status=mock"
         return f"/cabinet/upgrade?payment_id={payment.pk}&status=mock"
 
     def check_status(self, payment) -> dict:
@@ -86,6 +96,14 @@ class UnconfiguredPaymentProvider(PaymentProviderInterface):
 
     def parse_webhook(self, payload: dict) -> dict:
         raise NotImplementedError("Real payment provider not configured")
+
+
+def _is_legacy_material_shop_payment(payment) -> bool:
+    """Старые ошибочные платежи Cabinet.Material больше не создают entitlement."""
+    if getattr(payment, "purpose", "") == "material":
+        return True
+    meta = payment.metadata if isinstance(getattr(payment, "metadata", None), dict) else {}
+    return meta.get("purpose") == "material"
 
 
 def get_payment_provider(name: str | None = None) -> PaymentProviderInterface:
@@ -694,12 +712,22 @@ class PaymentProviderService:
                 customer_key=payment.customer_key,
                 pan_mask=parsed.get("pan_mask") or "",
             )
-            cls.activate_subscription_from_payment(payment)
-            from .subscription_service import PromoCodeService
-            from .promotion_service import confirm_for_payment as confirm_promotion
+            from .lesson_access import LessonPurchaseService, is_lesson_payment
 
-            PromoCodeService.confirm_for_payment(payment)
-            confirm_promotion(payment)
+            if is_lesson_payment(payment):
+                LessonPurchaseService.fulfill_payment(payment)
+            elif _is_legacy_material_shop_payment(payment):
+                logger.info(
+                    "legacy_material_shop_payment_ignored payment_id=%s",
+                    payment.pk,
+                )
+            else:
+                cls.activate_subscription_from_payment(payment)
+                from .subscription_service import PromoCodeService
+                from .promotion_service import confirm_for_payment as confirm_promotion
+
+                PromoCodeService.confirm_for_payment(payment)
+                confirm_promotion(payment)
             logger.info("payment_confirmed payment_id=%s teacher=%s", payment.pk, payment.teacher_id)
         elif new_status in ("failed", "cancelled", "refunded"):
             payment.status = new_status
@@ -776,9 +804,13 @@ class PaymentProviderService:
     @classmethod
     def activate_subscription_from_payment(cls, payment):
         """Назначает plan с платежа и продлевает период — фикс бага mock webhook."""
+        from .lesson_access import is_lesson_payment
         from .models import PromoCode, TariffPlan, TeacherSubscription
         from .referral_service import ReferralService
         from .subscription_service import SubscriptionLimitService
+
+        if is_lesson_payment(payment) or _is_legacy_material_shop_payment(payment):
+            return
 
         plan = payment.plan
         if plan is None:

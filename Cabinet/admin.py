@@ -49,6 +49,8 @@ from .models import (
     LessonPlanItem,
     MatchingPair,
     Material,
+    LessonDemoAccess,
+    LessonPurchase,
     Notification,
     NotificationPreference,
     PushSubscription,
@@ -237,6 +239,23 @@ class MaterialAdmin(admin.ModelAdmin):
     )
     search_fields = ("title", "topic", "subtopic")
     ordering = ("-created_at",)
+
+
+@admin.register(LessonPurchase)
+class LessonPurchaseAdmin(admin.ModelAdmin):
+    list_display = ("user", "lesson", "status", "amount", "currency", "purchased_at")
+    list_filter = ("status",)
+    search_fields = ("user__username", "lesson__title", "lesson__slug")
+    ordering = ("-purchased_at", "-created_at")
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(LessonDemoAccess)
+class LessonDemoAccessAdmin(admin.ModelAdmin):
+    list_display = ("user", "lesson", "opened_at", "expires_at", "terms_accepted_at")
+    search_fields = ("user__username", "lesson__title", "lesson__slug")
+    ordering = ("-opened_at",)
+    readonly_fields = ("created_at",)
 
 
 @admin.register(TeacherSavedMaterial)
@@ -1174,10 +1193,10 @@ class PromotionRedemptionAdmin(admin.ModelAdmin):
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
     list_display = (
-        "teacher", "plan", "final_amount", "amount", "currency",
+        "teacher", "purpose", "plan", "final_amount", "amount", "currency",
         "status", "provider", "promotion", "is_recurrent", "billing_period", "paid_at", "created_at",
     )
-    list_filter = ("status", "provider", "currency", "billing_period", "is_recurrent")
+    list_filter = ("purpose", "status", "provider", "currency", "billing_period", "is_recurrent")
     search_fields = (
         "teacher__username", "teacher__email",
         "provider_payment_id", "idempotency_key", "order_id", "rebill_id",

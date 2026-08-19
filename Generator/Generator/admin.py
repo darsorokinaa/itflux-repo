@@ -561,6 +561,9 @@ class LessonAdmin(AdminStoredFileDownloadMixin, admin.ModelAdmin):
         "task_number",
         "difficulty",
         "access_level",
+        "standalone_purchase_enabled",
+        "demo_enabled",
+        "demo_mode",
         "status",
         "views_count",
         "likes_count_display",
@@ -574,6 +577,9 @@ class LessonAdmin(AdminStoredFileDownloadMixin, admin.ModelAdmin):
         "exam_type",
         "difficulty",
         "access_level",
+        "standalone_purchase_enabled",
+        "demo_enabled",
+        "demo_mode",
         "status",
     )
     search_fields = ("title", "slug", "topic", "subtopic", "short_description")
@@ -600,6 +606,26 @@ class LessonAdmin(AdminStoredFileDownloadMixin, admin.ModelAdmin):
                     "status",
                     "access_level",
                 )
+            },
+        ),
+        (
+            "Доступ и продажа",
+            {
+                "fields": (
+                    "standalone_purchase_enabled",
+                    "standalone_price",
+                    "standalone_currency",
+                    "demo_enabled",
+                    "demo_mode",
+                    "demo_page_count",
+                    "demo_fragment",
+                    "demo_duration_minutes",
+                ),
+                "description": (
+                    "Бесплатно после регистрации = уровень «Бесплатный (Старт)». "
+                    "Отдельная покупка может сочетаться с тарифом. "
+                    "Демоверсия — один раз на 40 минут."
+                ),
             },
         ),
         (

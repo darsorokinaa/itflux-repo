@@ -101,6 +101,20 @@ export function lessonMatchesFilter(lesson, filter) {
   return libraryLessonMatchesFilter(lesson, filter);
 }
 
+export function getLessonContentUrl(slug) {
+  if (!slug) return null;
+  return `/api/lessons/${encodeURIComponent(slug)}/view/`;
+}
+
+export function lessonPreviewUrl(slug, extra = {}) {
+  if (!slug) return "/lessons";
+  const params = new URLSearchParams({ preview: slug });
+  Object.entries(extra).forEach(([key, value]) => {
+    if (value != null && value !== "") params.set(key, String(value));
+  });
+  return `/lessons?${params.toString()}`;
+}
+
 export function getLessonOpenUrl(lesson) {
   if (!lesson?.slug) return null;
   const fileExtLower = (lesson.file_url || "").toLowerCase().split("?")[0];
@@ -111,7 +125,7 @@ export function getLessonOpenUrl(lesson) {
     return `/lessons/${encodeURIComponent(lesson.slug)}/view`;
   }
   if (lesson.archive_url || lesson.file_url) {
-    return `/api/lessons/${encodeURIComponent(lesson.slug)}/view/`;
+    return getLessonContentUrl(lesson.slug);
   }
   return null;
 }

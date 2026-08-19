@@ -202,6 +202,14 @@ def _return_url(payment, *, status: str, custom: str) -> str:
 
 
 def _success_url(payment) -> str:
+    meta = payment.metadata if isinstance(getattr(payment, "metadata", None), dict) else {}
+    if meta.get("purpose") == "material" and meta.get("material_id"):
+        custom = f"{_public_base()}/materials/{meta['material_id']}"
+        return _return_url(payment, status="success", custom=custom)
+    if meta.get("purpose") == "lesson" and (meta.get("lesson_slug") or meta.get("lesson_id")):
+        slug = meta.get("lesson_slug") or meta.get("lesson_id")
+        custom = f"{_public_base()}/lessons?preview={slug}"
+        return _return_url(payment, status="success", custom=custom)
     return _return_url(
         payment,
         status="success",
@@ -210,6 +218,14 @@ def _success_url(payment) -> str:
 
 
 def _fail_url(payment) -> str:
+    meta = payment.metadata if isinstance(getattr(payment, "metadata", None), dict) else {}
+    if meta.get("purpose") == "material" and meta.get("material_id"):
+        custom = f"{_public_base()}/materials/{meta['material_id']}"
+        return _return_url(payment, status="fail", custom=custom)
+    if meta.get("purpose") == "lesson" and (meta.get("lesson_slug") or meta.get("lesson_id")):
+        slug = meta.get("lesson_slug") or meta.get("lesson_id")
+        custom = f"{_public_base()}/lessons?preview={slug}"
+        return _return_url(payment, status="fail", custom=custom)
     return _return_url(
         payment,
         status="fail",
@@ -255,14 +271,30 @@ def customer_key_for_teacher(teacher) -> str:
     return f"teacher_{int(getattr(teacher, 'pk', 0) or 0)}"
 
 
-def _safe_description(plan, billing_period: str) -> str:
+def _safe_description(plan, billing_period: str, payment=None) -> str:
+    if payment is not None:
+        meta = payment.metadata if isinstance(getattr(payment, "metadata", None), dict) else {}
+        if meta.get("purpose") == "material":
+            title = re.sub(r"[«»\"']", "", str(meta.get("material_title") or "материал"))
+            return f"Цифровой поток - материал: {title}"[:250]
+        if meta.get("purpose") == "lesson":
+            title = re.sub(r"[«»\"']", "", str(meta.get("lesson_title") or "урок"))
+            return f"Цифровой поток - урок: {title}"[:250]
     period_label = "год" if billing_period == "year" else "месяц"
     name = re.sub(r"[«»\"']", "", str(getattr(plan, "name", "") or "tariff"))
     text = f"Цифровой поток - тариф:  {name} / {period_label}"
     return text[:250]
 
 
-def _item_name(plan, billing_period: str) -> str:
+def _item_name(plan, billing_period: str, payment=None) -> str:
+    if payment is not None:
+        meta = payment.metadata if isinstance(getattr(payment, "metadata", None), dict) else {}
+        if meta.get("purpose") == "material":
+            title = str(meta.get("material_title") or "Материал").strip()
+            return f"Цифровой поток — материал «{title}»"[:128]
+        if meta.get("purpose") == "lesson":
+            title = str(meta.get("lesson_title") or "Урок").strip()
+            return f"Цифровой поток — урок «{title}»"[:128]
     period_label = "год" if billing_period == "year" else "месяц"
     name = str(getattr(plan, "name", "") or "Подписка").strip()
     text = f"Цифровой поток - тариф: «{name}» на {period_label}"
@@ -290,7 +322,7 @@ def build_receipt(payment, plan, *, amount_kopecks: int) -> dict[str, Any]:
     ffd = (_strip_env(getattr(settings, "TBANK_FFD_VERSION", "") or "") or "1.05").strip()
 
     item: dict[str, Any] = {
-        "Name": _item_name(plan, payment.billing_period),
+        "Name": _item_name(plan, payment.billing_period, payment),
         "Price": amount_kopecks,
         "Quantity": 1,
         "Amount": amount_kopecks,
@@ -368,7 +400,7 @@ class TBankPaymentProvider(PaymentProviderInterface):
             "TerminalKey": terminal,
             "Amount": kopecks,
             "OrderId": order_id,
-            "Description": _safe_description(plan, payment.billing_period),
+            "Description": _safe_description(plan, payment.billing_period, payment),
             "Receipt": build_receipt(payment, plan, amount_kopecks=kopecks),
         }
         if include_return_urls:
@@ -494,8 +526,12 @@ class TBankPaymentProvider(PaymentProviderInterface):
         }
 
     def create_checkout(self, payment, plan) -> str:
-        """Init родительского платежа → PaymentURL для редиректа."""
-        result = self._init_payment(payment, plan, recurrent_parent=True, include_return_urls=True)
+        """Init платежа → PaymentURL для редиректа."""
+        meta = payment.metadata if isinstance(getattr(payment, "metadata", None), dict) else {}
+        recurrent = meta.get("purpose") not in ("material", "lesson")
+        result = self._init_payment(
+            payment, plan, recurrent_parent=recurrent, include_return_urls=True
+        )
         payment_url = (result.get("payment_url") or "").strip()
         if not payment_url:
             raise ValueError("Т-Банк не вернул PaymentURL")

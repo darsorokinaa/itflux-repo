@@ -1,212 +1,38 @@
-import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import DocViewer, { DocViewerRenderers } from "@cyntler/react-doc-viewer";
-import CatalogEngagementBar, {
-  useRegisterCatalogView,
-} from "../components/CatalogEngagementBar";
-import { useAccessGate, useCabinetAuthed } from "../hooks/useAccessGate";
-import { devApiBase } from "../utils/devApiBase";
+import { useEffect } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { fetchReadyLesson } from "../utils/cabinetAuth";
+import { getLessonContentUrl, lessonPreviewUrl } from "../cabinet/lessonCardUtils";
 
+/** Legacy route: redirects to content or opens preview modal on /lessons */
 export default function LessonViewerPage() {
   const { slug } = useParams();
-  const [lesson, setLesson] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [accessPayload, setAccessPayload] = useState(null);
-  const authed = useCabinetAuthed();
-  const { modal: accessGateModal, openGate } = useAccessGate({
-    authenticated: authed,
-    sourcePage: `/lessons/${slug || ""}/view`,
-  });
-
-  const locked = Boolean(lesson?.locked || accessPayload);
-  const syncedViews = useRegisterCatalogView(
-    "lessons",
-    slug,
-    Boolean(slug) && !loading && !error && Boolean(lesson) && !locked,
-  );
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   useEffect(() => {
+    if (!slug) {
+      navigate("/lessons", { replace: true });
+      return;
+    }
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    const apiBase = devApiBase();
-    fetch(`${apiBase}/api/lessons/${encodeURIComponent(slug)}/`, {
-      credentials: apiBase ? "omit" : "same-origin",
-    })
-      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
-      .then(({ data }) => {
+    fetchReadyLesson(slug)
+      .then((lesson) => {
         if (cancelled) return;
-        const next = data?.lesson || null;
-        setLesson(next);
-        if (next?.locked || data?.upgrade_required || data?.code === "CONTENT_ACCESS_DENIED") {
-          setAccessPayload(data);
+        if (lesson?.access?.can_view) {
+          window.location.replace(getLessonContentUrl(slug));
+          return;
         }
+        const extra = {};
+        if (searchParams.get("demo_expired") === "1") extra.demo_expired = "1";
+        if (searchParams.get("payment_id")) extra.payment_id = searchParams.get("payment_id");
+        if (searchParams.get("status")) extra.status = searchParams.get("status");
+        navigate(lessonPreviewUrl(slug, extra), { replace: true });
       })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Ошибка загрузки");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+      .catch(() => {
+        if (!cancelled) navigate(lessonPreviewUrl(slug), { replace: true });
       });
+    return () => { cancelled = true; };
+  }, [slug, searchParams, navigate]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [slug]);
-
-  useEffect(() => {
-    if (typeof syncedViews === "number") {
-      setLesson((prev) => (prev ? { ...prev, views_count: syncedViews } : prev));
-    }
-  }, [syncedViews]);
-
-  useEffect(() => {
-    if (!locked || !lesson) return undefined;
-    openGate({
-      reason: authed ? "insufficient_plan" : "anonymous",
-      resourceType: "lesson",
-      requiredPlan: lesson.access?.min_plan || accessPayload?.min_plan,
-      resourceId: slug,
-      returnUrl: `/lessons/${encodeURIComponent(slug || "")}/view`,
-    });
-    return undefined;
-  }, [locked, lesson, authed, openGate, slug, accessPayload]);
-
-  if (loading) {
-    return (
-      <div className="lesson-viewer-page lesson-viewer-page--loading">
-        <p className="lesson-viewer-page__status">Загружаем урок…</p>
-      </div>
-    );
-  }
-
-  if (error || !lesson) {
-    return (
-      <div className="lesson-viewer-page lesson-viewer-page--error">
-        <div className="lesson-viewer-page__error-card">
-          <h2>Ошибка</h2>
-          <p>{error || "Урок не найден"}</p>
-          <Link to="/lessons" className="lesson-viewer-page__back">
-            Вернуться к каталогу
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  if (locked) {
-    return (
-      <div className="lesson-viewer-page">
-        <div className="lesson-viewer-page__toolbar">
-          <Link to="/lessons" className="lesson-viewer-page__back">
-            К каталогу
-          </Link>
-          <h1 className="lesson-viewer-page__title">{lesson.title}</h1>
-        </div>
-        {accessGateModal}
-      </div>
-    );
-  }
-
-  const fileUrl = lesson.file_url;
-  if (!fileUrl) {
-    return (
-      <div className="lesson-viewer-page lesson-viewer-page--error">
-        <div className="lesson-viewer-page__error-card">
-          <h2>Файл не найден</h2>
-          <p>Для этого урока не загружен файл.</p>
-          <Link to="/lessons" className="lesson-viewer-page__back">
-            Вернуться к каталогу
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  const isLocalhost =
-    window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-  const fileExt = fileUrl.toLowerCase().split("?")[0];
-  const isPptx = fileExt.endsWith(".pptx") || fileExt.endsWith(".ppt");
-  const isPdf = fileExt.endsWith(".pdf");
-
-  const toSameOriginUrl = (u) => {
-    try {
-      const parsed = new URL(u, window.location.href);
-      return parsed.pathname + parsed.search;
-    } catch {
-      return u;
-    }
-  };
-
-  const docs = [{ uri: fileUrl, fileName: lesson.title }];
-
-  const toolbar = (
-    <div className="lesson-viewer-page__toolbar">
-      <Link to="/lessons" className="lesson-viewer-page__back">
-        К каталогу
-      </Link>
-      <h1 className="lesson-viewer-page__title">{lesson.title}</h1>
-      <CatalogEngagementBar
-        kind="lessons"
-        slug={lesson.slug || slug}
-        viewsCount={lesson.views_count}
-        likesCount={lesson.likes_count}
-        isLiked={lesson.is_liked}
-        onChange={(next) =>
-          setLesson((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  views_count: next.views_count,
-                  likes_count: next.likes_count,
-                  is_liked: next.is_liked,
-                }
-              : prev,
-          )
-        }
-      />
-    </div>
-  );
-
-  if (isPdf) {
-    return (
-      <div className="lesson-viewer-page lesson-viewer-page--pdf">
-        {toolbar}
-        <iframe
-          src={toSameOriginUrl(fileUrl)}
-          title={lesson.title}
-          className="lesson-viewer-page__pdf-frame"
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className="lesson-viewer-page lesson-viewer-page--doc">
-      {toolbar}
-      {isLocalhost && isPptx ? (
-        <div className="lesson-viewer-page__warn">
-          <strong>Внимание:</strong> на localhost встроенный просмотр Office недоступен — скачайте
-          файл или проверьте на публичном сервере.
-        </div>
-      ) : null}
-      <main className="lesson-viewer-page__doc-main">
-        <DocViewer
-          documents={docs}
-          pluginRenderers={DocViewerRenderers}
-          style={{ height: "100%", width: "100%" }}
-          config={{
-            header: {
-              disableHeader: true,
-              disableFileName: true,
-              retainURLParams: false,
-            },
-          }}
-        />
-      </main>
-    </div>
-  );
+  return <div className="material-viewer material-viewer--loading">Загрузка…</div>;
 }

@@ -16,6 +16,7 @@ from .choices import (
     GroupStatus,
     HomeworkStatus,
     InvitationStatus,
+    MaterialStatus,
     PlanItemStatus,
     PlanStatus,
     ReviewStatus,
@@ -52,6 +53,7 @@ from .models import (
     LessonPlanEnrollment,
     LessonPlanItem,
     Material,
+    Profile,
     ReviewItem,
     ScheduleEvent,
     Student,
@@ -2209,7 +2211,7 @@ class MaterialViewSet(
     def get_queryset(self):
         teacher = self.get_teacher()
         qs = Material.objects.filter(
-            Q(is_public=True) | Q(teacher=teacher) | Q(teacher__isnull=True, is_public=True)
+            Q(is_public=True) | Q(teacher=teacher) | Q(owner=teacher)
         )
         params = self.request.query_params
         for field in ("direction", "exam_type", "material_type", "status"):
@@ -2220,7 +2222,7 @@ class MaterialViewSet(
         if search:
             qs = qs.filter(Q(title__icontains=search) | Q(topic__icontains=search))
         if params.get("mine") == "true":
-            qs = qs.filter(teacher=teacher)
+            qs = qs.filter(Q(teacher=teacher) | Q(owner=teacher))
         return qs.order_by("-created_at")
 
     def get_serializer_class(self):
@@ -2262,13 +2264,24 @@ class MaterialViewSet(
             SubscriptionAccessService.raise_if_cannot_access_content(request.user, material)
         except AccessDenied as exc:
             return Response(exc.to_dict(), status=status.HTTP_403_FORBIDDEN)
-        if not material.file:
+        fh = None
+        name = "file"
+        if material.file:
+            try:
+                fh = material.file.open("rb")
+                name = material.file.name.split("/")[-1] or "file"
+            except Exception:
+                fh = None
+        if fh is None and material.cabinet_file_id:
+            try:
+                from .files_storage import open_file
+
+                fh = open_file(material.cabinet_file.storage_key, "rb")
+                name = material.cabinet_file.original_name or "file"
+            except Exception:
+                fh = None
+        if fh is None:
             return Response({"detail": "Файл не найден."}, status=status.HTTP_404_NOT_FOUND)
-        try:
-            fh = material.file.open("rb")
-        except Exception:
-            return Response({"detail": "Файл недоступен."}, status=status.HTTP_404_NOT_FOUND)
-        name = material.file.name.split("/")[-1] or "file"
         content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
         if content_type in (
             "text/html",

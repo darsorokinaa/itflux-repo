@@ -18,6 +18,21 @@ class CatalogAccessMixin:
             user = None
         from Cabinet.subscription_access import SubscriptionAccessService
 
+        if instance._meta.app_label == "Generator" and instance._meta.model_name == "lesson":
+            from Cabinet.lesson_access import LessonAccessService
+
+            result = LessonAccessService.get_access(user, instance)
+            data["access"] = {
+                "allowed": result.is_full,
+                "min_plan": result.required_plan,
+                "access_level": getattr(instance, "access_level", "free"),
+                **result.to_dict(),
+            }
+            if not result.is_full:
+                data["file_url"] = None
+                data["archive_url"] = None
+            return data
+
         gate = SubscriptionAccessService.serialize_access_gate(user, instance)
         data["access"] = gate
         if not gate["allowed"]:

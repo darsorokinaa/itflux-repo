@@ -50,6 +50,21 @@ LESSON_COMPLETED = "lesson_completed"
 CORE_ACTIVATED = "core_activated"
 REPEAT_CORE = "repeat_core"
 
+LESSON_PREVIEW_VIEWED = "lesson_preview_viewed"
+LESSON_PAYWALL_VIEWED = "lesson_paywall_viewed"
+LESSON_REGISTRATION_REQUIRED = "lesson_registration_required"
+LESSON_DEMO_WARNING_VIEWED = "lesson_demo_warning_viewed"
+LESSON_DEMO_STARTED = "lesson_demo_started"
+LESSON_DEMO_FINISHED = "lesson_demo_finished"
+LESSON_DEMO_EXPIRED = "lesson_demo_expired"
+LESSON_DEMO_REOPEN_DENIED = "lesson_demo_reopen_denied"
+LESSON_PURCHASE_STARTED = "lesson_purchase_started"
+LESSON_PURCHASE_COMPLETED = "lesson_purchase_completed"
+LESSON_OPENED_SUBSCRIPTION = "lesson_opened_subscription"
+LESSON_OPENED_PURCHASE = "lesson_opened_purchase"
+LESSON_OPENED_FREE = "lesson_opened_free"
+LESSON_OPENED_DEMO = "lesson_opened_demo"
+
 INTENT_EVENTS = frozenset(
     {
         ADD_STUDENT_CTA_VIEWED,
@@ -61,6 +76,7 @@ INTENT_EVENTS = frozenset(
         STUDENT_INVITE_REGISTRATION_STARTED,
         SUBJECT_CREATION_STARTED,
         LESSON_CREATION_STARTED,
+        LESSON_DEMO_WARNING_VIEWED,
     }
 )
 
@@ -83,6 +99,19 @@ CONFIRMED_EVENTS = frozenset(
         LESSON_COMPLETED,
         CORE_ACTIVATED,
         REPEAT_CORE,
+        LESSON_PREVIEW_VIEWED,
+        LESSON_PAYWALL_VIEWED,
+        LESSON_REGISTRATION_REQUIRED,
+        LESSON_DEMO_STARTED,
+        LESSON_DEMO_FINISHED,
+        LESSON_DEMO_EXPIRED,
+        LESSON_DEMO_REOPEN_DENIED,
+        LESSON_PURCHASE_STARTED,
+        LESSON_PURCHASE_COMPLETED,
+        LESSON_OPENED_SUBSCRIPTION,
+        LESSON_OPENED_PURCHASE,
+        LESSON_OPENED_FREE,
+        LESSON_OPENED_DEMO,
     }
 )
 
@@ -117,6 +146,15 @@ ONCE_PER_OBJECT_EVENTS = frozenset(
         LESSON_CREATED,
         LESSON_STARTED,
         LESSON_COMPLETED,
+        LESSON_PREVIEW_VIEWED,
+        LESSON_DEMO_STARTED,
+        LESSON_DEMO_EXPIRED,
+        LESSON_DEMO_REOPEN_DENIED,
+        LESSON_PURCHASE_COMPLETED,
+        LESSON_OPENED_SUBSCRIPTION,
+        LESSON_OPENED_PURCHASE,
+        LESSON_OPENED_FREE,
+        LESSON_OPENED_DEMO,
     }
 )
 

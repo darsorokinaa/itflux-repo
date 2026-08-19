@@ -126,13 +126,48 @@ def read_lesson_file_html(
     return html
 
 
-def lesson_file_base_href(request, lesson) -> str:
-    file_dir = (lesson.file.name or "").replace("\\", "/").rsplit("/", 1)[0]
-    path = f"/media/{file_dir}/" if file_dir else "/media/"
+def lesson_file_base_href(request, lesson, slug: str = "") -> str:
+    slug = slug or getattr(lesson, "slug", "") or ""
+    path = f"/api/lessons/{slug}/assets/"
     base_href = request.build_absolute_uri(path)
     if not base_href.endswith("/"):
         base_href += "/"
     return base_href
+
+
+def resolve_lesson_file_asset(lesson, asset_path: str) -> str | None:
+    """Resolve relative asset path against the lesson HTML file directory."""
+    if not getattr(lesson, "file", None) or not lesson.file.name:
+        return None
+    asset_path = (asset_path or "").replace("\\", "/").lstrip("/")
+    if not asset_path or ".." in asset_path.split("/"):
+        return None
+    file_dir = lesson.file.name.replace("\\", "/").rsplit("/", 1)[0]
+    combined = f"{file_dir}/{asset_path}" if file_dir else asset_path
+    return combined
+
+
+def lesson_file_asset_response(lesson, storage_path: str):
+    import os
+
+    from django.conf import settings
+
+    abs_path = os.path.join(settings.MEDIA_ROOT, storage_path.replace("\\", "/"))
+    media_root = os.path.abspath(settings.MEDIA_ROOT)
+    if not os.path.abspath(abs_path).startswith(media_root):
+        raise Http404("Файл не найден")
+    if not os.path.isfile(abs_path):
+        raise Http404("Файл не найден")
+    try:
+        with open(abs_path, "rb") as handle:
+            data = handle.read()
+    except OSError as exc:
+        raise Http404("Файл не найден") from exc
+    content_type = mimetypes.guess_type(storage_path)[0] or "application/octet-stream"
+    response = HttpResponse(data, content_type=content_type)
+    response["X-Content-Type-Options"] = "nosniff"
+    response["Cache-Control"] = "private, no-store"
+    return response
 
 
 def _decode_html_bytes(raw: bytes) -> str:
@@ -142,6 +177,129 @@ def _decode_html_bytes(raw: bytes) -> str:
         except UnicodeDecodeError:
             continue
     return raw.decode("utf-8", errors="replace")
+
+
+def inject_demo_overlay(
+    html: str,
+    *,
+    partial: bool = False,
+    expires_at: str = "",
+    slug: str = "",
+    preview_url: str = "",
+) -> str:
+    """Watermark + demo timer. Контент и вёрстка урока не меняются."""
+    tiles = "".join(
+        f'<span class="itflux-demo-wm__tile" style="top:{y}%;left:{x}%">ДЕМОВЕРСИЯ · ЦИФРОВОЙ ПОТОК</span>'
+        for y in range(-6, 118, 28)
+        for x in range(-10, 108, 38)
+    )
+    continue_html = (
+        '<div class="itflux-demo-continue">Продолжение доступно в полной версии.</div>'
+        if partial
+        else ""
+    )
+    timer_html = (
+        '<div class="itflux-demo-timer" id="itflux-demo-timer" aria-live="polite">'
+        "Демоверсия · осталось — мин"
+        "</div>"
+        if expires_at
+        else ""
+    )
+    poll_url = f"/api/lessons/{slug}/" if slug else ""
+    preview = preview_url or (f"/lessons?preview={slug}" if slug else "/lessons")
+    timer_script = ""
+    if expires_at and poll_url:
+        timer_script = f"""
+<script id="itflux-demo-timer-script">
+(function() {{
+  var expiresAt = new Date({json.dumps(expires_at)});
+  var timerEl = document.getElementById("itflux-demo-timer");
+  var previewUrl = {json.dumps(preview)};
+  var pollUrl = {json.dumps(poll_url)};
+  function formatRemaining(ms) {{
+    var total = Math.max(0, Math.floor(ms / 1000));
+    var minutes = Math.ceil(total / 60);
+    return minutes;
+  }}
+  function updateTimer() {{
+    if (!timerEl) return;
+    var remaining = expiresAt.getTime() - Date.now();
+    if (remaining <= 0) {{
+      timerEl.textContent = "Демоверсия закончилась";
+      window.location.href = previewUrl + (previewUrl.includes("?") ? "&" : "?") + "demo_expired=1";
+      return;
+    }}
+    timerEl.textContent = "Демоверсия · осталось " + formatRemaining(remaining) + " мин";
+  }}
+  function checkAccess() {{
+    fetch(pollUrl, {{ credentials: "same-origin" }})
+      .then(function(res) {{ return res.ok ? res.json() : null; }})
+      .then(function(data) {{
+        var access = data && data.lesson && data.lesson.access;
+        if (!access || access.content_mode !== "demo" || !access.demo_active) {{
+          window.location.href = previewUrl + (previewUrl.includes("?") ? "&" : "?") + "demo_expired=1";
+        }}
+      }})
+      .catch(function() {{}});
+  }}
+  updateTimer();
+  setInterval(updateTimer, 15000);
+  setInterval(checkAccess, 30000);
+}})();
+</script>
+"""
+    snippet = f"""
+<style id="itflux-demo-style">
+  .itflux-demo-timer {{
+    position: fixed; top: 0; left: 0; right: 0; z-index: 2147483002; margin: 0;
+    padding: 8px 14px; background: rgba(255, 247, 237, 0.94); color: #9a3412;
+    font: 650 13px/1.3 system-ui, sans-serif; text-align: center; pointer-events: none;
+  }}
+  .itflux-demo-wm {{ position: fixed; inset: 0; pointer-events: none; z-index: 2147483000; overflow: hidden; }}
+  .itflux-demo-wm__tile {{
+    position: absolute; transform: rotate(-26deg); font-weight: 700; font-size: clamp(16px, 2.6vw, 30px);
+    letter-spacing: .06em; color: rgba(180, 48, 48, .09); white-space: nowrap; user-select: none;
+    font-family: system-ui, sans-serif;
+  }}
+  .itflux-demo-continue {{
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 2147483001; margin: 0;
+    padding: 12px 16px; background: rgba(255, 250, 244, 0.94); border-top: 1px solid #eadfce;
+    color: #3f2f22; font-family: system-ui, sans-serif; font-weight: 650; font-size: 14px;
+    text-align: center;
+  }}
+</style>
+{timer_html}
+<div class="itflux-demo-wm" aria-hidden="true">{tiles}</div>
+{continue_html}
+{timer_script}
+"""
+    if re.search(r"</body>", html, re.I):
+        return re.sub(r"</body>", snippet + "</body>", html, count=1, flags=re.I)
+    return html + snippet
+
+
+def inject_full_overlay(html: str, *, label: str = "") -> str:
+    """Delicate watermark for full-access viewing."""
+    text = label or "Цифровой поток"
+    tiles = "".join(
+        f'<span class="itflux-full-wm__tile" style="top:{y}%;left:{x}%">{text}</span>'
+        for y in range(10, 110, 34)
+        for x in range(8, 92, 36)
+    )
+    snippet = f"""
+<style id="itflux-full-wm-style">
+  .itflux-full-wm {{ position: fixed; inset: 0; pointer-events: none; z-index: 2147482000; overflow: hidden; }}
+  .itflux-full-wm__tile {{
+    position: absolute; transform: rotate(-24deg); font-weight: 600; font-size: clamp(12px, 1.8vw, 20px);
+    letter-spacing: .04em; color: rgba(36, 28, 22, .06); white-space: nowrap; user-select: none;
+    font-family: system-ui, sans-serif;
+  }}
+</style>
+<div class="itflux-full-wm" aria-hidden="true">{tiles}</div>
+"""
+    if re.search(r"</body>", html, re.I):
+        return re.sub(r"</body>", snippet + "</body>", html, count=1, flags=re.I)
+    return html + snippet
 
 
 def read_archive_html(
@@ -177,13 +335,8 @@ def archive_asset_response(zf: zipfile.ZipFile, entry: str) -> HttpResponse:
     data = zf.read(entry)
     content_type = mimetypes.guess_type(entry)[0] or "application/octet-stream"
     response = HttpResponse(data, content_type=content_type)
-    if content_type.startswith("image/") or content_type in {
-        "text/css",
-        "application/javascript",
-        "font/woff",
-        "font/woff2",
-    }:
-        response["Cache-Control"] = "public, max-age=86400"
+    response["X-Content-Type-Options"] = "nosniff"
+    response["Cache-Control"] = "private, no-store"
     return response
 
 

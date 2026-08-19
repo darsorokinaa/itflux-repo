@@ -153,7 +153,7 @@ class SubscriptionAccessTests(TestCase):
         )
         self.assertTrue(SubscriptionAccessService.can_access_content(self.user, material))
 
-    def test_student_bypasses_teacher_plan_gate(self):
+    def test_student_does_not_bypass_catalog_material_gate(self):
         student_user = User.objects.create_user("stu1", "s1@example.com", "pass")
         student_user.profile.role = Profile.Role.STUDENT
         student_user.profile.save(update_fields=["role"])
@@ -164,10 +164,11 @@ class SubscriptionAccessTests(TestCase):
             access_level=ContentAccessLevel.PREMIUM,
             is_public=True,
         )
-        self.assertTrue(SubscriptionAccessService.can_access_content(student_user, material))
-        SubscriptionAccessService.raise_if_cannot_access_content(student_user, material)
+        self.assertFalse(SubscriptionAccessService.can_access_content(student_user, material))
         gate = SubscriptionAccessService.serialize_access_gate(student_user, material)
-        self.assertTrue(gate["allowed"])
+        self.assertFalse(gate["allowed"])
+        with self.assertRaises(AccessDenied):
+            SubscriptionAccessService.raise_if_cannot_access_content(student_user, material)
         self.assertFalse(SubscriptionAccessService.can_access_content(self.user, material))
         self.assertFalse(SubscriptionAccessService.can_access_content(None, material))
 

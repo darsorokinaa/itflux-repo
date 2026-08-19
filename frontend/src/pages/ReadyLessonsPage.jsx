@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { ClipboardList, PenLine, Presentation, Search, StickyNote } from "lucide-react";
 import AccessGateBadge from "../components/AccessGateBadge";
 import CatalogEngagementBar from "../components/CatalogEngagementBar";
+import LessonPreviewModal from "../components/LessonPreviewModal";
 import StateView from "../components/StateView";
 import { isCatalogLocked } from "../accessGate/accessGate";
 import { useAccessGate, useCabinetAuthed } from "../hooks/useAccessGate";
 import { CATALOG_ORDERING_OPTIONS, registerCatalogView } from "../utils/catalogEngagement";
+import "../styles/material-access.css";
 
 const patternInf = new URL("../assets/subject-patterns/inf.svg", import.meta.url).href;
 const patternMath = new URL("../assets/subject-patterns/math.svg", import.meta.url).href;
@@ -190,7 +193,7 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen }) {
 
         {locked ? (
           <button type="button" className="lesson-card-v3__btn" onClick={() => onLockedOpen?.(lesson)}>
-            Открыть урок
+            Подробнее
           </button>
         ) : canOpenLesson ? (
           <a
@@ -213,6 +216,11 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen }) {
 }
 
 export default function ReadyLessonsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const previewSlug = searchParams.get("preview") || "";
+  const demoExpired = searchParams.get("demo_expired") === "1";
+  const paymentId = searchParams.get("payment_id") || "";
+  const paymentStatus = searchParams.get("status") || "";
   const [lessons, setLessons] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -246,14 +254,18 @@ export default function ReadyLessonsPage() {
   }, []);
 
   const handleLockedOpen = useCallback((lesson) => {
-    openGate({
-      reason: authed ? "insufficient_plan" : "anonymous",
-      resourceType: "lesson",
-      requiredPlan: lesson?.access?.min_plan,
-      resourceId: lesson?.slug,
-      returnUrl: `/lessons/${encodeURIComponent(lesson?.slug || "")}/view`,
-    });
-  }, [authed, openGate]);
+    if (!lesson?.slug) return;
+    setSearchParams({ preview: lesson.slug }, { replace: false });
+  }, [setSearchParams]);
+
+  const closePreview = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("preview");
+    next.delete("demo_expired");
+    next.delete("payment_id");
+    next.delete("status");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -558,6 +570,14 @@ export default function ReadyLessonsPage() {
         </main>
       </div>
       {accessGateModal}
+      <LessonPreviewModal
+        open={Boolean(previewSlug)}
+        slug={previewSlug}
+        onClose={closePreview}
+        demoExpired={demoExpired}
+        paymentId={paymentId}
+        paymentStatus={paymentStatus}
+      />
     </div>
   );
 }

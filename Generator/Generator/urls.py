@@ -19,7 +19,7 @@ if getattr(settings, "ADMIN_OTP_REQUIRED", False):
 
 
 def media_serve(request, path):
-    """Публичный media. Приватные префиксы кабинета — только через авторизованный API."""
+    """Публичный media. Приватные префиксы кабинета и premium-уроков — только через API."""
     normalized = (path or "").lstrip("/").replace("\\", "/")
     if (
         normalized.startswith("cabinet/boards/")
@@ -27,6 +27,8 @@ def media_serve(request, path):
         or normalized.startswith("cabinet/my-files/")
         or normalized.startswith("cabinet/homework/")
         or normalized.startswith("cabinet/materials/")
+        or normalized.startswith("lessons/files/")
+        or normalized.startswith("lessons/archives/")
     ):
         return HttpResponseForbidden("Доступ к файлу только через API.")
     return serve(request, path, document_root=settings.MEDIA_ROOT)
@@ -130,7 +132,10 @@ urlpatterns = [
         name="seasonal_theme_preview_stop",
     ),
     path("api/lessons/", views.api_lessons, name="api_lessons"),
+    path("api/lessons/purchases/", views.api_lesson_purchases, name="api_lesson_purchases"),
     path("api/lessons/<slug:slug>/view/", views.api_lesson_archive_view, name="api_lesson_archive_view"),
+    path("api/lessons/<slug:slug>/demo/", views.api_lesson_start_demo, name="api_lesson_start_demo"),
+    path("api/lessons/<slug:slug>/purchase/", views.api_lesson_purchase, name="api_lesson_purchase"),
     path(
         "api/lessons/<slug:slug>/stats/view/",
         views.api_lesson_stats_view,
@@ -145,6 +150,11 @@ urlpatterns = [
         "api/lessons/<slug:slug>/archive/<path:asset_path>",
         views.api_lesson_archive_asset,
         name="api_lesson_archive_asset",
+    ),
+    path(
+        "api/lessons/<slug:slug>/assets/<path:asset_path>",
+        views.api_lesson_file_asset,
+        name="api_lesson_file_asset",
     ),
     path("api/lessons/<slug:slug>/", views.api_lesson_detail, name="api_lesson_detail"),
     path("api/interesting/", views.api_interesting, name="api_interesting"),

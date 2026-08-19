@@ -1361,7 +1361,7 @@ def material_file_url(material: Material, *, for_student: bool = False) -> str:
             or name.startswith("cabinet/boards_private/")
         ):
             return _legacy_material_file_api_url(material, for_student=for_student, inline=False)
-        return material.file.url
+        return _legacy_material_file_api_url(material, for_student=for_student, inline=False)
     return ""
 
 
@@ -1385,7 +1385,7 @@ def material_view_url(material: Material, *, for_student: bool = False) -> str:
             or name.startswith("cabinet/boards/")
         ):
             return _legacy_material_file_api_url(material, for_student=for_student, inline=True)
-        return material.file.url
+        return _legacy_material_file_api_url(material, for_student=for_student, inline=True)
     return (material.external_url or "").strip()
 
 

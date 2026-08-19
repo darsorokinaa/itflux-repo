@@ -3963,18 +3963,47 @@ def api_lessons(request):
     return JsonResponse({"lessons": serializer.data, "total": len(serializer.data)})
 
 
-def _lesson_content_access_denied(request, lesson):
-    """None если доступ есть; иначе JsonResponse 403."""
-    if _lesson_viewer_is_teacher_or_admin(request):
-        return None
-    from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
+def _lesson_content_access(request, lesson):
+    """(access, denied_response). denied_response is None if can_view."""
+    from Cabinet.lesson_access import LessonAccessService
 
     user = request.user if getattr(request.user, "is_authenticated", False) else None
-    try:
-        SubscriptionAccessService.raise_if_cannot_access_content(user, lesson)
-    except AccessDenied as exc:
-        return JsonResponse({"error": exc.to_dict()}, status=403)
-    return None
+    access = LessonAccessService.get_access(user, lesson)
+    if access.can_view:
+        return access, None
+    return access, JsonResponse({"error": LessonAccessService._denied(access).to_dict()}, status=403)
+
+
+def _lesson_content_access_denied(request, lesson):
+    """None если доступ есть; иначе JsonResponse 403."""
+    _, denied = _lesson_content_access(request, lesson)
+    return denied
+
+
+def _lesson_viewer_label(user) -> str:
+    if user is None or not getattr(user, "is_authenticated", False):
+        return "Цифровой поток"
+    email = (getattr(user, "email", None) or "").strip()
+    if email:
+        local = email.split("@", 1)[0]
+        if len(local) > 12:
+            local = local[:9] + "…"
+        return f"Цифровой поток · {local}"
+    username = (getattr(user, "username", None) or "").strip()
+    if username:
+        return f"Цифровой поток · {username[:12]}"
+    return "Цифровой поток"
+
+
+def _lesson_protected_response(response, access):
+    response["X-Content-Type-Options"] = "nosniff"
+    if access.demo_active:
+        response["Cache-Control"] = "private, no-store"
+        response["X-Lesson-Access"] = "demo"
+    else:
+        response["Cache-Control"] = "private, no-store"
+        response["X-Lesson-Access"] = access.access_type or "full"
+    return response
 
 
 @csrf_exempt
@@ -4017,13 +4046,19 @@ def api_lesson_stats_like(request, slug):
 @require_http_methods(["GET"])
 def api_lesson_detail(request, slug):
     from .engagement import annotate_engagement
+    from Cabinet.lesson_access import LessonAccessService
 
     qs = annotate_engagement(_visible_lessons_queryset(request), request)
     lesson = get_object_or_404(qs, slug=slug)
-    from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
-
     user = request.user if getattr(request.user, "is_authenticated", False) else None
-    access = SubscriptionAccessService.serialize_access_gate(user, lesson)
+    access_result = LessonAccessService.get_access(user, lesson)
+    LessonAccessService.record_opened(user, lesson, access_result)
+    access = {
+        "allowed": access_result.is_full,
+        "min_plan": access_result.required_plan,
+        "access_level": lesson.access_level,
+        **access_result.to_dict(),
+    }
     lesson_data = LessonCatalogSerializer(lesson, context={"request": request}).data
     lesson_data.update(
         {
@@ -4031,45 +4066,106 @@ def api_lesson_detail(request, slug):
             "student_result": lesson.student_result,
             "viewer": {"is_teacher_or_admin": _lesson_viewer_is_teacher_or_admin(request)},
             "access": access,
+            "locked": not access_result.can_view,
         }
     )
-    if not access["allowed"] and not _lesson_viewer_is_teacher_or_admin(request):
-        # Метаданные доступны, полный контент — только при доступе
-        lesson_data["teacher_goal"] = ""
-        lesson_data["student_result"] = ""
+    if not access_result.is_full:
         lesson_data["file_url"] = None
         lesson_data["archive_url"] = None
-        lesson_data["locked"] = True
-        return JsonResponse({"lesson": lesson_data, "upgrade_required": True, **AccessDenied(
-            "CONTENT_ACCESS_DENIED",
-            "Материал доступен на более высоком тарифе",
-            feature="content",
-            min_plan=access["min_plan"],
-        ).to_dict()}, status=403 if request.GET.get("enforce") == "1" else 200)
     return JsonResponse({"lesson": lesson_data})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_lesson_start_demo(request, slug):
+    from Cabinet.lesson_access import AccessDenied, LessonAccessService
+
+    if not getattr(request.user, "is_authenticated", False):
+        return JsonResponse(
+            {"code": "REGISTRATION_REQUIRED", "message": "Создайте бесплатный аккаунт, чтобы ознакомиться с демоверсией."},
+            status=401,
+        )
+    lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
+    try:
+        payload = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        payload = {}
+    terms = payload.get("terms_accepted")
+    accepted = terms is True or str(terms or "").strip().lower() in ("1", "true", "yes", "on")
+    try:
+        demo = LessonAccessService.start_demo(request.user, lesson, terms_accepted=accepted)
+    except AccessDenied as exc:
+        return JsonResponse(exc.to_dict(), status=403)
+    access = LessonAccessService.get_access(request.user, lesson)
+    return JsonResponse({
+        "ok": True,
+        "demo": {
+            "opened_at": demo.opened_at.isoformat(),
+            "expires_at": demo.expires_at.isoformat(),
+            "terms_accepted_at": demo.terms_accepted_at.isoformat() if demo.terms_accepted_at else None,
+        },
+        "access": access.to_dict(),
+        "view_url": f"/api/lessons/{lesson.slug}/view/",
+    })
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_lesson_purchase(request, slug):
+    from Cabinet.lesson_access import AccessDenied, LessonPurchaseService
+
+    if not getattr(request.user, "is_authenticated", False):
+        return JsonResponse({"code": "AUTH_REQUIRED", "message": "Войдите, чтобы купить урок."}, status=401)
+    lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
+    try:
+        payload = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        payload = {}
+    try:
+        result = LessonPurchaseService.create_checkout(
+            request.user,
+            lesson,
+            idempotency_key=(payload.get("idempotency_key") or "").strip() or None,
+        )
+    except AccessDenied as exc:
+        return JsonResponse(exc.to_dict(), status=403)
+    except (ValueError, NotImplementedError) as exc:
+        return JsonResponse({"detail": str(exc), "code": "PAYMENT_UNAVAILABLE"}, status=503)
+    return JsonResponse(result, status=201)
+
+
+@require_http_methods(["GET"])
+def api_lesson_purchases(request):
+    from Cabinet.lesson_access import LessonPurchaseService
+
+    if not getattr(request.user, "is_authenticated", False):
+        return JsonResponse({"items": []}, status=401)
+    return JsonResponse({"items": LessonPurchaseService.list_for_user(request.user)})
 
 
 @require_http_methods(["GET"])
 def api_lesson_archive_view(request, slug):
     lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
-
-    if not _lesson_viewer_is_teacher_or_admin(request):
-        from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
-
-        user = request.user if getattr(request.user, "is_authenticated", False) else None
-        try:
-            SubscriptionAccessService.raise_if_cannot_access_content(user, lesson)
-        except AccessDenied as exc:
-            return JsonResponse({"error": exc.to_dict()}, status=403)
+    access, denied = _lesson_content_access(request, lesson)
+    if denied:
+        return denied
 
     from .lesson_archive import (
         archive_base_dir,
         find_html_entry,
+        inject_demo_overlay,
+        inject_full_overlay,
         lesson_file_base_href,
         open_lesson_archive,
         read_archive_html,
         read_lesson_file_html,
     )
+
+    user = request.user if getattr(request.user, "is_authenticated", False) else None
+    demo = access.access_type == "demo" and access.demo_active
+    partial = demo and getattr(lesson, "demo_mode", "") == "partial"
+    expires_at = access.demo_expires_at.isoformat() if demo and access.demo_expires_at else ""
+    preview_url = f"/lessons?preview={slug}"
 
     if lesson.archive:
         with open_lesson_archive(lesson.archive.path) as zf:
@@ -4081,21 +4177,69 @@ def api_lesson_archive_view(request, slug):
             if not base_href.endswith("/"):
                 base_href += "/"
             html = read_archive_html(zf, html_entry, base_href, request=request, slug=slug)
-        return HttpResponse(html, content_type="text/html; charset=utf-8")
+        if demo:
+            html = inject_demo_overlay(
+                html,
+                partial=partial,
+                expires_at=expires_at,
+                slug=slug,
+                preview_url=preview_url,
+            )
+        elif access.is_full:
+            html = inject_full_overlay(html, label=_lesson_viewer_label(user))
+        response = HttpResponse(html, content_type="text/html; charset=utf-8")
+        return _lesson_protected_response(response, access)
 
     if lesson.file:
         file_path = lesson.file.path
         if not file_path.lower().endswith(".html"):
+            if demo:
+                from Cabinet.material_watermark import demo_file_response
+
+                response = demo_file_response(lesson, inline=True)
+                return _lesson_protected_response(response, access)
             from django.http import FileResponse
             import mimetypes
             content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
-            return FileResponse(open(file_path, "rb"), content_type=content_type)
-            
-        base_href = lesson_file_base_href(request, lesson)
+            if not access.can_download:
+                return JsonResponse({"error": {"code": "DOWNLOAD_FORBIDDEN"}}, status=403)
+            response = FileResponse(open(file_path, "rb"), content_type=content_type)
+            return _lesson_protected_response(response, access)
+
+        base_href = lesson_file_base_href(request, lesson, slug=slug)
         html = read_lesson_file_html(file_path, base_href, request=request, slug=slug)
-        return HttpResponse(html, content_type="text/html; charset=utf-8")
+        if demo:
+            html = inject_demo_overlay(
+                html,
+                partial=partial,
+                expires_at=expires_at,
+                slug=slug,
+                preview_url=preview_url,
+            )
+        elif access.is_full:
+            html = inject_full_overlay(html, label=_lesson_viewer_label(user))
+        response = HttpResponse(html, content_type="text/html; charset=utf-8")
+        return _lesson_protected_response(response, access)
 
     raise Http404("Урок не найден")
+
+
+@require_http_methods(["GET"])
+def api_lesson_file_asset(request, slug, asset_path):
+    lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
+    if not lesson.file:
+        raise Http404("Файл урока не найден")
+
+    denied = _lesson_content_access_denied(request, lesson)
+    if denied:
+        return denied
+
+    from .lesson_archive import lesson_file_asset_response, resolve_lesson_file_asset
+
+    storage_path = resolve_lesson_file_asset(lesson, asset_path)
+    if not storage_path:
+        raise Http404("Файл не найден")
+    return lesson_file_asset_response(lesson, storage_path)
 
 
 @require_http_methods(["GET"])
@@ -4104,14 +4248,9 @@ def api_lesson_archive_asset(request, slug, asset_path):
     if not lesson.archive:
         raise Http404("Архив урока не найден")
 
-    if not _lesson_viewer_is_teacher_or_admin(request):
-        from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
-
-        user = request.user if getattr(request.user, "is_authenticated", False) else None
-        try:
-            SubscriptionAccessService.raise_if_cannot_access_content(user, lesson)
-        except AccessDenied as exc:
-            return JsonResponse({"error": exc.to_dict()}, status=403)
+    denied = _lesson_content_access_denied(request, lesson)
+    if denied:
+        return denied
 
     from .lesson_archive import (
         archive_asset_response,
