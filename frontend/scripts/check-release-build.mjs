@@ -60,9 +60,18 @@ if (/fonts\.googleapis\.com|fonts\.gstatic\.com|cdn\.jsdelivr\.net|unpkg\.com/.t
 }
 if (!index.includes("/boot-watchdog.js")) fail("index.html missing boot-watchdog.js");
 if (!fs.existsSync(path.join(distDir, "boot-watchdog.js"))) fail("boot-watchdog.js missing from dist");
+if (!index.includes("/vendor/mathjax/itflux-config.js")) fail("index.html missing local MathJax config");
+if (!index.includes("/vendor/mathjax/tex-mml-chtml.js")) fail("index.html missing local MathJax bundle");
+if (!fs.existsSync(path.join(distDir, "vendor/mathjax/itflux-config.js"))) {
+  fail("vendor/mathjax/itflux-config.js missing from dist");
+}
+if (!fs.existsSync(path.join(distDir, "vendor/mathjax/tex-mml-chtml.js"))) {
+  fail("vendor/mathjax/tex-mml-chtml.js missing from dist");
+}
 ok("index.html embeds app version");
 ok("index.html has no blocked CDN URLs");
 ok("boot watchdog ships with release");
+ok("local MathJax ships with release");
 
 const mains = fs.readdirSync(assetsDir).filter((f) => /^main-[a-zA-Z0-9_-]+\.js$/.test(f));
 if (!mains.length) fail("no hashed main-*.js chunks");

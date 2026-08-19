@@ -47,24 +47,8 @@
 
   <link href="/vendor/bootstrap/bootstrap.min.css" rel="stylesheet" />
 
-  <script>
-    window.MathJax = {
-      tex: {
-        inlineMath: [['$', '$'], ['\\(', '\\)']],
-        displayMath: [['$$', '$$'], ['\\[', '\\]']]
-      },
-      /* CHTML: глифы формул — шрифт MathJax; Calibri только через CSS для mjx-mtext (\text{}) */
-      chtml: {
-        scale: 1.525,
-        /* false: метрики \text{…} из шрифта MathJax — стабильная ширина кириллицы; true + Inter давало «схлопывание» букв */
-        mtextInheritFont: false,
-        matchFontHeight: false
-      },
-      startup: { typeset: false }
-    };
-  </script>
-
-  <script async src="/vendor/mathjax/tex-mml-chtml.js"></script>
+  <script src="/vendor/mathjax/itflux-config.js"></script>
+  <script id="MathJax-script" src="/vendor/mathjax/tex-mml-chtml.js"></script>
   <script defer src="/vendor/bootstrap/bootstrap.min.js"></script>
 
 </head>

@@ -1471,7 +1471,11 @@ export function typesetWorkbookMath(doc: Document): Promise<void> {
     });
   }
   const startup = mj.startup?.promise ?? Promise.resolve();
-  return startup
+  const startupOrTimeout = Promise.race([
+    startup.catch(() => undefined),
+    new Promise((resolve) => setTimeout(resolve, 2500)),
+  ]);
+  return startupOrTimeout
     .then(() => mj.typesetPromise?.())
     .then(() => {
       doc.querySelectorAll(".workbook-task__body, .workbook-task__body--answer-key").forEach((el) => {
@@ -1571,21 +1575,11 @@ export function buildWorkbookHtml(tasks: WorkbookTask[], meta: WorkbookMeta): st
   <title>${docTitle} | Цифровой поток</title>
   ${origin ? `<base href="${escapeHtml(origin)}/">` : ""}
   <link rel="stylesheet" href="/fonts/workbook.css" />
+  <script src="/vendor/mathjax/itflux-config.js"></script>
   <script>
-    window.MathJax = {
-      tex: {
-        inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
-        displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']]
-      },
-      chtml: {
-        scale: 1.38,
-        mtextInheritFont: false,
-        matchFontHeight: false
-      },
-      startup: { typeset: false }
-    };
+    if (window.MathJax && window.MathJax.chtml) window.MathJax.chtml.scale = 1.38;
   </script>
-  <script async src="/vendor/mathjax/tex-mml-chtml.js"></script>
+  <script id="MathJax-script" src="/vendor/mathjax/tex-mml-chtml.js"></script>
   <style>${workbookPrintCss()}</style>
 </head>
 <body class="${bodyClasses}">

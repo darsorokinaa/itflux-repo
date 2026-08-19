@@ -87,15 +87,18 @@ function Layout() {
   }, [pathname, search, cookieAccepted]);
 
   useEffect(() => {
+    let attempts = 0;
+    let timer = 0;
     const run = () => {
       if (window.MathJax?.typesetPromise) {
         window.MathJax.typesetPromise().catch(() => {});
-      } else {
-        setTimeout(run, 100);
+      } else if (attempts < 40) {
+        attempts += 1;
+        timer = window.setTimeout(run, 100);
       }
     };
-    const id = setTimeout(run, 100);
-    return () => clearTimeout(id);
+    timer = window.setTimeout(run, 100);
+    return () => clearTimeout(timer);
   }, [pathname]);
 
   const showMobileTabBar =

@@ -321,15 +321,31 @@ function unwrapBackendMathSpans(root) {
   }
 }
 
+function waitForMathJaxStartup(mj, ms = 2500) {
+  const p = mj?.startup?.promise;
+  if (!p || typeof p.then !== "function") return Promise.resolve();
+  return Promise.race([
+    p.catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, ms)),
+  ]);
+}
+
+function withTimeout(promise, ms) {
+  if (!promise || typeof promise.then !== "function") return Promise.resolve();
+  return Promise.race([
+    promise.catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, ms)),
+  ]);
+}
+
 function typesetMathInElement(el, { plainHtml = false } = {}) {
   const mj = window.MathJax;
   if (!mj?.typesetPromise) return Promise.resolve();
-  const startup = mj.startup?.promise ?? Promise.resolve();
   mathJaxPromise = mathJaxPromise
-    .then(() => startup)
+    .then(() => waitForMathJaxStartup(mj))
     .then(() => {
       mj.typesetClear?.([el]);
-      return mj.typesetPromise([el]);
+      return withTimeout(mj.typesetPromise([el]), 8000);
     })
     .then(() => {
       if (plainHtml) polishBankTaskMathJaxTables(el);
@@ -1616,15 +1632,15 @@ function MathContentInner({
     }
 
     let cancelled = false;
+    let attempts = 0;
     const run = () => {
       if (cancelled) return;
       if (window.MathJax?.typesetPromise) {
-        if (!cancelled) {
-          typesetMathInElement(el, { plainHtml }).catch((err) => {
-            console.error("MATHJAX_TYPESET_ERR:", err);
-          });
-        }
-      } else {
+        typesetMathInElement(el, { plainHtml }).catch((err) => {
+          console.error("MATHJAX_TYPESET_ERR:", err);
+        });
+      } else if (attempts < 50) {
+        attempts += 1;
         setTimeout(run, 100);
       }
     };

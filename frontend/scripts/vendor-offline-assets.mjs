@@ -70,6 +70,9 @@ async function vendorBootstrap() {
 }
 
 async function vendorMathjax() {
+  const dest = path.join(VENDOR, "mathjax");
+  const localConfig = path.join(dest, "itflux-config.js");
+  const configBackup = fs.existsSync(localConfig) ? fs.readFileSync(localConfig) : null;
   const tgz = path.join(VENDOR, "mathjax.tgz");
   await download("https://registry.npmjs.org/mathjax/-/mathjax-3.2.2.tgz", tgz);
   const extractDir = path.join(VENDOR, "mathjax-extract");
@@ -77,9 +80,9 @@ async function vendorMathjax() {
   mkdir(extractDir);
   execFileSync("tar", ["-xzf", tgz, "-C", extractDir]);
   const es5 = path.join(extractDir, "package", "es5");
-  const dest = path.join(VENDOR, "mathjax");
   fs.rmSync(dest, { recursive: true, force: true });
   fs.cpSync(es5, dest, { recursive: true });
+  if (configBackup) fs.writeFileSync(localConfig, configBackup);
   fs.rmSync(extractDir, { recursive: true, force: true });
   fs.rmSync(tgz, { force: true });
   console.log("  vendor/mathjax/ (es5)");
