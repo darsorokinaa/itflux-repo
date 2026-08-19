@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 ACCESS_PURCHASED = "purchased"
 ACCESS_SUBSCRIPTION = "subscription"
 ACCESS_FREE_START = "free_start"
+ACCESS_STUDENT = "student"
 ACCESS_OWNER = "owner"
 ACCESS_DEMO = "demo"
 ACCESS_LOCKED = "locked"
@@ -179,6 +180,7 @@ class LessonAccessResult:
             ACCESS_PURCHASED,
             ACCESS_SUBSCRIPTION,
             ACCESS_FREE_START,
+            ACCESS_STUDENT,
             ACCESS_OWNER,
         )
 
@@ -305,6 +307,11 @@ class LessonAccessService:
         if cls.is_owner(user, lesson):
             return cls._full(result, ACCESS_OWNER)
 
+        from .student_content_access import student_can_access_catalog_lesson
+
+        if student_can_access_catalog_lesson(user, lesson):
+            return cls._student_full(result)
+
         purchased = _purchased if _purchased is not None else cls.has_purchase(user, lesson)
         if purchased:
             return cls._full(result, ACCESS_PURCHASED)
@@ -365,6 +372,25 @@ class LessonAccessService:
         result.message = ""
         result.reason_code = ""
         result.cta = [{"type": "open", "label": "Открыть", "primary": True}]
+        return result
+
+    @classmethod
+    def _student_full(cls, result: LessonAccessResult) -> LessonAccessResult:
+        """Полный просмотр для привязанного ученика; без скачивания/выдачи оригинала."""
+        result.access_type = ACCESS_STUDENT
+        result.can_view = True
+        result.can_download = False
+        result.can_save = False
+        result.can_attach = False
+        result.can_assign = False
+        result.can_export = False
+        result.can_purchase = False
+        result.demo_available = False
+        result.demo_used = False
+        result.demo_active = False
+        result.message = ""
+        result.reason_code = ""
+        result.cta = [{"type": "open", "label": "Открыть урок", "primary": True}]
         return result
 
     @classmethod

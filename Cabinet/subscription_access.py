@@ -204,8 +204,16 @@ class SubscriptionAccessService:
                 return False
             if not user or not getattr(user, "is_authenticated", False):
                 return False
-        elif SubscriptionAccessService.is_student_user(user):
-            return True
+        else:
+            from .student_content_access import (
+                is_real_linked_student,
+                student_can_access_catalog_interesting,
+            )
+
+            if is_real_linked_student(user) and student_can_access_catalog_interesting(user, content):
+                return True
+            if SubscriptionAccessService.is_student_user(user):
+                return False
         level = getattr(content, "access_level", ContentAccessLevel.FREE) or ContentAccessLevel.FREE
         required = SubscriptionAccessService.content_level_rank(level)
         if required <= 0:
