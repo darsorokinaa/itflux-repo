@@ -190,6 +190,13 @@ class LessonAccessResult:
             return "demo"
         return "denied"
 
+    @property
+    def should_apply_viewer_watermark(self) -> bool:
+        """Purchased/owner views are clean; tariff/demo use overlays elsewhere."""
+        if not self.is_full or self.demo_active:
+            return False
+        return self.access_type not in (ACCESS_PURCHASED, ACCESS_OWNER)
+
 
 class LessonAccessService:
     """Единая точка проверки entitlement к Generator.Lesson."""

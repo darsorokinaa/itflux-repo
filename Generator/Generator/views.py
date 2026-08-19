@@ -4185,7 +4185,7 @@ def api_lesson_archive_view(request, slug):
                 slug=slug,
                 preview_url=preview_url,
             )
-        elif access.is_full:
+        elif access.should_apply_viewer_watermark:
             html = inject_full_overlay(html, label=_lesson_viewer_label(user))
         response = HttpResponse(html, content_type="text/html; charset=utf-8")
         return _lesson_protected_response(response, access)
@@ -4216,7 +4216,7 @@ def api_lesson_archive_view(request, slug):
                 slug=slug,
                 preview_url=preview_url,
             )
-        elif access.is_full:
+        elif access.should_apply_viewer_watermark:
             html = inject_full_overlay(html, label=_lesson_viewer_label(user))
         response = HttpResponse(html, content_type="text/html; charset=utf-8")
         return _lesson_protected_response(response, access)

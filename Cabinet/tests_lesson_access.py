@@ -404,6 +404,28 @@ class LessonFileProtectionTests(LessonAccessBase):
         self.assertEqual(res.status_code, 200)
         self.assertIn(b"color:red", res.content)
 
+    def test_purchased_view_has_no_watermark(self):
+        LessonPurchase.objects.create(
+            user=self.user,
+            lesson=self.paid,
+            amount=Decimal("790"),
+            status=LessonPurchase.Status.PAID,
+            purchased_at=timezone.now(),
+        )
+        self._login()
+        res = self.client.get(f"/api/lessons/{self.paid.slug}/view/")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn(b"secret", res.content)
+        self.assertNotIn(b"itflux-full-wm", res.content)
+        self.assertNotIn(b"itflux-demo-wm", res.content)
+
+    def test_subscription_view_keeps_light_watermark(self):
+        self._set_plan("premium")
+        self._login()
+        res = self.client.get(f"/api/lessons/{self.paid.slug}/view/")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn(b"itflux-full-wm", res.content)
+
     def test_asset_path_traversal_denied(self):
         LessonAccessService.start_demo(self.user, self.paid, terms_accepted=True)
         self._login()
