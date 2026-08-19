@@ -41,7 +41,9 @@ const sw = fs.readFileSync(swPath, "utf8");
 if (sw.includes("__ITFLUX_APP_VERSION__")) fail("sw.js still has version placeholder");
 if (!sw.includes(String(version.version))) fail("sw.js does not embed build version");
 if (/caches\.open\s*\(/.test(sw)) fail("sw.js must not open runtime caches");
-if (/addEventListener\s*\(\s*['"]fetch['"]/.test(sw)) fail("sw.js must not intercept fetch (API/HTML)");
+if (/addEventListener\s*\(\s*['"]fetch['"]/.test(sw) && !/request\.mode !== ["']navigate["']/.test(sw)) {
+  fail("sw.js fetch handler must ignore non-navigation requests");
+}
 if (!sw.includes("skipWaiting")) fail("sw.js missing skipWaiting");
 if (!sw.includes("clients.claim")) fail("sw.js missing clients.claim");
 if (!sw.includes("caches.delete") && !sw.includes("caches.keys")) {
@@ -56,8 +58,11 @@ if (!index.includes(String(version.version))) fail("index.html version mismatch"
 if (/fonts\.googleapis\.com|fonts\.gstatic\.com|cdn\.jsdelivr\.net|unpkg\.com/.test(index)) {
   fail("index.html must not load Google Fonts / jsDelivr / unpkg (blocked without VPN)");
 }
+if (!index.includes("/boot-watchdog.js")) fail("index.html missing boot-watchdog.js");
+if (!fs.existsSync(path.join(distDir, "boot-watchdog.js"))) fail("boot-watchdog.js missing from dist");
 ok("index.html embeds app version");
 ok("index.html has no blocked CDN URLs");
+ok("boot watchdog ships with release");
 
 const mains = fs.readdirSync(assetsDir).filter((f) => /^main-[a-zA-Z0-9_-]+\.js$/.test(f));
 if (!mains.length) fail("no hashed main-*.js chunks");

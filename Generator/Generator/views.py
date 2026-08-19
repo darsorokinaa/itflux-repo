@@ -925,6 +925,15 @@ def service_worker(request):
     return resp
 
 
+def boot_watchdog(request):
+    path = _frontend_public_file("boot-watchdog.js")
+    if not path:
+        return HttpResponse(status=404)
+    resp = FileResponse(open(path, "rb"), content_type="application/javascript; charset=utf-8")
+    resp["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+    return resp
+
+
 def web_manifest(request):
     path = _frontend_public_file("manifest.webmanifest")
     if not path:

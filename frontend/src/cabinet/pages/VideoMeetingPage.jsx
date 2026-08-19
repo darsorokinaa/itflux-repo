@@ -334,6 +334,7 @@ export default function VideoMeetingPage() {
   const [directMeetUrl, setDirectMeetUrl] = useState("");
   const [showJoinFallback, setShowJoinFallback] = useState(false);
   const iosStandalone = useMemo(() => isIosStandaloneDisplay(), []);
+  const [iosSafariRedirecting, setIosSafariRedirecting] = useState(false);
   const moderatorToastTimerRef = useRef(null);
 
   const disposeApi = useCallback(() => {
@@ -680,6 +681,45 @@ export default function VideoMeetingPage() {
       window.clearTimeout(moderatorToastTimerRef.current);
     }
   }, []);
+
+  useEffect(() => {
+    if (!iosStandalone || !directMeetUrl || !meetingUuid) return undefined;
+    const key = `itflux.ios-safari-call.${meetingUuid}`;
+    try {
+      if (sessionStorage.getItem(key) === "1") return undefined;
+      sessionStorage.setItem(key, "1");
+    } catch {
+      /* still redirect */
+    }
+    setIosSafariRedirecting(true);
+    const timer = window.setTimeout(() => {
+      window.location.assign(directMeetUrl);
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [iosStandalone, directMeetUrl, meetingUuid]);
+
+  useEffect(() => {
+    if (!iosStandalone || !meetingUuid || directMeetUrl) return undefined;
+    if (pageState !== "live" && pageState !== "camera") return undefined;
+    let cancelled = false;
+    fetchVideoMeetingJoinConfig(meetingUuid)
+      .then((config) => {
+        if (cancelled || !config?.domain || !config?.roomName) return;
+        try {
+          setDirectMeetUrl(buildJitsiEmbedUrl({
+            ...config,
+            startWithAudioMuted: true,
+            startWithVideoMuted: true,
+          }));
+        } catch {
+          /* wait for normal join */
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [iosStandalone, meetingUuid, pageState, directMeetUrl]);
 
   const loadFinishedAttendance = useCallback(async (canManage) => {
     if (!canManage || !meetingUuid) return;
@@ -2814,8 +2854,9 @@ export default function VideoMeetingPage() {
             {iosStandalone ? (
               <div className="video-lesson-media-warning video-lesson-media-warning--info" role="status">
                 <span>
-                  На iPhone звонок из иконки на рабочем столе часто не включает камеру и микрофон.
-                  Откройте этот урок в Safari.
+                  {iosSafariRedirecting
+                    ? "Открываем звонок в Safari — так включаются камера и микрофон."
+                    : "На iPhone звонок из иконки на рабочем столе часто не включает камеру и микрофон. Если Safari не открылся, нажмите кнопку."}
                 </span>
                 {directMeetUrl ? (
                   <a

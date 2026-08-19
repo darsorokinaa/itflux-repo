@@ -2,7 +2,9 @@ import { getAppVersion } from "./appVersion";
 import { isAppUpdateUnsafe } from "./appUpdateGuard";
 
 const RELOAD_ONCE_KEY = "itflux.reload-for-version";
+const VERSION_QUERY = "_itflux_v";
 const UPDATE_CHECK_MS = 5 * 60 * 1000;
+const STANDALONE_UPDATE_CHECK_MS = 30 * 1000;
 const VERSION_URL = "/version.json";
 
 let started = false;
@@ -73,6 +75,30 @@ export function markUpdateFromClientRequired(minimumVersion = "") {
   emit();
 }
 
+function isStandaloneShell() {
+  if (typeof window === "undefined") return false;
+  try {
+    return (
+      window.matchMedia("(display-mode: standalone)").matches
+      || window.navigator.standalone === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+function reloadWithCacheBust(target) {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set(VERSION_QUERY, String(target || Date.now()));
+    window.location.replace(url.href);
+    return;
+  } catch {
+    /* fall through */
+  }
+  window.location.reload();
+}
+
 /** Hard reload once per target version — avoids infinite reload loops. */
 export function applyAppUpdate({ force = false } = {}) {
   const target = remoteVersion || getAppVersion();
@@ -85,7 +111,7 @@ export function applyAppUpdate({ force = false } = {}) {
     return false;
   }
   markReloaded(target);
-  window.location.reload();
+  reloadWithCacheBust(target);
   return true;
 }
 
@@ -175,14 +201,24 @@ export function startAppUpdateMonitor() {
   if (started || typeof window === "undefined") return () => {};
   started = true;
 
+  const pollMs = isStandaloneShell() ? STANDALONE_UPDATE_CHECK_MS : UPDATE_CHECK_MS;
+
   unregisterForeignServiceWorkers();
-  checkForAppUpdate();
+  checkForAppUpdate().then((state) => {
+    if (state.updateAvailable && isStandaloneShell() && !isAppUpdateUnsafe()) {
+      applyAppUpdate();
+    }
+  });
   requestSwUpdate();
 
   const intervalId = window.setInterval(() => {
-    checkForAppUpdate();
+    checkForAppUpdate().then((state) => {
+      if (state.updateAvailable && isStandaloneShell() && !isAppUpdateUnsafe()) {
+        applyAppUpdate();
+      }
+    });
     requestSwUpdate();
-  }, UPDATE_CHECK_MS);
+  }, pollMs);
 
   const onVisible = () => {
     if (document.visibilityState === "visible") {

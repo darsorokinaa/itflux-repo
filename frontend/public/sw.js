@@ -1,7 +1,6 @@
 /* Service worker «Цифровой поток» — Web Push + безопасное обновление.
- * Не кэширует HTML/API/материалы (нет fetch handler, нет runtime cache API store).
- * URL всегда /sw.js (без hash сборки), scope = / — иначе каждый deploy
- * создавал бы новую регистрацию и терял PushSubscription.
+ * HTML-переходы (ярлык на рабочем столе) всегда с сети, без Cache Storage.
+ * API/ассеты не перехватываем. URL всегда /sw.js, scope = /.
  * Плейсхолдер версии подменяется при vite build. */
 const APP_VERSION = "__ITFLUX_APP_VERSION__";
 const SW_VERSION = `itflux-sw-${APP_VERSION}`;
@@ -34,6 +33,18 @@ async function notifyClients() {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     Promise.all([self.clients.claim(), clearOldCaches()]).then(() => notifyClients()),
+  );
+});
+
+// Только переходы по страницам: всегда свежий HTML (ярлык на рабочем столе).
+// API, скрипты и картинки не перехватываем — иначе снова закэшируется кабинет.
+self.addEventListener("fetch", (event) => {
+  const request = event.request;
+  if (request.mode !== "navigate") {
+    return;
+  }
+  event.respondWith(
+    fetch(request, { cache: "reload", credentials: request.credentials }).catch(() => fetch(request)),
   );
 });
 

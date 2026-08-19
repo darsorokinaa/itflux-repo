@@ -182,6 +182,7 @@ urlpatterns = [
     path("favicon.png", views.favicon),
     path("favicon.ico", views.favicon),
     path("sw.js", views.service_worker),
+    path("boot-watchdog.js", views.boot_watchdog),
     path("manifest.webmanifest", views.web_manifest),
     path("version.json", views.app_version_json),
     re_path(r"^fonts/(?P<relpath>.+)$", views.frontend_public_tree, {"prefix": "fonts"}),
