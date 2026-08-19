@@ -36,9 +36,22 @@
   border-radius: 10px;
   padding: 0.55rem 0.75rem;
   font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
   cursor: pointer;
   text-align: left;
   width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #0f172a;
+}
+
+.cb-files__nav-toggle svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: #64748b;
 }
 
 .cb-files__create-wrap {
@@ -91,71 +104,145 @@
   color: #94a3b8;
 }
 
-.cb-files-students__tabs {
+.cb-files-students {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.cb-files-students__head {
   display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cb-files-students__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.cb-files-students__sub {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.cb-files-students__count {
+  flex-shrink: 0;
+  font-size: 0.8125rem;
+  color: #64748b;
+  padding-top: 0.15rem;
+}
+
+.cb-files-students__toolbar {
+  margin-bottom: 0;
+}
+
+.cb-files-students__tabs {
+  display: inline-flex;
   gap: 0.35rem;
-  margin-bottom: 0.75rem;
+  padding: 0.2rem;
+  border-radius: 999px;
+  background: #eef2f7;
+  width: fit-content;
 }
 
 .cb-files-students__tab {
   appearance: none;
-  border: 1px solid #cbd5e1;
-  background: #fff;
+  border: 0;
+  background: transparent;
   border-radius: 999px;
-  padding: 0.35rem 0.85rem;
+  padding: 0.4rem 0.9rem;
   font: inherit;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #64748b;
   cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
 }
 
 .cb-files-students__tab.is-active {
-  border-color: #2563eb;
-  background: rgba(37, 99, 235, 0.08);
-  color: #1d4ed8;
-}
-
-.cb-files-students__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 0.35rem;
-}
-
-.cb-files-students__row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 0.85rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
   background: #fff;
+  color: #1d4ed8;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.cb-files-students__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.cb-files-students__card {
   cursor: pointer;
+  width: 100%;
   font: inherit;
+  color: inherit;
   text-align: left;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
 }
 
-.cb-files-students__row:hover {
+.cb-files-students__card .cb-student-row__info {
+  flex: 1;
+}
+
+.cb-files-students__card:hover {
   border-color: #93c5fd;
-  background: rgba(37, 99, 235, 0.04);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.08);
 }
 
-.cb-files-students__avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: rgba(37, 99, 235, 0.1);
+.cb-files-students__card:active {
+  transform: translateY(1px);
+}
+
+.cb-files-students__chevron {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: #cbd5e1;
+  transition: color 0.12s ease;
+}
+
+.cb-files-students__chevron svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cb-files-students__card:hover .cb-files-students__chevron {
+  color: #2563eb;
+}
+
+.cb-files-students__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.cb-files-students__back svg {
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
 }
 
-.cb-files-students__name {
-  flex: 1;
-  min-width: 0;
-  font-weight: 500;
+.cb-files-students__empty {
+  padding: 2rem 1rem;
+}
+
+@media (max-width: 640px) {
+  .cb-files-students__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cb-files-students__head {
+    flex-direction: column;
+    gap: 0.35rem;
+  }
 }
 
 .cb-files__nav {
@@ -165,6 +252,21 @@
   padding: 0.5rem;
   border-radius: 12px;
   background: var(--cb-surface, rgba(0, 0, 0, 0.03));
+}
+
+.cb-files__nav-btn--after-divider {
+  margin-top: 0.35rem;
+  position: relative;
+}
+
+.cb-files__nav-btn--after-divider::before {
+  content: "";
+  position: absolute;
+  left: 0.25rem;
+  right: 0.25rem;
+  top: -0.45rem;
+  height: 1px;
+  background: #e2e8f0;
 }
 
 .cb-files__nav-btn {

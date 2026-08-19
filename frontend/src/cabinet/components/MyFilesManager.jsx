@@ -600,14 +600,15 @@ export default function MyFilesManager({
               aria-expanded={navOpen}
               onClick={() => setNavOpen((v) => !v)}
             >
-              {WORKSPACES.find((w) => w.id === activeWorkspace)?.label || "Раздел"}
+              <span>{WORKSPACES.find((w) => w.id === activeWorkspace)?.label || "Раздел"}</span>
+              <CabinetIcon name="menu" />
             </button>
             <nav className={`cb-files__nav${navOpen ? " is-open" : ""}`} aria-label="Разделы файлов">
-              {WORKSPACES.map((s) => (
+              {WORKSPACES.map((s, idx) => (
                 <button
                   key={s.id}
                   type="button"
-                  className={`cb-files__nav-btn${activeWorkspace === s.id ? " is-active" : ""}`}
+                  className={`cb-files__nav-btn${activeWorkspace === s.id ? " is-active" : ""}${idx === 2 ? " cb-files__nav-btn--after-divider" : ""}`}
                   onClick={() => {
                     setActiveWorkspace(s.id);
                     setFolderId(null);

@@ -20,13 +20,33 @@ import {
   isMaterialPreviewable,
 } from "../student/components/StudentMaterialPreview";
 import CabinetIcon from "../CabinetIcons";
+import "../styles/students.css";
 import "../styles/my-files.css";
 
-function studentDisplayName(student) {
-  return student?.full_name
-    || student?.name
-    || `${student?.last_name || ""} ${student?.first_name || ""}`.trim()
-    || "Ученик";
+function studentInitials(name) {
+  const safe = String(name || "").replace(/\./g, "").trim();
+  if (!safe) return "??";
+  const parts = safe.split(/\s+/);
+  if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  return safe.slice(0, 2).toUpperCase();
+}
+
+function avatarTone(student) {
+  if (student.subject === "Python" || student.direction === "Python") return "py";
+  if (student.direction === "ЕГЭ") return "ege";
+  return "oge";
+}
+
+function pluralStudents(n) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${n} ученик`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} ученика`;
+  return `${n} учеников`;
+}
+
+function normalizeStudents(data) {
+  return (Array.isArray(data) ? data : data?.results || []).map(mapApiStudent);
 }
 
 export default function StudentFilesWorkspace({
@@ -65,9 +85,8 @@ export default function StudentFilesWorkspace({
       fetchStudents({ status: "archived" }).catch(() => []),
     ])
       .then(([active, archived]) => {
-        const normalize = (data) => (Array.isArray(data) ? data : data?.results || []);
-        setStudents(normalize(active));
-        setArchivedStudents(normalize(archived));
+        setStudents(normalizeStudents(active));
+        setArchivedStudents(normalizeStudents(archived));
       })
       .finally(() => setStudentsLoading(false));
   }, []);
@@ -111,10 +130,10 @@ export default function StudentFilesWorkspace({
     const q = studentSearch.trim().toLowerCase();
     const pool = showArchived ? archivedStudents : students;
     if (!q) return pool;
-    return pool.filter((s) => studentDisplayName(s).toLowerCase().includes(q));
+    return pool.filter((s) => (s.name || "").toLowerCase().includes(q));
   }, [students, archivedStudents, studentSearch, showArchived]);
 
-  const studentName = studentDisplayName(student);
+  const studentName = student?.name || "ученика";
 
   const openFile = (item) => {
     if (isMaterialPreviewable(item)) {
@@ -174,7 +193,19 @@ export default function StudentFilesWorkspace({
   if (!studentId) {
     return (
       <div className="cb-files-students">
-        <div className="cb-files__toolbar">
+        <div className="cb-files-students__head">
+          <div>
+            <h2 className="cb-files-students__title">Файлы учеников</h2>
+            <p className="cb-files-students__sub">
+              Выберите ученика, чтобы открыть его материалы и папки
+            </p>
+          </div>
+          {!studentsLoading && filteredStudents.length > 0 ? (
+            <span className="cb-files-students__count">{pluralStudents(filteredStudents.length)}</span>
+          ) : null}
+        </div>
+
+        <div className="cb-files__toolbar cb-files-students__toolbar">
           <button type="button" className="cb-btn cb-btn--primary" onClick={() => setAssignOpen(true)} disabled={studentsLoading}>
             Выдать материал
           </button>
@@ -183,14 +214,16 @@ export default function StudentFilesWorkspace({
             className="cb-files__search"
             value={studentSearch}
             onChange={(e) => setStudentSearch(e.target.value)}
-            placeholder="Поиск ученика"
+            placeholder="Поиск по имени"
             aria-label="Поиск ученика"
           />
         </div>
 
-        <div className="cb-files-students__tabs">
+        <div className="cb-files-students__tabs" role="tablist" aria-label="Список учеников">
           <button
             type="button"
+            role="tab"
+            aria-selected={!showArchived}
             className={`cb-files-students__tab${!showArchived ? " is-active" : ""}`}
             onClick={() => setShowArchived(false)}
           >
@@ -198,6 +231,8 @@ export default function StudentFilesWorkspace({
           </button>
           <button
             type="button"
+            role="tab"
+            aria-selected={showArchived}
             className={`cb-files-students__tab${showArchived ? " is-active" : ""}`}
             onClick={() => setShowArchived(true)}
           >
@@ -208,29 +243,39 @@ export default function StudentFilesWorkspace({
         {studentsLoading ? (
           <div className="cb-files__skeleton">Загрузка учеников…</div>
         ) : filteredStudents.length === 0 ? (
-          <div className="cb-files__empty">
+          <div className="cb-files__empty cb-files-students__empty">
             {showArchived
               ? "В архиве пока нет учеников."
               : "Здесь будут храниться материалы ваших учеников. Добавьте ученика, чтобы начать работу с его файлами."}
           </div>
         ) : (
-          <ul className="cb-files-students__list">
+          <div className="cb-files-students__grid">
             {filteredStudents.map((s) => (
-              <li key={s.id}>
-                <button
-                  type="button"
-                  className="cb-files-students__row"
-                  onClick={() => onStudentChange?.(String(s.id))}
-                >
-                  <span className="cb-files-students__avatar" aria-hidden>
-                    <CabinetIcon name="user" />
+              <button
+                key={s.id}
+                type="button"
+                className="cb-student-row cb-student-row--card cb-files-students__card"
+                onClick={() => onStudentChange?.(String(s.id))}
+              >
+                <span className={`cb-student-row__avatar cb-student-row__avatar--${avatarTone(s)}`}>
+                  {studentInitials(s.name)}
+                </span>
+                <span className="cb-student-row__info">
+                  <span className="cb-student-row__name-line">
+                    <span className="cb-student-row__name">{s.name}</span>
                   </span>
-                  <span className="cb-files-students__name">{studentDisplayName(s)}</span>
+                  <span className="cb-student-row__meta">
+                    {s.subjects?.length
+                      ? `${s.subjects.slice(0, 2).join(" · ")}${s.subjects.length > 2 ? ` +${s.subjects.length - 2}` : ""}`
+                      : (s.subject || s.direction || "Материалы ученика")}
+                  </span>
+                </span>
+                <span className="cb-files-students__chevron" aria-hidden>
                   <CabinetIcon name="arrow" />
-                </button>
-              </li>
+                </span>
+              </button>
             ))}
-          </ul>
+          </div>
         )}
 
         {assignOpen ? (
@@ -248,16 +293,17 @@ export default function StudentFilesWorkspace({
 
   return (
     <div className="cb-files-students">
-      <div className="cb-files__toolbar">
+      <div className="cb-files__toolbar cb-files-students__toolbar">
         <button
           type="button"
-          className="cb-btn cb-btn--outline"
+          className="cb-btn cb-btn--outline cb-files-students__back"
           onClick={() => {
             onFolderChange?.(null);
             onStudentChange?.(null);
           }}
         >
-          ← К ученикам
+          <CabinetIcon name="arrowLeft" />
+          К ученикам
         </button>
         <button type="button" className="cb-btn cb-btn--primary" onClick={() => setAssignOpen(true)}>
           Выдать материал
