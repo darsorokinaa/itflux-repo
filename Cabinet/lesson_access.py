@@ -149,6 +149,7 @@ class LessonAccessResult:
             "can_export": self.can_export,
             "can_purchase": self.can_purchase,
             "can_start_demo": self.demo_available,
+            "can_continue_demo": self.demo_active,
             "access_type": self.access_type,
             "content_mode": self.content_mode,
             "required_plan": self.required_plan,
@@ -316,8 +317,10 @@ class LessonAccessService:
                 remaining = int((demo.expires_at - timezone.now()).total_seconds())
                 result.demo_remaining_seconds = max(0, remaining)
                 result.reason_code = "DEMO_SESSION"
-                result.message = "Открыта демоверсия. Скачивание и копирование недоступны."
-                result.cta = cls._locked_cta(user, lesson, result, demo_active=True)
+                result.message = (
+                    "Демоверсия активна. Можно продолжить просмотр до окончания таймера."
+                )
+                result.cta = cls._demo_continue_cta()
                 return result
 
         result.demo_used = bool(demo)
@@ -412,7 +415,7 @@ class LessonAccessService:
                 })
             return actions
         if demo_active:
-            return actions
+            return cls._demo_continue_cta()
         if result.demo_available:
             actions.append({"type": "demo", "label": "Открыть демоверсию", "primary": True})
         if result.can_purchase and result.standalone_price is not None:
@@ -429,6 +432,10 @@ class LessonAccessService:
                 "primary": not actions,
             })
         return actions
+
+    @staticmethod
+    def _demo_continue_cta() -> list[dict]:
+        return [{"type": "demo", "label": "Продолжить демо", "primary": True}]
 
     @staticmethod
     def format_price(amount, currency: str = "RUB") -> str:

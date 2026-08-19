@@ -7,6 +7,7 @@ import LessonPreviewModal from "../components/LessonPreviewModal";
 import StateView from "../components/StateView";
 import { isCatalogLocked } from "../accessGate/accessGate";
 import { useAccessGate, useCabinetAuthed } from "../hooks/useAccessGate";
+import { getLessonContentUrl, getLessonCardActionLabel, lessonHasActiveDemo } from "../cabinet/lessonCardUtils";
 import { CATALOG_ORDERING_OPTIONS, registerCatalogView } from "../utils/catalogEngagement";
 import "../styles/material-access.css";
 
@@ -86,16 +87,28 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen }) {
   const durationLabel = formatDuration(lesson.duration_minutes);
   const difficultyLabel = DIFFICULTY_LABELS[lesson.difficulty];
   const locked = isCatalogLocked(lesson);
-  const canOpenLesson = Boolean(lesson.slug && (lesson.archive_url || lesson.file_url || locked));
+  const demoActive = lessonHasActiveDemo(lesson);
+  const canOpenLesson = Boolean(
+    lesson.slug && (lesson.archive_url || lesson.file_url || demoActive || locked),
+  );
+  const actionLabel = locked
+    ? "Подробнее"
+    : demoActive
+      ? "Продолжить демо"
+      : canOpenLesson
+        ? "Открыть урок"
+        : "Скоро";
   const fileExtLower = (lesson.file_url || "").toLowerCase().split("?")[0];
   const isReactViewer = Boolean(
     !lesson.archive_url &&
       lesson.file_url &&
       !fileExtLower.endsWith(".html")
   );
-  const lessonUrl = isReactViewer
-    ? `/lessons/${encodeURIComponent(lesson.slug)}/view`
-    : `/api/lessons/${encodeURIComponent(lesson.slug)}/view/`;
+  const lessonUrl = demoActive
+    ? getLessonContentUrl(lesson.slug)
+    : isReactViewer
+      ? `/lessons/${encodeURIComponent(lesson.slug)}/view`
+      : `/api/lessons/${encodeURIComponent(lesson.slug)}/view/`;
 
   const coverUrl = mediaUrl(lesson.cover_image_url);
 
@@ -203,11 +216,11 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen }) {
             rel="noopener noreferrer"
             onClick={handleOpen}
           >
-            Открыть урок
+            {actionLabel}
           </a>
         ) : (
           <button type="button" className="lesson-card-v3__btn lesson-card-v3__btn--disabled" disabled>
-            Скоро
+            {getLessonCardActionLabel(lesson)}
           </button>
         )}
       </div>

@@ -76,7 +76,7 @@ export function mapLessonToHomeworkCard(lesson) {
     description: lessonDescription(lesson),
     progressLabel: lessonMetaLine(lesson) || undefined,
     hideProgressBar: true,
-    actionLabel: lesson.status === "draft" ? "Редактировать" : "Открыть",
+    actionLabel: getLessonCardActionLabel(lesson),
     actionPrimary: true,
     lesson,
   };
@@ -115,8 +115,16 @@ export function lessonPreviewUrl(slug, extra = {}) {
   return `/lessons?${params.toString()}`;
 }
 
+export function lessonHasActiveDemo(lesson) {
+  const access = lesson?.access;
+  return access?.demo_active === true || access?.can_continue_demo === true;
+}
+
 export function getLessonOpenUrl(lesson) {
   if (!lesson?.slug) return null;
+  if (lessonHasActiveDemo(lesson)) {
+    return getLessonContentUrl(lesson.slug);
+  }
   const fileExtLower = (lesson.file_url || "").toLowerCase().split("?")[0];
   const isReactViewer = Boolean(
     !lesson.archive_url && lesson.file_url && !fileExtLower.endsWith(".html"),
@@ -128,4 +136,11 @@ export function getLessonOpenUrl(lesson) {
     return getLessonContentUrl(lesson.slug);
   }
   return null;
+}
+
+export function getLessonCardActionLabel(lesson) {
+  if (lessonHasActiveDemo(lesson)) return "Продолжить демо";
+  if (lesson?.access?.can_view === false || lesson?.access?.allowed === false) return "Подробнее";
+  if (lesson?.status === "draft") return "Редактировать";
+  return "Открыть";
 }

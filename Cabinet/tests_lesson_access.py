@@ -488,6 +488,9 @@ class LessonAccessStateTests(LessonAccessBase):
         self.assertTrue(access.demo_active)
         self.assertGreater(access.demo_remaining_seconds, 0)
         self.assertEqual(access.to_dict()["content_mode"], "demo")
+        self.assertTrue(access.to_dict()["can_continue_demo"])
+        self.assertEqual(access.cta[0]["label"], "Продолжить демо")
+        self.assertTrue(access.can_view)
 
     def test_purchased_user_gets_open_cta_only(self):
         LessonPurchase.objects.create(

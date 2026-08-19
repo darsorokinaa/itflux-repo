@@ -146,10 +146,11 @@ export default function LessonPreviewModal({
 
   const access = lesson?.access || {};
   const locked = Boolean(lesson) && access.can_view === false;
+  const demoActive = access.demo_active === true || access.can_continue_demo === true;
   const durationMinutes = access.demo_duration_minutes || 40;
   const isPaidLesson = lesson?.access_level && lesson.access_level !== "free";
   const demoExpired = demoExpiredProp || access.reason_code === "DEMO_EXPIRED";
-  const demoActive = access.demo_active === true;
+  const shouldAutoOpen = Boolean(lesson) && access.can_view === true && !demoActive;
 
   const priceLabel = useMemo(
     () => formatPrice(access.standalone_price, access.standalone_currency),
@@ -157,18 +158,18 @@ export default function LessonPreviewModal({
   );
 
   useEffect(() => {
-    if (!open || !lesson || !locked) return;
+    if (!open || !lesson || (!locked && !demoActive)) return;
     trackGoal("lesson_preview_viewed", {
       lesson_id: String(lesson.id || ""),
       access_type: access.access_type || "locked",
     });
     onOpened?.(lesson);
-  }, [open, lesson, locked, access.access_type, onOpened]);
+  }, [open, lesson, locked, demoActive, access.access_type, onOpened]);
 
   useEffect(() => {
-    if (!open || !lesson || locked || !slug) return;
+    if (!open || !lesson || !shouldAutoOpen || !slug) return;
     window.location.href = getLessonContentUrl(slug);
-  }, [open, lesson, locked, slug]);
+  }, [open, lesson, shouldAutoOpen, slug]);
 
   useEffect(() => {
     if (!open || typeof document === "undefined") return undefined;
@@ -193,7 +194,16 @@ export default function LessonPreviewModal({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open, warningOpen, busy, onClose]);
 
+  const onContinueDemo = () => {
+    if (!lesson?.slug) return;
+    window.location.href = getLessonContentUrl(lesson.slug);
+  };
+
   const onOpenDemo = () => {
+    if (demoActive) {
+      onContinueDemo();
+      return;
+    }
     if (!access.can_start_demo) return;
     trackGoal("lesson_demo_warning_viewed", {
       lesson_id: String(lesson.id),
@@ -264,15 +274,16 @@ export default function LessonPreviewModal({
       );
     }
     if (cta.type === "demo") {
+      const continueDemo = demoActive || cta.label === "Продолжить демо";
       return (
         <button
-          key={cta.type}
+          key={`${cta.type}-${cta.label}`}
           type="button"
           className={`material-access-btn ${cta.primary ? "material-access-btn--primary" : "material-access-btn--ghost"}`}
-          onClick={onOpenDemo}
+          onClick={continueDemo ? onContinueDemo : onOpenDemo}
           disabled={busy}
         >
-          {cta.label}
+          {continueDemo ? "Продолжить демо" : cta.label}
         </button>
       );
     }
@@ -342,9 +353,9 @@ export default function LessonPreviewModal({
             <div className="lesson-preview-modal__loading">
               <p>{error}</p>
             </div>
-          ) : lesson && !locked ? (
+          ) : lesson && shouldAutoOpen ? (
             <div className="lesson-preview-modal__loading">Открываем урок…</div>
-          ) : lesson ? (
+          ) : lesson && (locked || demoActive) ? (
             <div className={`material-preview material-preview--modal${lesson.cover_image_url ? "" : " material-preview--modal--no-cover"}`}>
               {lesson.cover_image_url ? (
                 <div className="material-preview__cover-wrap">
@@ -418,6 +429,10 @@ export default function LessonPreviewModal({
                     <h2>Демоверсия закончилась</h2>
                     <p>Период ознакомления закончился. Чтобы продолжить работу с материалом, купите урок или получите доступ по тарифу.</p>
                   </div>
+                ) : demoActive ? (
+                  <p className="material-paywall__message">
+                    {access.message || "Демоверсия активна. Продолжите просмотр, пока не истечёт таймер."}
+                  </p>
                 ) : (
                   <p className="material-paywall__message">{access.message}</p>
                 )}
