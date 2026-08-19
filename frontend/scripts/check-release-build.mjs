@@ -58,10 +58,17 @@ if (!index.includes(String(version.version))) fail("index.html version mismatch"
 if (/fonts\.googleapis\.com|fonts\.gstatic\.com|cdn\.jsdelivr\.net|unpkg\.com/.test(index)) {
   fail("index.html must not load Google Fonts / jsDelivr / unpkg (blocked without VPN)");
 }
+if (index.includes("/static/vendor/") || index.includes("/static/fonts/") || index.includes("/static/boot-watchdog.js")) {
+  fail("index.html must load vendor/fonts/boot-watchdog from /vendor /fonts /boot-watchdog.js, not /static/… (those 404 on nginx)");
+}
+if (!index.includes('src="/vendor/mathjax/itflux-config.js"') && !index.includes("src='/vendor/mathjax/itflux-config.js'")) {
+  fail("index.html missing local MathJax config at /vendor/mathjax/itflux-config.js");
+}
+if (!index.includes("/vendor/mathjax/tex-mml-chtml.js") || index.includes("/static/vendor/mathjax/")) {
+  fail("index.html missing local MathJax bundle at /vendor/mathjax/tex-mml-chtml.js");
+}
 if (!index.includes("/boot-watchdog.js")) fail("index.html missing boot-watchdog.js");
 if (!fs.existsSync(path.join(distDir, "boot-watchdog.js"))) fail("boot-watchdog.js missing from dist");
-if (!index.includes("/vendor/mathjax/itflux-config.js")) fail("index.html missing local MathJax config");
-if (!index.includes("/vendor/mathjax/tex-mml-chtml.js")) fail("index.html missing local MathJax bundle");
 if (!fs.existsSync(path.join(distDir, "vendor/mathjax/itflux-config.js"))) {
   fail("vendor/mathjax/itflux-config.js missing from dist");
 }

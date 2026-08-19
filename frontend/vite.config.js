@@ -79,9 +79,25 @@ function injectAppVersionPlugin() {
       sequential: true,
       handler() {
         writeVersionedArtifacts(resolvedOutDir)
+        restoreRootPublicUrls(path.join(resolvedOutDir, 'index.html'))
       },
     },
   }
+}
+
+/**
+ * Vite `base: '/static/'` переписывает /vendor и /fonts в /static/vendor и /static/fonts.
+ * На проде nginx отдаёт их с корня (/vendor/, /fonts/), а /static/vendor/ — 404.
+ * MathJax из‑за этого не загружается, формулы остаются сырым LaTeX.
+ */
+function restoreRootPublicUrls(indexPath) {
+  if (!fs.existsSync(indexPath)) return
+  let html = fs.readFileSync(indexPath, 'utf8')
+  html = html
+    .replaceAll('/static/vendor/', '/vendor/')
+    .replaceAll('/static/fonts/', '/fonts/')
+    .replaceAll('/static/boot-watchdog.js', '/boot-watchdog.js')
+  fs.writeFileSync(indexPath, html)
 }
 
 /** Общий для dev и preview: без прокси запросы к /api на vite preview дают HTML SPA → ломается JSON.parse в клиенте */
@@ -124,6 +140,17 @@ const backendProxy = {
 export default defineConfig(({ command }) => ({
   plugins: [react(), tailwindcss(), injectAppVersionPlugin()],
   base: command === 'build' ? '/static/' : '/',
+  experimental: {
+    renderBuiltUrl(filename) {
+      if (
+        filename.startsWith('vendor/') ||
+        filename.startsWith('fonts/') ||
+        filename === 'boot-watchdog.js'
+      ) {
+        return `/${filename}`
+      }
+    },
+  },
   build: {
     rollupOptions: {
       output: {
