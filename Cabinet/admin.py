@@ -18,6 +18,7 @@ from .models import (
     EventReminderLog,
     LessonPlanEnrollment,
     MeetingAttendance,
+    MeetingTechnicalEvent,
     PaymentWebhookEvent,
     PromoCode,
     PromoCodeUsage,
@@ -770,6 +771,43 @@ class MeetingAttendanceAdmin(admin.ModelAdmin):
     @admin.display(description="Урок")
     def meeting_lesson(self, obj):
         return obj.meeting.schedule_event.title
+
+
+@admin.register(MeetingTechnicalEvent)
+class MeetingTechnicalEventAdmin(admin.ModelAdmin):
+    list_display = (
+        "occurred_at",
+        "event_type",
+        "meeting",
+        "user",
+        "role",
+        "source",
+        "reason",
+        "jitsi_participant_id",
+    )
+    list_filter = ("event_type", "source", "occurred_at")
+    search_fields = (
+        "meeting__uuid",
+        "meeting__room_name",
+        "jitsi_participant_id",
+        "browser_tab_session_id",
+        "call_session_id",
+        "reason",
+    )
+    readonly_fields = (
+        "meeting",
+        "user",
+        "role",
+        "event_type",
+        "occurred_at",
+        "browser_tab_session_id",
+        "call_session_id",
+        "jitsi_participant_id",
+        "source",
+        "reason",
+        "metadata",
+    )
+    ordering = ("-occurred_at",)
 
 
 @admin.register(Notification)

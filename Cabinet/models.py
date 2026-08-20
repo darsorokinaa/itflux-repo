@@ -4195,6 +4195,82 @@ class MeetingAttendance(models.Model):
         return f"{self.user_id} @ {self.meeting_id} ({self.joined_at})"
 
 
+class MeetingTechnicalEvent(models.Model):
+    """
+    Техническая телеметрия Jitsi. Не является доказательством media connection.
+
+    MeetingAttendance = backend получил join.
+    Этот журнал = signalling/ICE события (комнаты, roster, сбои).
+    """
+
+    class EventType(models.TextChoices):
+        CONFERENCE_JOINED = "conference_joined", "conference_joined"
+        CONFERENCE_LEFT = "conference_left", "conference_left"
+        PARTICIPANT_JOINED = "participant_joined", "participant_joined"
+        PARTICIPANT_LEFT = "participant_left", "participant_left"
+        CONFERENCE_FAILED = "conference_failed", "conference_failed"
+        CONNECTION_FAILED = "connection_failed", "connection_failed"
+        PEER_CONNECTION_FAILURE = "peer_connection_failure", "peer_connection_failure"
+        READY_TO_CLOSE = "ready_to_close", "ready_to_close"
+        ROOM_MISMATCH = "room_mismatch", "room_mismatch"
+        CONNECTION_RECONNECTING = "connection_reconnecting", "connection_reconnecting"
+        CONNECTION_RESTORED = "connection_restored", "connection_restored"
+        PARTICIPANT_COUNT = "participant_count", "participant_count"
+        JOIN_CONFIG_ISSUED = "join_config_issued", "join_config_issued"
+
+    class Source(models.TextChoices):
+        FRONTEND = "frontend", "frontend"
+        BACKEND = "backend", "backend"
+
+    meeting = models.ForeignKey(
+        VideoMeeting,
+        on_delete=models.CASCADE,
+        related_name="technical_events",
+        verbose_name="Конференция",
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="meeting_technical_events",
+        verbose_name="Пользователь",
+    )
+    role = models.CharField("Роль", max_length=32, blank=True, default="")
+    event_type = models.CharField(
+        "Тип события",
+        max_length=40,
+        choices=EventType.choices,
+        db_index=True,
+    )
+    occurred_at = models.DateTimeField("Когда", auto_now_add=True, db_index=True)
+    browser_tab_session_id = models.CharField("Вкладка", max_length=64, blank=True, default="")
+    call_session_id = models.CharField("Сессия звонка", max_length=64, blank=True, default="")
+    jitsi_participant_id = models.CharField("Jitsi participant id", max_length=255, blank=True, default="")
+    source = models.CharField(
+        "Источник",
+        max_length=16,
+        choices=Source.choices,
+        default=Source.FRONTEND,
+    )
+    reason = models.CharField("Причина/код", max_length=128, blank=True, default="")
+    metadata = models.JSONField("Метаданные", default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "Техническое событие видеоконференции"
+        verbose_name_plural = "Технические события видеоконференций"
+        ordering = ["-occurred_at"]
+        indexes = [
+            models.Index(
+                fields=["meeting", "event_type", "occurred_at"],
+                name="cabinet_mee_meeting_tech_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type} @ {self.meeting_id} ({self.occurred_at})"
+
+
 def empty_board_scene():
     return {"elements": [], "appState": {}, "files": {}}
 

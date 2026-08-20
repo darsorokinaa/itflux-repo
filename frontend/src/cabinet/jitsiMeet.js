@@ -17,6 +17,11 @@ import {
 import { attachScreenSharePresence } from "./jitsiScreenShare";
 import { attachMediaWatchdog } from "./jitsiMediaWatchdog";
 import { createCallSessionId } from "./jitsiCallState";
+import {
+  canonicalJitsiRoomName,
+  jitsiRoomsMatch,
+  reportMeetingTechnicalEvent,
+} from "./jitsiTelemetry";
 
 export {
   createBrowserTabSessionId,
@@ -198,6 +203,8 @@ export function buildJitsiConfigOverwrite({
     // 1:1 учитель–ученик почти всегда за разными NAT. P2P даёт «видим в списке,
     // но нет звука/видео». Медиа идёт через JVB.
     p2p: { enabled: false },
+    // XMPP websocket на native Prosody может отдавать 501; BOSH уже работает.
+    preferBosh: true,
     channelLastN: 8,
     startBitrate: 400,
     disableSimulcast: false,
@@ -294,13 +301,73 @@ export function registerJoinDiagnostics(api, { onMediaWarning, diagnostics } = {
           console.info(`[Jitsi event] ${eventName}`, sanitizeJitsiEvent(event));
         }
         if (eventName === "videoConferenceJoined") {
+          const eventRoomName = event?.roomName || null;
+          const configuredRoomName = diagnostics?.roomName || null;
           console.info("[Jitsi] conference identity", {
-            eventRoomName: event?.roomName || null,
-            configuredRoomName: diagnostics?.roomName || null,
+            eventRoomName,
+            configuredRoomName,
+            canonicalEventRoom: canonicalJitsiRoomName(eventRoomName),
+            canonicalConfiguredRoom: canonicalJitsiRoomName(configuredRoomName),
             meetingUuid: diagnostics?.meetingUuid || null,
             role: diagnostics?.role || null,
             domain: diagnostics?.domain || null,
           });
+          const meetingUuid = diagnostics?.meetingUuid;
+          if (meetingUuid) {
+            const mismatch = Boolean(eventRoomName && configuredRoomName && !jitsiRoomsMatch(configuredRoomName, eventRoomName));
+            void reportMeetingTechnicalEvent(meetingUuid, {
+              eventType: mismatch ? "room_mismatch" : "conference_joined",
+              role: diagnostics?.role || "",
+              reason: mismatch ? "room_mismatch" : "",
+              jitsiParticipantId: event?.id || "",
+              browserTabSessionId: diagnostics?.browserTabSessionId || "",
+              callSessionId: diagnostics?.callSessionId || "",
+              metadata: {
+                configuredRoomName,
+                eventRoomName,
+                domain: diagnostics?.domain || "",
+                participantId: event?.id || "",
+              },
+            });
+          }
+        }
+        if (eventName === "participantJoined" || eventName === "participantLeft") {
+          const meetingUuid = diagnostics?.meetingUuid;
+          if (meetingUuid) {
+            void reportMeetingTechnicalEvent(meetingUuid, {
+              eventType: eventName === "participantJoined" ? "participant_joined" : "participant_left",
+              role: diagnostics?.role || "",
+              jitsiParticipantId: event?.id || "",
+              browserTabSessionId: diagnostics?.browserTabSessionId || "",
+              callSessionId: diagnostics?.callSessionId || "",
+              metadata: { participantId: event?.id || "" },
+            });
+          }
+        }
+        if (
+          eventName === "conferenceFailed"
+          || eventName === "connectionFailed"
+          || eventName === "peerConnectionFailure"
+          || eventName === "readyToClose"
+        ) {
+          const meetingUuid = diagnostics?.meetingUuid;
+          const typeMap = {
+            conferenceFailed: "conference_failed",
+            connectionFailed: "connection_failed",
+            peerConnectionFailure: "peer_connection_failure",
+            readyToClose: "ready_to_close",
+          };
+          if (meetingUuid) {
+            void reportMeetingTechnicalEvent(meetingUuid, {
+              eventType: typeMap[eventName],
+              role: diagnostics?.role || "",
+              reason: event?.error || event?.message || eventName,
+              jitsiParticipantId: diagnostics?.participantId || "",
+              browserTabSessionId: diagnostics?.browserTabSessionId || "",
+              callSessionId: diagnostics?.callSessionId || "",
+              metadata: { name: event?.name || "", type: event?.type || "" },
+            });
+          }
         }
         if (eventName === "errorOccurred") {
           const blob = [event?.type, event?.name, event?.message].filter(Boolean).join(" · ");
@@ -376,6 +443,8 @@ export function buildJitsiEmbedUrl(config) {
     `config.subject=${encodeURIComponent(JSON.stringify(subject))}`,
     `config.localSubject=${encodeURIComponent(JSON.stringify(subject))}`,
     `config.inviteAppName=${encodeURIComponent(JSON.stringify("Цифровой поток"))}`,
+    "config.p2p.enabled=false",
+    "config.preferBosh=true",
     "interfaceConfig.MOBILE_APP_PROMO=false",
     "interfaceConfig.SHOW_JITSI_WATERMARK=false",
     "interfaceConfig.SHOW_WATERMARK_FOR_GUESTS=false",

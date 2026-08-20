@@ -210,7 +210,9 @@ export default function MeetingCallDock() {
       try {
         holdingCallRef.current = true;
         attendance.cancelPendingLeave();
-        const config = await fetchVideoMeetingJoinConfig(meetingUuid);
+        const config = await fetchVideoMeetingJoinConfig(meetingUuid, {
+          browserTabSessionId: `dock-${ownerIdRef.current}`,
+        });
         if (cancelled) return;
         if (config?.meeting?.status && config.meeting.status !== "live") {
           setError("Урок уже не идёт");

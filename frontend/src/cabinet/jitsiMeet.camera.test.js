@@ -31,6 +31,7 @@ describe("meeting camera preference", () => {
     const cfg = buildJitsiConfigOverwrite();
     expect(cfg.disableLobbyMode).toBe(true);
     expect(cfg.p2p).toEqual({ enabled: false });
+    expect(cfg.preferBosh).toBe(true);
     expect(cfg.channelLastN).toBe(8);
     expect(cfg.enableNoAudioDetection).toBe(true);
   });
@@ -65,5 +66,7 @@ describe("meeting camera preference", () => {
     expect(url).toContain("interfaceConfig.SHOW_JITSI_WATERMARK=false");
     expect(url).toContain("interfaceConfig.SHOW_POWERED_BY=false");
     expect(url).toContain("config.inviteAppName=");
+    expect(url).toContain("config.p2p.enabled=false");
+    expect(url).toContain("config.preferBosh=true");
   });
 });

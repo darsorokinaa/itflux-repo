@@ -160,6 +160,21 @@ describe("attachConferencePresence", () => {
     presence.dispose();
   });
 
+  it("does not warn when event.roomName is a MUC JID of the same room", () => {
+    const api = fakeApi({ participants: [{ participantId: "t" }] });
+    const onMediaWarning = vi.fn();
+    const presence = attachConferencePresence(api, {
+      diagnostics: { roomName: "digitalstreamabc" },
+      onMediaWarning,
+    });
+    api.emit("videoConferenceJoined", {
+      id: "t",
+      roomName: "digitalstreamabc@conference.lesson.example",
+    });
+    expect(onMediaWarning).not.toHaveBeenCalled();
+    presence.dispose();
+  });
+
   it("is idempotent on duplicate participantJoined", async () => {
     const api = fakeApi({ participants: [{ participantId: "t" }] });
     const presence = attachConferencePresence(api, {

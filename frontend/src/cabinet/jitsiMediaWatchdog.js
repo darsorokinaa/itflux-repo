@@ -234,7 +234,7 @@ export function attachMediaWatchdog(api, {
 
   listen(api, "peerConnectionFailure", () => {
     onConnectionState?.("degraded", "peerConnectionFailure");
-    hint("Качество видео снижено для сохранения звука");
+    hint("Не удалось установить медиасоединение. Попробуйте переподключиться.");
   }, listeners);
 
   listen(api, "videoConferenceJoined", () => {

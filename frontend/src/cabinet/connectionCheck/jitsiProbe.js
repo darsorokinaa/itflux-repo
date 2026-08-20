@@ -362,6 +362,9 @@ export async function probeJitsiInfrastructure({
     api.addListener?.("connectionFailed", () => {
       conferenceError = conferenceError || "connection_failed";
     });
+    api.addListener?.("peerConnectionFailure", () => {
+      conferenceError = conferenceError || "peer_connection_failure";
+    });
     api.addListener?.("errorOccurred", (event) => {
       if (event?.isFatal) conferenceError = conferenceError || "conference_failed";
     });

@@ -2,15 +2,33 @@
 
 Домен: **`lesson.itflux-academy.ru`** → IP `5.42.106.185` (как у `itflux-academy.ru`).
 
-Схема:
+Канонический production-путь — **системный (apt) Jitsi**, не Docker:
 
 ```text
 Браузер → nginx :443 (lesson.itflux-academy.ru, SSL)
               ↓
-         127.0.0.1:8000  (Docker Jitsi web)
-              +
-         UDP 10000       (JVB, напрямую с интернета)
+         /usr/share/jitsi-meet
+         127.0.0.1:5280  (host Prosody BOSH)
+         127.0.0.1:8888  (host Jicofo)
+         127.0.0.1:9090  (host JVB colibri-ws)
+         UDP 10000       (host jitsi-videobridge2)
 ```
+
+**Не запускайте Docker Jitsi** в `/opt/jitsi/docker-jitsi-meet`. Это leftover.
+Его JVB не может занять UDP 10000 (уже native JVB), но docker-bridge `172.18.0.1`
+native JVB рекламировал как ICE host candidate. Учитель и ученик оказывались
+в одной MUC и не видели друг друга.
+
+Канонический путь:
+
+```bash
+sudo bash /opt/itfluxacademy/itflux/deploy/jitsi/canonicalize-native-stack.sh
+python manage.py audit_jitsi_health
+```
+
+---
+
+## На сервере (SSH)
 
 Платформа (Django) остаётся на своём `server_name`. Jitsi — отдельный `server` в nginx.
 

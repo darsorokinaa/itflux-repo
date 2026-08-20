@@ -3,6 +3,8 @@
  * Источник истины — фактический roster External API, не посещаемость в БД.
  */
 
+import { jitsiRoomsMatch } from "./jitsiTelemetry";
+
 export const PRESENCE_RECONCILE_INTERVAL_MS = 8000;
 export const JOIN_SNAPSHOT_RETRY_MS = [0, 250, 1000];
 const ROOMS_INFO_TIMEOUT_MS = 600;
@@ -327,7 +329,7 @@ export function attachConferencePresence(api, {
       eventRoomName: event?.roomName || "",
       roomName: diagnostics.roomName,
     });
-    if (event?.roomName && diagnostics.roomName && event.roomName !== diagnostics.roomName) {
+    if (event?.roomName && diagnostics.roomName && !jitsiRoomsMatch(diagnostics.roomName, event.roomName)) {
       onMediaWarning?.(
         "Комната Jitsi не совпадает с каноническим roomName урока. Обновите страницу.",
       );

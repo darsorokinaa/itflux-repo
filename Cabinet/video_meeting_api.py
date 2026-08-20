@@ -46,6 +46,7 @@ from .video_meeting_service import (
     meeting_join_window_state,
     record_attendance_join,
     record_attendance_leave,
+    record_technical_event,
     resolve_access,
     serialize_meeting_compact,
     serialize_meeting_summary,
@@ -349,6 +350,46 @@ class VideoMeetingAttendanceListView(APIView):
         except VideoMeetingError as exc:
             return _error_response(exc)
         return Response({"results": rows})
+
+
+class VideoMeetingTechnicalEventView(APIView):
+    """Санитизированная телеметрия Jitsi. Не доказывает media connection."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, meeting_uuid):
+        if not rate_limit_check(request, "jitsi_tech_event", 60, 60):
+            return rate_limit_drf_response()
+        meeting = None
+        try:
+            meeting = get_meeting_by_uuid(meeting_uuid)
+            access = resolve_access(request.user, meeting.schedule_event)
+            if not access.allowed:
+                raise VideoMeetingError(access.reason or "Доступ запрещён", code="forbidden", status=403)
+            data = request.data if isinstance(request.data, dict) else {}
+            event_type = str(data.get("eventType") or data.get("event_type") or "")[:40]
+            metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+            event = record_technical_event(
+                meeting=meeting,
+                user=request.user,
+                role=str(data.get("role") or access.role or "")[:32],
+                event_type=event_type,
+                source="frontend",
+                reason=str(data.get("reason") or data.get("code") or "")[:128],
+                jitsi_participant_id=str(
+                    data.get("jitsiParticipantId") or data.get("jitsi_participant_id") or ""
+                )[:255],
+                browser_tab_session_id=str(
+                    data.get("browserTabSessionId") or data.get("browser_tab_session_id") or ""
+                )[:64],
+                call_session_id=str(data.get("callSessionId") or data.get("call_session_id") or "")[:64],
+                metadata=metadata,
+            )
+        except VideoMeetingError as exc:
+            return _error_response(exc, meeting=meeting)
+        if event is None:
+            return Response({"ok": False, "ignored": True}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"ok": True, "id": event.pk, "eventType": event.event_type})
 
 
 class VideoMeetingPresentView(APIView):

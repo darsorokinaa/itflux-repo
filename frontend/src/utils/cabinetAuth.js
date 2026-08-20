@@ -372,8 +372,15 @@ export function fetchVideoMeetingStatus(meetingUuid) {
   return videoMeetingFetch(`/${meetingUuid}/status/`, { method: "GET" });
 }
 
-export function fetchVideoMeetingJoinConfig(meetingUuid) {
-  return videoMeetingFetch(`/${meetingUuid}/join-config/`, { method: "POST", body: "{}" });
+export function fetchVideoMeetingJoinConfig(meetingUuid, extra = {}) {
+  const body = {
+    browserTabSessionId: extra.browserTabSessionId || extra.browser_tab_session_id || "",
+    callSessionId: extra.callSessionId || extra.call_session_id || "",
+  };
+  return videoMeetingFetch(`/${meetingUuid}/join-config/`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 export function fetchVideoMeetingConnectionProbe() {
@@ -382,6 +389,14 @@ export function fetchVideoMeetingConnectionProbe() {
 
 export function reportVideoMeetingConnectionProbe(payload = {}) {
   return videoMeetingFetch("/connection-probe/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }).catch(() => null);
+}
+
+export function reportVideoMeetingTechnicalEvent(meetingUuid, payload = {}) {
+  if (!meetingUuid) return Promise.resolve(null);
+  return videoMeetingFetch(`/${meetingUuid}/technical-events/`, {
     method: "POST",
     body: JSON.stringify(payload),
   }).catch(() => null);

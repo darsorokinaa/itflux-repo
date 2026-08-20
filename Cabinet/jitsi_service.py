@@ -18,6 +18,30 @@ class JitsiConfigError(Exception):
     """Некорректная или неполная конфигурация Jitsi."""
 
 
+def canonical_jitsi_room_name(value: str | None) -> str:
+    """Локальная часть conference identity: без MUC JID, tenant-префикса и регистра.
+
+    `digitalstreamabc`, `digitalstreamabc@conference.example` и
+    `tenant/digitalstreamabc` считаются одной комнатой.
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    local = raw.split("@", 1)[0]
+    if "/" in local:
+        local = local.rsplit("/", 1)[-1]
+    return local.strip().lower()
+
+
+def jitsi_rooms_match(configured: str | None, event_room: str | None) -> bool:
+    """Сравнивает configured roomName и event.roomName после каноникализации."""
+    left = canonical_jitsi_room_name(configured)
+    right = canonical_jitsi_room_name(event_room)
+    if not left or not right:
+        return True
+    return left == right
+
+
 def normalize_jitsi_host(value: str | None) -> str:
     """Hostname без схемы/пути/порта-хвоста — для External API и JWT `sub`."""
     host = (value or "").strip()

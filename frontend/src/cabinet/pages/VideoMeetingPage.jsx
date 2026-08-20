@@ -47,6 +47,11 @@ import { clearPrimedMedia } from "../connectionCheck/mediaDevices";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import { lessonJournalFromMeetingPath, openLessonSummaryTab } from "../journal/openLessonSummary";
 import { getMeetingAttendanceTracker } from "../meetingAttendance";
+import {
+  classifyConferencePresence,
+  jitsiRoomsMatch,
+  reportMeetingTechnicalEvent,
+} from "../jitsiTelemetry";
 import { isIosStandaloneDisplay } from "../pwa/pwaHelpers";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
 import VideoLessonMaterialsPanel from "../components/VideoLessonMaterialsPanel";
@@ -320,6 +325,13 @@ export default function VideoMeetingPage() {
     });
   }
   const intendedMediaRef = useRef({ micOn: false, camOn: false, screenSharing: false, screenTrackActive: null });
+  const conferencePresenceRef = useRef({
+    joined: false,
+    count: 0,
+    mediaFailed: false,
+    reconnecting: false,
+    mediaUp: false,
+  });
   const initGenRef = useRef(0);
   const abortRef = useRef(null);
   const [roleLabel, setRoleLabel] = useState("");
@@ -418,7 +430,10 @@ export default function VideoMeetingPage() {
     };
 
     try {
-      const config = await fetchVideoMeetingJoinConfig(meetingUuid);
+      const config = await fetchVideoMeetingJoinConfig(meetingUuid, {
+        browserTabSessionId: tabSessionIdRef.current,
+        callSessionId: callSessionIdRef.current,
+      });
       if (initGenRef.current !== initGen || abort.signal.aborted) {
         return;
       }
@@ -519,20 +534,53 @@ export default function VideoMeetingPage() {
       const wrapped = await createJitsiMeetSession(joinConfig, containerRef.current, {
         signal: abort.signal,
         onParticipantCount: (n) => {
-          if (typeof n === "number" && n >= 0) setParticipantCount(n);
+          if (typeof n === "number" && n >= 0) {
+            setParticipantCount(n);
+            conferencePresenceRef.current.count = n;
+            const classified = classifyConferencePresence({
+              conferenceJoined: conferencePresenceRef.current.joined,
+              participantCount: n,
+              mediaFailed: conferencePresenceRef.current.mediaFailed,
+              reconnecting: conferencePresenceRef.current.reconnecting,
+            });
+            if (conferencePresenceRef.current.mediaUp && n >= 2 && !conferencePresenceRef.current.mediaFailed) {
+              setConnectionHint("");
+            } else {
+              setConnectionHint(classified.label);
+            }
+            void reportMeetingTechnicalEvent(meetingUuid, {
+              eventType: "participant_count",
+              role: config.diagnostics?.role || config.meeting?.role || "",
+              browserTabSessionId: tabSessionIdRef.current,
+              callSessionId: callSessionIdRef.current,
+              metadata: {
+                participantCount: n,
+                scenario: classified.scenario,
+                presenceCode: classified.code,
+              },
+            });
+          }
         },
         onPresence: (snap) => {
           if (typeof snap?.count === "number" && snap.count >= 0) {
             setParticipantCount(snap.count);
+            conferencePresenceRef.current.count = snap.count;
           }
         },
         onJoined: (event) => {
           setJoinState("joined");
-          setConnectionHint("");
+          conferencePresenceRef.current.joined = true;
+          const classified = classifyConferencePresence({
+            conferenceJoined: true,
+            participantCount: conferencePresenceRef.current.count || 1,
+            mediaFailed: false,
+            reconnecting: false,
+          });
+          setConnectionHint(classified.label);
           setShowJoinFallback(false);
           callStateRef.current?.transition(CALL_STATES.joined, "videoConferenceJoined");
           void attendanceTracker.onVerifiedJoin(event);
-          if (event?.roomName && config.roomName && event.roomName !== config.roomName) {
+          if (event?.roomName && config.roomName && !jitsiRoomsMatch(config.roomName, event.roomName)) {
             setMediaWarning(
               "Комната у вас и у ученика не совпадает. Обновите страницу у обоих участников.",
             );
@@ -545,12 +593,30 @@ export default function VideoMeetingPage() {
         onMediaWarning: (msg) => setMediaWarning(msg || ""),
         onConnectionHint: (msg) => setConnectionHint(msg || ""),
         onConnectionState: (next, why) => {
-          if (next === "joined") callStateRef.current?.transition(CALL_STATES.joined, why);
-          else if (next === "reconnecting") {
+          if (next === "joined") {
+            conferencePresenceRef.current.reconnecting = false;
+            conferencePresenceRef.current.mediaUp = why === "dataChannelOpened" || conferencePresenceRef.current.mediaUp;
+            callStateRef.current?.transition(CALL_STATES.joined, why);
+            if (conferencePresenceRef.current.mediaUp && conferencePresenceRef.current.count >= 2) {
+              setConnectionHint("");
+            }
+          } else if (next === "reconnecting") {
+            conferencePresenceRef.current.reconnecting = true;
             callStateRef.current?.transition(CALL_STATES.reconnecting, why);
+            setConnectionHint("Соединение восстанавливается…");
+            void reportMeetingTechnicalEvent(meetingUuid, {
+              eventType: "connection_reconnecting",
+              reason: why || "",
+              browserTabSessionId: tabSessionIdRef.current,
+              callSessionId: callSessionIdRef.current,
+            });
             void apiRef.current?.reconcileParticipants?.("connection-state");
           } else if (next === "degraded") {
+            conferencePresenceRef.current.mediaFailed = true;
             callStateRef.current?.transition(CALL_STATES.degraded, why);
+            setConnectionHint(
+              "Не удалось установить медиасоединение. Попробуйте переподключиться.",
+            );
           }
         },
         getIntendedMedia: () => intendedMediaRef.current,

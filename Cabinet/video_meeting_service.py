@@ -20,14 +20,16 @@ from .choices import MeetingProvider, ParticipantRole, ParticipantStatus
 from .jitsi_service import (
     JitsiConfigError,
     build_user_info,
+    canonical_jitsi_room_name,
     decode_jitsi_jwt_unsafe_for_tests,
     generate_jitsi_jwt,
     get_jitsi_auth_mode,
     get_jitsi_domain,
     get_jitsi_sub,
+    jitsi_rooms_match,
     jwt_expires_at,
 )
-from .models import MeetingAttendance, Profile, ScheduleEvent, Student, VideoMeeting
+from .models import MeetingAttendance, MeetingTechnicalEvent, Profile, ScheduleEvent, Student, VideoMeeting
 from .schedule_series import _ensure_organizer
 
 # Краткий разрыв (reload вкладки, Strict Mode, мигание сети) не считается уходом.
@@ -905,6 +907,134 @@ def ensure_muc_safe_room_name(meeting: VideoMeeting, *, allow_mutate: bool = Fal
         return locked.room_name
 
 
+_TECHNICAL_SECRET_KEYS = frozenset(
+    {
+        "jwt",
+        "token",
+        "password",
+        "email",
+        "secret",
+        "app_secret",
+        "appsecret",
+        "authorization",
+        "cookie",
+    }
+)
+
+ALLOWED_TECHNICAL_EVENT_TYPES = frozenset(MeetingTechnicalEvent.EventType.values)
+
+
+def sanitize_technical_metadata(value, *, depth: int = 0):
+    """Убирает секреты и PII из телеметрии. Не логирует JWT/token/password/email."""
+    if depth > 4:
+        return None
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, item in value.items():
+            key_l = str(key).strip().lower()
+            if key_l in _TECHNICAL_SECRET_KEYS or "secret" in key_l or "password" in key_l:
+                continue
+            if key_l in {"jwt", "token"}:
+                continue
+            nested = sanitize_technical_metadata(item, depth=depth + 1)
+            if nested is not None:
+                cleaned[str(key)[:64]] = nested
+            if len(cleaned) >= 24:
+                break
+        return cleaned
+    if isinstance(value, (list, tuple)):
+        return [sanitize_technical_metadata(item, depth=depth + 1) for item in value[:20]]
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        return float(value)
+    if value is None:
+        return None
+    text = str(value)
+    return text[:500]
+
+
+def _session_id_from_request(request, *names: str) -> str:
+    if request is None:
+        return ""
+    data = getattr(request, "data", None)
+    if not isinstance(data, dict):
+        data = {}
+    query = getattr(request, "query_params", None)
+    if query is None:
+        query = getattr(request, "GET", {}) or {}
+    for name in names:
+        raw = data.get(name) or query.get(name) or ""
+        value = str(raw or "").strip()
+        if value:
+            return value[:64]
+    return ""
+
+
+def record_technical_event(
+    *,
+    meeting: VideoMeeting,
+    user: User | None = None,
+    role: str = "",
+    event_type: str,
+    source: str = MeetingTechnicalEvent.Source.FRONTEND,
+    reason: str = "",
+    jitsi_participant_id: str = "",
+    browser_tab_session_id: str = "",
+    call_session_id: str = "",
+    metadata: dict | None = None,
+) -> MeetingTechnicalEvent | None:
+    """Пишет безопасное техническое событие. Не заменяет MeetingAttendance и не доказывает media."""
+    code = str(event_type or "").strip()[:40]
+    if code not in ALLOWED_TECHNICAL_EVENT_TYPES:
+        logger.info("jitsi_technical_event_ignored meeting=%s type=%s", meeting.uuid, code)
+        return None
+    source_code = str(source or MeetingTechnicalEvent.Source.FRONTEND).strip()[:16]
+    if source_code not in MeetingTechnicalEvent.Source.values:
+        source_code = MeetingTechnicalEvent.Source.FRONTEND
+    meta = sanitize_technical_metadata(metadata if isinstance(metadata, dict) else {})
+    if not isinstance(meta, dict):
+        meta = {}
+    configured = str(meta.get("configuredRoomName") or meta.get("roomName") or meeting.room_name or "")
+    event_room = str(meta.get("eventRoomName") or "")
+    if event_room and not jitsi_rooms_match(configured, event_room) and code != MeetingTechnicalEvent.EventType.ROOM_MISMATCH:
+        code = MeetingTechnicalEvent.EventType.ROOM_MISMATCH
+        reason = reason or "room_mismatch"
+    event = MeetingTechnicalEvent.objects.create(
+        meeting=meeting,
+        user=user,
+        role=str(role or "")[:32],
+        event_type=code,
+        source=source_code,
+        reason=str(reason or "")[:128],
+        jitsi_participant_id=str(jitsi_participant_id or "")[:255],
+        browser_tab_session_id=str(browser_tab_session_id or "")[:64],
+        call_session_id=str(call_session_id or "")[:64],
+        metadata=meta,
+    )
+    logger.info(
+        "jitsi_technical_event meeting_uuid=%s event_id=%s user_id=%s role=%s "
+        "type=%s source=%s reason=%s participant_id=%s tab=%s call=%s "
+        "configured_room=%s event_room=%s participant_count=%s",
+        meeting.uuid,
+        event.pk,
+        getattr(user, "pk", None),
+        role,
+        code,
+        source_code,
+        str(reason or "")[:64],
+        str(jitsi_participant_id or "")[:32],
+        str(browser_tab_session_id or "")[:36],
+        str(call_session_id or "")[:36],
+        canonical_jitsi_room_name(configured),
+        canonical_jitsi_room_name(event_room),
+        meta.get("participantCount"),
+    )
+    return event
+
+
 def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dict:
     access = assert_can_join_meeting(user, meeting, for_config=True)
     # Перечитываем статус: между проверкой и выдачей JWT урок мог завершиться.
@@ -982,11 +1112,13 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
             )
 
     config_endpoint = f"/api/video-meetings/{meeting.uuid}/join-config/"
+    tab_session_id = _session_id_from_request(request, "browserTabSessionId", "browser_tab_session_id")
+    call_session_id = _session_id_from_request(request, "callSessionId", "call_session_id")
     logger.info(
         "jitsi_join_config lesson_id=%s schedule_event_id=%s meeting_uuid=%s "
         "user_id=%s role=%s room_name=%s domain=%s auth_mode=%s is_moderator=%s "
         "password_required=%s has_jwt=%s jwt_aud=%s jwt_iss=%s jwt_sub=%s "
-        "jwt_room=%s jwt_exp=%s endpoint=%s",
+        "jwt_room=%s jwt_exp=%s endpoint=%s tab=%s call=%s",
         event.lesson_id or "",
         event.pk,
         meeting.uuid,
@@ -1004,7 +1136,30 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
         jwt_claims.get("room", room_name),
         jwt_exp_iso or "",
         config_endpoint,
+        tab_session_id,
+        call_session_id,
     )
+    try:
+        record_technical_event(
+            meeting=meeting,
+            user=user,
+            role=access.role,
+            event_type=MeetingTechnicalEvent.EventType.JOIN_CONFIG_ISSUED,
+            source=MeetingTechnicalEvent.Source.BACKEND,
+            browser_tab_session_id=tab_session_id,
+            call_session_id=call_session_id,
+            metadata={
+                "domain": domain,
+                "roomName": meeting.room_name,
+                "configuredRoomName": meeting.room_name,
+                "jwtSub": jwt_claims.get("sub") or get_jitsi_sub(),
+                "jwtRoom": jwt_claims.get("room") or room_name,
+                "isModerator": access.is_moderator,
+                "authMode": auth_mode,
+            },
+        )
+    except Exception:
+        logger.exception("jitsi_join_config_event_failed meeting=%s", meeting.uuid)
 
     subject = lesson_meeting_subject(event)
     audience = lesson_meeting_audience(event)
@@ -1036,6 +1191,9 @@ def build_join_config(*, meeting: VideoMeeting, user: User, request=None) -> dic
             "passwordRequired": False,
             "conferencePassword": None,
             "configEndpoint": config_endpoint,
+            "browserTabSessionId": tab_session_id,
+            "callSessionId": call_session_id,
+            "canonicalRoomName": canonical_jitsi_room_name(meeting.room_name),
         },
         "meeting": {
             "uuid": str(meeting.uuid),

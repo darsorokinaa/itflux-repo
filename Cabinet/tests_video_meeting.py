@@ -1129,3 +1129,138 @@ class VideoMeetingApiTests(TestCase):
         self.assertEqual(res.status_code, 200, res.content)
         meeting.refresh_from_db()
         self.assertGreater(meeting.updated_at, stale)
+
+    def test_join_config_records_backend_technical_event_without_jwt(self):
+        from Cabinet.models import MeetingTechnicalEvent
+
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        self.client.force_login(self.teacher)
+        res = self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/join-config/",
+            {
+                "browserTabSessionId": "tab-teacher-1",
+                "callSessionId": "call-teacher-1",
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["diagnostics"]["browserTabSessionId"], "tab-teacher-1")
+        event = MeetingTechnicalEvent.objects.filter(
+            meeting=meeting,
+            event_type=MeetingTechnicalEvent.EventType.JOIN_CONFIG_ISSUED,
+        ).latest("occurred_at")
+        self.assertEqual(event.user_id, self.teacher.pk)
+        self.assertEqual(event.browser_tab_session_id, "tab-teacher-1")
+        blob = str(event.metadata)
+        self.assertNotIn("jwt", event.metadata)
+        self.assertNotIn("test-secret-not-for-production", blob)
+        self.assertIn("jwtSub", event.metadata)
+        self.assertEqual(event.metadata.get("jwtRoom"), meeting.room_name)
+
+    def test_room_mismatch_technical_event_from_frontend(self):
+        from Cabinet.models import MeetingTechnicalEvent
+
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        self.client.force_login(self.student_user)
+        res = self.client.post(
+            f"/api/video-meetings/{meeting.uuid}/technical-events/",
+            {
+                "eventType": "conference_joined",
+                "role": "student",
+                "jitsiParticipantId": "p-student",
+                "browserTabSessionId": "tab-s",
+                "callSessionId": "call-s",
+                "metadata": {
+                    "configuredRoomName": meeting.room_name,
+                    "eventRoomName": "other-room@conference.example",
+                    "jwt": "must-not-be-stored",
+                    "email": "hidden@example.com",
+                },
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["eventType"], "room_mismatch")
+        event = MeetingTechnicalEvent.objects.get(pk=res.data["id"])
+        self.assertEqual(event.event_type, MeetingTechnicalEvent.EventType.ROOM_MISMATCH)
+        self.assertNotIn("jwt", event.metadata)
+        self.assertNotIn("email", event.metadata)
+        self.assertEqual(event.metadata.get("configuredRoomName"), meeting.room_name)
+
+    def test_participant_events_are_not_attendance(self):
+        from Cabinet.models import MeetingTechnicalEvent
+
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        self.client.force_login(self.teacher)
+        for event_type in ("participant_joined", "participant_left", "conference_failed", "connection_failed", "peer_connection_failure"):
+            res = self.client.post(
+                f"/api/video-meetings/{meeting.uuid}/technical-events/",
+                {"eventType": event_type, "metadata": {"participantCount": 2 if "participant" in event_type else 1}},
+                format="json",
+            )
+            self.assertEqual(res.status_code, 200, event_type)
+        self.assertEqual(MeetingAttendance.objects.filter(meeting=meeting).count(), 0)
+        self.assertEqual(MeetingTechnicalEvent.objects.filter(meeting=meeting).exclude(event_type="join_config_issued").count(), 5)
+
+    def test_canonical_room_name_treats_jid_as_same_conference(self):
+        from Cabinet.jitsi_service import canonical_jitsi_room_name, jitsi_rooms_match
+
+        room = "digitalstreamabc123"
+        self.assertEqual(canonical_jitsi_room_name(f"{room}@conference.lesson.itflux-academy.ru"), room)
+        self.assertTrue(jitsi_rooms_match(room, f"{room}@conference.lesson.example"))
+        self.assertFalse(jitsi_rooms_match(room, "other@conference.example"))
+
+    def test_refresh_and_roles_keep_same_conference_identity(self):
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        self.client.force_login(self.teacher)
+        first = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/", format="json")
+        refresh = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/", format="json")
+        self.client.force_login(self.student_user)
+        student = self.client.post(f"/api/video-meetings/{meeting.uuid}/join-config/", format="json")
+        self.assertEqual(first.data["roomName"], refresh.data["roomName"])
+        self.assertEqual(first.data["domain"], student.data["domain"])
+        self.assertEqual(first.data["roomName"], student.data["roomName"])
+        t_jwt = decode_jitsi_jwt_unsafe_for_tests(first.data["jwt"])
+        s_jwt = decode_jitsi_jwt_unsafe_for_tests(student.data["jwt"])
+        self.assertEqual(t_jwt["room"], s_jwt["room"])
+        self.assertEqual(t_jwt["sub"], s_jwt["sub"])
+        self.assertNotEqual(t_jwt["context"]["user"]["moderator"], s_jwt["context"]["user"]["moderator"])
+
+
+class JitsiHealthCommandTests(TestCase):
+    def test_duplicate_jvb_and_docker_ip_are_critical(self):
+        from Cabinet.jitsi_health import diagnose, parse_udp_10000
+
+        listeners = parse_udp_10000(
+            'UNCONN 0 0 5.42.106.185:10000 *:* users:(("java",pid=1,fd=1))\n'
+            'UNCONN 0 0 172.18.0.1:10000 *:* users:(("java",pid=2,fd=1))\n'
+        )
+        report = diagnose(
+            {
+                "hostAvailable": True,
+                "udp10000": listeners,
+                "services": {
+                    "prosody": {"isActive": True, "active": "active"},
+                    "jicofo": {"isActive": True, "active": "active"},
+                    "jitsi-videobridge2": {"isActive": True, "active": "active"},
+                },
+                "dockerJitsi": [{"name": "docker-jitsi-meet-jicofo-1", "status": "Up 2 weeks", "ports": "18888"}],
+                "jvbDockerInternal": ["172.18.0.1"],
+                "jvbPublic": ["5.42.106.185"],
+            },
+            {
+                "domain": "lesson.example",
+                "authMode": "jwt",
+                "jwtConfigured": True,
+                "sub": "lesson.example",
+            },
+        )
+        codes = {item["code"] for item in report["findings"]}
+        self.assertEqual(report["overall"], "CRITICAL")
+        self.assertIn("duplicate_jvb", codes)
+        self.assertIn("jvb_advertises_docker_ip", codes)
+        self.assertIn("docker_jitsi_leftover", codes)

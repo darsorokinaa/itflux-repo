@@ -34,6 +34,11 @@ urlpatterns = [
         name="video_meeting_finish",
     ),
     path(
+        "<uuid:meeting_uuid>/technical-events/",
+        video_meeting_api.VideoMeetingTechnicalEventView.as_view(),
+        name="video_meeting_technical_event",
+    ),
+    path(
         "<uuid:meeting_uuid>/attendance/join/",
         video_meeting_api.VideoMeetingAttendanceJoinView.as_view(),
         name="video_meeting_attendance_join",
