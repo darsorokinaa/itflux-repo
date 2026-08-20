@@ -20,6 +20,7 @@
 
 .lesson-draw-layer {
   position: fixed;
+  inset: 0;
   z-index: 9990;
   pointer-events: none;
   -ms-touch-action: none;
@@ -80,6 +81,7 @@
 
 .lesson-draw-chrome.is-dragging {
   user-select: none;
+  cursor: grabbing;
 }
 
 .lesson-draw-handle {
@@ -104,8 +106,14 @@
 }
 
 .lesson-draw-chrome.is-dragging .lesson-draw-handle,
-.lesson-draw-chrome.is-dragging .exam-drawing-panel {
+.lesson-draw-chrome.is-dragging .exam-drawing-panel,
+.lesson-draw-chrome.is-dragging .lesson-draw-fab {
   cursor: grabbing;
+  transition: none;
+}
+
+.lesson-draw-chrome.is-dragging .lesson-draw-fab:hover {
+  transform: none;
 }
 
 .lesson-draw-chrome > * {
@@ -123,7 +131,8 @@
   border-radius: 50%;
   background: linear-gradient(145deg, #1a5de0 0%, #0b2f9f 100%);
   color: #fff;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
   box-shadow:
     0 10px 28px rgba(21, 80, 216, 0.45),
     0 2px 8px rgba(11, 47, 159, 0.2),

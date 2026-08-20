@@ -3,7 +3,7 @@
 
   var config = window.__LESSON_DRAWING__ || {};
   var slug = config.slug || "lesson";
-  var storagePrefix = "lesson-slide-draw-v1:" + slug + ":";
+  var storagePrefix = "lesson-slide-draw-v2:" + slug + ":";
 
   var COLORS = ["#1e293b", "#4f46e5", "#0d9488", "#dc2626", "#ca8a04"];
   var WIDTHS = [2.5, 4.5, 7.5];
@@ -62,7 +62,7 @@
 
   function padFor(stroke, scale) {
     var s = scale && isFinite(scale) && scale > 0 ? scale : 1;
-    return Math.max(16 * s, (stroke.size + 14) * s);
+    return Math.max(28 * s, (stroke.size + 22) * s);
   }
 
   function hitPencil(stroke, x, y, scale) {
@@ -275,7 +275,9 @@
   }
 
   function init() {
-    if (document.querySelector(".lesson-draw-root")) return;
+    var stale = document.querySelectorAll(".lesson-draw-root:not([data-lesson-draw='v3'])");
+    for (var si = 0; si < stale.length; si++) stale[si].parentNode && stale[si].parentNode.removeChild(stale[si]);
+    if (document.querySelector(".lesson-draw-root[data-lesson-draw='v3']")) return;
     if (window.matchMedia && window.matchMedia("(max-width: 479px)").matches) return;
 
     var slides = Array.prototype.slice.call(document.querySelectorAll(".deck .slide"));
@@ -488,7 +490,7 @@
     var toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
     toggleBtn.className = "lesson-draw-fab";
-    toggleBtn.title = "Черновик";
+    toggleBtn.title = "Черновик — перетащите, чтобы переместить";
     toggleBtn.setAttribute("aria-label", "Черновик");
     toggleBtn.appendChild(svgFromHtml(ICONS.fabPencil));
 
@@ -498,35 +500,51 @@
       root.appendChild(entry.layer);
     });
     root.appendChild(chrome);
-    root.setAttribute("data-lesson-draw", "v2");
+    root.setAttribute("data-lesson-draw", "v3");
+    root.tabIndex = -1;
     document.body.appendChild(root);
 
     function activeSlide() {
       return slideStates[state.activeIndex] || slideStates[0];
     }
 
-    function getActiveIndex() {
-      for (var i = 0; i < slideStates.length; i++) {
-        if (slideStates[i].slide.classList.contains("active")) return i;
+    function slideVisibleArea(el) {
+      if (!el || el === document.body || el === document.documentElement) {
+        return window.innerWidth * window.innerHeight;
       }
-      return state.activeIndex;
+      var r = el.getBoundingClientRect();
+      var w = Math.max(0, Math.min(r.right, window.innerWidth) - Math.max(r.left, 0));
+      var h = Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0));
+      return w * h;
     }
 
-    function hostRect(el) {
-      if (!el || el === document.body || el === document.documentElement) {
-        return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+    function getActiveIndex() {
+      var marked = ["active", "present", "current", "is-active", "is-current", "is-visible"];
+      for (var i = 0; i < slideStates.length; i++) {
+        var cl = slideStates[i].slide.classList;
+        for (var c = 0; c < marked.length; c++) {
+          if (cl.contains(marked[c])) return i;
+        }
       }
-      return el.getBoundingClientRect();
+      var best = state.activeIndex;
+      var bestArea = 0;
+      for (var j = 0; j < slideStates.length; j++) {
+        var area = slideVisibleArea(slideStates[j].slide);
+        if (area > bestArea) {
+          bestArea = area;
+          best = j;
+        }
+      }
+      return best;
     }
 
     function syncLayerBox(entry) {
-      var rect = hostRect(entry.slide);
       var layer = entry.layer;
       layer.style.position = "fixed";
-      layer.style.left = Math.round(rect.left) + "px";
-      layer.style.top = Math.round(rect.top) + "px";
-      layer.style.width = Math.max(1, Math.round(rect.width)) + "px";
-      layer.style.height = Math.max(1, Math.round(rect.height)) + "px";
+      layer.style.left = "0px";
+      layer.style.top = "0px";
+      layer.style.width = Math.max(1, window.innerWidth) + "px";
+      layer.style.height = Math.max(1, window.innerHeight) + "px";
       layer.style.right = "auto";
       layer.style.bottom = "auto";
       layer.style.margin = "0";
@@ -614,16 +632,20 @@
       }).observe(entry.slide);
     });
 
-    toggleBtn.addEventListener("click", function () {
+    function toggleBoard() {
       state.boardOpen = !state.boardOpen;
-      if (state.boardOpen) state.tool = "pencil";
-      else {
+      if (state.boardOpen) {
+        state.tool = "pencil";
+        try {
+          root.focus({ preventScroll: true });
+        } catch (errFocus) {}
+      } else {
         state.tool = null;
         state.draft = null;
         state.redoStack = [];
       }
       syncUi();
-    });
+    }
 
     function undoLast() {
       var entry = activeSlide();
@@ -814,28 +836,36 @@
       return false;
     }
 
+    function ensureOpen() {
+      if (state.boardOpen) return;
+      state.boardOpen = true;
+      try {
+        root.focus({ preventScroll: true });
+      } catch (errOpen) {}
+    }
+
     window.addEventListener(
       "keydown",
       function (e) {
-        if (!state.boardOpen) return;
         if (isEditableTarget(e.target)) return;
         var meta = e.ctrlKey || e.metaKey;
-        if (meta && (e.key === "z" || e.key === "Z")) {
+        var code = e.code || "";
+        if (meta && (code === "KeyZ" || e.key === "z" || e.key === "Z")) {
           e.preventDefault();
           e.stopPropagation();
           if (e.shiftKey) redoLast();
           else undoLast();
           return;
         }
-        if (meta && (e.key === "y" || e.key === "Y")) {
+        if (meta && (code === "KeyY" || e.key === "y" || e.key === "Y")) {
           e.preventDefault();
           e.stopPropagation();
           redoLast();
           return;
         }
         if (meta || e.altKey) return;
-        var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-        if (k === "Escape") {
+        if (code === "Escape" || e.key === "Escape") {
+          if (!state.boardOpen) return;
           e.preventDefault();
           e.stopPropagation();
           if (popover.classList.contains("is-open")) {
@@ -846,24 +876,42 @@
           return;
         }
         var handled = true;
-        if (k === "v") setTool("cursor");
-        else if (k === "p") setTool("pencil");
-        else if (k === "e") setTool("eraser");
-        else if (k === "s") {
+        if (code === "KeyV") {
+          ensureOpen();
+          setTool("cursor");
+        } else if (code === "KeyP") {
+          ensureOpen();
+          setTool("pencil");
+        } else if (code === "KeyE") {
+          ensureOpen();
+          setTool("eraser");
+        } else if (code === "KeyS") {
+          ensureOpen();
           state.tool = "shape";
           popover.classList.toggle("is-open");
           syncUi();
-        } else if (k === "l") setTool("shape", "line");
-        else if (k === "r") setTool("shape", "rect");
-        else if (k === "o") setTool("shape", "circle");
-        else if (k === "a") setTool("shape", "arrow");
-        else if (k === "1") {
+        } else if (code === "KeyL") {
+          ensureOpen();
+          setTool("shape", "line");
+        } else if (code === "KeyR") {
+          ensureOpen();
+          setTool("shape", "rect");
+        } else if (code === "KeyO") {
+          ensureOpen();
+          setTool("shape", "circle");
+        } else if (code === "KeyA") {
+          ensureOpen();
+          setTool("shape", "arrow");
+        } else if (code === "Digit1" || code === "Numpad1") {
+          ensureOpen();
           state.strokeWidth = WIDTHS[0];
           syncUi();
-        } else if (k === "2") {
+        } else if (code === "Digit2" || code === "Numpad2") {
+          ensureOpen();
           state.strokeWidth = WIDTHS[1];
           syncUi();
-        } else if (k === "3") {
+        } else if (code === "Digit3" || code === "Numpad3") {
+          ensureOpen();
           state.strokeWidth = WIDTHS[2];
           syncUi();
         } else handled = false;
@@ -878,6 +926,7 @@
     var dragState = {
       active: false,
       moved: false,
+      fromFab: false,
       pointerId: null,
       dx: 0,
       dy: 0,
@@ -923,6 +972,7 @@
     function isDragHandleTarget(el) {
       if (!el) return false;
       if (dragHandle === el || dragHandle.contains(el)) return true;
+      if (toggleBtn === el || toggleBtn.contains(el)) return true;
       if (!panel.contains(el)) return false;
       if (el.closest("button")) return false;
       if (el.closest("a")) return false;
@@ -930,47 +980,66 @@
       return true;
     }
 
-    panel.addEventListener("pointerdown", function (e) {
+    function onChromeMove(e) {
+      if (!dragState.active || e.pointerId !== dragState.pointerId) return;
+      var left = e.clientX - dragState.dx;
+      var top = e.clientY - dragState.dy;
+      if (!dragState.moved) {
+        if (Math.abs(left - dragState.left) < 5 && Math.abs(top - dragState.top) < 5) return;
+        dragState.moved = true;
+        chrome.classList.add("is-dragging");
+      }
+      placeChrome(left, top);
+      e.preventDefault();
+    }
+
+    function onChromeUp(e) {
+      if (!dragState.active || (e && e.pointerId !== dragState.pointerId)) return;
+      var fromFab = dragState.fromFab;
+      var moved = dragState.moved;
+      dragState.active = false;
+      chrome.classList.remove("is-dragging");
+      window.removeEventListener("pointermove", onChromeMove);
+      window.removeEventListener("pointerup", onChromeUp);
+      window.removeEventListener("pointercancel", onChromeUp);
+      if (moved) {
+        var rect = chrome.getBoundingClientRect();
+        persistChromePos(placeChrome(rect.left, rect.top));
+        return;
+      }
+      if (fromFab) toggleBoard();
+    }
+
+    function startChromeDrag(e, fromFab) {
       if (e.pointerType === "mouse" && e.button !== 0) return;
-      if (!isDragHandleTarget(e.target)) return;
       var rect = chrome.getBoundingClientRect();
       dragState.active = true;
       dragState.moved = false;
+      dragState.fromFab = !!fromFab;
       dragState.pointerId = e.pointerId;
       dragState.dx = e.clientX - rect.left;
       dragState.dy = e.clientY - rect.top;
       dragState.left = rect.left;
       dragState.top = rect.top;
-      chrome.classList.add("is-dragging");
-      try {
-        panel.setPointerCapture(e.pointerId);
-      } catch (errCap) {}
+      window.addEventListener("pointermove", onChromeMove);
+      window.addEventListener("pointerup", onChromeUp);
+      window.addEventListener("pointercancel", onChromeUp);
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    toggleBtn.addEventListener("pointerdown", function (e) {
+      startChromeDrag(e, true);
+    });
+    toggleBtn.addEventListener("click", function (e) {
       e.preventDefault();
       e.stopPropagation();
     });
 
-    panel.addEventListener("pointermove", function (e) {
-      if (!dragState.active || e.pointerId !== dragState.pointerId) return;
-      var left = e.clientX - dragState.dx;
-      var top = e.clientY - dragState.dy;
-      if (Math.abs(left - dragState.left) > 3 || Math.abs(top - dragState.top) > 3) dragState.moved = true;
-      placeChrome(left, top);
-      e.preventDefault();
+    panel.addEventListener("pointerdown", function (e) {
+      if (!isDragHandleTarget(e.target)) return;
+      startChromeDrag(e, false);
     });
-
-    function endDrag(e) {
-      if (!dragState.active || (e && e.pointerId !== dragState.pointerId)) return;
-      dragState.active = false;
-      chrome.classList.remove("is-dragging");
-      try {
-        panel.releasePointerCapture(dragState.pointerId);
-      } catch (errRel) {}
-      var rect = chrome.getBoundingClientRect();
-      persistChromePos(placeChrome(rect.left, rect.top));
-    }
-
-    panel.addEventListener("pointerup", endDrag);
-    panel.addEventListener("pointercancel", endDrag);
 
     window.addEventListener("resize", function () {
       slideStates.forEach(fitCanvas);
@@ -978,6 +1047,12 @@
       var rect = chrome.getBoundingClientRect();
       persistChromePos(placeChrome(rect.left, rect.top));
     });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", function () {
+        slideStates.forEach(fitCanvas);
+      });
+    }
+    window.addEventListener("hashchange", onActiveSlideChange);
     window.addEventListener(
       "scroll",
       function () {
@@ -995,4 +1070,5 @@
   } else {
     init();
   }
+  window.addEventListener("load", init);
 })();

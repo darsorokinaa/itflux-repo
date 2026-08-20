@@ -85,10 +85,19 @@ def inject_lesson_content_styles(html: str, request) -> str:
     return f"<!DOCTYPE html><html><head>{tag}</head><body>{html}</body></html>"
 
 
+_DRAWING_SNIPPET_RE = re.compile(
+    r'(?:<style id="lesson-slide-drawing-css">[\s\S]*?</style>\s*)'
+    r'|(?:<script id="lesson-slide-drawing-js">[\s\S]*?</script>\s*)'
+    r'|(?:<link[^>]+lesson-slide-drawing\.css[^>]*>\s*)'
+    r'|(?:<script[^>]+lesson-slide-drawing\.js[^>]*>\s*</script>\s*)'
+    r'|(?:<script>\s*window\.__LESSON_DRAWING__\s*=[\s\S]*?</script>\s*)',
+    re.I,
+)
+
+
 def inject_lesson_drawing_assets(html: str, request, slug: str) -> str:
     """Встраиваем CSS/JS в HTML, чтобы панель не зависела от кэша /static/."""
-    if 'id="lesson-slide-drawing-js"' in html:
-        return html
+    html = _DRAWING_SNIPPET_RE.sub("", html)
     css_path = _DRAWING_STATIC_DIR / "css" / "lesson-slide-drawing.css"
     js_path = _DRAWING_STATIC_DIR / "js" / "lesson-slide-drawing.js"
     config = json.dumps({"slug": slug}, ensure_ascii=False)
@@ -104,9 +113,9 @@ def inject_lesson_drawing_assets(html: str, request, slug: str) -> str:
         css_url = request.build_absolute_uri(static("css/lesson-slide-drawing.css"))
         js_url = request.build_absolute_uri(static("js/lesson-slide-drawing.js"))
         block = (
-            f'<link rel="stylesheet" href="{css_url}?v=2">\n'
+            f'<link rel="stylesheet" href="{css_url}?v=3">\n'
             f"<script>window.__LESSON_DRAWING__={config};</script>\n"
-            f'<script src="{js_url}?v=2"></script>\n'
+            f'<script src="{js_url}?v=3"></script>\n'
         )
     if re.search(r"</body>", html, re.I):
         return re.sub(r"</body>", block + "</body>", html, count=1, flags=re.I)
