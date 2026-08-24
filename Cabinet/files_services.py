@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import timedelta
 from django.conf import settings
 from django.db import transaction
@@ -50,6 +51,19 @@ class FileServiceError(Exception):
         self.code = code
         self.status = status
         self.extra = extra or {}
+
+
+_UNSAFE_NAME_CHARS = re.compile(r'[\x00-\x1f\x7f\\/<>:"|?*]')
+
+
+def sanitize_item_name(name: str, *, max_len: int = 255) -> str:
+    """Название папки/файла без path-traversal и управляющих символов."""
+    cleaned = _UNSAFE_NAME_CHARS.sub("", (name or "").strip()).strip(" .")
+    if not cleaned:
+        raise FileServiceError("Укажите название", code="NAME_REQUIRED", status=400)
+    if len(cleaned) > max_len:
+        raise FileServiceError("Слишком длинное название", code="NAME_TOO_LONG", status=400)
+    return cleaned
 
 
 def get_quota_bytes(user) -> int:
@@ -292,11 +306,7 @@ def assert_no_folder_cycle(folder: CabinetFolder, new_parent: CabinetFolder | No
 
 
 def create_folder(user, name: str, parent_id=None) -> CabinetFolder:
-    name = (name or "").strip()
-    if not name:
-        raise FileServiceError("Укажите название папки", code="NAME_REQUIRED", status=400)
-    if len(name) > 255:
-        raise FileServiceError("Слишком длинное название папки", code="NAME_TOO_LONG", status=400)
+    name = sanitize_item_name(name)
     parent = None
     if parent_id:
         parent = get_owned_folder(user, parent_id)
@@ -374,10 +384,8 @@ def download_filename(file_obj: CabinetFile) -> str:
 
 def rename_folder(user, folder_id, name: str) -> CabinetFolder:
     folder = get_owned_folder(user, folder_id)
-    name = (name or "").strip()
-    if not name:
-        raise FileServiceError("Укажите название", code="NAME_REQUIRED", status=400)
-    folder.name = name[:255]
+    name = sanitize_item_name(name)
+    folder.name = name
     folder.save(update_fields=["name", "updated_at"])
     log_action(user, CabinetFileAuditAction.RENAME, folder=folder, meta={"to": folder.name})
     return folder
@@ -449,6 +457,193 @@ def copy_file(user, file_id, target_folder_id=None) -> CabinetFile:
     )
     log_action(user, CabinetFileAuditAction.COPY, file=clone, meta={"source_id": str(source.id)})
     return clone
+
+
+def _folder_file_size(user, folder: CabinetFolder) -> int:
+    descendants = _collect_descendant_folders(folder)
+    folder_ids = [folder.id] + [f.id for f in descendants]
+    total = (
+        CabinetFile.objects.filter(
+            owner=user,
+            folder_id__in=folder_ids,
+            status=CabinetFileStatus.ACTIVE,
+        ).aggregate(s=Sum("size"))["s"]
+        or 0
+    )
+    return int(total)
+
+
+@transaction.atomic
+def copy_folder(user, folder_id, target_parent_id=None) -> CabinetFolder:
+    source = get_owned_folder(user, folder_id)
+    target_parent = None
+    if target_parent_id:
+        target_parent = get_owned_folder(user, target_parent_id)
+        assert_no_folder_cycle(source, target_parent)
+    total_size = _folder_file_size(user, source)
+    if total_size:
+        assert_quota_allows(user, total_size)
+    name = source.name
+    if (target_parent_id or None) == (source.parent_id or None):
+        name = f"{source.name} (копия)"[:255]
+    clone = CabinetFolder.objects.create(owner=user, name=name, parent=target_parent)
+    child_files = CabinetFile.objects.filter(
+        owner=user, folder=source, status=CabinetFileStatus.ACTIVE
+    )
+    for src_file in child_files:
+        copy_file(user, src_file.id, target_folder_id=clone.id)
+    for child in CabinetFolder.objects.filter(owner=user, parent=source, deleted_at__isnull=True):
+        copy_folder(user, child.id, target_parent_id=clone.id)
+    log_action(user, CabinetFileAuditAction.COPY, folder=clone, meta={"source_id": str(source.id)})
+    return clone
+
+
+def bulk_trash(user, file_ids=None, folder_ids=None) -> dict:
+    file_ids = list(file_ids or [])
+    folder_ids = list(folder_ids or [])
+    if not file_ids and not folder_ids:
+        raise FileServiceError("Нечего удалять", code="EMPTY", status=400)
+    trashed = []
+    errors = []
+    for file_id in file_ids:
+        try:
+            trashed.append(serialize_file(trash_file(user, file_id)))
+        except FileServiceError as exc:
+            errors.append({"id": str(file_id), "kind": "file", "detail": exc.message, "code": exc.code})
+    for folder_id in folder_ids:
+        try:
+            trashed.append(serialize_folder(trash_folder(user, folder_id)))
+        except FileServiceError as exc:
+            errors.append({"id": str(folder_id), "kind": "folder", "detail": exc.message, "code": exc.code})
+    if not trashed:
+        raise FileServiceError(
+            errors[0]["detail"] if errors else "Не удалось удалить",
+            code=errors[0]["code"] if errors else "TRASH_FAILED",
+            status=403 if errors and errors[0]["code"] == "FORBIDDEN" else 400,
+            extra={"errors": errors},
+        )
+    return {"items": trashed, "errors": errors}
+
+
+@transaction.atomic
+def bulk_copy(user, file_ids=None, folder_ids=None, target_folder_id=None) -> dict:
+    file_ids = list(file_ids or [])
+    folder_ids = list(folder_ids or [])
+    if not file_ids and not folder_ids:
+        raise FileServiceError("Нечего копировать", code="EMPTY", status=400)
+    copied = []
+    for file_id in file_ids:
+        copied.append(serialize_file(copy_file(user, file_id, target_folder_id)))
+    for folder_id in folder_ids:
+        copied.append(serialize_folder(copy_folder(user, folder_id, target_folder_id)))
+    return {"items": copied}
+
+
+def _teacher_students(user, student_ids) -> list:
+    ids = []
+    for raw in student_ids or []:
+        try:
+            ids.append(int(raw))
+        except (TypeError, ValueError):
+            raise FileServiceError("Некорректный идентификатор ученика", code="INVALID_STUDENT", status=400)
+    ids = list(dict.fromkeys(ids))
+    if not ids:
+        raise FileServiceError("Укажите учеников", code="TARGET_REQUIRED", status=400)
+    students = list(Student.objects.filter(pk__in=ids, teacher=user))
+    found = {s.id for s in students}
+    missing = [sid for sid in ids if sid not in found]
+    if missing:
+        raise FileServiceError("Ученик не найден", code="NOT_FOUND", status=404)
+    return students
+
+
+def _assign_material_to_student(user, material, student, *, file_obj=None, message="") -> tuple[object, bool]:
+    from .models import DirectMaterialAssignment
+
+    existing = DirectMaterialAssignment.objects.filter(
+        teacher=user,
+        material=material,
+        student=student,
+        group__isnull=True,
+    ).first()
+    if existing:
+        return existing, False
+    da = DirectMaterialAssignment.objects.create(
+        teacher=user,
+        material=material,
+        student=student,
+        message=(message or "").strip(),
+    )
+    if file_obj is not None:
+        CabinetFileRelation.objects.get_or_create(
+            file=file_obj,
+            relation_type=CabinetFileRelationType.STUDENT,
+            student=student,
+            defaults={"created_by": user, "material": material},
+        )
+    return da, True
+
+
+@transaction.atomic
+def copy_to_students(user, *, file_ids=None, material_ids=None, student_ids=None, message="") -> dict:
+    """Скопировать файлы/материалы в библиотеку учеников без дублирования байтов."""
+    file_ids = list(file_ids or [])
+    material_ids = list(material_ids or [])
+    students = _teacher_students(user, student_ids)
+    if not file_ids and not material_ids:
+        raise FileServiceError("Укажите файлы или материалы", code="EMPTY", status=400)
+
+    materials = []
+    for file_id in file_ids:
+        file_obj = get_owned_file(user, file_id)
+        material = _ensure_material_bridge(user, file_obj)
+        if material.title != file_obj.display_name:
+            material.title = file_obj.display_name
+            material.save(update_fields=["title", "updated_at"])
+        materials.append((material, file_obj))
+
+    for material_id in material_ids:
+        material = Material.objects.filter(pk=material_id, teacher=user).first()
+        if not material:
+            raise FileServiceError("Материал не найден", code="NOT_FOUND", status=404)
+        materials.append((material, getattr(material, "cabinet_file", None)))
+
+    created = []
+    skipped = []
+    for material, file_obj in materials:
+        for student in students:
+            assignment, is_new = _assign_material_to_student(
+                user, material, student, file_obj=file_obj, message=message
+            )
+            payload = {
+                "assignment_id": assignment.id,
+                "material_id": material.id,
+                "student_id": student.id,
+            }
+            if is_new:
+                created.append(payload)
+            else:
+                skipped.append(payload)
+
+    log_action(
+        user,
+        CabinetFileAuditAction.ATTACH,
+        meta={
+            "mode": "copy_to_students",
+            "file_ids": [str(i) for i in file_ids],
+            "material_ids": material_ids,
+            "student_ids": [s.id for s in students],
+            "created": len(created),
+            "skipped": len(skipped),
+        },
+    )
+    return {
+        "created": created,
+        "skipped": skipped,
+        "created_count": len(created),
+        "skipped_count": len(skipped),
+        "student_count": len(students),
+    }
 
 
 def set_favorite_file(user, file_id, is_favorite: bool) -> CabinetFile:
@@ -652,14 +847,37 @@ def touch_accessed(file_obj: CabinetFile) -> None:
     CabinetFile.objects.filter(pk=file_obj.pk).update(last_accessed_at=timezone.now())
 
 
-def serialize_folder(folder: CabinetFolder, *, trash_days: int | None = None) -> dict:
+def _folder_rows_map(user) -> dict:
+    """id → {id, name, parent_id} всех живых папок владельца — для путей без N+1."""
+    rows = CabinetFolder.objects.filter(owner=user, deleted_at__isnull=True).values(
+        "id", "name", "parent_id"
+    )
+    return {row["id"]: row for row in rows}
+
+
+def path_from_folder_map(folder_map: dict, folder_id) -> list[dict]:
+    path = []
+    seen = set()
+    current = folder_id
+    while current and current not in seen:
+        seen.add(current)
+        node = folder_map.get(current)
+        if not node:
+            break
+        path.append({"id": str(node["id"]), "name": node["name"]})
+        current = node["parent_id"]
+    path.reverse()
+    return path
+
+
+def serialize_folder(folder: CabinetFolder, *, trash_days: int | None = None, path: list | None = None) -> dict:
     trash_days = trash_days if trash_days is not None else int(getattr(settings, "CABINET_FILE_TRASH_DAYS", 30))
     purge_at = None
     days_left = None
     if folder.deleted_at:
         purge_at = folder.deleted_at + timedelta(days=trash_days)
         days_left = max(0, (purge_at - timezone.now()).days)
-    return {
+    data = {
         "id": str(folder.id),
         "kind": "folder",
         "name": folder.name,
@@ -671,9 +889,13 @@ def serialize_folder(folder: CabinetFolder, *, trash_days: int | None = None) ->
         "purge_at": purge_at.isoformat() if purge_at else None,
         "days_left": days_left,
     }
+    if path is not None:
+        data["path"] = path
+        data["path_label"] = " / ".join(p["name"] for p in path)
+    return data
 
 
-def serialize_file(file_obj: CabinetFile, *, include_relations: bool = False, trash_days: int | None = None) -> dict:
+def serialize_file(file_obj: CabinetFile, *, include_relations: bool = False, trash_days: int | None = None, path: list | None = None) -> dict:
     trash_days = trash_days if trash_days is not None else int(getattr(settings, "CABINET_FILE_TRASH_DAYS", 30))
     purge_at = None
     days_left = None
@@ -704,6 +926,9 @@ def serialize_file(file_obj: CabinetFile, *, include_relations: bool = False, tr
         "download_url": f"/api/cabinet/files/{file_obj.id}/download/",
         "preview_url": f"/api/cabinet/files/{file_obj.id}/preview/",
     }
+    if path is not None:
+        data["path"] = path
+        data["path_label"] = " / ".join(p["name"] for p in path)
     if include_relations:
         data["relations"] = relation_warnings(file_obj)
     return data
@@ -719,6 +944,35 @@ KIND_FILTERS = {
 }
 
 
+def _sort_orders(sort: str, order: str) -> tuple[list[str], list[str]]:
+    sort = (sort or "name").strip().lstrip()
+    descending = (order or "").strip().lower() in ("desc", "descending", "-")
+    if sort.startswith("-"):
+        descending = True
+        sort = sort[1:]
+    # Для даты и размера «по умолчанию» — убывание (новые / крупные сверху)
+    if sort in ("updated", "created", "size") and (order or "").strip() == "":
+        descending = True
+
+    def apply(fields: list[str]) -> list[str]:
+        if not descending:
+            return fields
+        result = []
+        for field in fields:
+            result.append(field[1:] if field.startswith("-") else f"-{field}")
+        return result
+
+    if sort == "updated":
+        return apply(["updated_at", "name"]), apply(["updated_at", "display_name"])
+    if sort == "created":
+        return apply(["created_at", "name"]), apply(["created_at", "display_name"])
+    if sort == "size":
+        return apply(["name"]), apply(["size", "display_name"])
+    if sort == "type":
+        return apply(["name"]), apply(["extension", "display_name"])
+    return apply(["name"]), apply(["display_name"])
+
+
 def list_directory(
     user,
     *,
@@ -726,6 +980,7 @@ def list_directory(
     folder_id=None,
     search: str = "",
     sort: str = "name",
+    order: str = "",
     kind: str = "",
     student_id=None,
     group_id=None,
@@ -735,10 +990,11 @@ def list_directory(
     page_size: int = 50,
 ) -> dict:
     page = max(1, int(page or 1))
-    page_size = min(100, max(1, int(page_size or 50)))
+    page_size = min(200, max(1, int(page_size or 50)))
     section = (section or "my").strip()
     search = (search or "").strip()
     kind = (kind or "").strip()
+    searching = bool(search)
 
     breadcrumbs = [{"id": None, "name": "Мои файлы"}]
     current_folder = None
@@ -764,43 +1020,34 @@ def list_directory(
         files_qs = files_qs.filter(id__in=related_ids)
         breadcrumbs = [{"id": None, "name": "Учебные материалы"}]
     elif section == "shared":
-        # Этап 3 — пока пусто для владельца
         folders_qs = CabinetFolder.objects.none()
         files_qs = CabinetFile.objects.none()
         breadcrumbs = [{"id": None, "name": "Доступные мне"}]
     else:
         if folder_id:
             current_folder = get_owned_folder(user, folder_id)
-            folders_qs = folders_qs.filter(parent=current_folder)
-            files_qs = files_qs.filter(folder=current_folder)
             breadcrumbs = [{"id": None, "name": "Мои файлы"}] + [
                 {"id": str(f.id), "name": f.name} for f in folder_ancestors(current_folder)
             ]
-        else:
+            if not searching:
+                folders_qs = folders_qs.filter(parent=current_folder)
+                files_qs = files_qs.filter(folder=current_folder)
+        elif not searching:
             folders_qs = folders_qs.filter(parent__isnull=True)
             files_qs = files_qs.filter(folder__isnull=True)
 
-    if search:
+    if searching:
         folders_qs = folders_qs.filter(name__icontains=search)
         files_qs = files_qs.filter(
             Q(display_name__icontains=search)
             | Q(original_name__icontains=search)
             | Q(extension__icontains=search.lstrip("."))
         )
-        # В поиске не ограничиваем текущей папкой для my
-        if section == "my" and not folder_id:
-            folders_qs = CabinetFolder.objects.filter(owner=user, deleted_at__isnull=True, name__icontains=search)
-            files_qs = CabinetFile.objects.filter(owner=user, status=CabinetFileStatus.ACTIVE).filter(
-                Q(display_name__icontains=search)
-                | Q(original_name__icontains=search)
-                | Q(extension__icontains=search.lstrip("."))
-            )
 
     if kind in KIND_FILTERS:
         files_qs = files_qs.filter(extension__in=KIND_FILTERS[kind])
         folders_qs = folders_qs.none() if section != "trash" else folders_qs
 
-    # Учебные фильтры
     rel_filter = Q()
     if student_id:
         rel_filter &= Q(relations__student_id=student_id)
@@ -814,47 +1061,66 @@ def list_directory(
         files_qs = files_qs.filter(rel_filter).distinct()
         folders_qs = folders_qs.none()
 
-    # Сортировка
-    folder_order = ["name"]
-    file_order = ["display_name"]
-    if sort == "updated":
-        folder_order = ["-updated_at", "name"]
-        file_order = ["-updated_at", "display_name"]
-    elif sort == "created":
-        folder_order = ["-created_at", "name"]
-        file_order = ["-created_at", "display_name"]
-    elif sort == "size":
-        folder_order = ["name"]
-        file_order = ["-size", "display_name"]
-    elif sort == "type":
-        folder_order = ["name"]
-        file_order = ["extension", "display_name"]
-    elif sort == "-name":
-        folder_order = ["-name"]
-        file_order = ["-display_name"]
-
+    folder_order, file_order = _sort_orders(sort, order)
     if section != "recent":
         folders_qs = folders_qs.order_by(*folder_order)
         files_qs = files_qs.order_by(*file_order)
 
-    folders = list(folders_qs)
-    files = list(files_qs)
-    # Папки сначала, затем файлы; пагинация по объединённому списку
-    items = [serialize_folder(f) for f in folders] + [serialize_file(f) for f in files]
-    total = len(items)
+    files_qs = files_qs.select_related("folder")
+
+    folder_cap = 200
+    folders = list(folders_qs[:folder_cap])
+    folder_count = len(folders)
+    file_total = files_qs.count()
+    total = folder_count + file_total
     start = (page - 1) * page_size
     end = start + page_size
+
+    folder_map = _folder_rows_map(user) if searching else None
+
+    items = []
+    if start < folder_count:
+        for folder in folders[start:min(end, folder_count)]:
+            path = path_from_folder_map(folder_map, folder.parent_id) if folder_map else None
+            items.append(serialize_folder(folder, path=path))
+
+    file_start = max(0, start - folder_count)
+    file_end = max(0, end - folder_count)
+    if file_end > file_start:
+        for file_obj in files_qs[file_start:file_end]:
+            path = path_from_folder_map(folder_map, file_obj.folder_id) if folder_map else None
+            items.append(serialize_file(file_obj, path=path))
+
     return {
         "section": section,
         "folder": serialize_folder(current_folder) if current_folder else None,
         "breadcrumbs": breadcrumbs,
-        "items": items[start:end],
+        "items": items,
         "page": page,
         "page_size": page_size,
         "total": total,
         "has_more": end < total,
+        "searching": searching,
         "quota": get_quota_info(user),
     }
+
+
+def list_folder_tree(user) -> dict:
+    """Компактное дерево папок владельца для диалога перемещения."""
+    folders = list(
+        CabinetFolder.objects.filter(owner=user, deleted_at__isnull=True)
+        .order_by("name")
+        .values("id", "name", "parent_id", "updated_at")
+    )
+    items = [
+        {
+            "id": str(row["id"]),
+            "name": row["name"],
+            "parent_id": str(row["parent_id"]) if row["parent_id"] else None,
+        }
+        for row in folders
+    ]
+    return {"items": items, "root": {"id": None, "name": "Мои файлы"}}
 
 
 @transaction.atomic
@@ -994,6 +1260,7 @@ def assign_file_to_recipients(
     *,
     mode: str,
     student_id=None,
+    student_ids=None,
     group_id=None,
     message: str = "",
     title: str = "",
@@ -1016,17 +1283,17 @@ def assign_file_to_recipients(
             code="INVALID_MODE",
             status=400,
         )
-    if not student_id and not group_id:
-        raise FileServiceError("Укажите ученика или группу", code="TARGET_REQUIRED", status=400)
-    if student_id and group_id:
-        raise FileServiceError("Укажите либо ученика, либо группу", code="TARGET_AMBIGUOUS", status=400)
-
-    student = None
-    group = None
+    ids = list(student_ids or [])
     if student_id:
-        student = Student.objects.filter(pk=student_id, teacher=user).first()
-        if not student:
-            raise FileServiceError("Ученик не найден", code="NOT_FOUND", status=404)
+        ids.append(student_id)
+    if ids and group_id:
+        raise FileServiceError("Укажите либо учеников, либо группу", code="TARGET_AMBIGUOUS", status=400)
+    if not ids and not group_id:
+        raise FileServiceError("Укажите ученика или группу", code="TARGET_REQUIRED", status=400)
+
+    students = _teacher_students(user, ids) if ids else []
+    student = students[0] if len(students) == 1 else None
+    group = None
     if group_id:
         group = StudentGroup.objects.filter(pk=group_id, teacher=user).first()
         if not group:
@@ -1059,43 +1326,47 @@ def assign_file_to_recipients(
     }
 
     if mode == "material":
-        da = DirectMaterialAssignment.objects.create(
-            teacher=user,
-            material=material,
-            group=group,
-            student=student,
-            message=(message or "").strip(),
-        )
-        if student:
-            CabinetFileRelation.objects.get_or_create(
-                file=file_obj,
-                relation_type=CabinetFileRelationType.STUDENT,
-                student=student,
-                defaults={"created_by": user, "material": material},
-            )
         if group:
+            da = DirectMaterialAssignment.objects.create(
+                teacher=user,
+                material=material,
+                group=group,
+                message=(message or "").strip(),
+            )
             CabinetFileRelation.objects.get_or_create(
                 file=file_obj,
                 relation_type=CabinetFileRelationType.GROUP,
                 group=group,
                 defaults={"created_by": user, "material": material},
             )
-        result["assignments"].append({"id": da.id, "student_id": student.id if student else None, "group_id": group.id if group else None})
+            result["assignments"].append({"id": da.id, "student_id": None, "group_id": group.id})
+        for recipient in students:
+            assignment, is_new = _assign_material_to_student(
+                user, material, recipient, file_obj=file_obj, message=message
+            )
+            result["assignments"].append({
+                "id": assignment.id,
+                "student_id": recipient.id,
+                "group_id": None,
+                "created": is_new,
+            })
         log_action(
             user,
             CabinetFileAuditAction.ATTACH,
             file=file_obj,
-            meta={"mode": "material", "student_id": student.id if student else None, "group_id": group.id if group else None},
+            meta={
+                "mode": "material",
+                "student_ids": [s.id for s in students],
+                "group_id": group.id if group else None,
+            },
         )
         return result
 
     # homework
     hw_title = (title or "").strip() or f"ДЗ: {file_obj.display_name}"
     hw_description = (message or "").strip()
-    recipients = []
-    if student:
-        recipients = [student]
-    else:
+    recipients = list(students)
+    if not recipients and group:
         recipients = list(group.students.filter(status=StudentStatus.ACTIVE)) or list(group.students.all())
         if not recipients:
             raise FileServiceError("В группе пока нет учеников", code="GROUP_EMPTY", status=400)

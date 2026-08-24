@@ -14,7 +14,11 @@ from .files_services import (
     attach_file,
     attach_file_for_student,
     assign_file_to_recipients,
+    bulk_copy,
+    bulk_trash,
     copy_file,
+    copy_folder,
+    copy_to_students,
     create_folder,
     detach_relation,
     download_filename,
@@ -24,6 +28,7 @@ from .files_services import (
     get_quota_info,
     get_readable_file,
     list_directory,
+    list_folder_tree,
     log_action,
     move_file,
     move_folder,
@@ -78,6 +83,7 @@ class FilesListView(TeacherFilesMixin, APIView):
                 folder_id=request.query_params.get("folder_id") or None,
                 search=request.query_params.get("search") or "",
                 sort=request.query_params.get("sort") or "name",
+                order=request.query_params.get("order") or "",
                 kind=request.query_params.get("kind") or "",
                 student_id=request.query_params.get("student_id") or None,
                 group_id=request.query_params.get("group_id") or None,
@@ -255,6 +261,7 @@ class FilesAssignView(TeacherFilesMixin, APIView):
                 file_id,
                 mode=request.data.get("mode") or "",
                 student_id=request.data.get("student_id"),
+                student_ids=request.data.get("student_ids") or [],
                 group_id=request.data.get("group_id"),
                 message=request.data.get("message") or "",
                 title=request.data.get("title") or "",
@@ -263,6 +270,68 @@ class FilesAssignView(TeacherFilesMixin, APIView):
         except FileServiceError as exc:
             return _error_response(exc)
         return Response(result, status=status.HTTP_201_CREATED)
+
+
+class FilesFolderTreeView(TeacherFilesMixin, APIView):
+    def get(self, request):
+        return Response(list_folder_tree(request.user))
+
+
+class FilesBulkTrashView(TeacherFilesMixin, APIView):
+    def post(self, request):
+        try:
+            result = bulk_trash(
+                request.user,
+                file_ids=request.data.get("ids") or request.data.get("file_ids") or [],
+                folder_ids=request.data.get("folder_ids") or [],
+            )
+        except FileServiceError as exc:
+            return _error_response(exc)
+        return Response(result)
+
+
+class FilesBulkCopyView(TeacherFilesMixin, APIView):
+    def post(self, request):
+        target = request.data.get("folder_id")
+        if target in ("",):
+            target = None
+        try:
+            result = bulk_copy(
+                request.user,
+                file_ids=request.data.get("ids") or request.data.get("file_ids") or [],
+                folder_ids=request.data.get("folder_ids") or [],
+                target_folder_id=target,
+            )
+        except FileServiceError as exc:
+            return _error_response(exc)
+        return Response(result, status=status.HTTP_201_CREATED)
+
+
+class FilesCopyToStudentsView(TeacherFilesMixin, APIView):
+    def post(self, request):
+        try:
+            result = copy_to_students(
+                request.user,
+                file_ids=request.data.get("ids") or request.data.get("file_ids") or [],
+                material_ids=request.data.get("material_ids") or [],
+                student_ids=request.data.get("student_ids") or [],
+                message=request.data.get("message") or "",
+            )
+        except FileServiceError as exc:
+            return _error_response(exc)
+        return Response(result, status=status.HTTP_201_CREATED)
+
+
+class FolderCopyView(TeacherFilesMixin, APIView):
+    def post(self, request, folder_id):
+        target = request.data.get("parent_id") or request.data.get("folder_id")
+        if target in ("",):
+            target = None
+        try:
+            folder = copy_folder(request.user, folder_id, target)
+        except FileServiceError as exc:
+            return _error_response(exc)
+        return Response(serialize_folder(folder), status=status.HTTP_201_CREATED)
 
 
 class FilesMoveBatchView(TeacherFilesMixin, APIView):
@@ -350,6 +419,7 @@ class StudentFilesListView(StudentFilesMixin, APIView):
                 folder_id=request.query_params.get("folder_id") or None,
                 search=request.query_params.get("search") or "",
                 sort=request.query_params.get("sort") or "name",
+                order=request.query_params.get("order") or "",
                 kind=request.query_params.get("kind") or "",
                 page=request.query_params.get("page") or 1,
                 page_size=request.query_params.get("page_size") or 50,
@@ -560,3 +630,15 @@ class StudentSharedFilePreviewView(StudentFilesMixin, APIView):
         response = FileResponse(fh, content_type=content_type)
         response["Content-Disposition"] = content_disposition(download_filename(file_obj), inline=True)
         return response
+
+
+class StudentFilesFolderTreeView(StudentFilesMixin, FilesFolderTreeView):
+    pass
+
+
+class StudentFilesMoveBatchView(StudentFilesMixin, FilesMoveBatchView):
+    pass
+
+
+class StudentFilesBulkTrashView(StudentFilesMixin, FilesBulkTrashView):
+    pass

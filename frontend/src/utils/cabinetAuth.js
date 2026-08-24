@@ -971,6 +971,44 @@ async function cabinetFetchMultipart(path, formData, { method = "POST" } = {}) {
   return data;
 }
 
+function cabinetFetchMultipartWithProgress(path, formData, { method = "POST", onProgress } = {}) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, `${apiBase()}${path}`);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("Accept", "application/json");
+    const csrf = getCsrfToken();
+    if (csrf) xhr.setRequestHeader("X-CSRFToken", csrf);
+    Object.entries(clientVersionHeaders()).forEach(([key, value]) => {
+      xhr.setRequestHeader(key, value);
+    });
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || typeof onProgress !== "function") return;
+      onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+    xhr.onload = () => {
+      let data = null;
+      try {
+        data = JSON.parse(xhr.responseText || "null");
+      } catch {
+        data = null;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data);
+        return;
+      }
+      handleClientUpdateRequired(data);
+      const err = new Error(formatApiError(data, "Не удалось загрузить файл"));
+      err.status = xhr.status;
+      err.data = data;
+      err.code = data?.code;
+      reject(err);
+    };
+    xhr.onerror = () => reject(new Error("Не удалось загрузить файл"));
+    xhr.send(formData);
+  });
+}
+
 export function uploadReviewFeedback(reviewId, formData) {
   return cabinetFetchMultipart(
     `/review/${encodeURIComponent(String(reviewId))}/upload-feedback/`,
@@ -2196,12 +2234,16 @@ export function restoreMyFilesFolder(folderId, payload = {}) {
   });
 }
 
-export function uploadMyFile(file, { folderId, displayName, student = false } = {}) {
+export function uploadMyFile(file, { folderId, displayName, student = false, onProgress } = {}) {
   const formData = new FormData();
   formData.append("file", file);
   if (folderId) formData.append("folder_id", folderId);
   if (displayName) formData.append("display_name", displayName);
-  return cabinetFetchMultipart(`${filesBase(student)}/upload/`, formData);
+  const path = `${filesBase(student)}/upload/`;
+  if (typeof onProgress === "function") {
+    return ensureCsrfCookie().then(() => cabinetFetchMultipartWithProgress(path, formData, { onProgress }));
+  }
+  return cabinetFetchMultipart(path, formData);
 }
 
 export function fetchHomeworkAttachments(homeworkId) {
@@ -2260,8 +2302,40 @@ export function copyMyFile(fileId, payload = {}) {
   });
 }
 
-export function moveMyFiles(payload) {
-  return cabinetFetch("/files/move/", {
+export function fetchMyFilesFolderTree({ student = false } = {}) {
+  return cabinetFetch(`${filesBase(student)}/folders/tree/`, { method: "GET" });
+}
+
+export function moveMyFiles(payload, { student = false } = {}) {
+  return cabinetFetch(`${filesBase(student)}/move/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function bulkTrashMyFiles(payload, { student = false } = {}) {
+  return cabinetFetch(`${filesBase(student)}/bulk-trash/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function bulkCopyMyFiles(payload) {
+  return cabinetFetch("/files/bulk-copy/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function copyMyFilesToStudents(payload) {
+  return cabinetFetch("/files/copy-to-students/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function copyMyFilesFolder(folderId, payload = {}) {
+  return cabinetFetch(`/files/folders/${folderId}/copy/`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

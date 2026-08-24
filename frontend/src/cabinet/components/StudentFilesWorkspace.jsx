@@ -14,6 +14,7 @@ import {
 import ConfirmActionModal from "./ConfirmActionModal";
 import MaterialsAssignModal from "./MaterialsAssignModal";
 import MaterialsDiskBrowser from "./MaterialsDiskBrowser";
+import CopyToStudentsModal from "./files/CopyToStudentsModal";
 import { mapApiStudent } from "../cabinetMappers";
 import {
   StudentMaterialPreviewModal,
@@ -72,6 +73,7 @@ export default function StudentFilesWorkspace({
   const [error, setError] = useState("");
   const [previewItem, setPreviewItem] = useState(null);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [copyItems, setCopyItems] = useState(null);
   const [revokeItem, setRevokeItem] = useState(null);
   const [deleteFolder, setDeleteFolder] = useState(null);
   const [revoking, setRevoking] = useState(false);
@@ -167,6 +169,7 @@ export default function StudentFilesWorkspace({
     if (item.file_url) {
       actions.push({ label: "Скачать", onClick: () => window.open(item.file_url, "_blank", "noopener,noreferrer") });
     }
+    actions.push({ label: "Скопировать ученикам", onClick: () => setCopyItems([item]) });
     if (item.can_revoke) {
       actions.push({ label: "Отозвать", onClick: () => setRevokeItem(item) });
     }
@@ -416,6 +419,17 @@ export default function StudentFilesWorkspace({
           await loadMaterials();
         }}
         onClose={() => setDeleteFolder(null)}
+      />
+      <CopyToStudentsModal
+        open={Boolean(copyItems?.length)}
+        files={[]}
+        materials={copyItems || []}
+        excludeStudentId={studentId}
+        onClose={() => setCopyItems(null)}
+        onCopied={(result) => {
+          const n = result?.created_count || 0;
+          onNotice?.(n ? `Скопировано ученикам: ${n}` : "У выбранных учеников этот файл уже был");
+        }}
       />
     </div>
   );

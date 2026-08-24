@@ -1,5 +1,7 @@
 """Тесты API «Мои файлы»."""
 
+from unittest.mock import patch
+
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
@@ -141,7 +143,8 @@ class MyFilesApiTests(TestCase):
         self.assertIn(file_id, ids2)
 
     @override_settings(CABINET_FILE_STORAGE_QUOTA_BYTES=50)
-    def test_quota_blocks_upload(self):
+    @patch("Cabinet.files_services.get_quota_bytes", return_value=50)
+    def test_quota_blocks_upload(self, _quota):
         res = self._upload(self.teacher, content=b"x" * 80)
         self.assertEqual(res.status_code, 400)
         self.assertEqual(res.json().get("code"), "QUOTA_EXCEEDED")
@@ -300,3 +303,194 @@ class MyFilesApiTests(TestCase):
         obj = CabinetFile.objects.get(pk=file_id)
         self.assertEqual(obj.status, CabinetFileStatus.TRASHED)
         self.assertIsNotNone(obj.deleted_at)
+
+    def test_nested_folders_and_list_only_current_directory(self):
+        self._auth(self.teacher)
+        oge = self.client.post("/api/cabinet/files/folders/", {"name": "ОГЭ"}, format="json")
+        math = self.client.post(
+            "/api/cabinet/files/folders/",
+            {"name": "Математика", "parent_id": oge.json()["id"]},
+            format="json",
+        )
+        geo = self.client.post(
+            "/api/cabinet/files/folders/",
+            {"name": "Геометрия", "parent_id": math.json()["id"]},
+            format="json",
+        )
+        self.assertEqual(geo.status_code, 201, geo.content)
+        upload = self._upload(self.teacher, name="theorem.pdf", content=b"%PDF-1.4 x", folder_id=geo.json()["id"])
+        self.assertEqual(upload.status_code, 201)
+        root = self.client.get("/api/cabinet/files/")
+        root_ids = [i["id"] for i in root.json()["items"]]
+        self.assertIn(oge.json()["id"], root_ids)
+        self.assertNotIn(math.json()["id"], root_ids)
+        self.assertNotIn(upload.json()["id"], root_ids)
+        nested = self.client.get(f"/api/cabinet/files/?folder_id={geo.json()['id']}")
+        nested_ids = [i["id"] for i in nested.json()["items"]]
+        self.assertIn(upload.json()["id"], nested_ids)
+        crumbs = [c["name"] for c in nested.json()["breadcrumbs"]]
+        self.assertEqual(crumbs, ["Мои файлы", "ОГЭ", "Математика", "Геометрия"])
+
+    def test_cannot_create_folder_with_empty_or_unsafe_name(self):
+        self._auth(self.teacher)
+        empty = self.client.post("/api/cabinet/files/folders/", {"name": "   "}, format="json")
+        self.assertEqual(empty.status_code, 400)
+        slash = self.client.post("/api/cabinet/files/folders/", {"name": "../secret"}, format="json")
+        self.assertEqual(slash.status_code, 201, slash.content)
+        self.assertEqual(slash.json()["name"], "secret")
+
+    def test_search_returns_path(self):
+        self._auth(self.teacher)
+        oge = self.client.post("/api/cabinet/files/folders/", {"name": "ОГЭ"}, format="json")
+        self._upload(self.teacher, name="variant.pdf", content=b"%PDF-1.4", folder_id=oge.json()["id"])
+        found = self.client.get("/api/cabinet/files/?search=variant")
+        self.assertEqual(found.status_code, 200)
+        files = [i for i in found.json()["items"] if i["kind"] == "file"]
+        self.assertTrue(files)
+        self.assertEqual(files[0]["path_label"], "ОГЭ")
+
+    def test_folder_tree_and_bulk_move(self):
+        self._auth(self.teacher)
+        a = self.client.post("/api/cabinet/files/folders/", {"name": "A"}, format="json")
+        b = self.client.post("/api/cabinet/files/folders/", {"name": "B"}, format="json")
+        upload = self._upload(self.teacher, name="note.txt", content=b"hello")
+        tree = self.client.get("/api/cabinet/files/folders/tree/")
+        self.assertEqual(tree.status_code, 200)
+        names = {i["name"] for i in tree.json()["items"]}
+        self.assertEqual(names, {"A", "B"})
+        moved = self.client.post(
+            "/api/cabinet/files/move/",
+            {"ids": [upload.json()["id"]], "folder_ids": [a.json()["id"]], "folder_id": b.json()["id"]},
+            format="json",
+        )
+        self.assertEqual(moved.status_code, 200, moved.content)
+        listing = self.client.get(f"/api/cabinet/files/?folder_id={b.json()['id']}")
+        ids = [i["id"] for i in listing.json()["items"]]
+        self.assertIn(upload.json()["id"], ids)
+        self.assertIn(a.json()["id"], ids)
+
+    def test_cannot_move_folder_into_descendant(self):
+        self._auth(self.teacher)
+        a = self.client.post("/api/cabinet/files/folders/", {"name": "A"}, format="json")
+        b = self.client.post(
+            "/api/cabinet/files/folders/",
+            {"name": "B", "parent_id": a.json()["id"]},
+            format="json",
+        )
+        bad = self.client.post(
+            "/api/cabinet/files/move/",
+            {"folder_ids": [a.json()["id"]], "folder_id": b.json()["id"]},
+            format="json",
+        )
+        self.assertEqual(bad.status_code, 400)
+        self.assertEqual(bad.json().get("code"), "FOLDER_CYCLE")
+
+    def test_bulk_trash_and_copy(self):
+        self._auth(self.teacher)
+        f1 = self._upload(self.teacher, name="a.txt", content=b"aaa")
+        f2 = self._upload(self.teacher, name="b.txt", content=b"bbb")
+        copied = self.client.post(
+            "/api/cabinet/files/bulk-copy/",
+            {"ids": [f1.json()["id"]], "folder_id": None},
+            format="json",
+        )
+        self.assertEqual(copied.status_code, 201, copied.content)
+        self.assertEqual(len(copied.json()["items"]), 1)
+        self.assertNotEqual(copied.json()["items"][0]["id"], f1.json()["id"])
+        trashed = self.client.post(
+            "/api/cabinet/files/bulk-trash/",
+            {"ids": [f1.json()["id"], f2.json()["id"]]},
+            format="json",
+        )
+        self.assertEqual(trashed.status_code, 200, trashed.content)
+        listing = self.client.get("/api/cabinet/files/")
+        ids = [i["id"] for i in listing.json()["items"] if i["kind"] == "file"]
+        self.assertNotIn(f1.json()["id"], ids)
+        self.assertNotIn(f2.json()["id"], ids)
+
+    def test_copy_to_students_reuses_material_no_foreign_student(self):
+        res = self._upload(self.teacher, name="share.txt", content=b"shared")
+        file_id = res.json()["id"]
+        self._auth(self.teacher)
+        copied = self.client.post(
+            "/api/cabinet/files/copy-to-students/",
+            {"ids": [file_id], "student_ids": [self.student.id, self.other_student.id]},
+            format="json",
+        )
+        self.assertEqual(copied.status_code, 201, copied.content)
+        self.assertEqual(copied.json()["created_count"], 2)
+        from Cabinet.models import DirectMaterialAssignment
+        assignments = DirectMaterialAssignment.objects.filter(
+            teacher=self.teacher,
+            student_id__in=[self.student.id, self.other_student.id],
+        )
+        self.assertEqual(assignments.count(), 2)
+        material_ids = set(assignments.values_list("material_id", flat=True))
+        self.assertEqual(len(material_ids), 1)
+        again = self.client.post(
+            "/api/cabinet/files/copy-to-students/",
+            {"ids": [file_id], "student_ids": [self.student.id]},
+            format="json",
+        )
+        self.assertEqual(again.status_code, 201)
+        self.assertEqual(again.json()["skipped_count"], 1)
+
+        foreign = Student.objects.create(
+            teacher=self.other,
+            first_name="Чужой",
+            last_name="Ученик",
+            status="active",
+        )
+        denied = self.client.post(
+            "/api/cabinet/files/copy-to-students/",
+            {"ids": [file_id], "student_ids": [foreign.id]},
+            format="json",
+        )
+        self.assertEqual(denied.status_code, 404)
+
+    def test_cannot_copy_foreign_file_to_own_student(self):
+        res = self._upload(self.teacher, name="secret.txt", content=b"secret")
+        file_id = res.json()["id"]
+        self._auth(self.other)
+        denied = self.client.post(
+            "/api/cabinet/files/copy-to-students/",
+            {"ids": [file_id], "student_ids": [self.student.id]},
+            format="json",
+        )
+        self.assertIn(denied.status_code, (403, 404))
+
+    def test_cannot_preview_or_list_foreign_folder(self):
+        res = self._upload(self.teacher, name="pic.png", content=b"\x89PNG\r\n")
+        file_id = res.json()["id"]
+        self._auth(self.teacher)
+        folder = self.client.post("/api/cabinet/files/folders/", {"name": "Private"}, format="json")
+        self._auth(self.other)
+        preview = self.client.get(f"/api/cabinet/files/{file_id}/preview/")
+        self.assertEqual(preview.status_code, 403)
+        listing = self.client.get(f"/api/cabinet/files/?folder_id={folder.json()['id']}")
+        self.assertEqual(listing.status_code, 403)
+
+    def test_copy_material_between_students(self):
+        res = self._upload(self.teacher, name="lesson.txt", content=b"lesson")
+        file_id = res.json()["id"]
+        self._auth(self.teacher)
+        first = self.client.post(
+            "/api/cabinet/files/copy-to-students/",
+            {"ids": [file_id], "student_ids": [self.student.id]},
+            format="json",
+        )
+        material_id = first.json()["created"][0]["material_id"]
+        second = self.client.post(
+            "/api/cabinet/files/copy-to-students/",
+            {"material_ids": [material_id], "student_ids": [self.other_student.id]},
+            format="json",
+        )
+        self.assertEqual(second.status_code, 201, second.content)
+        from Cabinet.models import DirectMaterialAssignment
+        self.assertTrue(
+            DirectMaterialAssignment.objects.filter(
+                teacher=self.teacher,
+                student=self.other_student,
+                material_id=material_id,
+            ).exists()
+        )
