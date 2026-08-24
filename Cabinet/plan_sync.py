@@ -483,6 +483,8 @@ class PlanSyncService:
     @classmethod
     def on_event_rescheduled(cls, event):
         logger.info("lesson rescheduled event=%s item=%s", event.pk, event.lesson_plan_item_id)
+        cls.realign_for_event(event)
+        event.refresh_from_db()
         return event.lesson_plan_item
 
     @classmethod
@@ -503,6 +505,26 @@ class PlanSyncService:
         if enrollment is None:
             return {"ok": True, "skipped": True, "updated_event_ids": []}
         return cls.realign_enrollment_topics(enrollment)
+
+    @classmethod
+    def realign_enrollments_for_events(cls, events) -> None:
+        """Пересчитать темы для всех планов, которые видны в выборке расписания."""
+        from .plan_schedule import get_active_enrollment
+
+        seen = set()
+        for event in events:
+            enrollment = get_active_enrollment(event) if event else None
+            if enrollment is None or enrollment.pk in seen:
+                continue
+            seen.add(enrollment.pk)
+            try:
+                cls.realign_enrollment_topics(enrollment)
+            except Exception:
+                logger.exception(
+                    "plan realign failed enrollment=%s event=%s",
+                    enrollment.pk,
+                    event.pk,
+                )
 
     @classmethod
     @transaction.atomic
@@ -560,14 +582,33 @@ class PlanSyncService:
                 upcoming.append(ev)
 
         desired = {}
-        for index, ev in enumerate(conducted):
-            if index < len(items):
-                desired[ev.pk] = items[index]
-        offset = len(conducted)
-        for index, ev in enumerate(upcoming):
-            item_index = offset + index
-            if item_index < len(items):
-                desired[ev.pk] = items[item_index]
+        used_item_ids = set()
+        item_by_id = {item.id: item for item in items}
+
+        def take_next_item():
+            for item in items:
+                if item.id not in used_item_ids:
+                    used_item_ids.add(item.id)
+                    return item
+            return None
+
+        for ev in conducted:
+            current = ev.lesson_plan_item
+            if (
+                current is not None
+                and current.id in item_by_id
+                and current.id not in used_item_ids
+            ):
+                desired[ev.pk] = item_by_id[current.id]
+                used_item_ids.add(current.id)
+            else:
+                nxt = take_next_item()
+                if nxt is not None:
+                    desired[ev.pk] = nxt
+        for ev in upcoming:
+            nxt = take_next_item()
+            if nxt is not None:
+                desired[ev.pk] = nxt
 
         updated_ids = []
         conducted_ids = {ev.pk for ev in conducted}

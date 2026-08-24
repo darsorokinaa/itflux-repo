@@ -1,5 +1,6 @@
 """Map schedule events to lesson plan items (one lesson → one plan item)."""
 
+from django.db.models import Q
 from django.utils import timezone
 
 from .choices import EnrollmentStatus, PlanItemStatus
@@ -75,14 +76,19 @@ def get_active_enrollment(event):
 def events_for_enrollment(enrollment, owner):
     qs = ScheduleEvent.objects.filter(owner=owner)
     if enrollment.student_id:
-        qs = qs.filter(student_id=enrollment.student_id)
+        by_student = Q(student_id=enrollment.student_id)
         if enrollment.student_subject_id:
             # Только уроки этого предмета — не смешиваем слоты планов.
-            qs = qs.filter(student_subject_id=enrollment.student_subject_id)
+            by_audience = by_student & Q(student_subject_id=enrollment.student_subject_id)
         else:
-            qs = qs.filter(student_subject__isnull=True)
+            by_audience = by_student & Q(student_subject__isnull=True)
+        already_linked = by_student & Q(lesson_plan_item__plan_id=enrollment.plan_id)
+        qs = qs.filter(by_audience | already_linked).distinct()
     elif enrollment.group_id:
-        qs = qs.filter(group_id=enrollment.group_id)
+        qs = qs.filter(
+            Q(group_id=enrollment.group_id)
+            | Q(lesson_plan_item__plan_id=enrollment.plan_id, group_id=enrollment.group_id)
+        ).distinct()
     else:
         return ScheduleEvent.objects.none()
 
@@ -123,10 +129,11 @@ def attendance_statuses_by_event(event_ids, student_id=None):
 
 def event_consumed_plan_topic(event, *, student_id=None, attendance_statuses=None):
     """
-    Занятие съело слот плана: проведено по журналу или завершено без отметки.
+    Занятие съело слот плана: проведено по журналу, завершено без отметки
+    или уже прошло по расписанию.
 
     Проведено: присутствовал / опоздал / ушёл раньше / часть урока / тех. причина.
-    Не съедает слот: отмена со сдвигом, неявка, незакрытое прошлое занятие.
+    Не съедает слот: отмена со сдвигом, неявка.
     Пропуск темы при отмене (skip) учитывается статусом пункта SKIPPED, а не здесь.
     """
     if not getattr(event, "plan_sync_enabled", True):
@@ -141,10 +148,16 @@ def event_consumed_plan_topic(event, *, student_id=None, attendance_statuses=Non
     if marked:
         return any(status in CONDUCTED_FOR_PLAN_ATTENDANCE for status in marked)
 
-    return event.status in (
+    if event.status in (
         ScheduleEvent.Status.DONE,
         ScheduleEvent.Status.COMPLETED,
-    )
+    ):
+        return True
+    if event.status == ScheduleEvent.Status.DRAFT:
+        return False
+    # Урок уже стоял в расписании и время прошло — считаем состоявшимся,
+    # даже если журнал ещё не закрыли.
+    return event.starts_at < timezone.now()
 
 
 def event_is_upcoming_for_plan(event, *, now=None):

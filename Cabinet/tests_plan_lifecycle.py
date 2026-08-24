@@ -351,3 +351,46 @@ class PlanLifecycleTests(TestCase):
         self.assertIsNone(first.lesson_plan_item_id)
         self.assertEqual(second.lesson_plan_item_id, self.items[0].id)
         self.assertEqual(second.topic, self.items[0].topic)
+
+    def test_past_unmarked_lesson_counts_as_conducted(self):
+        self.enrollment.start_date = timezone.localtime(self.base).date() - timedelta(days=14)
+        self.enrollment.save(update_fields=["start_date"])
+        past = self._event(-2)
+        future = self._event(7)
+        past.refresh_from_db()
+        future.refresh_from_db()
+        self.items[0].refresh_from_db()
+        self.assertEqual(past.lesson_plan_item_id, self.items[0].id)
+        self.assertEqual(self.items[0].status, PlanItemStatus.COMPLETED)
+        self.assertEqual(future.lesson_plan_item_id, self.items[1].id)
+        self.assertEqual(future.topic, self.items[1].topic)
+
+    def test_schedule_list_realigns_stale_future_topics(self):
+        from Cabinet.schedule_events import list_schedule_events
+
+        first = self._event(1)
+        second = self._event(8)
+        third = self._event(15)
+        cancel_event_with_scope(
+            first, changed_by=self.teacher, notify=False, plan_cancel_action="shift",
+        )
+        second.lesson_plan_item = self.items[2]
+        second.topic = self.items[2].topic
+        second.save(update_fields=["lesson_plan_item", "topic", "updated_at"])
+        self.items[2].scheduled_event = second
+        self.items[2].save(update_fields=["scheduled_event", "updated_at"])
+        third.lesson_plan_item = self.items[1]
+        third.topic = self.items[1].topic
+        third.save(update_fields=["lesson_plan_item", "topic", "updated_at"])
+
+        list_schedule_events(
+            user=self.teacher,
+            date_from=timezone.localtime(second.starts_at).date(),
+            date_to=timezone.localtime(third.starts_at).date(),
+        )
+        second.refresh_from_db()
+        third.refresh_from_db()
+        self.assertEqual(second.lesson_plan_item_id, self.items[0].id)
+        self.assertEqual(second.topic, self.items[0].topic)
+        self.assertEqual(third.lesson_plan_item_id, self.items[1].id)
+        self.assertEqual(third.topic, self.items[1].topic)

@@ -403,6 +403,38 @@ def schedule_event_to_json(event):
 
 
 def list_schedule_events(*, user, date_from, date_to, include_cancelled=False):
+    qs = _schedule_events_queryset(
+        user=user,
+        date_from=date_from,
+        date_to=date_to,
+        include_cancelled=include_cancelled,
+    )
+    try:
+        from .plan_sync import PlanSyncService
+
+        PlanSyncService.realign_enrollments_for_events(list(qs.order_by("starts_at")))
+        qs = _schedule_events_queryset(
+            user=user,
+            date_from=date_from,
+            date_to=date_to,
+            include_cancelled=include_cancelled,
+        )
+    except Exception:
+        import logging
+        logging.getLogger("cabinet.plan_sync").exception(
+            "plan realign on schedule list failed teacher=%s", user.pk,
+        )
+    events = []
+    for ev in qs.order_by("starts_at"):
+        try:
+            events.append(schedule_event_to_json(ev))
+        except Exception:
+            # Один битый урок не должен обнулять весь календарь.
+            continue
+    return events
+
+
+def _schedule_events_queryset(*, user, date_from, date_to, include_cancelled=False):
     qs = ScheduleEvent.objects.filter(
         owner=user,
         starts_at__date__lte=date_to,
@@ -447,11 +479,4 @@ def list_schedule_events(*, user, date_from, date_to, include_cancelled=False):
     )
     if not include_cancelled:
         qs = qs.exclude(status=ScheduleEvent.Status.CANCELLED)
-    events = []
-    for ev in qs.order_by("starts_at"):
-        try:
-            events.append(schedule_event_to_json(ev))
-        except Exception:
-            # Один битый урок не должен обнулять весь календарь.
-            continue
-    return events
+    return qs

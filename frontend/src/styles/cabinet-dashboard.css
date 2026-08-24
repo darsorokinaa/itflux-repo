@@ -7865,7 +7865,7 @@ button.cb-sch-event {
 
 .cb-lesson-card__grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
   gap: 18px;
   align-items: start;
 }
@@ -8602,17 +8602,17 @@ select.cb-lesson-card__about-input.is-empty {
 
 .cb-lesson-card__empty {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   padding: 12px 14px;
   border-radius: 16px;
   background: #F8FAFC;
   border: 1px dashed #CBD5E1;
+  min-width: 0;
 }
 
 .cb-lesson-card__empty.is-highlight {
-  flex-wrap: wrap;
   background: #EDF3FF;
   border-color: #3564ef;
 }
@@ -8622,6 +8622,16 @@ select.cb-lesson-card__about-input.is-empty {
   font-size: 13px;
   font-weight: 600;
   color: #64748B;
+  line-height: 1.4;
+  min-width: 0;
+}
+
+.cb-lesson-card__empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
 }
 
 .cb-lesson-card__empty-btn {
@@ -8633,6 +8643,8 @@ select.cb-lesson-card__about-input.is-empty {
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
+  padding: 0;
+  text-align: left;
 }
 
 .cb-lesson-card__empty-btn--ghost {

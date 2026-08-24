@@ -793,12 +793,16 @@ function ResourceSection({
       ) : showEmpty ? (
         <div className={`cb-lesson-card__empty cb-lesson-card__empty--${variant}${highlight ? " is-highlight" : ""}`}>
           <p>{emptyLabel}</p>
-          {addHandler ? (
-            <button type="button" className="cb-lesson-card__empty-btn" onClick={addHandler}>
-              {emptyActionLabel || addLabel}
-            </button>
+          {addHandler || emptyExtra ? (
+            <div className="cb-lesson-card__empty-actions">
+              {addHandler ? (
+                <button type="button" className="cb-lesson-card__empty-btn" onClick={addHandler}>
+                  {emptyActionLabel || addLabel}
+                </button>
+              ) : null}
+              {emptyExtra}
+            </div>
           ) : null}
-          {emptyExtra}
         </div>
       ) : addHandler && !rows.length && !onAdd ? (
         <div className={`cb-lesson-card__empty cb-lesson-card__empty--${variant} cb-lesson-card__empty--compact`}>
