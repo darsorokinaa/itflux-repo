@@ -128,6 +128,7 @@ export default function CreateScheduleLessonModal({
   const [studentSubjectId, setStudentSubjectId] = useState("");
   const [subjectsLoading, setSubjectsLoading] = useState(false);
   const [nextPlanItem, setNextPlanItem] = useState(null);
+  const [planProgress, setPlanProgress] = useState(null);
   const [planLinkMode, setPlanLinkMode] = useState(lessonPlanItemId ? "use" : "suggest");
   const [selectedPlanItemId, setSelectedPlanItemId] = useState(lessonPlanItemId || null);
 
@@ -247,6 +248,7 @@ export default function CreateScheduleLessonModal({
     const sid = studentId || (selectedStudentIds.length === 1 ? selectedStudentIds[0] : "");
     if (!sid && !groupId) {
       setNextPlanItem(null);
+      setPlanProgress(null);
       return undefined;
     }
     let cancelled = false;
@@ -258,9 +260,13 @@ export default function CreateScheduleLessonModal({
       .then((data) => {
         if (cancelled) return;
         setNextPlanItem(data?.item || null);
+        setPlanProgress(data?.progress || null);
       })
       .catch(() => {
-        if (!cancelled) setNextPlanItem(null);
+        if (!cancelled) {
+          setNextPlanItem(null);
+          setPlanProgress(null);
+        }
       });
     return () => { cancelled = true; };
   }, [studentId, selectedStudentIds, groupId, studentSubjectId, lessonPlanItemId]);
@@ -409,12 +415,23 @@ export default function CreateScheduleLessonModal({
         </div>
         <form className="cb-sch-form cb-sch-form--sections" onSubmit={(e) => handleSubmit(e, false)}>
           {error ? <p className="cb-sch-form__error" role="alert">{error}</p> : null}
+          {!lessonPlanItemId && !nextPlanItem && planProgress?.is_finished ? (
+            <section className="cb-sch-form__section">
+              <h3>План уроков</h3>
+              <p className="cb-sch-field-hint">
+                {planProgress.warning_message || "План обучения завершён. Занятие будет создано без темы — добавьте темы в план."}
+              </p>
+            </section>
+          ) : null}
           {!lessonPlanItemId && nextPlanItem ? (
             <section className="cb-sch-form__section">
               <h3>План уроков</h3>
               <p className="cb-sch-field-hint">
                 Следующая тема по плану: {nextPlanItem.topic || nextPlanItem.title}
               </p>
+              {planProgress?.warning_message && planProgress.warning_level !== "ok" ? (
+                <p className="cb-sch-field-hint">{planProgress.warning_message}</p>
+              ) : null}
               <div className="cb-sch-form__row" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button
                   type="button"

@@ -42,7 +42,6 @@ from .plan_schedule import (
     events_for_enrollment,
     get_active_enrollment,
     plan_items_for_enrollment,
-    resolve_plan_item_for_event,
 )
 
 logger = logging.getLogger(__name__)
@@ -109,32 +108,37 @@ class LessonLearningPlanSyncService:
     @classmethod
     @transaction.atomic
     def attach_event_to_student_plan(cls, event: ScheduleEvent, *, teacher) -> ScheduleEvent:
-        """После создания занятия: нет плана — создать; урок вне плана — добавить пункт.
+        """После создания занятия привязать следующий свободный пункт плана.
 
-        Учебный план с ещё не занятыми слотами не трогаем (связь по слоту, без FK),
-        чтобы отмена со сдвигом темы продолжала работать.
+        Не создаёт новый план и не добавляет пункты: если свободных тем нет,
+        занятие остаётся без PlanItem (план завершён, а не «начат сначала»).
         """
-        if not event.student_id:
+        if not event.student_id and not event.group_id:
             return event
         if cls._linked_real_plan_item(event) is not None:
             return event
 
-        enrollment = get_active_enrollment(event)
-        if enrollment is not None:
-            resolved, _ = resolve_plan_item_for_event(event)
-            if resolved is not None and not cls._is_auto_materials_item(resolved):
-                return event
+        from .plan_sync import PlanSyncService
 
-        try:
-            cls.create_plan_item_from_lesson(event, teacher=teacher)
-        except LessonPlanSyncError as exc:
-            logger.info(
-                "skip auto plan attach event=%s code=%s message=%s",
-                event.pk,
-                getattr(exc, "code", ""),
-                exc,
-            )
+        item = PlanSyncService.link_next_plan_item(event)
         event.refresh_from_db()
+        linked = cls._linked_real_plan_item(event)
+        if linked is not None and event.plan_sync_enabled:
+            cls._copy_item_fields_to_event(
+                event, linked, force_fields=CONTENT_FIELDS,
+            )
+            cls._sync_plan_materials_onto_event(event, linked)
+            event.content_source = LessonContentSource.PLAN
+            event.plan_synced_at = timezone.now()
+            event.save(update_fields=[
+                *CONTENT_FIELDS, "content_source", "plan_synced_at", "updated_at",
+            ])
+            cls._sync_journal_topic(event)
+        elif item is None:
+            logger.info(
+                "plan exhausted or missing, event=%s left without plan item",
+                event.pk,
+            )
         return event
 
     @classmethod
@@ -375,27 +379,36 @@ class LessonLearningPlanSyncService:
                 if ev.starts_at >= now
                 and ev.status not in cls.TERMINAL_STATUSES
                 and ev.plan_sync_enabled
-                and "topic" not in (ev.manual_override_fields or [])
             ]
-            # Пункты, ещё не завершённые
-            plan_items = [
+            remaining_items = [
                 item for item in plan_items_for_enrollment(enrollment)
                 if item.status not in (PlanItemStatus.COMPLETED, PlanItemStatus.SKIPPED)
             ]
+            linked_item_ids = {
+                ev.lesson_plan_item_id
+                for ev in future_events
+                if ev.lesson_plan_item_id
+            }
+            free_items = [
+                item for item in remaining_items
+                if item.id not in linked_item_ids
+            ]
+            unlinked_events = [ev for ev in future_events if not ev.lesson_plan_item_id]
 
             warning = None
-            if len(future_events) != len(plan_items):
+            if len(unlinked_events) != len(free_items) and (unlinked_events or free_items):
                 warning = (
-                    f"Число будущих уроков ({len(future_events)}) не совпадает "
-                    f"с числом оставшихся пунктов плана ({len(plan_items)}). "
-                    "Обновлены только однозначно сопоставленные занятия; "
-                    "уроки не удалялись и не создавались."
+                    f"Число будущих уроков без темы ({len(unlinked_events)}) не совпадает "
+                    f"с числом свободных пунктов плана ({len(free_items)}). "
+                    "Уже связанные занятия не перепривязывались."
                 )
 
-            pair_count = min(len(future_events), len(plan_items))
             updated_ids = []
-            for ev, item in zip(future_events[:pair_count], plan_items[:pair_count]):
-                ev.lesson_plan_item = item
+            # Уже связанные занятия: обновить контент из ИХ пункта, не меняя связь.
+            for ev in future_events:
+                item = ev.lesson_plan_item
+                if item is None or "topic" in (ev.manual_override_fields or []):
+                    continue
                 cls._copy_item_fields_to_event(
                     ev, item,
                     force_fields=("topic", "subtopic", "description", "goal", "homework_description"),
@@ -405,17 +418,31 @@ class LessonLearningPlanSyncService:
                 ev.plan_synced_at = timezone.now()
                 ev.save()
                 cls._sync_journal_topic(ev)
-                if item.scheduled_event_id in (None, ev.pk):
-                    item.scheduled_event = ev
-                    item.save(update_fields=["scheduled_event", "updated_at"])
                 updated_ids.append(ev.pk)
+
+            from .plan_sync import PlanSyncService
+            for ev, item in zip(unlinked_events, free_items):
+                PlanSyncService.link_event_to_plan(ev, item, overwrite_topic=True)
+                ev.refresh_from_db()
+                if ev.lesson_plan_item_id == item.id:
+                    cls._copy_item_fields_to_event(
+                        ev, item,
+                        force_fields=("topic", "subtopic", "description", "goal", "homework_description"),
+                    )
+                    cls._sync_plan_materials_onto_event(ev, item)
+                    ev.content_source = LessonContentSource.PLAN
+                    ev.plan_synced_at = timezone.now()
+                    ev.save()
+                    cls._sync_journal_topic(ev)
+                    if ev.pk not in updated_ids:
+                        updated_ids.append(ev.pk)
 
             return {
                 "ok": True,
                 "updated_event_ids": updated_ids,
                 "warning": warning,
                 "future_events": len(future_events),
-                "plan_items": len(plan_items),
+                "plan_items": len(remaining_items),
             }
         finally:
             _set_guard(False)
@@ -718,15 +745,15 @@ class LessonLearningPlanSyncService:
             # План учителя без enrollment — разрешаем (черновик / подготовка)
             if item.plan.teacher_id == getattr(teacher, "id", teacher):
                 return
-            raise LessonPlanSyncError(
-                "Пункт плана не связан с учеником этого урока.",
-                status=403,
-                code="alien_plan",
-            )
+            raise LessonPlanSyncError("Пункт плана не назначен этому уроку.", code="alien_plan")
 
         if event.student_id:
             if enrollments.filter(student_id=event.student_id).exists():
                 return
+            logger.warning(
+                "ScheduleEvent has plan_item from another student event=%s item=%s event_student=%s",
+                event.pk, item.pk, event.student_id,
+            )
             raise LessonPlanSyncError(
                 "Нельзя связать урок с планом другого ученика.",
                 status=403,
@@ -742,6 +769,10 @@ class LessonLearningPlanSyncService:
             )
             if student_ids and enrollments.filter(student_id__in=student_ids).exists():
                 return
+            logger.warning(
+                "ScheduleEvent has plan_item from another group event=%s item=%s event_group=%s",
+                event.pk, item.pk, event.group_id,
+            )
             raise LessonPlanSyncError(
                 "Пункт плана не относится к группе этого урока.",
                 status=403,
@@ -856,11 +887,11 @@ class LessonLearningPlanSyncService:
     def _auto_create_enrollment(
         cls, event: ScheduleEvent, *, teacher, student_id: int,
     ) -> Optional[LessonPlanEnrollment]:
-        """Создаёт план обучения и назначение для ученика «на лету».
+        """Возвращает существующее назначение или создаёт одно, если его нет.
 
-        Срабатывает при создании занятия без плана и при сохранении темы
-        в карточке урока, если у ученика ещё нет активного плана — заводим
-        план по предмету занятия (или общий) и сразу назначаем его ученику.
+        Не создаёт второй активный план по тому же ученику+предмету.
+        Завершённый план при явном добавлении темы из карточки урока
+        открывается снова — это не «начать сначала», а продолжить тот же план.
         """
         from .plan_subjects import get_plan_subject_label
 
@@ -869,6 +900,28 @@ class LessonLearningPlanSyncService:
             return None
 
         student_subject = event.student_subject if event.student_subject_id else None
+        qs = LessonPlanEnrollment.objects.select_for_update().filter(
+            teacher=teacher,
+            student_id=student_id,
+        ).exclude(status=EnrollmentStatus.CANCELLED)
+        if student_subject is not None:
+            subject_qs = qs.filter(student_subject_id=student_subject.id)
+            qs = subject_qs if subject_qs.exists() else qs.filter(student_subject_id=student_subject.id)
+        else:
+            qs = qs.filter(student_subject__isnull=True)
+
+        existing = qs.select_related("plan").order_by("-created_at").first()
+        if existing is not None:
+            if existing.status == EnrollmentStatus.COMPLETED:
+                existing.status = EnrollmentStatus.ACTIVE
+                existing.save(update_fields=["status", "updated_at"])
+                logger.info(
+                    "reopened completed enrollment=%s student=%s for explicit plan item create",
+                    existing.pk,
+                    student_id,
+                )
+            return existing
+
         if student_subject is not None:
             subject_code = (student_subject.subject or "").strip() or "other"
             direction_code = student_subject.direction or Direction.OTHER
@@ -899,6 +952,13 @@ class LessonLearningPlanSyncService:
             student_subject=student_subject,
             format=PlanFormat.INDIVIDUAL,
             status=EnrollmentStatus.ACTIVE,
+        )
+        logger.info(
+            "created enrollment=%s plan=%s student=%s subject=%s",
+            enrollment.pk,
+            plan.pk,
+            student_id,
+            getattr(student_subject, "id", None),
         )
         return enrollment
 

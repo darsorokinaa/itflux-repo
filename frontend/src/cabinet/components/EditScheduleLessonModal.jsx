@@ -182,9 +182,7 @@ const PlanSyncSection = forwardRef(function PlanSyncSection({ event, disabled, o
   };
 
   const defaultSyncAction = () => {
-    const shouldSyncToPlan = syncMeta.planSyncEnabled !== false && (
-      hasRealPlanLink || Boolean(event.studentId)
-    );
+    const shouldSyncToPlan = syncMeta.planSyncEnabled !== false && hasRealPlanLink;
     return shouldSyncToPlan ? "lesson_and_plan" : "lesson_only";
   };
 

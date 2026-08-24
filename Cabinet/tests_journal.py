@@ -737,9 +737,10 @@ class JournalHomeworkResultTests(JournalTestBase):
 
 
 class JournalTopicsSyncTests(JournalTestBase):
-    def test_planned_topic_resolves_plan_slot_without_explicit_link(self):
-        """Журнал должен видеть ту же тему, что и календарь (slot-резолвинг),
-        даже если event.topic пуст и нет явной FK lesson_plan_item."""
+    def test_planned_topic_does_not_guess_plan_slot_without_explicit_link(self):
+        """Без явной FK журнал не подставляет тему по хронологическому слоту."""
+        from Cabinet.lesson_plan_content_sync import LessonLearningPlanSyncService
+
         plan = LessonPlan.objects.create(
             teacher=self.teacher, title="План", direction=Direction.OGE,
             subject=PlanSubject.INFORMATICS, exam_type=ExamType.OGE, status=PlanStatus.PUBLISHED,
@@ -748,12 +749,18 @@ class JournalTopicsSyncTests(JournalTestBase):
             teacher=self.teacher, plan=plan, student=self.student,
             format=PlanFormat.INDIVIDUAL, status=EnrollmentStatus.ACTIVE,
         )
-        LessonPlanItem.objects.create(plan=plan, order=1, title="Слот 1", topic="Тема из слота плана")
+        item = LessonPlanItem.objects.create(
+            plan=plan, order=1, title="Слот 1", topic="Тема из слота плана",
+        )
         event = self._individual_event()
         event.topic = ""
         event.save(update_fields=["topic"])
 
         journal = get_or_create_journal(event, self.teacher)
+        self.assertEqual(journal.planned_topic, "")
+
+        LessonLearningPlanSyncService.link_plan_item(event, item, teacher=self.teacher)
+        journal.refresh_from_db()
         self.assertEqual(journal.planned_topic, "Тема из слота плана")
 
     def test_calendar_topic_edit_syncs_existing_draft_journal(self):

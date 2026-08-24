@@ -993,7 +993,33 @@ class LessonPlanEnrollment(models.Model):
                     models.Q(group__isnull=False)
                 ),
                 name="enrollment_has_student_or_group",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["teacher", "student", "student_subject"],
+                condition=models.Q(
+                    status__in=["active", "paused"],
+                    student__isnull=False,
+                    student_subject__isnull=False,
+                ),
+                name="cabinet_uniq_active_enrollment_student_subject",
+            ),
+            models.UniqueConstraint(
+                fields=["teacher", "student"],
+                condition=models.Q(
+                    status__in=["active", "paused"],
+                    student__isnull=False,
+                    student_subject__isnull=True,
+                ),
+                name="cabinet_uniq_active_enrollment_student_unbound",
+            ),
+            models.UniqueConstraint(
+                fields=["teacher", "group"],
+                condition=models.Q(
+                    status__in=["active", "paused"],
+                    group__isnull=False,
+                ),
+                name="cabinet_uniq_active_enrollment_group",
+            ),
         ]
 
     def __str__(self):

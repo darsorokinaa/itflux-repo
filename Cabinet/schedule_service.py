@@ -505,9 +505,6 @@ def create_series(
     if item_id:
         first_item = LessonPlanItem.objects.filter(pk=item_id).first()
     skip_plan = bool(series_data.get("skip_plan") or series_data.get("unplanned"))
-    if first_item is not None and events:
-        PlanSyncService.link_event_to_plan(events[0], first_item)
-        events[0].refresh_from_db()
     if skip_plan:
         from .choices import LessonContentSource
 
@@ -518,9 +515,24 @@ def create_series(
     else:
         from .lesson_plan_content_sync import LessonLearningPlanSyncService
 
+        PlanSyncService.assign_plan_items_to_events(events, first_item=first_item)
         for event in events:
-            LessonLearningPlanSyncService.attach_event_to_student_plan(event, teacher=teacher)
             event.refresh_from_db()
+            linked = event.lesson_plan_item
+            if linked is None:
+                continue
+            LessonLearningPlanSyncService._copy_item_fields_to_event(
+                event, linked, force_fields=("topic", "subtopic", "description", "goal", "homework_description"),
+            )
+            LessonLearningPlanSyncService._sync_plan_materials_onto_event(event, linked)
+            from .choices import LessonContentSource
+            from django.utils import timezone as dj_tz
+            event.content_source = LessonContentSource.PLAN
+            event.plan_synced_at = dj_tz.now()
+            event.save(update_fields=[
+                "topic", "subtopic", "description", "goal", "homework_description",
+                "content_source", "plan_synced_at", "updated_at",
+            ])
 
     if notify and series.notify_on_create:
         for event in events[:1]:
@@ -780,7 +792,7 @@ def cancel_series(series, *, changed_by, from_date=None, notify=True, plan_cance
     return events
 
 
-def update_event(event, *, changed_by, data, notify=True):
+def update_event(event, *, changed_by, data, notify=True, sync_plan=True):
     data = normalize_event_update_data(data, event=event, teacher=changed_by)
     old = event_snapshot(event)
     fields = [
@@ -825,15 +837,41 @@ def update_event(event, *, changed_by, data, notify=True):
         else:
             event.student_subject_id = int(ss_val)
     event.save()
-    if any(f in data for f in ("topic", "subtopic", "description", "goal", "homework_description")):
-        # PATCH может менять тему в обход LessonLearningPlanSyncService —
-        # не даём журналу застревать на устаревшей теме (см. journal_service).
+    content_keys = ("topic", "subtopic", "description", "goal", "homework_description")
+    content_updates = {k: data[k] for k in content_keys if k in data}
+    if content_updates:
         try:
             from .journal_service import sync_planned_topic_from_event
 
             sync_planned_topic_from_event(event)
         except Exception:
             pass
+        if (
+            sync_plan
+            and event.lesson_plan_item_id
+            and event.plan_sync_enabled
+            and "topic" not in (event.manual_override_fields or [])
+        ):
+            try:
+                from .lesson_plan_content_sync import (
+                    LessonLearningPlanSyncService,
+                    LessonPlanSyncConflict,
+                    LessonPlanSyncError,
+                )
+
+                LessonLearningPlanSyncService.apply_lesson_edit(
+                    event,
+                    content_updates,
+                    teacher=changed_by,
+                    sync_action="lesson_and_plan",
+                    resolve_conflict="lesson_and_plan",
+                )
+            except (LessonPlanSyncConflict, LessonPlanSyncError):
+                logger = __import__("logging").getLogger("cabinet.plan_sync")
+                logger.info(
+                    "plan sync skipped after event update event=%s",
+                    event.pk,
+                )
     if time_changed:
         from .models import EventReminderLog
 
@@ -913,7 +951,7 @@ def apply_series_edit(event, *, scope, changed_by, data, notify=True):
         update_series_template(event.series, data, reference_event=event if scope == "series" else None)
 
     for ev in scope_events:
-        update_event(ev, changed_by=changed_by, data=shared, notify=False)
+        update_event(ev, changed_by=changed_by, data=shared, notify=False, sync_plan=False)
 
     if notify:
         NotificationService.notify_event_updated(event, changes=shared)

@@ -294,7 +294,7 @@ def schedule_event_to_json(event):
         )
     )
     topic = stored_topic
-    if plan_item_json and use_plan_topic and not stored_topic:
+    if plan_item_json and use_plan_topic and planned_topic:
         topic = planned_topic
         if "subtopic" not in overrides:
             subtopic = plan_item_json.get("subtopic") or subtopic
@@ -304,18 +304,16 @@ def schedule_event_to_json(event):
             goal = plan_item_json.get("goal") or goal
         if "homework_description" not in overrides:
             homework_description = plan_item_json.get("homeworkDescription") or homework_description
-    elif plan_item_json and use_plan_topic and stored_topic:
-        if "subtopic" not in overrides and not event.subtopic:
+    elif plan_item_json and use_plan_topic and not stored_topic:
+        topic = planned_topic
+        if "subtopic" not in overrides:
             subtopic = plan_item_json.get("subtopic") or subtopic
-        if "description" not in overrides and not event.description:
+        if "description" not in overrides:
             description = plan_item_json.get("description") or description
-        if "goal" not in overrides and not event.goal:
+        if "goal" not in overrides:
             goal = plan_item_json.get("goal") or goal
-        if "homework_description" not in overrides and not event.homework_description:
+        if "homework_description" not in overrides:
             homework_description = plan_item_json.get("homeworkDescription") or homework_description
-    elif plan_item_json and use_plan_topic:
-        if planned_topic:
-            topic = planned_topic
 
     has_plan = plan_item_json is not None or get_active_enrollment(event) is not None
     assigned_homework = _assigned_homework_to_json(
@@ -323,7 +321,10 @@ def schedule_event_to_json(event):
     )
 
     from .lesson_plan_content_sync import LessonLearningPlanSyncService
+    from .plan_sync import PlanSyncService
     sync_meta = LessonLearningPlanSyncService.sync_meta_payload(event, plan_item)
+    enrollment = get_active_enrollment(event)
+    plan_progress = PlanSyncService.get_enrollment_progress(enrollment) if enrollment else None
 
     return {
         "id": local_event_id(event.pk),
@@ -388,6 +389,10 @@ def schedule_event_to_json(event):
         "manualMaterials": sync_meta["manualMaterials"],
         "homeworkMaterials": sync_meta["homeworkMaterials"],
         "eventMaterials": sync_meta["allMaterials"],
+        "planProgress": plan_progress,
+        "planItemsTotal": (plan_progress or {}).get("total"),
+        "planWarningLevel": (plan_progress or {}).get("warning_level") or "",
+        "planWarningMessage": (plan_progress or {}).get("warning_message") or "",
     }
 
 

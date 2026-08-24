@@ -263,14 +263,23 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                     {"detail": "Предмет плана не совпадает с предметом ученика."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            LessonPlanEnrollment.objects.create(
+            already = LessonPlanEnrollment.objects.filter(
                 teacher=self.get_teacher(),
-                plan=plan,
                 student=student,
                 student_subject=subject,
-                format="individual",
-                status=EnrollmentStatus.ACTIVE,
-            )
+            ).exclude(status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED]).first()
+            if already is None:
+                LessonPlanEnrollment.objects.create(
+                    teacher=self.get_teacher(),
+                    plan=plan,
+                    student=student,
+                    student_subject=subject,
+                    format="individual",
+                    status=EnrollmentStatus.ACTIVE,
+                )
+            elif already.plan_id != plan.pk:
+                already.plan = plan
+                already.save(update_fields=["plan", "updated_at"])
         return Response(
             StudentSubjectSerializer(subject).data,
             status=status.HTTP_201_CREATED,
@@ -1174,6 +1183,7 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                     "attached_interactives",
                     "homework_materials",
                     "homework_interactives",
+                    "schedule_events_linked",
                 ).order_by("order", "id"),
             )
         )
@@ -1270,10 +1280,35 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         # Проверяем, что ученик/группа принадлежат учителю
         student = serializer.validated_data.get("student")
         group = serializer.validated_data.get("group")
+        student_subject = serializer.validated_data.get("student_subject")
         if student:
             get_object_or_404(Student, pk=student.pk, teacher=self.get_teacher())
         if group:
             get_object_or_404(StudentGroup, pk=group.pk, teacher=self.get_teacher())
+
+        existing_qs = LessonPlanEnrollment.objects.filter(
+            teacher=self.get_teacher(),
+        ).exclude(status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED])
+        if student and student_subject:
+            existing_qs = existing_qs.filter(student=student, student_subject=student_subject)
+        elif student:
+            existing_qs = existing_qs.filter(student=student, student_subject__isnull=True)
+        elif group:
+            existing_qs = existing_qs.filter(group=group)
+        else:
+            existing_qs = existing_qs.none()
+        existing = existing_qs.order_by("-created_at").first()
+        if existing is not None:
+            if existing.plan_id == plan.pk:
+                return Response(LessonPlanEnrollmentSerializer(existing).data, status=status.HTTP_201_CREATED)
+            return Response(
+                {
+                    "detail": "У этого ученика уже есть активный план по предмету.",
+                    "enrollment_id": existing.pk,
+                    "plan_id": existing.plan_id,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
 
         enrollment = serializer.save(teacher=self.get_teacher())
         return Response(LessonPlanEnrollmentSerializer(enrollment).data, status=status.HTTP_201_CREATED)
@@ -1297,6 +1332,10 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         item = serializer.save(plan=plan)
         plan.lessons_count = plan.items.count()
         plan.save(update_fields=["lessons_count", "updated_at"])
+        LessonPlanEnrollment.objects.filter(
+            plan=plan,
+            status=EnrollmentStatus.COMPLETED,
+        ).update(status=EnrollmentStatus.ACTIVE, updated_at=timezone.now())
         return Response(LessonPlanItemSerializer(item).data, status=status.HTTP_201_CREATED)
 
 
@@ -1377,6 +1416,32 @@ class LessonPlanItemViewSet(
             )
         if plan.teacher_id != self.get_teacher().id:
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
+        force = str(request.query_params.get("force") or request.data.get("force") or "").lower() in (
+            "1", "true", "yes",
+        )
+        linked_event = item.scheduled_event
+        if linked_event is None:
+            linked_event = item.schedule_events_linked.exclude(
+                status=ScheduleEvent.Status.CANCELLED,
+            ).order_by("starts_at").first()
+        if linked_event is not None and linked_event.status not in (
+            ScheduleEvent.Status.CANCELLED,
+        ):
+            if not force:
+                when = timezone.localtime(linked_event.starts_at).strftime("%d.%m")
+                return Response(
+                    {
+                        "detail": f"Эта тема уже назначена на занятие {when}.",
+                        "code": "item_in_use",
+                        "event_id": linked_event.pk,
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+            for ev in item.schedule_events_linked.filter(lesson_plan_item_id=item.pk):
+                ev.lesson_plan_item = None
+                ev.save(update_fields=["lesson_plan_item", "updated_at"])
+            item.scheduled_event = None
+            item.save(update_fields=["scheduled_event", "updated_at"])
         plan_id = plan.pk
         response = super().destroy(request, *args, **kwargs)
         plan = LessonPlan.objects.get(pk=plan_id)
@@ -1479,6 +1544,7 @@ class LessonPlanEnrollmentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         student = serializer.validated_data.get("student")
         group = serializer.validated_data.get("group")
         student_subject = serializer.validated_data.get("student_subject")
+        plan = serializer.validated_data.get("plan")
         if student:
             get_object_or_404(Student, pk=student.pk, teacher=self.get_teacher())
         if group:
@@ -1490,6 +1556,28 @@ class LessonPlanEnrollmentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                 student=student,
                 student__teacher=self.get_teacher(),
             )
+        existing_qs = LessonPlanEnrollment.objects.filter(
+            teacher=self.get_teacher(),
+        ).exclude(status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED])
+        if student and student_subject:
+            existing_qs = existing_qs.filter(student=student, student_subject=student_subject)
+        elif student:
+            existing_qs = existing_qs.filter(student=student, student_subject__isnull=True)
+        elif group:
+            existing_qs = existing_qs.filter(group=group)
+        else:
+            existing_qs = existing_qs.none()
+        existing = existing_qs.order_by("-created_at").first()
+        if existing is not None:
+            if plan and existing.plan_id == plan.pk:
+                serializer.instance = existing
+                return existing
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({
+                "detail": "У этого ученика уже есть активный план по предмету. Откройте существующий или завершите его.",
+                "enrollment_id": existing.pk,
+                "plan_id": existing.plan_id,
+            })
         enrollment = serializer.save(teacher=self.get_teacher())
         # Помечаем первый пункт плана как PLANNED
         from .plan_sync import PlanSyncService
@@ -1498,6 +1586,15 @@ class LessonPlanEnrollmentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         if first_item and first_item.status == PlanItemStatus.NOT_STARTED:
             first_item.status = PlanItemStatus.PLANNED
             first_item.save(update_fields=["status"])
+        return enrollment
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        enrollment = self.perform_create(serializer)
+        instance = enrollment if enrollment is not None else serializer.instance
+        output = LessonPlanEnrollmentSerializer(instance, context=self.get_serializer_context())
+        return Response(output.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"], url_path="progress")
     def progress(self, request, pk=None):

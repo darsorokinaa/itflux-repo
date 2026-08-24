@@ -85,9 +85,8 @@ def resolve_event_students(event: ScheduleEvent) -> list[Student]:
 def planned_topic_for_event(event: ScheduleEvent) -> str:
     """Планируемая тема из карточки урока / пункта плана / каталожного урока.
 
-    Использует тот же резолвинг пункта плана (явная связь → слот в enrollment),
-    что и календарь (schedule_events.schedule_event_to_json) — иначе тема,
-    видимая учителю в карточке урока, расходится с журналом.
+    Использует ту же явную связь пункт плана ↔ занятие, что и календарь
+    (schedule_events.schedule_event_to_json). Тема не угадывается по слоту.
     Не подставляет имя ученика/группы (часто лежит в event.title / item.title).
     """
     audience_names = {

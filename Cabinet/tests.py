@@ -29,6 +29,7 @@ from Cabinet.schedule_service import (
 )
 from Cabinet.schedule_events import schedule_event_to_json
 from Cabinet.schedule_series import generate_events_for_series
+from Cabinet.plan_sync import PlanSyncService
 from Cabinet.plan_schedule import (
     AUTO_MATERIALS_PLAN_DESCRIPTION,
     ensure_event_plan_item,
@@ -342,7 +343,8 @@ class PlanScheduleMappingTests(TestCase):
         self.assertEqual(payload2["planLessonNumber"], 2)
         self.assertEqual(payload2["planItem"]["title"], "Таблицы истинности")
 
-    def test_cancel_shift_moves_plan_topic_to_next_lesson(self):
+    def test_cancel_shift_returns_plan_item_without_rebinding_future_lessons(self):
+        """Отмена со сдвигом освобождает тему, но не перепривязывает уже связанные занятия."""
         base = timezone.now().replace(hour=15, minute=0, second=0, microsecond=0)
         event3 = create_single_event(
             teacher=self.teacher,
@@ -356,14 +358,30 @@ class PlanScheduleMappingTests(TestCase):
             student_ids=[self.student.pk],
             notify=False,
         )
+        self.assertEqual(event3.lesson_plan_item_id, self.item3.id)
         cancel_event_with_scope(
             self.event2,
             changed_by=self.teacher,
             notify=False,
             plan_cancel_action="shift",
         )
-        payload3 = schedule_event_to_json(event3)
-        self.assertEqual(payload3["planItem"]["id"], self.item2.id)
+        event3.refresh_from_db()
+        self.assertEqual(event3.lesson_plan_item_id, self.item3.id)
+        next_item = PlanSyncService.get_next_plan_item(self.enrollment)
+        self.assertEqual(next_item.id, self.item2.id)
+        event4 = create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": self.student.full_name,
+                "starts_at": base + timedelta(days=22),
+                "ends_at": base + timedelta(days=22, minutes=45),
+                "event_type": "individual_lesson",
+                "notify_participants": False,
+            },
+            student_ids=[self.student.pk],
+            notify=False,
+        )
+        self.assertEqual(event4.lesson_plan_item_id, self.item2.id)
 
     def test_cancel_skip_advances_plan_topic(self):
         base = timezone.now().replace(hour=15, minute=0, second=0, microsecond=0)
@@ -390,12 +408,32 @@ class PlanScheduleMappingTests(TestCase):
         payload3 = schedule_event_to_json(event3)
         self.assertEqual(payload3["planItem"]["id"], self.item3.id)
 
-    def test_ensure_out_of_plan_materials_do_not_mutate_enrollment_plan(self):
-        """Урок вне плана + материалы → отдельный черновик, слот плана не трогаем."""
+    def test_ensure_linked_event_reuses_plan_item_for_materials(self):
+        """Занятие с явной связью хранит материалы на пункте плана, а не в черновике."""
         display_item, _ = resolve_plan_item_for_event(self.event1)
         self.assertEqual(display_item.id, self.item1.id)
 
         ensured, _ = ensure_event_plan_item(self.event1, teacher=self.teacher)
+        self.assertEqual(ensured.id, self.item1.id)
+
+    def test_ensure_out_of_plan_materials_do_not_mutate_enrollment_plan(self):
+        """Урок вне плана + материалы → отдельный черновик, слот плана не трогаем."""
+        orphan = create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": self.student.full_name,
+                "starts_at": timezone.now() + timedelta(days=21),
+                "ends_at": timezone.now() + timedelta(days=21, minutes=45),
+                "event_type": "individual_lesson",
+                "notify_participants": False,
+                "skip_plan": True,
+            },
+            student_ids=[self.student.pk],
+            notify=False,
+        )
+        self.assertIsNone(orphan.lesson_plan_item_id)
+
+        ensured, _ = ensure_event_plan_item(orphan, teacher=self.teacher)
         self.assertNotEqual(ensured.id, self.item1.id)
         self.assertEqual(ensured.plan.description, AUTO_MATERIALS_PLAN_DESCRIPTION)
 
@@ -411,7 +449,6 @@ class PlanScheduleMappingTests(TestCase):
         self.assertFalse(self.item1.materials.filter(pk=material.pk).exists())
         self.assertTrue(ensured.materials.filter(pk=material.pk).exists())
 
-        # Служебные черновики скрыты из списка планов
         visible = LessonPlan.objects.filter(teacher=self.teacher).exclude(
             description=AUTO_MATERIALS_PLAN_DESCRIPTION,
         )

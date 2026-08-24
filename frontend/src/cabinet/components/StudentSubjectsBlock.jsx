@@ -173,6 +173,20 @@ export default function StudentSubjectsBlock({ studentId, onChanged }) {
                     ? ` · План: ${item.plan_enrollment.plan_title}`
                     : " · План не назначен"}
                 </span>
+                {item.plan_enrollment?.total ? (
+                  <span
+                    className={`cb-student-subjects__plan-progress${
+                      ["warn", "last", "exhausted", "overbooked"].includes(item.plan_enrollment.warning_level)
+                        ? ` cb-student-subjects__plan-progress--${item.plan_enrollment.warning_level}`
+                        : ""
+                    }`}
+                  >
+                    {item.plan_enrollment.completed} / {item.plan_enrollment.total}
+                    {item.plan_enrollment.remaining > 0
+                      ? ` · осталось ${item.plan_enrollment.remaining}`
+                      : " · план завершён"}
+                  </span>
+                ) : null}
               </div>
               <div className="cb-student-subjects__actions">
                 <button

@@ -22,6 +22,15 @@ from .choices import EnrollmentStatus, LessonContentSource, PlanItemStatus
 logger = logging.getLogger("cabinet.plan_sync")
 
 
+def _lessons_word(n: int) -> str:
+    n = abs(int(n))
+    if n % 10 == 1 and n % 100 != 11:
+        return "занятие"
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return "занятия"
+    return "занятий"
+
+
 class PlanSyncService:
 
     COMPLETED_STATUSES = {"done", "completed"}
@@ -130,16 +139,44 @@ class PlanSyncService:
             return item
         return None
 
+    NEAR_END_INFO = 5
+    NEAR_END_WARN = 2
+
     @classmethod
     def get_enrollment_progress(cls, enrollment) -> dict:
-        items = enrollment.plan.items.all()
-        total = items.count()
-        completed = items.filter(status=PlanItemStatus.COMPLETED).count()
+        from .models import ScheduleEvent
+        from .plan_schedule import events_for_enrollment
+
+        items = list(enrollment.plan.items.order_by("order", "id"))
+        total = len(items)
+        completed = sum(1 for item in items if item.status == PlanItemStatus.COMPLETED)
+        skipped = sum(1 for item in items if item.status == PlanItemStatus.SKIPPED)
+        remaining = max(0, total - completed - skipped)
         current = cls.get_current_item(enrollment)
+        next_item = cls.get_next_plan_item(enrollment)
+        now = timezone.now()
+        future_events = [
+            ev
+            for ev in events_for_enrollment(enrollment, enrollment.teacher)
+            if ev.starts_at >= now
+            and ev.status not in {
+                ScheduleEvent.Status.CANCELLED,
+                ScheduleEvent.Status.COMPLETED,
+                ScheduleEvent.Status.DONE,
+            }
+        ]
+        unlinked_future = [ev for ev in future_events if not ev.lesson_plan_item_id]
+        warning_level, warning_message = cls._progress_warning(
+            total=total,
+            remaining=remaining,
+            future_count=len(future_events),
+            unlinked_future=len(unlinked_future),
+        )
         return {
             "total": total,
             "completed": completed,
-            "remaining": total - completed,
+            "skipped": skipped,
+            "remaining": remaining,
             "percent": round(completed * 100 / total) if total else 0,
             "current_item": {
                 "id": current.pk,
@@ -147,12 +184,66 @@ class PlanSyncService:
                 "order": current.order,
                 "topic": current.topic,
             } if current else None,
-            "is_finished": completed >= total and total > 0,
+            "next_item": {
+                "id": next_item.pk,
+                "title": next_item.title,
+                "order": next_item.order,
+                "topic": next_item.topic,
+            } if next_item else None,
+            "is_finished": remaining == 0 and total > 0,
+            "future_events": len(future_events),
+            "unlinked_future_events": len(unlinked_future),
+            "warning_level": warning_level,
+            "warning_message": warning_message,
         }
 
     @classmethod
+    def _progress_warning(cls, *, total, remaining, future_count, unlinked_future):
+        if total == 0:
+            return "empty", "План обучения пока не заполнен. Добавьте темы."
+        if remaining == 0:
+            extra = unlinked_future or max(0, future_count)
+            if extra:
+                return (
+                    "exhausted",
+                    (
+                        f"План завершён. Все {total} тем использованы. "
+                        f"Для {extra} занятий тема ещё не выбрана — добавьте темы в план."
+                    ),
+                )
+            return "exhausted", f"План завершён. Все {total} тем пройдены."
+        if future_count > remaining and unlinked_future:
+            extra = unlinked_future
+            return (
+                "overbooked",
+                (
+                    f"В плане осталось {remaining} {_lessons_word(remaining)}, "
+                    f"а в расписании создано {future_count} будущих занятий. "
+                    f"Для {extra} занятий темы ещё не определены."
+                ),
+            )
+        if remaining == 1:
+            return (
+                "last",
+                "Это последняя тема текущего плана. Добавьте продолжение, "
+                "чтобы следующие занятия не остались без темы.",
+            )
+        if remaining <= cls.NEAR_END_WARN:
+            return (
+                "warn",
+                f"План подходит к концу — осталось {remaining} {_lessons_word(remaining)}.",
+            )
+        if remaining <= cls.NEAR_END_INFO:
+            return (
+                "info",
+                f"В плане осталось {remaining} {_lessons_word(remaining)}. "
+                "Можно заранее добавить следующие темы.",
+            )
+        return "ok", ""
+
+    @classmethod
     @transaction.atomic
-    def link_event_to_plan(cls, event, item, *, copy_topic=True):
+    def link_event_to_plan(cls, event, item, *, copy_topic=True, overwrite_topic=False):
         """Явная связь событие ↔ пункт плана по ID."""
         from .models import LessonPlanItem, ScheduleEvent
 
@@ -205,13 +296,15 @@ class PlanSyncService:
             item.status = PlanItemStatus.PLANNED
             item.save(update_fields=["status", "updated_at"])
 
-        if copy_topic and not (event.topic or "").strip():
+        if copy_topic:
+            overrides = set(event.manual_override_fields or [])
             topic = (item.topic or item.title or "").strip()
-            if topic:
-                event.topic = topic[:500]
-                update_event_fields.append("topic")
-                event.content_source = LessonContentSource.PLAN
-                update_event_fields.append("content_source")
+            if topic and "topic" not in overrides:
+                if overwrite_topic or not (event.topic or "").strip():
+                    event.topic = topic[:500]
+                    update_event_fields.append("topic")
+                    event.content_source = LessonContentSource.PLAN
+                    update_event_fields.append("content_source")
         event.save(update_fields=list(dict.fromkeys(update_event_fields)))
         logger.info(
             "schedule event linked to plan event=%s item=%s",
@@ -243,7 +336,7 @@ class PlanSyncService:
             enrollment, item = cls.suggest_next_for_event(event)
             if item is None:
                 return None
-            cls.link_event_to_plan(event, item)
+            cls.link_event_to_plan(event, item, overwrite_topic=True)
             event.refresh_from_db()
             if event.lesson_plan_item_id == item.id:
                 return item
@@ -262,7 +355,7 @@ class PlanSyncService:
         enrollment = get_active_enrollment(first)
         if enrollment is None:
             if first_item is not None:
-                cls.link_event_to_plan(first, first_item)
+                cls.link_event_to_plan(first, first_item, overwrite_topic=True)
             return
         remaining = []
         start_item = first_item
@@ -278,12 +371,12 @@ class PlanSyncService:
             if item is None:
                 remaining.append(event)
                 continue
-            cls.link_event_to_plan(event, item)
+            cls.link_event_to_plan(event, item, overwrite_topic=True)
             event.refresh_from_db()
             if not event.lesson_plan_item_id:
                 fallback = cls.get_next_plan_item(enrollment, exclude_event=event)
                 if fallback is not None and fallback.id != item.id:
-                    cls.link_event_to_plan(event, fallback)
+                    cls.link_event_to_plan(event, fallback, overwrite_topic=True)
                     event.refresh_from_db()
         if remaining:
             logger.info(
@@ -327,6 +420,16 @@ class PlanSyncService:
     def on_event_rescheduled(cls, event):
         logger.info("lesson rescheduled event=%s item=%s", event.pk, event.lesson_plan_item_id)
         return event.lesson_plan_item
+
+    @classmethod
+    def on_event_deleted(cls, event, *, plan_cancel_action=None):
+        """Удаление будущего занятия освобождает непройденный пункт плана."""
+        from .plan_schedule import PLAN_CANCEL_SHIFT
+
+        return cls.on_event_cancelled(
+            event,
+            plan_cancel_action=plan_cancel_action or PLAN_CANCEL_SHIFT,
+        )
 
     # ── Внутренняя логика ──────────────────────────────────────────────────
 

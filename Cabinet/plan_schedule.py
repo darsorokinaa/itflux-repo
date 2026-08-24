@@ -40,14 +40,25 @@ def get_active_enrollment(event):
         qs = qs.filter(group_id=event.group_id)
     else:
         return None
-    return qs.select_related("plan", "student_subject").prefetch_related(
+    qs = qs.select_related("plan", "student_subject").prefetch_related(
         "plan__items__materials",
         "plan__items__attached_interactives",
         "plan__items__homework_materials",
         "plan__items__homework_interactives",
         "plan__items__linked_lesson",
         "plan__items__plan",
-    ).order_by("-created_at").first()
+    ).order_by("-created_at")
+    matches = list(qs[:3])
+    if len(matches) > 1:
+        import logging
+        logging.getLogger("cabinet.plan_sync").warning(
+            "Multiple active plans detected teacher=%s student=%s subject=%s ids=%s",
+            event.owner_id,
+            event.student_id,
+            event.student_subject_id,
+            [m.pk for m in matches],
+        )
+    return matches[0] if matches else None
 
 
 def events_for_enrollment(enrollment, owner):
@@ -132,8 +143,13 @@ def plan_item_by_slot(event, enrollment):
 def resolve_plan_item_for_event(event):
     """
     One schedule lesson → one plan item.
-    Priority: explicit scheduled_event link → event.lesson_plan_item FK →
-    slot in enrollment plan (legacy fallback) → series FK if still free.
+
+    Только явная связь по ID:
+    LessonPlanItem.scheduled_event → ScheduleEvent.lesson_plan_item →
+    свободный series.lesson_plan_item.
+
+    Слот по дате/порядку занятий не используется: перенос урока не должен
+    менять пункт плана, а окончание плана не должно «начинать его сначала».
     Тема не используется как ключ связи.
     """
     linked = list(event.plan_items.order_by("order", "id")[:2])
@@ -150,12 +166,6 @@ def resolve_plan_item_for_event(event):
         if item is not None:
             return item, item.order or None
 
-    enrollment = get_active_enrollment(event)
-    if enrollment:
-        item, lesson_number = plan_item_by_slot(event, enrollment)
-        if item:
-            return item, lesson_number
-
     if event.series_id and event.series.lesson_plan_item_id:
         item = event.series.lesson_plan_item
         if item is not None and item.status not in (
@@ -163,7 +173,20 @@ def resolve_plan_item_for_event(event):
             PlanItemStatus.SKIPPED,
         ):
             if item.scheduled_event_id in (None, event.pk):
-                return item, item.order or None
+                occupied = (
+                    ScheduleEvent.objects.filter(lesson_plan_item_id=item.id)
+                    .exclude(pk=event.pk)
+                    .exclude(
+                        status__in=[
+                            ScheduleEvent.Status.CANCELLED,
+                            ScheduleEvent.Status.COMPLETED,
+                            ScheduleEvent.Status.DONE,
+                        ]
+                    )
+                    .exists()
+                )
+                if not occupied:
+                    return item, item.order or None
 
     return None, None
 

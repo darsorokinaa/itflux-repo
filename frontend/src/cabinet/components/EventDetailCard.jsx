@@ -265,9 +265,7 @@ function AboutEditor({
   }, [event.studentId]);
 
   const hasRealPlanLink = Boolean(event.linkedPlanId) && !event.isAutoMaterialsPlan;
-  const shouldSyncToPlan = event.planSyncEnabled !== false && (
-    hasRealPlanLink || Boolean(event.studentId)
-  );
+  const shouldSyncToPlan = event.planSyncEnabled !== false && hasRealPlanLink;
 
   const startEditing = (field = "topic") => {
     const nextSaved = {
@@ -380,7 +378,9 @@ function AboutEditor({
       if (subjectChanged) await saveSubject(subjectId);
       setEditing(false);
       setFocusField(null);
-      setStatus(savedOnlyOnLesson ? "Сохранено только в занятии" : "Сохранено");
+      setStatus(savedOnlyOnLesson
+        ? "Сохранено только в занятии"
+        : (shouldSyncToPlan ? "Тема обновлена в занятии и плане" : "Сохранено"));
     } catch (err) {
       setStatus(err?.message || "Не удалось сохранить");
     } finally {
@@ -460,6 +460,9 @@ function AboutEditor({
               onChange={(e) => { setTopicDraft(e.target.value); setStatus(""); }}
               disabled={saving}
             />
+            {hasRealPlanLink ? (
+              <span className="cb-lesson-card__about-hint">Изменение обновит эту тему и в плане обучения.</span>
+            ) : null}
           </label>
           <label className="cb-lesson-card__about-field">
             <span className="cb-lesson-card__about-label">Подтема</span>
@@ -526,6 +529,13 @@ function AboutEditor({
             empty="Не указана"
             onEdit={() => startEditing("topic")}
           />
+          {hasRealPlanLink && event.planLessonNumber ? (
+            <p className="cb-lesson-card__plan-meta">
+              {event.planLessonNumber}-я тема
+              {event.planProgress?.total ? ` из ${event.planProgress.total}` : ""}
+              {event.linkedPlanTitle ? ` · ${event.linkedPlanTitle}` : ""}
+            </p>
+          ) : null}
           <AboutField
             label="Подтема"
             value={subtopic}
@@ -1297,7 +1307,11 @@ export default function EventDetailCard({
                 </div>
               </div>
 
-              {showAbout ? (
+              {event.planWarningMessage && ["info", "warn", "last", "exhausted", "overbooked"].includes(event.planWarningLevel) ? (
+                <p className={`cb-lesson-card__plan-warning cb-lesson-card__plan-warning--${event.planWarningLevel}`}>
+                  {event.planWarningMessage}
+                </p>
+              ) : null}
                 <section className="cb-lesson-card__section cb-lesson-card__section--compact cb-lesson-card__section--about">
                   {canEditAbout ? (
                     <AboutEditor

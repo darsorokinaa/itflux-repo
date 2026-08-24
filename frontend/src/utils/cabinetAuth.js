@@ -1135,8 +1135,9 @@ export function updateLessonPlanItem(id, payload) {
   });
 }
 
-export function deleteLessonPlanItem(id) {
-  return cabinetFetch(`/lesson-plan-items/${id}/`, { method: "DELETE" });
+export function deleteLessonPlanItem(id, { force } = {}) {
+  const suffix = force ? "?force=1" : "";
+  return cabinetFetch(`/lesson-plan-items/${id}/${suffix}`, { method: "DELETE" });
 }
 
 export function reorderLessonPlanItems(items) {

@@ -165,11 +165,18 @@ class StudentSubjectSerializer(serializers.ModelSerializer):
         )
         if not enrollment:
             return None
+        from .plan_sync import PlanSyncService
+        progress = PlanSyncService.get_enrollment_progress(enrollment)
         return {
             "id": enrollment.id,
             "plan_id": enrollment.plan_id,
             "plan_title": enrollment.plan.title if enrollment.plan_id else "",
             "status": enrollment.status,
+            "total": progress.get("total") or 0,
+            "completed": progress.get("completed") or 0,
+            "remaining": progress.get("remaining") or 0,
+            "warning_level": progress.get("warning_level") or "",
+            "warning_message": progress.get("warning_message") or "",
         }
 
     def get_has_history(self, obj):
@@ -712,11 +719,7 @@ class LessonPlanItemSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     linked_lesson_title = serializers.SerializerMethodField()
     scheduled_event_title = serializers.SerializerMethodField()
-    scheduled_event_starts_at = serializers.DateTimeField(
-        source="scheduled_event.starts_at",
-        read_only=True,
-        allow_null=True,
-    )
+    scheduled_event_starts_at = serializers.SerializerMethodField()
     materials = serializers.SerializerMethodField()
     attached_interactives = serializers.SerializerMethodField()
     homework_materials = serializers.SerializerMethodField()
@@ -761,9 +764,20 @@ class LessonPlanItemSerializer(serializers.ModelSerializer):
         return None
 
     def get_scheduled_event_title(self, obj):
-        if obj.scheduled_event_id:
-            return obj.scheduled_event.title
-        return None
+        event = self._linked_schedule_event(obj)
+        return event.title if event else None
+
+    def get_scheduled_event_starts_at(self, obj):
+        event = self._linked_schedule_event(obj)
+        return event.starts_at if event else None
+
+    def _linked_schedule_event(self, obj):
+        if obj.scheduled_event_id and getattr(obj, "scheduled_event", None):
+            return obj.scheduled_event
+        linked = getattr(obj, "schedule_events_linked", None)
+        if linked is None:
+            return None
+        return linked.order_by("starts_at", "id").first()
 
     def get_materials(self, obj):
         return [
@@ -1003,6 +1017,7 @@ class LessonPlanEnrollmentSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     format_label = serializers.CharField(source="get_format_display", read_only=True)
     student_subject_label = serializers.SerializerMethodField()
+    progress = serializers.SerializerMethodField()
 
     class Meta:
         model = LessonPlanEnrollment
@@ -1024,6 +1039,7 @@ class LessonPlanEnrollmentSerializer(serializers.ModelSerializer):
             "status",
             "status_label",
             "notes",
+            "progress",
             "created_at",
             "updated_at",
         ]
@@ -1040,6 +1056,10 @@ class LessonPlanEnrollmentSerializer(serializers.ModelSerializer):
         if obj.student_subject_id and obj.student_subject:
             return obj.student_subject.display_label
         return None
+
+    def get_progress(self, obj):
+        from .plan_sync import PlanSyncService
+        return PlanSyncService.get_enrollment_progress(obj)
 
 
 class LessonPlanEnrollmentWriteSerializer(serializers.ModelSerializer):

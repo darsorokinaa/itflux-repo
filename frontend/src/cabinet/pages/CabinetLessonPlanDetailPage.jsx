@@ -22,6 +22,36 @@ import {
 } from "../../utils/cabinetAuth";
 import { usePageTitle } from "../hooks/usePageTitle";
 
+function formatPlanEventWhen(iso) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const day = date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+  const time = date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  return `${day} · ${time}`;
+}
+
+function itemScheduleStatus(item) {
+  if (item.status === "completed") return { label: "Пройдено", mod: "completed" };
+  if (item.status === "skipped") return { label: "Пропущено", mod: "skipped" };
+  const when = formatPlanEventWhen(item.scheduledEventStartsAt);
+  if (when) return { label: when, mod: "planned" };
+  if (item.status === "planned") return { label: "Запланировано", mod: "planned" };
+  return { label: "Не запланировано", mod: "idle" };
+}
+
+function remainingLessonsLabel(n) {
+  const abs = Math.abs(n);
+  const mod10 = abs % 10;
+  const mod100 = abs % 100;
+  const word = (mod10 === 1 && mod100 !== 11)
+    ? "занятие"
+    : (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14))
+      ? "занятия"
+      : "занятий";
+  return `${abs} ${word}`;
+}
+
 function LessonPlanItemCard({ item, plan, onOpen }) {
   const subject = planSubjectLabel(plan);
   const exam = planExamLabel(plan);
@@ -30,12 +60,9 @@ function LessonPlanItemCard({ item, plan, onOpen }) {
     + (item.materialsNotes?.trim() ? 1 : 0);
   const homeworkCount = homeworkResourceRows(item).length;
   const hasHomework = Boolean(item.homeworkDescription?.trim()) || homeworkCount > 0;
-  const topicLine = [
-    item.topic ? `Тема: ${item.topic}` : "",
-    item.subtopic ? `Подтема: ${item.subtopic}` : "",
-    item.taskNumber ? `№ задания: ${item.taskNumber}` : "",
-  ].filter(Boolean).join(" · ");
+  const topicLine = item.topic || item.title || `Занятие ${item.order}`;
   const coverTone = plan.direction || "other";
+  const scheduleStatus = itemScheduleStatus(item);
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -54,19 +81,17 @@ function LessonPlanItemCard({ item, plan, onOpen }) {
       aria-label={`Открыть занятие ${item.order}: ${item.title}`}
     >
       <div className={`cb-lesson-list-card__cover cb-lesson-list-card__cover--${coverTone}`}>
-        <span className="cb-lesson-list-card__order">{item.order}</span>
+        <span className="cb-lesson-list-card__order">{String(item.order).padStart(2, "0")}</span>
       </div>
       <div className="cb-lesson-list-card__body">
         <div className="cb-lesson-list-card__head">
-          <h4 className="cb-lesson-list-card__title">{item.title || `Занятие ${item.order}`}</h4>
-          {item.statusLabel ? (
-            <span className={`cb-lesson-list-card__status cb-lesson-list-card__status--${item.status || "not_started"}`}>
-              {item.statusLabel}
-            </span>
-          ) : null}
+          <h4 className="cb-lesson-list-card__title">{topicLine}</h4>
+          <span className={`cb-lesson-list-card__status cb-lesson-list-card__status--${scheduleStatus.mod}`}>
+            {scheduleStatus.label}
+          </span>
         </div>
-        {topicLine ? (
-          <p className="cb-lesson-list-card__topic">{topicLine}</p>
+        {item.topic && item.title && item.title !== item.topic ? (
+          <p className="cb-lesson-list-card__topic">{item.title}</p>
         ) : null}
         {meta ? <p className="cb-lesson-list-card__meta">{meta}</p> : null}
         <div className="cb-lesson-list-card__stats">
@@ -197,6 +222,10 @@ export default function CabinetLessonPlanDetailPage() {
     Boolean(item.homeworkDescription?.trim())
     || homeworkResourceRows(item).length > 0
   )).length;
+  const completedItems = plan.items.filter((item) => item.status === "completed").length;
+  const remainingItems = plan.items.filter((item) => item.status !== "completed" && item.status !== "skipped").length;
+  const showNearEndBanner = remainingItems > 0 && remainingItems <= 5 && totalItems > 0;
+  const showFinishedBanner = totalItems > 0 && remainingItems === 0;
 
   return (
     <CabinetPageShell className="cb-section--plan-detail">
@@ -298,15 +327,56 @@ export default function CabinetLessonPlanDetailPage() {
       <div className="cb-plan-detail-layout">
         <section className="cb-plan-detail-main">
           <h2 className="cb-plan-detail-section-title">
-            Занятия плана
+            План обучения
           </h2>
-          {plan.items.length === 0 ? (
-            <p className="cb-plan-detail-empty">
-              Занятия пока не добавлены.
-              {!plan.isPublic && (
-                <Link to={`/cabinet/plans/${planId}/edit`} className="cb-link"> Открыть редактор</Link>
-              )}
+          {totalItems > 0 ? (
+            <p className="cb-plan-detail-progress">
+              {completedItems}
+              {" "}
+              из
+              {" "}
+              {totalItems}
+              {" "}
+              занятий
+              {remainingItems ? ` · осталось ${remainingLessonsLabel(remainingItems)}` : " · план завершён"}
             </p>
+          ) : null}
+          {showFinishedBanner ? (
+            <div className="cb-plan-detail-banner cb-plan-detail-banner--done">
+              <p>План завершён. Все темы пройдены.</p>
+              {!plan.isPublic ? (
+                <Link to={`/cabinet/plans/${planId}/edit`} className="cb-btn cb-btn--outline cb-btn--sm">
+                  Добавить темы
+                </Link>
+              ) : null}
+            </div>
+          ) : null}
+          {showNearEndBanner ? (
+            <div className={`cb-plan-detail-banner${remainingItems <= 2 ? " cb-plan-detail-banner--warn" : ""}`}>
+              <p>
+                {remainingItems === 1
+                  ? "Это последняя тема текущего плана. Добавьте продолжение, чтобы следующие занятия не остались без темы."
+                  : `План подходит к концу — осталось ${remainingLessonsLabel(remainingItems)}. Можно заранее добавить следующие темы.`}
+              </p>
+              {!plan.isPublic ? (
+                <Link to={`/cabinet/plans/${planId}/edit`} className="cb-btn cb-btn--outline cb-btn--sm">
+                  Дополнить план
+                </Link>
+              ) : null}
+            </div>
+          ) : null}
+          {plan.items.length === 0 ? (
+            <div className="cb-plan-detail-empty">
+              <p>План обучения пока не создан</p>
+              <p className="cb-plan-detail-empty__hint">
+                Добавьте темы, чтобы занятия автоматически связывались с учебной программой.
+              </p>
+              {!plan.isPublic && (
+                <Link to={`/cabinet/plans/${planId}/edit`} className="cb-btn cb-btn--primary cb-btn--sm">
+                  Создать план
+                </Link>
+              )}
+            </div>
           ) : (
             <div className="cb-lesson-list">
               {plan.items.map((item) => (

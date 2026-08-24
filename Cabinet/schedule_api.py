@@ -486,13 +486,23 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
         )
         enrollment = get_active_enrollment(event)
         if enrollment is None:
-            return Response({"item": None, "enrollment_id": None})
+            return Response({
+                "item": None,
+                "enrollment_id": None,
+                "progress": None,
+                "plan_finished": False,
+            })
         item = PlanSyncService.get_next_plan_item(enrollment)
+        progress = PlanSyncService.get_enrollment_progress(enrollment)
         return Response({
             "enrollment_id": enrollment.pk,
             "plan_id": enrollment.plan_id,
             "plan_title": enrollment.plan.title if enrollment.plan_id else "",
             "item": _plan_item_to_json(item) if item else None,
+            "progress": progress,
+            "plan_finished": bool(progress.get("is_finished")),
+            "warning_level": progress.get("warning_level") or "",
+            "warning_message": progress.get("warning_message") or "",
         })
 
     @action(detail=True, methods=["post"], url_path="move")

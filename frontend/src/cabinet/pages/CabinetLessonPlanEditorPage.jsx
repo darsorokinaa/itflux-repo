@@ -364,6 +364,10 @@ export default function CabinetLessonPlanEditorPage() {
   const [autoSavedAt, setAutoSavedAt] = useState(null);
   const skipDirtyRef = useRef(false);
   const hydratedRef = useRef(false);
+  const creatingPlanRef = useRef(null);
+  const createdPlanIdRef = useRef(null);
+  const [deleteForce, setDeleteForce] = useState(false);
+  const [deleteHint, setDeleteHint] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -697,28 +701,38 @@ export default function CabinetLessonPlanEditorPage() {
   }, []);
 
   const ensurePlanId = useCallback(async () => {
-    const existingId = activePlanId || planId;
+    const existingId = createdPlanIdRef.current || activePlanId || planId;
     if (existingId && existingId !== "new") return existingId;
+    if (creatingPlanRef.current) return creatingPlanRef.current;
     if (!title.trim()) {
       throw new Error("Сначала укажите название плана");
     }
-    const created = await createLessonPlan({
-      title: title.trim(),
-      direction: type,
-      subject,
-      goal,
-      description,
-      grade,
-      lessons_count: sessions.length,
-      status: makePublic ? "published" : (planStatus || "draft"),
-      ...(canPublishCatalog ? { is_public: makePublic } : {}),
-    });
-    const nextId = String(created.id);
-    setActivePlanId(nextId);
-    if (isNew) {
-      navigate(`/cabinet/plans/${nextId}/edit`, { replace: true });
+    creatingPlanRef.current = (async () => {
+      const created = await createLessonPlan({
+        title: title.trim(),
+        direction: type,
+        subject,
+        goal,
+        description,
+        grade,
+        lessons_count: sessions.length,
+        status: makePublic ? "published" : (planStatus || "draft"),
+        ...(canPublishCatalog ? { is_public: makePublic } : {}),
+      });
+      const nextId = String(created.id);
+      createdPlanIdRef.current = nextId;
+      setActivePlanId(nextId);
+      if (isNew) {
+        navigate(`/cabinet/plans/${nextId}/edit`, { replace: true });
+      }
+      return nextId;
+    })();
+    try {
+      return await creatingPlanRef.current;
+    } catch (err) {
+      creatingPlanRef.current = null;
+      throw err;
     }
-    return nextId;
   }, [activePlanId, canPublishCatalog, description, goal, grade, isNew, makePublic, navigate, planId, planStatus, sessions.length, subject, title, type]);
 
   const saveSession = useCallback(async (index) => {
@@ -756,6 +770,8 @@ export default function CabinetLessonPlanEditorPage() {
   const deleteSession = useCallback((index) => {
     const session = sessions[index];
     if (!session) return;
+    setDeleteForce(false);
+    setDeleteHint("");
     setDeleteSessionIndex(index);
   }, [sessions]);
 
@@ -777,11 +793,18 @@ export default function CabinetLessonPlanEditorPage() {
 
     try {
       if (session.id) {
-        await deleteLessonPlanItem(session.id);
+        await deleteLessonPlanItem(session.id, { force: deleteForce });
       }
       removeSession(index);
       setDeleteSessionIndex(null);
+      setDeleteForce(false);
+      setDeleteHint("");
     } catch (err) {
+      if (err?.status === 409 && (err?.code === "item_in_use" || err?.data?.code === "item_in_use")) {
+        setDeleteForce(true);
+        setDeleteHint(err.message || "Эта тема уже назначена на занятие.");
+        return;
+      }
       setSessionErrors((prev) => ({
         ...prev,
         [index]: err?.message || "Не удалось удалить занятие",
@@ -789,7 +812,7 @@ export default function CabinetLessonPlanEditorPage() {
     } finally {
       setSavingSessionIndex(null);
     }
-  }, [deleteSessionIndex, removeSession, sessions]);
+  }, [deleteForce, deleteSessionIndex, removeSession, sessions]);
 
   const duplicateSession = useCallback((index) => {
     setSessions((prev) => {
@@ -965,7 +988,7 @@ export default function CabinetLessonPlanEditorPage() {
   });
 
   const handleSave = async () => {
-    if (!title.trim()) return;
+    if (!title.trim() || saving) return;
     setSaving(true);
     try {
       const payload = {
@@ -979,35 +1002,27 @@ export default function CabinetLessonPlanEditorPage() {
         status: makePublic ? "published" : (planStatus || "draft"),
         ...(canPublishCatalog ? { is_public: makePublic } : {}),
       };
-      let savedPlanId = activePlanId || planId;
+      let savedPlanId = createdPlanIdRef.current || activePlanId || planId;
 
-      if (isNew) {
-        const created = await createLessonPlan(payload);
-        savedPlanId = created.id;
-        setActivePlanId(String(created.id));
-        for (let i = 0; i < sessions.length; i++) {
-          const session = sessions[i];
-          if (!session.title.trim()) continue;
-          await addLessonPlanItem(savedPlanId, buildPlanItemApiPayload(session, i + 1));
+      if (isNew && (!savedPlanId || savedPlanId === "new")) {
+        savedPlanId = await ensurePlanId();
+      }
+      await updateLessonPlan(savedPlanId, payload);
+      const savedItems = [];
+      for (let i = 0; i < sessions.length; i++) {
+        const session = sessions[i];
+        if (!session.title.trim()) continue;
+        const itemPayload = buildPlanItemApiPayload(session, i + 1);
+        if (session.id) {
+          const data = await updateLessonPlanItem(session.id, itemPayload);
+          savedItems.push(data.id);
+        } else {
+          const data = await addLessonPlanItem(savedPlanId, itemPayload);
+          savedItems.push(data.id);
         }
-      } else {
-        await updateLessonPlan(planId, payload);
-        const savedItems = [];
-        for (let i = 0; i < sessions.length; i++) {
-          const session = sessions[i];
-          if (!session.title.trim()) continue;
-          const itemPayload = buildPlanItemApiPayload(session, i + 1);
-          if (session.id) {
-            const data = await updateLessonPlanItem(session.id, itemPayload);
-            savedItems.push(data.id);
-          } else {
-            const data = await addLessonPlanItem(planId, itemPayload);
-            savedItems.push(data.id);
-          }
-        }
-        if (savedItems.length > 1) {
-          await reorderLessonPlanItems(savedItems.map((id, order) => ({ id, order: order + 1 })));
-        }
+      }
+      if (savedItems.length > 1) {
+        await reorderLessonPlanItems(savedItems.map((id, order) => ({ id, order: order + 1 })));
       }
       navigate(`/cabinet/plans/${savedPlanId}`);
     } catch (err) {
@@ -1301,13 +1316,21 @@ export default function CabinetLessonPlanEditorPage() {
 
       <ConfirmActionModal
         open={deleteSessionIndex != null}
-        title="Удалить занятие?"
-        text="Удалить это занятие?"
-        confirmLabel="Удалить"
+        title={deleteForce ? "Тема уже назначена на занятие" : "Удалить занятие?"}
+        text={
+          deleteForce
+            ? `${deleteHint || "Эта тема уже назначена на занятие."} Удалить тему из плана и оставить занятие без темы?`
+            : "Удалить это занятие из плана?"
+        }
+        confirmLabel={deleteForce ? "Удалить тему" : "Удалить"}
         danger
         loading={savingSessionIndex === deleteSessionIndex && deleteSessionIndex != null}
         onClose={() => {
-          if (savingSessionIndex !== deleteSessionIndex) setDeleteSessionIndex(null);
+          if (savingSessionIndex !== deleteSessionIndex) {
+            setDeleteSessionIndex(null);
+            setDeleteForce(false);
+            setDeleteHint("");
+          }
         }}
         onConfirm={confirmDeleteSession}
       />

@@ -201,6 +201,7 @@ class LessonPlanContentSyncServiceTests(TestCase):
             student=other, subject="math", title="Математика (ОГЭ)", direction=Direction.OGE,
         )
         event = self._make_event(student=other)
+        LessonLearningPlanSyncService.create_plan_item_from_lesson(event, teacher=self.teacher)
         event.refresh_from_db()
         item = event.lesson_plan_item
         self.assertIsNotNone(item)
@@ -318,8 +319,11 @@ class LessonPlanContentSyncServiceTests(TestCase):
         self.assertIsNone(result["warning"])
         event1.refresh_from_db()
         event2.refresh_from_db()
-        self.assertEqual(event1.topic, "Графы")
-        self.assertEqual(event2.topic, "Множества")
+        # Уже связанные занятия не перепривязываются из-за смены order.
+        self.assertEqual(event1.lesson_plan_item_id, self.item1.id)
+        self.assertEqual(event2.lesson_plan_item_id, self.item2.id)
+        self.assertEqual(event1.topic, "Множества")
+        self.assertEqual(event2.topic, "Графы")
 
     # 13. Нельзя связать урок с планом другого ученика.
     def test_cannot_link_to_other_students_plan(self):
@@ -423,7 +427,20 @@ class LessonPlanContentSyncServiceTests(TestCase):
     def test_link_plan_item_clears_draft_materials_placeholder(self):
         from Cabinet.plan_schedule import ensure_event_plan_item
 
-        event = self._make_event(student=self.student)
+        event = create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": "Урок",
+                "starts_at": timezone.now() + timedelta(days=1),
+                "ends_at": timezone.now() + timedelta(days=1, minutes=45),
+                "event_type": "individual_lesson",
+                "format": "online",
+                "notify_participants": False,
+                "skip_plan": True,
+            },
+            student_ids=[self.student.pk],
+            notify=False,
+        )
         draft_item, _ = ensure_event_plan_item(event, teacher=self.teacher)
         self.assertEqual(draft_item.scheduled_event_id, event.pk)
 
@@ -500,10 +517,9 @@ class LessonPlanContentSyncServiceTests(TestCase):
             notify=False,
         )
         enrollment = LessonPlanEnrollment.objects.filter(student=other).select_related("plan").first()
-        self.assertIsNotNone(enrollment)
+        self.assertIsNone(enrollment)
         event.refresh_from_db()
-        self.assertEqual(event.lesson_plan_item.plan_id, enrollment.plan_id)
-        self.assertEqual(event.lesson_plan_item.topic, "Множества")
+        self.assertIsNone(event.lesson_plan_item_id)
 
     def test_second_event_appends_item_to_autocreated_plan(self):
         other = _make_student(self.teacher, username="lp_create_second", first="Лев", last="Второй")
@@ -518,13 +534,16 @@ class LessonPlanContentSyncServiceTests(TestCase):
 
         second = self._make_event(student=other, starts_at=timezone.now() + timedelta(days=8))
         second.refresh_from_db()
-        self.assertIsNotNone(second.lesson_plan_item_id)
-        self.assertEqual(enrollment.plan.items.count(), 2)
-        self.assertNotEqual(first.lesson_plan_item_id, second.lesson_plan_item_id)
+        self.assertIsNone(second.lesson_plan_item_id)
+        self.assertEqual(enrollment.plan.items.count(), 1)
 
         LessonLearningPlanSyncService.apply_lesson_edit(
             second, {"topic": "Тема 2"}, teacher=self.teacher, sync_action="lesson_and_plan",
         )
+        second.refresh_from_db()
+        self.assertIsNotNone(second.lesson_plan_item_id)
+        self.assertEqual(enrollment.plan.items.count(), 2)
+        self.assertNotEqual(first.lesson_plan_item_id, second.lesson_plan_item_id)
         second.lesson_plan_item.refresh_from_db()
         self.assertEqual(second.lesson_plan_item.topic, "Тема 2")
         first.lesson_plan_item.refresh_from_db()
@@ -534,7 +553,7 @@ class LessonPlanContentSyncServiceTests(TestCase):
         before = self.plan.items.count()
         event = self._make_event(student=self.student)
         event.refresh_from_db()
-        self.assertIsNone(event.lesson_plan_item_id)
+        self.assertEqual(event.lesson_plan_item_id, self.item1.id)
         self.assertEqual(self.plan.items.count(), before)
 
     def test_skip_plan_does_not_autocreate_for_student_without_plan(self):
@@ -584,12 +603,10 @@ class LessonPlanContentSyncServiceTests(TestCase):
         )
         self.assertGreaterEqual(len(events), 2)
         enrollment = LessonPlanEnrollment.objects.filter(student=other).first()
-        self.assertIsNotNone(enrollment)
-        self.assertEqual(enrollment.plan.items.count(), len(events))
+        self.assertIsNone(enrollment)
         for event in events:
             event.refresh_from_db()
-            self.assertIsNotNone(event.lesson_plan_item_id)
-            self.assertEqual(event.lesson_plan_item.plan_id, enrollment.plan_id)
+            self.assertIsNone(event.lesson_plan_item_id)
 
 
 class LessonPlanContentSyncApiTests(TestCase):

@@ -84,7 +84,7 @@ class PlanLifecycleTests(TestCase):
         self.assertEqual(self.items[0].status, PlanItemStatus.COMPLETED)
         self.assertNotEqual(self.items[1].status, PlanItemStatus.COMPLETED)
         next_item = PlanSyncService.get_next_plan_item(self.enrollment)
-        self.assertEqual(next_item.id, self.items[1].id)
+        self.assertEqual(next_item.id, self.items[2].id)
 
         payload2 = schedule_event_to_json(e2)
         self.assertEqual(payload2["planItem"]["id"], self.items[1].id)
@@ -129,7 +129,7 @@ class PlanLifecycleTests(TestCase):
         self.items[0].refresh_from_db()
         self.assertNotEqual(self.items[0].status, PlanItemStatus.COMPLETED)
         next_item = PlanSyncService.get_next_plan_item(self.enrollment)
-        self.assertEqual(next_item.id, self.items[0].id)
+        self.assertEqual(next_item.id, self.items[1].id)
         payload = schedule_event_to_json(planned)
         self.assertEqual(payload["planItem"]["id"], self.items[0].id)
 
@@ -151,3 +151,99 @@ class PlanLifecycleTests(TestCase):
             LessonPlanItem.objects.filter(plan=self.plan, status=PlanItemStatus.COMPLETED).count(),
             1,
         )
+
+    def test_plan_does_not_restart_after_last_item(self):
+        for index, item in enumerate(self.items):
+            event = self._event(index + 1)
+            self.assertEqual(event.lesson_plan_item_id, item.id)
+            PlanSyncService.mark_event_completed(event)
+        extra = self._event(20)
+        extra.refresh_from_db()
+        self.assertIsNone(extra.lesson_plan_item_id)
+        self.assertNotEqual((extra.topic or "").strip(), self.items[0].topic)
+        next_item = PlanSyncService.get_next_plan_item(self.enrollment)
+        self.assertIsNone(next_item)
+
+    def test_same_titles_sync_by_id_not_text(self):
+        from Cabinet.lesson_plan_content_sync import LessonLearningPlanSyncService
+
+        self.items[0].topic = "Повторение"
+        self.items[0].title = "Повторение"
+        self.items[0].save(update_fields=["topic", "title"])
+        self.items[1].topic = "Повторение"
+        self.items[1].title = "Повторение"
+        self.items[1].save(update_fields=["topic", "title"])
+        e1 = self._event(1)
+        e2 = self._event(2)
+        self.assertEqual(e1.lesson_plan_item_id, self.items[0].id)
+        self.assertEqual(e2.lesson_plan_item_id, self.items[1].id)
+        LessonLearningPlanSyncService.apply_lesson_edit(
+            e1, {"topic": "Повторение: кодирование"}, teacher=self.teacher,
+            sync_action="lesson_and_plan",
+        )
+        self.items[0].refresh_from_db()
+        self.items[1].refresh_from_db()
+        e2.refresh_from_db()
+        self.assertEqual(self.items[0].topic, "Повторение: кодирование")
+        self.assertEqual(self.items[1].topic, "Повторение")
+        self.assertEqual(e2.topic, "Повторение")
+
+    def test_edit_plan_item_updates_linked_future_event(self):
+        from Cabinet.lesson_plan_content_sync import LessonLearningPlanSyncService
+
+        event = self._event(3)
+        self.assertEqual(event.lesson_plan_item_id, self.items[0].id)
+        self.items[0].topic = "Теорема Виета"
+        self.items[0].save(update_fields=["topic", "updated_at"])
+        LessonLearningPlanSyncService.sync_plan_item_to_lessons(
+            self.items[0], teacher=self.teacher, update_source="plan",
+        )
+        event.refresh_from_db()
+        self.assertEqual(event.topic, "Теорема Виета")
+
+    def test_duplicate_enrollment_is_rejected(self):
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        response = client.post(
+            "/api/cabinet/lesson-plan-enrollments/",
+            {"plan": self.plan.pk, "student": self.student.pk, "format": "individual"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data.get("id"), self.enrollment.pk)
+        self.assertEqual(
+            LessonPlanEnrollment.objects.filter(
+                teacher=self.teacher, student=self.student, status="active",
+            ).count(),
+            1,
+        )
+
+    def test_progress_warns_before_plan_ends(self):
+        progress = PlanSyncService.get_enrollment_progress(self.enrollment)
+        self.assertEqual(progress["remaining"], 5)
+        self.assertEqual(progress["warning_level"], "info")
+        for index in range(4):
+            event = self._event(index + 1)
+            PlanSyncService.mark_event_completed(event)
+        progress = PlanSyncService.get_enrollment_progress(self.enrollment)
+        self.assertEqual(progress["remaining"], 1)
+        self.assertEqual(progress["warning_level"], "last")
+
+    def test_delete_linked_plan_item_requires_force(self):
+        from rest_framework.test import APIClient
+
+        event = self._event(1)
+        self.assertEqual(event.lesson_plan_item_id, self.items[0].id)
+        client = APIClient()
+        client.force_login(self.teacher)
+        url = f"/api/cabinet/lesson-plan-items/{self.items[0].pk}/"
+        blocked = client.delete(url)
+        self.assertEqual(blocked.status_code, 409)
+        self.assertEqual(blocked.data.get("code"), "item_in_use")
+        forced = client.delete(f"{url}?force=1")
+        self.assertEqual(forced.status_code, 204)
+        event.refresh_from_db()
+        self.assertIsNone(event.lesson_plan_item_id)
+        self.assertFalse(LessonPlanItem.objects.filter(pk=self.items[0].pk).exists())

@@ -11081,6 +11081,125 @@ select.cb-lesson-card__about-input.is-empty {
   font-size: 0.84rem;
 }
 
+.cb-plan-detail-empty p {
+  margin: 0 0 8px;
+}
+
+.cb-plan-detail-empty__hint {
+  color: #94A3B8;
+}
+
+.cb-plan-detail-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #F8FAFC;
+  color: #334155;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.cb-plan-detail-banner p {
+  margin: 0;
+}
+
+.cb-plan-detail-banner--warn,
+.cb-plan-detail-banner--done {
+  background: #FFF7ED;
+  color: #9A3412;
+}
+
+.cb-student-subjects__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cb-student-subjects__item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cb-student-subjects__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cb-student-subjects__plan-progress {
+  font-size: 0.75rem;
+  color: #64748B;
+}
+
+.cb-student-subjects__plan-progress--warn,
+.cb-student-subjects__plan-progress--last,
+.cb-student-subjects__plan-progress--exhausted,
+.cb-student-subjects__plan-progress--overbooked {
+  color: #9A3412;
+}
+
+.cb-plan-detail-progress {
+  margin: -4px 0 14px;
+  color: #64748B;
+  font-size: 0.86rem;
+}
+
+.cb-lesson-list-card__status--completed {
+  color: #15803d;
+  background: #dcfce7;
+}
+
+.cb-lesson-list-card__status--planned {
+  color: #334155;
+  background: #e2e8f0;
+}
+
+.cb-lesson-list-card__status--idle,
+.cb-lesson-list-card__status--skipped {
+  color: #64748b;
+  background: #f1f5f9;
+}
+
+.cb-lesson-card__about-hint,
+.cb-lesson-card__plan-meta {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  color: #64748b;
+  line-height: 1.35;
+}
+
+.cb-lesson-card__plan-warning {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: #334155;
+  background: #f8fafc;
+}
+
+.cb-lesson-card__plan-warning--warn,
+.cb-lesson-card__plan-warning--last {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.cb-lesson-card__plan-warning--exhausted,
+.cb-lesson-card__plan-warning--overbooked {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
 .cb-session-list {
   display: flex;
   flex-direction: column;
