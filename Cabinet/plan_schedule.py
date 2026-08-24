@@ -147,14 +147,10 @@ def attendance_statuses_by_event(event_ids, student_id=None):
     return mapping
 
 
-def event_consumed_plan_topic(event, *, student_id=None, attendance_statuses=None):
+def event_consumed_plan_topic(event, *, student_id=None, attendance_statuses=None, journal=None):
     """
     Занятие съело слот плана: проведено по журналу или явно завершено.
     Прошедшее без отметки занятие слот не съедает.
-
-    Проведено: присутствовал / опоздал / ушёл раньше / часть урока / тех. причина.
-    Не съедает слот: отмена со сдвигом, неявка, незакрытое занятие.
-    Пропуск темы при отмене (skip) учитывается статусом пункта SKIPPED, а не здесь.
     """
     if not getattr(event, "plan_sync_enabled", True):
         return False
@@ -167,6 +163,19 @@ def event_consumed_plan_topic(event, *, student_id=None, attendance_statuses=Non
         marked = mapping.get(event.pk) or []
     if marked:
         return any(status in CONDUCTED_FOR_PLAN_ATTENDANCE for status in marked)
+
+    if journal is not None:
+        from .journal_models import JournalStatus
+
+        if journal.status == JournalStatus.CANCELLED:
+            return False
+        if journal.status == JournalStatus.COMPLETED and (journal.actual_topic or "").strip():
+            if event.starts_at >= timezone.now() and event.status not in (
+                ScheduleEvent.Status.DONE,
+                ScheduleEvent.Status.COMPLETED,
+            ):
+                return False
+            return True
 
     return event.status in (
         ScheduleEvent.Status.DONE,

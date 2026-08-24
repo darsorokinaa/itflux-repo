@@ -374,6 +374,10 @@ class PlanSyncService:
             item.status = PlanItemStatus.PLANNED
             item.save(update_fields=["status", "updated_at"])
 
+        LessonPlanItem.objects.filter(
+            scheduled_event_id=event.pk,
+        ).exclude(pk=item.pk).update(scheduled_event=None)
+
         if copy_topic:
             overrides = set(event.manual_override_fields or [])
             topic = (item.topic or item.title or "").strip()
@@ -575,6 +579,14 @@ class PlanSyncService:
         )
 
         from .models import ScheduleEvent
+        from .journal_models import LessonJournal
+
+        journals = {
+            journal.schedule_event_id: journal
+            for journal in LessonJournal.objects.filter(
+                schedule_event_id__in=[ev.pk for ev in sequence_events],
+            )
+        }
 
         conducted = []
         upcoming = []
@@ -585,6 +597,7 @@ class PlanSyncService:
                 ev,
                 student_id=enrollment.student_id,
                 attendance_statuses=attendance_map.get(ev.pk) or [],
+                journal=journals.get(ev.pk),
             )
             # Будущее занятие не считаем проведённым, даже если статус сбился.
             future_open = event_is_upcoming_for_plan(ev, now=now) or (
@@ -598,7 +611,6 @@ class PlanSyncService:
 
         desired = {}
         used_item_ids = set()
-        item_by_id = {item.id: item for item in items}
 
         def take_next_item():
             for item in items:
@@ -607,20 +619,9 @@ class PlanSyncService:
                     return item
             return None
 
-        for ev in conducted:
-            current = ev.lesson_plan_item
-            if (
-                current is not None
-                and current.id in item_by_id
-                and current.id not in used_item_ids
-            ):
-                desired[ev.pk] = item_by_id[current.id]
-                used_item_ids.add(current.id)
-            else:
-                nxt = take_next_item()
-                if nxt is not None:
-                    desired[ev.pk] = nxt
-        for ev in upcoming:
+        # Журнал по дате → пункты плана по порядку. Старые FK не сохраняем:
+        # иначе «дыра» (тема 04 пройдена, а 03 ещё в будущем).
+        for ev in [*conducted, *upcoming]:
             nxt = take_next_item()
             if nxt is not None:
                 desired[ev.pk] = nxt
@@ -667,6 +668,7 @@ class PlanSyncService:
                 updated_ids.append(ev.pk)
             if consumed:
                 cls._complete_item_and_advance(item, ev)
+                cls._sync_journal_planned_from_item(ev, item)
                 continue
             overrides = set(ev.manual_override_fields or [])
             fields = [field for field in CONTENT_FIELDS if field not in overrides]
@@ -742,6 +744,22 @@ class PlanSyncService:
         if item is not None and item.scheduled_event_id == event.pk:
             item.scheduled_event = None
             item.save(update_fields=["scheduled_event", "updated_at"])
+
+    @classmethod
+    def _sync_journal_planned_from_item(cls, event, item):
+        """В журнале планируемая тема = пункт плана. Фактическую не трогаем."""
+        from .journal_models import LessonJournal
+
+        if event is None or item is None:
+            return
+        planned = (item.topic or item.title or "").strip()[:500]
+        if not planned:
+            return
+        journal = LessonJournal.objects.filter(schedule_event_id=event.pk).first()
+        if journal is None or journal.planned_topic == planned:
+            return
+        journal.planned_topic = planned
+        journal.save(update_fields=["planned_topic", "updated_at"])
 
     @classmethod
     def _release_plan_item_shift(cls, event, item=None):

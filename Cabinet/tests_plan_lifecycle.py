@@ -134,12 +134,14 @@ class PlanLifecycleTests(TestCase):
         self.assertEqual(payload["planItem"]["id"], self.items[0].id)
 
     def test_actual_topic_does_not_overwrite_plan(self):
-        event = self._event(1, lesson_plan_item=self.items[2].id, topic="Системы счисления. Перевод")
+        event = self._event(1)
+        event.topic = "Системы счисления. Перевод"
+        event.save(update_fields=["topic", "updated_at"])
         PlanSyncService.mark_event_completed(event)
-        self.items[2].refresh_from_db()
-        self.assertEqual(self.items[2].topic, "Системы счисления")
+        self.items[0].refresh_from_db()
+        self.assertEqual(self.items[0].topic, "Информация и информационные процессы")
         journal = LessonJournal.objects.get(schedule_event=event)
-        self.assertEqual(journal.planned_topic, "Системы счисления")
+        self.assertEqual(journal.planned_topic, "Информация и информационные процессы")
         self.assertEqual(journal.actual_topic, "Системы счисления. Перевод")
 
     def test_double_complete_does_not_duplicate_journal(self):
@@ -409,6 +411,51 @@ class PlanLifecycleTests(TestCase):
         self.assertEqual(fourth.lesson_plan_item_id, items[3].id)
         self.assertEqual(fifth.lesson_plan_item_id, items[4].id)
         self.assertEqual(fourth.topic, items[3].topic)
+
+    def test_realign_maps_journal_dates_to_planned_topics_in_order(self):
+        first = self._event(1)
+        second = self._event(2)
+        third = self._event(3)
+        PlanSyncService.mark_event_completed(first)
+        PlanSyncService.mark_event_completed(second)
+        third.topic = "Фактически разобрали моделирование"
+        third.save(update_fields=["topic", "updated_at"])
+        PlanSyncService.mark_event_completed(third)
+        fourth = self._event(10)
+        fifth = self._event(17)
+
+        third.lesson_plan_item = self.items[3]
+        third.save(update_fields=["lesson_plan_item", "updated_at"])
+        self.items[2].status = PlanItemStatus.PLANNED
+        self.items[2].completed_at = None
+        self.items[2].scheduled_event = fourth
+        self.items[2].save(update_fields=["status", "completed_at", "scheduled_event", "updated_at"])
+        self.items[3].status = PlanItemStatus.COMPLETED
+        self.items[3].scheduled_event = third
+        self.items[3].save(update_fields=["status", "scheduled_event", "updated_at"])
+        self.items[4].scheduled_event = fourth
+        self.items[4].save(update_fields=["scheduled_event", "updated_at"])
+
+        PlanSyncService.realign_enrollment_topics(self.enrollment)
+        for item in self.items:
+            item.refresh_from_db()
+        third.refresh_from_db()
+        fourth.refresh_from_db()
+        fifth.refresh_from_db()
+
+        self.assertEqual(self.items[2].status, PlanItemStatus.COMPLETED)
+        self.assertNotEqual(self.items[3].status, PlanItemStatus.COMPLETED)
+        self.assertEqual(self.items[2].topic, "Системы счисления")
+        self.assertEqual(self.items[3].topic, "Логика")
+        self.assertEqual(third.lesson_plan_item_id, self.items[2].id)
+        self.assertEqual(third.topic, "Фактически разобрали моделирование")
+        self.assertEqual(fourth.lesson_plan_item_id, self.items[3].id)
+        self.assertEqual(fifth.lesson_plan_item_id, self.items[4].id)
+        self.assertEqual(self.items[3].scheduled_event_id, fourth.pk)
+        self.assertNotEqual(self.items[4].scheduled_event_id, fourth.pk)
+        journal = LessonJournal.objects.get(schedule_event=third)
+        self.assertEqual(journal.planned_topic, "Системы счисления")
+        self.assertEqual(journal.actual_topic, "Фактически разобрали моделирование")
 
     def test_schedule_list_realigns_stale_future_topics(self):
         from Cabinet.schedule_events import list_schedule_events

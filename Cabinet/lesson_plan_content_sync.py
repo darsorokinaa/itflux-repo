@@ -296,7 +296,9 @@ class LessonLearningPlanSyncService:
                             items_to_update.append(other_item)
                             linked_ids.add(other_item.pk)
                 for target_item in items_to_update:
-                    cls._copy_event_fields_to_item(event, target_item)
+                    cls._copy_event_fields_to_item(
+                        event, target_item, topic=(title or "").strip() or None,
+                    )
                 result = {
                     "ok": True,
                     "items": [{"id": i.pk, "plan_id": i.plan_id} for i in items_to_update],
@@ -1025,15 +1027,23 @@ class LessonLearningPlanSyncService:
                 setattr(event, field, mapping[field])
 
     @classmethod
-    def _copy_event_fields_to_item(cls, event: ScheduleEvent, item: LessonPlanItem) -> None:
+    def _copy_event_fields_to_item(
+        cls,
+        event: ScheduleEvent,
+        item: LessonPlanItem,
+        *,
+        topic: Optional[str] = None,
+    ) -> None:
         old_topic = (item.topic or "").strip()
         old_title = (item.title or "").strip()
-        item.topic = (event.topic or "")[:500]
+        incoming = (topic or event.topic or "").strip()
+        if incoming:
+            item.topic = incoming[:500]
         item.subtopic = (event.subtopic or "")[:255]
         item.description = event.description or ""
         item.goal = event.goal or ""
         item.homework_description = event.homework_description or ""
-        topic = (event.topic or "").strip()
+        title_source = (topic or "").strip() or incoming
         audience_titles = {
             (event.title or "").strip(),
             (event.audience or "").strip(),
@@ -1046,8 +1056,8 @@ class LessonLearningPlanSyncService:
             or old_title == old_topic
             or not old_topic
         )
-        if topic and title_is_placeholder:
-            item.title = topic[:255]
+        if title_source and title_is_placeholder:
+            item.title = title_source[:255]
         item.save(update_fields=[
             "topic", "subtopic", "description", "goal",
             "homework_description", "title", "updated_at",
