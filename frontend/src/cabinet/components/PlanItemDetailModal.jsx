@@ -242,7 +242,6 @@ export default function PlanItemDetailModal({
     { label: "Подтема", value: item?.subtopic },
     { label: "№ задания", value: item?.taskNumber },
     { label: "Дата и время", value: scheduleLabel },
-    { label: "Урок из библиотеки", value: item?.linkedLessonTitle },
     { label: "Событие", value: item?.scheduledEventTitle },
   ].filter((entry) => hasText(entry.value))), [item, subject, exam, scheduleLabel]);
   const hasComment = hasText(item?.teacherComment);

@@ -85,16 +85,23 @@ function HomeworkCoverWaves() {
  * @param {string} props.subject — «ОГЭ · Информатика»
  * @param {string} props.title
  * @param {string} props.description
+ * @param {string} [props.studentName]
  * @param {string} props.progressLabel — «5 из 8 выполнили»
  * @param {number} [props.progressPercent] — 0–100
  * @param {'default'|'overdue'|'completed'|'review'} [props.progressTone]
- * @param {{ initials: string }[]} [props.students]
+ * @param {{ initials: string, name?: string }[]} [props.students]
  * @param {number} [props.overflowCount]
  * @param {string} props.actionLabel
  * @param {boolean} [props.actionPrimary]
  * @param {string} [props.coverImageUrl] — обложка из БД (вместо волн)
  * @param {string} [props.coverBgColor] — HEX-фон, если нет картинки
  * @param {boolean} [props.hideProgressBar]
+ * @param {object} [props.result] — итоговый блок после проверки
+ * @param {string} [props.result.countsLabel]
+ * @param {number|null} [props.result.percentage]
+ * @param {string} [props.result.hint]
+ * @param {string} [props.metaLine]
+ * @param {string} [props.commentPreview]
  * @param {() => void} [props.onAction]
  * @param {string} [props.secondaryActionLabel]
  * @param {() => void} [props.onSecondaryAction]
@@ -113,10 +120,14 @@ export default function CabinetHomeworkCard({
   subject,
   title,
   description,
+  studentName,
   progressLabel,
   progressPercent = 0,
   progressTone = "default",
   hideProgressBar = false,
+  result = null,
+  metaLine,
+  commentPreview,
   students = [],
   overflowCount = 0,
   actionLabel = "Открыть",
@@ -131,11 +142,14 @@ export default function CabinetHomeworkCard({
 }) {
   const safeDeadline = DEADLINE_TONES.includes(deadlineTone) ? deadlineTone : "default";
   const safeProgress = PROGRESS_TONES.includes(progressTone) ? progressTone : "default";
-  const pct = Math.max(0, Math.min(100, progressPercent));
+  const pct = Math.max(0, Math.min(100, Number(result?.percentage ?? progressPercent) || 0));
   const resolvedCoverVariant = coverVariant || pickCoverVariant(title);
   const [menuAnchor, setMenuAnchor] = useState(null);
   const menuOpen = Boolean(menuAnchor);
   const menuId = useId();
+  const showResult = Boolean(result && (result.countsLabel || result.percentage != null || result.hint));
+  const showLegacyProgress = !showResult && Boolean(progressLabel);
+  const resultPct = result?.percentage != null ? Math.max(0, Math.min(100, Number(result.percentage) || 0)) : null;
 
   return (
     <article className="cb-hw-card">
@@ -153,15 +167,55 @@ export default function CabinetHomeworkCard({
             <span className="cb-hw-card__subject">{subject}</span>
           ) : null}
 
-          <h3 className="cb-hw-card__title">{title}</h3>
+          <h3 className="cb-hw-card__title" title={title}>{title}</h3>
 
           {description ? (
             <p className="cb-hw-card__desc">{description}</p>
           ) : null}
+
+          {studentName ? (
+            <div className="cb-hw-card__student">
+              {students[0]?.initials ? (
+                <span className="cb-hw-avatars__item" aria-hidden="true">{students[0].initials}</span>
+              ) : null}
+              <span className="cb-hw-card__student-name">{studentName}</span>
+            </div>
+          ) : null}
+
+          {metaLine ? (
+            <p className="cb-hw-card__meta">{metaLine}</p>
+          ) : null}
         </div>
 
         <div className="cb-hw-card__bottom">
-          {progressLabel ? (
+          {showResult ? (
+            <div className="cb-hw-card__result">
+              <div className="cb-hw-card__result-row">
+                <span className="cb-hw-card__result-label">Результат</span>
+                {resultPct != null ? (
+                  <span className="cb-hw-card__result-pct">{Math.round(resultPct)}%</span>
+                ) : null}
+              </div>
+              {result.countsLabel ? (
+                <p className="cb-hw-card__result-counts">{result.countsLabel}</p>
+              ) : null}
+              {resultPct != null ? (
+                <div
+                  className="cb-hw-bar"
+                  role="progressbar"
+                  aria-label="Результат"
+                  aria-valuenow={Math.round(resultPct)}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <div className="cb-hw-bar__fill" style={{ width: `${resultPct}%` }} />
+                </div>
+              ) : null}
+              {result.hint ? (
+                <p className="cb-hw-card__result-hint">{result.hint}</p>
+              ) : null}
+            </div>
+          ) : showLegacyProgress ? (
             <div className={`cb-hw-card__progress${hideProgressBar ? " cb-hw-card__progress--text-only" : ""}`}>
               <span className={`cb-hw-card__progress-label cb-hw-card__progress-label--${safeProgress}`}>
                 {progressLabel}
@@ -177,11 +231,18 @@ export default function CabinetHomeworkCard({
             </div>
           ) : null}
 
+          {commentPreview ? (
+            <p className="cb-hw-card__comment">
+              <span className="cb-hw-card__comment-label">Комментарий преподавателя</span>
+              <span className="cb-hw-card__comment-text">{commentPreview}</span>
+            </p>
+          ) : null}
+
           <div className="cb-hw-card__footer">
-            {(students.length > 0 || overflowCount > 0) ? (
+            {!studentName && (students.length > 0 || overflowCount > 0) ? (
               <div className="cb-hw-avatars">
                 {students.slice(0, 3).map((s, i) => (
-                  <div key={`${s.initials}-${i}`} className="cb-hw-avatars__item" title={s.initials}>
+                  <div key={`${s.initials}-${i}`} className="cb-hw-avatars__item" title={s.name || s.initials}>
                     {s.initials}
                   </div>
                 ))}

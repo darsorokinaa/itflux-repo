@@ -415,7 +415,7 @@ export default function CreateScheduleLessonModal({
         </div>
         <form className="cb-sch-form cb-sch-form--sections" onSubmit={(e) => handleSubmit(e, false)}>
           {error ? <p className="cb-sch-form__error" role="alert">{error}</p> : null}
-          {!lessonPlanItemId && !nextPlanItem && planProgress?.is_finished ? (
+          {!lessonPlanItemId && !nextPlanItem && (planProgress?.is_finished || planProgress?.is_schedule_exhausted) ? (
             <section className="cb-sch-form__section">
               <h3>План уроков</h3>
               <p className="cb-sch-field-hint">

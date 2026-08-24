@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import MathContent from "../../components/MathContent";
 import TaskFileAttachment from "../../components/TaskFileAttachment";
 import {
@@ -283,7 +283,9 @@ function ReviewFeedbackUpload({
 export default function CabinetReviewDetailPage() {
   const { reviewId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const reviewListPath = location.state?.from || "/cabinet/review";
   const [review, setReview] = useState(null);
   const [variant, setVariant] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -485,7 +487,7 @@ export default function CabinetReviewDetailPage() {
         setCheckDoneBanner(true);
         setNotice("Проверка сохранена");
       } else {
-        navigate("/cabinet/review");
+        navigate(reviewListPath);
       }
     } catch (err) {
       setError(err.message || "Не удалось сохранить проверку");
@@ -502,7 +504,7 @@ export default function CabinetReviewDetailPage() {
       const updated = await returnReviewItem(reviewId, buildPayload());
       setReview(updated);
       window.dispatchEvent(new Event("cabinet:nav-counts-refresh"));
-      navigate("/cabinet/review");
+      navigate(reviewListPath);
     } catch (err) {
       setError(err.message || "Не удалось вернуть работу");
     } finally {
@@ -518,7 +520,7 @@ export default function CabinetReviewDetailPage() {
     setError(null);
     try {
       await deleteHomework(homeworkId);
-      navigate("/cabinet/review");
+      navigate(reviewListPath);
     } catch (err) {
       setError(err.message || "Не удалось удалить домашнее задание");
       setBusy(false);
@@ -533,7 +535,7 @@ export default function CabinetReviewDetailPage() {
       text: "Сохранить оценку и отметить работу проверенной?",
       confirmLabel: "Проверено",
       danger: false,
-      onConfirm: () => runCheck({ stay: true }),
+      onConfirm: () => runCheck({ stay: false }),
     });
   };
 
@@ -641,7 +643,7 @@ export default function CabinetReviewDetailPage() {
           >
             Повторить
           </button>
-          <Link to="/cabinet/review" className="cb-review-detail__btn cb-review-detail__btn--primary">
+          <Link to={reviewListPath} className="cb-review-detail__btn cb-review-detail__btn--primary">
             Назад к проверке
           </Link>
         </div>
@@ -654,7 +656,7 @@ export default function CabinetReviewDetailPage() {
       <CabinetPageShell className="cb-section--review">
         <CabinetPageHeader title="Проверка" />
         <p className="cb-inline-error">Этот тип работы пока не поддерживается.</p>
-        <Link to="/cabinet/review" className="cb-review-detail__back">← К списку</Link>
+        <Link to={reviewListPath} className="cb-review-detail__back">Назад к проверке</Link>
       </CabinetPageShell>
     );
   }
@@ -662,7 +664,7 @@ export default function CabinetReviewDetailPage() {
   return (
     <CabinetPageShell className="cb-section--review cb-section--review-detail">
       <div className="cb-review-detail__topbar">
-        <Link to="/cabinet/review" className="cb-review-detail__back">← К списку</Link>
+        <Link to={reviewListPath} className="cb-review-detail__back">Назад к проверке</Link>
         {variantUrl ? (
           <Link to={variantUrl} className="cb-review-detail__open-variant">
             Открыть вариант
@@ -1114,9 +1116,9 @@ export default function CabinetReviewDetailPage() {
             <button
               type="button"
               className="cb-review-detail__btn cb-review-detail__btn--ghost"
-              onClick={() => navigate("/cabinet/review")}
+              onClick={() => navigate(reviewListPath)}
             >
-              К списку работ
+              Назад к проверке
             </button>
           </div>
         </section>

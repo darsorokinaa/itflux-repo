@@ -14,14 +14,8 @@ import {
   StudentFilterPills,
   StudentLoadingState,
   StudentPageShell,
-  StudentStatusBadge,
-  formatDueDate,
 } from "../StudentSectionUi";
 import StudentSubjectTabs, { getStoredStudentSubjectId } from "../StudentSubjectTabs";
-import {
-  studentHwActionLabel,
-  studentHwStatusLabel,
-} from "../studentDisplay";
 
 const FILTERS = [
   { id: "all", label: "Все" },
@@ -48,78 +42,12 @@ function matchesFilter(item, filter) {
 
 function HomeworkListCard({ item }) {
   const navigate = useNavigate();
-  const statusLabel = studentHwStatusLabel(item.status, item.status_label);
-  const actionLabel = studentHwActionLabel(item.status);
-  const subject = item.student_subject_label || item.type_label || "Задание";
-  const description = item.description || "";
-  const isOverdue = item.status === "overdue";
-
-  let progressLabel = null;
-  let progressPercent = 0;
-  let hideProgressBar = true;
-
-  if (item.result_percent != null) {
-    progressLabel = `Результат: ${Math.round(item.result_percent)}%`;
-    progressPercent = item.result_percent;
-    hideProgressBar = false;
-  } else if (item.items_count > 0) {
-    progressLabel = `Выполнено ${item.items_done ?? 0} из ${item.items_count}`;
-    progressPercent = item.progress_percent || 0;
-    hideProgressBar = false;
-  }
-
-  // Интерактивы оставляем на общей карточке платформы
-  if (item.kind === "interactive") {
-    const card = mapStudentAssignmentToHwCard(item);
-    return (
-      <CabinetHomeworkCard
-        {...card}
-        onAction={() => navigate(getStudentAssignmentPath(item))}
-      />
-    );
-  }
-
+  const card = mapStudentAssignmentToHwCard(item);
   return (
-    <article className={`st-hw-card${isOverdue ? " st-hw-card--overdue" : ""}`}>
-      <div className="st-hw-card__top">
-        <span className="st-hw-card__subject">{subject}</span>
-        <StudentStatusBadge status={item.status} label={statusLabel} />
-      </div>
-      <h3 className="st-hw-card__title">{item.title}</h3>
-      {item.topic && item.topic !== item.title ? (
-        <p className="st-hw-card__topic">Тема: {item.topic}</p>
-      ) : null}
-      {description ? <p className="st-hw-card__desc">{description}</p> : null}
-      <div className="st-hw-card__meta">
-        {item.due_at ? (
-          <span className={isOverdue ? "st-hw-card__due--late" : undefined}>
-            {formatDueDate(item.due_at)}
-          </span>
-        ) : null}
-        {item.items_count > 0 ? <span>{item.items_count} заданий</span> : null}
-        {item.teacher_name ? <span>{item.teacher_name}</span> : null}
-      </div>
-      {progressLabel ? (
-        <div className="st-hw-card__progress">
-          {!hideProgressBar ? (
-            <div className="st-pending-hw__bar" role="progressbar" aria-valuenow={progressPercent} aria-valuemin={0} aria-valuemax={100}>
-              <span style={{ width: `${Math.min(100, progressPercent)}%` }} />
-            </div>
-          ) : null}
-          <span>{progressLabel}</span>
-        </div>
-      ) : null}
-      {item.teacher_comment ? (
-        <p className="st-hw-card__comment">Комментарий учителя: {item.teacher_comment}</p>
-      ) : null}
-      <button
-        type="button"
-        className="cb-btn cb-btn--primary"
-        onClick={() => navigate(getStudentAssignmentPath(item))}
-      >
-        {actionLabel}
-      </button>
-    </article>
+    <CabinetHomeworkCard
+      {...card}
+      onAction={() => navigate(getStudentAssignmentPath(item))}
+    />
   );
 }
 

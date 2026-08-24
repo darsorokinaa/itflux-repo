@@ -32,7 +32,6 @@ export function materialOpenUrl(material) {
 
 export function lessonResourceRows(item) {
   const rows = [];
-  const materialTitles = new Set();
   (item?.materials || []).forEach((material) => {
     const kind = material.materialType === "task_set"
       ? "variant"
@@ -41,8 +40,6 @@ export function lessonResourceRows(item) {
         : material.materialType === "lesson"
           ? "library_lesson"
           : "material";
-    const title = (material.title || "").trim();
-    if (title) materialTitles.add(title.toLowerCase());
     rows.push({
       key: `lesson-material-${material.id}`,
       kind,
@@ -53,17 +50,9 @@ export function lessonResourceRows(item) {
       cabinetFileId: material.cabinetFileId || material.cabinet_file_id || null,
     });
   });
-  const linkedTitle = (item?.linkedLessonTitle || "").trim();
-  // Не дублируем linked_lesson, если тот же урок уже прикреплён как материал.
-  if (linkedTitle && !materialTitles.has(linkedTitle.toLowerCase())) {
-    rows.push({
-      key: `linked-lesson-${item.linkedLessonId || item.linkedLessonTitle}`,
-      kind: "linked_lesson",
-      label: item.linkedLessonTitle,
-      typeLabel: "Урок из библиотеки",
-      url: "",
-    });
-  }
+  // linked_lesson — служебная копия пункта плана для выдачи ученику,
+  // не материал, который учитель прикреплял. Готовый урок из библиотеки
+  // приходит сюда как material_type=lesson.
   (item?.attachedInteractives || []).forEach((interactive) => {
     rows.push({
       key: `lesson-interactive-${interactive.id}`,
@@ -214,15 +203,11 @@ export function planItemLessonPopoverRows(item) {
 
 export function planItemTaskPopoverRows(item) {
   if (!item) return [];
-  // Не передаём linkedLessonTitle: иначе «Урок из библиотеки» дублируется
-  // вместе с planItemLessonPopoverRows.
   const taskMaterials = (item.materials || []).filter((material) => material.materialType === "task_set");
   return lessonResourceRows({
     ...item,
     materials: taskMaterials,
     attachedInteractives: [],
-    linkedLessonTitle: "",
-    linkedLessonId: null,
   }).map((row) => toPopoverRow(row));
 }
 

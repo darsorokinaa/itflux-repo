@@ -818,12 +818,13 @@ def _serialize_lesson_card(assignment, students):
     }
 
 
-def _homework_student_status(homework, student):
-    submission = (
-        HomeworkSubmission.objects.filter(homework=homework, student=student)
-        .order_by("-submitted_at", "-id")
-        .first()
-    )
+def _homework_student_status(homework, student, submission=None):
+    if submission is None and student is not None:
+        submission = (
+            HomeworkSubmission.objects.filter(homework=homework, student=student)
+            .order_by("-submitted_at", "-id")
+            .first()
+        )
     now = timezone.now()
     if submission:
         if submission.status == SubmissionStatus.CHECKED:
@@ -843,13 +844,29 @@ def _homework_student_status(homework, student):
     return "in_progress", "В работе", submission
 
 
-def _serialize_assignment_card(homework, students):
+def _submissions_by_homework(homeworks, student):
+    if student is None or not homeworks:
+        return {}
+    mapping = {}
+    qs = HomeworkSubmission.objects.filter(
+        homework_id__in=[hw.id for hw in homeworks],
+        student=student,
+    ).order_by("homework_id", "-submitted_at", "-id")
+    for submission in qs:
+        mapping.setdefault(submission.homework_id, submission)
+    return mapping
+
+
+def _serialize_assignment_card(homework, students, submission=None):
     student = _pick_student(students, homework.teacher)
-    sid, slabel, submission = _homework_student_status(homework, student)
+    sid, slabel, submission = _homework_student_status(homework, student, submission=submission)
     subject_label = ""
     if homework.student_subject_id and homework.student_subject:
         subject_label = homework.student_subject.display_label
-    tasks_total = homework.tasks.count() if hasattr(homework, "tasks") else 0
+    try:
+        tasks_total = len(homework.tasks.all())
+    except Exception:
+        tasks_total = 0
     # Backend: точный items_done потребует разбора result_payload по типам задач.
     # Пока оцениваем прогресс по статусу сдачи.
     tasks_done = 0
@@ -861,8 +878,22 @@ def _serialize_assignment_card(homework, students):
         progress_percent = 45 if tasks_total else 30
         tasks_done = round(tasks_total * progress_percent / 100) if tasks_total else 0
     from .homework_attachments import list_homework_attachments
+    from .homework_result import build_submission_result_summary
 
     attachments = list_homework_attachments(homework, for_student=True)
+    result_summary = (
+        build_submission_result_summary(submission, for_student=True)
+        if submission
+        else None
+    )
+    result_percent = None
+    teacher_comment = ""
+    if result_summary and result_summary.get("is_final"):
+        result_percent = result_summary.get("percentage")
+    if result_summary and result_summary.get("teacher_comment_preview"):
+        teacher_comment = result_summary["teacher_comment_preview"]
+    elif sid == "needs_fix" and submission:
+        teacher_comment = (submission.teacher_comment or "").strip()
     return {
         "id": homework.id,
         "title": homework.title,
@@ -871,7 +902,8 @@ def _serialize_assignment_card(homework, students):
         "due_at": homework.due_at.isoformat() if homework.due_at else None,
         "status": sid,
         "status_label": slabel,
-        "result_percent": float(submission.score) if submission and submission.score is not None else None,
+        "result_percent": result_percent,
+        "result_summary": result_summary,
         "topic": (homework.lesson.topic or homework.lesson.title) if homework.lesson else "",
         "cover_theme": _cover_theme_from_lesson(homework.lesson) if homework.lesson else "ege",
         "lesson_id": homework.lesson_id,
@@ -881,7 +913,7 @@ def _serialize_assignment_card(homework, students):
         "items_count": tasks_total,
         "items_done": tasks_done,
         "progress_percent": progress_percent,
-        "teacher_comment": (submission.teacher_comment or "") if submission else "",
+        "teacher_comment": teacher_comment,
         "description": (homework.description or "").strip()[:240],
         "attachments": attachments[:4],
         "attachments_count": len(attachments),
@@ -1185,13 +1217,20 @@ def _student_hw_counts_and_scores(students, homeworks):
     open_hw = 0
     done_hw = 0
     scores = []
+    student = _pick_student(students)
+    sub_map = _submissions_by_homework(homeworks, student)
     for hw in homeworks:
-        sid, _, submission = _homework_student_status(hw, _pick_student(students, hw.teacher))
+        roster = _pick_student(students, hw.teacher)
+        sid, _, submission = _homework_student_status(
+            hw,
+            roster,
+            submission=sub_map.get(hw.id),
+        )
         if sid in _OPEN_HW_STATUSES:
             open_hw += 1
         elif sid in _DONE_HW_STATUSES:
             done_hw += 1
-        if submission and submission.score is not None:
+        if sid == "checked" and submission and submission.score is not None:
             scores.append(float(submission.score))
     avg = round(sum(scores) / len(scores)) if scores else None
     return open_hw, done_hw, avg
@@ -1209,6 +1248,8 @@ class StudentDashboardView(StudentScopedView):
         lessons = all_lessons[:20]
         all_homeworks = list(_homework_qs(students))
         interactives = list(_interactive_assignments_qs(students)[:20])
+        dashboard_student = _pick_student(students)
+        hw_sub_map = _submissions_by_homework(all_homeworks, dashboard_student)
         today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
         today_end = today_start.replace(hour=23, minute=59, second=59)
         today_events = list(
@@ -1218,9 +1259,13 @@ class StudentDashboardView(StudentScopedView):
         todo = []
         for hw in all_homeworks:
             roster = _pick_student(students, hw.teacher)
-            sid, _, _ = _homework_student_status(hw, roster)
+            submission = hw_sub_map.get(hw.id)
+            sid, _, _ = _homework_student_status(hw, roster, submission=submission)
             if sid in _OPEN_HW_STATUSES:
-                todo.append({"kind": "assignment", **_serialize_assignment_card(hw, students)})
+                todo.append({
+                    "kind": "assignment",
+                    **_serialize_assignment_card(hw, students, submission=submission),
+                })
             if len(todo) >= 3:
                 break
 
@@ -1427,7 +1472,13 @@ class StudentAssignmentsView(StudentScopedView):
             qs = qs.filter(
                 Q(student_subject_id=subject_id) | Q(student_subject__isnull=True)
             )
-        items = [_serialize_assignment_card(hw, students) for hw in qs]
+        homeworks = list(qs)
+        student = _pick_student(students)
+        sub_map = _submissions_by_homework(homeworks, student)
+        items = [
+            _serialize_assignment_card(hw, students, submission=sub_map.get(hw.id))
+            for hw in homeworks
+        ]
         return Response({"items": items})
 
 

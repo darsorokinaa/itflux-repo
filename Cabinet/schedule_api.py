@@ -500,7 +500,9 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
             "plan_title": enrollment.plan.title if enrollment.plan_id else "",
             "item": _plan_item_to_json(item) if item else None,
             "progress": progress,
-            "plan_finished": bool(progress.get("is_finished")),
+            "plan_finished": bool(
+                progress.get("is_finished") or progress.get("is_schedule_exhausted")
+            ),
             "warning_level": progress.get("warning_level") or "",
             "warning_message": progress.get("warning_message") or "",
         })

@@ -3841,6 +3841,11 @@ a.st-dash-last-result:hover strong {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 14px;
+  align-items: stretch;
+}
+
+.st-hw-grid .cb-hw-card {
+  max-width: none;
 }
 
 .st-hw-card {

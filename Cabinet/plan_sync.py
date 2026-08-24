@@ -31,6 +31,13 @@ def _lessons_word(n: int) -> str:
     return "занятий"
 
 
+def _unlinked_topics_phrase(n: int) -> str:
+    n = abs(int(n))
+    if n % 10 == 1 and n % 100 != 11:
+        return f"Для {n} занятия тема ещё не определена"
+    return f"Для {n} занятий темы ещё не определены"
+
+
 class PlanSyncService:
 
     COMPLETED_STATUSES = {"done", "completed"}
@@ -143,11 +150,11 @@ class PlanSyncService:
     NEAR_END_WARN = 2
 
     @classmethod
-    def get_enrollment_progress(cls, enrollment) -> dict:
+    def get_enrollment_progress(cls, enrollment, *, event=None, plan_item=None) -> dict:
         from .models import ScheduleEvent
-        from .plan_schedule import events_for_enrollment
+        from .plan_schedule import events_for_enrollment, plan_items_for_enrollment
 
-        items = list(enrollment.plan.items.order_by("order", "id"))
+        items = plan_items_for_enrollment(enrollment)
         total = len(items)
         completed = sum(1 for item in items if item.status == PlanItemStatus.COMPLETED)
         skipped = sum(1 for item in items if item.status == PlanItemStatus.SKIPPED)
@@ -155,28 +162,53 @@ class PlanSyncService:
         current = cls.get_current_item(enrollment)
         next_item = cls.get_next_plan_item(enrollment)
         now = timezone.now()
+        ignored_statuses = {
+            ScheduleEvent.Status.CANCELLED,
+            ScheduleEvent.Status.COMPLETED,
+            ScheduleEvent.Status.DONE,
+        }
         future_events = [
             ev
             for ev in events_for_enrollment(enrollment, enrollment.teacher)
             if ev.starts_at >= now
-            and ev.status not in {
-                ScheduleEvent.Status.CANCELLED,
-                ScheduleEvent.Status.COMPLETED,
-                ScheduleEvent.Status.DONE,
-            }
+            and ev.status not in ignored_statuses
         ]
+        linked_item_ids = {
+            ev.lesson_plan_item_id
+            for ev in future_events
+            if ev.lesson_plan_item_id
+        }
+        remaining_unassigned = sum(
+            1
+            for item in items
+            if item.status not in cls.TERMINAL_ITEM
+            and item.id not in linked_item_ids
+        )
         unlinked_future = [ev for ev in future_events if not ev.lesson_plan_item_id]
+        item_for_event = plan_item
+        if item_for_event is None and event is not None:
+            item_for_event = event.lesson_plan_item
+        active_items = [item for item in items if item.status != PlanItemStatus.SKIPPED]
+        is_last_topic = bool(
+            item_for_event is not None
+            and active_items
+            and active_items[-1].id == item_for_event.id
+        )
         warning_level, warning_message = cls._progress_warning(
             total=total,
             remaining=remaining,
+            remaining_unassigned=remaining_unassigned,
             future_count=len(future_events),
             unlinked_future=len(unlinked_future),
+            is_last_topic=is_last_topic,
+            event_bound=item_for_event is not None,
         )
         return {
             "total": total,
             "completed": completed,
             "skipped": skipped,
             "remaining": remaining,
+            "remaining_unassigned": remaining_unassigned,
             "percent": round(completed * 100 / total) if total else 0,
             "current_item": {
                 "id": current.pk,
@@ -191,6 +223,8 @@ class PlanSyncService:
                 "topic": next_item.topic,
             } if next_item else None,
             "is_finished": remaining == 0 and total > 0,
+            "is_schedule_exhausted": remaining_unassigned == 0 and total > 0,
+            "is_last_topic": is_last_topic,
             "future_events": len(future_events),
             "unlinked_future_events": len(unlinked_future),
             "warning_level": warning_level,
@@ -198,9 +232,32 @@ class PlanSyncService:
         }
 
     @classmethod
-    def _progress_warning(cls, *, total, remaining, future_count, unlinked_future):
+    def _last_topic_message(cls, *, unlinked_future):
+        extra = (
+            f" {_unlinked_topics_phrase(unlinked_future)} — добавьте темы в план."
+            if unlinked_future
+            else (
+                " Добавьте продолжение, чтобы следующие занятия не остались без темы."
+            )
+        )
+        return "last", f"Это последняя тема текущего плана.{extra}"
+
+    @classmethod
+    def _progress_warning(
+        cls,
+        *,
+        total,
+        remaining,
+        remaining_unassigned,
+        future_count,
+        unlinked_future,
+        is_last_topic=False,
+        event_bound=False,
+    ):
         if total == 0:
             return "empty", "План обучения пока не заполнен. Добавьте темы."
+        if is_last_topic:
+            return cls._last_topic_message(unlinked_future=unlinked_future)
         if remaining == 0:
             extra = unlinked_future or max(0, future_count)
             if extra:
@@ -208,26 +265,30 @@ class PlanSyncService:
                     "exhausted",
                     (
                         f"План завершён. Все {total} тем использованы. "
-                        f"Для {extra} занятий тема ещё не выбрана — добавьте темы в план."
+                        f"{_unlinked_topics_phrase(extra)} — добавьте темы в план."
                     ),
                 )
             return "exhausted", f"План завершён. Все {total} тем пройдены."
-        if future_count > remaining and unlinked_future:
-            extra = unlinked_future
+        overflow = unlinked_future - remaining_unassigned
+        if overflow > 0:
+            if remaining_unassigned == 0:
+                return (
+                    "overbooked",
+                    (
+                        "Все темы плана уже назначены на занятия. "
+                        f"{_unlinked_topics_phrase(unlinked_future)} — добавьте темы в план."
+                    ),
+                )
             return (
                 "overbooked",
                 (
-                    f"В плане осталось {remaining} {_lessons_word(remaining)}, "
-                    f"а в расписании создано {future_count} будущих занятий. "
-                    f"Для {extra} занятий темы ещё не определены."
+                    f"В плане свободно {remaining_unassigned} {_lessons_word(remaining_unassigned)}, "
+                    f"а в расписании без темы — {unlinked_future} {_lessons_word(unlinked_future)}. "
+                    f"{_unlinked_topics_phrase(overflow)}."
                 ),
             )
-        if remaining == 1:
-            return (
-                "last",
-                "Это последняя тема текущего плана. Добавьте продолжение, "
-                "чтобы следующие занятия не остались без темы.",
-            )
+        if remaining == 1 and not event_bound:
+            return cls._last_topic_message(unlinked_future=unlinked_future)
         if remaining <= cls.NEAR_END_WARN:
             return (
                 "warn",

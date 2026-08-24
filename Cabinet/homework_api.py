@@ -1498,7 +1498,70 @@ def build_homework_review_context(homework: Homework) -> dict:
         "description": homework_instruction_text(homework),
         "attachments": attachments,
         "attachments_count": len(attachments),
+        "subject_label": (
+            homework.student_subject.display_label
+            if homework.student_subject_id and homework.student_subject
+            else ""
+        ),
     }
+
+
+def build_homework_review_list_context(homework: Homework) -> dict:
+    """Лёгкий контекст для списка проверки — без сериализации всех заданий."""
+    variant_id = None
+    level = ""
+    subject = ""
+    has_variant = False
+    tasks_count = 0
+    for task in homework.tasks.all():
+        if not getattr(task, "is_active", True):
+            continue
+        tasks_count += 1
+        resource = (task.description or "").strip()
+        if task_is_variant(task):
+            has_variant = True
+        vid = extract_variant_id(resource)
+        if vid and not variant_id:
+            variant_id = vid
+            match = VARIANT_PATH_RE.search(resource)
+            if match:
+                level = match.group("level") or ""
+                subject = match.group("subject") or ""
+    subject_label = ""
+    if homework.student_subject_id and homework.student_subject:
+        subject_label = homework.student_subject.display_label
+    return {
+        "homework_id": homework.id,
+        "homework_title": homework.title,
+        "due_at": homework.due_at.isoformat() if homework.due_at else None,
+        "has_variant": has_variant,
+        "variant_id": variant_id,
+        "level": level,
+        "subject": subject,
+        "subject_label": subject_label,
+        "tasks_count": tasks_count,
+    }
+
+
+def prefetch_submissions_for_review_items(items) -> dict:
+    """Один запрос submissions для списка ReviewItem (source_id не FK)."""
+    ids = [
+        item.source_id
+        for item in items
+        if getattr(item, "source_type", None) == "homework" and item.source_id
+    ]
+    if not ids:
+        return {}
+    submissions = (
+        HomeworkSubmission.objects.filter(pk__in=ids)
+        .select_related(
+            "homework",
+            "homework__student_subject",
+            "student",
+        )
+        .prefetch_related("homework__tasks", "file_attachments")
+    )
+    return {sub.pk: sub for sub in submissions}
 
 
 def _homework_recipient_students(homework: Homework) -> list:

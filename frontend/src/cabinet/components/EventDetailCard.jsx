@@ -1312,36 +1312,36 @@ export default function EventDetailCard({
                   {event.planWarningMessage}
                 </p>
               ) : null}
-                <section className="cb-lesson-card__section cb-lesson-card__section--compact cb-lesson-card__section--about">
-                  {canEditAbout ? (
-                    <AboutEditor
-                      event={event}
-                      topic={lessonTopic}
-                      subtopic={subtopic}
-                      subjectLabel={subject}
-                      courseTitle={courseTitle}
-                      description={description}
-                      onEventUpdated={onEventUpdated}
-                    />
-                  ) : (
-                    <>
-                      <h3 className="cb-lesson-card__section-title cb-lesson-card__section-title--plain">О занятии</h3>
-                      <div className="cb-lesson-card__about">
-                        <AboutField label="Предмет" value={subject} empty="Не указан" />
-                        <AboutField label="Курс" value={courseTitle} empty="Не указан" />
-                        <AboutField label="Тема" value={lessonTopic} empty="Не указана" />
-                        {subtopic ? <AboutField label="Подтема" value={subtopic} /> : null}
-                        <AboutField
-                          label="Описание"
-                          value={description}
-                          empty="Описание не добавлено"
-                          multiline
-                        />
-                      </div>
-                    </>
-                  )}
-                </section>
-              ) : null}
+
+              <section className="cb-lesson-card__section cb-lesson-card__section--compact cb-lesson-card__section--about">
+                {canEditAbout ? (
+                  <AboutEditor
+                    event={event}
+                    topic={lessonTopic}
+                    subtopic={subtopic}
+                    subjectLabel={subject}
+                    courseTitle={courseTitle}
+                    description={description}
+                    onEventUpdated={onEventUpdated}
+                  />
+                ) : (
+                  <>
+                    <h3 className="cb-lesson-card__section-title cb-lesson-card__section-title--plain">О занятии</h3>
+                    <div className="cb-lesson-card__about">
+                      <AboutField label="Предмет" value={subject} empty="Не указан" />
+                      <AboutField label="Курс" value={courseTitle} empty="Не указан" />
+                      <AboutField label="Тема" value={lessonTopic} empty="Не указана" />
+                      {subtopic ? <AboutField label="Подтема" value={subtopic} /> : null}
+                      <AboutField
+                        label="Описание"
+                        value={description}
+                        empty="Описание не добавлено"
+                        multiline
+                      />
+                    </div>
+                  </>
+                )}
+              </section>
 
               <ParticipantsRow participants={participantList} />
 

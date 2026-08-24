@@ -1620,6 +1620,7 @@ class ReviewItemSerializer(serializers.ModelSerializer):
     group_title = serializers.CharField(source="group.title", read_only=True, allow_null=True)
     homework_submission = serializers.SerializerMethodField()
     homework_review = serializers.SerializerMethodField()
+    result_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = ReviewItem
@@ -1642,29 +1643,48 @@ class ReviewItemSerializer(serializers.ModelSerializer):
             "teacher_comment",
             "homework_submission",
             "homework_review",
+            "result_summary",
         ]
 
-    def get_homework_submission(self, obj):
+    def _submission_for(self, obj):
         if obj.source_type != "homework":
             return None
-        submission = HomeworkSubmission.objects.filter(pk=obj.source_id).select_related(
-            "homework", "student"
-        ).prefetch_related("file_attachments").first()
+        cache = self.context.get("submissions_by_id")
+        if cache is not None:
+            return cache.get(obj.source_id)
+        return (
+            HomeworkSubmission.objects.filter(pk=obj.source_id)
+            .select_related("homework", "homework__student_subject", "student")
+            .prefetch_related("file_attachments", "homework__tasks")
+            .first()
+        )
+
+    def get_homework_submission(self, obj):
+        submission = self._submission_for(obj)
         if not submission:
             return None
         return HomeworkSubmissionSerializer(submission).data
 
     def get_homework_review(self, obj):
-        if obj.source_type != "homework":
-            return None
-        submission = HomeworkSubmission.objects.filter(pk=obj.source_id).select_related(
-            "homework"
-        ).first()
+        submission = self._submission_for(obj)
         if not submission or not submission.homework_id:
             return None
+        homework = submission.homework
+        if self.context.get("list_mode"):
+            from .homework_api import build_homework_review_list_context
+
+            return build_homework_review_list_context(homework)
         from .homework_api import build_homework_review_context
 
-        return build_homework_review_context(submission.homework)
+        return build_homework_review_context(homework)
+
+    def get_result_summary(self, obj):
+        submission = self._submission_for(obj)
+        if not submission:
+            return None
+        from .homework_result import build_submission_result_summary
+
+        return build_submission_result_summary(submission, for_student=False)
 
 
 class ScheduleEventParticipantSerializer(serializers.ModelSerializer):

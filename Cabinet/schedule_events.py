@@ -324,7 +324,13 @@ def schedule_event_to_json(event):
     from .plan_sync import PlanSyncService
     sync_meta = LessonLearningPlanSyncService.sync_meta_payload(event, plan_item)
     enrollment = get_active_enrollment(event)
-    plan_progress = PlanSyncService.get_enrollment_progress(enrollment) if enrollment else None
+    plan_progress = (
+        PlanSyncService.get_enrollment_progress(
+            enrollment, event=event, plan_item=plan_item,
+        )
+        if enrollment
+        else None
+    )
 
     return {
         "id": local_event_id(event.pk),

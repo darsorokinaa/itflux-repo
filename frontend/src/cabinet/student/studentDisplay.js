@@ -16,12 +16,12 @@ export function studentHwStatusLabel(status, fallback = "") {
 }
 
 export function studentHwActionLabel(status) {
-  if (status === "checked" || status === "completed") return "Результаты";
-  if (status === "needs_fix") return "Исправить";
-  if (status === "submitted" || status === "reviewing") return "Открыть";
+  if (status === "checked" || status === "completed") return "Перейти к результатам";
+  if (status === "needs_fix") return "Исправить работу";
+  if (status === "submitted" || status === "reviewing") return "Посмотреть работу";
   if (status === "in_progress") return "Продолжить";
   if (status === "overdue") return "Выполнить";
-  return "Начать";
+  return "Выполнить";
 }
 
 export function pluralRu(n, one, few, many) {

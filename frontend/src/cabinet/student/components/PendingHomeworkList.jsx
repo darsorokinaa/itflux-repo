@@ -3,11 +3,12 @@ import {
   StudentStatusBadge,
   formatDueDate,
 } from "../StudentSectionUi";
-import { getStudentAssignmentPath } from "../studentAssignmentCards";
+import { getStudentAssignmentPath, studentResultBlock } from "../studentAssignmentCards";
 import {
   studentHwActionLabel,
   studentHwStatusLabel,
 } from "../studentDisplay";
+import { commentPreview } from "../../homeworkResultSummary";
 
 export function PendingHomeworkCard({ item, showTeacher = false }) {
   const subject = item.student_subject_label || item.type_label || "Задание";
@@ -15,15 +16,18 @@ export function PendingHomeworkCard({ item, showTeacher = false }) {
   const statusLabel = studentHwStatusLabel(item.status, item.status_label);
   const actionLabel = studentHwActionLabel(item.status);
   const isOverdue = item.status === "overdue";
-  const hasProgress =
-    item.items_count > 0
-    || (item.progress_percent != null && item.progress_percent > 0)
-    || item.result_percent != null;
+  const result = studentResultBlock(item);
+  const comment = commentPreview(item.result_summary?.teacher_comment_preview || item.teacher_comment);
 
   let progressText = "";
-  if (item.result_percent != null) {
-    progressText = `Результат: ${Math.round(item.result_percent)}%`;
-  } else if (item.items_count > 0) {
+  if (result) {
+    const parts = [result.countsLabel, result.percentage != null ? `${result.percentage}%` : ""].filter(Boolean);
+    progressText = parts.length ? `Результат ${parts.join(" · ")}` : "";
+  } else if (item.status === "submitted" || item.status === "reviewing") {
+    progressText = "Ожидает проверки преподавателем";
+  } else if (item.status === "needs_fix") {
+    progressText = "Учитель оставил замечания";
+  } else if (item.items_count > 0 && item.result_percent == null) {
     progressText = `Выполнено ${item.items_done ?? 0} из ${item.items_count} заданий`;
   } else if (item.progress_percent > 0 && item.status === "in_progress") {
     progressText = "В процессе";
@@ -48,21 +52,25 @@ export function PendingHomeworkCard({ item, showTeacher = false }) {
           ) : null}
           {showTeacher && item.teacher_name ? <span>Учитель: {item.teacher_name}</span> : null}
         </div>
-        {hasProgress && progressText ? (
+        {progressText ? (
           <div className="st-pending-hw__progress">
-            {item.items_count > 0 && item.result_percent == null ? (
+            {result?.percentage != null ? (
               <div
                 className="st-pending-hw__bar"
                 role="progressbar"
-                aria-valuenow={item.progress_percent || 0}
+                aria-label="Результат"
+                aria-valuenow={result.percentage}
                 aria-valuemin={0}
                 aria-valuemax={100}
               >
-                <span style={{ width: `${Math.min(100, item.progress_percent || 0)}%` }} />
+                <span style={{ width: `${Math.min(100, result.percentage)}%` }} />
               </div>
             ) : null}
             <span>{progressText}</span>
           </div>
+        ) : null}
+        {comment && (item.status === "checked" || item.status === "needs_fix") ? (
+          <p className="st-hw-card__comment">{comment}</p>
         ) : null}
       </div>
       <Link

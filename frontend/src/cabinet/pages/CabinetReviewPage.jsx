@@ -1,20 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import CabinetHomeworkCard from "../CabinetHomeworkCard";
 import ConfirmActionModal from "../components/ConfirmActionModal";
+import CabinetSearchableSelect from "../components/CabinetSearchableSelect";
 import {
   CabinetPageShell,
   CabinetPageHeader,
   CabinetFilterBar,
-  CabinetMetricsRow,
   CabinetEmptyState,
 } from "../CabinetSectionUi";
 import { deleteHomework, fetchReviewItems, normalizeCabinetList } from "../../utils/cabinetAuth";
 import HomeworkCopyModal from "../components/HomeworkCopyModal";
+import {
+  formatAutoCheckLine,
+  formatResultCounts,
+  formatResultPercent,
+  formatSubmittedAtLabel,
+} from "../homeworkResultSummary";
 
 const FILTERS = [
-  { id: "inbox", label: "К проверке" },
-  { id: "done", label: "Проверенные" },
+  { id: "inbox", label: "На проверке" },
+  { id: "done", label: "Проверено" },
   { id: "overdue", label: "Просроченные" },
   { id: "oge", label: "ОГЭ" },
   { id: "ege", label: "ЕГЭ" },
@@ -43,6 +49,25 @@ function isReviewOverdue(item) {
   return due.getTime() < Date.now();
 }
 
+function homeworkTitle(item) {
+  const fromHw = (item.homework_review?.homework_title || "").trim();
+  if (fromHw) return fromHw;
+  const title = (item.title || "").trim();
+  const name = (item.student_name || "").trim();
+  if (name && title.endsWith(`— ${name}`)) {
+    return title.slice(0, title.length - name.length - 2).replace(/[—–-]\s*$/, "").trim();
+  }
+  return title || "Домашнее задание";
+}
+
+function subjectLabel(item) {
+  return (
+    item.homework_review?.subject_label
+    || item.student_subject_label
+    || ""
+  ) || "Домашнее задание";
+}
+
 function mapReviewItem(item) {
   const studentName = (item.student_name || "").trim();
   const initials = (studentName || "?")
@@ -57,12 +82,16 @@ function mapReviewItem(item) {
   const studentId = item.student ?? item.homework_submission?.student ?? null;
   const groupId = item.group ?? null;
   const groupTitle = (item.group_title || "").trim();
+  const summary = item.result_summary || null;
 
   const filter = ["all"];
   if (item.status === "pending") {
     if (awaitingSubmission) filter.push("assigned");
     else filter.push("new");
     filter.push("inbox");
+  } else if (item.status === "returned") {
+    filter.push("done");
+    filter.push("returned");
   } else {
     filter.push("done");
   }
@@ -73,28 +102,47 @@ function mapReviewItem(item) {
   if (studentId || studentName) filter.push("students");
   if (groupId || groupTitle) filter.push("groups");
 
-  let deadlineLabel = item.status_label || item.status;
-  let deadlineTone = item.status === "pending" ? "review" : "completed";
-  let progressLabel = item.status_label;
-  let progressTone = item.status === "pending" ? "review" : "completed";
-  let progressPercent = item.status === "pending" ? 50 : 100;
-  let actionLabel = item.status === "pending" ? "Проверить" : "Открыть";
+  let deadlineLabel = "На проверке";
+  let deadlineTone = "review";
+  let actionLabel = "Проверить работу";
+  let metaLine = "";
+  let result = null;
 
-  if (awaitingSubmission) {
-    deadlineLabel = "Выдано";
+  if (item.status === "checked") {
+    deadlineLabel = "Проверено";
+    deadlineTone = "completed";
+    actionLabel = "Перейти к результатам";
+    const countsLabel = formatResultCounts(summary);
+    const percentage = formatResultPercent(summary);
+    if (countsLabel || percentage != null) {
+      result = { countsLabel, percentage };
+    }
+  } else if (item.status === "returned") {
+    deadlineLabel = "Возвращено";
+    deadlineTone = "overdue";
+    actionLabel = "Открыть работу";
+    metaLine = "Нужна доработка";
+  } else if (awaitingSubmission) {
+    deadlineLabel = "Не сдано";
     deadlineTone = "info";
-    progressLabel = "Ожидает сдачи";
-    progressTone = "default";
-    progressPercent = 15;
-    actionLabel = "Открыть";
+    actionLabel = "Открыть задание";
+  } else {
+    deadlineLabel = "На проверке";
+    deadlineTone = "review";
+    actionLabel = "Проверить работу";
+    metaLine = formatSubmittedAtLabel(item.homework_submission?.submitted_at);
+    const autoLine = formatAutoCheckLine(summary);
+    if (autoLine || summary?.needs_manual_review) {
+      result = {
+        countsLabel: autoLine,
+        hint: summary?.needs_manual_review ? "Есть задания для ручной проверки" : "",
+      };
+    }
   }
-  if (overdue) {
+
+  if (overdue && item.status === "pending") {
     deadlineLabel = "Просрочено";
     deadlineTone = "overdue";
-    if (item.status === "pending") {
-      progressLabel = "Просрочено";
-      progressTone = "overdue";
-    }
   }
 
   return {
@@ -103,6 +151,8 @@ function mapReviewItem(item) {
     status: item.status || "",
     canDeleteHomework: item.status !== "checked",
     dueAt: resolveDueAt(item),
+    submittedAt: item.homework_submission?.submitted_at || null,
+    checkedAt: item.checked_at || null,
     awaitingSubmission,
     submittedForReview,
     studentId: studentId != null ? String(studentId) : "",
@@ -113,13 +163,11 @@ function mapReviewItem(item) {
     coverType: item.source_type === "homework" ? "exam" : "general",
     deadlineLabel,
     deadlineTone,
-    subject: item.source_type_label || item.source_type,
-    title: item.title,
-    description: studentName || "",
-    progressLabel,
-    progressPercent,
-    progressTone,
-    students: [{ initials }],
+    subject: subjectLabel(item),
+    title: homeworkTitle(item),
+    metaLine,
+    result,
+    students: [{ initials, name: studentName }],
     actionLabel,
   };
 }
@@ -160,10 +208,9 @@ function ReviewWorksGrid({ items, deletingId, onOpen, onDeleteRequest, onCopyReq
             deadlineTone={item.deadlineTone}
             subject={item.subject}
             title={item.title}
-            description={item.description}
-            progressLabel={item.progressLabel}
-            progressPercent={item.progressPercent}
-            progressTone={item.progressTone}
+            studentName={item.studentName}
+            metaLine={item.metaLine}
+            result={item.result}
             students={item.students}
             overflowCount={item.overflowCount}
             actionLabel={deletingId === item.id ? "Удаление…" : item.actionLabel}
@@ -231,35 +278,90 @@ function ReviewGroupedSections({
   );
 }
 
+function ReviewSkeletonGrid() {
+  return (
+    <div className="cb-hw-grid" aria-hidden="true">
+      {[0, 1, 2].map((key) => (
+        <div key={key} className="cb-hw-card cb-hw-card--skeleton" />
+      ))}
+    </div>
+  );
+}
+
+function patchSearchParams(params, patch) {
+  const next = new URLSearchParams(params);
+  Object.entries(patch).forEach(([key, value]) => {
+    if (value == null || value === "") next.delete(key);
+    else next.set(key, String(value));
+  });
+  return next;
+}
+
 export default function CabinetReviewPage() {
   const navigate = useNavigate();
-  const [filter, setFilter] = useState("inbox");
-  const [studentScope, setStudentScope] = useState("all");
-  const [groupScope, setGroupScope] = useState("all");
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filter = searchParams.get("tab") || "inbox";
+  const studentScope = searchParams.get("student") || "all";
+  const groupScope = searchParams.get("group") || "all";
+  const subjectScope = searchParams.get("subject") || "";
+  const searchQuery = searchParams.get("q") || "";
+  const [searchDraft, setSearchDraft] = useState(searchQuery);
   const [works, setWorks] = useState([]);
+  const [studentOptions, setStudentOptions] = useState([]);
+  const [subjectOptions, setSubjectOptions] = useState([]);
+  const [counts, setCounts] = useState({ all: 0, pending: 0, checked: 0, returned: 0 });
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [copyTarget, setCopyTarget] = useState(null);
 
+  const setFilterValue = useCallback((patch) => {
+    setSearchParams(patchSearchParams(searchParams, patch), { replace: true });
+  }, [searchParams, setSearchParams]);
+
   useEffect(() => {
-    let cancelled = false;
-    const load = async ({ soft = false } = {}) => {
-      if (!soft) setLoading(true);
-      try {
-        const data = await fetchReviewItems();
-        if (!cancelled) {
-          setWorks(normalizeCabinetList(data).map(mapReviewItem));
-          setError(null);
-        }
-      } catch (err) {
-        if (!cancelled) setError(err.message);
-      } finally {
-        if (!cancelled) setLoading(false);
+    setSearchDraft(searchQuery);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      if (searchDraft !== searchQuery) {
+        setSearchParams(patchSearchParams(searchParams, { q: searchDraft }), { replace: true });
       }
-    };
+    }, 250);
+    return () => window.clearTimeout(handle);
+  }, [searchDraft, searchQuery, searchParams, setSearchParams]);
+
+  const load = useCallback(async ({ soft = false } = {}) => {
+    if (soft) setRefreshing(true);
+    else setLoading(true);
+    try {
+      const data = await fetchReviewItems({
+        student: studentScope !== "all" ? studentScope : undefined,
+        subject: subjectScope || undefined,
+        q: searchQuery || undefined,
+      });
+      setWorks(normalizeCabinetList(data).map(mapReviewItem));
+      setCounts(data?.counts || { all: 0, pending: 0, checked: 0, returned: 0 });
+      setStudentOptions(Array.isArray(data?.students) ? data.students : []);
+      setSubjectOptions(Array.isArray(data?.subjects) ? data.subjects : []);
+      setError(null);
+    } catch (err) {
+      setError(err.message || "Не удалось загрузить работы");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [studentScope, subjectScope, searchQuery]);
+
+  useEffect(() => {
     load();
+  }, [load]);
+
+  useEffect(() => {
     const onFocus = () => load({ soft: true });
     const onVisibility = () => {
       if (document.visibilityState === "visible") load({ soft: true });
@@ -267,16 +369,10 @@ export default function CabinetReviewPage() {
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      cancelled = true;
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, []);
-
-  useEffect(() => {
-    setStudentScope("all");
-    setGroupScope("all");
-  }, [filter]);
+  }, [load]);
 
   const confirmDelete = useCallback(async () => {
     const item = deleteTarget;
@@ -293,12 +389,15 @@ export default function CabinetReviewPage() {
     }
   }, [deleteTarget]);
 
-  const metrics = useMemo(() => [
-    { label: "На проверке", shortLabel: "Проверка", value: works.filter((w) => w.filter.includes("new")).length, icon: "pencil", tone: "review", accent: "review" },
-    { label: "Ожидают сдачи", shortLabel: "Ожидают", value: works.filter((w) => w.filter.includes("assigned")).length, icon: "tasks", tone: "info", accent: "info" },
-    { label: "Просрочено", value: works.filter((w) => w.filter.includes("overdue")).length, icon: "alert", tone: "danger", accent: "danger" },
-    { label: "Проверено", value: works.filter((w) => w.filter.includes("done")).length, icon: "check", tone: "success", accent: "success" },
-  ], [works]);
+  const selectedStudent = studentOptions.find((opt) => String(opt.id) === String(studentScope));
+  const studentName = selectedStudent?.label || "";
+
+  const chipFilters = useMemo(() => ([
+    { id: "all", label: "Все", count: counts.all },
+    { id: "inbox", label: "На проверке", count: counts.pending },
+    { id: "done", label: "Проверено", count: counts.checked },
+    ...FILTERS.filter((f) => !["all", "inbox", "done"].includes(f.id)),
+  ]), [counts]);
 
   const submittedWorks = useMemo(
     () => works.filter((w) => w.filter.includes("new")),
@@ -308,16 +407,6 @@ export default function CabinetReviewPage() {
     () => works.filter((w) => w.filter.includes("assigned")),
     [works],
   );
-
-  const studentOptions = useMemo(() => {
-    const map = new Map();
-    works.forEach((w) => {
-      if (!w.filter.includes("students")) return;
-      const key = w.studentId || `name:${w.studentName}`;
-      if (!map.has(key)) map.set(key, { id: key, label: w.studentName });
-    });
-    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "ru"));
-  }, [works]);
 
   const groupOptions = useMemo(() => {
     const map = new Map();
@@ -332,7 +421,7 @@ export default function CabinetReviewPage() {
   const studentGrouped = useMemo(() => {
     let list = works.filter((w) => w.filter.includes("students"));
     if (studentScope !== "all") {
-      list = list.filter((w) => (w.studentId || `name:${w.studentName}`) === studentScope);
+      list = list.filter((w) => w.studentId === String(studentScope));
     }
     return groupWorksBy(
       list,
@@ -359,43 +448,85 @@ export default function CabinetReviewPage() {
   }, [works, filter]);
 
   const openItem = useCallback((item) => {
-    navigate(`/cabinet/review/${item.id}`);
-  }, [navigate]);
+    navigate(`/cabinet/review/${item.id}`, {
+      state: { from: `${location.pathname}${location.search}` },
+    });
+  }, [navigate, location.pathname, location.search]);
 
-  if (loading) {
-    return (
-      <CabinetPageShell className="cb-section--review">
-        <p className="cb-loading">Загрузка работ…</p>
-      </CabinetPageShell>
-    );
-  }
+  const emptyCopy = useMemo(() => {
+    if (works.length === 0 && !studentName && !searchQuery && !subjectScope) {
+      return {
+        title: "Здесь пока нет работ",
+        text: "Когда ученики отправят домашние задания, они появятся в этом разделе.",
+      };
+    }
+    if (filter === "inbox" && studentName) {
+      return {
+        title: "Работ на проверке нет",
+        text: `Все отправленные работы ученика «${studentName}» уже проверены.`,
+      };
+    }
+    if (studentName) {
+      return {
+        title: "Нет работ",
+        text: `По выбранным фильтрам у «${studentName}» ничего не найдено.`,
+      };
+    }
+    return {
+      title: "Нет работ",
+      text: "В этой вкладке пока ничего нет.",
+    };
+  }, [works.length, studentName, searchQuery, subjectScope, filter]);
 
   const inboxEmpty = submittedWorks.length === 0 && awaitingWorks.length === 0;
+  const showSkeleton = loading || (refreshing && works.length === 0);
 
   return (
     <CabinetPageShell className="cb-section--review">
-      <CabinetPageHeader title="Проверка" />
-      <CabinetMetricsRow metrics={metrics} />
-      <CabinetFilterBar filters={FILTERS} active={filter} onChange={setFilter} />
+      <CabinetPageHeader title="Проверка домашних заданий" />
 
-      {filter === "students" ? (
-        <div className="cb-review-scope">
-          <label className="cb-review-scope__label" htmlFor="review-student-scope">
-            Ученик
-          </label>
+      <div className="cb-review-toolbar">
+        <CabinetSearchableSelect
+          id="review-student-filter"
+          label="Ученик"
+          value={studentScope === "all" ? "" : studentScope}
+          options={studentOptions}
+          allLabel="Все ученики"
+          placeholder="Найти ученика"
+          onChange={(id) => setFilterValue({ student: id || null })}
+        />
+        <label className="cb-review-toolbar__field">
+          <span className="cb-search-select__label">Предмет</span>
           <select
-            id="review-student-scope"
             className="cb-review-scope__select"
-            value={studentScope}
-            onChange={(e) => setStudentScope(e.target.value)}
+            value={subjectScope}
+            aria-label="Предмет"
+            onChange={(e) => setFilterValue({ subject: e.target.value || null })}
           >
-            <option value="all">Все ученики</option>
-            {studentOptions.map((opt) => (
+            <option value="">Все предметы</option>
+            {subjectOptions.map((opt) => (
               <option key={opt.id} value={opt.id}>{opt.label}</option>
             ))}
           </select>
-        </div>
-      ) : null}
+        </label>
+        <label className="cb-review-toolbar__search">
+          <span className="cb-search-select__label">Поиск</span>
+          <input
+            type="search"
+            className="cb-review-toolbar__input"
+            placeholder="Поиск…"
+            value={searchDraft}
+            onChange={(e) => setSearchDraft(e.target.value)}
+            aria-label="Поиск по работам"
+          />
+        </label>
+      </div>
+
+      <CabinetFilterBar
+        filters={chipFilters}
+        active={filter}
+        onChange={(id) => setFilterValue({ tab: id === "inbox" ? null : id })}
+      />
 
       {filter === "groups" ? (
         <div className="cb-review-scope">
@@ -406,7 +537,7 @@ export default function CabinetReviewPage() {
             id="review-group-scope"
             className="cb-review-scope__select"
             value={groupScope}
-            onChange={(e) => setGroupScope(e.target.value)}
+            onChange={(e) => setFilterValue({ group: e.target.value === "all" ? null : e.target.value })}
           >
             <option value="all">Все группы</option>
             {groupOptions.map((opt) => (
@@ -416,17 +547,27 @@ export default function CabinetReviewPage() {
         </div>
       ) : null}
 
-      {error ? <p className="cb-inline-error" role="alert">{error}</p> : null}
+      {error ? (
+        <div className="cb-review-error" role="alert">
+          <p className="cb-inline-error">Не удалось загрузить работы</p>
+          <p className="cabinet-auth-muted">{error}</p>
+          <button type="button" className="cb-btn cb-btn--outline" onClick={() => load()}>
+            Повторить
+          </button>
+        </div>
+      ) : null}
 
-      {filter === "inbox" ? (
+      {showSkeleton ? (
+        <ReviewSkeletonGrid />
+      ) : filter === "inbox" ? (
         inboxEmpty ? (
           <CabinetEmptyState
             icon="check"
-            title="Нет работ к проверке"
-            text="Сданные и ожидающие сдачи домашние задания появятся здесь."
+            title={emptyCopy.title}
+            text={emptyCopy.text}
           />
         ) : (
-          <div className="cb-review-inbox">
+          <div className={`cb-review-inbox${refreshing ? " is-refreshing" : ""}`}>
             <section className="cb-review-inbox__section" aria-labelledby="review-submitted-heading">
               <div className="cb-review-inbox__head">
                 <h2 id="review-submitted-heading" className="cb-review-inbox__title">Сданные</h2>
@@ -441,7 +582,11 @@ export default function CabinetReviewPage() {
                   onCopyRequest={setCopyTarget}
                 />
               ) : (
-                <p className="cb-review-inbox__empty">Пока нет сданных работ</p>
+                <p className="cb-review-inbox__empty">
+                  {studentName
+                    ? `Работ на проверке нет. Все отправленные работы ученика «${studentName}» уже проверены.`
+                    : "Пока нет сданных работ"}
+                </p>
               )}
             </section>
 
@@ -471,8 +616,8 @@ export default function CabinetReviewPage() {
           onOpen={openItem}
           onDeleteRequest={setDeleteTarget}
           onCopyRequest={setCopyTarget}
-          emptyTitle="Нет работ по ученикам"
-          emptyText="Когда появятся работы с указанным учеником, они сгруппируются здесь."
+          emptyTitle={emptyCopy.title}
+          emptyText={emptyCopy.text}
         />
       ) : filter === "groups" ? (
         <ReviewGroupedSections
@@ -487,8 +632,8 @@ export default function CabinetReviewPage() {
       ) : tabItems.length === 0 ? (
         <CabinetEmptyState
           icon="check"
-          title="Нет работ"
-          text="В этой вкладке пока ничего нет."
+          title={emptyCopy.title}
+          text={emptyCopy.text}
         />
       ) : (
         <ReviewWorksGrid
@@ -527,6 +672,7 @@ export default function CabinetReviewPage() {
           onCopied={() => {
             setCopyTarget(null);
             window.dispatchEvent(new Event("cabinet:nav-counts-refresh"));
+            load({ soft: true });
           }}
         />
       ) : null}

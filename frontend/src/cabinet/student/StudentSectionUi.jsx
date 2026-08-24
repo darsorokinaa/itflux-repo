@@ -316,11 +316,11 @@ export function lessonActionLabel(status) {
 }
 
 export function assignmentActionLabel(status) {
-  if (status === "checked") return "Результаты";
-  if (status === "needs_fix") return "Исправить";
-  if (status === "submitted") return "Открыть";
-  if (status === "overdue") return "Сдать";
-  return status === "new" ? "Открыть" : "Сдать";
+  if (status === "checked") return "Перейти к результатам";
+  if (status === "needs_fix") return "Исправить работу";
+  if (status === "submitted") return "Посмотреть работу";
+  if (status === "overdue") return "Выполнить";
+  return status === "new" ? "Выполнить" : "Выполнить";
 }
 
 export function interactiveActionLabel(action) {

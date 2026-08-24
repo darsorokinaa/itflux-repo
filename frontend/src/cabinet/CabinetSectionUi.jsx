@@ -60,6 +60,9 @@ export function CabinetFilterBar({ filters, active, onChange }) {
           onClick={() => onChange(f.id)}
         >
           {f.label}
+          {f.count != null ? (
+            <span className="cb-filter-chip__count">{f.count}</span>
+          ) : null}
         </button>
       ))}
     </div>

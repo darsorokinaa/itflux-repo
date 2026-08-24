@@ -230,6 +230,34 @@ class PlanLifecycleTests(TestCase):
         progress = PlanSyncService.get_enrollment_progress(self.enrollment)
         self.assertEqual(progress["remaining"], 1)
         self.assertEqual(progress["warning_level"], "last")
+        self.assertIn("последняя тема", progress["warning_message"])
+
+    def test_last_plan_item_card_does_not_count_earlier_unfinished_topics(self):
+        """На последней теме плана подсказка не говорит «осталось 2», даже если раньше не закрыли занятия."""
+        for index in range(3):
+            PlanSyncService.mark_event_completed(self._event(index + 1))
+        fourth = self._event(10)
+        last = self._event(11)
+        extra = self._event(12, skip_plan=True)
+
+        self.assertEqual(fourth.lesson_plan_item_id, self.items[3].id)
+        self.assertEqual(last.lesson_plan_item_id, self.items[-1].id)
+        self.assertIsNone(extra.lesson_plan_item_id)
+
+        payload = schedule_event_to_json(last)
+        self.assertEqual(payload["planLessonNumber"], 5)
+        self.assertEqual(payload["planProgress"]["total"], 5)
+        self.assertEqual(payload["planProgress"]["remaining"], 2)
+        self.assertEqual(payload["planWarningLevel"], "last")
+        self.assertIn("последняя тема", payload["planWarningMessage"])
+        self.assertNotIn("осталось", payload["planWarningMessage"])
+        self.assertIn("1 занятия", payload["planWarningMessage"])
+
+        enrollment_progress = PlanSyncService.get_enrollment_progress(self.enrollment)
+        self.assertEqual(enrollment_progress["remaining"], 2)
+        self.assertEqual(enrollment_progress["remaining_unassigned"], 0)
+        self.assertEqual(enrollment_progress["warning_level"], "overbooked")
+        self.assertIn("уже назначены", enrollment_progress["warning_message"])
 
     def test_delete_linked_plan_item_requires_force(self):
         from rest_framework.test import APIClient

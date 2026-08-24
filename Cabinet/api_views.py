@@ -1806,23 +1806,157 @@ class InteractiveAttemptViewSet(TeacherScopedMixin, mixins.CreateModelMixin, vie
 class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     serializer_class = ReviewItemSerializer
 
+    def _owned_pk(self, raw, queryset):
+        """True + id если свой объект; False если чужой/битый id (пустой результат)."""
+        if raw in (None, ""):
+            return True, None
+        try:
+            pk = int(raw)
+        except (TypeError, ValueError):
+            return False, None
+        if not queryset.filter(pk=pk).exists():
+            return False, None
+        return True, pk
+
+    def _review_qs(self, *, apply_status=True, apply_student=True, apply_subject=True, apply_search=True):
+        from .homework_api import exclude_live_meeting_review_items
+
+        teacher = self.get_teacher()
+        qs = ReviewItem.objects.filter(teacher=teacher).select_related("student", "group")
+        qs = exclude_live_meeting_review_items(qs)
+        qs = qs.exclude(student__status=StudentStatus.ARCHIVED)
+        params = self.request.query_params
+
+        if apply_student:
+            ok, student_id = self._owned_pk(
+                params.get("student") or params.get("student_id"),
+                Student.objects.filter(teacher=teacher),
+            )
+            if not ok:
+                return qs.none()
+            if student_id:
+                qs = qs.filter(student_id=student_id)
+
+        if apply_subject:
+            ok, subject_id = self._owned_pk(
+                params.get("subject") or params.get("student_subject"),
+                StudentSubject.objects.filter(student__teacher=teacher),
+            )
+            if not ok:
+                return qs.none()
+            if subject_id:
+                submission_ids = HomeworkSubmission.objects.filter(
+                    homework__teacher=teacher,
+                    homework__student_subject_id=subject_id,
+                ).values_list("id", flat=True)
+                qs = qs.filter(source_type="homework", source_id__in=submission_ids)
+
+        if apply_search:
+            query = (params.get("q") or params.get("search") or "").strip()
+            if query:
+                qs = qs.filter(
+                    Q(title__icontains=query)
+                    | Q(student__first_name__icontains=query)
+                    | Q(student__last_name__icontains=query)
+                )
+
+        if apply_status:
+            status_param = params.get("status")
+            if status_param:
+                qs = qs.filter(status=status_param)
+        return qs
+
+    def _sorted_review_items(self, items):
+        status_param = self.request.query_params.get("status")
+
+        def pending_key(item):
+            return (item.created_at or timezone.now(), item.id)
+
+        def done_key(item):
+            return (item.checked_at or item.created_at or timezone.now(), item.id)
+
+        if status_param == ReviewStatus.PENDING:
+            return sorted(items, key=pending_key)
+        if status_param in (ReviewStatus.CHECKED, ReviewStatus.RETURNED):
+            return sorted(items, key=done_key, reverse=True)
+        pending = sorted(
+            [item for item in items if item.status == ReviewStatus.PENDING],
+            key=pending_key,
+        )
+        done = sorted(
+            [item for item in items if item.status != ReviewStatus.PENDING],
+            key=done_key,
+            reverse=True,
+        )
+        return pending + done
+
+    def _review_filter_options(self):
+        teacher = self.get_teacher()
+        rows = (
+            self._review_qs(apply_status=False, apply_student=False, apply_subject=True, apply_search=True)
+            .exclude(student_id=None)
+            .values("student_id", "student__first_name", "student__last_name")
+        )
+        students = []
+        seen = set()
+        for row in rows:
+            sid = row["student_id"]
+            if not sid or sid in seen:
+                continue
+            seen.add(sid)
+            label = f"{row['student__first_name'] or ''} {row['student__last_name'] or ''}".strip()
+            students.append({"id": sid, "label": label or f"Ученик {sid}"})
+        students.sort(key=lambda row: row["label"].lower())
+
+        subject_ids = (
+            Homework.objects.filter(teacher=teacher, student_subject_id__isnull=False)
+            .values_list("student_subject_id", flat=True)
+            .distinct()
+        )
+        subjects = [
+            {"id": subject.id, "label": subject.display_label}
+            for subject in StudentSubject.objects.filter(
+                id__in=subject_ids,
+                student__teacher=teacher,
+            )
+        ]
+        subjects.sort(key=lambda row: row["label"].lower())
+        return students, subjects
+
     def list(self, request, *args, **kwargs):
-        from .homework_api import sync_assigned_homework_into_review_queue
+        from .homework_api import prefetch_submissions_for_review_items, sync_assigned_homework_into_review_queue
 
         # Подтянуть выданные ДЗ без ReviewItem (авто-выдача после урока).
         sync_assigned_homework_into_review_queue(self.get_teacher())
-        return super().list(request, *args, **kwargs)
+
+        scoped_qs = self._review_qs(apply_status=False)
+        counts = {
+            "all": scoped_qs.count(),
+            "pending": scoped_qs.filter(status=ReviewStatus.PENDING).count(),
+            "checked": scoped_qs.filter(status=ReviewStatus.CHECKED).count(),
+            "returned": scoped_qs.filter(status=ReviewStatus.RETURNED).count(),
+        }
+        items = self._sorted_review_items(list(self.filter_queryset(self.get_queryset())))
+        submissions_by_id = prefetch_submissions_for_review_items(items)
+        serializer = self.get_serializer(
+            items,
+            many=True,
+            context={
+                **self.get_serializer_context(),
+                "submissions_by_id": submissions_by_id,
+                "list_mode": True,
+            },
+        )
+        students, subjects = self._review_filter_options()
+        return Response({
+            "results": serializer.data,
+            "counts": counts,
+            "students": students,
+            "subjects": subjects,
+        })
 
     def get_queryset(self):
-        from .homework_api import exclude_live_meeting_review_items
-
-        qs = ReviewItem.objects.filter(teacher=self.get_teacher()).select_related("student", "group")
-        qs = exclude_live_meeting_review_items(qs)
-        qs = qs.exclude(student__status=StudentStatus.ARCHIVED)
-        status_param = self.request.query_params.get("status")
-        if status_param:
-            qs = qs.filter(status=status_param)
-        return qs.order_by("-created_at")
+        return self._review_qs(apply_status=True)
 
     @action(detail=True, methods=["post"], url_path="check")
     def check(self, request, pk=None):
