@@ -36,24 +36,28 @@ function isPoisonTopic(candidate, audienceNames) {
 }
 
 /**
- * Тема урока: event.topic → planItem.topic → planItem.title (только если это не имя ученика).
+ * Тема урока: для будущего занятия — планируемая тема из плана на эту дату.
+ * Для проведённого можно показать фактическую (event.topic).
  * Никогда не возвращает event.title / audience.
  */
 export function resolveLessonTopic(event) {
   if (!event) return "";
   const audienceNames = eventAudienceNames(event);
   const planItem = event.planItem || (Array.isArray(event.planItems) ? event.planItems[0] : null);
+  const isDone = event.status === "done" || event.status === "completed";
+
+  const planned = String(event.plannedTopic || planItem?.topic || "").trim();
+  const planTitle = String(planItem?.title || "").trim();
+  const fromPlan = planned && !isPoisonTopic(planned, audienceNames)
+    ? planned
+    : (planTitle && !isPoisonTopic(planTitle, audienceNames) ? planTitle : "");
+
+  if (!isDone && fromPlan) return fromPlan;
 
   const direct = String(event.topic || "").trim();
   if (direct && !isPoisonTopic(direct, audienceNames)) return direct;
 
-  const planTopic = String(planItem?.topic || "").trim();
-  if (planTopic && !isPoisonTopic(planTopic, audienceNames)) return planTopic;
-
-  const planTitle = String(planItem?.title || "").trim();
-  if (planTitle && !isPoisonTopic(planTitle, audienceNames)) return planTitle;
-
-  return "";
+  return fromPlan;
 }
 
 export function resolveLessonTopicOrPlaceholder(event) {

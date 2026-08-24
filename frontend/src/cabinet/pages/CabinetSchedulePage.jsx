@@ -809,7 +809,7 @@ function CalendarEventBlock({
   const recurring = isRecurring(event);
   const displayTitle = eventDisplayTitle(event);
   const displaySubtitle = eventDisplaySubtitle(event);
-  const planTopic = (event.topic || "").trim();
+  const planTopic = resolveLessonTopic(event);
   const cardSubtitle = displaySubtitle || (planTopic && planTopic !== displayTitle ? planTopic : "");
 
   const cardStyle = {

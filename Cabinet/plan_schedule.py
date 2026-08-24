@@ -289,31 +289,68 @@ def plan_item_by_slot(event, enrollment):
     return None, None
 
 
+def plan_item_display_number(item):
+    """Номер темы в карточке: 1, 2, 3… по порядку плана, даже если order с нуля."""
+    if item is None:
+        return None
+    items = list(item.plan.items.order_by("order", "id"))
+    for index, row in enumerate(items, start=1):
+        if row.id == item.id:
+            return index
+    return item.order if item.order else 1
+
+
+def plan_item_matching_event_date(event):
+    """Пункт плана, который в плане стоит на эту дату и время."""
+    if not getattr(event, "plan_sync_enabled", True):
+        return None
+    enrollment = get_active_enrollment(event)
+    if enrollment is None:
+        return None
+    slot = plan_slot_key(event)
+    for item in plan_items_for_enrollment(enrollment):
+        scheduled = item.scheduled_event
+        if scheduled is None:
+            continue
+        if plan_slot_key(scheduled) == slot:
+            return item
+    return None
+
+
 def resolve_plan_item_for_event(event):
     """
-    One schedule lesson → one plan item.
+    Тема карточки урока = пункт плана на эту дату.
 
-    Только явная связь по ID:
-    LessonPlanItem.scheduled_event → ScheduleEvent.lesson_plan_item →
-    свободный series.lesson_plan_item.
-
-    Слот по дате/порядку занятий не используется: перенос урока не должен
-    менять пункт плана, а окончание плана не должно «начинать его сначала».
-    Тема не используется как ключ связи.
+    Сначала явный выбор в карточке, если он не противоречит дате в плане.
+    Иначе пункт, у которого в плане стоит это же время.
     """
-    linked = list(event.plan_items.order_by("order", "id")[:2])
-    if len(linked) == 1:
-        item = linked[0]
-        return item, item.order or None
-    if len(linked) > 1 and event.lesson_plan_item_id:
-        for item in linked:
-            if item.id == event.lesson_plan_item_id:
-                return item, item.order or None
+    def _result(item):
+        if item is None:
+            return None, None
+        return item, plan_item_display_number(item)
 
     if event.lesson_plan_item_id:
         item = event.lesson_plan_item
         if item is not None:
-            return item, item.order or None
+            scheduled = item.scheduled_event
+            if (
+                scheduled is None
+                or scheduled.pk == event.pk
+                or plan_slot_key(scheduled) == plan_slot_key(event)
+            ):
+                return _result(item)
+
+    dated = plan_item_matching_event_date(event)
+    if dated is not None:
+        return _result(dated)
+
+    linked = list(event.plan_items.order_by("order", "id")[:2])
+    if len(linked) == 1:
+        return _result(linked[0])
+    if len(linked) > 1 and event.lesson_plan_item_id:
+        for item in linked:
+            if item.id == event.lesson_plan_item_id:
+                return _result(item)
 
     if event.series_id and event.series.lesson_plan_item_id:
         item = event.series.lesson_plan_item
@@ -335,7 +372,7 @@ def resolve_plan_item_for_event(event):
                     .exists()
                 )
                 if not occupied:
-                    return item, item.order or None
+                    return _result(item)
 
     return None, None
 

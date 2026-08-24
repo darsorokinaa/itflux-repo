@@ -4,6 +4,7 @@ from .choices import HomeworkStatus, ParticipantStatus
 from .models import Homework, ScheduleEvent
 from .plan_schedule import (
     get_active_enrollment,
+    plan_item_display_number,
     resolve_plan_item_for_event,
 )
 
@@ -69,10 +70,11 @@ def _interactive_to_json(interactive):
 
 def _plan_item_to_json(item, *, lesson_number=None):
     linked = getattr(item, "linked_lesson", None)
+    number = lesson_number if lesson_number is not None else plan_item_display_number(item)
     return {
         "id": item.id,
         "order": item.order,
-        "lessonNumber": lesson_number if lesson_number is not None else item.order,
+        "lessonNumber": number,
         "title": item.title,
         "topic": item.topic or "",
         "subtopic": item.subtopic or "",

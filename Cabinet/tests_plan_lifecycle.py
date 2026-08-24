@@ -480,6 +480,26 @@ class PlanLifecycleTests(TestCase):
         self.assertEqual(self.items[4].scheduled_event_id, next_week.pk)
         self.assertNotEqual(self.items[3].scheduled_event_id, self.items[4].scheduled_event_id)
 
+    def test_lesson_card_follows_plan_dates(self):
+        for index in range(3):
+            PlanSyncService.mark_event_completed(self._event(index + 1))
+        fourth = self._event(10)
+        fifth = self._event(17)
+        fourth.topic = "Тема с другой карточки"
+        fourth.save(update_fields=["topic", "updated_at"])
+        PlanSyncService.realign_enrollment_topics(self.enrollment)
+        fourth.refresh_from_db()
+        fifth.refresh_from_db()
+        payload = schedule_event_to_json(fourth)
+        self.assertEqual(payload["planItem"]["id"], self.items[3].id)
+        self.assertEqual(payload["plannedTopic"], self.items[3].topic)
+        self.assertEqual(payload["topic"], self.items[3].topic)
+        self.assertEqual(payload["planLessonNumber"], 4)
+        payload5 = schedule_event_to_json(fifth)
+        self.assertEqual(payload5["planItem"]["id"], self.items[4].id)
+        self.assertEqual(payload5["topic"], self.items[4].topic)
+        self.assertEqual(payload5["planLessonNumber"], 5)
+
     def test_schedule_list_realigns_stale_future_topics(self):
         from Cabinet.schedule_events import list_schedule_events
 

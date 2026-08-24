@@ -272,7 +272,10 @@ class ScheduleEventViewSetExtended(TeacherScopedMixin, viewsets.ModelViewSet):
         raise
 
     def _event_payload(self, event):
+        from .plan_sync import PlanSyncService
         from .schedule_events import schedule_event_to_json
+
+        PlanSyncService.realign_for_event(event)
         event.refresh_from_db()
         return {
             "ok": True,
