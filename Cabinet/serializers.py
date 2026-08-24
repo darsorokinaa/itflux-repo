@@ -772,23 +772,18 @@ class LessonPlanItemSerializer(serializers.ModelSerializer):
         return event.starts_at if event else None
 
     def _linked_schedule_event(self, obj):
-        event = None
-        if obj.scheduled_event_id and getattr(obj, "scheduled_event", None):
-            event = obj.scheduled_event
-        else:
-            linked = getattr(obj, "schedule_events_linked", None)
-            if linked is not None:
-                event = linked.order_by("starts_at", "id").first()
-        if event is None:
+        """Дата в плане только у темы, выбранной в карточке урока."""
+        event = getattr(obj, "scheduled_event", None) if obj.scheduled_event_id else None
+        if event is not None and event.lesson_plan_item_id == obj.id:
+            return event
+        linked = getattr(obj, "schedule_events_linked", None)
+        if linked is None:
             return None
-        # Один урок не должен светиться на двух темах плана.
-        if (
-            event.lesson_plan_item_id
-            and event.lesson_plan_item_id != obj.id
-            and obj.scheduled_event_id != event.pk
-        ):
-            return None
-        return event
+        rows = linked.all() if hasattr(linked, "all") else linked
+        for ev in rows:
+            if ev.lesson_plan_item_id == obj.id:
+                return ev
+        return None
 
     def get_materials(self, obj):
         return [

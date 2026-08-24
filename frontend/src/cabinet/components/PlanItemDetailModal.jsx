@@ -27,6 +27,15 @@ function formatDateTime(value) {
   });
 }
 
+function planItemDisplayNumber(item, plan) {
+  const items = plan?.items || [];
+  const idx = items.findIndex((row) => String(row.id) === String(item?.id));
+  if (idx >= 0) return String(idx + 1).padStart(2, "0");
+  const n = Number(item?.order);
+  if (!Number.isFinite(n)) return "";
+  return String(n === 0 ? 1 : n).padStart(2, "0");
+}
+
 
 function ResourceCard({ row, canEdit, removing, onRemove }) {
   const href = row.url;
@@ -413,7 +422,7 @@ export default function PlanItemDetailModal({
         <header className="cb-lesson-card__header">
           <div className="cb-lesson-card__header-top">
             <div className="cb-lesson-card__header-copy">
-              <p className="cb-lesson-card__eyebrow">Занятие {item.order}</p>
+              <p className="cb-lesson-card__eyebrow">Занятие {planItemDisplayNumber(item, plan)}</p>
               <h2 className="cb-lesson-card__title">{item.title}</h2>
               {(item.topic || item.subtopic) && (
                 <p className="cb-lesson-card__topic-line">

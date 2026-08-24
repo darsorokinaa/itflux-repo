@@ -31,14 +31,8 @@ function formatPlanEventWhen(iso) {
   return `${day} · ${time}`;
 }
 
-function planItemsAreZeroBased(items) {
-  if (!items?.length) return false;
-  return Math.min(...items.map((item) => Number(item.order) || 0)) === 0;
-}
-
-function displayPlanItemOrder(order, zeroBased) {
-  const n = Number(order) || 0;
-  return String(zeroBased ? n + 1 : n).padStart(2, "0");
+function displayPlanItemIndex(index) {
+  return String(index + 1).padStart(2, "0");
 }
 
 function itemScheduleStatus(item) {
@@ -68,7 +62,7 @@ function remainingLessonsLabel(n) {
   return `${abs} ${word}`;
 }
 
-function LessonPlanItemCard({ item, plan, onOpen, zeroBased = false }) {
+function LessonPlanItemCard({ item, plan, onOpen, index = 0 }) {
   const subject = planSubjectLabel(plan);
   const exam = planExamLabel(plan);
   const meta = [exam, subject].filter(Boolean).join(" · ");
@@ -76,10 +70,10 @@ function LessonPlanItemCard({ item, plan, onOpen, zeroBased = false }) {
     + (item.materialsNotes?.trim() ? 1 : 0);
   const homeworkCount = homeworkResourceRows(item).length;
   const hasHomework = Boolean(item.homeworkDescription?.trim()) || homeworkCount > 0;
-  const topicLine = item.topic || item.title || `Занятие ${displayPlanItemOrder(item.order, zeroBased)}`;
+  const orderLabel = displayPlanItemIndex(index);
+  const topicLine = item.topic || item.title || `Занятие ${orderLabel}`;
   const coverTone = plan.direction || "other";
   const scheduleStatus = itemScheduleStatus(item);
-  const orderLabel = displayPlanItemOrder(item.order, zeroBased);
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -402,12 +396,12 @@ export default function CabinetLessonPlanDetailPage() {
             </div>
           ) : (
             <div className="cb-lesson-list">
-              {plan.items.map((item) => (
+              {plan.items.map((item, index) => (
                 <LessonPlanItemCard
                   key={item.id}
                   item={item}
                   plan={plan}
-                  zeroBased={planItemsAreZeroBased(plan.items)}
+                  index={index}
                   onOpen={handleOpen}
                 />
               ))}

@@ -457,6 +457,29 @@ class PlanLifecycleTests(TestCase):
         self.assertEqual(journal.planned_topic, "Системы счисления")
         self.assertEqual(journal.actual_topic, "Фактически разобрали моделирование")
 
+    def test_same_timeslot_gets_one_plan_topic(self):
+        for index in range(3):
+            PlanSyncService.mark_event_completed(self._event(index + 1))
+        first_slot = self._event(10)
+        duplicate = self._event(10)
+        next_week = self._event(17)
+        PlanSyncService.realign_enrollment_topics(self.enrollment)
+        first_slot.refresh_from_db()
+        duplicate.refresh_from_db()
+        next_week.refresh_from_db()
+        self.items[3].refresh_from_db()
+        self.items[4].refresh_from_db()
+        slot_ids = {first_slot.lesson_plan_item_id, duplicate.lesson_plan_item_id}
+        self.assertIn(self.items[3].id, slot_ids)
+        self.assertNotIn(self.items[4].id, slot_ids)
+        self.assertTrue(
+            (first_slot.lesson_plan_item_id == self.items[3].id and not duplicate.lesson_plan_item_id)
+            or (duplicate.lesson_plan_item_id == self.items[3].id and not first_slot.lesson_plan_item_id)
+        )
+        self.assertEqual(next_week.lesson_plan_item_id, self.items[4].id)
+        self.assertEqual(self.items[4].scheduled_event_id, next_week.pk)
+        self.assertNotEqual(self.items[3].scheduled_event_id, self.items[4].scheduled_event_id)
+
     def test_schedule_list_realigns_stale_future_topics(self):
         from Cabinet.schedule_events import list_schedule_events
 

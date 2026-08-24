@@ -198,6 +198,36 @@ def event_is_upcoming_for_plan(event, *, now=None):
     return event.starts_at >= now
 
 
+def plan_slot_key(event):
+    """Ключ слота: одно время у одного ученика/группы = один урок."""
+    starts = event.starts_at
+    if starts is None:
+        return ("pk", event.pk)
+    if timezone.is_aware(starts):
+        starts = timezone.localtime(starts)
+    stamped = starts.replace(second=0, microsecond=0)
+    return (stamped, event.student_id, event.group_id)
+
+
+def unique_plan_slot_events(events):
+    """
+    Схлопывает дубли карточек на одно и то же время.
+    В карточке уже выбранный пункт плана важнее «пустого» дубля.
+    """
+    chosen = {}
+    order = []
+    for ev in events:
+        key = plan_slot_key(ev)
+        prev = chosen.get(key)
+        if prev is None:
+            chosen[key] = ev
+            order.append(key)
+            continue
+        if prev.lesson_plan_item_id is None and ev.lesson_plan_item_id:
+            chosen[key] = ev
+    return [chosen[key] for key in order]
+
+
 def plan_slot_index(event, enrollment):
     """
     0-based plan slot for this event.
@@ -206,10 +236,10 @@ def plan_slot_index(event, enrollment):
     Отмена со сдвигом и неявка слот не занимают; skip — через SKIPPED-пункты.
     """
     now = timezone.now()
-    events = [
+    events = unique_plan_slot_events([
         ev for ev in events_for_enrollment(enrollment, event.owner)
         if getattr(ev, "plan_sync_enabled", True)
-    ]
+    ])
     attendance_map = attendance_statuses_by_event(
         [ev.pk for ev in events],
         student_id=enrollment.student_id,

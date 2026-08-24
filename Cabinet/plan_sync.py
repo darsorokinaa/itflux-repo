@@ -321,8 +321,8 @@ class PlanSyncService:
 
     @classmethod
     @transaction.atomic
-    def link_event_to_plan(cls, event, item, *, copy_topic=True, overwrite_topic=False):
-        """Явная связь событие ↔ пункт плана по ID."""
+    def link_event_to_plan(cls, event, item, *, copy_topic=True, overwrite_topic=False, force=False):
+        """Явная связь событие ↔ пункт плана по ID. Один урок — одна тема."""
         from .models import LessonPlanItem, ScheduleEvent
 
         if item is None:
@@ -335,35 +335,31 @@ class PlanSyncService:
             ScheduleEvent.Status.COMPLETED,
             ScheduleEvent.Status.DONE,
         }
-        taken_by_other = (
-            ScheduleEvent.objects.select_for_update()
-            .filter(lesson_plan_item_id=item.pk)
-            .exclude(pk=event.pk)
-            .exclude(status__in=terminal)
-            .exists()
-        )
-        other_scheduled = item.scheduled_event
-        if (
-            other_scheduled is not None
-            and other_scheduled.pk != event.pk
-            and other_scheduled.status not in terminal
-        ):
-            taken_by_other = True
-        if taken_by_other:
-            logger.info(
-                "skip double plan link event=%s item=%s already assigned",
-                event.pk,
-                item.pk,
+        if not force:
+            taken_by_other = (
+                ScheduleEvent.objects.select_for_update()
+                .filter(lesson_plan_item_id=item.pk)
+                .exclude(pk=event.pk)
+                .exclude(status__in=terminal)
+                .exists()
             )
-            return event
+            other_scheduled = item.scheduled_event
+            if (
+                other_scheduled is not None
+                and other_scheduled.pk != event.pk
+                and other_scheduled.status not in terminal
+            ):
+                taken_by_other = True
+            if taken_by_other:
+                logger.info(
+                    "skip double plan link event=%s item=%s already assigned",
+                    event.pk,
+                    item.pk,
+                )
+                return event
         event.lesson_plan_item = item
         update_event_fields = ["lesson_plan_item", "updated_at"]
-        if item.scheduled_event_id not in (None, event.pk):
-            other = item.scheduled_event
-            if other is not None and other.status == ScheduleEvent.Status.CANCELLED:
-                item.scheduled_event = event
-                item.save(update_fields=["scheduled_event", "updated_at"])
-        elif item.scheduled_event_id != event.pk:
+        if item.scheduled_event_id != event.pk:
             item.scheduled_event = event
             item_fields = ["scheduled_event", "updated_at"]
             if item.status == PlanItemStatus.NOT_STARTED:
@@ -377,6 +373,11 @@ class PlanSyncService:
         LessonPlanItem.objects.filter(
             scheduled_event_id=event.pk,
         ).exclude(pk=item.pk).update(scheduled_event=None)
+        ScheduleEvent.objects.filter(
+            lesson_plan_item_id=item.pk,
+        ).exclude(pk=event.pk).exclude(
+            status__in=terminal,
+        ).update(lesson_plan_item=None)
 
         if copy_topic:
             overrides = set(event.manual_override_fields or [])
@@ -562,6 +563,7 @@ class PlanSyncService:
             event_is_upcoming_for_plan,
             events_for_enrollment,
             plan_items_for_enrollment,
+            unique_plan_slot_events,
         )
 
         now = timezone.now()
@@ -608,6 +610,9 @@ class PlanSyncService:
                 conducted.append(ev)
             elif future_open:
                 upcoming.append(ev)
+
+        conducted = unique_plan_slot_events(conducted)
+        upcoming = unique_plan_slot_events(upcoming)
 
         desired = {}
         used_item_ids = set()
@@ -661,6 +666,7 @@ class PlanSyncService:
                 item,
                 copy_topic=not consumed,
                 overwrite_topic=not consumed,
+                force=True,
             )
             ev.refresh_from_db()
             item.refresh_from_db()
@@ -849,20 +855,19 @@ class PlanSyncService:
     def _complete_item_and_advance(cls, item, event=None) -> list:
         """Помечает пункт плана выполненным и продвигает план."""
         if item.status == PlanItemStatus.COMPLETED:
-            if event and item.scheduled_event_id in (None, event.pk):
-                if item.scheduled_event_id != event.pk:
-                    item.scheduled_event = event
-                    item.save(update_fields=["scheduled_event", "updated_at"])
-                if event.lesson_plan_item_id != item.id:
-                    event.lesson_plan_item = item
-                    event.save(update_fields=["lesson_plan_item", "updated_at"])
+            if event and item.scheduled_event_id != event.pk:
+                item.scheduled_event = event
+                item.save(update_fields=["scheduled_event", "updated_at"])
+            if event and event.lesson_plan_item_id != item.id:
+                event.lesson_plan_item = item
+                event.save(update_fields=["lesson_plan_item", "updated_at"])
             return []
 
         item.status = PlanItemStatus.COMPLETED
         item.completed_at = timezone.now()
         update_fields = ["status", "completed_at"]
         if event:
-            if item.scheduled_event_id in (None, event.pk):
+            if item.scheduled_event_id != event.pk:
                 item.scheduled_event = event
                 update_fields.append("scheduled_event")
             if event.lesson_plan_item_id != item.id:
