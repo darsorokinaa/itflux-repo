@@ -164,7 +164,13 @@ function PlanContent({ text }) {
 
 function getPrimaryAction(item) {
   if (item.status === "completed") {
-    return { label: "Открыть материалы", mode: "materials" };
+    const startsAt = item.scheduledEventStartsAt ? new Date(item.scheduledEventStartsAt) : null;
+    const isFuture = Boolean(
+      startsAt && !Number.isNaN(startsAt.getTime()) && startsAt.getTime() > Date.now(),
+    );
+    if (!isFuture) {
+      return { label: "Открыть материалы", mode: "materials" };
+    }
   }
   if (item.scheduledEventStartsAt || item.status === "planned") {
     return { label: "Начать урок", mode: "schedule" };

@@ -31,10 +31,26 @@ function formatPlanEventWhen(iso) {
   return `${day} · ${time}`;
 }
 
+function planItemsAreZeroBased(items) {
+  if (!items?.length) return false;
+  return Math.min(...items.map((item) => Number(item.order) || 0)) === 0;
+}
+
+function displayPlanItemOrder(order, zeroBased) {
+  const n = Number(order) || 0;
+  return String(zeroBased ? n + 1 : n).padStart(2, "0");
+}
+
 function itemScheduleStatus(item) {
-  if (item.status === "completed") return { label: "Пройдено", mod: "completed" };
-  if (item.status === "skipped") return { label: "Пропущено", mod: "skipped" };
   const when = formatPlanEventWhen(item.scheduledEventStartsAt);
+  const startsAt = item.scheduledEventStartsAt ? new Date(item.scheduledEventStartsAt) : null;
+  const isFuture = Boolean(
+    startsAt && !Number.isNaN(startsAt.getTime()) && startsAt.getTime() > Date.now(),
+  );
+  if (item.status === "skipped") return { label: "Пропущено", mod: "skipped" };
+  // Будущее занятие не показываем как «Пройдено», даже если статус в плане сбился.
+  if (isFuture && when) return { label: when, mod: "planned" };
+  if (item.status === "completed") return { label: "Пройдено", mod: "completed" };
   if (when) return { label: when, mod: "planned" };
   if (item.status === "planned") return { label: "Запланировано", mod: "planned" };
   return { label: "Не запланировано", mod: "idle" };
@@ -52,7 +68,7 @@ function remainingLessonsLabel(n) {
   return `${abs} ${word}`;
 }
 
-function LessonPlanItemCard({ item, plan, onOpen }) {
+function LessonPlanItemCard({ item, plan, onOpen, zeroBased = false }) {
   const subject = planSubjectLabel(plan);
   const exam = planExamLabel(plan);
   const meta = [exam, subject].filter(Boolean).join(" · ");
@@ -60,9 +76,10 @@ function LessonPlanItemCard({ item, plan, onOpen }) {
     + (item.materialsNotes?.trim() ? 1 : 0);
   const homeworkCount = homeworkResourceRows(item).length;
   const hasHomework = Boolean(item.homeworkDescription?.trim()) || homeworkCount > 0;
-  const topicLine = item.topic || item.title || `Занятие ${item.order}`;
+  const topicLine = item.topic || item.title || `Занятие ${displayPlanItemOrder(item.order, zeroBased)}`;
   const coverTone = plan.direction || "other";
   const scheduleStatus = itemScheduleStatus(item);
+  const orderLabel = displayPlanItemOrder(item.order, zeroBased);
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -78,10 +95,10 @@ function LessonPlanItemCard({ item, plan, onOpen }) {
       onKeyDown={handleKeyDown}
       role="button"
       tabIndex={0}
-      aria-label={`Открыть занятие ${item.order}: ${item.title}`}
+      aria-label={`Открыть занятие ${orderLabel}: ${item.title}`}
     >
       <div className={`cb-lesson-list-card__cover cb-lesson-list-card__cover--${coverTone}`}>
-        <span className="cb-lesson-list-card__order">{String(item.order).padStart(2, "0")}</span>
+        <span className="cb-lesson-list-card__order">{orderLabel}</span>
       </div>
       <div className="cb-lesson-list-card__body">
         <div className="cb-lesson-list-card__head">
@@ -222,8 +239,14 @@ export default function CabinetLessonPlanDetailPage() {
     Boolean(item.homeworkDescription?.trim())
     || homeworkResourceRows(item).length > 0
   )).length;
-  const completedItems = plan.items.filter((item) => item.status === "completed").length;
-  const remainingItems = plan.items.filter((item) => item.status !== "completed" && item.status !== "skipped").length;
+  const completedItems = plan.items.filter((item) => {
+    if (item.status !== "completed") return false;
+    if (!item.scheduledEventStartsAt) return true;
+    const startsAt = new Date(item.scheduledEventStartsAt);
+    return Number.isNaN(startsAt.getTime()) || startsAt.getTime() <= Date.now();
+  }).length;
+  const skippedItems = plan.items.filter((item) => item.status === "skipped").length;
+  const remainingItems = Math.max(0, totalItems - completedItems - skippedItems);
   const showNearEndBanner = remainingItems > 0 && remainingItems <= 5 && totalItems > 0;
   const showFinishedBanner = totalItems > 0 && remainingItems === 0;
 
@@ -384,6 +407,7 @@ export default function CabinetLessonPlanDetailPage() {
                   key={item.id}
                   item={item}
                   plan={plan}
+                  zeroBased={planItemsAreZeroBased(plan.items)}
                   onOpen={handleOpen}
                 />
               ))}

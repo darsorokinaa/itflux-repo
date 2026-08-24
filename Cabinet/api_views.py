@@ -1244,6 +1244,23 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
         return super().update(request, *args, **kwargs)
 
+    def retrieve(self, request, *args, **kwargs):
+        plan = self.get_object()
+        from .plan_sync import PlanSyncService
+
+        enrollments = LessonPlanEnrollment.objects.filter(
+            plan=plan,
+            teacher=self.get_teacher(),
+        ).exclude(status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED])
+        for enrollment in enrollments:
+            try:
+                PlanSyncService.realign_enrollment_topics(enrollment)
+            except Exception:
+                pass
+        plan = self.get_object()
+        serializer = self.get_serializer(plan)
+        return Response(serializer.data)
+
     def destroy(self, request, *args, **kwargs):
         plan = self.get_object()
         publisher = can_publish_catalog_lesson_plan(self.get_teacher())

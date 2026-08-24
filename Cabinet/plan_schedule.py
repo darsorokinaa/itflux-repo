@@ -98,15 +98,35 @@ def events_for_enrollment(enrollment, owner):
     return qs.order_by("starts_at", "pk")
 
 
+def plan_start_order_for_enrollment(enrollment, items=None):
+    """
+    С какого пункта плана идём. Нумерация может быть с 0 или с 1.
+    Дефолт enrollment.plan_start_order=1 при пунктах 0,1,2… значит «с начала»,
+    а не «пропустить нулевой».
+    """
+    if items is None:
+        items = list(enrollment.plan.items.order_by("order", "id"))
+    raw = getattr(enrollment, "plan_start_order", None)
+    min_order = items[0].order if items else 0
+    if raw is None:
+        return min_order
+    start_order = int(raw)
+    if start_order == 1 and min_order == 0:
+        return 0
+    return start_order
+
+
 def plan_items_for_enrollment(enrollment):
     items = list(enrollment.plan.items.order_by("order", "id"))
-    start_order = getattr(enrollment, "plan_start_order", None) or 1
-    if start_order > 1:
+    start_order = plan_start_order_for_enrollment(enrollment, items)
+    min_order = items[0].order if items else 0
+    if start_order > min_order:
         filtered = [item for item in items if item.order >= start_order]
         if filtered:
             items = filtered
         elif start_order <= len(items):
-            items = items[start_order - 1:]
+            # 1-based fallback: «начать с урока N»
+            items = items[max(0, start_order - 1):]
     return items
 
 
@@ -129,11 +149,11 @@ def attendance_statuses_by_event(event_ids, student_id=None):
 
 def event_consumed_plan_topic(event, *, student_id=None, attendance_statuses=None):
     """
-    Занятие съело слот плана: проведено по журналу, завершено без отметки
-    или уже прошло по расписанию.
+    Занятие съело слот плана: проведено по журналу или явно завершено.
+    Прошедшее без отметки занятие слот не съедает.
 
     Проведено: присутствовал / опоздал / ушёл раньше / часть урока / тех. причина.
-    Не съедает слот: отмена со сдвигом, неявка.
+    Не съедает слот: отмена со сдвигом, неявка, незакрытое занятие.
     Пропуск темы при отмене (skip) учитывается статусом пункта SKIPPED, а не здесь.
     """
     if not getattr(event, "plan_sync_enabled", True):
@@ -148,16 +168,10 @@ def event_consumed_plan_topic(event, *, student_id=None, attendance_statuses=Non
     if marked:
         return any(status in CONDUCTED_FOR_PLAN_ATTENDANCE for status in marked)
 
-    if event.status in (
+    return event.status in (
         ScheduleEvent.Status.DONE,
         ScheduleEvent.Status.COMPLETED,
-    ):
-        return True
-    if event.status == ScheduleEvent.Status.DRAFT:
-        return False
-    # Урок уже стоял в расписании и время прошло — считаем состоявшимся,
-    # даже если журнал ещё не закрыли.
-    return event.starts_at < timezone.now()
+    )
 
 
 def event_is_upcoming_for_plan(event, *, now=None):
@@ -222,7 +236,7 @@ def plan_item_by_slot(event, enrollment):
     i = index
     while 0 <= i < len(plan_items):
         item = plan_items[i]
-        lesson_number = item.order or (i + 1)
+        lesson_number = item.order if item.order is not None else (i + 1)
         linked_to_self = (
             item.scheduled_event_id == event.pk
             or event.lesson_plan_item_id == item.id
@@ -342,7 +356,7 @@ def ensure_event_plan_item(event, *, teacher=None):
             item.save(update_fields=["scheduled_event", "updated_at"])
         if update_fields:
             event.save(update_fields=update_fields)
-        return item, lesson_number if lesson_number is not None else (item.order or 1)
+        return item, lesson_number if lesson_number is not None else item.order
 
     plan = LessonPlan.objects.create(
         teacher=teacher,

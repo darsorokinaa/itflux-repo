@@ -145,9 +145,14 @@ class PlanSyncService:
             busy_ids.discard(
                 getattr(exclude_event, "lesson_plan_item_id", None)
             )
+        from .plan_schedule import plan_start_order_for_enrollment
+
         qs = enrollment.plan.items.exclude(status__in=cls.TERMINAL_ITEM).order_by("order", "id")
-        start_order = getattr(enrollment, "plan_start_order", None) or 1
-        if start_order > 1:
+        start_order = plan_start_order_for_enrollment(enrollment)
+        min_order = enrollment.plan.items.order_by("order", "id").values_list("order", flat=True).first()
+        if min_order is None:
+            min_order = 0
+        if start_order > min_order:
             qs = qs.filter(order__gte=start_order)
         for item in qs:
             if item.id in busy_ids:
@@ -569,16 +574,26 @@ class PlanSyncService:
             student_id=enrollment.student_id,
         )
 
+        from .models import ScheduleEvent
+
         conducted = []
         upcoming = []
         for ev in sequence_events:
-            if event_consumed_plan_topic(
+            if ev.status in (ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.DRAFT):
+                continue
+            consumed = event_consumed_plan_topic(
                 ev,
                 student_id=enrollment.student_id,
                 attendance_statuses=attendance_map.get(ev.pk) or [],
-            ):
+            )
+            # Будущее занятие не считаем проведённым, даже если статус сбился.
+            future_open = event_is_upcoming_for_plan(ev, now=now) or (
+                ev.starts_at >= now
+                and ev.status not in cls.COMPLETED_STATUSES
+            )
+            if consumed and not future_open:
                 conducted.append(ev)
-            elif event_is_upcoming_for_plan(ev, now=now):
+            elif future_open:
                 upcoming.append(ev)
 
         desired = {}

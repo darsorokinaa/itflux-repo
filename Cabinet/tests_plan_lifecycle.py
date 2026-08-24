@@ -352,18 +352,63 @@ class PlanLifecycleTests(TestCase):
         self.assertEqual(second.lesson_plan_item_id, self.items[0].id)
         self.assertEqual(second.topic, self.items[0].topic)
 
-    def test_past_unmarked_lesson_counts_as_conducted(self):
+    def test_past_unmarked_lesson_does_not_complete_topic(self):
         self.enrollment.start_date = timezone.localtime(self.base).date() - timedelta(days=14)
         self.enrollment.save(update_fields=["start_date"])
         past = self._event(-2)
         future = self._event(7)
+        PlanSyncService.realign_enrollment_topics(self.enrollment)
         past.refresh_from_db()
         future.refresh_from_db()
         self.items[0].refresh_from_db()
-        self.assertEqual(past.lesson_plan_item_id, self.items[0].id)
-        self.assertEqual(self.items[0].status, PlanItemStatus.COMPLETED)
-        self.assertEqual(future.lesson_plan_item_id, self.items[1].id)
-        self.assertEqual(future.topic, self.items[1].topic)
+        self.assertNotEqual(self.items[0].status, PlanItemStatus.COMPLETED)
+        self.assertEqual(future.lesson_plan_item_id, self.items[0].id)
+        self.assertEqual(future.topic, self.items[0].topic)
+
+    def test_three_conducted_leaves_penultimate_for_next_lesson(self):
+        for index in range(3):
+            PlanSyncService.mark_event_completed(self._event(index + 1))
+        fourth = self._event(10)
+        fifth = self._event(17)
+        fourth.refresh_from_db()
+        fifth.refresh_from_db()
+        self.items[3].refresh_from_db()
+        self.items[4].refresh_from_db()
+        self.assertNotEqual(self.items[3].status, PlanItemStatus.COMPLETED)
+        self.assertEqual(fourth.lesson_plan_item_id, self.items[3].id)
+        self.assertEqual(fifth.lesson_plan_item_id, self.items[4].id)
+        self.assertEqual(fourth.topic, self.items[3].topic)
+
+    def test_zero_based_orders_keep_penultimate_for_next_lesson(self):
+        LessonPlanItem.objects.filter(plan=self.plan).delete()
+        items = [
+            LessonPlanItem.objects.create(plan=self.plan, order=n, title=title, topic=title)
+            for n, title in enumerate(
+                [
+                    "Поиск удаленного/добавленного слова",
+                    "Истинность логических высказываний",
+                    "Поисковые запросы",
+                    "Моделирование",
+                    "Моделирование пути",
+                ]
+            )
+        ]
+        self.enrollment.plan_start_order = 1
+        self.enrollment.save(update_fields=["plan_start_order"])
+        for index in range(3):
+            PlanSyncService.mark_event_completed(self._event(index + 1))
+        fourth = self._event(10)
+        fifth = self._event(17)
+        fourth.refresh_from_db()
+        fifth.refresh_from_db()
+        items[0].refresh_from_db()
+        items[3].refresh_from_db()
+        items[4].refresh_from_db()
+        self.assertEqual(items[0].status, PlanItemStatus.COMPLETED)
+        self.assertNotEqual(items[3].status, PlanItemStatus.COMPLETED)
+        self.assertEqual(fourth.lesson_plan_item_id, items[3].id)
+        self.assertEqual(fifth.lesson_plan_item_id, items[4].id)
+        self.assertEqual(fourth.topic, items[3].topic)
 
     def test_schedule_list_realigns_stale_future_topics(self):
         from Cabinet.schedule_events import list_schedule_events
