@@ -73,6 +73,8 @@ export default function MyFilesManager({
   const [navOpen, setNavOpen] = useState(false);
   const [internalFolderId, setInternalFolderId] = useState(null);
   const folderId = controlledFolderId !== undefined ? controlledFolderId : internalFolderId;
+  const folderIdRef = useRef(folderId);
+  folderIdRef.current = folderId;
   const activeWorkspace = controlledWorkspace ?? workspace;
 
   const setFolder = (next) => {
@@ -258,13 +260,25 @@ export default function MyFilesManager({
     }
   };
 
+  const currentUploadFolderId = () => {
+    const selectedFolders = selectedItems.filter((item) => item.kind === "folder");
+    if (selectedFolders.length === 1 && selectedItems.length === 1) {
+      return selectedFolders[0].id;
+    }
+    return apiSection === "my" ? folderIdRef.current : null;
+  };
+
   const handleSelectClick = (item, index, event) => {
     if (selectable) {
       openItem(item);
       return;
     }
-    const key = selectionKey(item);
     const cmd = event.metaKey || event.ctrlKey;
+    if (item.kind === "folder" && !cmd && !event.shiftKey) {
+      openItem(item);
+      return;
+    }
+    const key = selectionKey(item);
     if (event.shiftKey) {
       const from = Math.min(anchorIndex, index);
       const to = Math.max(anchorIndex, index);
@@ -288,13 +302,14 @@ export default function MyFilesManager({
   const handleUploadFiles = async (fileList) => {
     const files = Array.from(fileList || []);
     if (!files.length) return;
+    const targetFolderId = currentUploadFolderId();
     const jobs = files.map((file) => ({ name: file.name, progress: 0, error: "", done: false }));
     setUploads(jobs);
     setError("");
     await Promise.all(files.map(async (file, index) => {
       try {
         await uploadMyFile(file, {
-          folderId: apiSection === "my" ? folderId : null,
+          folderId: targetFolderId,
           student,
           onProgress: (progress) => {
             setUploads((prev) => prev.map((job, i) => (i === index ? { ...job, progress } : job)));
@@ -318,7 +333,7 @@ export default function MyFilesManager({
     if (!name) return;
     try {
       await createMyFilesFolder(
-        { name, parent_id: apiSection === "my" ? folderId : null },
+        { name, parent_id: apiSection === "my" ? folderIdRef.current : null },
         { student },
       );
       setCreateFolderOpen(false);
@@ -406,12 +421,12 @@ export default function MyFilesManager({
     if (!files.length && !folders.length) return;
     try {
       if (files.length === 1 && !folders.length && !student) {
-        await copyMyFile(files[0].id, { folder_id: folderId });
+        await copyMyFile(files[0].id, { folder_id: folderIdRef.current });
       } else if (!student) {
         await bulkCopyMyFiles({
           ids: files.map((i) => i.id),
           folder_ids: folders.map((i) => i.id),
-          folder_id: folderId,
+          folder_id: folderIdRef.current,
         });
       }
       showNotice("Копия создана");

@@ -368,8 +368,18 @@ export default function StudentFilesWorkspace({
         <MaterialsAssignModal
           student={{ id: Number(studentId), name: studentName }}
           onClose={() => setAssignOpen(false)}
-          onAssigned={() => {
+          onAssigned={async ({ materialIds } = {}) => {
             setAssignOpen(false);
+            if (controlledFolderId && materialIds?.length) {
+              try {
+                await placeStudentMaterials(studentId, {
+                  keys: materialIds.map(String),
+                  folderId: controlledFolderId,
+                });
+              } catch {
+                /* материал всё равно выдан, просто останется в корне */
+              }
+            }
             onNotice?.("Материалы выданы");
             loadMaterials();
           }}

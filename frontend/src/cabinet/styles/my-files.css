@@ -251,7 +251,8 @@
   gap: 0.25rem;
   padding: 0.5rem;
   border-radius: 12px;
-  background: var(--cb-surface, rgba(0, 0, 0, 0.03));
+  background: #fff;
+  border: 1px solid #e2e8f0;
 }
 
 .cb-files__nav-btn--after-divider {

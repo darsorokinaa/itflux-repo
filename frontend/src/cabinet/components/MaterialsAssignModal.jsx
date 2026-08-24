@@ -114,7 +114,7 @@ export default function MaterialsAssignModal({
       for (const materialId of materialIds) {
         await assignMaterialDirect({ ...base, material_id: materialId });
       }
-      onAssigned?.();
+      onAssigned?.({ materialIds });
       onClose?.();
     } catch (err) {
       setError(err.message || "Не удалось выдать материалы");
