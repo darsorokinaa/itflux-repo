@@ -98,6 +98,78 @@ def _variant_task_meta(level: str, subject: str, variant_id: int) -> dict[str, d
     return meta
 
 
+def _import_answers_equal():
+    try:
+        from Generator.answer_check import answers_equal
+    except Exception:
+        try:
+            from Generator.Generator.answer_check import answers_equal
+        except Exception:
+            return None
+    return answers_equal
+
+
+def _answer_text(raw) -> str:
+    if raw is None:
+        return ""
+    if isinstance(raw, dict) and "text" in raw:
+        return str(raw.get("text") or "")
+    return str(raw)
+
+
+def student_answer_matches_expected(student_answer, expected_answer, *, subject: str = "") -> bool:
+    """True, если ответ совпадает с эталоном. Не доверяем checked ученика."""
+    if not str(student_answer or "").strip() or not str(expected_answer or "").strip():
+        return False
+    answers_equal = _import_answers_equal()
+    if answers_equal is None:
+        return False
+    return bool(answers_equal(student_answer, expected_answer, subject=subject))
+
+
+def _student_answer_from_payload(result: dict, task_id: str, number=None, *, number_unique: bool = False) -> str:
+    by_id = result.get("by_task_id") or result.get("byTaskId") or {}
+    by_num = result.get("by_number") or result.get("byNumber") or {}
+    if not isinstance(by_id, dict):
+        by_id = {}
+    if not isinstance(by_num, dict):
+        by_num = {}
+    if task_id in by_id and by_id[task_id] is not None:
+        text = _answer_text(by_id[task_id])
+        if text.strip():
+            return text
+    if not number_unique or number is None:
+        return ""
+    nk = str(number)
+    if nk in by_num and by_num[nk] is not None:
+        return _answer_text(by_num[nk])
+    if nk != task_id and nk in by_id and by_id[nk] is not None:
+        return _answer_text(by_id[nk])
+    return ""
+
+
+def _load_task_answers(task_ids) -> dict[str, str]:
+    ids = []
+    for tid in task_ids:
+        try:
+            ids.append(int(tid))
+        except (TypeError, ValueError):
+            continue
+    if not ids:
+        return {}
+    try:
+        from Generator.models import Task
+    except Exception:
+        try:
+            from Generator.Generator.models import Task
+        except Exception:
+            return {}
+    out = {}
+    for task in Task.objects.filter(id__in=ids).only("id", "answer"):
+        out[str(task.id)] = str(getattr(task, "answer", "") or "")
+    return out
+
+
 def get_failed_generator_tasks(
     *,
     submission: HomeworkSubmission,
@@ -109,6 +181,9 @@ def get_failed_generator_tasks(
     """
     Задания с ошибками по сохранённому result_payload.
     Статусы: incorrect | partial | unanswered.
+
+    Не доверяем checked=false: ученику эталон скрыт, клиент часто шлёт false
+    даже при верном ответе. Пересчитываем по эталону задачи.
     """
     result = submission.result_payload if isinstance(submission.result_payload, dict) else {}
     checked = result.get("checked") if isinstance(result.get("checked"), dict) else {}
@@ -118,6 +193,14 @@ def get_failed_generator_tasks(
     if variant_id and level and subject:
         meta = _variant_task_meta(level, subject, int(variant_id))
 
+    number_counts: dict[str, int] = {}
+    for info in meta.values():
+        nk = str(info.get("number")) if info.get("number") is not None else ""
+        if nk:
+            number_counts[nk] = number_counts.get(nk, 0) + 1
+
+    expected_by_id = _load_task_answers(checked.keys())
+
     failed = []
     seen = set()
 
@@ -126,8 +209,26 @@ def get_failed_generator_tasks(
         if key in seen:
             continue
         if ok is False:
+            info = meta.get(key) or {
+                "id": int(tid) if str(tid).isdigit() else tid,
+                "number": None,
+                "title": f"Задание {tid}",
+            }
+            num = info.get("number")
+            num_key = str(num) if num is not None else ""
+            student_answer = _student_answer_from_payload(
+                result,
+                key,
+                num,
+                number_unique=bool(num_key) and number_counts.get(num_key, 0) <= 1,
+            )
+            if student_answer_matches_expected(
+                student_answer,
+                expected_by_id.get(key) or "",
+                subject=subject,
+            ):
+                continue
             seen.add(key)
-            info = meta.get(key) or {"id": int(tid) if str(tid).isdigit() else tid, "number": None, "title": f"Задание {tid}"}
             failed.append({
                 **info,
                 "task_id": key,

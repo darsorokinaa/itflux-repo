@@ -50,6 +50,124 @@ export function eventLocalTimeRange(event) {
   return end ? `${start}–${end}` : start;
 }
 
+export function eventStartDateTime(event, now = new Date()) {
+  if (event?.startsAt) {
+    const dt = new Date(event.startsAt);
+    if (!Number.isNaN(dt.getTime())) return dt;
+  }
+  const next = new Date(now);
+  next.setHours(0, 0, 0, 0);
+  const offset = Number(event?.dayOffset);
+  if (Number.isFinite(offset) && offset) next.setDate(next.getDate() + offset);
+  const [hours, minutes] = normalizeTimeValue(event?.startTime).split(":").map(Number);
+  next.setHours(hours, minutes, 0, 0);
+  return next;
+}
+
+function normalizePersonName(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function personNamesOverlap(a, b) {
+  const left = normalizePersonName(a);
+  const right = normalizePersonName(b);
+  if (!left || !right) return false;
+  if (left === right) return true;
+  const shorter = left.length <= right.length ? left : right;
+  const longer = left.length <= right.length ? right : left;
+  return longer.startsWith(`${shorter} `) || longer.endsWith(` ${shorter}`) || longer.includes(` ${shorter} `);
+}
+
+export function eventDisplayTitle(event) {
+  const title = String(event?.title || "").trim();
+  const audience = String(event?.audience || "").trim();
+  if (audience && title && audience !== title && personNamesOverlap(title, audience)) {
+    return audience.length >= title.length ? audience : title;
+  }
+  return title || audience || "Занятие";
+}
+
+export function eventDisplaySubtitle(event) {
+  const title = eventDisplayTitle(event);
+  const audience = String(event?.audience || "").trim();
+  const subject = String(event?.studentSubjectLabel || "").trim();
+  const parts = [];
+  if (audience && audience !== title && !personNamesOverlap(audience, title)) parts.push(audience);
+  if (subject) parts.push(subject);
+  return parts.length ? parts.join(" · ") : "";
+}
+
+export function upcomingEventDateLabel(event, now = new Date()) {
+  const start = eventStartDateTime(event, now);
+  if (Number.isNaN(start.getTime())) return "";
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(start);
+  target.setHours(0, 0, 0, 0);
+  const diff = Math.round((target - today) / 86400000);
+  if (diff === 0) return "сегодня";
+  if (diff === 1) return "завтра";
+  return `${target.getDate()} ${MONTHS[target.getMonth()]}`;
+}
+
+function studentIdentity(event) {
+  if (event?.studentId != null && event.studentId !== "") return `s:${event.studentId}`;
+  const ids = Array.isArray(event?.participantStudentIds)
+    ? event.participantStudentIds.filter((id) => id != null && id !== "")
+    : [];
+  if (ids.length === 1) return `s:${ids[0]}`;
+  if (ids.length > 1) return `p:${[...ids].map(String).sort().join(",")}`;
+  return "";
+}
+
+function sameUpcomingLesson(a, b) {
+  const aStart = eventStartDateTime(a).getTime();
+  const bStart = eventStartDateTime(b).getTime();
+  if (Number.isNaN(aStart) || Number.isNaN(bStart)) return false;
+  if (Math.abs(aStart - bStart) > 60 * 1000) return false;
+  const aId = studentIdentity(a);
+  const bId = studentIdentity(b);
+  if (aId && bId) return aId === bId;
+  return personNamesOverlap(a.audience || a.title, b.audience || b.title);
+}
+
+function preferUpcomingEvent(a, b) {
+  const aTitle = eventDisplayTitle(a);
+  const bTitle = eventDisplayTitle(b);
+  if (aTitle.length !== bTitle.length) return aTitle.length >= bTitle.length ? a : b;
+  if (studentIdentity(a) && !studentIdentity(b)) return a;
+  if (studentIdentity(b) && !studentIdentity(a)) return b;
+  return a;
+}
+
+export function getUpcomingEvents(events, limit = 3, now = new Date()) {
+  const nowMs = now.getTime();
+  const future = (Array.isArray(events) ? events : [])
+    .filter((ev) => ev && ev.status !== "cancelled")
+    .map((ev) => ({ ev, start: eventStartDateTime(ev, now) }))
+    .filter(({ start }) => {
+      const time = start.getTime();
+      return !Number.isNaN(time) && time >= nowMs;
+    })
+    .sort((a, b) => {
+      const delta = a.start.getTime() - b.start.getTime();
+      if (delta !== 0) return delta;
+      return eventDisplayTitle(a.ev).localeCompare(eventDisplayTitle(b.ev), "ru");
+    });
+
+  const picked = [];
+  for (const { ev } of future) {
+    const dupAt = picked.findIndex((other) => sameUpcomingLesson(other, ev));
+    if (dupAt >= 0) {
+      picked[dupAt] = preferUpcomingEvent(picked[dupAt], ev);
+      continue;
+    }
+    picked.push(ev);
+    if (picked.length >= limit) break;
+  }
+  return picked;
+}
+
 export function combineLocalDateAndTime(date, time) {
   const [hours, minutes] = normalizeTimeValue(time).split(":").map(Number);
   const next = new Date(date);

@@ -5270,12 +5270,27 @@
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
 }
 
-.cb-sch-upcoming__time {
+.cb-sch-upcoming__when {
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 46px;
+}
+
+.cb-sch-upcoming__time {
   font-size: 0.72rem;
   font-weight: 800;
   color: #2563EB;
-  min-width: 38px;
+}
+
+.cb-sch-upcoming__date {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #94A3B8;
+  line-height: 1.2;
+  text-transform: lowercase;
 }
 
 .cb-sch-upcoming__text {

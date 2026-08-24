@@ -265,7 +265,9 @@ function AboutEditor({
   }, [event.studentId]);
 
   const hasRealPlanLink = Boolean(event.linkedPlanId) && !event.isAutoMaterialsPlan;
-  const shouldSyncToPlan = event.planSyncEnabled !== false && hasRealPlanLink;
+  const isGroupEvent = Boolean(
+    event.group || event.groupId || event.eventType === "group" || event.eventType === "group_lesson",
+  );
 
   const startEditing = (field = "topic") => {
     const nextSaved = {
@@ -312,19 +314,18 @@ function AboutEditor({
     if (!Object.keys(fields).length) return false;
     const payload = {
       ...fields,
-      sync_action: shouldSyncToPlan ? "lesson_and_plan" : "lesson_only",
+      sync_action: "lesson_and_plan",
+      ...(isGroupEvent ? { confirm_all_students: true } : {}),
     };
     let data;
-    let savedOnlyOnLesson = false;
     try {
       data = await updateScheduleEventContent(event.id, payload);
     } catch (err) {
       if (err?.status === 409) {
         data = await updateScheduleEventContent(event.id, {
-          ...fields,
-          sync_action: "lesson_only",
+          ...payload,
+          resolve_conflict: "lesson_and_plan",
         });
-        savedOnlyOnLesson = true;
       } else {
         throw err;
       }
@@ -333,7 +334,8 @@ function AboutEditor({
     if (fields.topic !== undefined) savedRef.current.topic = fields.topic;
     if (fields.subtopic !== undefined) savedRef.current.subtopic = fields.subtopic;
     if (fields.description !== undefined) savedRef.current.description = fields.description;
-    return savedOnlyOnLesson;
+    const planInfo = data?.edit?.plan;
+    return Boolean(planInfo && planInfo.plan_updated === false);
   };
 
   const saveSubject = async (nextId) => {
@@ -379,8 +381,8 @@ function AboutEditor({
       setEditing(false);
       setFocusField(null);
       setStatus(savedOnlyOnLesson
-        ? "Сохранено только в занятии"
-        : (shouldSyncToPlan ? "Тема обновлена в занятии и плане" : "Сохранено"));
+        ? "Сохранено в занятии, план не обновлён"
+        : "Тема обновлена в занятии и плане");
     } catch (err) {
       setStatus(err?.message || "Не удалось сохранить");
     } finally {
@@ -460,8 +462,12 @@ function AboutEditor({
               onChange={(e) => { setTopicDraft(e.target.value); setStatus(""); }}
               disabled={saving}
             />
-            {hasRealPlanLink ? (
-              <span className="cb-lesson-card__about-hint">Изменение обновит эту тему и в плане обучения.</span>
+            {event.planSyncEnabled !== false ? (
+              <span className="cb-lesson-card__about-hint">
+                {hasRealPlanLink
+                  ? "Изменение обновит эту тему и в плане обучения."
+                  : "Тема появится в плане обучения ученика."}
+              </span>
             ) : null}
           </label>
           <label className="cb-lesson-card__about-field">

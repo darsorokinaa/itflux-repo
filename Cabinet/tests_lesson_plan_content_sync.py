@@ -153,6 +153,47 @@ class LessonPlanContentSyncServiceTests(TestCase):
         self.item1.refresh_from_db()
         self.assertEqual(event.topic, "Обновлённая тема")
         self.assertEqual(self.item1.topic, "Обновлённая тема")
+        self.assertEqual(self.item1.title, "Тема 1")
+
+    def test_edit_topic_renames_plan_item_when_title_matches_old_topic(self):
+        self.item1.title = "Множества"
+        self.item1.topic = "Множества"
+        self.item1.save(update_fields=["title", "topic", "updated_at"])
+        event = self._make_event(student=self.student)
+        LessonLearningPlanSyncService.link_plan_item(event, self.item1, teacher=self.teacher)
+
+        LessonLearningPlanSyncService.apply_lesson_edit(
+            event, {"topic": "Графы и пути"}, teacher=self.teacher, sync_action="lesson_and_plan",
+        )
+        self.item1.refresh_from_db()
+        self.assertEqual(self.item1.topic, "Графы и пути")
+        self.assertEqual(self.item1.title, "Графы и пути")
+
+    def test_edit_topic_on_unlinked_lesson_adds_plan_item(self):
+        event = create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": "Урок",
+                "starts_at": timezone.now() + timedelta(days=3),
+                "ends_at": timezone.now() + timedelta(days=3, minutes=45),
+                "event_type": "individual_lesson",
+                "format": "online",
+                "notify_participants": False,
+                "skip_plan": True,
+            },
+            student_ids=[self.student.pk],
+            notify=False,
+        )
+        before = self.plan.items.count()
+        LessonLearningPlanSyncService.apply_lesson_edit(
+            event, {"topic": "Новая с карточки"}, teacher=self.teacher, sync_action="lesson_and_plan",
+        )
+        event.refresh_from_db()
+        self.assertEqual(self.plan.items.count(), before + 1)
+        self.assertIsNotNone(event.lesson_plan_item_id)
+        self.assertEqual(event.lesson_plan_item.topic, "Новая с карточки")
+        self.assertEqual(event.lesson_plan_item.title, "Новая с карточки")
+        self.assertEqual(event.lesson_plan_item.plan_id, self.plan.pk)
 
     # 5. Изменение темы только в конкретном уроке.
     def test_edit_topic_lesson_only(self):

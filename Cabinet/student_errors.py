@@ -20,6 +20,7 @@ from .homework_from_review import (
     _parse_due_at,
     get_failed_generator_tasks,
     notify_students_homework_assigned,
+    student_answer_matches_expected,
 )
 from .models import Homework, HomeworkSubmission, HomeworkTask, ReviewItem, Student
 from .student_release import _record_variant_tasks_for_homework, suggest_homework_due_at
@@ -394,7 +395,7 @@ def collect_student_errors(
             variant_path = row.pop("_variant_path", "") or ""
             if submission is None:
                 continue
-            by_task[key] = _enrich_error_row(
+            enriched = _enrich_error_row(
                 row=row,
                 submission=submission,
                 number_counts=number_counts,
@@ -402,6 +403,24 @@ def collect_student_errors(
                 variant_id=variant_id,
                 variant_path=variant_path,
             )
+            # Эталон в таблице — Task.answer. Если он совпадает с ответом ученика,
+            # не держим строку в журнале ошибок из‑за stale checked=false.
+            if enriched.get("status") == "incorrect":
+                gen_pk = None
+                try:
+                    gen_pk = int(enriched.get("id") or enriched.get("task_id") or 0)
+                except (TypeError, ValueError):
+                    gen_pk = None
+                gen_task = generator_tasks.get(gen_pk) if gen_pk else None
+                expected = str(getattr(gen_task, "answer", "") or "") if gen_task is not None else ""
+                if student_answer_matches_expected(
+                    enriched.get("student_answer"),
+                    expected,
+                    subject=enriched.get("subject") or "",
+                ):
+                    del by_task[key]
+                    continue
+            by_task[key] = enriched
 
     groups_map: dict[tuple[str, str], list[dict]] = {}
     for (subject, level, _tid), row in by_task.items():

@@ -42,13 +42,17 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import {
   applySeriesTimeUpdate,
   combineLocalDateAndTime,
+  eventDisplaySubtitle,
+  eventDisplayTitle,
   eventLocalEndTime,
   eventLocalStartTime,
   eventLocalTimeRange,
   formatLocalDateTimeIso,
+  getUpcomingEvents,
   getSeriesRefreshRange,
   localClockToTimeZone,
   parseScheduleScope,
+  upcomingEventDateLabel,
 } from "../scheduleLessonUtils";
 import {
   planItemForScheduleEvent,
@@ -109,23 +113,6 @@ function eventAccentColor(event) {
   return EVENT_TYPES[event.type]?.color || "#2563EB";
 }
 
-function eventStartDateTime(event) {
-  if (event.startsAt) return new Date(event.startsAt);
-  const d = eventDate(event);
-  const [h, m] = (event.startTime || "00:00").split(":").map(Number);
-  d.setHours(h, m, 0, 0);
-  return d;
-}
-
-function getUpcomingEvents(events, limit = 3) {
-  const now = new Date();
-  return [...events]
-    .filter((ev) => ev.status !== "cancelled")
-    .sort((a, b) => eventStartDateTime(a) - eventStartDateTime(b))
-    .filter((ev) => eventStartDateTime(ev) >= now)
-    .slice(0, limit);
-}
-
 function isWeekend(date) {
   const d = date.getDay();
   return d === 0 || d === 6;
@@ -149,22 +136,28 @@ function formatApiDate(date) {
 }
 
 function getCalendarFetchRange(view, focusDate) {
+  let range;
   if (view === "day") {
-    return { from: formatApiDate(focusDate), to: formatApiDate(focusDate) };
-  }
-  if (view === "month") {
+    range = { from: formatApiDate(focusDate), to: formatApiDate(focusDate) };
+  } else if (view === "month") {
     const start = new Date(focusDate.getFullYear(), focusDate.getMonth(), 1);
     const end = new Date(focusDate.getFullYear(), focusDate.getMonth() + 1, 0);
-    return { from: formatApiDate(start), to: formatApiDate(end) };
-  }
-  if (view === "list") {
+    range = { from: formatApiDate(start), to: formatApiDate(end) };
+  } else if (view === "list") {
     const start = startOfDay(new Date());
     const end = addDays(start, 60);
-    return { from: formatApiDate(start), to: formatApiDate(end) };
+    range = { from: formatApiDate(start), to: formatApiDate(end) };
+  } else {
+    const ws = startOfWeek(focusDate);
+    const we = endOfWeek(focusDate);
+    range = { from: formatApiDate(ws), to: formatApiDate(we) };
   }
-  const ws = startOfWeek(focusDate);
-  const we = endOfWeek(focusDate);
-  return { from: formatApiDate(ws), to: formatApiDate(we) };
+  const upcomingFrom = formatApiDate(startOfDay(new Date()));
+  const upcomingTo = formatApiDate(addDays(startOfDay(new Date()), 21));
+  return {
+    from: range.from < upcomingFrom ? range.from : upcomingFrom,
+    to: range.to > upcomingTo ? range.to : upcomingTo,
+  };
 }
 
 function startOfDay(date) {
@@ -704,23 +697,32 @@ function UpcomingLessons({ events, onEventClick, compact }) {
         <p className="cb-sch-upcoming__empty">Ближайших занятий нет</p>
       ) : (
         <ul className="cb-sch-upcoming__list">
-          {upcoming.map((ev) => (
-            <li key={ev.id}>
-              <button
-                type="button"
-                className="cb-sch-upcoming__item"
-                onClick={() => onEventClick(ev)}
-              >
-                <span className="cb-sch-upcoming__time">{eventLocalStartTime(ev)}</span>
-                <span className="cb-sch-upcoming__text">
-                <span className="cb-sch-upcoming__title">{eventDisplayTitle(ev)}</span>
-                {eventDisplaySubtitle(ev) ? (
-                  <span className="cb-sch-upcoming__meta">{eventDisplaySubtitle(ev)}</span>
-                ) : null}
-                </span>
-              </button>
-            </li>
-          ))}
+          {upcoming.map((ev) => {
+            const subtitle = eventDisplaySubtitle(ev);
+            const dateLabel = upcomingEventDateLabel(ev);
+            return (
+              <li key={ev.id}>
+                <button
+                  type="button"
+                  className="cb-sch-upcoming__item"
+                  onClick={() => onEventClick(ev)}
+                >
+                  <span className="cb-sch-upcoming__when">
+                    <span className="cb-sch-upcoming__time">{eventLocalStartTime(ev)}</span>
+                    {dateLabel ? (
+                      <span className="cb-sch-upcoming__date">{dateLabel}</span>
+                    ) : null}
+                  </span>
+                  <span className="cb-sch-upcoming__text">
+                    <span className="cb-sch-upcoming__title">{eventDisplayTitle(ev)}</span>
+                    {subtitle ? (
+                      <span className="cb-sch-upcoming__meta">{subtitle}</span>
+                    ) : null}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -789,21 +791,6 @@ function ScheduleSidebar({
       </aside>
     </>
   );
-}
-
-function eventDisplayTitle(event) {
-  return (event.title || event.audience || "Занятие").trim();
-}
-
-function eventDisplaySubtitle(event) {
-  const title = eventDisplayTitle(event);
-  const audience = (event.audience || "").trim();
-  const subject = (event.studentSubjectLabel || "").trim();
-  const parts = [];
-  if (audience && audience !== title) parts.push(audience);
-  if (subject) parts.push(subject);
-  if (!parts.length) return null;
-  return parts.join(" · ");
 }
 
 function CalendarEventBlock({

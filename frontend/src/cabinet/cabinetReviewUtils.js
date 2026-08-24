@@ -135,10 +135,15 @@ export function homeworkTeacherAttachments(result, taskId, taskNumber, tasks) {
 export { homeworkTaskAttachments };
 export { computePart1TaskCorrect, formatCorrectAnswerPlain } from "../utils/examAnswerCheck";
 
-/** Вердикт ч.1: без ответа всегда «Нет ответа», даже если checked=false. */
+/** Вердикт ч.1: без ответа всегда «Нет ответа». Эталон важнее saved checked. */
 export function resolvePart1Verdict(task, answer, result, subject) {
   const text = String(answer ?? "").trim();
   if (!text) return null;
+  // Ученику эталон скрыт — клиент часто шлёт checked=false даже при верном ответе.
+  if (task?.answer != null && String(task.answer).trim() !== "") {
+    const recomputed = computePart1TaskCorrect(task, text, subject);
+    if (recomputed != null) return Boolean(recomputed);
+  }
   const saved = homeworkTaskChecked(result, task.id);
   if (typeof saved === "boolean") return saved;
   return computePart1TaskCorrect(task, text, subject);

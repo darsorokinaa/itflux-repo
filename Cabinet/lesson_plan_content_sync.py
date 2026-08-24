@@ -999,6 +999,11 @@ class LessonLearningPlanSyncService:
         title: str = "",
     ) -> LessonPlanItem:
         plan = enrollment.plan
+        if plan.teacher_id is None:
+            raise LessonPlanSyncError(
+                "Публичный план нельзя изменять. Сделайте копию.",
+                code="public_plan",
+            )
         if plan.description == AUTO_MATERIALS_PLAN_DESCRIPTION:
             raise LessonPlanSyncError(
                 "Нельзя добавлять пункты в служебный черновик материалов.",
@@ -1074,6 +1079,8 @@ class LessonLearningPlanSyncService:
 
     @classmethod
     def _copy_event_fields_to_item(cls, event: ScheduleEvent, item: LessonPlanItem) -> None:
+        old_topic = (item.topic or "").strip()
+        old_title = (item.title or "").strip()
         item.topic = (event.topic or "")[:500]
         item.subtopic = (event.subtopic or "")[:255]
         item.description = event.description or ""
@@ -1085,7 +1092,14 @@ class LessonLearningPlanSyncService:
             (event.audience or "").strip(),
             "Урок",
         }
-        if topic and (not item.title or item.title in audience_titles or item.title.startswith("Материалы:")):
+        title_is_placeholder = (
+            not old_title
+            or old_title in audience_titles
+            or old_title.startswith("Материалы:")
+            or old_title == old_topic
+            or not old_topic
+        )
+        if topic and title_is_placeholder:
             item.title = topic[:255]
         item.save(update_fields=[
             "topic", "subtopic", "description", "goal",

@@ -359,11 +359,15 @@ def recompute_variant_checked(result: dict | None, variant_id: int | None, *, su
         key_s = str(key)
         answer = ""
         if key_s in by_id and by_id[key_s] is not None:
-            answer = str(by_id[key_s])
+            answer = by_id[key_s]
         elif key in by_id and by_id[key] is not None:
-            answer = str(by_id[key])
+            answer = by_id[key]
         elif key_s in by_num and by_num[key_s] is not None:
-            answer = str(by_num[key_s])
+            answer = by_num[key_s]
+        if isinstance(answer, dict) and "text" in answer:
+            answer = str(answer.get("text") or "")
+        else:
+            answer = str(answer or "")
         if not str(answer).strip():
             continue
         task_id = None
@@ -381,6 +385,8 @@ def recompute_variant_checked(result: dict | None, variant_id: int | None, *, su
                 int(variant_id),
                 task_number_key=key_s,
             )
+        if not str(expected or "").strip():
+            continue
         out_checked[key_s] = answers_equal(answer, expected, subject=subject)
 
     updated = dict(result)
@@ -907,7 +913,12 @@ class HomeworkAssignmentSaveDraftView(HomeworkAssignmentBaseView):
             if variant_id:
                 break
         if not is_live_meeting_homework(homework):
-            merged = recompute_variant_checked(merged, variant_id) or merged
+            subject = ""
+            try:
+                subject = (build_homework_review_context(homework).get("subject") or "")
+            except Exception:
+                subject = ""
+            merged = recompute_variant_checked(merged, variant_id, subject=subject) or merged
         submission.result_payload = merged
         computed = compute_score_percent(merged)
         if computed is not None:

@@ -96,6 +96,27 @@ class StudentErrorsJournalTests(TestCase):
         self.assertIn("subtopic_id", by_id["101"])
         self.assertIn("subtopic_title", by_id["101"])
 
+    def test_matching_answer_is_not_listed_as_error(self):
+        HomeworkSubmission.objects.filter(pk=self.submission.pk).update(
+            result_payload={
+                "checked": {"101": False, "102": True},
+                "by_task_id": {"101": "полукресло"},
+            }
+        )
+        with patch(
+            "Cabinet.homework_from_review._load_task_answers",
+            return_value={"101": "полукресло"},
+        ):
+            resp = self.client.get(f"/api/cabinet/journal/students/{self.student.id}/errors/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        data = resp.json()
+        task_ids = {
+            str(t["task_id"])
+            for group in data["subjects"]
+            for t in group.get("tasks") or []
+        }
+        self.assertNotIn("101", task_ids)
+
     def test_summary_only_skips_task_details(self):
         resp = self.client.get(
             f"/api/cabinet/journal/students/{self.student.id}/errors/?summary=1"

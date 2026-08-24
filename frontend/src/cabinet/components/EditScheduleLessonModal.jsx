@@ -181,10 +181,7 @@ const PlanSyncSection = forwardRef(function PlanSyncSection({ event, disabled, o
     return patch;
   };
 
-  const defaultSyncAction = () => {
-    const shouldSyncToPlan = syncMeta.planSyncEnabled !== false && hasRealPlanLink;
-    return shouldSyncToPlan ? "lesson_and_plan" : "lesson_only";
-  };
+  const defaultSyncAction = () => "lesson_and_plan";
 
   const submitContent = async (extra = {}) => {
     const patch = changedContent();
@@ -196,6 +193,12 @@ const PlanSyncSection = forwardRef(function PlanSyncSection({ event, disabled, o
     const payload = { ...patch, ...extra };
     if (!payload.sync_action && !payload.resolve_conflict) {
       payload.sync_action = defaultSyncAction();
+    }
+    const isGroup = Boolean(
+      event.group || event.groupId || event.eventType === "group" || event.eventType === "group_lesson",
+    );
+    if (payload.sync_action === "lesson_and_plan" && isGroup && payload.confirm_all_students == null) {
+      payload.confirm_all_students = true;
     }
     try {
       const data = await updateScheduleEventContent(event.id, payload);
@@ -512,7 +515,7 @@ const PlanSyncSection = forwardRef(function PlanSyncSection({ event, disabled, o
       {planNotice ? <p className="cb-sch-form__hint" role="status">{planNotice}</p> : null}
       {saveOk && !planNotice ? (
         <p className="cb-sch-form__hint" role="status">
-          {hasRealPlanLink ? "Сохранено. Карточка и план обучения обновлены." : "Сохранено."}
+          Сохранено. Карточка и план обучения обновлены.
         </p>
       ) : null}
 

@@ -35,6 +35,11 @@ describe("homeworkTaskAnswer legacy number keys", () => {
     expect(resolvePart1Verdict(tasks[3], "732", { checked: { "106": true } }, "math")).toBe(true);
   });
 
+  it("matching answer is correct even if checked=false", () => {
+    expect(resolvePart1Verdict(tasks[3], "732", { checked: { "106": false } }, "math")).toBe(true);
+    expect(resolvePart1Verdict(tasks[3], "999", { checked: { "106": true } }, "math")).toBe(false);
+  });
+
   it("builds one review row per task with correct verdicts", () => {
     const result = {
       by_task_id: { "1": "26", "2": "199", "3": "16", "6": "732", "8": "109" },

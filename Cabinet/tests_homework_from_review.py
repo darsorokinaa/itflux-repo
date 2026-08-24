@@ -252,3 +252,39 @@ class HomeworkFromReviewTests(TestCase):
         ids2 = {str(t["task_id"]) for t in with_partial}
         self.assertIn("101", ids2)
         self.assertIn("103", ids2)
+
+    def test_matching_answer_is_not_listed_as_error(self):
+        from Cabinet.homework_from_review import get_failed_generator_tasks
+
+        self.submission.result_payload = {
+            "by_task_id": {"101": "полукресло", "102": "гуава"},
+            "checked": {"101": False, "102": False},
+        }
+        with patch(
+            "Cabinet.homework_from_review._load_task_answers",
+            return_value={"101": "полукресло", "102": "дядя"},
+        ):
+            failed = get_failed_generator_tasks(
+                submission=self.submission,
+                subject="inf",
+            )
+        ids = {str(t["task_id"]) for t in failed}
+        self.assertNotIn("101", ids)
+        self.assertIn("102", ids)
+
+    def test_matching_answer_case_and_html_not_listed_as_error(self):
+        from Cabinet.homework_from_review import get_failed_generator_tasks
+
+        self.submission.result_payload = {
+            "by_task_id": {"101": "Полукресло"},
+            "checked": {"101": False},
+        }
+        with patch(
+            "Cabinet.homework_from_review._load_task_answers",
+            return_value={"101": "<p>полукресло</p>"},
+        ):
+            failed = get_failed_generator_tasks(
+                submission=self.submission,
+                subject="inf",
+            )
+        self.assertEqual(failed, [])

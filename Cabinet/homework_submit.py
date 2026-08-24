@@ -99,7 +99,11 @@ def submit_homework_for_student(
         _ensure_review_item,
         _merge_result_payload,
         _notify_homework_submitted,
+        build_homework_review_context,
         compute_score_percent,
+        extract_variant_id,
+        is_live_meeting_homework,
+        recompute_variant_checked,
     )
     from .homework_attempts import maybe_snapshot_before_resubmit
     from .submission_files import save_submission_files, submission_has_files
@@ -142,6 +146,18 @@ def submit_homework_for_student(
 
     if result is not None:
         merged = _merge_result_payload(submission.result_payload, result)
+        variant_id = None
+        for task in homework.tasks.filter(is_active=True):
+            variant_id = extract_variant_id(task.description)
+            if variant_id:
+                break
+        if variant_id and not is_live_meeting_homework(homework):
+            subject = ""
+            try:
+                subject = (build_homework_review_context(homework).get("subject") or "")
+            except Exception:
+                subject = ""
+            merged = recompute_variant_checked(merged, variant_id, subject=subject) or merged
         submission.result_payload = merged
         computed = compute_score_percent(merged)
         if computed is not None:
