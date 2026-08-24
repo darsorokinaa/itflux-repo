@@ -922,6 +922,26 @@ class LessonLearningPlanSyncService:
                 )
             return existing
 
+        cancelled_qs = LessonPlanEnrollment.objects.select_for_update().filter(
+            teacher=teacher,
+            student_id=student_id,
+            status=EnrollmentStatus.CANCELLED,
+        )
+        if student_subject is not None:
+            cancelled_qs = cancelled_qs.filter(student_subject_id=student_subject.id)
+        else:
+            cancelled_qs = cancelled_qs.filter(student_subject__isnull=True)
+        cancelled = cancelled_qs.select_related("plan").order_by("-created_at").first()
+        if cancelled is not None:
+            cancelled.status = EnrollmentStatus.ACTIVE
+            cancelled.save(update_fields=["status", "updated_at"])
+            logger.info(
+                "reopened cancelled enrollment=%s student=%s instead of creating a new plan",
+                cancelled.pk,
+                student_id,
+            )
+            return cancelled
+
         if student_subject is not None:
             subject_code = (student_subject.subject or "").strip() or "other"
             direction_code = student_subject.direction or Direction.OTHER
@@ -936,15 +956,23 @@ class LessonLearningPlanSyncService:
             subject_label = "Общий"
 
         plan_title = f"План: {student.full_name} — {subject_label}".strip()[:255]
-        plan = LessonPlan.objects.create(
-            teacher=teacher,
-            title=plan_title,
-            direction=direction_code,
-            subject=subject_code,
-            exam_type=ExamType.NONE,
-            status=PlanStatus.PUBLISHED,
-            lessons_count=0,
+        plan = (
+            LessonPlan.objects.filter(teacher=teacher, title=plan_title)
+            .exclude(status=PlanStatus.ARCHIVED)
+            .exclude(description=AUTO_MATERIALS_PLAN_DESCRIPTION)
+            .order_by("id")
+            .first()
         )
+        if plan is None:
+            plan = LessonPlan.objects.create(
+                teacher=teacher,
+                title=plan_title,
+                direction=direction_code,
+                subject=subject_code,
+                exam_type=ExamType.NONE,
+                status=PlanStatus.PUBLISHED,
+                lessons_count=0,
+            )
         enrollment = LessonPlanEnrollment.objects.create(
             teacher=teacher,
             plan=plan,

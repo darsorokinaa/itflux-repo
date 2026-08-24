@@ -1194,6 +1194,8 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             qs = qs.filter(teacher__isnull=True, status=PlanStatus.PUBLISHED)
         elif self.request.query_params.get("mine") == "true":
             qs = qs.filter(teacher=teacher)
+            if getattr(self, "action", None) == "list":
+                qs = qs.exclude(status=PlanStatus.ARCHIVED)
         return qs.order_by("-updated_at")
 
     def get_serializer_class(self):

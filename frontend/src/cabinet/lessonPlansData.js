@@ -223,15 +223,16 @@ function planSubjectKind(plan) {
 }
 
 export function filterPlans(plans, filterId) {
-  if (filterId === "all") return plans;
-  if (filterId === "draft") return plans.filter((p) => p.status === "draft");
-  if (filterId === "published") return plans.filter((p) => p.status === "published");
+  const visible = plans.filter((p) => p.status !== "archived");
+  if (filterId === "all") return visible;
+  if (filterId === "draft") return visible.filter((p) => p.status === "draft");
+  if (filterId === "published") return visible.filter((p) => p.status === "published");
   if (filterId === "math" || filterId === "informatics") {
-    return plans.filter((p) => planSubjectKind(p) === filterId);
+    return visible.filter((p) => planSubjectKind(p) === filterId);
   }
   const dirMap = { oge: "oge", ege: "ege" };
-  if (dirMap[filterId]) return plans.filter((p) => p.direction === dirMap[filterId]);
-  return plans;
+  if (dirMap[filterId]) return visible.filter((p) => p.direction === dirMap[filterId]);
+  return visible;
 }
 
 export function mapApiPlan(plan) {

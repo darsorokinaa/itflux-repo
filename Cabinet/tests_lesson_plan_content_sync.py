@@ -192,6 +192,44 @@ class LessonPlanContentSyncServiceTests(TestCase):
         self.assertEqual(event.lesson_plan_item.plan_id, enrollment.plan_id)
         self.assertEqual(event.lesson_plan_item.topic, "Тема только в карточке")
 
+    def test_cancelled_enrollment_is_reopened_instead_of_new_plan(self):
+        other = _make_student(self.teacher, username="lp_reopen", first="Пётр", last="БезПлана")
+        plan = LessonPlan.objects.create(
+            teacher=self.teacher,
+            title="План: Пётр БезПлана — Общий",
+            status=PlanStatus.PUBLISHED,
+        )
+        enrollment = LessonPlanEnrollment.objects.create(
+            teacher=self.teacher,
+            plan=plan,
+            student=other,
+            format=PlanFormat.INDIVIDUAL,
+            status=EnrollmentStatus.CANCELLED,
+        )
+        event = create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": "Урок",
+                "starts_at": timezone.now() + timedelta(days=1),
+                "ends_at": timezone.now() + timedelta(days=1, minutes=45),
+                "event_type": "individual_lesson",
+                "format": "online",
+                "notify_participants": False,
+                "skip_plan": True,
+            },
+            student_ids=[other.pk],
+            notify=False,
+        )
+        LessonLearningPlanSyncService.apply_lesson_edit(
+            event, {"topic": "Новая тема"}, teacher=self.teacher, sync_action="lesson_and_plan",
+        )
+        self.assertEqual(LessonPlanEnrollment.objects.filter(student=other).count(), 1)
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.status, EnrollmentStatus.ACTIVE)
+        self.assertEqual(enrollment.plan_id, plan.pk)
+        event.refresh_from_db()
+        self.assertEqual(event.lesson_plan_item.plan_id, plan.pk)
+
     # 5c. Автосозданный план наследует предмет/направление занятия.
     def test_autocreated_plan_uses_event_student_subject(self):
         from Cabinet.models import StudentSubject
