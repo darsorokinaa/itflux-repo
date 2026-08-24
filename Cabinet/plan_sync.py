@@ -11,6 +11,7 @@ PlanSyncService — единый lifecycle занятия:
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Optional
 
 from django.db import transaction
@@ -20,6 +21,7 @@ from django.utils import timezone
 from .choices import EnrollmentStatus, LessonContentSource, PlanItemStatus
 
 logger = logging.getLogger("cabinet.plan_sync")
+_realign_guard = threading.local()
 
 
 def _lessons_word(n: int) -> str:
@@ -50,10 +52,20 @@ class PlanSyncService:
         """
         Вызывается после того как ScheduleEvent отмечен done/completed.
         Идемпотентно: повторный вызов не создаёт второй completed item / журнал.
+        Неявка не съедает тему — оставшиеся пункты сдвигаются на будущие занятия.
         """
         if event.status not in cls.COMPLETED_STATUSES:
             return []
-        return cls._complete_linked_plan(event, ensure_journal=True)
+        from .plan_schedule import event_consumed_plan_topic
+
+        if event_consumed_plan_topic(event, student_id=event.student_id):
+            advanced = cls._complete_linked_plan(event, ensure_journal=True)
+        else:
+            cls._release_plan_item_shift(event)
+            cls._ensure_journal_for_event(event, None)
+            advanced = []
+        cls.realign_for_event(event)
+        return advanced
 
     @classmethod
     @transaction.atomic
@@ -445,10 +457,11 @@ class PlanSyncService:
                 len(remaining),
                 enrollment.pk,
             )
+        cls.realign_enrollment_topics(enrollment)
 
     @classmethod
     def on_event_cancelled(cls, event, *, plan_cancel_action=None):
-        from .plan_schedule import PLAN_CANCEL_SHIFT, PLAN_CANCEL_SKIP, apply_plan_cancel_action
+        from .plan_schedule import PLAN_CANCEL_SKIP, apply_plan_cancel_action
 
         action = apply_plan_cancel_action(event, plan_cancel_action)
         item = event.lesson_plan_item
@@ -456,25 +469,15 @@ class PlanSyncService:
             item = event.plan_items.order_by("order", "id").first()
         if item is None:
             logger.info("lesson cancelled event=%s action=%s", event.pk, action)
+            cls.realign_for_event(event)
             return action
         if action == PLAN_CANCEL_SKIP:
             logger.info("lesson cancelled event=%s item=%s skipped", event.pk, item.pk)
+            cls.realign_for_event(event)
             return action
-        # shift: вернуть пункт в очередь, не завершать и не дублировать
-        update_fields = ["updated_at"]
-        if item.scheduled_event_id == event.pk:
-            item.scheduled_event = None
-            update_fields.append("scheduled_event")
-        if item.status == PlanItemStatus.COMPLETED:
-            pass
-        elif item.status != PlanItemStatus.SKIPPED:
-            item.status = PlanItemStatus.PLANNED
-            update_fields.append("status")
-        item.save(update_fields=update_fields)
-        if event.lesson_plan_item_id == item.id:
-            event.lesson_plan_item = None
-            event.save(update_fields=["lesson_plan_item", "updated_at"])
+        cls._release_plan_item_shift(event, item=item)
         logger.info("lesson cancelled event=%s item=%s returned to planned", event.pk, item.pk)
+        cls.realign_for_event(event)
         return action
 
     @classmethod
@@ -491,6 +494,221 @@ class PlanSyncService:
             event,
             plan_cancel_action=plan_cancel_action or PLAN_CANCEL_SHIFT,
         )
+
+    @classmethod
+    def realign_for_event(cls, event):
+        from .plan_schedule import get_active_enrollment
+
+        enrollment = get_active_enrollment(event)
+        if enrollment is None:
+            return {"ok": True, "skipped": True, "updated_event_ids": []}
+        return cls.realign_enrollment_topics(enrollment)
+
+    @classmethod
+    @transaction.atomic
+    def realign_enrollment_topics(cls, enrollment) -> dict:
+        """
+        Раскладывает темы плана по занятиям:
+
+        1. Сколько уроков фактически прошло (проведён / опоздал / ушёл раньше /
+           тех. причина) — столько первых пунктов плана считаются пройденными.
+        2. Оставшиеся пункты по порядку вешаются на будущие занятия.
+        """
+        if getattr(_realign_guard, "active", False):
+            return {"ok": True, "skipped": True, "updated_event_ids": []}
+        _realign_guard.active = True
+        try:
+            return cls._realign_enrollment_topics_inner(enrollment)
+        finally:
+            _realign_guard.active = False
+
+    @classmethod
+    def _realign_enrollment_topics_inner(cls, enrollment) -> dict:
+        from .lesson_plan_content_sync import CONTENT_FIELDS, LessonLearningPlanSyncService
+        from .plan_schedule import (
+            attendance_statuses_by_event,
+            event_consumed_plan_topic,
+            event_is_upcoming_for_plan,
+            events_for_enrollment,
+            plan_items_for_enrollment,
+        )
+
+        now = timezone.now()
+        items = [
+            item for item in plan_items_for_enrollment(enrollment)
+            if item.status != PlanItemStatus.SKIPPED
+        ]
+        sequence_events = [
+            ev for ev in events_for_enrollment(enrollment, enrollment.teacher)
+            if getattr(ev, "plan_sync_enabled", True)
+        ]
+        attendance_map = attendance_statuses_by_event(
+            [ev.pk for ev in sequence_events],
+            student_id=enrollment.student_id,
+        )
+
+        conducted = []
+        upcoming = []
+        for ev in sequence_events:
+            if event_consumed_plan_topic(
+                ev,
+                student_id=enrollment.student_id,
+                attendance_statuses=attendance_map.get(ev.pk) or [],
+            ):
+                conducted.append(ev)
+            elif event_is_upcoming_for_plan(ev, now=now):
+                upcoming.append(ev)
+
+        desired = {}
+        for index, ev in enumerate(conducted):
+            if index < len(items):
+                desired[ev.pk] = items[index]
+        offset = len(conducted)
+        for index, ev in enumerate(upcoming):
+            item_index = offset + index
+            if item_index < len(items):
+                desired[ev.pk] = items[item_index]
+
+        updated_ids = []
+        conducted_ids = {ev.pk for ev in conducted}
+
+        for ev in sequence_events:
+            want = desired.get(ev.pk)
+            if ev.lesson_plan_item_id and (want is None or ev.lesson_plan_item_id != want.id):
+                cls._clear_event_plan_link(ev)
+                ev.lesson_plan_item = None
+                ev.lesson_plan_item_id = None
+                if ev.pk not in updated_ids:
+                    updated_ids.append(ev.pk)
+
+        assigned_item_ids = {item.id for item in desired.values()}
+        for item in items:
+            want_event_id = next(
+                (event_id for event_id, bound in desired.items() if bound.id == item.id),
+                None,
+            )
+            if item.scheduled_event_id and item.scheduled_event_id != want_event_id:
+                item.scheduled_event = None
+                item.save(update_fields=["scheduled_event", "updated_at"])
+
+        for ev in [*conducted, *upcoming]:
+            item = desired.get(ev.pk)
+            if item is None:
+                continue
+            ev.refresh_from_db()
+            item.refresh_from_db()
+            consumed = ev.pk in conducted_ids
+            changed = ev.lesson_plan_item_id != item.id
+            cls.link_event_to_plan(
+                ev,
+                item,
+                copy_topic=not consumed,
+                overwrite_topic=not consumed,
+            )
+            ev.refresh_from_db()
+            item.refresh_from_db()
+            if changed and ev.pk not in updated_ids:
+                updated_ids.append(ev.pk)
+            if consumed:
+                cls._complete_item_and_advance(item, ev)
+                continue
+            overrides = set(ev.manual_override_fields or [])
+            fields = [field for field in CONTENT_FIELDS if field not in overrides]
+            if fields and ev.plan_sync_enabled:
+                LessonLearningPlanSyncService._copy_item_fields_to_event(
+                    ev, item, force_fields=fields,
+                )
+                LessonLearningPlanSyncService._sync_plan_materials_onto_event(ev, item)
+                ev.content_source = LessonContentSource.PLAN
+                ev.plan_synced_at = timezone.now()
+                ev.save()
+                LessonLearningPlanSyncService._sync_journal_topic(ev)
+                if ev.pk not in updated_ids:
+                    updated_ids.append(ev.pk)
+
+        for item in items:
+            item.refresh_from_db()
+            if item.id in assigned_item_ids:
+                continue
+            update_fields = ["updated_at"]
+            if item.scheduled_event_id:
+                item.scheduled_event = None
+                update_fields.append("scheduled_event")
+            if item.status == PlanItemStatus.COMPLETED:
+                item.status = PlanItemStatus.PLANNED
+                item.completed_at = None
+                update_fields.extend(["status", "completed_at"])
+            if len(update_fields) > 1:
+                item.save(update_fields=update_fields)
+
+        for item in items:
+            item.refresh_from_db()
+            want_event_id = next(
+                (event_id for event_id, bound in desired.items() if bound.id == item.id),
+                None,
+            )
+            if want_event_id in conducted_ids:
+                continue
+            if item.status == PlanItemStatus.COMPLETED:
+                item.status = PlanItemStatus.PLANNED
+                item.completed_at = None
+                item.save(update_fields=["status", "completed_at", "updated_at"])
+
+        remaining_open = [
+            item for item in items
+            if item.status not in (PlanItemStatus.COMPLETED, PlanItemStatus.SKIPPED)
+        ]
+        if enrollment.status == EnrollmentStatus.COMPLETED and remaining_open:
+            enrollment.status = EnrollmentStatus.ACTIVE
+            enrollment.save(update_fields=["status", "updated_at"])
+
+        logger.info(
+            "plan realigned enrollment=%s conducted=%s upcoming=%s updated=%s",
+            enrollment.pk,
+            len(conducted),
+            len(upcoming),
+            len(updated_ids),
+        )
+        return {
+            "ok": True,
+            "updated_event_ids": updated_ids,
+            "conducted": len(conducted),
+            "future_events": len(upcoming),
+            "plan_items": len(items),
+        }
+
+    @classmethod
+    def _clear_event_plan_link(cls, event):
+        item = event.lesson_plan_item
+        if event.lesson_plan_item_id:
+            event.lesson_plan_item = None
+            event.save(update_fields=["lesson_plan_item", "updated_at"])
+        if item is not None and item.scheduled_event_id == event.pk:
+            item.scheduled_event = None
+            item.save(update_fields=["scheduled_event", "updated_at"])
+
+    @classmethod
+    def _release_plan_item_shift(cls, event, item=None):
+        item = item or event.lesson_plan_item
+        if item is None and event.plan_items.exists():
+            item = event.plan_items.order_by("order", "id").first()
+        if item is None:
+            return
+        update_fields = ["updated_at"]
+        if item.scheduled_event_id == event.pk:
+            item.scheduled_event = None
+            update_fields.append("scheduled_event")
+        if item.status == PlanItemStatus.COMPLETED:
+            item.status = PlanItemStatus.PLANNED
+            item.completed_at = None
+            update_fields.extend(["status", "completed_at"])
+        elif item.status != PlanItemStatus.SKIPPED:
+            item.status = PlanItemStatus.PLANNED
+            update_fields.append("status")
+        item.save(update_fields=update_fields)
+        if event.lesson_plan_item_id == item.id:
+            event.lesson_plan_item = None
+            event.save(update_fields=["lesson_plan_item", "updated_at"])
 
     # ── Внутренняя логика ──────────────────────────────────────────────────
 

@@ -39,7 +39,6 @@ from .models import (
 )
 from .plan_schedule import (
     AUTO_MATERIALS_PLAN_DESCRIPTION,
-    events_for_enrollment,
     get_active_enrollment,
     plan_items_for_enrollment,
 )
@@ -118,10 +117,16 @@ class LessonLearningPlanSyncService:
         if cls._linked_real_plan_item(event) is not None:
             return event
 
+        from .plan_schedule import get_active_enrollment
         from .plan_sync import PlanSyncService
 
-        item = PlanSyncService.link_next_plan_item(event)
-        event.refresh_from_db()
+        enrollment = get_active_enrollment(event)
+        if enrollment is not None:
+            PlanSyncService.realign_enrollment_topics(enrollment)
+            event.refresh_from_db()
+        else:
+            PlanSyncService.link_next_plan_item(event)
+            event.refresh_from_db()
         linked = cls._linked_real_plan_item(event)
         if linked is not None and event.plan_sync_enabled:
             cls._copy_item_fields_to_event(
@@ -134,7 +139,7 @@ class LessonLearningPlanSyncService:
                 *CONTENT_FIELDS, "content_source", "plan_synced_at", "updated_at",
             ])
             cls._sync_journal_topic(event)
-        elif item is None:
+        else:
             logger.info(
                 "plan exhausted or missing, event=%s left without plan item",
                 event.pk,
@@ -372,76 +377,18 @@ class LessonLearningPlanSyncService:
 
         _set_guard(True)
         try:
-            owner = enrollment.teacher
-            now = timezone.now()
-            future_events = [
-                ev for ev in events_for_enrollment(enrollment, owner)
-                if ev.starts_at >= now
-                and ev.status not in cls.TERMINAL_STATUSES
-                and ev.plan_sync_enabled
-            ]
+            from .plan_sync import PlanSyncService
+
+            result = PlanSyncService.realign_enrollment_topics(enrollment)
             remaining_items = [
                 item for item in plan_items_for_enrollment(enrollment)
                 if item.status not in (PlanItemStatus.COMPLETED, PlanItemStatus.SKIPPED)
             ]
-            linked_item_ids = {
-                ev.lesson_plan_item_id
-                for ev in future_events
-                if ev.lesson_plan_item_id
-            }
-            free_items = [
-                item for item in remaining_items
-                if item.id not in linked_item_ids
-            ]
-            unlinked_events = [ev for ev in future_events if not ev.lesson_plan_item_id]
-
-            warning = None
-            if len(unlinked_events) != len(free_items) and (unlinked_events or free_items):
-                warning = (
-                    f"Число будущих уроков без темы ({len(unlinked_events)}) не совпадает "
-                    f"с числом свободных пунктов плана ({len(free_items)}). "
-                    "Уже связанные занятия не перепривязывались."
-                )
-
-            updated_ids = []
-            # Уже связанные занятия: обновить контент из ИХ пункта, не меняя связь.
-            for ev in future_events:
-                item = ev.lesson_plan_item
-                if item is None or "topic" in (ev.manual_override_fields or []):
-                    continue
-                cls._copy_item_fields_to_event(
-                    ev, item,
-                    force_fields=("topic", "subtopic", "description", "goal", "homework_description"),
-                )
-                cls._sync_plan_materials_onto_event(ev, item)
-                ev.content_source = LessonContentSource.PLAN
-                ev.plan_synced_at = timezone.now()
-                ev.save()
-                cls._sync_journal_topic(ev)
-                updated_ids.append(ev.pk)
-
-            from .plan_sync import PlanSyncService
-            for ev, item in zip(unlinked_events, free_items):
-                PlanSyncService.link_event_to_plan(ev, item, overwrite_topic=True)
-                ev.refresh_from_db()
-                if ev.lesson_plan_item_id == item.id:
-                    cls._copy_item_fields_to_event(
-                        ev, item,
-                        force_fields=("topic", "subtopic", "description", "goal", "homework_description"),
-                    )
-                    cls._sync_plan_materials_onto_event(ev, item)
-                    ev.content_source = LessonContentSource.PLAN
-                    ev.plan_synced_at = timezone.now()
-                    ev.save()
-                    cls._sync_journal_topic(ev)
-                    if ev.pk not in updated_ids:
-                        updated_ids.append(ev.pk)
-
             return {
                 "ok": True,
-                "updated_event_ids": updated_ids,
-                "warning": warning,
-                "future_events": len(future_events),
+                "updated_event_ids": result.get("updated_event_ids") or [],
+                "warning": None,
+                "future_events": result.get("future_events", 0),
                 "plan_items": len(remaining_items),
             }
         finally:

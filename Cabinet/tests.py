@@ -343,8 +343,8 @@ class PlanScheduleMappingTests(TestCase):
         self.assertEqual(payload2["planLessonNumber"], 2)
         self.assertEqual(payload2["planItem"]["title"], "Таблицы истинности")
 
-    def test_cancel_shift_returns_plan_item_without_rebinding_future_lessons(self):
-        """Отмена со сдвигом освобождает тему, но не перепривязывает уже связанные занятия."""
+    def test_cancel_shift_rebinds_future_lessons(self):
+        """Отмена со сдвигом переносит тему на следующее занятие."""
         base = timezone.now().replace(hour=15, minute=0, second=0, microsecond=0)
         event3 = create_single_event(
             teacher=self.teacher,
@@ -366,9 +366,10 @@ class PlanScheduleMappingTests(TestCase):
             plan_cancel_action="shift",
         )
         event3.refresh_from_db()
-        self.assertEqual(event3.lesson_plan_item_id, self.item3.id)
+        self.assertEqual(event3.lesson_plan_item_id, self.item2.id)
+        self.assertEqual(event3.topic, (self.item2.topic or self.item2.title))
         next_item = PlanSyncService.get_next_plan_item(self.enrollment)
-        self.assertEqual(next_item.id, self.item2.id)
+        self.assertEqual(next_item.id, self.item3.id)
         event4 = create_single_event(
             teacher=self.teacher,
             data={
@@ -381,7 +382,7 @@ class PlanScheduleMappingTests(TestCase):
             student_ids=[self.student.pk],
             notify=False,
         )
-        self.assertEqual(event4.lesson_plan_item_id, self.item2.id)
+        self.assertEqual(event4.lesson_plan_item_id, self.item3.id)
 
     def test_cancel_skip_advances_plan_topic(self):
         base = timezone.now().replace(hour=15, minute=0, second=0, microsecond=0)

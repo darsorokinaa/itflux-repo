@@ -275,3 +275,79 @@ class PlanLifecycleTests(TestCase):
         event.refresh_from_db()
         self.assertIsNone(event.lesson_plan_item_id)
         self.assertFalse(LessonPlanItem.objects.filter(pk=self.items[0].pk).exists())
+
+    def _complete_with_attendance(self, event, attendance):
+        from Cabinet.journal_service import complete_journal, get_or_create_journal
+
+        journal = get_or_create_journal(event, self.teacher)
+        record = journal.student_records.get(student=self.student)
+        record.attendance_status = attendance
+        record.save(update_fields=["attendance_status", "updated_at"])
+        complete_journal(journal, self.teacher, force=True)
+        event.refresh_from_db()
+
+    def test_cancel_shift_moves_topic_to_next_lesson(self):
+        first = self._event(1)
+        second = self._event(8)
+        third = self._event(15)
+        self.assertEqual(first.lesson_plan_item_id, self.items[0].id)
+        self.assertEqual(second.lesson_plan_item_id, self.items[1].id)
+        self.assertEqual(third.lesson_plan_item_id, self.items[2].id)
+
+        cancel_event_with_scope(
+            first, changed_by=self.teacher, notify=False, plan_cancel_action="shift",
+        )
+        second.refresh_from_db()
+        third.refresh_from_db()
+        self.assertEqual(second.lesson_plan_item_id, self.items[0].id)
+        self.assertEqual(second.topic, self.items[0].topic)
+        self.assertEqual(third.lesson_plan_item_id, self.items[1].id)
+        self.assertEqual(third.topic, self.items[1].topic)
+
+    def test_conducted_attendance_consumes_topic_and_shifts_remaining(self):
+        from Cabinet.journal_models import AttendanceStatus
+
+        first = self._event(1)
+        second = self._event(8)
+        third = self._event(15)
+        self._complete_with_attendance(first, AttendanceStatus.LATE)
+        self.items[0].refresh_from_db()
+        second.refresh_from_db()
+        third.refresh_from_db()
+        self.assertEqual(self.items[0].status, PlanItemStatus.COMPLETED)
+        self.assertEqual(second.lesson_plan_item_id, self.items[1].id)
+        self.assertEqual(third.lesson_plan_item_id, self.items[2].id)
+
+        self._complete_with_attendance(second, AttendanceStatus.TECHNICAL_ISSUE)
+        self.items[1].refresh_from_db()
+        third.refresh_from_db()
+        self.assertEqual(self.items[1].status, PlanItemStatus.COMPLETED)
+        self.assertEqual(third.lesson_plan_item_id, self.items[2].id)
+        self.assertEqual(third.topic, self.items[2].topic)
+
+        leftover = self._event(22)
+        leftover.refresh_from_db()
+        self.assertEqual(leftover.lesson_plan_item_id, self.items[3].id)
+
+        fourth_event = self._event(29)
+        self._complete_with_attendance(third, AttendanceStatus.LEFT_EARLY)
+        leftover.refresh_from_db()
+        fourth_event.refresh_from_db()
+        self.items[2].refresh_from_db()
+        self.assertEqual(self.items[2].status, PlanItemStatus.COMPLETED)
+        self.assertEqual(leftover.lesson_plan_item_id, self.items[3].id)
+        self.assertEqual(fourth_event.lesson_plan_item_id, self.items[4].id)
+
+    def test_absent_does_not_consume_plan_topic(self):
+        from Cabinet.journal_models import AttendanceStatus
+
+        first = self._event(1)
+        second = self._event(8)
+        self._complete_with_attendance(first, AttendanceStatus.ABSENT_UNEXCUSED)
+        self.items[0].refresh_from_db()
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertNotEqual(self.items[0].status, PlanItemStatus.COMPLETED)
+        self.assertIsNone(first.lesson_plan_item_id)
+        self.assertEqual(second.lesson_plan_item_id, self.items[0].id)
+        self.assertEqual(second.topic, self.items[0].topic)

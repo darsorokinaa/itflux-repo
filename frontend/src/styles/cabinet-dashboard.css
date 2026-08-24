@@ -7719,7 +7719,7 @@ button.cb-sch-event {
 
 .cb-lesson-card.cb-sch-popover {
   position: relative;
-  width: min(900px, calc(100vw - 64px));
+  width: min(1035px, calc(100vw - 64px));
   max-height: calc(100vh - 48px);
   height: auto;
   align-self: center;

@@ -398,11 +398,11 @@ class LessonPlanContentSyncServiceTests(TestCase):
         self.assertIsNone(result["warning"])
         event1.refresh_from_db()
         event2.refresh_from_db()
-        # Уже связанные занятия не перепривязываются из-за смены order.
-        self.assertEqual(event1.lesson_plan_item_id, self.item1.id)
-        self.assertEqual(event2.lesson_plan_item_id, self.item2.id)
-        self.assertEqual(event1.topic, "Множества")
-        self.assertEqual(event2.topic, "Графы")
+        # После смены order темы раскладываются по будущим занятиям заново.
+        self.assertEqual(event1.lesson_plan_item_id, self.item2.id)
+        self.assertEqual(event2.lesson_plan_item_id, self.item1.id)
+        self.assertEqual(event1.topic, "Графы")
+        self.assertEqual(event2.topic, "Множества")
 
     # 13. Нельзя связать урок с планом другого ученика.
     def test_cannot_link_to_other_students_plan(self):

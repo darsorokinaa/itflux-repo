@@ -3,10 +3,21 @@
 from django.utils import timezone
 
 from .choices import EnrollmentStatus, PlanItemStatus
+from .journal_models import AttendanceStatus
 from .models import LessonPlanEnrollment, ScheduleEvent
 
 PLAN_CANCEL_SHIFT = "shift"
 PLAN_CANCEL_SKIP = "skip"
+
+# Посещаемость, которая для плана считается проведённым занятием:
+# присутствовал, опоздал, ушёл раньше, часть урока, техническая причина.
+CONDUCTED_FOR_PLAN_ATTENDANCE = frozenset({
+    AttendanceStatus.PRESENT,
+    AttendanceStatus.LATE,
+    AttendanceStatus.LEFT_EARLY,
+    AttendanceStatus.PARTIAL,
+    AttendanceStatus.TECHNICAL_ISSUE,
+})
 
 
 def enrollment_start_date(enrollment):
@@ -93,19 +104,91 @@ def plan_items_for_enrollment(enrollment):
     return items
 
 
+def attendance_statuses_by_event(event_ids, student_id=None):
+    """event_id → список отмеченных статусов посещаемости (без not_marked)."""
+    if not event_ids:
+        return {}
+    from .journal_models import StudentLessonRecord
+
+    qs = StudentLessonRecord.objects.filter(
+        journal__schedule_event_id__in=list(event_ids),
+    ).exclude(attendance_status=AttendanceStatus.NOT_MARKED)
+    if student_id:
+        qs = qs.filter(student_id=student_id)
+    mapping = {}
+    for event_id, status in qs.values_list("journal__schedule_event_id", "attendance_status"):
+        mapping.setdefault(event_id, []).append(status)
+    return mapping
+
+
+def event_consumed_plan_topic(event, *, student_id=None, attendance_statuses=None):
+    """
+    Занятие съело слот плана: проведено по журналу или завершено без отметки.
+
+    Проведено: присутствовал / опоздал / ушёл раньше / часть урока / тех. причина.
+    Не съедает слот: отмена со сдвигом, неявка, незакрытое прошлое занятие.
+    Пропуск темы при отмене (skip) учитывается статусом пункта SKIPPED, а не здесь.
+    """
+    if not getattr(event, "plan_sync_enabled", True):
+        return False
+    if event.status == ScheduleEvent.Status.CANCELLED:
+        return False
+
+    marked = attendance_statuses
+    if marked is None:
+        mapping = attendance_statuses_by_event([event.pk], student_id=student_id)
+        marked = mapping.get(event.pk) or []
+    if marked:
+        return any(status in CONDUCTED_FOR_PLAN_ATTENDANCE for status in marked)
+
+    return event.status in (
+        ScheduleEvent.Status.DONE,
+        ScheduleEvent.Status.COMPLETED,
+    )
+
+
+def event_is_upcoming_for_plan(event, *, now=None):
+    """Будущее активное занятие, на которое можно повесить следующую тему."""
+    if not getattr(event, "plan_sync_enabled", True):
+        return False
+    if event.status in (
+        ScheduleEvent.Status.CANCELLED,
+        ScheduleEvent.Status.DONE,
+        ScheduleEvent.Status.COMPLETED,
+        ScheduleEvent.Status.DRAFT,
+    ):
+        return False
+    now = now or timezone.now()
+    return event.starts_at >= now
+
+
 def plan_slot_index(event, enrollment):
     """
     0-based plan slot for this event.
-    Cancelled with shift → slot not consumed; cancelled with skip → slot consumed.
+
+    Слот занимают фактически проведённые занятия и будущие активные.
+    Отмена со сдвигом и неявка слот не занимают; skip — через SKIPPED-пункты.
     """
+    now = timezone.now()
+    events = [
+        ev for ev in events_for_enrollment(enrollment, event.owner)
+        if getattr(ev, "plan_sync_enabled", True)
+    ]
+    attendance_map = attendance_statuses_by_event(
+        [ev.pk for ev in events],
+        student_id=enrollment.student_id,
+    )
     slots = 0
-    for ev in events_for_enrollment(enrollment, event.owner):
+    for ev in events:
         if ev.pk == event.pk:
             return slots
-        if ev.status == ScheduleEvent.Status.CANCELLED:
-            if (getattr(ev, "plan_cancel_action", "") or "") == PLAN_CANCEL_SKIP:
-                slots += 1
-        else:
+        if event_consumed_plan_topic(
+            ev,
+            student_id=enrollment.student_id,
+            attendance_statuses=attendance_map.get(ev.pk) or [],
+        ):
+            slots += 1
+        elif event_is_upcoming_for_plan(ev, now=now):
             slots += 1
     return None
 
