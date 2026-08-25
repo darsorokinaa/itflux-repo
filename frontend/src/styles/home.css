@@ -941,6 +941,10 @@ a.home-updates__card {
     grid-template-columns: 1fr 1fr;
     align-items: stretch;
   }
+  .all-tasks-item__group-body--stack {
+    display: flex;
+    flex-direction: column;
+  }
   .all-tasks-item__group-col--main {
     border-right: 1px solid var(--border-card, #e4e8ff);
   }

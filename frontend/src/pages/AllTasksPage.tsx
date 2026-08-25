@@ -162,6 +162,12 @@ function isFunctionGraphTask(task: Pick<BankTask, "task_title" | "subtopic" | "t
   return hay.includes("график") && hay.includes("функц");
 }
 
+/** Письменный английский: задания группы идут столбиком, не «условие слева / вопросы справа». */
+function isEnglishWritingSubject(subject: string): boolean {
+  const s = String(subject || "").trim().toLowerCase();
+  return s === "eng" || s === "eng_write";
+}
+
 const LazyVisible = memo(function LazyVisible({
   minHeight = 140,
   rootMargin = "600px 0px",
@@ -1312,7 +1318,16 @@ export default function AllTasksPage() {
                             ) : null}
                           </div>
                         </header>
-                        <div className="all-tasks-item__group-body">
+                        <div
+                          className={[
+                            "all-tasks-item__group-body",
+                            isEnglishWritingSubject(subject)
+                              ? "all-tasks-item__group-body--stack"
+                              : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                        >
                           {(() => {
                             const renderGroupTask = (t: BankTask) => {
                               const taskNumber = t.task_number ?? 0;
@@ -1442,8 +1457,17 @@ export default function AllTasksPage() {
                               );
                             };
 
+                            const stackGroupTasks = isEnglishWritingSubject(subject);
                             const firstTask = entry.tasks[0];
                             const otherTasks = entry.tasks.slice(1);
+
+                            if (stackGroupTasks) {
+                              return (
+                                <div className="all-tasks-item__group-col">
+                                  {entry.tasks.map((t) => renderGroupTask(t))}
+                                </div>
+                              );
+                            }
 
                             return (
                               <>
