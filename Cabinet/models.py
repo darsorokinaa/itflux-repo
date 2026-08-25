@@ -847,8 +847,10 @@ class LessonAssignment(models.Model):
 
 class LessonPlan(models.Model):
     """
-    Шаблон плана уроков — методический контент без привязки к ученику/группе.
-    teacher=null означает публичный план, доступный всем учителям.
+    План уроков — методический контент без привязки к ученику/группе.
+
+    is_public=True — шаблон каталога: другие учителя видят его в «Готовых планах»
+    и создают личную копию. Назначение ученику и календарь всегда идут через копию.
     Для назначения плана конкретному ученику/группе используйте LessonPlanEnrollment.
     """
     teacher = models.ForeignKey(
@@ -858,7 +860,7 @@ class LessonPlan(models.Model):
         blank=True,
         related_name="lesson_plans",
         verbose_name="Автор",
-        help_text="Пусто — публичный план, доступный всем учителям",
+        help_text="Автор плана. Пусто допускается у старых шаблонов каталога.",
     )
     title = models.CharField("Название", max_length=255)
     description = models.TextField("Описание", blank=True)
@@ -886,6 +888,12 @@ class LessonPlan(models.Model):
         max_length=32,
         blank=True,
         help_text="Например: 9, 10, 11, 10–11",
+    )
+    is_public = models.BooleanField(
+        "Публичный шаблон",
+        default=False,
+        db_index=True,
+        help_text="Готовый план каталога: другие учителя могут создать свою копию, но не изменяют оригинал.",
     )
     lessons_count = models.PositiveIntegerField("Количество занятий", default=0)
     status = models.CharField(

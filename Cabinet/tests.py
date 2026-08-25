@@ -475,6 +475,7 @@ class LessonPlanItemMaterialsTests(TestCase):
         )
         self.public_plan = LessonPlan.objects.create(
             teacher=None,
+            is_public=True,
             title="Публичный план",
             direction="oge",
             status="active",
@@ -627,12 +628,14 @@ class LessonPlanCatalogTests(TestCase):
         )
         self.public_draft = LessonPlan.objects.create(
             teacher=None,
+            is_public=True,
             title="Публичный черновик",
             direction="oge",
             status="draft",
         )
         self.public_plan = LessonPlan.objects.create(
             teacher=None,
+            is_public=True,
             title="ОГЭ — готовый маршрут",
             direction="oge",
             status="published",
@@ -653,7 +656,13 @@ class LessonPlanCatalogTests(TestCase):
         response = client.get("/api/cabinet/lesson-plans/?catalog=true")
         self.assertEqual(response.status_code, 200)
         titles = [item["title"] for item in response.data]
-        self.assertEqual(titles, ["ОГЭ — готовый маршрут"])
+        self.assertIn("ОГЭ — готовый маршрут", titles)
+        self.assertNotIn("Публичный черновик", titles)
+        self.assertNotIn("Мой черновик", titles)
+        self.assertNotIn("Мой опубликованный", titles)
+        for item in response.data:
+            self.assertTrue(item["is_public"])
+            self.assertEqual(item["status"], "published")
 
     def test_mine_lists_only_teacher_plans(self):
         from rest_framework.test import APIClient
@@ -729,7 +738,8 @@ class LessonPlanCatalogTests(TestCase):
         )
         self.assertEqual(response.status_code, 201)
         plan = LessonPlan.objects.get(pk=response.data["id"])
-        self.assertIsNone(plan.teacher_id)
+        self.assertEqual(plan.teacher_id, publisher.id)
+        self.assertTrue(plan.is_public)
         self.assertEqual(plan.status, "published")
 
     def test_teacher_can_update_own_published_plan(self):

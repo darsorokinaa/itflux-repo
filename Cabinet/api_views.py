@@ -1,3 +1,5 @@
+from django.core.cache import cache
+from django.db import transaction
 from django.db.models import Count, Prefetch, Q
 from django.core.files.storage import default_storage
 from django.shortcuts import get_object_or_404
@@ -25,7 +27,15 @@ from .choices import (
     SubmissionStatus,
 )
 from .subscription_service import LimitExceeded, SubscriptionLimitService
-from .plan_catalog import can_publish_catalog_lesson_plan
+from .plan_catalog import (
+    can_edit_lesson_plan,
+    can_publish_catalog_lesson_plan,
+    is_catalog_lesson_plan,
+    personal_lesson_plans_q,
+    published_catalog_lesson_plans_q,
+    visible_lesson_plan_items_q,
+    visible_lesson_plans_q,
+)
 from .plan_levels import get_plan_level_options
 from .plan_subjects import get_plan_subject_options
 from .invitations import (
@@ -1119,56 +1129,68 @@ class LessonViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
 
 
 def _copy_lesson_plan(source, teacher):
-    """Создаёт личную копию плана (обычно из публичного каталога)."""
-    new_plan = LessonPlan.objects.create(
-        teacher=teacher,
-        title=source.title,
-        description=source.description,
-        goal=source.goal,
-        direction=source.direction,
-        subject=source.subject,
-        exam_type=source.exam_type,
-        grade=source.grade,
-        lessons_count=0,
-        status=PlanStatus.DRAFT,
-    )
-    teacher_interactive_ids = set(
-        Interactive.objects.filter(teacher=teacher).values_list("pk", flat=True)
-    )
-    for item in source.items.all().order_by("order", "id"):
-        new_item = LessonPlanItem.objects.create(
-            plan=new_plan,
-            order=item.order,
-            title=item.title,
-            topic=item.topic,
-            subtopic=item.subtopic,
-            task_number=item.task_number,
-            goal=item.goal,
-            planned_results=item.planned_results,
-            description=item.description,
-            lesson_materials_notes=item.lesson_materials_notes,
-            homework_description=item.homework_description,
-            status=PlanItemStatus.NOT_STARTED,
+    """Создаёт личную копию плана (обычно из публичного каталога).
+
+    Копирует структуру (темы, уроки, порядок, материалы), но не владельца,
+    учеников, расписание, статусы прохождения и прочую персональную информацию.
+    """
+    with transaction.atomic():
+        new_plan = LessonPlan.objects.create(
+            teacher=teacher,
+            is_public=False,
+            title=source.title,
+            description=source.description,
+            goal=source.goal,
+            direction=source.direction,
+            subject=source.subject,
+            exam_type=source.exam_type,
+            grade=source.grade,
+            lessons_count=0,
+            status=PlanStatus.DRAFT,
         )
-        new_item.materials.set(item.materials.all())
-        new_item.homework_materials.set(item.homework_materials.all())
-        new_item.attached_interactives.set(
-            item.attached_interactives.filter(pk__in=teacher_interactive_ids)
+        teacher_interactive_ids = set(
+            Interactive.objects.filter(teacher=teacher).values_list("pk", flat=True)
         )
-        new_item.homework_interactives.set(
-            item.homework_interactives.filter(pk__in=teacher_interactive_ids)
+        source_items = source.items.all().order_by("order", "id").prefetch_related(
+            "materials",
+            "homework_materials",
+            "attached_interactives",
+            "homework_interactives",
         )
-    new_plan.lessons_count = new_plan.items.count()
-    new_plan.save(update_fields=["lessons_count", "updated_at"])
-    return new_plan
+        for item in source_items:
+            new_item = LessonPlanItem.objects.create(
+                plan=new_plan,
+                order=item.order,
+                title=item.title,
+                topic=item.topic,
+                subtopic=item.subtopic,
+                task_number=item.task_number,
+                goal=item.goal,
+                planned_results=item.planned_results,
+                description=item.description,
+                lesson_materials_notes=item.lesson_materials_notes,
+                homework_description=item.homework_description,
+                status=PlanItemStatus.NOT_STARTED,
+            )
+            new_item.materials.set(item.materials.all())
+            new_item.homework_materials.set(item.homework_materials.all())
+            new_item.attached_interactives.set(
+                item.attached_interactives.filter(pk__in=teacher_interactive_ids)
+            )
+            new_item.homework_interactives.set(
+                item.homework_interactives.filter(pk__in=teacher_interactive_ids)
+            )
+        new_plan.lessons_count = new_plan.items.count()
+        new_plan.save(update_fields=["lessons_count", "updated_at"])
+        return new_plan
 
 
 class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         teacher = self.get_teacher()
-        # Личные планы учителя + общедоступные (teacher=None)
+        # Личные планы учителя + публичные шаблоны каталога.
         qs = LessonPlan.objects.filter(
-            Q(teacher=teacher) | Q(teacher__isnull=True)
+            visible_lesson_plans_q(teacher)
         ).exclude(
             # Служебные черновики под материалы урока «вне плана» — не в списке планов.
             description="Автосоздано для материалов занятия",
@@ -1191,9 +1213,9 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         if status_param:
             qs = qs.filter(status=status_param)
         if self.request.query_params.get("catalog") == "true":
-            qs = qs.filter(teacher__isnull=True, status=PlanStatus.PUBLISHED)
+            qs = qs.filter(published_catalog_lesson_plans_q())
         elif self.request.query_params.get("mine") == "true":
-            qs = qs.filter(teacher=teacher)
+            qs = qs.filter(personal_lesson_plans_q(teacher))
             if getattr(self, "action", None) == "list":
                 qs = qs.exclude(status=PlanStatus.ARCHIVED)
         return qs.order_by("-updated_at")
@@ -1206,41 +1228,41 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         return LessonPlanListSerializer
 
     def perform_create(self, serializer):
-        is_public = serializer.validated_data.pop("is_public", False)
+        is_public = serializer.validated_data.get("is_public", False)
         teacher = self.get_teacher()
         if is_public and not can_publish_catalog_lesson_plan(teacher):
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied("Нет прав на публикацию шаблона в каталог.")
         if is_public:
-            plan = serializer.save(teacher=None, status=PlanStatus.PUBLISHED)
+            serializer.save(teacher=teacher, is_public=True, status=PlanStatus.PUBLISHED)
         else:
-            plan = serializer.save(teacher=teacher)
-        return plan
+            serializer.save(teacher=teacher, is_public=False)
 
     def perform_update(self, serializer):
-        is_public = serializer.validated_data.pop("is_public", None)
+        is_public = serializer.validated_data.get("is_public", None)
         teacher = self.get_teacher()
         if is_public is True and not can_publish_catalog_lesson_plan(teacher):
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied("Нет прав на публикацию шаблона в каталог.")
         plan = serializer.instance
+        extra = {}
         if is_public is True:
-            serializer.save(teacher=None, status=PlanStatus.PUBLISHED)
-        elif is_public is False and plan.teacher is None:
-            serializer.save(teacher=teacher, status=PlanStatus.DRAFT)
-        else:
-            serializer.save()
+            extra["status"] = PlanStatus.PUBLISHED
+            extra["is_public"] = True
+        elif is_public is False:
+            extra["is_public"] = False
+            if plan.teacher_id is None:
+                extra["teacher"] = teacher
+        serializer.save(**extra)
 
     def update(self, request, *args, **kwargs):
         plan = self.get_object()
-        publisher = can_publish_catalog_lesson_plan(self.get_teacher())
-        if plan.teacher is None:
-            if not publisher:
+        if not can_edit_lesson_plan(self.get_teacher(), plan):
+            if is_catalog_lesson_plan(plan):
                 return Response(
                     {"detail": "Публичный план нельзя изменить. Сделайте копию для редактирования."},
                     status=status.HTTP_403_FORBIDDEN,
                 )
-        elif plan.teacher_id != self.get_teacher().id:
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
         return super().update(request, *args, **kwargs)
 
@@ -1248,50 +1270,84 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         plan = self.get_object()
         from .plan_sync import PlanSyncService
 
-        enrollments = LessonPlanEnrollment.objects.filter(
-            plan=plan,
-            teacher=self.get_teacher(),
-        ).exclude(status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED])
-        for enrollment in enrollments:
-            try:
-                PlanSyncService.realign_enrollment_topics(enrollment)
-            except Exception:
-                pass
-        plan = self.get_object()
+        if not is_catalog_lesson_plan(plan):
+            enrollments = LessonPlanEnrollment.objects.filter(
+                plan=plan,
+                teacher=self.get_teacher(),
+            ).exclude(status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED])
+            for enrollment in enrollments:
+                try:
+                    PlanSyncService.realign_enrollment_topics(enrollment)
+                except Exception:
+                    pass
+            plan = self.get_object()
         serializer = self.get_serializer(plan)
         return Response(serializer.data)
 
     def destroy(self, request, *args, **kwargs):
         plan = self.get_object()
-        publisher = can_publish_catalog_lesson_plan(self.get_teacher())
-        if plan.teacher is None:
-            if not publisher:
-                return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
-        elif plan.teacher_id != self.get_teacher().id:
+        if not can_edit_lesson_plan(self.get_teacher(), plan):
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
         return super().destroy(request, *args, **kwargs)
 
-    @action(detail=True, methods=["post"], url_path="copy")
-    def copy(self, request, pk=None):
-        """Скопировать план: свой — дубликат с «(копия)», чужой/публичный — в личный кабинет."""
-        source = self.get_object()
-        teacher = self.get_teacher()
-        new_plan = _copy_lesson_plan(source, teacher)
-        if source.teacher_id == teacher.id:
-            base_title = (source.title or "").strip() or "План уроков"
-            if not base_title.endswith("(копия)"):
-                new_plan.title = f"{base_title} (копия)"
-                new_plan.save(update_fields=["title", "updated_at"])
+    def _copy_response(self, new_plan):
         new_plan = self.get_queryset().filter(pk=new_plan.pk).first() or new_plan
         return Response(
             LessonPlanDetailSerializer(new_plan).data,
             status=status.HTTP_201_CREATED,
         )
 
+    @action(detail=True, methods=["post"], url_path="copy")
+    def copy(self, request, pk=None):
+        """Скопировать план: свой — дубликат с «(копия)», чужой/публичный — в личный кабинет."""
+        source = self.get_object()
+        teacher = self.get_teacher()
+        cache_key = f"cabinet.lesson_plan.copy:{teacher.id}:{source.pk}"
+        lock_key = f"{cache_key}:lock"
+        cached_id = cache.get(cache_key)
+        if cached_id:
+            existing = LessonPlan.objects.filter(pk=cached_id, teacher=teacher).first()
+            if existing is not None:
+                return self._copy_response(existing)
+        if not cache.add(lock_key, "1", timeout=15):
+            import time
+            for _ in range(20):
+                time.sleep(0.1)
+                cached_id = cache.get(cache_key)
+                if cached_id:
+                    existing = LessonPlan.objects.filter(pk=cached_id, teacher=teacher).first()
+                    if existing is not None:
+                        return self._copy_response(existing)
+            return Response(
+                {"detail": "Копирование уже выполняется."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+        try:
+            cached_id = cache.get(cache_key)
+            if cached_id:
+                existing = LessonPlan.objects.filter(pk=cached_id, teacher=teacher).first()
+                if existing is not None:
+                    return self._copy_response(existing)
+            new_plan = _copy_lesson_plan(source, teacher)
+            if source.teacher_id == teacher.id and not is_catalog_lesson_plan(source):
+                base_title = (source.title or "").strip() or "План уроков"
+                if not base_title.endswith("(копия)"):
+                    new_plan.title = f"{base_title} (копия)"
+                    new_plan.save(update_fields=["title", "updated_at"])
+            cache.set(cache_key, new_plan.pk, timeout=15)
+            return self._copy_response(new_plan)
+        finally:
+            cache.delete(lock_key)
+
     @action(detail=True, methods=["post"], url_path="enroll")
     def enroll(self, request, pk=None):
         """Назначить план ученику или группе → создаёт LessonPlanEnrollment."""
         plan = self.get_object()
+        if is_catalog_lesson_plan(plan):
+            return Response(
+                {"detail": "Публичный шаблон нельзя назначить. Сначала создайте личную копию."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         data = {**request.data, "plan": plan.pk}
         serializer = LessonPlanEnrollmentWriteSerializer(data=data)
         serializer.is_valid(raise_exception=True)
@@ -1335,7 +1391,7 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="items")
     def add_item(self, request, pk=None):
         plan = self.get_object()
-        if plan.teacher is None or plan.teacher_id != self.get_teacher().id:
+        if not can_edit_lesson_plan(self.get_teacher(), plan):
             return Response(
                 {"detail": "Нельзя изменять публичный или чужой план."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -1378,7 +1434,7 @@ class LessonPlanItemViewSet(
     def get_queryset(self):
         teacher = self.get_teacher()
         return LessonPlanItem.objects.filter(
-            Q(plan__teacher=teacher) | Q(plan__teacher__isnull=True)
+            visible_lesson_plan_items_q(teacher)
         ).select_related(
             "plan",
             "linked_lesson",
@@ -1405,12 +1461,12 @@ class LessonPlanItemViewSet(
     def update(self, request, *args, **kwargs):
         item = self.get_object()
         plan = item.plan
-        if plan.teacher is None:
-            return Response(
-                {"detail": "Публичный план нельзя изменить. Сделайте копию для редактирования."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        if plan.teacher_id != self.get_teacher().id:
+        if not can_edit_lesson_plan(self.get_teacher(), plan):
+            if is_catalog_lesson_plan(plan):
+                return Response(
+                    {"detail": "Публичный план нельзя изменить. Сделайте копию для редактирования."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
         response = super().update(request, *args, **kwargs)
         item.refresh_from_db()
@@ -1428,12 +1484,12 @@ class LessonPlanItemViewSet(
     def destroy(self, request, *args, **kwargs):
         item = self.get_object()
         plan = item.plan
-        if plan.teacher is None:
-            return Response(
-                {"detail": "Публичный план нельзя изменить."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        if plan.teacher_id != self.get_teacher().id:
+        if not can_edit_lesson_plan(self.get_teacher(), plan):
+            if is_catalog_lesson_plan(plan):
+                return Response(
+                    {"detail": "Публичный план нельзя изменить."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
         force = str(request.query_params.get("force") or request.data.get("force") or "").lower() in (
             "1", "true", "yes",
@@ -1471,6 +1527,13 @@ class LessonPlanItemViewSet(
     @action(detail=True, methods=["post"], url_path="schedule")
     def schedule(self, request, pk=None):
         item = self.get_object()
+        if is_catalog_lesson_plan(item.plan):
+            return Response(
+                {"detail": "Нельзя привязать расписание к публичному шаблону. Сначала создайте копию."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if item.plan.teacher_id != self.get_teacher().id:
+            return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
         event_id = request.data.get("schedule_event_id")
         scheduled_date = request.data.get("scheduled_date")
         if event_id:

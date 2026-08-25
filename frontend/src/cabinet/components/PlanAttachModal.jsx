@@ -227,6 +227,9 @@ export default function PlanAttachModal({
               <Link to="/cabinet/plans/new" className="cb-btn cb-btn--primary" onClick={onClose}>
                 Создать свой план
               </Link>
+              <Link to="/cabinet/plans" className="cb-btn cb-btn--outline" onClick={onClose}>
+                Готовые планы
+              </Link>
               <button type="button" className="cb-btn cb-btn--outline" onClick={onClose}>
                 Закрыть
               </button>

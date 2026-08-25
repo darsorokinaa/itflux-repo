@@ -927,7 +927,6 @@ class LessonPlanListSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     progress_percent = serializers.IntegerField(read_only=True)
     items_count = serializers.IntegerField(read_only=True)
-    is_public = serializers.SerializerMethodField()
 
     class Meta:
         model = LessonPlan
@@ -952,9 +951,6 @@ class LessonPlanListSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
-    def get_is_public(self, obj):
-        return obj.teacher is None
-
     def get_direction_label(self, obj):
         return get_plan_level_label(obj.direction)
 
@@ -970,7 +966,6 @@ class LessonPlanDetailSerializer(LessonPlanListSerializer):
 
 
 class LessonPlanWriteSerializer(serializers.ModelSerializer):
-    is_public = serializers.BooleanField(required=False, write_only=True)
     direction = serializers.CharField(max_length=20)
     subject = serializers.CharField(max_length=20)
 
@@ -1085,6 +1080,10 @@ class LessonPlanEnrollmentWriteSerializer(serializers.ModelSerializer):
         ]
 
     def validate_plan(self, plan):
+        if getattr(plan, "is_public", False):
+            raise serializers.ValidationError(
+                "Публичный шаблон нельзя назначить. Сначала создайте личную копию."
+            )
         if plan.status == PlanStatus.DRAFT:
             raise serializers.ValidationError(
                 "Черновик плана нельзя назначить ученику или группе. Сначала опубликуйте план."
@@ -1116,6 +1115,10 @@ class LessonPlanEnrollmentWriteSerializer(serializers.ModelSerializer):
 
         plan = data.get("plan") or getattr(self.instance, "plan", None)
         status = data.get("status", getattr(self.instance, "status", EnrollmentStatus.ACTIVE))
+        if plan and getattr(plan, "is_public", False):
+            raise serializers.ValidationError({
+                "plan": "Публичный шаблон нельзя назначить. Сначала создайте личную копию.",
+            })
         if (
             plan
             and plan.status == PlanStatus.DRAFT

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import ConfirmActionModal from "../components/ConfirmActionModal";
@@ -131,6 +131,7 @@ export default function CabinetLessonPlanDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [copying, setCopying] = useState(false);
+  const copyingRef = useRef(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [actionError, setActionError] = useState("");
@@ -177,6 +178,8 @@ export default function CabinetLessonPlanDetailPage() {
   useEffect(() => { load(); }, [load]);
 
   const handleCopyPlan = async () => {
+    if (copyingRef.current) return;
+    copyingRef.current = true;
     setCopying(true);
     setActionError("");
     try {
@@ -184,6 +187,7 @@ export default function CabinetLessonPlanDetailPage() {
       navigate(`/cabinet/plans/${copied.id}/edit`);
     } catch (err) {
       setActionError(err.message || "Не удалось скопировать план");
+      copyingRef.current = false;
     } finally {
       setCopying(false);
     }
@@ -266,7 +270,7 @@ export default function CabinetLessonPlanDetailPage() {
             {plan.description && <p className="cb-page-sub">{plan.description}</p>}
             {plan.isPublic && !canPublishCatalog ? (
               <p className="cb-plan-detail-hint">
-                Публичный шаблон нельзя менять напрямую — нажмите «Сохранить себе и редактировать»,
+                Публичный шаблон нельзя менять напрямую — нажмите «Использовать план»,
                 чтобы создать личную копию. Изменения будут только у вас.
               </p>
             ) : null}
@@ -280,7 +284,7 @@ export default function CabinetLessonPlanDetailPage() {
                 onClick={handleCopyPlan}
                 disabled={copying}
               >
-                {copying ? "…" : "Сохранить себе и редактировать"}
+                {copying ? "…" : "Использовать план"}
               </button>
             ) : plan.isPublic && canPublishCatalog ? (
               <>

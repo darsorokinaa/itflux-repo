@@ -241,7 +241,7 @@ def merge_duplicate_student_plans(*, teacher_id: int | None = None, apply: bool 
 
 def _merge_duplicate_student_plans(*, teacher_id: int | None = None, apply: bool = False) -> dict:
     qs = (
-        LessonPlan.objects.filter(teacher__isnull=False)
+        LessonPlan.objects.filter(teacher__isnull=False, is_public=False)
         .exclude(status=PlanStatus.ARCHIVED)
         .exclude(description=AUTO_MATERIALS_PLAN_DESCRIPTION)
         .annotate(item_count=Count("items", distinct=True))

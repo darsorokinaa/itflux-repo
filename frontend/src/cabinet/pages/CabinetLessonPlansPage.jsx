@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import CabinetHomeworkCard from "../CabinetHomeworkCard";
 import ConfirmActionModal from "../components/ConfirmActionModal";
@@ -25,6 +25,7 @@ export default function CabinetLessonPlansPage() {
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [copyingId, setCopyingId] = useState(null);
+  const copyingRef = useRef(false);
   const [deletingId, setDeletingId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [error, setError] = useState("");
@@ -70,6 +71,8 @@ export default function CabinetLessonPlansPage() {
 
   const handleCopyPlan = async (item) => {
     const planId = item.plan?.id || item.id;
+    if (copyingRef.current) return;
+    copyingRef.current = true;
     setCopyingId(planId);
     setError("");
     try {
@@ -77,6 +80,7 @@ export default function CabinetLessonPlansPage() {
       navigate(`/cabinet/plans/${copied.id}/edit`);
     } catch (err) {
       setError(err.message || "Не удалось скопировать план");
+      copyingRef.current = false;
     } finally {
       setCopyingId(null);
     }
@@ -145,6 +149,12 @@ export default function CabinetLessonPlansPage() {
             const secondaryLabel = scope === "mine"
               ? "Дублировать"
               : item.secondaryActionLabel;
+            const onPrimary = scope === "catalog"
+              ? () => handleCopyPlan(item)
+              : () => handleOpenPlan(item);
+            const onSecondary = scope === "catalog"
+              ? () => handleOpenPlan(item)
+              : () => handleCopyPlan(item);
             return (
               <CabinetHomeworkCard
                 key={item.id}
@@ -162,10 +172,10 @@ export default function CabinetLessonPlansPage() {
                 actionPrimary={item.actionPrimary}
                 secondaryActionLabel={busy ? undefined : secondaryLabel}
                 dangerActionLabel={scope === "mine" && !busy ? "Удалить" : undefined}
-                onAction={() => handleOpenPlan(item)}
+                onAction={onPrimary}
                 onSecondaryAction={
                   secondaryLabel && !busy
-                    ? () => handleCopyPlan(item)
+                    ? onSecondary
                     : undefined
                 }
                 onDangerAction={

@@ -71,7 +71,7 @@ def build_student_materials_audit(*, student_id=None, teacher_id=None, limit=SAM
     plan_items_with_materials = LessonPlanItem.objects.filter(materials__isnull=False).distinct()
     if teacher_id:
         plan_items_with_materials = plan_items_with_materials.filter(
-            Q(plan__teacher_id=teacher_id) | Q(plan__teacher__isnull=True)
+            Q(plan__teacher_id=teacher_id) | Q(plan__is_public=True)
         )
 
     duplicate_direct = (

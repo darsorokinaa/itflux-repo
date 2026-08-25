@@ -906,7 +906,7 @@ class LessonLearningPlanSyncService:
 
         plan_title = f"План: {student.full_name} — {subject_label}".strip()[:255]
         plan = (
-            LessonPlan.objects.filter(teacher=teacher, title=plan_title)
+            LessonPlan.objects.filter(teacher=teacher, title=plan_title, is_public=False)
             .exclude(status=PlanStatus.ARCHIVED)
             .exclude(description=AUTO_MATERIALS_PLAN_DESCRIPTION)
             .order_by("id")

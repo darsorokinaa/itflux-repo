@@ -74,6 +74,7 @@ class PlanStatus(models.TextChoices):
 class PlanSubject(models.TextChoices):
     INFORMATICS = "informatics", "Информатика"
     MATH = "math", "Математика"
+    PHYS = "phys", "Физика"
     OTHER = "other", "Другое"
 
 

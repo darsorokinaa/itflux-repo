@@ -311,19 +311,15 @@ class LessonPlanItemInline(admin.StackedInline):
 @admin.register(LessonPlan)
 class LessonPlanAdmin(admin.ModelAdmin):
     list_display = ("title", "is_public", "teacher", "subject", "direction", "grade", "exam_type", "status", "lessons_count", "updated_at")
-    list_filter = ("subject", "direction", "exam_type", "status")
+    list_filter = ("is_public", "subject", "direction", "exam_type", "status")
     search_fields = ("title", "goal", "teacher__username")
     inlines = [LessonPlanItemInline]
     ordering = ("-updated_at",)
 
-    @admin.display(boolean=True, description="Публичный")
-    def is_public(self, obj):
-        return obj.teacher is None
-
     fieldsets = (
         (None, {
-            "fields": ("teacher", "title", "status"),
-            "description": "Оставьте «Учитель» пустым, чтобы план был доступен всем учителям.",
+            "fields": ("teacher", "title", "status", "is_public"),
+            "description": "Публичный шаблон виден всем учителям в «Готовых планах». Обычные учителя получают личную копию и не меняют оригинал.",
         }),
         ("Параметры", {
             "fields": ("subject", "direction", "exam_type", "grade"),

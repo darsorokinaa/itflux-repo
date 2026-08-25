@@ -3,7 +3,9 @@ import { pickCoverVariant } from "./CabinetHomeworkCard";
 export const PLAN_FILTERS = [
   { id: "all", label: "Все" },
   { id: "math", label: "Математика" },
+  { id: "physics", label: "Физика" },
   { id: "informatics", label: "Информатика" },
+  { id: "russian", label: "Русский язык" },
   { id: "oge", label: "ОГЭ" },
   { id: "ege", label: "ЕГЭ" },
   { id: "draft", label: "Черновики" },
@@ -12,7 +14,7 @@ export const PLAN_FILTERS = [
 
 export const PLAN_SCOPE_FILTERS = [
   { id: "mine", label: "Мои планы" },
-  { id: "catalog", label: "Готовые" },
+  { id: "catalog", label: "Готовые планы" },
 ];
 
 export const PLAN_CATALOG_FILTERS = PLAN_FILTERS.filter(
@@ -63,6 +65,7 @@ export const PLAN_LEVELS = [
 export const PLAN_SUBJECTS = [
   { id: "inf", label: "Информатика" },
   { id: "math", label: "Математика" },
+  { id: "phys", label: "Физика" },
   { id: "prog", label: "Программирование" },
   { id: "rus", label: "Русский язык" },
   { id: "other", label: "Другое" },
@@ -73,6 +76,8 @@ const PLAN_SUBJECT_LABELS = {
   informatics: "Информатика",
   math: "Математика",
   math_base: "Математика базовая",
+  phys: "Физика",
+  physics: "Физика",
   prog: "Программирование",
   rus: "Русский язык",
   other: "Другое",
@@ -159,8 +164,8 @@ export function mapPlanToHomeworkCard(plan, options = {}) {
     progressPercent: plan.progressPercent || 0,
     progressTone: plan.progressPercent >= 100 ? "completed" : "default",
     hideProgressBar: isCatalog || !plan.progressPercent,
-    actionLabel: isCatalog ? "Открыть" : "Редактировать",
-    secondaryActionLabel: isCatalog ? "Сохранить себе" : undefined,
+    actionLabel: isCatalog ? "Использовать план" : "Редактировать",
+    secondaryActionLabel: isCatalog ? "Открыть" : undefined,
     actionPrimary: true,
     coverVariant: planCoverVariant(plan),
     plan,
@@ -209,6 +214,8 @@ function planSubjectKind(plan) {
     const subjectId = String(plan.subject).toLowerCase();
     if (subjectId === "inf" || subjectId === "informatics") return "informatics";
     if (subjectId === "math" || subjectId === "math_base") return "math";
+    if (subjectId === "phys" || subjectId === "physics") return "physics";
+    if (subjectId === "rus" || subjectId === "russian") return "russian";
     return subjectId;
   }
   const hay = `${plan.title || ""} ${plan.description || ""} ${plan.goal || ""}`;
@@ -227,7 +234,7 @@ export function filterPlans(plans, filterId) {
   if (filterId === "all") return visible;
   if (filterId === "draft") return visible.filter((p) => p.status === "draft");
   if (filterId === "published") return visible.filter((p) => p.status === "published");
-  if (filterId === "math" || filterId === "informatics") {
+  if (filterId === "math" || filterId === "informatics" || filterId === "physics" || filterId === "russian") {
     return visible.filter((p) => planSubjectKind(p) === filterId);
   }
   const dirMap = { oge: "oge", ege: "ege" };
