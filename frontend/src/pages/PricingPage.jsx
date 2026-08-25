@@ -60,6 +60,7 @@ export default function PricingPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState("month");
+  const [selectedSlug, setSelectedSlug] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -84,6 +85,10 @@ export default function PricingPage() {
   }, []);
 
   const plans = useMemo(() => data?.plans || [], [data]);
+  const selectedPlanSlug = useMemo(() => {
+    if (selectedSlug && plans.some((p) => p.slug === selectedSlug)) return selectedSlug;
+    return plans.find((p) => p.is_recommended)?.slug || plans[0]?.slug || null;
+  }, [plans, selectedSlug]);
   const anon = data?.anonymous;
   const promo = data?.registration_promo;
   const promotions = data?.promotions || [];
@@ -183,10 +188,12 @@ export default function PricingPage() {
               key={plan.slug}
               className={[
                 "pricing-card",
-                plan.is_recommended || plan.is_featured ? "pricing-card--featured" : "",
+                plan.slug === selectedPlanSlug ? "pricing-card--featured" : "",
               ]
                 .filter(Boolean)
                 .join(" ")}
+              aria-selected={plan.slug === selectedPlanSlug}
+              onClick={() => setSelectedSlug(plan.slug)}
             >
               {(plan.badge_text || plan.is_recommended || offerLive) && (
                 <div className="pricing-card__badge">

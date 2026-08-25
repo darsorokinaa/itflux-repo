@@ -549,11 +549,13 @@ function SubscriptionStatusCard({
 function PlanCard({
   plan,
   isCurrent,
+  isSelected = false,
   period,
   promoDiscount,
   referralEligible = false,
   referralPercent = 50,
   onSelect,
+  onActivate,
   selecting,
   expanded,
   onToggleFeatures,
@@ -640,11 +642,13 @@ function PlanCard({
       className={[
         "upg-card",
         isCurrent ? "upg-card--current" : "",
-        plan.is_recommended || plan.is_featured ? "upg-card--recommended" : "",
+        isSelected ? "upg-card--selected" : "",
         plan.slug === "premium" ? "upg-card--premium" : "",
       ]
         .filter(Boolean)
         .join(" ")}
+      aria-selected={isSelected}
+      onClick={() => onActivate?.(plan)}
     >
       <div className="upg-card__badges">
         {(plan.badge_text || plan.is_recommended) && plan.slug === "pro" ? (
@@ -674,7 +678,14 @@ function PlanCard({
             {onOfferDetails ? (
               <>
                 {" · "}
-                <button type="button" className="upg-link-btn" onClick={() => onOfferDetails(offer)}>
+                <button
+                  type="button"
+                  className="upg-link-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOfferDetails(offer);
+                  }}
+                >
                   Подробнее
                 </button>
               </>
@@ -712,7 +723,14 @@ function PlanCard({
         <p className="upg-card__caveat">Без расписания, журнала и видеозанятий.</p>
       ) : null}
 
-      <button type="button" className="upg-card__more" onClick={onToggleFeatures}>
+      <button
+        type="button"
+        className="upg-card__more"
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleFeatures();
+        }}
+      >
         {expanded ? "Скрыть сравнение" : "Все возможности"}
       </button>
 
@@ -738,7 +756,11 @@ function PlanCard({
           <button
             type="button"
             className="upg-card__btn"
-            onClick={() => onSelect(plan)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onActivate?.(plan);
+              onSelect(plan);
+            }}
             disabled={selecting === plan.slug}
           >
             {selecting === plan.slug ? "Подождите…" : buttonLabel}
@@ -1073,6 +1095,7 @@ export default function CabinetUpgradePage() {
   const [noticeSupport, setNoticeSupport] = useState(false);
   const [noticeRetry, setNoticeRetry] = useState(null);
   const [period, setPeriod] = useState("month");
+  const [selectedSlug, setSelectedSlug] = useState(null);
   const [promoInput, setPromoInput] = useState("");
   const [promoState, setPromoState] = useState(null);
   const [promoLoading, setPromoLoading] = useState(false);
@@ -1101,6 +1124,8 @@ export default function CabinetUpgradePage() {
   useEffect(() => {
     const qp = searchParams.get("period");
     if (qp === "year" || qp === "month") setPeriod(qp);
+    const planQp = searchParams.get("plan");
+    if (planQp && MAIN_SLUGS.includes(planQp)) setSelectedSlug(planQp);
   }, [searchParams]);
 
   useEffect(() => {
@@ -1119,7 +1144,7 @@ export default function CabinetUpgradePage() {
     let cancelled = false;
     (async () => {
       try {
-        const data = await validatePromoCode(code, null, period);
+        const data = await validatePromoCode(code, selectedSlug, period);
         if (cancelled) return;
         setPromoState({
           valid: true,
@@ -1133,9 +1158,9 @@ export default function CabinetUpgradePage() {
     return () => {
       cancelled = true;
     };
-    // Обновляем цены промокода только при смене месяца/года.
+    // Пересчитываем превью промокода при смене периода или выбранного тарифа.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period]);
+  }, [period, selectedSlug]);
 
   // Возврат с оплаты: не верь URL — проверяем статус платежа в API
   useEffect(() => {
@@ -1242,6 +1267,15 @@ export default function CabinetUpgradePage() {
     () => MAIN_SLUGS.map((slug) => plans.find((p) => p.slug === slug)).filter(Boolean),
     [plans],
   );
+
+  useEffect(() => {
+    if (!mainPlans.length) return;
+    setSelectedSlug((prev) => {
+      if (prev && mainPlans.some((p) => p.slug === prev)) return prev;
+      const rec = mainPlans.find((p) => p.is_recommended);
+      return rec?.slug || mainPlans[0]?.slug || prev;
+    });
+  }, [mainPlans]);
   const schoolPlan = plans.find((p) => p.slug === SCHOOL_SLUG);
   const currentSlug = plansData?.current_slug;
   const subscription = plansData?.subscription;
@@ -1395,7 +1429,7 @@ export default function CabinetUpgradePage() {
     setPromoLoading(true);
     setPromoState(null);
     try {
-      const data = await validatePromoCode(code, null, period);
+      const data = await validatePromoCode(code, selectedSlug, period);
       setPromoState({
         valid: true,
         ...data,
@@ -1784,11 +1818,13 @@ export default function CabinetUpgradePage() {
                 key={plan.slug}
                 plan={plan}
                 isCurrent={plan.slug === currentSlug}
+                isSelected={plan.slug === selectedSlug}
                 period={period}
                 promoDiscount={promoState}
                 referralEligible={Boolean(referral?.my_discount?.eligible)}
                 referralPercent={referral?.my_discount?.percent || 50}
                 onSelect={handleSelect}
+                onActivate={(next) => setSelectedSlug(next.slug)}
                 selecting={selecting}
                 expanded={compareOpen}
                 onToggleFeatures={() => setCompareOpen((v) => !v)}

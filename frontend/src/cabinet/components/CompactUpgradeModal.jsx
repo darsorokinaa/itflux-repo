@@ -1,7 +1,7 @@
 /**
  * CompactUpgradeModal — компактное окно выбора тарифа.
  *
- * Показывает текущий + рекомендуемый тариф.
+ * Показывает основные тарифы. Клик по карточке делает её активной и показывает цену.
  * Props:
  *   currentPlan  — { name, slug, limits: { students, groups, ai_requests } }
  *   plans        — полный список тарифов из API
@@ -11,10 +11,12 @@
  *   onClose
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { validatePromoCode } from "../../utils/cabinetAuth";
 import { formatStorageLabel } from "../../utils/planHighlights";
+
+const MAIN_SLUGS = ["start", "teacher", "pro", "premium"];
 
 function formatRub(value) {
   const n = Number(value);
@@ -33,7 +35,7 @@ function resolvePlanPromo(promoDiscount, planSlug) {
   return null;
 }
 
-function PlanCard({ plan, isCurrent, onSelect, promoDiscount }) {
+function PlanCard({ plan, isCurrent, isSelected, onSelect, onActivate, promoDiscount }) {
   const l = plan.limits || {};
   const storage = formatStorageLabel(l.storage_mb);
   const summary = [
@@ -79,7 +81,11 @@ function PlanCard({ plan, isCurrent, onSelect, promoDiscount }) {
   }
 
   return (
-    <div className={`cum-plan-card${isCurrent ? " cum-plan-card--current" : ""}${plan.is_recommended ? " cum-plan-card--recommended" : ""}`}>
+    <div
+      className={`cum-plan-card${isCurrent ? " cum-plan-card--current" : ""}${isSelected ? " cum-plan-card--selected" : ""}`}
+      aria-selected={isSelected}
+      onClick={() => onActivate?.(plan.slug)}
+    >
       {plan.is_recommended && <span className="cum-badge">Оптимально</span>}
       {isCurrent && <span className="cum-badge cum-badge--current">Текущий</span>}
       {offer || promoApplies ? <span className="cum-badge">Акция</span> : null}
@@ -99,7 +105,15 @@ function PlanCard({ plan, isCurrent, onSelect, promoDiscount }) {
         {priceNote}
       </div>
       {!isCurrent && (
-        <button type="button" className="cum-plan-btn" onClick={() => onSelect(plan.slug)}>
+        <button
+          type="button"
+          className="cum-plan-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onActivate?.(plan.slug);
+            onSelect(plan.slug);
+          }}
+        >
           {offer?.button_text || `Перейти на ${plan.name}`}
         </button>
       )}
@@ -112,18 +126,31 @@ export default function CompactUpgradeModal({
   plans = [],
   recommendedSlug,
   onSelectPlan,
-  onCompareAll,
+  onCompareAll: _onCompareAll,
   onClose,
 }) {
   const currentSlug = currentPlan?.slug;
   const [promoInput, setPromoInput] = useState("");
-  const [promoState, setPromoState] = useState(null); // { valid, message, discount }
+  const [promoState, setPromoState] = useState(null);
   const [promoLoading, setPromoLoading] = useState(false);
+  const [selectedSlug, setSelectedSlug] = useState(recommendedSlug || currentSlug || null);
 
-  // Показываем: текущий + рекомендуемый (если разные)
-  const visiblePlans = plans.filter(
-    (p) => p.slug === currentSlug || p.slug === recommendedSlug,
-  );
+  const visiblePlans = useMemo(() => {
+    const main = MAIN_SLUGS.map((slug) => plans.find((p) => p.slug === slug)).filter(Boolean);
+    if (main.length) return main;
+    return plans.filter((p) => p.slug === currentSlug || p.slug === recommendedSlug);
+  }, [plans, currentSlug, recommendedSlug]);
+
+  useEffect(() => {
+    if (!visiblePlans.length) return;
+    setSelectedSlug((prev) => {
+      if (prev && visiblePlans.some((p) => p.slug === prev)) return prev;
+      if (recommendedSlug && visiblePlans.some((p) => p.slug === recommendedSlug)) {
+        return recommendedSlug;
+      }
+      return visiblePlans[0]?.slug || prev;
+    });
+  }, [visiblePlans, recommendedSlug]);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
@@ -137,7 +164,7 @@ export default function CompactUpgradeModal({
     setPromoLoading(true);
     setPromoState(null);
     try {
-      const data = await validatePromoCode(code);
+      const data = await validatePromoCode(code, selectedSlug);
       const bonus = Number(data.bonus_days || 0);
       setPromoState({
         valid: true,
@@ -161,7 +188,7 @@ export default function CompactUpgradeModal({
         </button>
 
         <h2 className="upm-title cum-title">Увеличить лимит</h2>
-        <p className="upm-text cum-subtitle">Выберите подходящий вариант.</p>
+        <p className="upm-text cum-subtitle">Нажмите на тариф, чтобы увидеть цену. Затем подтвердите переход.</p>
 
         <div className="cum-plans">
           {visiblePlans.map((p) => (
@@ -169,7 +196,9 @@ export default function CompactUpgradeModal({
               key={p.slug}
               plan={p}
               isCurrent={p.slug === currentSlug}
+              isSelected={p.slug === selectedSlug}
               onSelect={onSelectPlan}
+              onActivate={setSelectedSlug}
               promoDiscount={promoState}
             />
           ))}

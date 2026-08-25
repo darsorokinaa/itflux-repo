@@ -2130,9 +2130,10 @@ function ExamPage() {
                 : [...new Set(variant.tasks.map((t) => t.number).filter(Boolean))]
                     .sort((a, b) => a - b)
                     .map(String);
-            if (labels.length === 0) return `Вариант № ${variant.id}`;
-            if (labels.length === 1) return `Задание ${labels[0]}`;
-            return `Задания ${labels.join(", ")}`;
+            const variantLabel = `Вариант № ${variant.id}`;
+            if (labels.length === 0) return variantLabel;
+            if (labels.length === 1) return `${variantLabel} · Задание ${labels[0]}`;
+            return `${variantLabel} · Задания ${labels.join(", ")}`;
           })()
         : mode === "part1"
           ? `Вариант № ${variant.id} · Часть 1`

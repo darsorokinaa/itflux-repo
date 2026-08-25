@@ -15687,7 +15687,7 @@ select.cb-lesson-card__about-input.is-empty {
 
 /* ── CompactUpgradeModal ───────────────────────────────────────────────── */
 .cum-sheet {
-  max-width: 480px;
+  max-width: 720px;
   align-items: stretch;
   text-align: left;
 }
@@ -15695,9 +15695,12 @@ select.cb-lesson-card__about-input.is-empty {
 .cum-subtitle { text-align: left; margin: -6px 0 4px; }
 .cum-plans {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   width: 100%;
+}
+@media (max-width: 540px) {
+  .cum-plans { grid-template-columns: 1fr; }
 }
 .cum-plan-card {
   padding: 16px;
@@ -15708,9 +15711,14 @@ select.cb-lesson-card__about-input.is-empty {
   flex-direction: column;
   gap: 6px;
   position: relative;
+  cursor: pointer;
+}
+.cum-plan-card:hover:not(.cum-plan-card--selected) {
+  border-color: #93c5fd;
 }
 .cum-plan-card--current { background: #F0F9FF; border-color: #BAE6FD; }
-.cum-plan-card--recommended { border-color: #2563EB; background: #EEF2FF; }
+.cum-plan-card--recommended,
+.cum-plan-card--selected { border-color: #2563EB; background: #EEF2FF; }
 .cum-badge {
   display: inline-block;
   font-size: 0.7rem;
@@ -15724,7 +15732,8 @@ select.cb-lesson-card__about-input.is-empty {
 }
 .cum-badge--current { background: #0EA5E9; }
 .cum-plan-name { font-size: 0.95rem; font-weight: 800; color: #0F172A; }
-.cum-plan-price { font-size: 0.82rem; font-weight: 700; color: #2563EB; }
+.cum-plan-price { font-size: 0.95rem; font-weight: 800; color: #0F172A; }
+.cum-plan-card--selected .cum-plan-price { color: #2563EB; }
 .cum-plan-summary { font-size: 0.78rem; color: #64748B; line-height: 1.4; }
 .cum-plan-btn {
   margin-top: auto;
@@ -16349,12 +16358,17 @@ select.cb-lesson-card__about-input.is-empty {
   min-width: 0;
   height: 100%;
   box-sizing: border-box;
+  cursor: pointer;
+}
+.upg-card:hover:not(.upg-card--selected) {
+  border-color: #93c5fd;
 }
 .upg-card--current {
   border-color: #bae6fd;
   background: #f8fbff;
 }
-.upg-card--recommended {
+.upg-card--recommended,
+.upg-card--selected {
   border: 2px solid var(--upg-accent);
   background: linear-gradient(180deg, #f5f8ff 0%, #fff 48%);
   box-shadow: 0 8px 28px rgba(37, 99, 235, 0.1);
@@ -16363,6 +16377,10 @@ select.cb-lesson-card__about-input.is-empty {
 .upg-card--premium {
   border-color: #334155;
   background: linear-gradient(180deg, #f8fafc 0%, #fff 40%);
+}
+.upg-card--premium.upg-card--selected {
+  border: 2px solid var(--upg-accent);
+  background: linear-gradient(180deg, #f5f8ff 0%, #fff 48%);
 }
 .upg-card__badges {
   display: flex;
@@ -16459,7 +16477,8 @@ select.cb-lesson-card__about-input.is-empty {
   white-space: normal;
   word-break: break-word;
 }
-.upg-card--recommended .upg-card__price { color: var(--upg-accent); }
+.upg-card--recommended .upg-card__price,
+.upg-card--selected .upg-card__price { color: var(--upg-accent); }
 .upg-card__price-was {
   font-size: 0.85rem;
   color: var(--upg-muted);
@@ -16836,7 +16855,8 @@ select.cb-lesson-card__about-input.is-empty {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 16px;
   }
-  .upg-card--recommended { transform: translateY(-6px); }
+  .upg-card--recommended,
+  .upg-card--selected { transform: translateY(-6px); }
   .upg-compare__desktop {
     display: block;
     overflow-x: auto;
@@ -16851,7 +16871,8 @@ select.cb-lesson-card__about-input.is-empty {
   .upg-anon { flex-direction: column; align-items: stretch; }
   .upg-anon .upg-btn { width: 100%; }
   .upg-promo { max-width: none; width: 100%; }
-  .upg-card--recommended { transform: none; }
+  .upg-card--recommended,
+  .upg-card--selected { transform: none; }
 }
 
 /* ── AI page ────────────────────────────────────────────────────────────── */
