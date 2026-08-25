@@ -23,6 +23,7 @@ import { notifySubscriptionChanged, useSubscription } from "../hooks/useSubscrip
 import SupportContactLink from "../components/SupportContactLink";
 import TariffUsageBlock from "../components/TariffUsageBlock";
 import { openSupport } from "../support";
+import { buildPlanHighlights, formatStorageLabel } from "../../utils/planHighlights";
 
 function isLocalFrontendHost() {
   const host = window.location.hostname;
@@ -90,14 +91,18 @@ const FAQ_ITEMS = [
 const COMPARE_ROWS = [
   { key: "students", label: "Активные ученики", type: "limit", field: "students" },
   { key: "groups", label: "Группы", type: "limit", field: "groups" },
+  { key: "storage", label: "Хранилище", type: "storage" },
   { key: "homework", label: "Домашние задания", type: "feature", field: "homework" },
   { key: "review", label: "Проверка работ", type: "feature", field: "review" },
   { key: "variants", label: "Генератор вариантов", type: "limit_monthly", field: "variants_monthly" },
   { key: "workbooks", label: "Рабочие тетради", type: "limit_monthly", field: "workbooks_monthly" },
   { key: "interactives", label: "Создание интерактивов", type: "limit_monthly", field: "interactives" },
+  { key: "lessons", label: "Занятия в расписании", type: "limit", field: "lessons" },
+  { key: "ai", label: "ИИ-запросы", type: "ai_monthly", field: "ai_requests" },
   { key: "schedule", label: "Расписание", type: "rank", min: 1 },
   { key: "journal", label: "Журнал", type: "rank", min: 1 },
   { key: "video", label: "Видеоконференции", type: "rank", min: 1 },
+  { key: "notifications", label: "Уведомления", type: "notifications" },
   { key: "analytics", label: "Аналитика", type: "analytics_level" },
   { key: "mass", label: "Массовые действия", type: "feature", field: "mass_actions" },
   { key: "free_lib", label: "Бесплатные материалы", type: "always" },
@@ -106,7 +111,6 @@ const COMPARE_ROWS = [
   { key: "premium_lib", label: "Premium-материалы", type: "rank", min: 3 },
   { key: "simulators", label: "Симуляторы", type: "simulators_level" },
   { key: "cross_subject", label: "Межпредметные проекты", type: "cross_subject" },
-  { key: "storage", label: "Хранилище", type: "storage" },
   { key: "support", label: "Поддержка", type: "support" },
 ];
 
@@ -149,6 +153,33 @@ function monthsWord(n) {
   if (last === 1) return "месяц";
   if (last >= 2 && last <= 4) return "месяца";
   return "месяцев";
+}
+
+function resolvePlanPromo(promoDiscount, planSlug) {
+  if (!promoDiscount?.valid) return null;
+  const entry = promoDiscount.by_plan?.[planSlug];
+  if (entry) {
+    if (entry.valid === false) return null;
+    return { ...promoDiscount, ...entry, valid: true };
+  }
+  if (promoDiscount.plan_slug === planSlug) return promoDiscount;
+  return null;
+}
+
+function formatPromoAppliedMessage(data) {
+  if (data?.applied_discount_source === "referral") {
+    return "Скидка по приглашению применена";
+  }
+  const byPlan = data?.by_plan || {};
+  const bonusFromPlans = Object.values(byPlan).map((row) =>
+    row && row.valid !== false ? Number(row.bonus_days || 0) : 0,
+  );
+  const bonus = Math.max(Number(data?.bonus_days || 0), ...bonusFromPlans, 0);
+  const extra = Number(data?.extra_free_months || 0);
+  const parts = ["Промокод применён"];
+  if (bonus > 0) parts.push(`+${bonus} ${daysWord(bonus)}`);
+  if (extra > 0) parts.push(`${extra} ${monthsWord(extra)} бесплатно`);
+  return parts.join(" · ");
 }
 
 function planRank(slug) {
@@ -196,92 +227,9 @@ function ctaLabel(plan, isCurrent, { expiresAt, currentSlug, period } = {}) {
   return `Выбрать ${plan.name}`;
 }
 
-/** Ключевые пункты карточки — позиционирование тарифов, без «списка отсутствий». */
+/** Ключевые пункты карточки — лимиты, которые реально отличаются между тарифами. */
 function buildHighlights(plan) {
-  const l = plan.limits || {};
-  const f = plan.features || {};
-  const students =
-    l.students != null ? `до ${l.students} активных учеников` : null;
-  const variants =
-    l.variants_monthly == null
-      ? "Генератор вариантов без лимита"
-      : `${l.variants_monthly} вариантов в месяц`;
-  const workbooks =
-    l.workbooks_monthly == null
-      ? "Рабочие тетради без лимита"
-      : `${l.workbooks_monthly} рабочих тетрадей в месяц`;
-  const interactives =
-    l.interactives == null
-      ? "Создание интерактивов без лимита"
-      : `${l.interactives} интерактива в месяц`;
-
-  if (plan.slug === "start") {
-    return [
-      l.students != null && `до ${l.students} учеников`,
-      "домашние задания и проверка",
-      l.variants_monthly != null && `${l.variants_monthly} вариантов в месяц`,
-      l.workbooks_monthly != null && `${l.workbooks_monthly} рабочих тетрадей в месяц`,
-      "бесплатные материалы",
-    ].filter(Boolean);
-  }
-
-  if (plan.slug === "teacher") {
-    return [
-      students,
-      "расписание и журнал",
-      "видеозанятия прямо на платформе",
-      "ДЗ и проверка",
-      l.variants_monthly != null && `${l.variants_monthly} вариантов в месяц`,
-      l.workbooks_monthly != null && `${l.workbooks_monthly} рабочих тетрадей`,
-      "расширенная библиотека",
-    ].filter(Boolean);
-  }
-
-  if (plan.slug === "pro") {
-    return [
-      students,
-      "расписание, журнал и видеозанятия",
-      variants,
-      workbooks,
-      interactives,
-      "полная основная библиотека",
-      f.simulators && "симуляторы",
-      f.mass_actions && "массовые действия",
-      f.analytics && "расширенная аналитика",
-    ].filter(Boolean);
-  }
-
-  if (plan.slug === "premium") {
-    return [
-      students,
-      "группы без лимита",
-      { text: "полная библиотека и Premium-материалы", accent: true },
-      "симуляторы и межпредметные проекты",
-      variants,
-      workbooks,
-      f.priority_support && "приоритетная поддержка",
-      "полная аналитика",
-    ].filter(Boolean);
-  }
-
-  if (plan.slug === SCHOOL_SLUG) {
-    return [
-      f.multi_teacher && "Несколько преподавателей",
-      "Единый кабинет организации",
-      "Управление лицензиями",
-      f.analytics && "Общая аналитика",
-      "Администратор организации",
-      "Индивидуальные лимиты",
-      f.priority_support && "Корпоративная поддержка",
-    ].filter(Boolean);
-  }
-
-  return [
-    students,
-    f.homework && "Домашние задания",
-    f.review && "Проверка работ",
-    f.simulators && "Симуляторы",
-  ].filter(Boolean);
+  return buildPlanHighlights(plan, { includeAi: true });
 }
 
 function compareCell(plan, row) {
@@ -314,11 +262,18 @@ function compareCell(plan, row) {
     case "promise":
       return plan.monthly_library_promise ? "Не менее 5" : "—";
     case "storage": {
-      const mb = l.storage_mb;
-      if (mb == null) return "—";
-      if (mb >= 1024) return `${Math.round(mb / 1024)} ГБ`;
-      return `${mb} МБ`;
+      const label = formatStorageLabel(l.storage_mb);
+      return label || "—";
     }
+    case "ai_monthly": {
+      const v = l.ai_requests;
+      if (v == null) return "—";
+      return `${v}/мес`;
+    }
+    case "notifications":
+      if (f.advanced_notifications) return "Расширенные";
+      if (f.basic_notifications) return "Базовые";
+      return "—";
     case "support":
       if (f.priority_support) return "Приоритетная";
       if (rank >= 1) return "Стандартная";
@@ -607,7 +562,7 @@ function PlanCard({
   expiresAt = null,
   onOfferDetails,
 }) {
-  const highlights = buildHighlights(plan).slice(0, 8);
+  const highlights = buildHighlights(plan);
   const priceMonth = Number(plan.price_month);
   const priceYear = Number(plan.price_year);
   const isContact = plan.cta_type === "contact" || plan.slug === SCHOOL_SLUG;
@@ -624,12 +579,16 @@ function PlanCard({
     referralEligible && !isFree && !isContact && basePrice > 0 && !offerLive
       ? Math.round(basePrice * (1 - Number(referralPercent || 50) / 100))
       : null;
+  const planPromo = resolvePlanPromo(promoDiscount, plan.slug);
+  const bonusDays = Number(planPromo?.bonus_days || 0);
+  const extraFreeMonths = Number(planPromo?.extra_free_months || 0);
+  const promoFinal = planPromo?.final_amount != null ? Number(planPromo.final_amount) : null;
+  const hasPromoPriceCut =
+    Boolean(planPromo) && promoFinal != null && Number.isFinite(promoFinal) && promoFinal + 0.005 < basePrice;
   const promoApplies =
-    Boolean(promoDiscount?.valid) &&
-    promoDiscount.plan_slug === plan.slug &&
-    (promoDiscount.final_amount != null || Number(promoDiscount.extra_free_months) > 0);
+    Boolean(planPromo) && (hasPromoPriceCut || extraFreeMonths > 0 || bonusDays > 0);
   const renewalPrice = promoApplies
-    ? promoDiscount.renewal_price ?? offer?.pricing?.renewal ?? basePrice
+    ? planPromo.renewal_price ?? offer?.pricing?.renewal ?? basePrice
     : offer?.pricing?.renewal ?? basePrice;
 
   let priceMain;
@@ -638,15 +597,15 @@ function PlanCard({
   if (isContact) {
     priceMain = "По запросу";
     priceSub = "Стоимость рассчитывается индивидуально";
-  } else if (promoApplies && Number(promoDiscount.extra_free_months) > 0) {
+  } else if (promoApplies && extraFreeMonths > 0) {
     priceWas = formatMoney(basePrice);
     priceMain = "Бесплатно";
-    priceSub = `${promoDiscount.extra_free_months} ${monthsWord(promoDiscount.extra_free_months)} · далее ${formatMoney(renewalPrice)}/мес`;
-  } else if (promoApplies) {
-    priceWas = formatMoney(promoDiscount.base_price ?? offer?.pricing?.original ?? basePrice);
-    priceMain = formatMoney(promoDiscount.final_amount);
+    priceSub = `${extraFreeMonths} ${monthsWord(extraFreeMonths)} · далее ${formatMoney(renewalPrice)}/мес`;
+  } else if (promoApplies && hasPromoPriceCut) {
+    priceWas = formatMoney(planPromo.base_price ?? offer?.pricing?.original ?? basePrice);
+    priceMain = formatMoney(planPromo.final_amount);
     priceSub =
-      promoDiscount.applied_discount_source === "referral"
+      planPromo.applied_discount_source === "referral"
         ? `первый месяц · далее ${formatMoney(renewalPrice)}/мес`
         : `сейчас · далее ${formatMoney(renewalPrice)}/мес`;
   } else if (offerLive && offer.benefit_type === "free_period") {
@@ -722,8 +681,13 @@ function PlanCard({
             ) : null}
           </div>
         ) : null}
-        {referralFirstPrice != null && period === "month" && !promoDiscount?.valid ? (
+        {referralFirstPrice != null && period === "month" && !planPromo ? (
           <div className="upg-card__price-note">Скидка действует только на первый месяц.</div>
+        ) : null}
+        {promoApplies && bonusDays > 0 ? (
+          <div className="upg-card__promo-price">
+            +{bonusDays} {daysWord(bonusDays)} к подписке
+          </div>
         ) : null}
       </div>
 
@@ -1149,6 +1113,30 @@ export default function CabinetUpgradePage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    const code = promoInput.trim();
+    if (!code || !promoState?.valid) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await validatePromoCode(code, null, period);
+        if (cancelled) return;
+        setPromoState({
+          valid: true,
+          ...data,
+          message: formatPromoAppliedMessage(data),
+        });
+      } catch {
+        /* оставляем текущий превью */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Обновляем цены промокода только при смене месяца/года.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period]);
+
   // Возврат с оплаты: не верь URL — проверяем статус платежа в API
   useEffect(() => {
     const status = (searchParams.get("status") || "").toLowerCase();
@@ -1407,26 +1395,11 @@ export default function CabinetUpgradePage() {
     setPromoLoading(true);
     setPromoState(null);
     try {
-      const targetSlug =
-        searchParams.get("plan") ||
-        plans.find((p) => p.is_recommended)?.slug ||
-        "pro";
-      const data = await validatePromoCode(code, targetSlug, period);
-      const source = data.applied_discount_source;
-      let message;
-      if (source === "referral") {
-        message = "Скидка по приглашению применена";
-      } else if (data.discount_type === "bonus_days" || (source === "promo" && data.applied_discount_type === "bonus_days")) {
-        message = `+${data.bonus_days || data.discount_value} бонусных дней`;
-      } else if (source === "promotion") {
-        message = "Акция применена";
-      } else {
-        message = "Промокод применён";
-      }
+      const data = await validatePromoCode(code, null, period);
       setPromoState({
         valid: true,
         ...data,
-        message,
+        message: formatPromoAppliedMessage(data),
       });
     } catch (err) {
       setPromoState({

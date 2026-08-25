@@ -332,8 +332,13 @@ def _get_or_create_teacher_referral_link(user) -> ReferralLink:
 
 
 def _plan_short(plan, *, promotion=None) -> dict:
-    """Кабинет: совместимость + публичные поля (ИИ скрыт от витрины, в кабинете тоже не акцентируем)."""
-    return _plan_public(plan, promotion=promotion)
+    """Кабинет: публичные поля плюс лимиты, которые на витрине не акцентируем (ИИ)."""
+    data = _plan_public(plan, promotion=promotion)
+    data["limits"] = {
+        **data["limits"],
+        "ai_requests": plan.ai_requests_monthly_limit,
+    }
+    return data
 
 
 class SubscriptionCurrentView(APIView):
@@ -1094,10 +1099,11 @@ class SubscriptionPaymentStatusView(APIView):
 
 class PromoCodeValidateView(APIView):
     permission_classes = [IsCabinetTeacher]
+    _PER_PLAN_SKIP = frozenset({"PROMO_NOT_APPLICABLE", "PROMO_NOT_COMBINABLE"})
 
     def post(self, request):
         from .pricing_service import calculate_subscription_price, price_payload
-        from .subscription_service import PromoCodeError
+        from .subscription_service import PromoCodeError, PromoCodeService
 
         code_str = (request.data.get("code") or "").strip()
         plan_slug = (request.data.get("plan_slug") or "").strip() or None
@@ -1105,39 +1111,82 @@ class PromoCodeValidateView(APIView):
         if billing_period not in ("month", "year"):
             billing_period = "month"
 
-        if plan_slug:
-            plan = TariffPlan.objects.filter(slug=plan_slug, is_active=True).first()
-        else:
-            plan = (
-                TariffPlan.objects.filter(is_active=True, is_recommended=True).first()
-                or SubscriptionLimitService.get_current_plan(request.user)
-            )
-        if not plan:
-            return Response({"detail": "Тарифный план не найден."}, status=404)
-
         if not code_str:
             return Response({"detail": "Укажите промокод.", "code": "PROMO_EMPTY"}, status=400)
 
         try:
-            calc = calculate_subscription_price(
-                request.user,
-                plan,
-                billing_period=billing_period,
-                promo_code=code_str,
-                validate_promo=True,
-            )
+            PromoCodeService.validate(request.user, code_str, plan_slug=None)
         except PromoCodeError as exc:
             return Response(exc.to_dict(), status=400)
 
+        plans = [
+            p
+            for p in TariffPlan.objects.filter(is_active=True, is_public=True).order_by(
+                "sort_order", "id"
+            )
+            if not _plan_is_free(p) and getattr(p, "cta_type", "") != TariffPlan.CtaType.CONTACT
+        ]
+        if not plans:
+            fallback = None
+            if plan_slug:
+                fallback = TariffPlan.objects.filter(slug=plan_slug, is_active=True).first()
+            if fallback is None:
+                fallback = (
+                    TariffPlan.objects.filter(is_active=True, is_recommended=True).first()
+                    or SubscriptionLimitService.get_current_plan(request.user)
+                )
+            plans = [fallback] if fallback else []
+        if not plans:
+            return Response({"detail": "Тарифный план не найден."}, status=404)
+
+        by_plan = {}
+        first_ok = None
+        requested_ok = None
+        for plan in plans:
+            try:
+                calc = calculate_subscription_price(
+                    request.user,
+                    plan,
+                    billing_period=billing_period,
+                    promo_code=code_str,
+                    validate_promo=True,
+                )
+            except PromoCodeError as exc:
+                if exc.code in self._PER_PLAN_SKIP:
+                    by_plan[plan.slug] = {
+                        "valid": False,
+                        "code": exc.code,
+                        "message": exc.message,
+                    }
+                    continue
+                return Response(exc.to_dict(), status=400)
+            payload = {"valid": True, **price_payload(calc)}
+            by_plan[plan.slug] = payload
+            if first_ok is None:
+                first_ok = payload
+            if plan_slug and plan.slug == plan_slug:
+                requested_ok = payload
+
+        if first_ok is None:
+            return Response(
+                {
+                    "valid": False,
+                    "code": "PROMO_NOT_APPLICABLE",
+                    "message": "Промокод не действует для доступных тарифов.",
+                },
+                status=400,
+            )
+
+        primary = requested_ok or first_ok
         payload = {
             "valid": True,
             "code": code_str,
             "billing_period": billing_period,
-            "plan_slug": plan.slug,
-            **price_payload(calc),
+            **primary,
+            "by_plan": by_plan,
         }
-        if calc.get("message"):
-            payload["message"] = calc["message"]
+        if calc_message := primary.get("message"):
+            payload["message"] = calc_message
         return Response(payload)
 
 

@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { TEACHERS_TELEGRAM_URL } from "../config/teacherLinks";
+import { buildPlanHighlights, formatStorageLabel } from "../utils/planHighlights";
 import "./pricing.css";
 
 const FAQ = [
@@ -39,66 +40,16 @@ function formatPrice(value) {
 }
 
 function PlanFeatures({ plan }) {
-  const l = plan.limits || {};
-  const f = plan.features || {};
-
-  let rows = [];
-  let caveat = null;
-
-  if (plan.slug === "start") {
-    rows = [
-      l.students != null && `до ${l.students} учеников`,
-      "домашние задания и проверка",
-      l.variants_monthly != null && `${l.variants_monthly} вариантов в месяц`,
-      l.workbooks_monthly != null && `${l.workbooks_monthly} рабочих тетрадей в месяц`,
-      "бесплатные материалы",
-    ].filter(Boolean);
-    caveat = "Без расписания, журнала и видеозанятий.";
-  } else if (plan.slug === "teacher") {
-    rows = [
-      l.students != null && `до ${l.students} активных учеников`,
-      "расписание и журнал",
-      "видеозанятия прямо на платформе",
-      "ДЗ и проверка",
-      l.variants_monthly != null && `${l.variants_monthly} вариантов в месяц`,
-      l.workbooks_monthly != null && `${l.workbooks_monthly} рабочих тетрадей`,
-      "расширенная библиотека",
-    ].filter(Boolean);
-  } else if (plan.slug === "pro") {
-    rows = [
-      l.students != null && `до ${l.students} активных учеников`,
-      "расписание, журнал и видеозанятия",
-      l.variants_monthly == null ? "генератор вариантов без лимита" : `${l.variants_monthly} вариантов в месяц`,
-      l.workbooks_monthly == null ? "рабочие тетради без лимита" : `${l.workbooks_monthly} тетрадей в месяц`,
-      l.interactives == null ? "интерактивы без лимита" : `${l.interactives} интерактивов в месяц`,
-      "полная основная библиотека",
-      f.simulators && "симуляторы",
-    ].filter(Boolean);
-  } else if (plan.slug === "premium") {
-    rows = [
-      l.students != null && `до ${l.students} активных учеников`,
-      "группы без лимита",
-      "полная библиотека и Premium-материалы",
-      "симуляторы и межпредметные проекты",
-      "генератор и тетради без лимита",
-      f.priority_support && "приоритетная поддержка",
-    ].filter(Boolean);
-  } else {
-    rows = [
-      l.students != null && `До ${l.students} учеников`,
-      l.groups != null && `До ${l.groups} групп`,
-      f.multi_teacher && "Несколько учителей",
-      f.team_roles && "Роли в команде",
-      f.priority_support && "Приоритетная поддержка",
-    ].filter(Boolean);
-  }
+  const rows = buildPlanHighlights(plan);
+  const caveat = plan.slug === "start" ? "Без расписания, журнала и видеозанятий." : null;
 
   return (
     <>
       <ul className="pricing-card__list">
-        {rows.map((row) => (
-          <li key={row}>{row}</li>
-        ))}
+        {rows.map((row) => {
+          const text = typeof row === "string" ? row : row.text;
+          return <li key={text}>{text}</li>;
+        })}
       </ul>
       {caveat ? <p className="pricing-card__caveat">{caveat}</p> : null}
     </>
@@ -334,6 +285,12 @@ export default function PricingPage() {
                 ))}
               </tr>
               <tr>
+                <td>Хранилище</td>
+                {plans.map((p) => (
+                  <td key={p.slug}>{formatStorageLabel(p.limits?.storage_mb) || "—"}</td>
+                ))}
+              </tr>
+              <tr>
                 <td>Генератор вариантов</td>
                 {plans.map((p) => (
                   <td key={p.slug}>
@@ -387,13 +344,12 @@ export default function PricingPage() {
                 })}
               </tr>
               <tr>
-                <td>Хранилище</td>
+                <td>Уведомления</td>
                 {plans.map((p) => {
-                  const mb = p.limits?.storage_mb;
+                  const f = p.features || {};
                   let label = "—";
-                  if (mb != null) {
-                    label = mb >= 1024 ? `${Math.round(mb / 1024)} ГБ` : `${mb} МБ`;
-                  }
+                  if (f.advanced_notifications) label = "Расширенные";
+                  else if (f.basic_notifications) label = "Базовые";
                   return <td key={p.slug}>{label}</td>;
                 })}
               </tr>

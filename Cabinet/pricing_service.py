@@ -310,6 +310,18 @@ def calculate_subscription_price(
     elif applied_source == "promo":
         message = f"Применён промокод {applied_promo_code}."
 
+    if bonus_days:
+        mod10 = bonus_days % 10
+        mod100 = bonus_days % 100
+        if mod10 == 1 and mod100 != 11:
+            days_word = "день"
+        elif 2 <= mod10 <= 4 and not (12 <= mod100 <= 14):
+            days_word = "дня"
+        else:
+            days_word = "дней"
+        bonus_bit = f"+{bonus_days} {days_word} к подписке"
+        message = f"{message.rstrip('.')} · {bonus_bit}." if message else f"{bonus_bit}."
+
     return {
         "base_price": base_price,
         "billing_period": billing_period,
@@ -382,4 +394,5 @@ def price_payload(calc: dict) -> dict:
         "renewal_price": s(calc.get("renewal_price") or calc["base_price"]),
         "pricing_duration": calc.get("pricing_duration"),
         "promotion_request_ignored": bool(calc.get("promotion_request_ignored")),
+        "stacked_promo": bool(calc.get("stacked_promo")),
     }

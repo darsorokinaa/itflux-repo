@@ -231,7 +231,19 @@ class SubscriptionAccessTests(TestCase):
         self.assertTrue(any(p["slug"] == "premium" for p in data["plans"]))
         for plan in data["plans"]:
             self.assertNotIn("ai_requests", plan.get("limits", {}))
+            self.assertIn("storage_mb", plan.get("limits", {}))
+            self.assertIn("interactives", plan.get("limits", {}))
         self.assertIn("anonymous", data)
+
+    def test_cabinet_plans_include_ai_and_storage(self):
+        client = Client()
+        client.force_login(self.user)
+        res = client.get("/api/cabinet/subscription/plans/")
+        self.assertEqual(res.status_code, 200)
+        for plan in res.json()["plans"]:
+            limits = plan.get("limits", {})
+            self.assertIn("storage_mb", limits)
+            self.assertIn("ai_requests", limits)
 
 
 @override_settings(DEBUG=True, PAYMENT_PROVIDER="mock")

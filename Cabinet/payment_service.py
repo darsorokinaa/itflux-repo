@@ -840,22 +840,27 @@ class PaymentProviderService:
         bonus_days = 0
         meta = payment.metadata if isinstance(payment.metadata, dict) else {}
         pricing = meta.get("pricing") if isinstance(meta.get("pricing"), dict) else {}
+        promo_source = meta.get("applied_discount_source")
+        stacked_promo = bool(pricing.get("stacked_promo"))
+        apply_promo_period = bool(payment.promo_code_id) and (
+            promo_source == "promo" or stacked_promo
+        )
 
-        if payment.promo_code_id and meta.get("applied_discount_source") == "promo":
+        if apply_promo_period:
             promo = payment.promo_code
             if promo.discount_type == PromoCode.DiscountType.FREE_MONTHS:
                 months = max(months, int(promo.discount_value or 0) or months)
             elif promo.discount_type == PromoCode.DiscountType.BONUS_DAYS:
                 bonus_days = int(promo.discount_value or 0)
             bonus_days += int(getattr(promo, "bonus_days", 0) or 0)
-        elif pricing.get("extra_free_months"):
+        if pricing.get("extra_free_months"):
             extra = int(pricing.get("extra_free_months") or 0)
             if extra:
-                if meta.get("applied_discount_source") == "promotion":
+                if promo_source == "promotion" and not stacked_promo:
                     months = extra
                 else:
                     months = max(months, extra)
-        if pricing.get("bonus_days") and meta.get("applied_discount_source") == "promo":
+        if pricing.get("bonus_days") and apply_promo_period:
             bonus_days = max(bonus_days, int(pricing.get("bonus_days") or 0))
 
         was_active = bool(sub.expires_at and sub.expires_at > now and sub.is_valid())

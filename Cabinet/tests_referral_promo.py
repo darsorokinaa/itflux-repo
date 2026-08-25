@@ -6,6 +6,7 @@ from decimal import Decimal
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from Cabinet.models import (
     Payment,
@@ -48,7 +49,12 @@ def _plan(slug, name, price, rank=1):
 
 def _teacher(username, email=None):
     user = User.objects.create_user(username, email or f"{username}@test.ru", "pass")
-    Profile.objects.filter(user=user).update(role=Profile.Role.TEACHER)
+    profile = Profile.objects.get(user=user)
+    profile.role = Profile.Role.TEACHER
+    profile.account_active = True
+    profile.account_blocked = False
+    profile.save()
+    user.profile = profile
     TeacherSubscription.objects.update_or_create(
         teacher=user,
         defaults={
@@ -456,6 +462,81 @@ class PromoCodeTests(TestCase):
             ).count(),
             1,
         )
+
+    def test_percent_promo_keeps_bonus_days(self):
+        PromoCode.objects.create(
+            code="1SEPTEMBER",
+            discount_type=PromoCode.DiscountType.PERCENT,
+            discount_value=Decimal("30"),
+            bonus_days=14,
+            is_active=True,
+        )
+        calc = calculate_subscription_price(
+            self.user, self.pro, "month", promo_code="1SEPTEMBER"
+        )
+        self.assertEqual(calc["final_price"], Decimal("2093.00"))
+        self.assertEqual(calc["bonus_days"], 14)
+        self.assertIn("14", calc["message"] or "")
+
+    def test_apply_promo_api_prices_all_paid_plans(self):
+        profile = Profile.objects.get(user=self.user)
+        profile.role = Profile.Role.TEACHER
+        profile.account_active = True
+        profile.account_blocked = False
+        profile.save()
+        _plan("premium", "Премиум", 3990, 3)
+        PromoCode.objects.create(
+            code="1SEPTEMBER",
+            discount_type=PromoCode.DiscountType.PERCENT,
+            discount_value=Decimal("30"),
+            bonus_days=14,
+            is_active=True,
+        )
+        client = APIClient()
+        client.force_login(self.user)
+        response = client.post(
+            "/api/cabinet/subscription/apply-promo/",
+            {"code": "1SEPTEMBER", "plan_slug": "pro", "billing_period": "month"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertTrue(data["valid"])
+        self.assertEqual(data["bonus_days"], 14)
+        by_plan = data["by_plan"]
+        self.assertEqual(by_plan["teacher"]["final_amount"], "1393.00")
+        self.assertEqual(by_plan["pro"]["final_amount"], "2093.00")
+        self.assertEqual(by_plan["premium"]["final_amount"], "2793.00")
+        self.assertEqual(by_plan["teacher"]["bonus_days"], 14)
+        self.assertEqual(by_plan["premium"]["bonus_days"], 14)
+        self.assertNotIn("start", by_plan)
+
+    def test_apply_promo_api_skips_inapplicable_plan(self):
+        profile = Profile.objects.get(user=self.user)
+        profile.role = Profile.Role.TEACHER
+        profile.account_active = True
+        profile.account_blocked = False
+        profile.save()
+        promo = PromoCode.objects.create(
+            code="TEACHER30",
+            discount_type=PromoCode.DiscountType.PERCENT,
+            discount_value=Decimal("30"),
+            bonus_days=7,
+            is_active=True,
+        )
+        promo.applicable_plans.add(self.teacher_plan)
+        client = APIClient()
+        client.force_login(self.user)
+        response = client.post(
+            "/api/cabinet/subscription/apply-promo/",
+            {"code": "TEACHER30", "billing_period": "month"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertTrue(data["by_plan"]["teacher"]["valid"])
+        self.assertFalse(data["by_plan"]["pro"]["valid"])
+        self.assertEqual(data["by_plan"]["pro"]["code"], "PROMO_NOT_APPLICABLE")
 
 
 @override_settings(PAYMENTS_ENABLED=True, DEBUG=True, PAYMENT_PROVIDER="mock")

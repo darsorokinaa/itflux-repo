@@ -14,6 +14,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { validatePromoCode } from "../../utils/cabinetAuth";
+import { formatStorageLabel } from "../../utils/planHighlights";
 
 function formatRub(value) {
   const n = Number(value);
@@ -21,29 +22,50 @@ function formatRub(value) {
   return `${Math.round(n).toLocaleString("ru-RU")} ₽`;
 }
 
+function resolvePlanPromo(promoDiscount, planSlug) {
+  if (!promoDiscount?.valid) return null;
+  const entry = promoDiscount.by_plan?.[planSlug];
+  if (entry) {
+    if (entry.valid === false) return null;
+    return { ...promoDiscount, ...entry, valid: true };
+  }
+  if (promoDiscount.plan_slug === planSlug) return promoDiscount;
+  return null;
+}
+
 function PlanCard({ plan, isCurrent, onSelect, promoDiscount }) {
   const l = plan.limits || {};
+  const storage = formatStorageLabel(l.storage_mb);
   const summary = [
     l.students != null ? `${l.students} учеников` : null,
-    l.groups != null ? `${l.groups} групп` : null,
+    l.groups != null ? `${l.groups} групп` : l.groups === null ? "группы без лимита" : null,
+    storage ? `${storage} хранилища` : null,
     l.ai_requests != null ? `${l.ai_requests} ИИ` : null,
   ].filter(Boolean).join(" · ");
 
   const offer = plan.promotion?.can_redeem ? plan.promotion : null;
-  const promoApplies =
-    Boolean(promoDiscount?.valid) &&
-    promoDiscount.plan_slug === plan.slug &&
-    promoDiscount.final_amount != null;
+  const planPromo = resolvePlanPromo(promoDiscount, plan.slug);
+  const bonusDays = Number(planPromo?.bonus_days || 0);
+  const promoFinal = planPromo?.final_amount != null ? Number(planPromo.final_amount) : null;
+  const basePrice = Number(plan.price_month);
+  const hasPromoPriceCut =
+    Boolean(planPromo) && promoFinal != null && Number.isFinite(promoFinal) && promoFinal + 0.005 < basePrice;
+  const promoApplies = Boolean(planPromo) && (hasPromoPriceCut || bonusDays > 0);
   let price =
     Number(plan.price_month) === 0
       ? "Бесплатно"
       : `${Number(plan.price_month).toLocaleString("ru-RU")} ₽/мес`;
   let priceNote = summary;
-  if (promoApplies) {
-    price = `${formatRub(promoDiscount.final_amount)} сейчас`;
-    priceNote = promoDiscount.renewal_price
-      ? `далее ${formatRub(promoDiscount.renewal_price)}/мес`
-      : "с учётом скидки";
+  if (hasPromoPriceCut) {
+    price = `${formatRub(planPromo.final_amount)} сейчас`;
+    priceNote = [
+      planPromo.renewal_price ? `далее ${formatRub(planPromo.renewal_price)}/мес` : "с учётом скидки",
+      bonusDays > 0 ? `+${bonusDays} дн.` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  } else if (promoApplies && bonusDays > 0) {
+    priceNote = `${summary ? `${summary} · ` : ""}+${bonusDays} дн. к подписке`;
   } else if (offer?.benefit_type === "free_period") {
     price = `${offer.free_months} мес. бесплатно`;
     priceNote = offer.pricing?.renewal
@@ -64,12 +86,12 @@ function PlanCard({ plan, isCurrent, onSelect, promoDiscount }) {
       <div className="cum-plan-name">{plan.name}</div>
       <div className="cum-plan-price">{price}</div>
       <div className="cum-plan-summary">
-        {promoApplies && promoDiscount.base_price ? (
-          <s>{formatRub(promoDiscount.base_price)}</s>
+        {promoApplies && planPromo.base_price && hasPromoPriceCut ? (
+          <s>{formatRub(planPromo.base_price)}</s>
         ) : offer?.pricing?.original && offer.benefit_type !== "free_period" ? (
           <s>{formatRub(offer.pricing.original)}</s>
         ) : null}
-        {((promoApplies && promoDiscount.base_price) ||
+        {((promoApplies && planPromo.base_price && hasPromoPriceCut) ||
           (offer?.pricing?.original && offer.benefit_type !== "free_period")) &&
         priceNote
           ? " · "
@@ -115,11 +137,12 @@ export default function CompactUpgradeModal({
     setPromoLoading(true);
     setPromoState(null);
     try {
-      const data = await validatePromoCode(code, recommendedSlug);
+      const data = await validatePromoCode(code);
+      const bonus = Number(data.bonus_days || 0);
       setPromoState({
         valid: true,
         ...data,
-        message: "Промокод применён",
+        message: bonus > 0 ? `Промокод применён · +${bonus} дн.` : "Промокод применён",
       });
     } catch (err) {
       setPromoState({ valid: false, message: err.data?.message || "Промокод не найден" });
