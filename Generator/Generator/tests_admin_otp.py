@@ -67,3 +67,14 @@ class RestrictedOTPAdminSiteTests(TestCase):
     def test_login_form_allows_whitelisted_staff(self):
         user = User.objects.create_user("admin_dasha", password="pass12345", is_staff=True)
         RestrictedOTPAdminAuthenticationForm().confirm_login_allowed(user)
+
+    @override_settings(ADMIN_OTP_ALLOWED_USERNAMES=frozenset({"admin_dasha", "darsorokinaa"}))
+    def test_confirmed_totp_allows_staff_outside_allowlist(self):
+        from django_otp.plugins.otp_totp.models import TOTPDevice
+
+        user = User.objects.create_user("new_admin", password="pass12345", is_staff=True)
+        TOTPDevice.objects.create(user=user, name="admin", confirmed=True)
+        RestrictedOTPAdminAuthenticationForm().confirm_login_allowed(user)
+        request = self.factory.get("/admin/")
+        request.user = _attach_otp(user, verified=True)
+        self.assertTrue(self.site.has_permission(request))

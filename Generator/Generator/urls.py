@@ -12,6 +12,7 @@ from Cabinet.views import api_teacher_application, api_teacher_community_feedbac
 
 # MFA для /admin/ (TOTP). Включение: ADMIN_OTP_REQUIRED=true или prod DEBUG=False.
 # Доп. ограничение: ADMIN_OTP_ALLOWED_USERNAMES (по умолчанию admin_dasha, darsorokinaa).
+# Пользователь с confirmed TOTP (setup_admin_totp) тоже проходит, даже вне списка.
 if getattr(settings, "ADMIN_OTP_REQUIRED", False):
     from Generator.admin_otp import RestrictedOTPAdminSite
 

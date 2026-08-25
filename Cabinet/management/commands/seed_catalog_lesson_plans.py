@@ -4,6 +4,8 @@ python manage.py seed_catalog_lesson_plans --key math-oge
 python manage.py seed_catalog_lesson_plans --key phys-oge
 python manage.py seed_catalog_lesson_plans --key inf-oge
 python manage.py seed_catalog_lesson_plans --key rus-oge
+python manage.py seed_catalog_lesson_plans --key math-ege
+python manage.py seed_catalog_lesson_plans --key inf-ege
 
 Создаёт или обновляет публичные шаблоны в «Готовых планах».
 Повторный запуск безопасен: дубли не создаются, темы синхронизируются по порядку.
@@ -23,7 +25,7 @@ class Command(BaseCommand):
             action="append",
             dest="keys",
             default=[],
-            help="Ключ плана (можно несколько). Сейчас доступны: math-oge, phys-oge, inf-oge, rus-oge",
+            help="Ключ плана (можно несколько). Сейчас доступны: math-oge, math-ege, phys-oge, inf-oge, inf-ege, rus-oge",
         )
 
     def handle(self, *args, **options):

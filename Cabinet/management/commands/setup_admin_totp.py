@@ -87,8 +87,11 @@ class Command(BaseCommand):
         if allowed is not None and username.strip().lower() not in allowed:
             self.stdout.write(
                 self.style.WARNING(
-                    f"OTP-вход в /admin/ сейчас разрешён только: {', '.join(sorted(allowed))}. "
-                    f"{username} устройство получит, но войти не сможет, пока ограничение не снимут."
+                    f"Username {username!r} нет в ADMIN_OTP_ALLOWED_USERNAMES "
+                    f"({', '.join(sorted(allowed))}). После создания TOTP вход будет "
+                    "разрешён по confirmed-устройству. Чтобы не зависеть от этого, "
+                    "добавьте имя в /etc/itflux/itflux.env и перезапустите itflux:\n"
+                    f"  ADMIN_OTP_ALLOWED_USERNAMES={','.join(sorted(allowed))},{username}"
                 )
             )
 

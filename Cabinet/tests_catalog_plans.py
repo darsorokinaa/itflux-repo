@@ -2,14 +2,18 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from Cabinet.catalog_plans import (
+    INF_EGE_PLAN,
     INF_OGE_PLAN,
+    MATH_EGE_PLAN,
     MATH_OGE_PLAN,
     PHYS_OGE_PLAN,
     RUS_OGE_PLAN,
     sync_all_catalog_plans,
     sync_catalog_plan,
 )
+from Cabinet.catalog_plans.inf_ege import ITEMS as INF_EGE_ITEMS
 from Cabinet.catalog_plans.inf_oge import ITEMS as INF_ITEMS
+from Cabinet.catalog_plans.math_ege import ITEMS as MATH_EGE_ITEMS
 from Cabinet.catalog_plans.math_oge import ITEMS as MATH_ITEMS
 from Cabinet.catalog_plans.phys_oge import ITEMS as PHYS_ITEMS
 from Cabinet.catalog_plans.rus_oge import ITEMS as RUS_ITEMS
@@ -56,11 +60,18 @@ class CatalogMathOgeSeedTests(TestCase):
         teacher.profile.role = Profile.Role.TEACHER
         teacher.profile.save(update_fields=["role"])
         results = sync_all_catalog_plans()
-        self.assertEqual(len(results), 4)
+        self.assertEqual(len(results), 6)
         titles_synced = {plan.title for plan, _ in results}
         self.assertEqual(
             titles_synced,
-            {"Математика — ОГЭ", "Физика — ОГЭ", "Информатика — ОГЭ", "Русский язык — ОГЭ"},
+            {
+                "Математика — ОГЭ",
+                "Математика — ЕГЭ (профиль)",
+                "Физика — ОГЭ",
+                "Информатика — ОГЭ",
+                "Информатика — ЕГЭ",
+                "Русский язык — ОГЭ",
+            },
         )
         plan = next(item for item, _ in results if item.title == "Математика — ОГЭ")
 
@@ -73,6 +84,8 @@ class CatalogMathOgeSeedTests(TestCase):
         self.assertIn("Физика — ОГЭ", titles)
         self.assertIn("Информатика — ОГЭ", titles)
         self.assertIn("Русский язык — ОГЭ", titles)
+        self.assertIn("Математика — ЕГЭ (профиль)", titles)
+        self.assertIn("Информатика — ЕГЭ", titles)
         row = next(item for item in catalog.data if item["title"] == "Математика — ОГЭ")
         self.assertTrue(row["is_public"])
         self.assertEqual(row["lessons_count"], 54)
@@ -88,6 +101,16 @@ class CatalogMathOgeSeedTests(TestCase):
         self.assertTrue(rus_row["is_public"])
         self.assertEqual(rus_row["lessons_count"], 28)
         self.assertEqual(rus_row["subject"], "rus")
+        ege_row = next(item for item in catalog.data if item["title"] == "Математика — ЕГЭ (профиль)")
+        self.assertTrue(ege_row["is_public"])
+        self.assertEqual(ege_row["lessons_count"], 42)
+        self.assertEqual(ege_row["subject"], "math")
+        self.assertEqual(ege_row["direction"], "ege")
+        inf_ege_row = next(item for item in catalog.data if item["title"] == "Информатика — ЕГЭ")
+        self.assertTrue(inf_ege_row["is_public"])
+        self.assertEqual(inf_ege_row["lessons_count"], 42)
+        self.assertEqual(inf_ege_row["subject"], "inf")
+        self.assertEqual(inf_ege_row["direction"], "ege")
 
         mine = client.get("/api/cabinet/lesson-plans/?mine=true")
         mine_ids = {item["id"] for item in mine.data}
@@ -202,3 +225,82 @@ class CatalogRusOgeSeedTests(TestCase):
         self.assertEqual(first.pk, second.pk)
         self.assertEqual(LessonPlan.objects.filter(title="Русский язык — ОГЭ", is_public=True).count(), 1)
         self.assertEqual(LessonPlanItem.objects.filter(plan=first).count(), 28)
+
+
+class CatalogMathEgeSeedTests(TestCase):
+    def test_spec_has_42_consecutive_lessons(self):
+        self.assertEqual(len(MATH_EGE_ITEMS), 42)
+        self.assertEqual([item["order"] for item in MATH_EGE_ITEMS], list(range(1, 43)))
+        self.assertEqual(MATH_EGE_PLAN["subject"], "math")
+        self.assertEqual(MATH_EGE_PLAN["direction"], "ege")
+        self.assertEqual(MATH_EGE_ITEMS[20]["task_number"], "13")
+        self.assertEqual(MATH_EGE_ITEMS[37]["topic"], "Числа")
+
+    def test_sync_creates_public_math_ege_plan(self):
+        plan, _created = sync_catalog_plan(MATH_EGE_PLAN)
+        self.assertTrue(plan.is_public)
+        self.assertEqual(plan.status, PlanStatus.PUBLISHED)
+        self.assertEqual(plan.title, "Математика — ЕГЭ (профиль)")
+        self.assertEqual(plan.subject, "math")
+        self.assertEqual(plan.direction, "ege")
+        self.assertEqual(plan.exam_type, "ege")
+        self.assertEqual(plan.grade, "10–11")
+        self.assertEqual(plan.items.count(), 42)
+        self.assertEqual(plan.lessons_count, 42)
+        first = plan.items.get(order=1)
+        self.assertEqual(first.topic, "Старт подготовки")
+        self.assertEqual(first.task_number, "1–19")
+        finance = plan.items.get(order=26)
+        self.assertEqual(finance.topic, "Финансовая математика")
+        last = plan.items.get(order=42)
+        self.assertEqual(last.topic, "Работа над ошибками")
+
+    def test_sync_is_idempotent(self):
+        first, _ = sync_catalog_plan(MATH_EGE_PLAN)
+        second, created_second = sync_catalog_plan(MATH_EGE_PLAN)
+        self.assertFalse(created_second)
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(
+            LessonPlan.objects.filter(title="Математика — ЕГЭ (профиль)", is_public=True).count(),
+            1,
+        )
+        self.assertEqual(LessonPlanItem.objects.filter(plan=first).count(), 42)
+
+
+class CatalogInfEgeSeedTests(TestCase):
+    def test_spec_has_42_consecutive_lessons(self):
+        self.assertEqual(len(INF_EGE_ITEMS), 42)
+        self.assertEqual([item["order"] for item in INF_EGE_ITEMS], list(range(1, 43)))
+        self.assertEqual(INF_EGE_PLAN["subject"], "inf")
+        self.assertEqual(INF_EGE_PLAN["direction"], "ege")
+        self.assertEqual(INF_EGE_ITEMS[11]["task_number"], "12")
+        self.assertEqual(INF_EGE_ITEMS[11]["subtopic"], "Машина Тьюринга: устройство и команды")
+        self.assertEqual(INF_EGE_ITEMS[37]["topic"], "Анализ данных")
+
+    def test_sync_creates_public_inf_ege_plan(self):
+        plan, _created = sync_catalog_plan(INF_EGE_PLAN)
+        self.assertTrue(plan.is_public)
+        self.assertEqual(plan.status, PlanStatus.PUBLISHED)
+        self.assertEqual(plan.title, "Информатика — ЕГЭ")
+        self.assertEqual(plan.subject, "inf")
+        self.assertEqual(plan.direction, "ege")
+        self.assertEqual(plan.exam_type, "ege")
+        self.assertEqual(plan.grade, "10–11")
+        self.assertEqual(plan.items.count(), 42)
+        self.assertEqual(plan.lessons_count, 42)
+        first = plan.items.get(order=1)
+        self.assertEqual(first.topic, "Подготовка к ЕГЭ")
+        self.assertEqual(first.task_number, "1–27")
+        turing = plan.items.get(order=12)
+        self.assertEqual(turing.topic, "Алгоритмические исполнители")
+        last = plan.items.get(order=42)
+        self.assertEqual(last.topic, "Итоговое повторение")
+        self.assertEqual(last.subtopic, "Работа над ошибками")
+
+    def test_sync_is_idempotent(self):
+        first, _ = sync_catalog_plan(INF_EGE_PLAN)
+        second, created_second = sync_catalog_plan(INF_EGE_PLAN)
+        self.assertFalse(created_second)
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(LessonPlan.objects.filter(title="Информатика — ЕГЭ", is_public=True).count(), 1)
+        self.assertEqual(LessonPlanItem.objects.filter(plan=first).count(), 42)

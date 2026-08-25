@@ -312,6 +312,15 @@ REST_FRAMEWORK = {
 }
 
 # CORS / CSRF — см. блок production hardening ниже
+# Если CSRF_TRUSTED_ORIGINS не задан — строим доверенные origins из DJANGO_ALLOWED_HOSTS.
+# Иначе Django 4+ отклоняет POST /admin/login/ (403 CSRF), даже если пользователь staff.
+_csrf_extra = [o.strip() for o in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()]
+if not _csrf_extra:
+    for _h in _hosts_list:
+        if _h and not _h.startswith("."):
+            _csrf_extra.append(f"https://{_h}")
+            _csrf_extra.append(f"http://{_h}")
+
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5000",
     "http://127.0.0.1:5000",
@@ -319,7 +328,7 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:5001",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-]
+] + _csrf_extra
 CORS_ALLOW_CREDENTIALS = True
 
 CSRF_COOKIE_SAMESITE = "Lax"
@@ -356,10 +365,6 @@ elif DEBUG:
 else:
     CORS_ALLOW_ALL_ORIGINS = False
     CORS_ALLOWED_ORIGINS = []
-
-_csrf_extra = [o.strip() for o in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()]
-if _csrf_extra:
-    CSRF_TRUSTED_ORIGINS = CSRF_TRUSTED_ORIGINS + _csrf_extra
 
 # Тело JSON PATCH сцены доски (лимит сцены 15 МБ + обёртка + запас на вложенные поля).
 # Без этого Django по умолчанию рвёт запрос на 2.5 МБ раньше SCENE_TOO_LARGE.
