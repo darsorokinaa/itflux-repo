@@ -1871,8 +1871,15 @@ export default function AllTasksPage() {
                 groups={staffGroups}
                 subtopics={staffSubtopics}
                 taskLists={filterOptions?.task_numbers ?? []}
+                selectedTaskListId={taskListId}
                 selectedGroupId={staffGroupId}
                 selectedSubtopicId={subtopicId}
+                onSelectTaskList={(id) => {
+                  setTaskListId(id);
+                  setSubtopicId("");
+                  setStaffGroupId("");
+                  resetPage();
+                }}
                 onSelectGroup={(id) => {
                   setStaffGroupId(id);
                   setTaskListId("");
@@ -1895,11 +1902,14 @@ export default function AllTasksPage() {
                   setSubtopicId("");
                   resetPage();
                 }}
-                onCreateSubtopic={async (title, taskListPk) => {
-                  const created = await createStaffSubtopic(level, subject, {
-                    title,
-                    task_list_id: taskListPk,
-                  });
+                onCreateSubtopic={async (title, taskListPk, fromTask) => {
+                  const created = await createStaffSubtopic(
+                    level,
+                    subject,
+                    fromTask
+                      ? { task_list_id: taskListPk, from_task: true }
+                      : { title, task_list_id: taskListPk }
+                  );
                   await reloadStaffCatalog({ refreshFilters: true });
                   setStaffGroupId("");
                   if (created.task_list_id != null) {

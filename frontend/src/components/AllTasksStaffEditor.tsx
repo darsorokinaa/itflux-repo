@@ -38,6 +38,7 @@ export type StaffTaskPatch = {
 
 const GROUP_NONE = "";
 const SUBTOPIC_NONE = "";
+const SUBTOPIC_FROM_TASK = "__from_task__";
 
 function getCsrfToken(): string {
   const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
@@ -87,6 +88,7 @@ export async function saveStaffTask(
     create_group?: boolean;
     subtopic_id?: number | null;
     create_subtopic?: string;
+    from_task?: boolean;
   }
 ): Promise<StaffTaskPatch> {
   return staffFetch(`/api/tasks/${taskId}/staff/`, {
@@ -138,7 +140,7 @@ export async function fetchStaffSubtopics(
 export async function createStaffSubtopic(
   level: string,
   subject: string,
-  payload: { title: string; task_list_id: number }
+  payload: { title?: string; task_list_id: number; from_task?: boolean }
 ): Promise<StaffSubtopicOption> {
   return staffFetch(
     `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/staff-subtopics/`,
@@ -186,20 +188,24 @@ type CatalogSidebarProps = {
   groups: StaffGroupOption[];
   subtopics: StaffSubtopicOption[];
   taskLists: StaffTaskListOption[];
+  selectedTaskListId: string;
   selectedGroupId: string;
   selectedSubtopicId: string;
+  onSelectTaskList: (taskListId: string) => void;
   onSelectGroup: (groupId: string) => void;
   onSelectSubtopic: (subtopic: StaffSubtopicOption) => void;
   onCreateGroup: () => Promise<void> | void;
-  onCreateSubtopic: (title: string, taskListId: number) => Promise<void> | void;
+  onCreateSubtopic: (title: string, taskListId: number, fromTask?: boolean) => Promise<void> | void;
 };
 
 export function AllTasksStaffCatalogSidebar({
   groups,
   subtopics,
   taskLists,
+  selectedTaskListId,
   selectedGroupId,
   selectedSubtopicId,
+  onSelectTaskList,
   onSelectGroup,
   onSelectSubtopic,
   onCreateGroup,
@@ -208,9 +214,13 @@ export function AllTasksStaffCatalogSidebar({
   const [groupBusy, setGroupBusy] = useState(false);
   const [groupError, setGroupError] = useState<string | null>(null);
   const [subTitle, setSubTitle] = useState("");
-  const [subListId, setSubListId] = useState("");
+  const [subListId, setSubListId] = useState(selectedTaskListId || "");
   const [subBusy, setSubBusy] = useState(false);
   const [subError, setSubError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (selectedTaskListId) setSubListId(selectedTaskListId);
+  }, [selectedTaskListId]);
 
   const handleCreateGroup = async () => {
     if (groupBusy) return;
@@ -250,8 +260,144 @@ export function AllTasksStaffCatalogSidebar({
     }
   };
 
+  const handleCreateFromTask = async () => {
+    if (subBusy) return;
+    const tlId = Number(subListId);
+    if (!Number.isFinite(tlId) || tlId <= 0) {
+      setSubError("Выберите номер задания");
+      return;
+    }
+    setSubBusy(true);
+    setSubError(null);
+    try {
+      await onCreateSubtopic("", tlId, true);
+    } catch (err) {
+      setSubError(err instanceof Error ? err.message : "Не удалось создать подтему");
+    } finally {
+      setSubBusy(false);
+    }
+  };
+
   return (
-    <aside className="all-tasks-staff-sidebar" aria-label="Группы и подтемы">
+    <aside className="all-tasks-staff-sidebar" aria-label="Темы, подтемы и группы">
+      <section className="all-tasks-staff-sidebar__section">
+        <h2 className="all-tasks-staff-sidebar__title">Темы</h2>
+        <p className="all-tasks-staff-sidebar__hint">
+          Номера заданий (TaskList) этого предмета и уровня.
+        </p>
+        {taskLists.length === 0 ? (
+          <p className="all-tasks-staff-sidebar__empty">Пока нет тем</p>
+        ) : (
+          <ul className="all-tasks-staff-sidebar__list">
+            {taskLists.map((item) => {
+              const id = String(item.task_list_id);
+              const active = selectedTaskListId === id && !selectedSubtopicId && !selectedGroupId;
+              return (
+                <li key={item.task_list_id}>
+                  <button
+                    type="button"
+                    className={`all-tasks-staff-sidebar__item${active ? " is-active" : ""}`}
+                    aria-current={active ? "true" : undefined}
+                    onClick={() => onSelectTaskList(id)}
+                  >
+                    <span className="all-tasks-staff-sidebar__num">№{item.task_number}</span>
+                    <span className="all-tasks-staff-sidebar__name">
+                      {item.task_title || "без названия"}
+                    </span>
+                    <span className="all-tasks-staff-sidebar__count">
+                      {item.task_count}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section className="all-tasks-staff-sidebar__section">
+        <h2 className="all-tasks-staff-sidebar__title">Подтемы</h2>
+        <p className="all-tasks-staff-sidebar__hint">
+          Подтемы из базы. Можно создать свою или добавить само задание как подтему.
+        </p>
+        <form className="all-tasks-staff-sidebar__form" onSubmit={handleCreateSubtopic}>
+          <select
+            className="all-tasks-staff-sidebar__control"
+            value={subListId}
+            disabled={subBusy}
+            onChange={(e) => setSubListId(e.target.value)}
+          >
+            <option value="">Номер задания</option>
+            {taskLists.map((item) => (
+              <option key={item.task_list_id} value={String(item.task_list_id)}>
+                №{item.task_number}
+                {item.task_title ? ` — ${item.task_title}` : ""}
+              </option>
+            ))}
+          </select>
+          <input
+            type="text"
+            className="all-tasks-staff-sidebar__control"
+            value={subTitle}
+            maxLength={255}
+            placeholder="Название подтемы"
+            disabled={subBusy}
+            onChange={(e) => setSubTitle(e.target.value)}
+          />
+          <button
+            type="submit"
+            className="all-tasks-staff-sidebar__add"
+            disabled={subBusy || !subTitle.trim() || !subListId}
+          >
+            {subBusy ? "Создание…" : "Создать подтему"}
+          </button>
+          <button
+            type="button"
+            className="all-tasks-staff-sidebar__add all-tasks-staff-sidebar__add--secondary"
+            disabled={subBusy || !subListId}
+            onClick={handleCreateFromTask}
+          >
+            {subBusy ? "Создание…" : "Добавить задание как подтему"}
+          </button>
+        </form>
+        {subError ? (
+          <p className="all-tasks-staff-sidebar__error" role="alert">
+            {subError}
+          </p>
+        ) : null}
+        {subtopics.length === 0 ? (
+          <p className="all-tasks-staff-sidebar__empty">Пока нет подтем</p>
+        ) : (
+          <ul className="all-tasks-staff-sidebar__list">
+            {subtopics.map((item) => {
+              const id = String(item.id);
+              const active = selectedSubtopicId === id;
+              return (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    className={`all-tasks-staff-sidebar__item${active ? " is-active" : ""}`}
+                    aria-current={active ? "true" : undefined}
+                    onClick={() => onSelectSubtopic(item)}
+                  >
+                    <span className="all-tasks-staff-sidebar__num">
+                      {item.task_number != null ? `№${item.task_number}` : "—"}
+                    </span>
+                    <span className="all-tasks-staff-sidebar__name">
+                      {item.title}
+                      {(item.task_count ?? 0) === 0 ? " · пустая" : ""}
+                    </span>
+                    <span className="all-tasks-staff-sidebar__count">
+                      {item.task_count ?? 0}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
       <section className="all-tasks-staff-sidebar__section">
         <h2 className="all-tasks-staff-sidebar__title">Группы</h2>
         <p className="all-tasks-staff-sidebar__hint">
@@ -292,81 +438,6 @@ export function AllTasksStaffCatalogSidebar({
                     </span>
                     <span className="all-tasks-staff-sidebar__count">
                       {group.member_count}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      <section className="all-tasks-staff-sidebar__section">
-        <h2 className="all-tasks-staff-sidebar__title">Подтемы</h2>
-        <p className="all-tasks-staff-sidebar__hint">
-          Подтемы из базы. Новая создаётся у выбранного номера задания (TaskList).
-        </p>
-        <form className="all-tasks-staff-sidebar__form" onSubmit={handleCreateSubtopic}>
-          <select
-            className="all-tasks-staff-sidebar__control"
-            value={subListId}
-            disabled={subBusy}
-            onChange={(e) => setSubListId(e.target.value)}
-          >
-            <option value="">Номер задания</option>
-            {taskLists.map((item) => (
-              <option key={item.task_list_id} value={String(item.task_list_id)}>
-                №{item.task_number}
-                {item.task_title ? ` — ${item.task_title}` : ""}
-              </option>
-            ))}
-          </select>
-          <input
-            type="text"
-            className="all-tasks-staff-sidebar__control"
-            value={subTitle}
-            maxLength={100}
-            placeholder="Название подтемы"
-            disabled={subBusy}
-            onChange={(e) => setSubTitle(e.target.value)}
-          />
-          <button
-            type="submit"
-            className="all-tasks-staff-sidebar__add"
-            disabled={subBusy || !subTitle.trim() || !subListId}
-          >
-            {subBusy ? "Создание…" : "Создать подтему"}
-          </button>
-        </form>
-        {subError ? (
-          <p className="all-tasks-staff-sidebar__error" role="alert">
-            {subError}
-          </p>
-        ) : null}
-        {subtopics.length === 0 ? (
-          <p className="all-tasks-staff-sidebar__empty">Пока нет подтем</p>
-        ) : (
-          <ul className="all-tasks-staff-sidebar__list">
-            {subtopics.map((item) => {
-              const id = String(item.id);
-              const active = selectedSubtopicId === id;
-              return (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    className={`all-tasks-staff-sidebar__item${active ? " is-active" : ""}`}
-                    aria-current={active ? "true" : undefined}
-                    onClick={() => onSelectSubtopic(item)}
-                  >
-                    <span className="all-tasks-staff-sidebar__num">
-                      {item.task_number != null ? `№${item.task_number}` : "—"}
-                    </span>
-                    <span className="all-tasks-staff-sidebar__name">
-                      {item.title}
-                      {(item.task_count ?? 0) === 0 ? " · пустая" : ""}
-                    </span>
-                    <span className="all-tasks-staff-sidebar__count">
-                      {item.task_count ?? 0}
                     </span>
                   </button>
                 </li>
@@ -464,6 +535,7 @@ export function AllTasksStaffEditor({
           task_list_id: number;
           group_id?: number | null;
           subtopic_id?: number | null;
+          from_task?: boolean;
         } = {
           answer: draftAnswer,
           task_list_id: nextListId,
@@ -481,7 +553,9 @@ export function AllTasksStaffEditor({
             payload.group_id = parsed;
           }
         }
-        if (!draftSubtopic) {
+        if (draftSubtopic === SUBTOPIC_FROM_TASK) {
+          payload.from_task = true;
+        } else if (!draftSubtopic) {
           payload.subtopic_id = null;
         } else {
           const parsed = Number(draftSubtopic);
@@ -524,8 +598,18 @@ export function AllTasksStaffEditor({
     ]
   );
 
+  const selectedList = taskLists.find((item) => String(item.task_list_id) === draftListId);
+  const fromTaskTitle = (
+    (selectedList?.task_title || "").trim() ||
+    (selectedList ? `Задание ${selectedList.task_number}` : "")
+  );
+  const hasFromTaskSubtopic = subtopicsForList.some(
+    (s) => (s.title || "").toLocaleLowerCase("ru") === fromTaskTitle.toLocaleLowerCase("ru")
+  );
   const groupInList = groups.some((g) => String(g.id) === draftGroup);
-  const subtopicInList = subtopicsForList.some((s) => String(s.id) === draftSubtopic);
+  const subtopicInList =
+    draftSubtopic === SUBTOPIC_FROM_TASK ||
+    subtopicsForList.some((s) => String(s.id) === draftSubtopic);
 
   return (
     <form className="all-tasks-staff-editor" onSubmit={handleSave}>
@@ -539,9 +623,11 @@ export function AllTasksStaffEditor({
           onChange={(e) => {
             const next = e.target.value;
             setDraftListId(next);
-            const stillValid = subtopics.some(
-              (s) => String(s.task_list_id) === next && String(s.id) === draftSubtopic
-            );
+            const stillValid =
+              draftSubtopic === SUBTOPIC_FROM_TASK ||
+              subtopics.some(
+                (s) => String(s.task_list_id) === next && String(s.id) === draftSubtopic
+              );
             if (!stillValid) {
               setDraftSubtopic(SUBTOPIC_NONE);
             }
@@ -569,7 +655,12 @@ export function AllTasksStaffEditor({
           }}
         >
           <option value={SUBTOPIC_NONE}>Нет подтемы</option>
-          {draftSubtopic && !subtopicInList ? (
+          {fromTaskTitle && !hasFromTaskSubtopic ? (
+            <option value={SUBTOPIC_FROM_TASK}>
+              Само задание — {fromTaskTitle}
+            </option>
+          ) : null}
+          {draftSubtopic && !subtopicInList && draftSubtopic !== SUBTOPIC_FROM_TASK ? (
             <option value={draftSubtopic}>Подтема {draftSubtopic}</option>
           ) : null}
           {subtopicsForList.map((item) => (

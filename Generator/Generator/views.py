@@ -3474,6 +3474,39 @@ def _find_subtopic_by_title(task_list, title):
     return None
 
 
+_SUBTOPIC_TITLE_MAX_LEN = 255
+
+
+def _truthy_flag(value):
+    return value in (True, 1, "1", "true", "yes")
+
+
+def _subtopic_title_from_task_list(tl):
+    title = (getattr(tl, "task_title", None) or "").strip()
+    if not title:
+        num = getattr(tl, "task_number", None)
+        title = f"Задание {num}" if num is not None else "Задание"
+    return title[:_SUBTOPIC_TITLE_MAX_LEN]
+
+
+def _get_or_create_subtopic(task_list, title):
+    title = (title or "").strip()
+    if not title:
+        return None, False
+    existing = _find_subtopic_by_title(task_list, title)
+    if existing:
+        return existing, False
+    next_order = SubTopic.objects.filter(task_list=task_list).count()
+    try:
+        row = SubTopic.objects.create(task_list=task_list, title=title, order=next_order)
+        return row, True
+    except IntegrityError:
+        existing = _find_subtopic_by_title(task_list, title)
+        if existing:
+            return existing, False
+        raise
+
+
 def _serialize_staff_subtopic(st):
     tl = st.task_list
     task_count = getattr(st, "task_count", None)
@@ -3507,11 +3540,6 @@ def api_staff_subtopics(request, level, subject):
             return JsonResponse({"error": "Неверный формат данных"}, status=400)
         if not isinstance(data, dict):
             return JsonResponse({"error": "Тело запроса должно быть JSON-объектом"}, status=400)
-        title = (str(data.get("title") or "")).strip()
-        if not title:
-            return JsonResponse({"error": "Укажите название подтемы"}, status=400)
-        if len(title) > 100:
-            return JsonResponse({"error": "Название подтемы не длиннее 100 символов"}, status=400)
         try:
             tl_id = int(data.get("task_list_id"))
         except (TypeError, ValueError):
@@ -3521,20 +3549,23 @@ def api_staff_subtopics(request, level, subject):
         ).first()
         if tl is None:
             return JsonResponse({"error": "TaskList не найден для этого предмета"}, status=404)
-        existing = _find_subtopic_by_title(tl, title)
-        if existing:
-            return JsonResponse(_serialize_staff_subtopic(existing), status=200)
-        next_order = SubTopic.objects.filter(task_list=tl).count()
-        try:
-            row = SubTopic.objects.create(task_list=tl, title=title, order=next_order)
-        except IntegrityError:
-            existing = _find_subtopic_by_title(tl, title)
-            if existing:
-                return JsonResponse(_serialize_staff_subtopic(existing), status=200)
-            raise
+        from_task = _truthy_flag(data.get("from_task"))
+        title = (str(data.get("title") or "")).strip()
+        if from_task:
+            title = _subtopic_title_from_task_list(tl)
+        if not title:
+            return JsonResponse({"error": "Укажите название подтемы"}, status=400)
+        if len(title) > _SUBTOPIC_TITLE_MAX_LEN:
+            return JsonResponse(
+                {"error": f"Название подтемы не длиннее {_SUBTOPIC_TITLE_MAX_LEN} символов"},
+                status=400,
+            )
+        row, created = _get_or_create_subtopic(tl, title)
         row = SubTopic.objects.select_related("task_list").get(pk=row.id)
-        row.task_count = 0
-        return JsonResponse(_serialize_staff_subtopic(row), status=201)
+        if created:
+            row.task_count = 0
+            return JsonResponse(_serialize_staff_subtopic(row), status=201)
+        return JsonResponse(_serialize_staff_subtopic(row), status=200)
 
     qs = (
         SubTopic.objects.filter(
@@ -3619,7 +3650,7 @@ def api_task_staff_update(request, task_id):
 
     if not any(
         key in data
-        for key in ("answer", "task_list_id", "group_id", "create_group", "subtopic_id", "create_subtopic")
+        for key in ("answer", "task_list_id", "group_id", "create_group", "subtopic_id", "create_subtopic", "from_task")
     ):
         return JsonResponse({"error": "Нет полей для сохранения"}, status=400)
 
@@ -3658,31 +3689,34 @@ def api_task_staff_update(request, task_id):
         task.task = new_tl
         task.quick_level_id = new_tl.level_id
         update_fields.extend(["task", "quick_level"])
-        if "subtopic_id" not in data and "create_subtopic" not in data and task.subtopic_id:
+        if (
+            "subtopic_id" not in data
+            and "create_subtopic" not in data
+            and not _truthy_flag(data.get("from_task"))
+            and task.subtopic_id
+        ):
             st = SubTopic.objects.filter(pk=task.subtopic_id).only("task_list_id").first()
             if st is None or st.task_list_id != new_tl.id:
                 task.subtopic = None
                 update_fields.append("subtopic")
 
-    if "create_subtopic" in data:
-        title = (str(data.get("create_subtopic") or "")).strip()
-        if not title:
-            return JsonResponse({"error": "Укажите название подтемы"}, status=400)
-        if len(title) > 100:
-            return JsonResponse({"error": "Название подтемы не длиннее 100 символов"}, status=400)
+    if _truthy_flag(data.get("from_task")) or "create_subtopic" in data:
         tl = task.task
         if tl is None:
             return JsonResponse({"error": "Сначала выберите TaskList"}, status=400)
-        existing = _find_subtopic_by_title(tl, title)
-        if existing:
-            task.subtopic = existing
+        if _truthy_flag(data.get("from_task")):
+            title = _subtopic_title_from_task_list(tl)
         else:
-            next_order = SubTopic.objects.filter(task_list=tl).count()
-            task.subtopic = SubTopic.objects.create(
-                task_list=tl,
-                title=title,
-                order=next_order,
+            title = (str(data.get("create_subtopic") or "")).strip()
+        if not title:
+            return JsonResponse({"error": "Укажите название подтемы"}, status=400)
+        if len(title) > _SUBTOPIC_TITLE_MAX_LEN:
+            return JsonResponse(
+                {"error": f"Название подтемы не длиннее {_SUBTOPIC_TITLE_MAX_LEN} символов"},
+                status=400,
             )
+        row, _created = _get_or_create_subtopic(tl, title)
+        task.subtopic = row
         update_fields.append("subtopic")
     elif "subtopic_id" in data:
         raw_st = data.get("subtopic_id")

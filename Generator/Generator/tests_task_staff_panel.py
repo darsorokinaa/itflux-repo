@@ -257,6 +257,40 @@ class TaskStaffPanelApiTests(TestCase):
         resp = self.client.get("/api/oge/math/staff-subtopics/")
         self.assertEqual(resp.status_code, 403)
 
+    def test_staff_creates_subtopic_from_task_list_title(self):
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            "/api/oge/math/staff-subtopics/",
+            data={"from_task": True, "task_list_id": self.tl1.id},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        payload = resp.json()
+        self.assertEqual(payload["title"], "Планиметрия")
+        self.assertEqual(payload["task_list_id"], self.tl1.id)
+        self.assertTrue(
+            SubTopic.objects.filter(pk=payload["id"], task_list=self.tl1, title="Планиметрия").exists()
+        )
+
+        again = self.client.post(
+            "/api/oge/math/staff-subtopics/",
+            data={"from_task": True, "task_list_id": self.tl1.id},
+            content_type="application/json",
+        )
+        self.assertEqual(again.status_code, 200)
+        self.assertEqual(again.json()["id"], payload["id"])
+
+        patch = self.client.patch(
+            self._url(),
+            data={"from_task": True},
+            content_type="application/json",
+        )
+        self.assertEqual(patch.status_code, 200, patch.content)
+        self.assertEqual(patch.json()["subtopic_id"], payload["id"])
+        self.assertEqual(patch.json()["subtopic"], "Планиметрия")
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.subtopic_id, payload["id"])
+
     def test_group_number_conflict(self):
         group = TaskGroup.objects.create(subject=self.subject, level=self.level)
         other = Task.objects.create(

@@ -425,7 +425,7 @@ class SubTopic(models.Model):
         on_delete=CASCADE,
         related_name='subtopics'
     )
-    title = models.CharField(max_length=100)
+    title = models.CharField(max_length=255)
     order = models.IntegerField(default=0)
 
     class Meta:

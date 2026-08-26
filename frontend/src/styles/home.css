@@ -1281,6 +1281,12 @@ a.home-updates__card {
   cursor: not-allowed;
 }
 
+.all-tasks-staff-sidebar__add--secondary {
+  background: #fff;
+  color: #2b52f5;
+  border: 1px solid #2b52f5;
+}
+
 .all-tasks-staff-sidebar__error {
   margin: 0 0 8px;
   font-size: 0.8125rem;
