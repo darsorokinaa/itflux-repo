@@ -265,21 +265,41 @@ function subjectsFromCatalog(catalog: CatalogLevel[], level: string): SubjectDef
   return row.subjects.map((s) => buildSubjectDefinition(s.id, { title: s.title, comingSoon: false }));
 }
 
+const ALL_TASKS_FILTERS_STORAGE_KEY = "itflux:all-tasks-filters:v1";
+const ALL_TASKS_FILTER_PARAM_KEYS = [
+  "level",
+  "subject",
+  "grade",
+  "advanced",
+  "task",
+  "subtopic",
+  "fipi",
+  "author",
+  "page",
+] as const;
+
+function searchParamsHaveFilters(sp: URLSearchParams): boolean {
+  return ALL_TASKS_FILTER_PARAM_KEYS.some((key) => {
+    const value = sp.get(key);
+    return value != null && value !== "";
+  });
+}
+
 function readFiltersFromSearchParams(
   sp: URLSearchParams,
   catalog: CatalogLevel[],
 ): AllTasksFilters {
   const levelRaw = (sp.get("level") || "").toLowerCase();
-  const level = catalog.some((o) => o.id === levelRaw)
-    ? levelRaw
-    : (catalog[0]?.id || "oge");
+  const catalogLoaded = catalog.length > 0;
+  const level = catalogLoaded
+    ? (catalog.some((o) => o.id === levelRaw) ? levelRaw : (catalog[0]?.id || "oge"))
+    : (levelRaw || "oge");
 
   const subjects = subjectsFromCatalog(catalog, level);
-  const subjectRaw = sp.get("subject");
-  const subject =
-    subjects.find((s) => s.id === subjectRaw)?.id ??
-    subjects[0]?.id ??
-    "inf";
+  const subjectRaw = (sp.get("subject") || "") as SubjectId;
+  const subject = catalogLoaded
+    ? (subjects.find((s) => s.id === subjectRaw)?.id ?? subjects[0]?.id ?? "inf")
+    : (subjectRaw || "inf");
 
   const grades = (GRADES_BY_LEVEL as Record<string, number[]>).vpr || DEFAULT_VPR_GRADES;
   const gradeRaw = Number(sp.get("grade"));
@@ -317,6 +337,47 @@ function writeFiltersToSearchParams(f: AllTasksFilters): URLSearchParams {
   return p;
 }
 
+function loadStoredFilterParams(): URLSearchParams | null {
+  try {
+    const raw = localStorage.getItem(ALL_TASKS_FILTERS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<AllTasksFilters>;
+    if (!parsed || typeof parsed !== "object") return null;
+    return writeFiltersToSearchParams({
+      level: String(parsed.level || ""),
+      subject: (parsed.subject || "inf") as SubjectId,
+      vprGrade: Number(parsed.vprGrade) || 7,
+      vprAdvanced: Boolean(parsed.vprAdvanced),
+      taskListId: String(parsed.taskListId || ""),
+      subtopicId: String(parsed.subtopicId || ""),
+      onlyFipi: Boolean(parsed.onlyFipi),
+      author: String(parsed.author || ""),
+      page: Math.max(1, Number(parsed.page) || 1),
+    });
+  } catch {
+    return null;
+  }
+}
+
+function persistAllTasksFilters(f: AllTasksFilters) {
+  try {
+    localStorage.setItem(ALL_TASKS_FILTERS_STORAGE_KEY, JSON.stringify(f));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+function resolveFiltersFromLocation(
+  sp: URLSearchParams,
+  catalog: CatalogLevel[],
+): AllTasksFilters {
+  if (!searchParamsHaveFilters(sp)) {
+    const stored = loadStoredFilterParams();
+    if (stored) return readFiltersFromSearchParams(stored, catalog);
+  }
+  return readFiltersFromSearchParams(sp, catalog);
+}
+
 export default function AllTasksPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [catalog, setCatalog] = useState<CatalogLevel[]>([]);
@@ -340,7 +401,7 @@ export default function AllTasksPage() {
   }, []);
 
   const initialFilters = useMemo(
-    () => readFiltersFromSearchParams(searchParams, []),
+    () => resolveFiltersFromLocation(searchParams, []),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- только при первом монтировании
     []
   );
@@ -522,7 +583,8 @@ export default function AllTasksPage() {
   }, [filterOptions, taskListId]);
 
   useEffect(() => {
-    const next = writeFiltersToSearchParams({
+    if (!catalogReady) return;
+    const payload: AllTasksFilters = {
       level,
       subject,
       vprGrade,
@@ -532,15 +594,17 @@ export default function AllTasksPage() {
       onlyFipi: usesFipiFilter ? onlyFipi : false,
       author: usesFipiFilter ? "" : author,
       page,
-    });
+    };
+    persistAllTasksFilters(payload);
+    const next = writeFiltersToSearchParams(payload);
     setSearchParams((prev) => (prev.toString() === next.toString() ? prev : next), {
       replace: true,
     });
-  }, [level, subject, vprGrade, vprAdvanced, taskListId, subtopicId, onlyFipi, author, page, usesFipiFilter, setSearchParams]);
+  }, [catalogReady, level, subject, vprGrade, vprAdvanced, taskListId, subtopicId, onlyFipi, author, page, usesFipiFilter, setSearchParams]);
 
   useEffect(() => {
     if (!catalogReady || !catalog.length) return;
-    const next = readFiltersFromSearchParams(searchParams, catalog);
+    const next = resolveFiltersFromLocation(searchParams, catalog);
     if (!catalog.some((row) => row.id === level)) {
       setLevel(next.level);
       setSubject(next.subject);
@@ -572,12 +636,12 @@ export default function AllTasksPage() {
   }, [catalog, catalogReady, level, subject, vprGrade, searchParams]);
 
   useEffect(() => {
-    if (!filterOptions || !taskListId) return;
+    if (filtersLoading || !filterOptions || !taskListId) return;
     const ok = filterOptions.task_numbers.some(
       (t) => String(t.task_list_id) === taskListId
     );
     if (!ok) setTaskListId("");
-  }, [filterOptions, taskListId]);
+  }, [filterOptions, taskListId, filtersLoading]);
 
   useEffect(() => {
     let cancelled = false;
