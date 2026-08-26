@@ -216,6 +216,21 @@ urlpatterns = [
         views.api_task_tags_set,
         name="api_task_tags_set",
     ),
+    path(
+        "api/tasks/<int:task_id>/staff/",
+        views.api_task_staff_update,
+        name="api_task_staff_update",
+    ),
+    path(
+        "api/<str:level>/<str:subject>/staff-groups/",
+        views.api_staff_groups,
+        name="api_staff_groups",
+    ),
+    path(
+        "api/<str:level>/<str:subject>/staff-subtopics/",
+        views.api_staff_subtopics,
+        name="api_staff_subtopics",
+    ),
     path("api/<str:level>/<str:subject>/variant-from-ids/", views.api_variant_from_ids, name="api_variant_from_ids"),
     path("api/<str:level>/<str:subject>/variant/", views.api_generate_variant),
     path("api/<str:level>/<str:subject>/variant/<int:variant_id>/", views.api_variant_detail),

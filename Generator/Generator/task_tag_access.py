@@ -10,3 +10,10 @@ def can_edit_task_tags(user) -> bool:
         return False
     allowed = getattr(settings, "TASK_TAG_EDITOR_USERNAMES", ())
     return username in allowed
+
+
+def can_edit_bank_tasks(user) -> bool:
+    """Staff и суперпользователь: мини-админка на «Все задачи» без захода в /admin/."""
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))

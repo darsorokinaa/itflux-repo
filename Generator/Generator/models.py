@@ -137,7 +137,7 @@ class TaskList(models.Model):
     level = models.ForeignKey(Level, on_delete=CASCADE)
     part = models.ForeignKey(Part, on_delete=CASCADE, blank=True, null=True, default=1)
     task_number = models.IntegerField()
-    task_title = models.CharField(max_length=100)
+    task_title = models.CharField(max_length=255)
     max_score = models.IntegerField(default=1)
 
     SUBDIVISION_CHOICES = [

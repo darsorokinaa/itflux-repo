@@ -17,6 +17,11 @@ describe("inferExamTaskPart", () => {
     expect(inferExamTaskPart({ part: 9, part_title: "Часть 1", number: 1 }, "ege", "inf")).toBe(1);
     expect(inferExamTaskPart({ part: 9, part_title: "Часть 2", number: 20 }, "ege", "inf")).toBe(2);
   });
+
+  it("maps ege chemistry 1–28 to part 1", () => {
+    expect(inferExamTaskPart({ number: 28 }, "ege", "chem")).toBe(1);
+    expect(inferExamTaskPart({ number: 29 }, "ege", "chem")).toBe(2);
+  });
 });
 
 describe("formatExamPartLabel", () => {

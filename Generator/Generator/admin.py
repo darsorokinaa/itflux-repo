@@ -300,14 +300,14 @@ class TaskAdmin(SearchByIdMixin, admin.ModelAdmin):
     show_full_result_count = False
     raw_id_fields = ("task",)
     autocomplete_fields = ("subtopic",)
+    readonly_fields = ("created_by",)
     fieldsets = (
         (None, {"fields": ("task", "subtopic", "is_active", "task_template", "answer", "max_score", "files", "author", "added_at", "created_by")}),
         ("ВПР", {"fields": ("vpr_class", "vpr_basic", "vpr_advanced", "truth_table_enabled")}),
     )
 
     def save_model(self, request, obj, form, change):
-        if not change:
-            obj.created_by = username_for_created_by(request)
+        obj.created_by = username_for_created_by(request)
         if form is not None:
             if not change and obj.task_id and obj.quick_level_id is None:
                 tl = TaskList.objects.filter(pk=obj.task_id).only("level_id").first()

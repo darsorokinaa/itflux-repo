@@ -22,7 +22,7 @@ import jwt as pyjwt
 
 from django.conf import settings as django_settings
 from django.core.signing import BadSignature, Signer
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Case, Count, IntegerField, Min, Prefetch, Q, Value, When
 from django.http import (
     FileResponse,
@@ -49,7 +49,7 @@ except Exception:
     _WEASYPRINT_OK = False
 
 from .error_report_utils import notify_error_report_email
-from .task_tag_access import can_edit_task_tags
+from .task_tag_access import can_edit_bank_tasks, can_edit_task_tags
 from .models import (
     Announcement,
     Criteria,
@@ -2711,10 +2711,11 @@ def api_task_bank(request, level, subject):
     total = qs.count()
     offset = (page - 1) * per_page
     # Дефолтный порядок в банке задач: сначала недавно добавленные.
-    tasks_qs = qs.order_by('-added_at', '-id')[offset:offset + per_page]
+    tasks_list = list(qs.order_by('-added_at', '-id')[offset:offset + per_page])
+    group_by_task = _group_ids_for_tasks([t.id for t in tasks_list])
 
     result = []
-    for task in tasks_qs:
+    for task in tasks_list:
         tl = task.task
 
         file_url = None
@@ -2755,6 +2756,7 @@ def api_task_bank(request, level, subject):
             'task_number': tl.task_number if tl else None,
             'task_title': tl.task_title if tl else '',
             'subtopic': task.subtopic.title if task.subtopic else None,
+            'subtopic_id': task.subtopic_id,
             'max_score': tl.max_score if tl else 1,
             'part_id': tl.part_id if tl else None,
             'part_title': (tl.part.part_title if tl and tl.part else None),
@@ -2772,6 +2774,7 @@ def api_task_bank(request, level, subject):
             'author': (task.author or '').strip() or None,
             'added_at': task.added_at.strftime('%d.%m.%Y') if task.added_at else None,
             'tags': _serialize_task_tags(task),
+            'group_id': group_by_task.get(task.id),
         })
 
     return JsonResponse({
@@ -2924,6 +2927,21 @@ class TaskListView(APIView):
 # ── end LK Variant Builder ────────────────────────────────────────────────────
 
 
+def _group_ids_for_tasks(task_ids):
+    """task_id → первый TaskGroup.id; задание может быть в нескольких группах."""
+    if not task_ids:
+        return {}
+    mapping = {}
+    rows = (
+        TaskGroupMember.objects.filter(task_id__in=task_ids)
+        .order_by("task_group_id")
+        .values_list("task_id", "task_group_id")
+    )
+    for task_id, group_id in rows:
+        mapping.setdefault(task_id, group_id)
+    return mapping
+
+
 def _bank_task_file_url(request, task):
     """Абсолютный URL вложения задачи (как в api_task_bank)."""
     if not getattr(task, 'files', None):
@@ -3007,6 +3025,7 @@ def _serialize_bank_group_member(request, member, *, raw_html=False):
         'task_number': member.task_number,
         'task_title': tl.task_title if tl else '',
         'subtopic': t.subtopic.title if t and t.subtopic else None,
+        'subtopic_id': t.subtopic_id if t else None,
         'max_score': tl.max_score if tl else 1,
         'part_id': tl.part_id if tl else None,
         'part_title': (part.part_title if part else None),
@@ -3024,6 +3043,7 @@ def _serialize_bank_group_member(request, member, *, raw_html=False):
         'author': (t.author or '').strip() or None if t else None,
         'added_at': t.added_at.strftime('%d.%m.%Y') if t and t.added_at else None,
         'tags': _serialize_task_tags(t),
+        'group_id': member.task_group_id,
     }
 
 
@@ -3327,6 +3347,420 @@ def api_task_tags_set(request, task_id):
         ).get(id=task.id)
     )
     return JsonResponse({"id": task.id, "tags": _serialize_task_tags(task)})
+
+
+_STAFF_ANSWER_MAX_LEN = 50000
+
+
+def _task_staff_forbidden():
+    return JsonResponse({"error": "Недостаточно прав"}, status=403)
+
+
+def _require_bank_task_editor(request):
+    if can_edit_bank_tasks(getattr(request, "user", None)):
+        return None
+    return _task_staff_forbidden()
+
+
+def _serialize_staff_task(task):
+    tl = task.task
+    group_id = (
+        TaskGroupMember.objects.filter(task_id=task.id)
+        .order_by("task_group_id")
+        .values_list("task_group_id", flat=True)
+        .first()
+    )
+    st = task.subtopic
+    return {
+        "id": task.id,
+        "answer": str(task.answer or ""),
+        "task_list_id": task.task_id,
+        "task_number": tl.task_number if tl else None,
+        "task_title": tl.task_title if tl else "",
+        "group_id": group_id,
+        "subtopic_id": task.subtopic_id,
+        "subtopic": st.title if st else None,
+        "created_by": task.created_by or "",
+    }
+
+
+def _serialize_staff_group(group, members=None):
+    if members is None:
+        members = list(group.taskgroupmember_set.all())
+    nums = sorted({int(m.task_number) for m in members if m.task_number is not None})
+    subtopic = None
+    if getattr(group, "subtopic", None) is not None:
+        subtopic = group.subtopic.title
+    return {
+        "id": group.id,
+        "task_numbers": nums,
+        "member_count": len(members),
+        "subtopic": subtopic,
+    }
+
+
+def _create_task_group_for_task(task):
+    """Новая TaskGroup того же предмета/уровня, задание — первый член."""
+    tl = task.task
+    if tl is None:
+        return JsonResponse({"error": "У задания нет номера (TaskList)"}, status=400)
+    TaskGroupMember.objects.filter(task=task).delete()
+    group = TaskGroup.objects.create(
+        subject_id=tl.subject_id,
+        level_id=tl.level_id,
+        subtopic_id=task.subtopic_id,
+    )
+    TaskGroupMember.objects.create(
+        task_group=group,
+        task=task,
+        task_number=tl.task_number,
+    )
+    return None
+
+
+@require_http_methods(["GET", "POST"])
+def api_staff_groups(request, level, subject):
+    """GET/POST /api/<level>/<subject>/staff-groups/ — группы предмета/уровня; POST создаёт пустую."""
+    forbidden = _require_bank_task_editor(request)
+    if forbidden:
+        return forbidden
+
+    subject_instance = get_subject_for_api(subject)
+    level_instance = get_object_or_404(Level, level=level)
+
+    if request.method == "POST":
+        group = TaskGroup.objects.create(
+            subject=subject_instance,
+            level=level_instance,
+        )
+        return JsonResponse(_serialize_staff_group(group), status=201)
+
+    qs = (
+        TaskGroup.objects.filter(subject=subject_instance, level=level_instance)
+        .select_related("subtopic")
+        .prefetch_related("taskgroupmember_set")
+        .order_by("-id")
+    )
+    include_id = (request.GET.get("include_id") or "").strip()
+    include_pk = int(include_id) if include_id.isdigit() else None
+
+    limit = 400
+    groups = list(qs[:limit])
+    seen = {g.id for g in groups}
+    if include_pk and include_pk not in seen:
+        extra = (
+            TaskGroup.objects.filter(
+                pk=include_pk, subject=subject_instance, level=level_instance
+            )
+            .select_related("subtopic")
+            .prefetch_related("taskgroupmember_set")
+            .first()
+        )
+        if extra:
+            groups.append(extra)
+
+    return JsonResponse({
+        "groups": [_serialize_staff_group(g) for g in groups],
+    })
+
+
+def _find_subtopic_by_title(task_list, title):
+    needle = (title or "").casefold()
+    if not needle:
+        return None
+    for row in SubTopic.objects.filter(task_list=task_list):
+        if (row.title or "").casefold() == needle:
+            return row
+    return None
+
+
+def _serialize_staff_subtopic(st):
+    tl = st.task_list
+    task_count = getattr(st, "task_count", None)
+    if task_count is None:
+        task_count = Task.objects.filter(subtopic_id=st.id).count()
+    return {
+        "id": st.id,
+        "title": st.title,
+        "task_list_id": st.task_list_id,
+        "task_number": tl.task_number if tl else None,
+        "task_title": (tl.task_title if tl else "") or "",
+        "order": st.order,
+        "task_count": int(task_count or 0),
+    }
+
+
+@require_http_methods(["GET", "POST"])
+def api_staff_subtopics(request, level, subject):
+    """GET/POST /api/<level>/<subject>/staff-subtopics/ — подтемы из БД; POST создаёт пустую."""
+    forbidden = _require_bank_task_editor(request)
+    if forbidden:
+        return forbidden
+
+    subject_instance = get_subject_for_api(subject)
+    level_instance = get_object_or_404(Level, level=level)
+
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body or b"{}")
+        except (json.JSONDecodeError, TypeError):
+            return JsonResponse({"error": "Неверный формат данных"}, status=400)
+        if not isinstance(data, dict):
+            return JsonResponse({"error": "Тело запроса должно быть JSON-объектом"}, status=400)
+        title = (str(data.get("title") or "")).strip()
+        if not title:
+            return JsonResponse({"error": "Укажите название подтемы"}, status=400)
+        if len(title) > 100:
+            return JsonResponse({"error": "Название подтемы не длиннее 100 символов"}, status=400)
+        try:
+            tl_id = int(data.get("task_list_id"))
+        except (TypeError, ValueError):
+            return JsonResponse({"error": "Выберите номер задания (TaskList)"}, status=400)
+        tl = TaskList.objects.filter(
+            pk=tl_id, subject=subject_instance, level=level_instance
+        ).first()
+        if tl is None:
+            return JsonResponse({"error": "TaskList не найден для этого предмета"}, status=404)
+        existing = _find_subtopic_by_title(tl, title)
+        if existing:
+            return JsonResponse(_serialize_staff_subtopic(existing), status=200)
+        next_order = SubTopic.objects.filter(task_list=tl).count()
+        try:
+            row = SubTopic.objects.create(task_list=tl, title=title, order=next_order)
+        except IntegrityError:
+            existing = _find_subtopic_by_title(tl, title)
+            if existing:
+                return JsonResponse(_serialize_staff_subtopic(existing), status=200)
+            raise
+        row = SubTopic.objects.select_related("task_list").get(pk=row.id)
+        row.task_count = 0
+        return JsonResponse(_serialize_staff_subtopic(row), status=201)
+
+    qs = (
+        SubTopic.objects.filter(
+            task_list__subject=subject_instance,
+            task_list__level=level_instance,
+        )
+        .select_related("task_list")
+        .annotate(task_count=Count("task"))
+        .order_by("task_list__task_number", "order", "title", "id")
+    )
+    tl_filter = (request.GET.get("task_list_id") or "").strip()
+    if tl_filter.isdigit():
+        qs = qs.filter(task_list_id=int(tl_filter))
+    return JsonResponse({
+        "subtopics": [_serialize_staff_subtopic(st) for st in qs],
+    })
+
+
+def _assign_task_group(task, group_id):
+    """None — убрать из всех групп; иначе перенести в указанную группу."""
+    TaskGroupMember.objects.filter(task=task).delete()
+    if group_id is None:
+        return None
+    group = TaskGroup.objects.filter(pk=group_id).select_related("subject", "level").first()
+    if group is None:
+        return JsonResponse({"error": "Группа не найдена"}, status=404)
+    tl = task.task
+    if tl is None:
+        return JsonResponse({"error": "У задания нет номера (TaskList)"}, status=400)
+    if group.subject_id != tl.subject_id or group.level_id != tl.level_id:
+        return JsonResponse(
+            {"error": "Группа относится к другому предмету или уровню"},
+            status=400,
+        )
+    conflict = (
+        TaskGroupMember.objects.filter(task_group=group, task_number=tl.task_number)
+        .exclude(task_id=task.id)
+        .exists()
+    )
+    if conflict:
+        return JsonResponse(
+            {"error": f"В группе {group.id} уже есть задание №{tl.task_number}"},
+            status=400,
+        )
+    try:
+        TaskGroupMember.objects.create(
+            task_group=group,
+            task=task,
+            task_number=tl.task_number,
+        )
+    except IntegrityError:
+        return JsonResponse(
+            {"error": f"В группе {group.id} уже есть задание №{tl.task_number}"},
+            status=400,
+        )
+    return None
+
+
+def _stamp_staff_editor(request, task):
+    """Пишет логин редактора в Task.created_by. True, если поле изменилось."""
+    login = username_for_created_by(request)
+    if not login or (task.created_by or "") == login:
+        return False
+    task.created_by = login
+    return True
+
+
+@require_http_methods(["PATCH"])
+def api_task_staff_update(request, task_id):
+    """PATCH /api/tasks/<id>/staff/ — ответ, TaskList, подтема и группа (staff и суперпользователь)."""
+    forbidden = _require_bank_task_editor(request)
+    if forbidden:
+        return forbidden
+
+    task = get_object_or_404(Task.objects.select_related("task", "subtopic"), id=task_id)
+    try:
+        data = json.loads(request.body or b"{}")
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"error": "Неверный формат данных"}, status=400)
+    if not isinstance(data, dict):
+        return JsonResponse({"error": "Тело запроса должно быть JSON-объектом"}, status=400)
+
+    if not any(
+        key in data
+        for key in ("answer", "task_list_id", "group_id", "create_group", "subtopic_id", "create_subtopic")
+    ):
+        return JsonResponse({"error": "Нет полей для сохранения"}, status=400)
+
+    update_fields = []
+    group_changed = False
+
+    if "answer" in data:
+        answer = data.get("answer")
+        if answer is None:
+            answer = ""
+        if not isinstance(answer, str):
+            return JsonResponse({"error": "Ответ должен быть строкой"}, status=400)
+        if len(answer) > _STAFF_ANSWER_MAX_LEN:
+            return JsonResponse(
+                {"error": f"Ответ не длиннее {_STAFF_ANSWER_MAX_LEN} символов"},
+                status=400,
+            )
+        task.answer = answer
+        update_fields.append("answer")
+
+    if "task_list_id" in data:
+        raw_tl = data.get("task_list_id")
+        try:
+            tl_id = int(raw_tl)
+        except (TypeError, ValueError):
+            return JsonResponse({"error": "Некорректный task_list_id"}, status=400)
+        new_tl = TaskList.objects.filter(pk=tl_id).first()
+        if new_tl is None:
+            return JsonResponse({"error": "Номер задания не найден"}, status=404)
+        old_tl = task.task
+        if old_tl and (new_tl.subject_id != old_tl.subject_id or new_tl.level_id != old_tl.level_id):
+            return JsonResponse(
+                {"error": "TaskList другого предмета или уровня"},
+                status=400,
+            )
+        task.task = new_tl
+        task.quick_level_id = new_tl.level_id
+        update_fields.extend(["task", "quick_level"])
+        if "subtopic_id" not in data and "create_subtopic" not in data and task.subtopic_id:
+            st = SubTopic.objects.filter(pk=task.subtopic_id).only("task_list_id").first()
+            if st is None or st.task_list_id != new_tl.id:
+                task.subtopic = None
+                update_fields.append("subtopic")
+
+    if "create_subtopic" in data:
+        title = (str(data.get("create_subtopic") or "")).strip()
+        if not title:
+            return JsonResponse({"error": "Укажите название подтемы"}, status=400)
+        if len(title) > 100:
+            return JsonResponse({"error": "Название подтемы не длиннее 100 символов"}, status=400)
+        tl = task.task
+        if tl is None:
+            return JsonResponse({"error": "Сначала выберите TaskList"}, status=400)
+        existing = _find_subtopic_by_title(tl, title)
+        if existing:
+            task.subtopic = existing
+        else:
+            next_order = SubTopic.objects.filter(task_list=tl).count()
+            task.subtopic = SubTopic.objects.create(
+                task_list=tl,
+                title=title,
+                order=next_order,
+            )
+        update_fields.append("subtopic")
+    elif "subtopic_id" in data:
+        raw_st = data.get("subtopic_id")
+        if raw_st in (None, "", False):
+            task.subtopic = None
+            update_fields.append("subtopic")
+        else:
+            try:
+                st_id = int(raw_st)
+            except (TypeError, ValueError):
+                return JsonResponse({"error": "Некорректный subtopic_id"}, status=400)
+            st = SubTopic.objects.filter(pk=st_id).first()
+            if st is None:
+                return JsonResponse({"error": "Подтема не найдена"}, status=404)
+            if task.task_id and st.task_list_id != task.task_id:
+                return JsonResponse(
+                    {"error": "Подтема относится к другому номеру задания"},
+                    status=400,
+                )
+            task.subtopic = st
+            update_fields.append("subtopic")
+
+    if update_fields:
+        if _stamp_staff_editor(request, task):
+            update_fields.append("created_by")
+        seen = []
+        for name in update_fields:
+            if name not in seen:
+                seen.append(name)
+        task.save(update_fields=seen)
+
+    if "task_list_id" in data and "group_id" not in data and task.task_id:
+        new_number = task.task.task_number
+        members = list(TaskGroupMember.objects.filter(task=task))
+        for member in members:
+            conflict = (
+                TaskGroupMember.objects.filter(
+                    task_group_id=member.task_group_id,
+                    task_number=new_number,
+                )
+                .exclude(pk=member.pk)
+                .exists()
+            )
+            if conflict:
+                return JsonResponse(
+                    {"error": f"В группе {member.task_group_id} уже есть задание №{new_number}"},
+                    status=400,
+                )
+            if member.task_number != new_number:
+                member.task_number = new_number
+                member.save(update_fields=["task_number"])
+
+    if data.get("create_group") in (True, 1, "1", "true", "yes"):
+        err = _create_task_group_for_task(task)
+        if err is not None:
+            return err
+        group_changed = True
+    elif "group_id" in data:
+        raw_group = data.get("group_id")
+        if raw_group in (None, "", False):
+            group_id = None
+        else:
+            try:
+                group_id = int(raw_group)
+            except (TypeError, ValueError):
+                return JsonResponse({"error": "Некорректный group_id"}, status=400)
+            if group_id <= 0:
+                group_id = None
+        err = _assign_task_group(task, group_id)
+        if err is not None:
+            return err
+        group_changed = True
+
+    if group_changed and _stamp_staff_editor(request, task):
+        task.save(update_fields=["created_by"])
+
+    task = Task.objects.select_related("task", "subtopic").get(pk=task.id)
+    return JsonResponse(_serialize_staff_task(task))
 
 
 @require_http_methods(["GET"])

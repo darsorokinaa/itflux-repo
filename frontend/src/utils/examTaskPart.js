@@ -31,6 +31,7 @@ export function inferExamTaskPart(task, level, subject) {
   if (lv === "ege" && isMathLikeSubject(sub)) return n <= 11 ? 1 : 2;
   if (lv === "oge" && sub === "inf") return n <= 15 ? 1 : 2;
   if (lv === "ege" && sub === "inf") return n <= 27 ? 1 : 2;
+  if (lv === "ege" && sub === "chem") return n <= 28 ? 1 : 2;
   return n <= 19 ? 1 : 2;
 }
 

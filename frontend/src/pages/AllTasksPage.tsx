@@ -39,6 +39,18 @@ import {
   useCanEditTaskTags,
   type TaskTag,
 } from "../components/AllTasksTagEditor";
+import {
+  AllTasksStaffCatalogSidebar,
+  AllTasksStaffEditor,
+  createStaffGroup,
+  createStaffSubtopic,
+  fetchStaffGroups,
+  fetchStaffSubtopics,
+  useCanEditBankTasks,
+  type StaffGroupOption,
+  type StaffSubtopicOption,
+  type StaffTaskPatch,
+} from "../components/AllTasksStaffEditor";
 
 // TEMP: кнопка «Код» временно скрыта
 // const InformaticsCodeEditorEntry = lazy(
@@ -49,7 +61,9 @@ type BankTask = {
   id: number;
   task_number: number | null;
   task_title: string;
+  task_list_id?: number | null;
   subtopic: string | null;
+  subtopic_id?: number | null;
   subdivision?: string | null;
   text: string;
   answer?: string | null;
@@ -58,6 +72,7 @@ type BankTask = {
   part_title?: string | null;
   author?: string | null;
   tags?: TaskTag[];
+  group_id?: number | null;
 };
 
 type BankResponse = {
@@ -456,7 +471,12 @@ export default function AllTasksPage() {
   const [pickDraft, setPickDraft] = useState<WorkbookTask[]>([]);
   const [pickMode, setPickMode] = useState<"workbook" | "variant" | null>(null);
   const canEditTaskTags = useCanEditTaskTags();
+  const canEditBankTasks = useCanEditBankTasks();
   const [tagCatalog, setTagCatalog] = useState<TaskTag[]>([]);
+  const [staffGroups, setStaffGroups] = useState<StaffGroupOption[]>([]);
+  const [staffSubtopics, setStaffSubtopics] = useState<StaffSubtopicOption[]>([]);
+  const [staffGroupId, setStaffGroupId] = useState("");
+  const [filtersTick, setFiltersTick] = useState(0);
 
   useEffect(() => {
     if (!canEditTaskTags) {
@@ -475,6 +495,46 @@ export default function AllTasksPage() {
       cancelled = true;
     };
   }, [canEditTaskTags]);
+
+  useEffect(() => {
+    if (!canEditBankTasks) {
+      setStaffGroups([]);
+      setStaffSubtopics([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.all([
+      fetchStaffGroups(level, subject),
+      fetchStaffSubtopics(level, subject),
+    ])
+      .then(([groups, subtopics]) => {
+        if (cancelled) return;
+        setStaffGroups(groups);
+        setStaffSubtopics(subtopics);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setStaffGroups([]);
+        setStaffSubtopics([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canEditBankTasks, level, subject]);
+
+  const reloadStaffCatalog = useCallback((opts?: { refreshFilters?: boolean }) => {
+    if (!canEditBankTasks) return Promise.resolve();
+    return Promise.all([
+      fetchStaffGroups(level, subject),
+      fetchStaffSubtopics(level, subject),
+    ]).then(([groups, subtopics]) => {
+      setStaffGroups(groups);
+      setStaffSubtopics(subtopics);
+      if (opts?.refreshFilters) {
+        setFiltersTick((n) => n + 1);
+      }
+    });
+  }, [canEditBankTasks, level, subject]);
 
   const handleTaskTagsChange = useCallback((taskId: number, tags: TaskTag[]) => {
     setData((prev) =>
@@ -497,6 +557,37 @@ export default function AllTasksPage() {
         : prev
     );
   }, []);
+
+  const handleStaffTaskSaved = useCallback((patch: StaffTaskPatch) => {
+    const apply = (t: BankTask): BankTask =>
+      t.id === patch.id
+        ? {
+            ...t,
+            answer: patch.answer,
+            task_list_id: patch.task_list_id,
+            task_number: patch.task_number,
+            task_title: patch.task_title,
+            group_id: patch.group_id,
+            subtopic_id: patch.subtopic_id,
+            subtopic: patch.subtopic,
+          }
+        : t;
+    setData((prev) =>
+      prev ? { ...prev, tasks: prev.tasks.map(apply) } : prev
+    );
+    setGroupData((prev) =>
+      prev
+        ? {
+            ...prev,
+            instances: prev.instances.map((inst) => ({
+              ...inst,
+              tasks: inst.tasks.map(apply),
+            })),
+          }
+        : prev
+    );
+    void reloadStaffCatalog({ refreshFilters: true });
+  }, [reloadStaffCatalog]);
 
   const handleTagCatalogChange = useCallback((tags: TaskTag[]) => {
     setTagCatalog(tags);
@@ -570,17 +661,29 @@ export default function AllTasksPage() {
   const useProgTaskSheet = level === "school" && subject === "prog";
 
   const subtopicsForTask = useMemo(() => {
-    if (!filterOptions) return [];
+    if (!filterOptions && !(canEditBankTasks && taskListId)) return [];
     if (!taskListId) {
-      return filterOptions.subtopics.filter(
+      return (filterOptions?.subtopics ?? []).filter(
         (s) => s.task_list_id == null && (String(s.id) === "none" || String(s.id) === "no-answer")
       );
     }
     const tlId = Number(taskListId);
-    return filterOptions.subtopics.filter(
+    const fromFilters = (filterOptions?.subtopics ?? []).filter(
       (s) => s.task_list_id === tlId && s.id != null
     );
-  }, [filterOptions, taskListId]);
+    if (!canEditBankTasks) return fromFilters;
+    const seen = new Set(fromFilters.map((s) => String(s.id)));
+    const extras: SubtopicOption[] = staffSubtopics
+      .filter((s) => s.task_list_id === tlId && !seen.has(String(s.id)))
+      .map((s) => ({
+        id: s.id,
+        title: s.title,
+        task_list_id: s.task_list_id,
+        task_number: s.task_number ?? null,
+        task_count: s.task_count ?? 0,
+      }));
+    return extras.length ? [...fromFilters, ...extras] : fromFilters;
+  }, [canEditBankTasks, filterOptions, staffSubtopics, taskListId]);
 
   useEffect(() => {
     if (!catalogReady) return;
@@ -686,13 +789,14 @@ export default function AllTasksPage() {
     return () => {
       cancelled = true;
     };
-  }, [level, subject, vprGrade, vprAdvanced, taskListId]);
+  }, [level, subject, vprGrade, vprAdvanced, taskListId, filtersTick]);
 
   useEffect(() => {
     if (!subtopicId) return;
-    const ok = subtopicsForTask.some((s) => String(s.id) === subtopicId);
-    if (!ok) setSubtopicId("");
-  }, [subtopicsForTask, subtopicId]);
+    const inFilters = subtopicsForTask.some((s) => String(s.id) === subtopicId);
+    const inStaff = staffSubtopics.some((s) => String(s.id) === subtopicId);
+    if (!inFilters && !inStaff) setSubtopicId("");
+  }, [staffSubtopics, subtopicsForTask, subtopicId]);
 
   useEffect(() => {
     if (!author || usesFipiFilter) return;
@@ -703,7 +807,7 @@ export default function AllTasksPage() {
   }, [filterOptions, author, usesFipiFilter]);
 
   const fetchTasks = useCallback(async () => {
-    if (!taskListId && !subtopicId) {
+    if (!staffGroupId && !taskListId && !subtopicId) {
       setData(null);
       setGroupData(null);
       setBankUsesGroups(false);
@@ -720,7 +824,31 @@ export default function AllTasksPage() {
     const authorParam = !usesFipiFilter && author ? author : undefined;
 
     try {
-      if (groupDescriptor) {
+      if (staffGroupId) {
+        const qs = buildQuery(level, vprGrade, vprAdvanced, {
+          page: String(page),
+          per_page: String(PER_PAGE),
+          only_fipi: onlyFipiParam,
+          author: authorParam,
+          group_id: staffGroupId,
+        });
+        const res = await fetch(
+          `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/group-instances/${qs}`,
+          { credentials: "same-origin" }
+        );
+        if (!res.ok) {
+          throw new Error(`Ошибка загрузки (${res.status})`);
+        }
+        const json: BankGroupResponse = await res.json();
+        setGroupData(json);
+        setData(null);
+        setBankUsesGroups(true);
+        setActiveGroupDescriptor({
+          linkedKey: staffGroupId,
+          taskNumbers: [],
+          label: `Группа ${staffGroupId}`,
+        });
+      } else if (groupDescriptor) {
         const qs = buildQuery(level, vprGrade, vprAdvanced, {
           page: String(page),
           per_page: String(PER_PAGE),
@@ -784,6 +912,7 @@ export default function AllTasksPage() {
     vprAdvanced,
     taskListId,
     subtopicId,
+    staffGroupId,
     groupByTaskListId,
   ]);
 
@@ -793,11 +922,12 @@ export default function AllTasksPage() {
 
   useEffect(() => {
     setOpenAnswers({});
-  }, [level, subject, vprGrade, vprAdvanced, taskListId, subtopicId, onlyFipi, author, page]);
+  }, [level, subject, vprGrade, vprAdvanced, taskListId, subtopicId, staffGroupId, onlyFipi, author, page]);
 
   useEffect(() => {
     setPickMode(null);
     setPickDraft([]);
+    setStaffGroupId("");
   }, [level, subject]);
 
   const displayEntries = useMemo((): BankDisplayEntry[] => {
@@ -982,6 +1112,8 @@ export default function AllTasksPage() {
   const showCodeSidebar = false;
   // const showCodeSidebar = isInformaticsCodeEditorContext(level, subject);
   const showTagsSidebar = canEditTaskTags;
+  const showStaffSidebar = canEditBankTasks;
+  const showSidebars = showTagsSidebar || showStaffSidebar;
 
   // const getCodeEditorTaskSources = useCallback((): TaskFileSource[] => {
   //   return (data?.tasks ?? [])
@@ -1000,7 +1132,7 @@ export default function AllTasksPage() {
         className={[
           "digital-flow-page__wrap",
           showCodeSidebar ? "digital-flow-page__wrap--with-code-sidebar" : "",
-          showTagsSidebar ? "digital-flow-page__wrap--with-tags-sidebar" : "",
+          showSidebars ? "digital-flow-page__wrap--with-tags-sidebar" : "",
         ]
           .filter(Boolean)
           .join(" ")}
@@ -1124,6 +1256,7 @@ export default function AllTasksPage() {
                 onChange={(e) => {
                   setTaskListId(e.target.value);
                   setSubtopicId("");
+                  setStaffGroupId("");
                   resetPage();
                 }}
               >
@@ -1283,23 +1416,28 @@ export default function AllTasksPage() {
             ) : null}
           </div>
 
-          {!taskListId && !subtopicId && !loading && !error ? (
+          {!staffGroupId && !taskListId && !subtopicId && !loading && !error ? (
             <div className="all-tasks-empty all-tasks-empty--pick" role="status">
               <p className="all-tasks-empty__title">Выберите задание</p>
               <p className="all-tasks-empty__lead">
-                Укажите номер в фильтре «Задание», чтобы показать задачи из банка.
+                {canEditBankTasks
+                  ? "Выберите группу или подтему справа либо номер в фильтре «Задание»."
+                  : "Укажите номер в фильтре «Задание», чтобы показать задачи из банка."}
               </p>
             </div>
           ) : null}
 
-          {taskListId && !loading && !error && displayEntries.length === 0 ? (
+          {(taskListId || staffGroupId || subtopicId) && !loading && !error && displayEntries.length === 0 ? (
             <p className="all-tasks-empty" role="status">
-              По выбранным фильтрам заданий нет. Смените задание, подтему
-              {usesFipiFilter
-                ? " или снимите «Только ФИПИ»."
-                : author
-                  ? " или сбросьте фильтр «Автор»."
-                  : "."}
+              {staffGroupId && !taskListId
+                ? "В этой группе пока нет заданий. Добавьте их в карточке задания."
+                : `По выбранным фильтрам заданий нет. Смените задание, подтему${
+                    usesFipiFilter
+                      ? " или снимите «Только ФИПИ»."
+                      : author
+                        ? " или сбросьте фильтр «Автор»."
+                        : "."
+                  }`}
             </p>
           ) : null}
 
@@ -1487,6 +1625,20 @@ export default function AllTasksPage() {
                                       </LazyVisible>
                                     </ExamTaskDrawingShell>
                                   </div>
+                                  {canEditBankTasks ? (
+                                    <AllTasksStaffEditor
+                                      taskId={t.id}
+                                      taskListId={t.task_list_id ?? null}
+                                      groupId={t.group_id ?? entry.groupId}
+                                      subtopicId={t.subtopic_id ?? null}
+                                      answer={t.answer || ""}
+                                      taskLists={filterOptions?.task_numbers ?? []}
+                                      groups={staffGroups}
+                                      subtopics={staffSubtopics}
+                                      showGroup
+                                      onSaved={handleStaffTaskSaved}
+                                    />
+                                  ) : null}
                                   {answerHtml ? (
                                     <div className="all-tasks-item__answer-foot">
                                       <button
@@ -1659,6 +1811,20 @@ export default function AllTasksPage() {
                           </LazyVisible>
                         </ExamTaskDrawingShell>
                       </div>
+                      {canEditBankTasks ? (
+                        <AllTasksStaffEditor
+                          taskId={t.id}
+                          taskListId={t.task_list_id ?? null}
+                          groupId={t.group_id ?? null}
+                          subtopicId={t.subtopic_id ?? null}
+                          answer={t.answer || ""}
+                          taskLists={filterOptions?.task_numbers ?? []}
+                          groups={staffGroups}
+                          subtopics={staffSubtopics}
+                          showGroup
+                          onSaved={handleStaffTaskSaved}
+                        />
+                      ) : null}
                       {answerHtml ? (
                         <div className="all-tasks-item__answer-foot">
                           <button
@@ -1698,11 +1864,59 @@ export default function AllTasksPage() {
 
         </main>
 
-        {showTagsSidebar ? (
-          <AllTasksTagsCatalogSidebar
-            tags={tagCatalog}
-            onTagsChange={handleTagCatalogChange}
-          />
+        {showSidebars ? (
+          <div className="all-tasks-sidebars">
+            {showStaffSidebar ? (
+              <AllTasksStaffCatalogSidebar
+                groups={staffGroups}
+                subtopics={staffSubtopics}
+                taskLists={filterOptions?.task_numbers ?? []}
+                selectedGroupId={staffGroupId}
+                selectedSubtopicId={subtopicId}
+                onSelectGroup={(id) => {
+                  setStaffGroupId(id);
+                  setTaskListId("");
+                  setSubtopicId("");
+                  resetPage();
+                }}
+                onSelectSubtopic={(item) => {
+                  setStaffGroupId("");
+                  if (item.task_list_id != null) {
+                    setTaskListId(String(item.task_list_id));
+                  }
+                  setSubtopicId(String(item.id));
+                  resetPage();
+                }}
+                onCreateGroup={async () => {
+                  const created = await createStaffGroup(level, subject);
+                  await reloadStaffCatalog({ refreshFilters: true });
+                  setStaffGroupId(String(created.id));
+                  setTaskListId("");
+                  setSubtopicId("");
+                  resetPage();
+                }}
+                onCreateSubtopic={async (title, taskListPk) => {
+                  const created = await createStaffSubtopic(level, subject, {
+                    title,
+                    task_list_id: taskListPk,
+                  });
+                  await reloadStaffCatalog({ refreshFilters: true });
+                  setStaffGroupId("");
+                  if (created.task_list_id != null) {
+                    setTaskListId(String(created.task_list_id));
+                  }
+                  setSubtopicId(String(created.id));
+                  resetPage();
+                }}
+              />
+            ) : null}
+            {showTagsSidebar ? (
+              <AllTasksTagsCatalogSidebar
+                tags={tagCatalog}
+                onTagsChange={handleTagCatalogChange}
+              />
+            ) : null}
+          </div>
         ) : null}
 
         {/* TEMP: кнопка «Код» временно скрыта
