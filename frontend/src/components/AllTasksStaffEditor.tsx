@@ -148,6 +148,18 @@ export async function createStaffSubtopic(
   );
 }
 
+export async function updateStaffTaskList(
+  level: string,
+  subject: string,
+  taskListId: number,
+  taskTitle: string
+): Promise<StaffTaskListOption> {
+  return staffFetch(
+    `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/staff-task-lists/${taskListId}/`,
+    { method: "PATCH", body: JSON.stringify({ task_title: taskTitle }) }
+  );
+}
+
 export function useCanEditBankTasks() {
   const [canEdit, setCanEdit] = useState(false);
 
@@ -196,6 +208,7 @@ type CatalogSidebarProps = {
   onSelectSubtopic: (subtopic: StaffSubtopicOption) => void;
   onCreateGroup: () => Promise<void> | void;
   onCreateSubtopic: (title: string, taskListId: number, fromTask?: boolean) => Promise<void> | void;
+  onRenameTaskList: (taskListId: number, title: string) => Promise<void> | void;
 };
 
 export function AllTasksStaffCatalogSidebar({
@@ -210,6 +223,7 @@ export function AllTasksStaffCatalogSidebar({
   onSelectSubtopic,
   onCreateGroup,
   onCreateSubtopic,
+  onRenameTaskList,
 }: CatalogSidebarProps) {
   const [groupBusy, setGroupBusy] = useState(false);
   const [groupError, setGroupError] = useState<string | null>(null);
@@ -217,6 +231,10 @@ export function AllTasksStaffCatalogSidebar({
   const [subListId, setSubListId] = useState(selectedTaskListId || "");
   const [subBusy, setSubBusy] = useState(false);
   const [subError, setSubError] = useState<string | null>(null);
+  const [editListId, setEditListId] = useState("");
+  const [editTitle, setEditTitle] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   useEffect(() => {
     if (selectedTaskListId) setSubListId(selectedTaskListId);
@@ -278,13 +296,49 @@ export function AllTasksStaffCatalogSidebar({
     }
   };
 
+  const startRename = (item: StaffTaskListOption) => {
+    setEditListId(String(item.task_list_id));
+    setEditTitle(item.task_title || "");
+    setEditError(null);
+  };
+
+  const handleRenameTaskList = async (e: FormEvent) => {
+    e.preventDefault();
+    if (editBusy) return;
+    const title = editTitle.trim();
+    const tlId = Number(editListId);
+    if (!title) {
+      setEditError("Введите название");
+      return;
+    }
+    if (!Number.isFinite(tlId) || tlId <= 0) {
+      setEditError("Некорректная тема");
+      return;
+    }
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      await onRenameTaskList(tlId, title);
+      setEditListId("");
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Не удалось сохранить название");
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
   return (
     <aside className="all-tasks-staff-sidebar" aria-label="Темы, подтемы и группы">
       <section className="all-tasks-staff-sidebar__section">
         <h2 className="all-tasks-staff-sidebar__title">Темы</h2>
         <p className="all-tasks-staff-sidebar__hint">
-          Номера заданий (TaskList) этого предмета и уровня.
+          Номера заданий (TaskList). Можно переименовать тему.
         </p>
+        {editError ? (
+          <p className="all-tasks-staff-sidebar__error" role="alert">
+            {editError}
+          </p>
+        ) : null}
         {taskLists.length === 0 ? (
           <p className="all-tasks-staff-sidebar__empty">Пока нет тем</p>
         ) : (
@@ -292,22 +346,66 @@ export function AllTasksStaffCatalogSidebar({
             {taskLists.map((item) => {
               const id = String(item.task_list_id);
               const active = selectedTaskListId === id && !selectedSubtopicId && !selectedGroupId;
+              const editing = editListId === id;
               return (
-                <li key={item.task_list_id}>
-                  <button
-                    type="button"
-                    className={`all-tasks-staff-sidebar__item${active ? " is-active" : ""}`}
-                    aria-current={active ? "true" : undefined}
-                    onClick={() => onSelectTaskList(id)}
-                  >
-                    <span className="all-tasks-staff-sidebar__num">№{item.task_number}</span>
-                    <span className="all-tasks-staff-sidebar__name">
-                      {item.task_title || "без названия"}
-                    </span>
-                    <span className="all-tasks-staff-sidebar__count">
-                      {item.task_count}
-                    </span>
-                  </button>
+                <li key={item.task_list_id} className="all-tasks-staff-sidebar__row">
+                  {editing ? (
+                    <form className="all-tasks-staff-sidebar__rename" onSubmit={handleRenameTaskList}>
+                      <span className="all-tasks-staff-sidebar__num">№{item.task_number}</span>
+                      <input
+                        type="text"
+                        className="all-tasks-staff-sidebar__control"
+                        value={editTitle}
+                        maxLength={255}
+                        autoFocus
+                        disabled={editBusy}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                      />
+                      <button
+                        type="submit"
+                        className="all-tasks-staff-sidebar__icon-btn"
+                        disabled={editBusy || !editTitle.trim()}
+                      >
+                        {editBusy ? "…" : "OK"}
+                      </button>
+                      <button
+                        type="button"
+                        className="all-tasks-staff-sidebar__icon-btn"
+                        disabled={editBusy}
+                        onClick={() => {
+                          setEditListId("");
+                          setEditError(null);
+                        }}
+                      >
+                        ×
+                      </button>
+                    </form>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className={`all-tasks-staff-sidebar__item${active ? " is-active" : ""}`}
+                        aria-current={active ? "true" : undefined}
+                        onClick={() => onSelectTaskList(id)}
+                      >
+                        <span className="all-tasks-staff-sidebar__num">№{item.task_number}</span>
+                        <span className="all-tasks-staff-sidebar__name">
+                          {item.task_title || "без названия"}
+                        </span>
+                        <span className="all-tasks-staff-sidebar__count">
+                          {item.task_count}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="all-tasks-staff-sidebar__icon-btn"
+                        aria-label={`Переименовать №${item.task_number}`}
+                        onClick={() => startRename(item)}
+                      >
+                        ✎
+                      </button>
+                    </>
+                  )}
                 </li>
               );
             })}

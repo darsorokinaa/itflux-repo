@@ -3464,6 +3464,56 @@ def api_staff_groups(request, level, subject):
     })
 
 
+_TASK_LIST_TITLE_MAX_LEN = 255
+
+
+def _serialize_staff_task_list(tl, task_count=None):
+    if task_count is None:
+        task_count = Task.active_objects.filter(task_id=tl.id).count()
+    return {
+        "task_list_id": tl.id,
+        "task_number": tl.task_number,
+        "task_title": tl.task_title or "",
+        "task_count": int(task_count or 0),
+    }
+
+
+@require_http_methods(["PATCH"])
+def api_staff_task_list(request, level, subject, task_list_id):
+    """PATCH /api/<level>/<subject>/staff-task-lists/<id>/ — название TaskList."""
+    forbidden = _require_bank_task_editor(request)
+    if forbidden:
+        return forbidden
+
+    subject_instance = get_subject_for_api(subject)
+    level_instance = get_object_or_404(Level, level=level)
+    tl = TaskList.objects.filter(
+        pk=task_list_id, subject=subject_instance, level=level_instance
+    ).first()
+    if tl is None:
+        return JsonResponse({"error": "TaskList не найден для этого предмета"}, status=404)
+
+    try:
+        data = json.loads(request.body or b"{}")
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"error": "Неверный формат данных"}, status=400)
+    if not isinstance(data, dict):
+        return JsonResponse({"error": "Тело запроса должно быть JSON-объектом"}, status=400)
+    if "task_title" not in data:
+        return JsonResponse({"error": "Укажите название темы"}, status=400)
+    title = (str(data.get("task_title") or "")).strip()
+    if not title:
+        return JsonResponse({"error": "Название темы не может быть пустым"}, status=400)
+    if len(title) > _TASK_LIST_TITLE_MAX_LEN:
+        return JsonResponse(
+            {"error": f"Название темы не длиннее {_TASK_LIST_TITLE_MAX_LEN} символов"},
+            status=400,
+        )
+    tl.task_title = title
+    tl.save(update_fields=["task_title"])
+    return JsonResponse(_serialize_staff_task_list(tl))
+
+
 def _find_subtopic_by_title(task_list, title):
     needle = (title or "").casefold()
     if not needle:

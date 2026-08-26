@@ -8722,13 +8722,19 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     cursor: pointer;
 }
 
-/* Физика: компактные иллюстрации, как в алгебре/геометрии */
+/* Физика и химия: иллюстрации как в геометрии (300px) */
 .exam-page[data-subject="phys"] .task .task-text figure,
 .exam-page[data-subject="phys"] .task .task-text figure.image,
 .exam-page[data-subject="phys"] .exam-task-card .exam-task-card__text figure,
 .exam-page[data-subject="phys"] .exam-task-card .exam-task-card__text figure.image,
+.exam-page[data-subject="chem"] .task .task-text figure,
+.exam-page[data-subject="chem"] .task .task-text figure.image,
+.exam-page[data-subject="chem"] .exam-task-card .exam-task-card__text figure,
+.exam-page[data-subject="chem"] .exam-task-card .exam-task-card__text figure.image,
 .all-tasks-page[data-subject="phys"] .all-tasks-item .all-tasks-item__html figure,
-.all-tasks-page[data-subject="phys"] .all-tasks-item .all-tasks-item__html figure.image {
+.all-tasks-page[data-subject="phys"] .all-tasks-item .all-tasks-item__html figure.image,
+.all-tasks-page[data-subject="chem"] .all-tasks-item .all-tasks-item__html figure,
+.all-tasks-page[data-subject="chem"] .all-tasks-item .all-tasks-item__html figure.image {
     width: auto !important;
     max-width: 100% !important;
     margin-top: 0.85rem !important;
@@ -8738,7 +8744,10 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 }
 .exam-page[data-subject="phys"] .task .task-img-zoomable,
 .exam-page[data-subject="phys"] .exam-task-card .task-img-zoomable,
-.all-tasks-page[data-subject="phys"] .all-tasks-item .all-tasks-item__html .task-img-zoomable {
+.exam-page[data-subject="chem"] .task .task-img-zoomable,
+.exam-page[data-subject="chem"] .exam-task-card .task-img-zoomable,
+.all-tasks-page[data-subject="phys"] .all-tasks-item .all-tasks-item__html .task-img-zoomable,
+.all-tasks-page[data-subject="chem"] .all-tasks-item .all-tasks-item__html .task-img-zoomable {
     width: auto !important;
     max-width: 100% !important;
     display: block !important;
@@ -8752,7 +8761,15 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .exam-page[data-subject="phys"] .exam-task-card .task-text img,
 .exam-page[data-subject="phys"] .exam-task-card .correct-answer-content img,
 .exam-page[data-subject="phys"] .exam-task-card .part2-answer-content img,
-.all-tasks-page[data-subject="phys"] .all-tasks-item .all-tasks-item__html img {
+.exam-page[data-subject="chem"] .task .task-text img,
+.exam-page[data-subject="chem"] .task .correct-answer-content img,
+.exam-page[data-subject="chem"] .task .part2-answer-content img,
+.exam-page[data-subject="chem"] .exam-task-card .exam-task-card__text img,
+.exam-page[data-subject="chem"] .exam-task-card .task-text img,
+.exam-page[data-subject="chem"] .exam-task-card .correct-answer-content img,
+.exam-page[data-subject="chem"] .exam-task-card .part2-answer-content img,
+.all-tasks-page[data-subject="phys"] .all-tasks-item .all-tasks-item__html img,
+.all-tasks-page[data-subject="chem"] .all-tasks-item .all-tasks-item__html img {
     display: block !important;
     margin: 0.85rem auto 0.55rem !important;
     width: min(300px, 70vw) !important;
@@ -8765,8 +8782,23 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 }
 .exam-page[data-subject="phys"] .task .task-text figure img,
 .exam-page[data-subject="phys"] .exam-task-card .exam-task-card__text figure img,
-.all-tasks-page[data-subject="phys"] .all-tasks-item .all-tasks-item__html figure img {
+.exam-page[data-subject="chem"] .task .task-text figure img,
+.exam-page[data-subject="chem"] .exam-task-card .exam-task-card__text figure img,
+.all-tasks-page[data-subject="phys"] .all-tasks-item .all-tasks-item__html figure img,
+.all-tasks-page[data-subject="chem"] .all-tasks-item .all-tasks-item__html figure img {
     margin: 0 auto !important;
+}
+
+/* Химия и физика: LaTeX минимум в 2 раза крупнее базового банка (1.1em → 2.2em) */
+.exam-page[data-subject="phys"] .task-text mjx-container,
+.exam-page[data-subject="phys"] .exam-task-card__text mjx-container,
+.exam-page[data-subject="phys"] .correct-answer-content mjx-container,
+.exam-page[data-subject="phys"] .part2-answer-content mjx-container,
+.exam-page[data-subject="chem"] .task-text mjx-container,
+.exam-page[data-subject="chem"] .exam-task-card__text mjx-container,
+.exam-page[data-subject="chem"] .correct-answer-content mjx-container,
+.exam-page[data-subject="chem"] .part2-answer-content mjx-container {
+    font-size: 2.2em !important;
 }
 
 /*

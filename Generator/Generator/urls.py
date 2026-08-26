@@ -227,6 +227,11 @@ urlpatterns = [
         name="api_staff_groups",
     ),
     path(
+        "api/<str:level>/<str:subject>/staff-task-lists/<int:task_list_id>/",
+        views.api_staff_task_list,
+        name="api_staff_task_list",
+    ),
+    path(
         "api/<str:level>/<str:subject>/staff-subtopics/",
         views.api_staff_subtopics,
         name="api_staff_subtopics",

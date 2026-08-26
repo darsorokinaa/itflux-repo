@@ -291,6 +291,30 @@ class TaskStaffPanelApiTests(TestCase):
         self.task.refresh_from_db()
         self.assertEqual(self.task.subtopic_id, payload["id"])
 
+    def test_staff_renames_task_list(self):
+        self.client.force_login(self.staff)
+        url = f"/api/oge/math/staff-task-lists/{self.tl1.id}/"
+        resp = self.client.patch(
+            url,
+            data={"task_title": "Планиметрия: углы"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.json()["task_list_id"], self.tl1.id)
+        self.assertEqual(resp.json()["task_title"], "Планиметрия: углы")
+        self.tl1.refresh_from_db()
+        self.assertEqual(self.tl1.task_title, "Планиметрия: углы")
+
+        self.client.force_login(self.plain)
+        resp = self.client.patch(
+            url,
+            data={"task_title": "хак"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.tl1.refresh_from_db()
+        self.assertEqual(self.tl1.task_title, "Планиметрия: углы")
+
     def test_group_number_conflict(self):
         group = TaskGroup.objects.create(subject=self.subject, level=self.level)
         other = Task.objects.create(

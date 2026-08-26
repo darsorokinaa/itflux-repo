@@ -46,6 +46,7 @@ import {
   createStaffSubtopic,
   fetchStaffGroups,
   fetchStaffSubtopics,
+  updateStaffTaskList,
   useCanEditBankTasks,
   type StaffGroupOption,
   type StaffSubtopicOption,
@@ -1879,6 +1880,39 @@ export default function AllTasksPage() {
                   setSubtopicId("");
                   setStaffGroupId("");
                   resetPage();
+                }}
+                onRenameTaskList={async (taskListPk, title) => {
+                  const updated = await updateStaffTaskList(level, subject, taskListPk, title);
+                  const nextTitle = updated.task_title || title;
+                  setFilterOptions((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          task_numbers: prev.task_numbers.map((row) =>
+                            row.task_list_id === taskListPk
+                              ? { ...row, task_title: nextTitle }
+                              : row
+                          ),
+                        }
+                      : prev
+                  );
+                  const applyTitle = (t: BankTask): BankTask =>
+                    t.task_list_id === taskListPk ? { ...t, task_title: nextTitle } : t;
+                  setData((prev) =>
+                    prev ? { ...prev, tasks: prev.tasks.map(applyTitle) } : prev
+                  );
+                  setGroupData((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          instances: prev.instances.map((inst) => ({
+                            ...inst,
+                            tasks: inst.tasks.map(applyTitle),
+                          })),
+                        }
+                      : prev
+                  );
+                  await reloadStaffCatalog({ refreshFilters: true });
                 }}
                 onSelectGroup={(id) => {
                   setStaffGroupId(id);
