@@ -87,6 +87,21 @@ export function planSubjectLabelFromId(subjectId) {
   return PLAN_SUBJECT_LABELS[subjectId] || "";
 }
 
+export function planSubjectsMatch(planSubject, studentSubject) {
+  const aliases = {
+    informatics: "inf",
+    inf: "inf",
+    math: "math",
+    math_base: "math",
+    physics: "phys",
+    phys: "phys",
+  };
+  const a = String(planSubject || "").trim().toLowerCase();
+  const b = String(studentSubject || "").trim().toLowerCase();
+  if (!a || !b) return true;
+  return (aliases[a] || a) === (aliases[b] || b);
+}
+
 export function defaultSubjectForDirection(direction) {
   if (direction === "school") return "prog";
   if (direction === "vpr") return "math";
@@ -337,6 +352,8 @@ export function mapApiEnrollment(enrollment) {
     planId: enrollment.plan,
     planTitle: enrollment.plan_title || "",
     studentId: enrollment.student != null ? String(enrollment.student) : null,
+    studentSubjectId: enrollment.student_subject != null ? String(enrollment.student_subject) : null,
+    studentSubjectLabel: enrollment.student_subject_label || "",
     groupId: enrollment.group != null ? String(enrollment.group) : null,
     status: enrollment.status,
     statusLabel: enrollment.status_label || enrollment.status,
@@ -346,6 +363,29 @@ export function mapApiEnrollment(enrollment) {
     frequency: enrollment.frequency || "",
     raw: enrollment,
   };
+}
+
+export function formatStudentPlansMeta(enrollments) {
+  const list = Array.isArray(enrollments)
+    ? enrollments
+    : enrollments
+      ? [enrollments]
+      : [];
+  const withPlan = list.filter((item) => item?.planTitle);
+  if (!withPlan.length) return "План не назначен";
+  if (withPlan.length === 1) {
+    const item = withPlan[0];
+    return item.studentSubjectLabel
+      ? `${item.studentSubjectLabel}: ${item.planTitle}`
+      : `План: ${item.planTitle}`;
+  }
+  return withPlan
+    .map((item) => (
+      item.studentSubjectLabel
+        ? `${item.studentSubjectLabel}: ${item.planTitle}`
+        : item.planTitle
+    ))
+    .join(" · ");
 }
 
 const TARGET_DIRECTION_MAP = {

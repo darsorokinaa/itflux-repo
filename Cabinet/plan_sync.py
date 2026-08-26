@@ -116,6 +116,12 @@ class PlanSyncService:
         завершён/пропущен и не занят другим активным событием.
         """
         from .models import ScheduleEvent
+        from .plan_schedule import plan_slots_exhausted
+
+        if plan_slots_exhausted(
+            enrollment, enrollment.teacher, exclude_event=exclude_event,
+        ):
+            return None
 
         busy_ids = set(
             enrollment.plan.items.filter(
@@ -177,7 +183,7 @@ class PlanSyncService:
         skipped = sum(1 for item in items if item.status == PlanItemStatus.SKIPPED)
         remaining = max(0, total - completed - skipped)
         current = cls.get_current_item(enrollment)
-        next_item = cls.get_next_plan_item(enrollment)
+        next_item = cls.get_next_plan_item(enrollment, exclude_event=event)
         now = timezone.now()
         ignored_statuses = {
             ScheduleEvent.Status.CANCELLED,
@@ -219,6 +225,7 @@ class PlanSyncService:
             unlinked_future=len(unlinked_future),
             is_last_topic=is_last_topic,
             event_bound=item_for_event is not None,
+            next_item_missing=next_item is None,
         )
         return {
             "total": total,
@@ -241,6 +248,7 @@ class PlanSyncService:
             } if next_item else None,
             "is_finished": remaining == 0 and total > 0,
             "is_schedule_exhausted": remaining_unassigned == 0 and total > 0,
+            "needs_manual_topic": bool(next_item is None and total > 0),
             "is_last_topic": is_last_topic,
             "future_events": len(future_events),
             "unlinked_future_events": len(unlinked_future),
@@ -270,9 +278,15 @@ class PlanSyncService:
         unlinked_future,
         is_last_topic=False,
         event_bound=False,
+        next_item_missing=False,
     ):
         if total == 0:
             return "empty", "План обучения пока не заполнен. Добавьте темы."
+        if next_item_missing and remaining > 0 and remaining_unassigned > 0 and not event_bound:
+            return (
+                "need_topic",
+                "Все темы плана уже использованы. Новая тема добавится в конец плана.",
+            )
         if is_last_topic:
             return cls._last_topic_message(unlinked_future=unlinked_future)
         if remaining == 0:
@@ -613,6 +627,15 @@ class PlanSyncService:
 
         conducted = unique_plan_slot_events(conducted)
         upcoming = unique_plan_slot_events(upcoming)
+        parked = unique_plan_slot_events([
+            ev for ev in sequence_events
+            if ev.status not in (ScheduleEvent.Status.CANCELLED, ScheduleEvent.Status.DRAFT)
+            and ev.pk not in {row.pk for row in conducted}
+            and ev.pk not in {row.pk for row in upcoming}
+            and getattr(ev, "plan_sync_enabled", True)
+        ])
+        history_slots = unique_plan_slot_events([*conducted, *parked])
+        restart_plan = len(history_slots) >= len(items)
 
         desired = {}
         used_item_ids = set()
@@ -624,10 +647,50 @@ class PlanSyncService:
                     return item
             return None
 
+        def take_item_for_event(ev):
+            from .plan_schedule import event_local_date
+            event_date = event_local_date(ev)
+            if event_date:
+                for item in items:
+                    if item.id in used_item_ids:
+                        continue
+                    if item.scheduled_date == event_date:
+                        used_item_ids.add(item.id)
+                        return item
+            return take_next_item()
+
         # Журнал по дате → пункты плана по порядку. Старые FK не сохраняем:
         # иначе «дыра» (тема 04 пройдена, а 03 ещё в будущем).
-        for ev in [*conducted, *upcoming]:
+        for ev in conducted:
             nxt = take_next_item()
+            if nxt is not None:
+                desired[ev.pk] = nxt
+        def keep_existing_item(ev):
+            """Тема, которую учитель только что добавил в календарь (последний пункт на эту дату), не сдвигаем."""
+            current_item = next(
+                (item for item in items if item.id == ev.lesson_plan_item_id),
+                None,
+            )
+            if current_item is None or current_item.id in used_item_ids:
+                return None
+            max_order = max((item.order or 0) for item in items)
+            if (current_item.order or 0) < max_order:
+                return None
+            from .plan_schedule import event_local_date
+            event_date = event_local_date(ev)
+            if current_item.scheduled_date and event_date and current_item.scheduled_date == event_date:
+                return current_item
+            return None
+
+        for ev in upcoming:
+            kept = keep_existing_item(ev)
+            if kept is not None:
+                used_item_ids.add(kept.id)
+                desired[ev.pk] = kept
+                continue
+            if restart_plan:
+                continue
+            nxt = take_item_for_event(ev)
             if nxt is not None:
                 desired[ev.pk] = nxt
 

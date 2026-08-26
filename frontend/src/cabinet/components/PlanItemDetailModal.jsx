@@ -239,7 +239,20 @@ export default function PlanItemDetailModal({
   const scheduleLabel = useMemo(() => {
     if (!item) return "";
     if (item.scheduledEventStartsAt) return formatDateTime(item.scheduledEventStartsAt);
-    if (item.scheduledDate) return item.scheduledDate;
+    if (item.scheduledDate) {
+      const match = String(item.scheduledDate).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (match) {
+        const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+        if (!Number.isNaN(date.getTime())) {
+          return date.toLocaleDateString("ru-RU", {
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          });
+        }
+      }
+      return item.scheduledDate;
+    }
     return "";
   }, [item]);
 
@@ -256,7 +269,7 @@ export default function PlanItemDetailModal({
     { label: "Тема", value: item?.topic },
     { label: "Подтема", value: item?.subtopic },
     { label: "№ задания", value: item?.taskNumber },
-    { label: "Дата и время", value: scheduleLabel },
+    { label: "Дата", value: scheduleLabel },
     { label: "Событие", value: item?.scheduledEventTitle },
   ].filter((entry) => hasText(entry.value))), [item, subject, exam, scheduleLabel]);
   const hasComment = hasText(item?.teacherComment);

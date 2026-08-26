@@ -27,6 +27,15 @@ def enrollment_start_date(enrollment):
     return timezone.localtime(enrollment.created_at).date()
 
 
+def event_local_date(event):
+    starts = getattr(event, "starts_at", None)
+    if starts is None:
+        return None
+    if timezone.is_aware(starts):
+        starts = timezone.localtime(starts)
+    return starts.date()
+
+
 def get_active_enrollment(event):
     qs = LessonPlanEnrollment.objects.filter(
         teacher=event.owner,
@@ -48,6 +57,12 @@ def get_active_enrollment(event):
             unbound = qs.filter(student_subject__isnull=True)
             if unbound.exists():
                 qs = unbound
+            else:
+                event_date = event_local_date(event)
+                if event_date:
+                    dated = qs.filter(plan__items__scheduled_date=event_date).distinct()
+                    if dated.exists():
+                        qs = dated
     elif event.group_id:
         qs = qs.filter(group_id=event.group_id)
     else:
@@ -78,8 +93,27 @@ def events_for_enrollment(enrollment, owner):
     if enrollment.student_id:
         by_student = Q(student_id=enrollment.student_id)
         if enrollment.student_subject_id:
-            # Только уроки этого предмета — не смешиваем слоты планов.
+            # Уроки этого предмета + уже связанные с планом.
             by_audience = by_student & Q(student_subject_id=enrollment.student_subject_id)
+            # Старый урок без предмета: подхватываем, если это единственный
+            # активный план ученика или дата совпадает с датой в плане.
+            other_subject_plans = LessonPlanEnrollment.objects.filter(
+                teacher_id=enrollment.teacher_id,
+                student_id=enrollment.student_id,
+                student_subject__isnull=False,
+            ).exclude(pk=enrollment.pk).exclude(
+                status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED],
+            ).exists()
+            unbound = by_student & Q(student_subject__isnull=True)
+            if not other_subject_plans:
+                by_audience = by_audience | unbound
+            else:
+                dated = list(
+                    enrollment.plan.items.exclude(scheduled_date=None)
+                    .values_list("scheduled_date", flat=True)
+                )
+                if dated:
+                    by_audience = by_audience | (unbound & Q(starts_at__date__in=dated))
         else:
             by_audience = by_student & Q(student_subject__isnull=True)
         already_linked = by_student & Q(lesson_plan_item__plan_id=enrollment.plan_id)
@@ -128,6 +162,29 @@ def plan_items_for_enrollment(enrollment):
             # 1-based fallback: «начать с урока N»
             items = items[max(0, start_order - 1):]
     return items
+
+
+def active_plan_slot_events(enrollment, owner, *, exclude_event=None):
+    """Все незакрытые занятия плана: прошедшие и будущие, без отменённых."""
+    events = [
+        ev for ev in events_for_enrollment(enrollment, owner)
+        if getattr(ev, "plan_sync_enabled", True)
+        and ev.status not in (
+            ScheduleEvent.Status.CANCELLED,
+            ScheduleEvent.Status.DRAFT,
+        )
+    ]
+    if exclude_event is not None and getattr(exclude_event, "pk", None):
+        events = [ev for ev in events if ev.pk != exclude_event.pk]
+    return unique_plan_slot_events(events)
+
+
+def plan_slots_exhausted(enrollment, owner, *, exclude_event=None):
+    """В расписании уже не меньше занятий, чем тем в плане — новую тему не берём с начала."""
+    items = plan_items_for_enrollment(enrollment)
+    if not items:
+        return True
+    return len(active_plan_slot_events(enrollment, owner, exclude_event=exclude_event)) >= len(items)
 
 
 def attendance_statuses_by_event(event_ids, student_id=None):
@@ -195,7 +252,13 @@ def event_is_upcoming_for_plan(event, *, now=None):
     ):
         return False
     now = now or timezone.now()
-    return event.starts_at >= now
+    event_date = event_local_date(event)
+    if event_date is None:
+        return event.starts_at >= now
+    today = timezone.localtime(now).date() if timezone.is_aware(now) else now.date()
+    # Занятие на сегодня остаётся слотом плана, даже если время уже прошло —
+    # иначе тема «пропадает», хотя урок стоит в расписании на эту дату.
+    return event_date >= today
 
 
 def plan_slot_key(event):
@@ -308,13 +371,21 @@ def plan_item_matching_event_date(event):
     if enrollment is None:
         return None
     slot = plan_slot_key(event)
+    event_date = event_local_date(event)
+    date_match = None
     for item in plan_items_for_enrollment(enrollment):
-        scheduled = item.scheduled_event
-        if scheduled is None:
+        if item.status in (PlanItemStatus.COMPLETED, PlanItemStatus.SKIPPED):
             continue
-        if plan_slot_key(scheduled) == slot:
+        scheduled = item.scheduled_event
+        if scheduled is not None and plan_slot_key(scheduled) == slot:
             return item
-    return None
+        if (
+            date_match is None
+            and event_date
+            and item.scheduled_date == event_date
+        ):
+            date_match = item
+    return date_match
 
 
 def resolve_plan_item_for_event(event):

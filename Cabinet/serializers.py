@@ -172,6 +172,8 @@ class StudentSubjectSerializer(serializers.ModelSerializer):
             "plan_id": enrollment.plan_id,
             "plan_title": enrollment.plan.title if enrollment.plan_id else "",
             "status": enrollment.status,
+            "start_date": enrollment.start_date.isoformat() if enrollment.start_date else None,
+            "frequency": enrollment.frequency or "",
             "total": progress.get("total") or 0,
             "completed": progress.get("completed") or 0,
             "remaining": progress.get("remaining") or 0,
@@ -185,6 +187,8 @@ class StudentSubjectSerializer(serializers.ModelSerializer):
 
 class StudentSubjectWriteSerializer(serializers.ModelSerializer):
     plan_id = serializers.IntegerField(required=False, allow_null=True, write_only=True)
+    start_date = serializers.DateField(required=False, allow_null=True, write_only=True)
+    date_interval = serializers.CharField(required=False, allow_blank=True, write_only=True, max_length=32)
 
     class Meta:
         model = StudentSubject
@@ -196,6 +200,8 @@ class StudentSubjectWriteSerializer(serializers.ModelSerializer):
             "status",
             "notes",
             "plan_id",
+            "start_date",
+            "date_interval",
         ]
 
     def validate_subject(self, value):
@@ -908,6 +914,8 @@ class LessonPlanItemWriteSerializer(serializers.ModelSerializer):
 
 
 class LessonPlanItemEditorSerializer(LessonPlanItemWriteSerializer):
+    scheduled_date = serializers.DateField(required=False, allow_null=True)
+
     class Meta(LessonPlanItemWriteSerializer.Meta):
         fields = LessonPlanItemWriteSerializer.Meta.fields + [
             "order",
@@ -918,6 +926,7 @@ class LessonPlanItemEditorSerializer(LessonPlanItemWriteSerializer):
             "goal",
             "planned_results",
             "description",
+            "scheduled_date",
         ]
 
 

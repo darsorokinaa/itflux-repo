@@ -11163,6 +11163,11 @@ select.cb-lesson-card__about-input.is-empty {
   min-width: 0;
 }
 
+.cb-student-subjects__meta {
+  font-size: 0.85rem;
+  color: #64748B;
+}
+
 .cb-student-subjects__plan-progress {
   font-size: 0.75rem;
   color: #64748B;
@@ -11702,6 +11707,42 @@ select.cb-lesson-card__about-input.is-empty {
 }
 
 .cb-pe-field--wide { grid-column: 1 / -1; }
+
+.cb-pe-field__hint {
+  font-size: 12px;
+  color: #64748B;
+  line-height: 1.35;
+}
+
+.cb-pe-dates {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px 16px;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border: 1px solid #E2E8F0;
+  border-radius: 14px;
+}
+
+.cb-pe-dates--attach {
+  margin: 0 0 8px;
+  padding: 12px 14px;
+}
+
+.cb-pe-dates__hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 13px;
+  color: #64748B;
+  line-height: 1.4;
+}
+
+.cb-student-subjects__meta a {
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 
 .cb-pe-field--checkbox {
   flex-direction: row;
@@ -12434,7 +12475,8 @@ select.cb-lesson-card__about-input.is-empty {
   }
 
   .cb-pe-session__grid--2,
-  .cb-pe-params__row {
+  .cb-pe-params__row,
+  .cb-pe-dates {
     grid-template-columns: minmax(0, 1fr);
   }
 

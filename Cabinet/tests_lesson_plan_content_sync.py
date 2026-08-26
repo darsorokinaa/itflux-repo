@@ -195,6 +195,32 @@ class LessonPlanContentSyncServiceTests(TestCase):
         self.assertEqual(event.lesson_plan_item.title, "Новая с карточки")
         self.assertEqual(event.lesson_plan_item.plan_id, self.plan.pk)
 
+    def test_calendar_placeholder_topic_appends_last_plan_item(self):
+        self.item1.title = "Урок 1"
+        self.item1.topic = "Урок 1"
+        self.item1.save(update_fields=["title", "topic", "updated_at"])
+        event = self._make_event(student=self.student)
+        event.refresh_from_db()
+        before = self.plan.items.count()
+        last_order = self.plan.items.order_by("order", "id").last().order
+
+        LessonLearningPlanSyncService.apply_lesson_edit(
+            event,
+            {"topic": "Кодирование информации"},
+            teacher=self.teacher,
+            sync_action="lesson_and_plan",
+        )
+        event.refresh_from_db()
+        self.item1.refresh_from_db()
+        self.assertEqual(self.plan.items.count(), before + 1)
+        self.assertEqual(self.item1.topic, "Урок 1")
+        new_item = event.lesson_plan_item
+        self.assertIsNotNone(new_item)
+        self.assertNotEqual(new_item.id, self.item1.id)
+        self.assertEqual(new_item.topic, "Кодирование информации")
+        self.assertEqual(new_item.order, last_order + 1)
+        self.assertEqual(self.plan.items.order_by("order", "id").last().id, new_item.id)
+
     # 5. Изменение темы только в конкретном уроке.
     def test_edit_topic_lesson_only(self):
         event = self._make_event(student=self.student)

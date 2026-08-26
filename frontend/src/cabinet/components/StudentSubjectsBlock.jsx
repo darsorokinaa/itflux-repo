@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import ConfirmActionModal from "./ConfirmActionModal";
 import {
   createStudentSubject,
@@ -10,6 +11,8 @@ import {
 } from "../../utils/cabinetAuth";
 import { STUDENT_DIRECTION_OPTIONS } from "../cabinetMappers";
 import { trackActivationIntent } from "../activationAnalytics";
+import { mapApiPlan, planCanBeAttached, planSubjectsMatch } from "../lessonPlansData";
+import { PLAN_DATE_INTERVALS, formatPlanDateLabel } from "../planDates";
 
 const EMPTY_FORM = {
   subject: "inf",
@@ -17,6 +20,8 @@ const EMPTY_FORM = {
   direction: "other",
   level: "",
   plan_id: "",
+  start_date: "",
+  date_interval: "weekly",
 };
 
 export default function StudentSubjectsBlock({ studentId, onChanged }) {
@@ -38,7 +43,7 @@ export default function StudentSubjectsBlock({ studentId, onChanged }) {
       const [subjectsResp, opts, plansResp] = await Promise.all([
         fetchStudentSubjects(studentId, { include_archived: 1 }),
         fetchLessonPlanSubjects().catch(() => ({ items: [] })),
-        fetchLessonPlans({ status: "published" }).catch(() => []),
+        fetchLessonPlans({ mine: "true" }).catch(() => []),
       ]);
       const list = Array.isArray(subjectsResp) ? subjectsResp : subjectsResp?.items || [];
       setItems(list);
@@ -55,7 +60,9 @@ export default function StudentSubjectsBlock({ studentId, onChanged }) {
               { value: "other", label: "Другое" },
             ],
       );
-      const planList = Array.isArray(plansResp) ? plansResp : plansResp?.results || plansResp?.items || [];
+      const planList = (Array.isArray(plansResp) ? plansResp : plansResp?.results || plansResp?.items || [])
+        .map(mapApiPlan)
+        .filter((plan) => planCanBeAttached(plan));
       setPlans(planList);
     } catch (err) {
       setError(err.message || "Не удалось загрузить предметы");
@@ -84,12 +91,25 @@ export default function StudentSubjectsBlock({ studentId, onChanged }) {
       direction: item.direction || "other",
       level: item.level || "",
       plan_id: item.plan_enrollment?.plan_id ? String(item.plan_enrollment.plan_id) : "",
+      start_date: item.plan_enrollment?.start_date || "",
+      date_interval: PLAN_DATE_INTERVALS.some((interval) => interval.id === item.plan_enrollment?.frequency)
+        ? item.plan_enrollment.frequency
+        : "weekly",
     });
     setEditor({ mode: "edit", item });
   };
 
   const setField = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [field]: value };
+      if (field === "subject" && prev.plan_id) {
+        const plan = plans.find((p) => String(p.id) === String(prev.plan_id));
+        if (plan && !planSubjectsMatch(plan.subject, value)) {
+          next.plan_id = "";
+        }
+      }
+      return next;
+    });
   };
 
   const handleSave = async (e) => {
@@ -109,6 +129,15 @@ export default function StudentSubjectsBlock({ studentId, onChanged }) {
         level: form.level.trim(),
         plan_id: form.plan_id ? Number(form.plan_id) : null,
       };
+      const prevEnrollment = editor?.item?.plan_enrollment;
+      const startChanged = form.start_date !== (prevEnrollment?.start_date || "");
+      const intervalChanged = Boolean(form.start_date)
+        && form.date_interval !== (prevEnrollment?.frequency || "weekly");
+      const planChanged = String(form.plan_id || "") !== String(prevEnrollment?.plan_id || "");
+      if (form.plan_id && form.start_date && (editor?.mode === "create" || startChanged || intervalChanged || planChanged)) {
+        payload.start_date = form.start_date;
+        payload.date_interval = form.date_interval || "weekly";
+      }
       if (editor?.mode === "edit" && editor.item) {
         await updateStudentSubject(studentId, editor.item.id, payload);
       } else {
@@ -169,9 +198,17 @@ export default function StudentSubjectsBlock({ studentId, onChanged }) {
                 <strong>{item.display_label || item.subject_label}</strong>
                 <span className="cb-student-subjects__meta">
                   {item.status_label}
-                  {item.plan_enrollment?.plan_title
-                    ? ` · План: ${item.plan_enrollment.plan_title}`
-                    : " · План не назначен"}
+                  {item.plan_enrollment?.plan_title ? (
+                    <>
+                      {" · План: "}
+                      <Link to={`/cabinet/plans/${item.plan_enrollment.plan_id}`}>
+                        {item.plan_enrollment.plan_title}
+                      </Link>
+                      {item.plan_enrollment.start_date
+                        ? ` · с ${formatPlanDateLabel(item.plan_enrollment.start_date)}`
+                        : ""}
+                    </>
+                  ) : " · План не назначен"}
                 </span>
                 {item.plan_enrollment?.total ? (
                   <span
@@ -277,17 +314,37 @@ export default function StudentSubjectsBlock({ studentId, onChanged }) {
                 <option value="">Не назначать сейчас</option>
                 {plans
                   .filter((p) => {
-                    if (!form.subject || !p.subject) return true;
-                    if (p.subject === form.subject) return true;
-                    const a = String(p.subject);
-                    const b = String(form.subject);
-                    return (a === "informatics" && b === "inf") || (a === "inf" && b === "informatics");
+                    if (String(p.id) === String(form.plan_id)) return true;
+                    return planSubjectsMatch(p.subject, form.subject);
                   })
                   .map((p) => (
                     <option key={p.id} value={p.id}>{p.title}</option>
                   ))}
               </select>
             </label>
+            {form.plan_id ? (
+              <>
+                <label className="cb-field">
+                  <span>Дата первого занятия</span>
+                  <input
+                    type="date"
+                    value={form.start_date}
+                    onChange={(e) => setField("start_date", e.target.value)}
+                  />
+                </label>
+                <label className="cb-field">
+                  <span>Как часто</span>
+                  <select
+                    value={form.date_interval}
+                    onChange={(e) => setField("date_interval", e.target.value)}
+                  >
+                    {PLAN_DATE_INTERVALS.map((item) => (
+                      <option key={item.id} value={item.id}>{item.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            ) : null}
             <div className="cb-field cb-field--wide cb-modal-form__actions-main">
               <button
                 type="button"

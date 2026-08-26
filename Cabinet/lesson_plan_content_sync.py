@@ -11,6 +11,7 @@ ScheduleEvent ↔ LessonPlanItem.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from typing import Any, Iterable, Optional
 
@@ -47,6 +48,7 @@ logger = logging.getLogger(__name__)
 
 CONTENT_FIELDS = ("topic", "subtopic", "description", "goal", "homework_description")
 SYNCABLE_FROM_PLAN = ("topic", "subtopic", "description", "goal", "homework_description")
+_PLACEHOLDER_ITEM_TITLE = re.compile(r"^(урок|занятие|тема)\s*\d+$", re.IGNORECASE)
 
 _sync_guard = threading.local()
 
@@ -105,12 +107,36 @@ class LessonLearningPlanSyncService:
         return item
 
     @classmethod
+    def _is_placeholder_plan_item(cls, item: LessonPlanItem | None) -> bool:
+        """Черновик «Урок 1» без настоящей темы — новую тему из календаря не пишем сюда."""
+        if item is None or cls._is_auto_materials_item(item):
+            return True
+        title = (item.title or "").strip()
+        topic = (item.topic or "").strip()
+        if not title and not topic:
+            return True
+        title_is_slot = bool(_PLACEHOLDER_ITEM_TITLE.match(title))
+        topic_is_slot = bool(_PLACEHOLDER_ITEM_TITLE.match(topic)) if topic else False
+        if title_is_slot and (not topic or topic == title or topic_is_slot):
+            return True
+        if topic_is_slot and (not title or title == topic):
+            return True
+        return False
+
+    @classmethod
+    def _should_append_topic_as_last(cls, event: ScheduleEvent, linked: LessonPlanItem | None) -> bool:
+        new_topic = (event.topic or "").strip()
+        if not new_topic:
+            return False
+        return linked is None or cls._is_placeholder_plan_item(linked)
+
+    @classmethod
     @transaction.atomic
     def attach_event_to_student_plan(cls, event: ScheduleEvent, *, teacher) -> ScheduleEvent:
         """После создания занятия привязать следующий свободный пункт плана.
 
-        Не создаёт новый план и не добавляет пункты: если свободных тем нет,
-        занятие остаётся без PlanItem (план завершён, а не «начат сначала»).
+        Если свободных тем нет, но учитель указал тему — она добавляется
+        последним пунктом того же плана, а не начинает его сначала.
         """
         if not event.student_id and not event.group_id:
             return event
@@ -128,6 +154,32 @@ class LessonLearningPlanSyncService:
             PlanSyncService.link_next_plan_item(event)
             event.refresh_from_db()
         linked = cls._linked_real_plan_item(event)
+        if linked is None:
+            topic = (event.topic or "").strip()
+            existing_plan = LessonPlanEnrollment.objects.filter(
+                teacher=teacher,
+            ).exclude(status=EnrollmentStatus.CANCELLED)
+            if event.student_id:
+                existing_plan = existing_plan.filter(student_id=event.student_id)
+                if event.student_subject_id:
+                    subject_plan = existing_plan.filter(student_subject_id=event.student_subject_id)
+                    if subject_plan.exists():
+                        existing_plan = subject_plan
+            elif event.group_id:
+                existing_plan = existing_plan.filter(group_id=event.group_id)
+            else:
+                existing_plan = existing_plan.none()
+            if topic and existing_plan.exists():
+                try:
+                    cls.create_plan_item_from_lesson(event, teacher=teacher, title=topic)
+                    event.refresh_from_db()
+                    linked = cls._linked_real_plan_item(event)
+                except LessonPlanSyncError:
+                    logger.info(
+                        "could not append plan item from event=%s topic=%s",
+                        event.pk,
+                        topic,
+                    )
         if linked is not None and event.plan_sync_enabled:
             cls._copy_item_fields_to_event(
                 event, linked, force_fields=CONTENT_FIELDS,
@@ -495,11 +547,21 @@ class LessonLearningPlanSyncService:
 
         plan_result = None
         if sync_action == "lesson_and_plan" or resolve_conflict == "lesson_and_plan":
+            linked = cls._linked_real_plan_item(event)
+            append_last = "topic" in content_updates and cls._should_append_topic_as_last(event, linked)
+            if append_last and linked is not None:
+                if linked.scheduled_event_id == event.pk:
+                    linked.scheduled_event = None
+                    linked.save(update_fields=["scheduled_event", "updated_at"])
+                event.lesson_plan_item = None
+                event.save(update_fields=["lesson_plan_item", "updated_at"])
             try:
                 plan_result = cls.sync_lesson_to_plan(
                     event,
                     teacher=teacher,
-                    mode="update_linked" if cls._linked_real_plan_item(event) else "create_item",
+                    mode="create_item" if append_last else (
+                        "update_linked" if cls._linked_real_plan_item(event) else "create_item"
+                    ),
                     student_ids=student_ids,
                     confirm_all_students=confirm_all_students,
                 )
@@ -969,6 +1031,7 @@ class LessonLearningPlanSyncService:
         if raw_title.lower() in audience_names:
             raw_title = ""
         item_title = (raw_title or topic or f"Урок {max_order + 1}").strip()[:255]
+        from .plan_schedule import event_local_date
         item = LessonPlanItem.objects.create(
             plan=plan,
             order=max_order + 1,
@@ -979,10 +1042,14 @@ class LessonLearningPlanSyncService:
             description=event.description or "",
             homework_description=event.homework_description or "",
             scheduled_event=event,
+            scheduled_date=event_local_date(event),
             status=PlanItemStatus.PLANNED,
         )
         plan.lessons_count = plan.items.count()
         plan.save(update_fields=["lessons_count", "updated_at"])
+        if enrollment.status == EnrollmentStatus.COMPLETED:
+            enrollment.status = EnrollmentStatus.ACTIVE
+            enrollment.save(update_fields=["status", "updated_at"])
         return item
 
     @classmethod

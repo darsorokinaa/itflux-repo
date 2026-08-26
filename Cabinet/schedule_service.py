@@ -846,11 +846,20 @@ def update_event(event, *, changed_by, data, notify=True, sync_plan=True):
             sync_planned_topic_from_event(event)
         except Exception:
             pass
-        if (
+        topic_text = str(content_updates.get("topic") or "").strip()
+        should_push_topic = bool(
             sync_plan
-            and event.lesson_plan_item_id
-            and event.plan_sync_enabled
+            and topic_text
             and "topic" not in (event.manual_override_fields or [])
+        )
+        if (
+            should_push_topic
+            or (
+                sync_plan
+                and event.lesson_plan_item_id
+                and event.plan_sync_enabled
+                and "topic" not in (event.manual_override_fields or [])
+            )
         ):
             try:
                 from .lesson_plan_content_sync import (

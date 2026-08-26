@@ -259,8 +259,13 @@ export default function CreateScheduleLessonModal({
     })
       .then((data) => {
         if (cancelled) return;
-        setNextPlanItem(data?.item || null);
+        const item = data?.item || null;
+        setNextPlanItem(item);
         setPlanProgress(data?.progress || null);
+        if (!item) {
+          setPlanLinkMode("suggest");
+          setSelectedPlanItemId(null);
+        }
       })
       .catch(() => {
         if (!cancelled) {
@@ -415,12 +420,41 @@ export default function CreateScheduleLessonModal({
         </div>
         <form className="cb-sch-form cb-sch-form--sections" onSubmit={(e) => handleSubmit(e, false)}>
           {error ? <p className="cb-sch-form__error" role="alert">{error}</p> : null}
-          {!lessonPlanItemId && !nextPlanItem && (planProgress?.is_finished || planProgress?.is_schedule_exhausted) ? (
+          {!lessonPlanItemId && !nextPlanItem && planProgress ? (
             <section className="cb-sch-form__section">
               <h3>План уроков</h3>
-              <p className="cb-sch-field-hint">
-                {planProgress.warning_message || "План обучения завершён. Занятие будет создано без темы — добавьте темы в план."}
+              <p className="cb-sch-field-hint" role="status">
+                {planProgress.warning_message
+                  || "Все темы плана уже использованы. Новая тема добавится в конец плана."}
               </p>
+              <label className="cb-sch-field">
+                <span>Тема занятия</span>
+                <input
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                  placeholder="Заполните тему"
+                  autoFocus
+                />
+              </label>
+              <div className="cb-sch-form__row" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className={`cb-btn cb-btn--sm ${planLinkMode !== "skip" ? "cb-btn--primary" : "cb-btn--outline"}`}
+                  onClick={() => setPlanLinkMode("suggest")}
+                >
+                  Добавить в план
+                </button>
+                <button
+                  type="button"
+                  className={`cb-btn cb-btn--sm ${planLinkMode === "skip" ? "cb-btn--primary" : "cb-btn--outline"}`}
+                  onClick={() => {
+                    setPlanLinkMode("skip");
+                    setSelectedPlanItemId(null);
+                  }}
+                >
+                  Без привязки к плану
+                </button>
+              </div>
             </section>
           ) : null}
           {!lessonPlanItemId && nextPlanItem ? (

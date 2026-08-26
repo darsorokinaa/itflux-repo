@@ -16,6 +16,7 @@ import {
   deleteLessonPlanItem,
   fetchCabinetSession,
   fetchLessonPlan,
+  fillLessonPlanDates,
   reorderLessonPlanItems,
   updateLessonPlan,
   updateLessonPlanItem,
@@ -44,6 +45,13 @@ import {
 } from "../planEditorSession";
 import { useAutoSave } from "../hooks/useAutoSave";
 import { usePageTitle } from "../hooks/usePageTitle";
+import {
+  PLAN_DATE_INTERVALS,
+  applyPlanDates,
+  formatPlanDateLabel,
+  inferPlanDateInterval,
+  nextPlanDateAfter,
+} from "../planDates";
 
 function planTypeLabel(id, options = PLAN_LEVELS) {
   return options.find((t) => t.id === id)?.label || id;
@@ -72,6 +80,7 @@ function PlanEditorSessionCard({
   expanded,
   onToggle,
   onChange,
+  onDateChange,
   onMove,
   onDuplicate,
   onOpenPicker,
@@ -90,6 +99,7 @@ function PlanEditorSessionCard({
   const summary = sessionResourceSummary(session);
   const displayTitle = session.title.trim() || `Занятие ${index + 1}`;
   const topicLine = session.topic.trim() ? `Тема: «${session.topic.trim()}»` : "Тема не указана";
+  const dateLabel = formatPlanDateLabel(session.scheduledDate);
 
   return (
     <article
@@ -111,7 +121,7 @@ function PlanEditorSessionCard({
         </button>
 
         <button type="button" className="cb-pe-session__summary" onClick={onToggle}>
-          <span className="cb-pe-session__num">Занятие {index + 1}</span>
+          <span className="cb-pe-session__num">Занятие {index + 1}{dateLabel ? ` · ${dateLabel}` : ""}</span>
           <strong className="cb-pe-session__title">{displayTitle}</strong>
           <span className="cb-pe-session__topic">{topicLine}</span>
           <span className="cb-pe-session__meta">
@@ -141,6 +151,22 @@ function PlanEditorSessionCard({
             <label className="cb-pe-field">
               <span>Название</span>
               <input value={session.title} onChange={(e) => onChange(index, "title", e.target.value)} />
+            </label>
+            <label className="cb-pe-field">
+              <span>Дата занятия</span>
+              <input
+                type="date"
+                value={session.scheduledDate || ""}
+                onChange={(e) => {
+                  if (onDateChange) onDateChange(index, e.target.value);
+                  else onChange(index, "scheduledDate", e.target.value);
+                }}
+              />
+              {index === 0 ? (
+                <small className="cb-pe-field__hint">От этой даты автоматически проставятся остальные</small>
+              ) : (
+                <small className="cb-pe-field__hint">Можно поправить вручную</small>
+              )}
             </label>
             <label className="cb-pe-field">
               <span>Тема</span>
@@ -356,6 +382,7 @@ export default function CabinetLessonPlanEditorPage() {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleDraft, setScheduleDraft] = useState(null);
   const [schedulingFirst, setSchedulingFirst] = useState(false);
+  const [dateInterval, setDateInterval] = useState("weekly");
   const [deleteSessionIndex, setDeleteSessionIndex] = useState(null);
   const [makePublic, setMakePublic] = useState(false);
   const [canPublishCatalog, setCanPublishCatalog] = useState(false);
@@ -521,7 +548,9 @@ export default function CabinetLessonPlanEditorPage() {
         setMakePublic(Boolean(data.is_public));
         setExtraOpen(Boolean(data.goal?.trim() || data.description?.trim()));
         if (data.items?.length) {
-          setSessions(data.items.map((item) => mapApiItemResponseToSession(item)));
+          const mapped = data.items.map((item) => mapApiItemResponseToSession(item));
+          setSessions(mapped);
+          setDateInterval(inferPlanDateInterval(mapped));
           setExpandedIndex(0);
         } else {
           setSessions([clonePlanSession(EMPTY_PLAN_SESSION)]);
@@ -571,9 +600,65 @@ export default function CabinetLessonPlanEditorPage() {
     }
   }, []);
 
+  const savedPlanKey = useCallback(() => {
+    const key = createdPlanIdRef.current || activePlanId || planId;
+    if (!key || key === "new") return null;
+    return key;
+  }, [activePlanId, planId]);
+
+  const persistFilledPlanDates = useCallback(async (startDate, interval) => {
+    const planKey = savedPlanKey();
+    if (!planKey || !startDate) return;
+    try {
+      const data = await fillLessonPlanDates(planKey, {
+        start_date: startDate,
+        interval,
+      });
+      if (Array.isArray(data?.items)) {
+        skipDirtyRef.current = true;
+        setSessions(data.items.map(mapApiItemResponseToSession));
+      }
+    } catch {
+      /* даты остаются локально — сохранится автосейвом */
+    }
+  }, [savedPlanKey]);
+
   const updateSession = useCallback((index, field, value) => {
-    setSessions((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)));
-  }, []);
+    setSessions((prev) => {
+      if (field === "scheduledDate" && index === 0 && value) {
+        return applyPlanDates(prev, value, dateInterval, 0);
+      }
+      return prev.map((s, i) => (i === index ? { ...s, [field]: value } : s));
+    });
+  }, [dateInterval]);
+
+  const handleFirstDateChange = useCallback((value) => {
+    updateSession(0, "scheduledDate", value);
+    void persistFilledPlanDates(value, dateInterval);
+  }, [dateInterval, persistFilledPlanDates, updateSession]);
+
+  const handleDateIntervalChange = useCallback((nextInterval) => {
+    setDateInterval(nextInterval);
+    const first = sessions[0]?.scheduledDate;
+    if (!first) return;
+    setSessions((prev) => applyPlanDates(prev, first, nextInterval, 0));
+    void persistFilledPlanDates(first, nextInterval);
+  }, [persistFilledPlanDates, sessions]);
+
+  const handleSessionDateChange = useCallback((index, value) => {
+    if (index === 0) {
+      handleFirstDateChange(value);
+      return;
+    }
+    let nextSession;
+    setSessions((prev) => {
+      nextSession = { ...prev[index], scheduledDate: value };
+      return prev.map((s, i) => (i === index ? nextSession : s));
+    });
+    if (nextSession?.id) {
+      void persistSessionIfSaved(index, nextSession);
+    }
+  }, [handleFirstDateChange, persistSessionIfSaved]);
 
   const applySessionUpdate = useCallback(async (index, updater) => {
     let nextSession;
@@ -817,11 +902,15 @@ export default function CabinetLessonPlanEditorPage() {
   const duplicateSession = useCallback((index) => {
     setSessions((prev) => {
       const next = [...prev];
-      next.splice(index + 1, 0, clonePlanSession(prev[index]));
+      const copy = clonePlanSession(prev[index]);
+      if (prev[index]?.scheduledDate) {
+        copy.scheduledDate = nextPlanDateAfter(prev[index].scheduledDate, index, dateInterval);
+      }
+      next.splice(index + 1, 0, copy);
       return next;
     });
     setExpandedIndex(index + 1);
-  }, []);
+  }, [dateInterval]);
 
   const handlePreview = useCallback(() => {
     setPreviewOpen(true);
@@ -875,11 +964,16 @@ export default function CabinetLessonPlanEditorPage() {
 
   const addSession = useCallback(() => {
     setSessions((prev) => {
-      const next = [...prev, clonePlanSession(EMPTY_PLAN_SESSION)];
+      const last = prev[prev.length - 1];
+      const nextSession = clonePlanSession(EMPTY_PLAN_SESSION);
+      if (last?.scheduledDate) {
+        nextSession.scheduledDate = nextPlanDateAfter(last.scheduledDate, prev.length - 1, dateInterval);
+      }
+      const next = [...prev, nextSession];
       setExpandedIndex(next.length - 1);
       return next;
     });
-  }, []);
+  }, [dateInterval]);
 
   const handleDragStart = useCallback((index) => {
     setDragIndex(index);
@@ -1196,6 +1290,33 @@ export default function CabinetLessonPlanEditorPage() {
               </button>
             </div>
 
+            {sessions.length > 0 ? (
+              <div className="cb-pe-dates">
+                <label className="cb-pe-field">
+                  <span>Дата первого занятия</span>
+                  <input
+                    type="date"
+                    value={sessions[0]?.scheduledDate || ""}
+                    onChange={(e) => handleFirstDateChange(e.target.value)}
+                  />
+                </label>
+                <label className="cb-pe-field">
+                  <span>Как часто</span>
+                  <select
+                    value={dateInterval}
+                    onChange={(e) => handleDateIntervalChange(e.target.value)}
+                  >
+                    {PLAN_DATE_INTERVALS.map((item) => (
+                      <option key={item.id} value={item.id}>{item.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <p className="cb-pe-dates__hint">
+                  Остальные даты проставятся автоматически. Любую дату занятия можно поправить вручную.
+                </p>
+              </div>
+            ) : null}
+
             {sessions.length === 0 ? (
               <div className="cb-pe-empty">
                 <p className="cb-pe-empty__title">Занятий пока нет</p>
@@ -1215,6 +1336,7 @@ export default function CabinetLessonPlanEditorPage() {
                     expanded={expandedIndex === index}
                     onToggle={() => setExpandedIndex((prev) => (prev === index ? null : index))}
                     onChange={updateSession}
+                    onDateChange={handleSessionDateChange}
                     onMove={moveSession}
                     onDuplicate={duplicateSession}
                     onOpenPicker={openResourcesPicker}

@@ -21,7 +21,7 @@ import UpgradeLimitModal from "../components/UpgradeLimitModal";
 import CompactUpgradeModal from "../components/CompactUpgradeModal";
 import { useSubscription } from "../hooks/useSubscription";
 import { useLimitModal } from "../hooks/useLimitModal";
-import { mapApiEnrollment } from "../lessonPlansData";
+import { formatStudentPlansMeta, mapApiEnrollment } from "../lessonPlansData";
 import {
   addStudentToGroup,
   archiveStudent,
@@ -871,8 +871,9 @@ export default function CabinetStudentsPage() {
       const byGroup = {};
       (data || []).forEach((item) => {
         const mapped = mapApiEnrollment(item);
-        if (mapped.studentId && !byStudent[mapped.studentId]) {
-          byStudent[mapped.studentId] = mapped;
+        if (mapped.studentId) {
+          if (!byStudent[mapped.studentId]) byStudent[mapped.studentId] = [];
+          byStudent[mapped.studentId].push(mapped);
         }
         if (mapped.groupId && !byGroup[mapped.groupId]) {
           byGroup[mapped.groupId] = mapped;
@@ -1143,7 +1144,7 @@ export default function CabinetStudentsPage() {
     setPlanAttachModal({
       type: "student",
       target: student,
-      enrollment: enrollmentsByStudent[student.id] || null,
+      enrollment: enrollmentsByStudent[student.id] || [],
     });
   };
   const openAttachPlanForGroup = (group) => {
@@ -1157,7 +1158,7 @@ export default function CabinetStudentsPage() {
   const openAssignHomeworkForStudent = (student) => {
     setHomeworkAssignModal({
       student,
-      enrollment: enrollmentsByStudent[student.id] || null,
+      enrollment: (enrollmentsByStudent[student.id] || [])[0] || null,
     });
   };
   const openAssignHomeworkForGroup = (group) => {
@@ -1684,11 +1685,7 @@ export default function CabinetStudentsPage() {
                             onDragStart={handleDragStart}
                             onDragEnd={handleDragEnd}
                             onOpen={() => openEditStudent(st)}
-                            extraMeta={
-                              enrollmentsByStudent[st.id]?.planTitle
-                                ? `План: ${enrollmentsByStudent[st.id].planTitle}`
-                                : "Нет запланированного урока"
-                            }
+                            extraMeta={formatStudentPlansMeta(enrollmentsByStudent[st.id])}
                             menuItems={[
                               { label: "Редактировать", onClick: () => openEditStudent(st) },
                               { label: "Задать ДЗ", onClick: () => openAssignHomeworkForStudent(st) },

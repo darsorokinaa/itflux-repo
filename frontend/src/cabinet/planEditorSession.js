@@ -19,6 +19,7 @@ export const EMPTY_PLAN_SESSION = {
   homeworkDescription: "",
   homeworkMaterials: [],
   homeworkInteractives: [],
+  scheduledDate: "",
 };
 
 export function mapPlanItemToEditorSession(item) {
@@ -41,6 +42,7 @@ export function mapPlanItemToEditorSession(item) {
     homeworkMaterials: (item.homework_materials || item.homeworkMaterials || []).map(mapApiMaterial),
     homeworkInteractives: (item.homework_interactives || item.homeworkInteractives || [])
       .map(mapApiInteractiveAttachment),
+    scheduledDate: item.scheduled_date || item.scheduledDate || "",
   };
 }
 
@@ -67,6 +69,7 @@ export function buildPlanItemApiPayload(session, order) {
     interactive_ids: session.lessonInteractives.map((i) => i.id).filter(Boolean),
     homework_material_ids: session.homeworkMaterials.map((m) => m.id).filter(Boolean),
     homework_interactive_ids: session.homeworkInteractives.map((i) => i.id).filter(Boolean),
+    scheduled_date: session.scheduledDate || null,
   };
 }
 
@@ -217,7 +220,7 @@ export function editorSessionToPlanItem(session, order) {
     scheduledEventStartsAt: null,
     status: "draft",
     statusLabel: "Черновик",
-    scheduledDate: null,
+    scheduledDate: session.scheduledDate || null,
     completedAt: null,
     createdAt: null,
   };

@@ -166,6 +166,63 @@ class PlanLifecycleTests(TestCase):
         next_item = PlanSyncService.get_next_plan_item(self.enrollment)
         self.assertIsNone(next_item)
 
+    def test_extra_lesson_does_not_restart_plan_after_full_history(self):
+        self.enrollment.start_date = timezone.localtime(self.base).date() - timedelta(days=30)
+        self.enrollment.save(update_fields=["start_date"])
+        for index in range(len(self.items)):
+            self._event(-(index + 2))
+        extra = self._event(20)
+        extra.refresh_from_db()
+        self.assertIsNone(extra.lesson_plan_item_id)
+        self.assertNotEqual((extra.topic or "").strip(), self.items[0].topic)
+        self.assertIsNone(PlanSyncService.get_next_plan_item(self.enrollment))
+        progress = PlanSyncService.get_enrollment_progress(self.enrollment)
+        self.assertTrue(progress["needs_manual_topic"])
+        self.assertIn("конец плана", progress["warning_message"])
+
+    def test_new_topic_appends_last_plan_item(self):
+        for index, item in enumerate(self.items):
+            event = self._event(index + 1)
+            self.assertEqual(event.lesson_plan_item_id, item.id)
+            PlanSyncService.mark_event_completed(event)
+        last_order = self.plan.items.order_by("order", "id").last().order
+        extra = self._event(20, topic="Графы")
+        extra.refresh_from_db()
+        self.assertIsNotNone(extra.lesson_plan_item_id)
+        new_item = extra.lesson_plan_item
+        self.assertEqual(new_item.plan_id, self.plan.id)
+        self.assertEqual(new_item.topic, "Графы")
+        self.assertEqual(new_item.title, "Графы")
+        self.assertEqual(new_item.order, last_order + 1)
+        self.assertEqual(
+            self.plan.items.order_by("order", "id").last().id,
+            new_item.id,
+        )
+        self.assertNotEqual(new_item.id, self.items[0].id)
+
+    def test_calendar_topic_on_placeholder_stays_last_after_realign(self):
+        from Cabinet.lesson_plan_content_sync import LessonLearningPlanSyncService
+
+        self.items[0].title = "Урок 1"
+        self.items[0].topic = "Урок 1"
+        self.items[0].save(update_fields=["title", "topic", "updated_at"])
+        event = self._event(1)
+        LessonLearningPlanSyncService.apply_lesson_edit(
+            event,
+            {"topic": "Кодирование"},
+            teacher=self.teacher,
+            sync_action="lesson_and_plan",
+        )
+        event.refresh_from_db()
+        new_id = event.lesson_plan_item_id
+        self.assertIsNotNone(new_id)
+        self.assertNotEqual(new_id, self.items[0].id)
+        PlanSyncService.realign_enrollment_topics(self.enrollment)
+        event.refresh_from_db()
+        self.assertEqual(event.lesson_plan_item_id, new_id)
+        self.assertEqual(event.lesson_plan_item.topic, "Кодирование")
+        self.assertEqual(self.plan.items.order_by("order", "id").last().id, new_id)
+
     def test_same_titles_sync_by_id_not_text(self):
         from Cabinet.lesson_plan_content_sync import LessonLearningPlanSyncService
 
@@ -366,6 +423,26 @@ class PlanLifecycleTests(TestCase):
         self.assertNotEqual(self.items[0].status, PlanItemStatus.COMPLETED)
         self.assertEqual(future.lesson_plan_item_id, self.items[0].id)
         self.assertEqual(future.topic, self.items[0].topic)
+
+    def test_today_unmarked_lesson_still_gets_next_topic(self):
+        starts = timezone.now().replace(second=0, microsecond=0) - timedelta(hours=2)
+        event = create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": self.student.full_name,
+                "starts_at": starts,
+                "ends_at": starts + timedelta(minutes=45),
+                "event_type": "individual_lesson",
+                "notify_participants": False,
+            },
+            student_ids=[self.student.pk],
+            notify=False,
+        )
+        event.refresh_from_db()
+        self.items[0].refresh_from_db()
+        self.assertEqual(event.lesson_plan_item_id, self.items[0].id)
+        self.assertEqual(event.topic, self.items[0].topic)
+        self.assertNotEqual(self.items[0].status, PlanItemStatus.COMPLETED)
 
     def test_three_conducted_leaves_penultimate_for_next_lesson(self):
         for index in range(3):

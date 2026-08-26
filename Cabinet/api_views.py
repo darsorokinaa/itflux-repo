@@ -245,6 +245,8 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         )
         serializer.is_valid(raise_exception=True)
         plan_id = serializer.validated_data.pop("plan_id", None)
+        start_date = serializer.validated_data.pop("start_date", None)
+        date_interval = (serializer.validated_data.pop("date_interval", None) or "").strip() or None
         subject = serializer.save(student=student)
         try:
             from .activation_events import SUBJECT_CREATED, record_event
@@ -279,7 +281,7 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                 student_subject=subject,
             ).exclude(status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED]).first()
             if already is None:
-                LessonPlanEnrollment.objects.create(
+                already = LessonPlanEnrollment.objects.create(
                     teacher=self.get_teacher(),
                     plan=plan,
                     student=student,
@@ -290,6 +292,11 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             elif already.plan_id != plan.pk:
                 already.plan = plan
                 already.save(update_fields=["plan", "updated_at"])
+            if start_date or date_interval:
+                from .plan_dates import apply_enrollment_start_dates
+                apply_enrollment_start_dates(
+                    already, start_date=start_date, interval=date_interval,
+                )
         return Response(
             StudentSubjectSerializer(subject).data,
             status=status.HTTP_201_CREATED,
@@ -338,10 +345,14 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         )
         serializer.is_valid(raise_exception=True)
         serializer.validated_data.pop("plan_id", None)
+        start_date = serializer.validated_data.pop("start_date", None)
+        date_interval = (serializer.validated_data.pop("date_interval", None) or "").strip() or None
         # plan_id is optional on patch; only handle if explicitly provided
         plan_provided = "plan_id" in request.data
         raw_plan = request.data.get("plan_id")
+        dates_provided = "start_date" in request.data or "date_interval" in request.data
         subject = serializer.save()
+        enrollment = None
         if plan_provided:
             if raw_plan in (None, "", 0, "0"):
                 LessonPlanEnrollment.objects.filter(
@@ -368,7 +379,7 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                     enrollment.plan = plan
                     enrollment.save(update_fields=["plan", "updated_at"])
                 else:
-                    LessonPlanEnrollment.objects.create(
+                    enrollment = LessonPlanEnrollment.objects.create(
                         teacher=self.get_teacher(),
                         plan=plan,
                         student=student,
@@ -376,6 +387,17 @@ class StudentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
                         format="individual",
                         status=EnrollmentStatus.ACTIVE,
                     )
+        if dates_provided:
+            if enrollment is None:
+                enrollment = LessonPlanEnrollment.objects.filter(
+                    student_subject=subject,
+                    status__in=[EnrollmentStatus.ACTIVE, EnrollmentStatus.PAUSED],
+                ).first()
+            if enrollment is not None:
+                from .plan_dates import apply_enrollment_start_dates
+                apply_enrollment_start_dates(
+                    enrollment, start_date=start_date, interval=date_interval,
+                )
         return Response(StudentSubjectSerializer(subject).data)
 
     @action(detail=True, methods=["get"], url_path="materials")
@@ -1386,7 +1408,34 @@ class LessonPlanViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             )
 
         enrollment = serializer.save(teacher=self.get_teacher())
+        if enrollment.start_date:
+            from .plan_dates import apply_enrollment_start_dates
+            apply_enrollment_start_dates(enrollment)
         return Response(LessonPlanEnrollmentSerializer(enrollment).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="fill-dates")
+    def fill_dates(self, request, pk=None):
+        """Проставить даты занятий от даты первого урока."""
+        plan = self.get_object()
+        if not can_edit_lesson_plan(self.get_teacher(), plan):
+            if is_catalog_lesson_plan(plan):
+                return Response(
+                    {"detail": "Публичный план нельзя изменить. Сделайте копию для редактирования."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            return Response({"detail": "Нет доступа."}, status=status.HTTP_403_FORBIDDEN)
+        from .plan_dates import apply_plan_item_dates, parse_plan_date
+
+        start_date = parse_plan_date(request.data.get("start_date"))
+        if not start_date:
+            return Response(
+                {"detail": "Укажите дату первого занятия."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        interval = request.data.get("interval") or request.data.get("frequency") or "weekly"
+        apply_plan_item_dates(plan, start_date, interval)
+        plan = self.get_queryset().filter(pk=plan.pk).first() or plan
+        return Response(LessonPlanDetailSerializer(plan).data)
 
     @action(detail=True, methods=["post"], url_path="items")
     def add_item(self, request, pk=None):
@@ -1474,9 +1523,19 @@ class LessonPlanItemViewSet(
         if hasattr(item, "_prefetched_objects_cache"):
             item._prefetched_objects_cache.clear()
         from .lesson_plan_content_sync import LessonLearningPlanSyncService
+        from .plan_sync import PlanSyncService
         sync_result = LessonLearningPlanSyncService.sync_plan_item_to_lessons(
             item, teacher=self.get_teacher(), update_source="plan",
         )
+        if "scheduled_date" in request.data:
+            try:
+                enrollments = LessonPlanEnrollment.objects.filter(plan=plan).exclude(
+                    status__in=[EnrollmentStatus.COMPLETED, EnrollmentStatus.CANCELLED],
+                )
+                for enrollment in enrollments:
+                    PlanSyncService.realign_enrollment_topics(enrollment)
+            except Exception:
+                pass
         data = LessonPlanItemSerializer(item).data
         data["synced_events"] = sync_result
         return Response(data)
@@ -1622,6 +1681,16 @@ class LessonPlanEnrollmentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
             return LessonPlanEnrollmentWriteSerializer
         return LessonPlanEnrollmentSerializer
 
+    def perform_update(self, serializer):
+        start_provided = "start_date" in serializer.validated_data
+        interval_provided = "frequency" in serializer.validated_data
+        enrollment = serializer.save()
+        if start_provided or interval_provided:
+            if enrollment.start_date:
+                from .plan_dates import apply_enrollment_start_dates
+                apply_enrollment_start_dates(enrollment)
+        return enrollment
+
     def perform_create(self, serializer):
         student = serializer.validated_data.get("student")
         group = serializer.validated_data.get("group")
@@ -1668,6 +1737,9 @@ class LessonPlanEnrollmentViewSet(TeacherScopedMixin, viewsets.ModelViewSet):
         if first_item and first_item.status == PlanItemStatus.NOT_STARTED:
             first_item.status = PlanItemStatus.PLANNED
             first_item.save(update_fields=["status"])
+        if enrollment.start_date:
+            from .plan_dates import apply_enrollment_start_dates
+            apply_enrollment_start_dates(enrollment)
         return enrollment
 
     def create(self, request, *args, **kwargs):

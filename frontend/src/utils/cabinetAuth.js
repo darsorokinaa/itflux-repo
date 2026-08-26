@@ -1170,6 +1170,13 @@ export function enrollLessonPlan(planId, payload) {
   });
 }
 
+export function fillLessonPlanDates(planId, payload) {
+  return cabinetFetch(`/lesson-plans/${planId}/fill-dates/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function updatePlanEnrollment(id, payload) {
   return cabinetFetch(`/lesson-plan-enrollments/${id}/`, {
     method: "PATCH",

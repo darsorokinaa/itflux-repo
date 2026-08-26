@@ -22,6 +22,15 @@ import {
 } from "../../utils/cabinetAuth";
 import { usePageTitle } from "../hooks/usePageTitle";
 
+function formatPlanDateLabel(iso) {
+  if (!iso) return "";
+  const match = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return "";
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+}
+
 function formatPlanEventWhen(iso) {
   if (!iso) return "";
   const date = new Date(iso);
@@ -46,6 +55,9 @@ function itemScheduleStatus(item) {
   if (isFuture && when) return { label: when, mod: "planned" };
   if (item.status === "completed") return { label: "Пройдено", mod: "completed" };
   if (when) return { label: when, mod: "planned" };
+  if (item.scheduledDate) {
+    return { label: formatPlanDateLabel(item.scheduledDate), mod: "planned" };
+  }
   if (item.status === "planned") return { label: "Запланировано", mod: "planned" };
   return { label: "Не запланировано", mod: "idle" };
 }
