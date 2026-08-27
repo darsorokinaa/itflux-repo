@@ -139,7 +139,7 @@ function payloadFromRecord(record: Record<string, unknown> | null): AccessDenied
     min_plan: typeof source.min_plan === "string" ? source.min_plan : undefined,
     recommended_plan:
       typeof source.recommended_plan === "string" ? source.recommended_plan : undefined,
-    upgrade_required: Boolean(source.upgrade_required ?? source.code),
+    upgrade_required: Boolean(source.upgrade_required),
     limit: typeof source.limit === "number" ? source.limit : undefined,
     current: typeof source.current === "number" ? source.current : undefined,
   };
@@ -244,6 +244,8 @@ export function classifyAccessError(
       resourceType: extras.resourceType || LIMIT_CODES[payload.code],
     };
   }
+  // Только явный флаг с бэкенда AccessDenied — не любой { code: "..." }
+  // (иначе конфликт слота в расписании выглядит как «нужен другой тариф»).
   if (payload.upgrade_required) {
     return {
       ...base,

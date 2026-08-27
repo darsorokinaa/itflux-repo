@@ -77,6 +77,12 @@ describe("classifyAccessError", () => {
     expect(classifyAccessError({ code: "STUDENT_LIMIT_REACHED" })?.reason).toBe("limit_reached");
     expect(classifyAccessError({ code: "VARIANT_LIMIT_REACHED" })?.reason).toBe("limit_reached");
     expect(classifyAccessError({ status: 500, message: "boom" })).toBeNull();
+    expect(classifyAccessError({ code: "schedule_conflict", error: "В это время уже есть занятие." })).toBeNull();
+    expect(
+      classifyAccessError({
+        data: { ok: false, error: "В это время уже есть занятие.", code: "schedule_conflict" },
+      }),
+    ).toBeNull();
   });
 });
 
