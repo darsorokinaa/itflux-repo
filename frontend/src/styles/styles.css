@@ -8789,7 +8789,7 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     margin: 0 auto !important;
 }
 
-/* Химия и физика: LaTeX минимум в 2 раза крупнее базового банка (1.1em → 2.2em) */
+/* Химия и физика: LaTeX крупнее банка, −30% от предыдущих 2.2em */
 .exam-page[data-subject="phys"] .task-text mjx-container,
 .exam-page[data-subject="phys"] .exam-task-card__text mjx-container,
 .exam-page[data-subject="phys"] .correct-answer-content mjx-container,
@@ -8798,7 +8798,7 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .exam-page[data-subject="chem"] .exam-task-card__text mjx-container,
 .exam-page[data-subject="chem"] .correct-answer-content mjx-container,
 .exam-page[data-subject="chem"] .part2-answer-content mjx-container {
-    font-size: 2.2em !important;
+    font-size: 1.54em !important;
 }
 
 /*

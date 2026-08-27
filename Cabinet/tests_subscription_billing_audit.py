@@ -290,6 +290,7 @@ class PaymentStackAndIdempotencyTests(TestCase):
     def test_expires_at_boundary_is_invalid(self):
         self.sub.plan = self.pro
         self.sub.status = TeacherSubscription.Status.ACTIVE
+        self.sub.source = TeacherSubscription.Source.PAYMENT
         self.sub.expires_at = timezone.now()
         self.sub.save()
         self.sub.refresh_from_db()

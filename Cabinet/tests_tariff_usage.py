@@ -192,6 +192,8 @@ class TariffUsageServiceTests(TestCase):
         self.assertEqual(data["usage"]["variants"], 7)
         self.assertEqual(data["usage"]["students"], 1)
         self.assertEqual(data["limits"]["variants_monthly"], 20)
+        self.assertEqual(data["limits"]["lessons"], self.start.max_lessons)
+        self.assertEqual(data["assigned_plan"]["slug"], "start")
 
     def test_old_month_usage_is_not_counted(self):
         TeacherMonthlyUsage.objects.create(

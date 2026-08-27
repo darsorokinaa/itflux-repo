@@ -1699,7 +1699,7 @@ a.home-updates__card {
 
 .all-tasks-page[data-subject="chem"] .all-tasks-item__html mjx-container,
 .all-tasks-page[data-subject="phys"] .all-tasks-item__html mjx-container {
-  font-size: 2.2em !important;
+  font-size: 1.54em !important;
 }
 
 .all-tasks-item__html mjx-container[display="true"] {

@@ -246,7 +246,7 @@ class TariffUsageService:
         return {
             "students": plan.max_students,
             "groups": plan.max_groups,
-            "lessons": None,
+            "lessons": plan.max_lessons,
             "interactives": plan.max_interactives,
             "variants_monthly": plan.max_variants_monthly,
             "workbooks_monthly": plan.max_workbooks_monthly,

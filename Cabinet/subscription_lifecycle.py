@@ -14,6 +14,7 @@ import logging
 from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -157,6 +158,20 @@ def process_expired_subscriptions(*, limit: int = 500) -> dict:
             ],
         )
         .exclude(plan_id=start_plan.pk)
+        .exclude(source=TeacherSubscription.Source.ADMIN)
+        .filter(
+            Q(
+                source__in=[
+                    TeacherSubscription.Source.PAYMENT,
+                    TeacherSubscription.Source.LAUNCH_PROMO,
+                    TeacherSubscription.Source.REFERRAL,
+                    TeacherSubscription.Source.PROMO_CODE,
+                    TeacherSubscription.Source.PROMOTION,
+                ]
+            )
+            | Q(auto_renew=True)
+            | Q(tbank_rebill_id__gt="")
+        )
         .order_by("expires_at")[:limit]
     )
 

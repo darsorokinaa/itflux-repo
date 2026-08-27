@@ -124,12 +124,18 @@ export default function CabinetMorePage() {
     openGuide,
     openSupport,
     currentPlan,
+    assignedPlan,
     subscriptionLoading,
     navCounts,
     refreshUser,
   } = useOutletContext();
   const name = user ? displayName(user) : "";
   const planName = currentPlan?.name || "";
+  const assignedName = assignedPlan?.name || "";
+  const planLabel =
+    assignedName && assignedPlan?.slug && currentPlan?.slug && assignedPlan.slug !== currentPlan.slug
+      ? `${planName || "Старт"} · в профиле БД: ${assignedName}`
+      : (planName || "Не выбран");
 
   const moreGroups = [
     ...CABINET_MORE_GROUPS,
@@ -198,7 +204,7 @@ export default function CabinetMorePage() {
               className="cb-more-profile__plan"
               title={planName ? `Тариф «${planName}»` : "Тарифы"}
             >
-              Тариф: {subscriptionLoading ? "…" : (planName || "Не выбран")}
+              Тариф: {subscriptionLoading ? "…" : planLabel}
             </Link>
           </div>
           <button

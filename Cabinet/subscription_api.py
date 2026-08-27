@@ -371,11 +371,11 @@ class SubscriptionUsageView(APIView):
             TeacherSubscription.objects.select_related("plan", "scheduled_plan")
             .get(teacher=request.user)
         )
-        if sub.plan_id != plan.pk:
-            sub.plan = plan
+        assigned_plan = sub.plan
 
         return Response({
             "plan": _plan_short(plan),
+            "assigned_plan": _plan_short(assigned_plan) if assigned_plan else None,
             "subscription": _subscription_payload(sub),
             "tariff": payload["tariff"],
             "period_start": payload["period_start"],
@@ -420,8 +420,7 @@ class SubscriptionPlansView(APIView):
             TeacherSubscription.objects.select_related("plan", "scheduled_plan")
             .get(teacher=request.user)
         )
-        if sub.plan_id != current_plan.pk:
-            sub.plan = current_plan
+        assigned_plan = sub.plan
 
         paid_plans = [p for p in plans if not _plan_is_free(p) and p.cta_type != TariffPlan.CtaType.CONTACT]
         year_savings = None
@@ -452,6 +451,7 @@ class SubscriptionPlansView(APIView):
 
         return Response({
             "current_slug": current_plan.slug,
+            "assigned_plan": _plan_short(assigned_plan) if assigned_plan else None,
             "plans": plan_payloads,
             "promotions": promotions,
             "registration_promo": promo_payload(),

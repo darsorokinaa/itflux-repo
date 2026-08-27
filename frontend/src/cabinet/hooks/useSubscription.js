@@ -23,17 +23,11 @@ export function notifySubscriptionChanged() {
 
 const INITIAL_STATE = {
   currentPlan: null,
-  limits: { students: 5, groups: 2, lessons: 10, interactives: 5, ai_requests: 10 },
-  usage: { students: 0, groups: 0, lessons: 0, interactives: 0, ai_requests: 0 },
+  assignedPlan: null,
+  limits: {},
+  usage: {},
   usageItems: [],
-  features: {
-    homework: true,
-    review: true,
-    basic_notifications: false,
-    advanced_notifications: false,
-    extended_library: false,
-    multi_teacher: false,
-  },
+  features: {},
   subscription: null,
   loading: true,
   error: null,
@@ -50,10 +44,11 @@ export function useSubscription() {
       const data = await fetchSubscriptionUsage();
       setState({
         currentPlan: data.plan,
-        limits: data.limits,
-        usage: data.usage,
+        assignedPlan: data.assigned_plan || data.plan,
+        limits: data.limits || {},
+        usage: data.usage || {},
         usageItems: data.usage_items || [],
-        features: data.features,
+        features: data.features || {},
         subscription: data.subscription,
         loading: false,
         error: null,
@@ -86,11 +81,11 @@ export function useSubscription() {
   return {
     ...state,
     refreshUsage: load,
-    canCreateStudent: limits.students == null || usage.students < limits.students,
-    canCreateGroup: limits.groups == null || usage.groups < limits.groups,
+    canCreateStudent: limits.students == null || (usage.students || 0) < limits.students,
+    canCreateGroup: limits.groups == null || (usage.groups || 0) < limits.groups,
     canCreateLesson: true,
-    canCreateInteractive: limits.interactives == null || usage.interactives < limits.interactives,
-    canUseAI: limits.ai_requests == null || usage.ai_requests < limits.ai_requests,
+    canCreateInteractive: limits.interactives == null || (usage.interactives || 0) < limits.interactives,
+    canUseAI: limits.ai_requests == null || (usage.ai_requests || 0) < limits.ai_requests,
   };
 }
 

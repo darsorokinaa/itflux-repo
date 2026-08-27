@@ -320,6 +320,7 @@ class ExpiredPlanAccessTests(TestCase):
             defaults={
                 "plan": self.plans["premium"],
                 "status": TeacherSubscription.Status.ACTIVE,
+                "source": TeacherSubscription.Source.PAYMENT,
                 "expires_at": timezone.now() - timedelta(days=1),
             },
         )
@@ -337,6 +338,25 @@ class ExpiredPlanAccessTests(TestCase):
             is_public=True,
         )
         self.assertFalse(SubscriptionAccessService.can_access_content(self.user, material))
+
+    def test_admin_assigned_pro_stays_pro_even_if_expires_at_is_past(self):
+        from Cabinet.subscription_service import SubscriptionLimitService
+
+        sub = self.user.subscription
+        sub.plan = self.plans["pro"]
+        sub.status = TeacherSubscription.Status.ACTIVE
+        sub.source = TeacherSubscription.Source.SELF
+        sub.auto_renew = False
+        sub.tbank_rebill_id = ""
+        sub.expires_at = timezone.now() - timedelta(days=1)
+        sub.save(update_fields=["plan", "status", "source", "auto_renew", "tbank_rebill_id", "expires_at"])
+        plan = SubscriptionLimitService.get_current_plan(self.user)
+        self.assertEqual(plan.slug, "pro")
+        sub.refresh_from_db()
+        self.assertEqual(sub.plan.slug, "pro")
+        self.assertEqual(sub.status, TeacherSubscription.Status.ACTIVE)
+        self.assertTrue(sub.is_valid())
+        self.assertTrue(SubscriptionAccessService.can_use_schedule(self.user))
 
 
 @override_settings(DEBUG=True, PAYMENT_PROVIDER="mock")

@@ -299,6 +299,7 @@ export default function CabinetLayout() {
     openSupport,
     refreshUser,
     currentPlan: subscription.currentPlan,
+    assignedPlan: subscription.assignedPlan,
     subscription: subscription.subscription,
     subscriptionLoading: subscription.loading,
     usageItems: subscription.usageItems,

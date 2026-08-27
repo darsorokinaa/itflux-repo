@@ -71,8 +71,7 @@ def get_quota_bytes(user) -> int:
     try:
         from .subscription_service import SubscriptionLimitService
 
-        sub = SubscriptionLimitService.get_or_create_subscription(user, apply_promo=False)
-        plan = getattr(sub, "plan", None)
+        plan = SubscriptionLimitService.get_current_plan(user)
         mb = int(getattr(plan, "max_storage_mb", 0) or 0) if plan else 0
         if mb > 0:
             return mb * 1024 * 1024

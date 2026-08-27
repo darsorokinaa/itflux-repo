@@ -915,6 +915,22 @@ class TeacherSubscriptionAdmin(admin.ModelAdmin):
     search_fields = ("teacher__username", "teacher__email")
     readonly_fields = ("started_at", "created_at", "updated_at")
     ordering = ("-created_at",)
+
+    def save_model(self, request, obj, form, change):
+        from django.utils import timezone as tz
+
+        changing_plan = (not change) or (form and "plan" in getattr(form, "changed_data", []))
+        if not obj.source or obj.source == TeacherSubscription.Source.SELF:
+            obj.source = TeacherSubscription.Source.ADMIN
+        if changing_plan:
+            obj.source = TeacherSubscription.Source.ADMIN
+            if obj.status in (
+                TeacherSubscription.Status.ACTIVE,
+                TeacherSubscription.Status.TRIAL,
+            ) and obj.expires_at and obj.expires_at <= tz.now():
+                obj.expires_at = None
+        super().save_model(request, obj, form, change)
+
     fieldsets = (
         (None, {"fields": ("teacher", "plan", "status", "source", "billing_period", "auto_renew")}),
         ("Сроки", {

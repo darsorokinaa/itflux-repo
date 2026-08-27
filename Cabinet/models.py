@@ -3144,8 +3144,23 @@ class TeacherSubscription(models.Model):
         from django.utils import timezone as tz
         if self.status not in (self.Status.ACTIVE, self.Status.TRIAL):
             return False
-        if self.expires_at and self.expires_at <= tz.now():
-            return False
+        # Оплата/акция истекают по expires_at. Ручное назначение (админка)
+        # держит тариф из строки БД, пока статус active/trial.
+        billing_sources = {
+            self.Source.PAYMENT,
+            self.Source.LAUNCH_PROMO,
+            self.Source.REFERRAL,
+            self.Source.PROMO_CODE,
+            self.Source.PROMOTION,
+        }
+        has_payment_method = bool((self.tbank_rebill_id or "").strip())
+        if (
+            self.source in billing_sources
+            or self.auto_renew
+            or has_payment_method
+        ):
+            if self.expires_at and self.expires_at <= tz.now():
+                return False
         return True
 
 
