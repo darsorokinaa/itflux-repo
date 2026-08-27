@@ -1,12 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   attachStableUrls,
+  collectFilesNeedingRemoteHydrate,
+  createBoardFileHydrator,
   createStableUrlMap,
   externalizeSceneFiles,
   filesForLivePublish,
   filesForPersist,
   filesForRestPayload,
   filesNeedRemoteHydrate,
+  hydrateMissingDidWork,
   markImageElementsSaved,
   pendingUploadFileIds,
   preferDisplayFile,
@@ -140,6 +143,17 @@ describe("externalizeSceneFiles", () => {
     })).toBe(false);
     expect(filesNeedRemoteHydrate({ f1: { dataURL: stable } }, {})).toBe(true);
     expect(filesNeedRemoteHydrate({}, {})).toBe(false);
+    expect(collectFilesNeedingRemoteHydrate(
+      {
+        f1: { dataURL: stable },
+        f2: { dataURL: "blob:http://local/2" },
+      },
+      { f1: { dataURL: "blob:http://local/1" } },
+    )).toEqual({});
+    expect(Object.keys(collectFilesNeedingRemoteHydrate(
+      { f1: { dataURL: stable }, f2: { dataURL: "/api/cabinet/interactive-boards/b/assets/y/" } },
+      { f1: { dataURL: "blob:http://local/1" } },
+    ))).toEqual(["f2"]);
   });
 
   it("attachStableUrls восстанавливает ключ после onChange без кастомных полей", () => {
@@ -192,3 +206,118 @@ describe("externalizeSceneFiles", () => {
     expect(out.f1[STABLE_URL_KEY]).toBe("/api/cabinet/interactive-boards/b/assets/a/");
   });
 });
+
+function assetUrl(fileId: string): string {
+  return `/api/cabinet/interactive-boards/board-1/assets/${fileId}/`;
+}
+
+function sceneFiles(ids: string[]): Record<string, Record<string, unknown>> {
+  return Object.fromEntries(ids.map((id) => [id, { id, dataURL: assetUrl(id), url: assetUrl(id), mimeType: "image/png" }]));
+}
+
+describe("createBoardFileHydrator single-flight", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function mockAssetFetch() {
+    const calls: string[] = [];
+    const inflightByUrl = new Map<string, number>();
+    const maxInflightByUrl = new Map<string, number>();
+    vi.stubGlobal("createImageBitmap", async () => ({ close() {} }));
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      inflightByUrl.set(url, (inflightByUrl.get(url) || 0) + 1);
+      maxInflightByUrl.set(url, Math.max(maxInflightByUrl.get(url) || 0, inflightByUrl.get(url)!));
+      await new Promise((r) => setTimeout(r, 40));
+      inflightByUrl.set(url, (inflightByUrl.get(url) || 1) - 1);
+      const size = url.includes("big") ? 700_000 : 32;
+      return new Response(new Blob([new Uint8Array(size)], { type: "image/png" }), {
+        status: 200,
+        headers: { "Content-Type": "image/png" },
+      });
+    });
+    return { calls, maxInflightByUrl };
+  }
+
+  it("событие B до окончания A не делает второй GET того же fileId", async () => {
+    const { calls, maxInflightByUrl } = mockAssetFetch();
+    const hydrator = createBoardFileHydrator();
+    const files = sceneFiles(["img-a"]);
+
+    const a = hydrator.hydrateMissing(files, {});
+    expect(hydrator.isInFlight("img-a")).toBe(true);
+    const b = hydrator.hydrateMissing(files, {});
+
+    const [ra, rb] = await Promise.all([a, b]);
+    expect(calls.filter((u) => u.includes("img-a")).length).toBe(1);
+    expect(maxInflightByUrl.get(assetUrl("img-a"))).toBe(1);
+    expect(hydrateMissingDidWork(ra)).toBe(true);
+    expect(hydrateMissingDidWork(rb)).toBe(true);
+    expect(filesNeedRemoteHydrate(files, ra.files)).toBe(false);
+    expect(filesNeedRemoteHydrate(files, rb.files)).toBe(false);
+  });
+
+  it("не скачивает локальный blob, уже hydrated и in-flight file", async () => {
+    const { calls } = mockAssetFetch();
+    const hydrator = createBoardFileHydrator();
+    const files = sceneFiles(["img-a", "img-b"]);
+    const first = await hydrator.hydrateMissing(files, {});
+    expect(calls.filter((u) => u.includes("/assets/")).length).toBe(2);
+
+    const again = await hydrator.hydrateMissing(files, {});
+    expect(again.fetchedFileIds).toEqual([]);
+    expect(calls.filter((u) => u.includes("/assets/")).length).toBe(2);
+
+    const withLocalBlob = await hydrator.hydrateMissing(
+      files,
+      { "img-a": first.files["img-a"], "img-b": first.files["img-b"] },
+    );
+    expect(hydrateMissingDidWork(withLocalBlob)).toBe(false);
+    expect(calls.filter((u) => u.includes("/assets/")).length).toBe(2);
+  });
+
+  it("учитель+ученик, 3 картинки (~700KB), частые scene updates: 1 GET на fileId на клиента", async () => {
+    const { calls, maxInflightByUrl } = mockAssetFetch();
+    const teacher = createBoardFileHydrator();
+    const student = createBoardFileHydrator();
+    const files = sceneFiles(["img-small-1", "img-small-2", "img-big"]);
+
+    const burst = (h: ReturnType<typeof createBoardFileHydrator>) =>
+      Promise.all(Array.from({ length: 30 }, () => h.hydrateMissing(files, {})));
+
+    const [teacherResults, studentResults] = await Promise.all([burst(teacher), burst(student)]);
+
+    for (const id of ["img-small-1", "img-small-2", "img-big"]) {
+      const url = assetUrl(id);
+      expect(calls.filter((u) => u === url).length).toBe(2);
+      expect(maxInflightByUrl.get(url)).toBeLessThanOrEqual(2);
+      expect(teacher.isHydrated(id)).toBe(true);
+      expect(student.isHydrated(id)).toBe(true);
+    }
+
+    const lastTeacher = teacherResults[teacherResults.length - 1];
+    const lastStudent = studentResults[studentResults.length - 1];
+    expect(filesNeedRemoteHydrate(files, lastTeacher.files)).toBe(false);
+    expect(filesNeedRemoteHydrate(files, lastStudent.files)).toBe(false);
+
+    const teacherAgain = await teacher.hydrateMissing(files, lastTeacher.files);
+    const studentAgain = await student.hydrateMissing(files, lastStudent.files);
+    expect(hydrateMissingDidWork(teacherAgain)).toBe(false);
+    expect(hydrateMissingDidWork(studentAgain)).toBe(false);
+    expect(calls.filter((u) => u.includes("/assets/")).length).toBe(6);
+  });
+
+  it("reset при смене boardId снова разрешает GET", async () => {
+    const { calls } = mockAssetFetch();
+    const hydrator = createBoardFileHydrator();
+    const files = sceneFiles(["img-a"]);
+    await hydrator.hydrateMissing(files, {});
+    hydrator.reset();
+    expect(hydrator.isHydrated("img-a")).toBe(false);
+    await hydrator.hydrateMissing(files, {});
+    expect(calls.filter((u) => u.includes("img-a")).length).toBe(2);
+  });
+});
+

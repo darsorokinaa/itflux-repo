@@ -161,6 +161,18 @@ export function shouldBlockUnload(status: SaveStatus, hasPending: boolean): bool
   return hasPending || status === "dirty" || status === "saving" || status === "error";
 }
 
+/**
+ * После VERSION_CONFLICT 409: повторный PATCH только если пользователь
+ * правил сцену после снимка, ушедшего в конфликтующий запрос.
+ * Само применение remote merge не является локальной правкой.
+ */
+export function shouldRetryPersistAfterVersionConflict(
+  localRevision: number,
+  revisionAtSave: number,
+): boolean {
+  return localRevision > revisionAtSave;
+}
+
 export function isBoardSceneTooLargeError(error: {
   code?: string;
   status?: number;

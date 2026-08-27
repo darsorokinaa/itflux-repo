@@ -7,6 +7,7 @@ import {
   sanitizeAppState,
   saveStatusLabel,
   shouldBlockUnload,
+  shouldRetryPersistAfterVersionConflict,
 } from "./boardAutosave";
 
 describe("boardAutosave", () => {
@@ -115,5 +116,59 @@ describe("boardAutosave", () => {
     // Контракт для UI: при view saveStatus остаётся idle и unload не блокируется без dirty
     expect(shouldBlockUnload("idle", false)).toBe(false);
     expect(saveStatusLabel("idle")).toBe("");
+  });
+
+  it("после 409 повторный PATCH только если есть правки новее snapshot", () => {
+    expect(shouldRetryPersistAfterVersionConflict(4, 4)).toBe(false);
+    expect(shouldRetryPersistAfterVersionConflict(5, 4)).toBe(true);
+    expect(shouldRetryPersistAfterVersionConflict(3, 4)).toBe(false);
+  });
+
+  it("409 merge без новых локальных правок не зацикливает PATCH", () => {
+    let patches = 0;
+    let localRevision = 3;
+    const persist = () => {
+      patches += 1;
+      if (patches > 20) throw new Error("infinite VERSION_CONFLICT loop");
+      const revisionAtSave = localRevision;
+      // PATCH → 409 → fetch/merge; merge НЕ увеличивает localRevision.
+      if (shouldRetryPersistAfterVersionConflict(localRevision, revisionAtSave)) persist();
+    };
+    persist();
+    persist();
+    expect(patches).toBe(2);
+
+    localRevision = 3;
+    patches = 0;
+    const persistWithUserEditDuringSave = () => {
+      patches += 1;
+      if (patches > 20) throw new Error("infinite VERSION_CONFLICT loop");
+      const revisionAtSave = localRevision;
+      if (patches === 1) localRevision += 1;
+      if (shouldRetryPersistAfterVersionConflict(localRevision, revisionAtSave)) {
+        persistWithUserEditDuringSave();
+      }
+    };
+    persistWithUserEditDuringSave();
+    expect(patches).toBe(2);
+  });
+
+  it("два клиента после взаимного 409 не устраивают PATCH ping-pong", () => {
+    const client = (startRevision: number) => {
+      let patches = 0;
+      let localRevision = startRevision;
+      const persist = () => {
+        patches += 1;
+        if (patches > 10) throw new Error("PATCH ping-pong");
+        const revisionAtSave = localRevision;
+        if (shouldRetryPersistAfterVersionConflict(localRevision, revisionAtSave)) persist();
+      };
+      persist();
+      return { patches, localRevision };
+    };
+    const teacher = client(8);
+    const student = client(8);
+    expect(teacher.patches).toBe(1);
+    expect(student.patches).toBe(1);
   });
 });

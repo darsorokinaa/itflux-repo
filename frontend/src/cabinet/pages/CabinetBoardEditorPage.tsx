@@ -29,6 +29,7 @@ import {
   isBoardSceneTooLargeError,
   saveStatusLabel,
   shouldBlockUnload,
+  shouldRetryPersistAfterVersionConflict,
   type BoardScenePayload,
   type SaveStatus,
 } from "../boards/boardAutosave";
@@ -45,9 +46,11 @@ import {
   externalizeSceneFiles,
   filesForPersist,
   filesForRestPayload,
+  createBoardFileHydrator,
   filesNeedRemoteHydrate,
   findMissingImageFileIds,
   hydrateBoardFiles,
+  hydrateMissingDidWork,
   isTransientFileUrl,
   markImageElementsSaved,
   pendingUploadFileIds,
@@ -418,7 +421,8 @@ export default function CabinetBoardEditorPage() {
   const stableFileUrlsRef = useRef(createStableUrlMap());
   /** fileId, успешно загруженные/восстановленные в этой сессии — без повторного upload. */
   const loadedFilesRef = useRef(new Set<string>());
-  const loadingRemoteFilesRef = useRef(new Set<string>());
+  /** Single-flight GET /assets/<fileId>/ на вкладку: один in-flight + cache на fileId. */
+  const fileHydratorRef = useRef(createBoardFileHydrator());
   const lastActiveToolRef = useRef("");
   const imageUploadStatusRef = useRef<"idle" | "uploading" | "error">("idle");
   const [imageUploadStatus, setImageUploadStatus] = useState<"idle" | "uploading" | "error">("idle");
@@ -633,47 +637,67 @@ export default function CabinetBoardEditorPage() {
             // Новые картинки из серверной сцены (например, добавил пир, пока
             // мы не успели сохранить) ещё не blob — не блокируем merge, но
             // догружаем их так же, как для scene_saved/resync.
-            if (filesNeedRemoteHydrate(
+            void fileHydratorRef.current.hydrateMissing(
               merged.files as Record<string, Record<string, unknown>>,
               localFiles as Record<string, Record<string, unknown>>,
-            )) {
-              void hydrateBoardFiles(merged.files as Record<string, Record<string, unknown>>).then((hydrated) => {
-                boardLog("hydrate:conflictMerge", {
-                  ok: hydrated.blobUrls.length,
-                  missing: hydrated.missingFileIds,
-                  failed: hydrated.failedFileIds,
-                });
-                if (boardIdRef.current !== boardIdAtSave || !apiRef.current) {
-                  revokeBoardBlobUrls(hydrated.blobUrls);
-                  return;
-                }
-                hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
-                // За время await hydrateBoardFiles на канвас мог прилететь более
-                // свежий апдейт — пересливаем поверх текущего состояния, а не
-                // поверх merged, снятого до await.
-                const freshLocal = getLocalElementsForMerge(apiRef.current, latestSceneRef.current?.elements);
-                const freshApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
-                const freshFiles = (apiRef.current.getFiles?.() || {}) as Record<string, unknown>;
-                const reMerged = mergeCollabScenes(
-                  { elements: freshLocal, appState: freshApp, files: freshFiles },
-                  { elements: merged.elements, appState: merged.appState, files: hydrated.files },
-                );
-                applyingRemoteRef.current = true;
-                applyRemoteSceneToApi(apiRef.current, reMerged);
-                clearApplyingRemoteSoon();
-                const mergedFiles = { ...freshFiles, ...reMerged.files };
-                latestSceneRef.current = buildScenePayload(reMerged.elements, reMerged.appState, mergedFiles);
-                lastElementsRef.current = reMerged.elements;
-                lastFilesRef.current = mergedFiles;
+            ).then((hydrated) => {
+              if (!hydrateMissingDidWork(hydrated)) return;
+              boardLog("hydrate:conflictMerge", {
+                ok: hydrated.blobUrls.length,
+                missing: hydrated.missingFileIds,
+                failed: hydrated.failedFileIds,
+                fetched: hydrated.fetchedFileIds,
               });
-            }
-            // После merge нужно пересохранить нашу актуальную версию поверх серверной.
-            markLocalSceneChange();
-            saveRequestedRef.current = true;
-            if (mountedRef.current) {
-              setConflict(false);
-              safeSetSaveStatus("dirty");
-              setBoard((prev) => (prev ? { ...prev, version: fresh.version } : prev));
+              if (boardIdRef.current !== boardIdAtSave || !apiRef.current) {
+                revokeBoardBlobUrls(hydrated.blobUrls);
+                return;
+              }
+              hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
+              fileHydratorRef.current.remember(hydrated.files);
+              // За время await hydrate на канвас мог прилететь более
+              // свежий апдейт — пересливаем поверх текущего состояния, а не
+              // поверх merged, снятого до await.
+              const freshLocal = getLocalElementsForMerge(apiRef.current, latestSceneRef.current?.elements);
+              const freshApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
+              const freshFiles = (apiRef.current.getFiles?.() || {}) as Record<string, unknown>;
+              const reMerged = mergeCollabScenes(
+                { elements: freshLocal, appState: freshApp, files: freshFiles },
+                { elements: merged.elements, appState: merged.appState, files: hydrated.files },
+              );
+              applyingRemoteRef.current = true;
+              apiRef.current.addFiles?.(toBinaryFileDataList(hydrated.files, "conflictHydrated"));
+              applyRemoteSceneToApi(apiRef.current, reMerged);
+              clearApplyingRemoteSoon();
+              const mergedFiles = { ...freshFiles, ...reMerged.files };
+              latestSceneRef.current = buildScenePayload(reMerged.elements, reMerged.appState, mergedFiles);
+              lastElementsRef.current = reMerged.elements;
+              lastFilesRef.current = mergedFiles;
+            });
+            // Remote merge сам по себе не локальная правка — иначе PATCH↔409 ping-pong.
+            // Повторный PATCH только если пользователь правил после снимка этого запроса.
+            const hasNewerLocal = shouldRetryPersistAfterVersionConflict(
+              localRevisionRef.current,
+              revisionAtSave,
+            );
+            if (hasNewerLocal) {
+              saveRequestedRef.current = true;
+              dirtyRef.current = true;
+              if (mountedRef.current) {
+                setConflict(false);
+                safeSetSaveStatus("dirty");
+                setBoard((prev) => (prev ? { ...prev, version: fresh.version } : prev));
+              }
+            } else {
+              saveRequestedRef.current = false;
+              dirtyRef.current = false;
+              if (revisionAtSave > lastSavedRevisionRef.current) {
+                lastSavedRevisionRef.current = revisionAtSave;
+              }
+              if (mountedRef.current) {
+                setConflict(false);
+                safeSetSaveStatus("saved");
+                setBoard((prev) => (prev ? { ...prev, version: fresh.version } : prev));
+              }
             }
           } catch {
             if (mountedRef.current) {
@@ -719,7 +743,7 @@ export default function CabinetBoardEditorPage() {
         saverRef.current?.schedule();
       }
     }
-  }, [boardId, canEdit, collaborative, conflict, markLocalSceneChange, safeSetSaveStatus, scheduleThumbnailRefresh, showNotice]);
+  }, [boardId, canEdit, collaborative, conflict, safeSetSaveStatus, scheduleThumbnailRefresh, showNotice]);
 
   // persistScene пересоздаётся при каждом изменении conflict/canEdit/... (а conflict
   // переключается прямо внутри обработки 409 несколько раз за один цикл). Если
@@ -768,6 +792,7 @@ export default function CabinetBoardEditorPage() {
       pendingRemoteOpsFrameRef.current = [];
       pendingRemoteSceneFrameRef.current = null;
       saverRef.current?.cancel();
+      fileHydratorRef.current.reset();
     };
   }, []);
 
@@ -796,7 +821,7 @@ export default function CabinetBoardEditorPage() {
     sceneChangeReadyRef.current = false;
     stableFileUrlsRef.current = createStableUrlMap();
     loadedFilesRef.current = new Set();
-    loadingRemoteFilesRef.current = new Set();
+    fileHydratorRef.current.reset();
     uploadingFileIdsRef.current = new Set();
     imageUploadStatusRef.current = "idle";
     setImageUploadStatus("idle");
@@ -880,6 +905,7 @@ export default function CabinetBoardEditorPage() {
           revokeBoardBlobUrls(hydrated.blobUrls);
           return;
         }
+        fileHydratorRef.current.remember(hydrated.files);
         hydratedBlobUrlsRef.current = hydrated.blobUrls;
         rememberStableUrls(stableFileUrlsRef.current, hydrated.files);
         for (const id of Object.keys(hydrated.files)) {
@@ -1538,30 +1564,20 @@ export default function CabinetBoardEditorPage() {
       // Image-элемент нельзя применять до addFiles — иначе вечный pending у пира.
       if (imageUpserts && needsHydrate) {
         const remoteFiles = applied.files as Record<string, Record<string, unknown>>;
-        const fetchIds = Object.keys(remoteFiles || {}).filter((id) => {
-          if (loadingRemoteFilesRef.current.has(id)) return false;
-          const local = localFiles[id];
-          if (local && typeof local === "object") {
-            const localUrl = String((local as { dataURL?: string; url?: string }).dataURL
-              || (local as { url?: string }).url
-              || "");
-            if (localUrl && isTransientFileUrl(localUrl)) return false;
-          }
-          return true;
-        });
-        fetchIds.forEach((id) => loadingRemoteFilesRef.current.add(id));
-        void hydrateBoardFiles(remoteFiles).then((hydrated) => {
-          fetchIds.forEach((id) => loadingRemoteFilesRef.current.delete(id));
+        void fileHydratorRef.current.hydrateMissing(remoteFiles, localFiles).then((hydrated) => {
+          if (!hydrateMissingDidWork(hydrated)) return;
           boardLog("hydrate:remoteOpsBeforeImage", {
             ok: hydrated.blobUrls.length,
             missing: hydrated.missingFileIds,
             failed: hydrated.failedFileIds,
+            fetched: hydrated.fetchedFileIds,
           });
           if (boardIdRef.current !== boardId || !apiRef.current) {
             revokeBoardBlobUrls(hydrated.blobUrls);
             return;
           }
           hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
+          fileHydratorRef.current.remember(hydrated.files);
           if (isDrawingGestureRef.current) {
             pendingHydrateFilesRef.current = {
               ...(pendingHydrateFilesRef.current || {}),
@@ -1584,11 +1600,16 @@ export default function CabinetBoardEditorPage() {
 
       paintNow(paintFiles);
       if (needsHydrate) {
-        void hydrateBoardFiles(applied.files as Record<string, Record<string, unknown>>).then((hydrated) => {
+        void fileHydratorRef.current.hydrateMissing(
+          applied.files as Record<string, Record<string, unknown>>,
+          localFiles,
+        ).then((hydrated) => {
+          if (!hydrateMissingDidWork(hydrated)) return;
           boardLog("hydrate:remoteOps", {
             ok: hydrated.blobUrls.length,
             missing: hydrated.missingFileIds,
             failed: hydrated.failedFileIds,
+            fetched: hydrated.fetchedFileIds,
           });
           if (boardIdRef.current !== boardId || !apiRef.current) {
             revokeBoardBlobUrls(hydrated.blobUrls);
@@ -1596,6 +1617,7 @@ export default function CabinetBoardEditorPage() {
           }
           hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
           rememberStableUrls(stableFileUrlsRef.current, hydrated.files);
+          fileHydratorRef.current.remember(hydrated.files);
           if (isDrawingGestureRef.current) {
             pendingHydrateFilesRef.current = {
               ...(pendingHydrateFilesRef.current || {}),
@@ -1630,7 +1652,6 @@ export default function CabinetBoardEditorPage() {
           stableFileUrlsRef.current.set(f.id, f.url);
           continue;
         }
-        if (loadingRemoteFilesRef.current.has(f.id)) continue;
         asSceneFiles[f.id] = {
           id: f.id,
           dataURL: f.url,
@@ -1696,13 +1717,17 @@ export default function CabinetBoardEditorPage() {
         applyElements({});
         return;
       }
-      Object.keys(asSceneFiles).forEach((id) => loadingRemoteFilesRef.current.add(id));
-      void hydrateBoardFiles(asSceneFiles).then((hydrated) => {
-        Object.keys(asSceneFiles).forEach((id) => loadingRemoteFilesRef.current.delete(id));
+      const localFilesForAdd = attachStableUrls(
+        (apiRef.current.getFiles?.() || latestSceneRef.current?.files || {}) as Record<string, Record<string, unknown>>,
+        stableFileUrlsRef.current,
+      );
+      void fileHydratorRef.current.hydrateMissing(asSceneFiles, localFilesForAdd).then((hydrated) => {
+        if (!hydrateMissingDidWork(hydrated) && !elements.length) return;
         boardLog("hydrate:file_add", {
           ok: hydrated.blobUrls.length,
           missing: hydrated.missingFileIds,
           failed: hydrated.failedFileIds,
+          fetched: hydrated.fetchedFileIds,
         });
         if (boardIdRef.current !== boardId || !apiRef.current) {
           revokeBoardBlobUrls(hydrated.blobUrls);
@@ -1710,6 +1735,7 @@ export default function CabinetBoardEditorPage() {
         }
         hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
         rememberStableUrls(stableFileUrlsRef.current, hydrated.files);
+        fileHydratorRef.current.remember(hydrated.files);
         for (const id of Object.keys(hydrated.files)) {
           if (stableFileUrlsRef.current.has(id)) loadedFilesRef.current.add(id);
         }
@@ -1752,22 +1778,27 @@ export default function CabinetBoardEditorPage() {
                 (apiRef.current.getFiles?.() || latestSceneRef.current?.files || {}) as Record<string, Record<string, unknown>>,
                 stableFileUrlsRef.current,
               );
-              if (filesNeedRemoteHydrate(remoteFiles, localFilesForHydrate)) {
-                const hydrated = await hydrateBoardFiles(remoteFiles);
+              const hydrated = await fileHydratorRef.current.hydrateMissing(
+                remoteFiles,
+                localFilesForHydrate,
+              );
+              if (hydrateMissingDidWork(hydrated)) {
                 boardLog("hydrate:resync", {
                   ok: hydrated.blobUrls.length,
                   missing: hydrated.missingFileIds,
                   failed: hydrated.failedFileIds,
+                  fetched: hydrated.fetchedFileIds,
                 });
                 hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
                 rememberStableUrls(stableFileUrlsRef.current, hydrated.files);
+                fileHydratorRef.current.remember(hydrated.files);
                 for (const id of Object.keys(hydrated.files)) {
                   if (stableFileUrlsRef.current.has(id)) loadedFilesRef.current.add(id);
                 }
-                remoteFiles = hydrated.files as Record<string, Record<string, unknown>>;
+                remoteFiles = { ...remoteFiles, ...hydrated.files };
                 if (apiRef.current) {
                   applyingRemoteRef.current = true;
-                  apiRef.current.addFiles?.(toBinaryFileDataList(remoteFiles, "resync"));
+                  apiRef.current.addFiles?.(toBinaryFileDataList(hydrated.files, "resync"));
                   clearApplyingRemoteSoon();
                 }
               }
@@ -1956,45 +1987,48 @@ export default function CabinetBoardEditorPage() {
           // Элементы (штрихи) — сразу; картинки догружаем, только если локально ещё нет blob.
           const paintFiles = { ...localFiles, ...(merged.files || {}) } as Record<string, unknown>;
           applyMerged(paintFiles);
-          if (filesNeedRemoteHydrate(
+          void fileHydratorRef.current.hydrateMissing(
             merged.files as Record<string, Record<string, unknown>>,
             localFiles as Record<string, Record<string, unknown>>,
-          )) {
-            void hydrateBoardFiles(merged.files as Record<string, Record<string, unknown>>).then((hydrated) => {
-              boardLog("hydrate:remoteScene", {
-                ok: hydrated.blobUrls.length,
-                missing: hydrated.missingFileIds,
-                failed: hydrated.failedFileIds,
-              });
-              if (boardIdRef.current !== boardId || !apiRef.current) {
-                revokeBoardBlobUrls(hydrated.blobUrls);
-                return;
-              }
-              hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
-              if (isDrawingGestureRef.current) {
-                pendingHydrateFilesRef.current = {
-                  ...(pendingHydrateFilesRef.current || {}),
-                  ...hydrated.files,
-                };
-                return;
-              }
-              // За время fetch'а на канвас мог прилететь более свежий апдейт
-              // (ops/сцена) — пересливаем поверх текущего состояния, а не поверх
-              // merged.elements, снятого до await, иначе мы бы его затёрли.
-              const freshLocal = getLocalElementsForMerge(apiRef.current, latestSceneRef.current?.elements);
-              const freshApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
-              const freshFiles = (apiRef.current.getFiles?.() || {}) as Record<string, unknown>;
-              const reMerged = mergeCollabScenes(
-                { elements: freshLocal, appState: freshApp, files: freshFiles },
-                { elements: merged.elements, appState: merged.appState, files: hydrated.files },
-              );
-              applyMerged(
-                { ...freshFiles, ...reMerged.files },
-                reMerged.elements,
-                reMerged.appState,
-              );
+          ).then((hydrated) => {
+            if (!hydrateMissingDidWork(hydrated)) return;
+            boardLog("hydrate:remoteScene", {
+              ok: hydrated.blobUrls.length,
+              missing: hydrated.missingFileIds,
+              failed: hydrated.failedFileIds,
+              fetched: hydrated.fetchedFileIds,
             });
-          }
+            if (boardIdRef.current !== boardId || !apiRef.current) {
+              revokeBoardBlobUrls(hydrated.blobUrls);
+              return;
+            }
+            hydratedBlobUrlsRef.current.push(...hydrated.blobUrls);
+            fileHydratorRef.current.remember(hydrated.files);
+            if (isDrawingGestureRef.current) {
+              pendingHydrateFilesRef.current = {
+                ...(pendingHydrateFilesRef.current || {}),
+                ...hydrated.files,
+              };
+              return;
+            }
+            // За время fetch'а на канвас мог прилететь более свежий апдейт
+            // (ops/сцена) — пересливаем поверх текущего состояния, а не поверх
+            // merged.elements, снятого до await, иначе мы бы его затёрли.
+            applyingRemoteRef.current = true;
+            apiRef.current.addFiles?.(toBinaryFileDataList(hydrated.files, "remoteSceneHydrated"));
+            const freshLocal = getLocalElementsForMerge(apiRef.current, latestSceneRef.current?.elements);
+            const freshApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
+            const freshFiles = (apiRef.current.getFiles?.() || {}) as Record<string, unknown>;
+            const reMerged = mergeCollabScenes(
+              { elements: freshLocal, appState: freshApp, files: freshFiles },
+              { elements: merged.elements, appState: merged.appState, files: hydrated.files },
+            );
+            applyMerged(
+              { ...freshFiles, ...reMerged.files },
+              reMerged.elements,
+              reMerged.appState,
+            );
+          });
         };
 
     // Во время активного локального жеста (палец/мышь ещё «внизу») применения

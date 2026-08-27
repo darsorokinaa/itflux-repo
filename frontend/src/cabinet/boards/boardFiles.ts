@@ -48,6 +48,35 @@ export function isStableFileUrl(url: string): boolean {
   return Boolean(url) && !isTransientFileUrl(url);
 }
 
+export function fileNeedsRemoteHydrate(
+  fileId: string,
+  meta: Record<string, unknown> | null | undefined,
+  localFiles?: SceneFiles | null,
+): boolean {
+  if (!meta || typeof meta !== "object") return false;
+  const url = String(meta.dataURL || meta.url || "");
+  if (!url || isTransientFileUrl(url)) return false;
+  const local = localFiles?.[fileId];
+  if (local && typeof local === "object") {
+    const localUrl = String(local.dataURL || local.url || "");
+    if (localUrl && isTransientFileUrl(localUrl)) return false;
+  }
+  return true;
+}
+
+/** Подмножество файлов, которым ещё нужен GET asset. */
+export function collectFilesNeedingRemoteHydrate(
+  files: SceneFiles | null | undefined,
+  localFiles?: SceneFiles | null,
+): SceneFiles {
+  const out: SceneFiles = {};
+  if (!files || typeof files !== "object") return out;
+  for (const [fileId, meta] of Object.entries(files)) {
+    if (fileNeedsRemoteHydrate(fileId, meta, localFiles)) out[fileId] = meta;
+  }
+  return out;
+}
+
 /**
  * Нужна ли сетевая гидратация перед показом сцены пиру.
  * Если локально уже есть blob:/data: для fileId — не блокируем штрихи ожиданием fetch.
@@ -56,19 +85,7 @@ export function filesNeedRemoteHydrate(
   files: SceneFiles | null | undefined,
   localFiles?: SceneFiles | null,
 ): boolean {
-  if (!files || typeof files !== "object") return false;
-  for (const [fileId, meta] of Object.entries(files)) {
-    if (!meta || typeof meta !== "object") continue;
-    const url = String(meta.dataURL || meta.url || "");
-    if (!url || isTransientFileUrl(url)) continue;
-    const local = localFiles?.[fileId];
-    if (local && typeof local === "object") {
-      const localUrl = String(local.dataURL || local.url || "");
-      if (localUrl && isTransientFileUrl(localUrl)) continue;
-    }
-    return true;
-  }
-  return false;
+  return Object.keys(collectFilesNeedingRemoteHydrate(files, localFiles)).length > 0;
 }
 
 /** Оценка «стабильности» файла: постоянный URL лучше data/blob. */
@@ -367,7 +384,12 @@ export type HydrateBoardFilesResult = {
 async function decodeImageBlob(blob: Blob): Promise<void> {
   if (typeof createImageBitmap === "function") {
     try {
-      const bmp = await createImageBitmap(blob);
+      const bmp = await Promise.race([
+        createImageBitmap(blob),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("image_decode_timeout")), 2500);
+        }),
+      ]);
       bmp.close?.();
       return;
     } catch {
@@ -379,14 +401,19 @@ async function decodeImageBlob(blob: Blob): Promise<void> {
   try {
     await new Promise<void>((resolve, reject) => {
       const img = new Image();
+      const timer = window.setTimeout(() => reject(new Error("image_decode_timeout")), 2500);
       img.onload = () => {
+        window.clearTimeout(timer);
         if (typeof img.decode === "function") {
           img.decode().then(() => resolve()).catch(() => resolve());
         } else {
           resolve();
         }
       };
-      img.onerror = () => reject(new Error("image_decode_failed"));
+      img.onerror = () => {
+        window.clearTimeout(timer);
+        reject(new Error("image_decode_failed"));
+      };
       img.src = objectUrl;
     });
   } finally {
@@ -430,6 +457,230 @@ async function mapPool<T, R>(
   return results;
 }
 
+export type HydrateFileOutcome = {
+  fileId: string;
+  meta: Record<string, unknown>;
+  blobUrl?: string;
+  missing?: boolean;
+  failed?: boolean;
+};
+
+async function hydrateOneBoardFile(
+  fileId: string,
+  meta: Record<string, unknown>,
+  opts: { signal?: AbortSignal } = {},
+): Promise<HydrateFileOutcome> {
+  const record = meta && typeof meta === "object" ? meta : {};
+  const rawUrl = String(record.dataURL || record.url || "");
+  if (!rawUrl) {
+    return {
+      fileId,
+      missing: true,
+      meta: {
+        ...record,
+        id: record.id || fileId,
+        mimeType: record.mimeType || "image/png",
+        dataURL: MISSING_IMAGE_DATA_URL,
+        url: MISSING_IMAGE_DATA_URL,
+        status: "error",
+      },
+    };
+  }
+  // Уже data:/blob: — только decode для надёжного первого кадра.
+  if (isTransientFileUrl(rawUrl)) {
+    if (rawUrl.startsWith("blob:")) {
+      try {
+        const blob = await parseBlobUrl(rawUrl).then((p) => (
+          p ? new Blob([p.bytes.buffer as ArrayBuffer], { type: p.mime }) : null
+        ));
+        if (blob) await decodeImageBlob(blob);
+      } catch {
+        /* best-effort */
+      }
+    }
+    return { fileId, meta: { ...record, id: record.id || fileId } };
+  }
+
+  try {
+    const blob = await fetchAssetAsBlob(rawUrl);
+    if (opts.signal?.aborted) {
+      return { fileId, meta: { ...record, id: record.id || fileId }, failed: true };
+    }
+    await decodeImageBlob(blob);
+    if (opts.signal?.aborted) {
+      return { fileId, meta: { ...record, id: record.id || fileId }, failed: true };
+    }
+    const objectUrl = URL.createObjectURL(blob);
+    return {
+      fileId,
+      blobUrl: objectUrl,
+      meta: {
+        ...record,
+        id: record.id || fileId,
+        mimeType: record.mimeType || blob.type || "image/png",
+        dataURL: objectUrl,
+        url: objectUrl,
+        [STABLE_URL_KEY]: rawUrl,
+        created: record.created || Date.now(),
+      },
+    };
+  } catch {
+    return {
+      fileId,
+      failed: true,
+      meta: {
+        ...record,
+        id: record.id || fileId,
+        mimeType: record.mimeType || "image/png",
+        dataURL: MISSING_IMAGE_DATA_URL,
+        url: MISSING_IMAGE_DATA_URL,
+        [STABLE_URL_KEY]: rawUrl,
+        status: "error",
+      },
+    };
+  }
+}
+
+export type HydrateMissingResult = HydrateBoardFilesResult & {
+  fetchedFileIds: string[];
+  fromCacheFileIds: string[];
+};
+
+export function hydrateMissingDidWork(result: HydrateMissingResult): boolean {
+  return (
+    result.fetchedFileIds.length > 0
+    || result.fromCacheFileIds.length > 0
+    || result.blobUrls.length > 0
+    || result.failedFileIds.length > 0
+    || result.missingFileIds.length > 0
+  );
+}
+
+export type BoardFileHydrator = {
+  hydrateMissing(
+    files: SceneFiles | null | undefined,
+    localFiles?: SceneFiles | null,
+    opts?: { signal?: AbortSignal },
+  ): Promise<HydrateMissingResult>;
+  needsHydrate(files: SceneFiles | null | undefined, localFiles?: SceneFiles | null): boolean;
+  remember(files: SceneFiles | null | undefined): void;
+  reset(): void;
+  isHydrated(fileId: string): boolean;
+  isInFlight(fileId: string): boolean;
+};
+
+/**
+ * Single-flight гидратация по fileId: один HTTP GET на файл, общий Promise
+ * для параллельных remote-событий, cache успешных (и терминальных) результатов.
+ */
+export function createBoardFileHydrator(): BoardFileHydrator {
+  let generation = 0;
+  const inFlight = new Map<string, Promise<HydrateFileOutcome>>();
+  const hydratedIds = new Set<string>();
+  const hydratedMeta = new Map<string, Record<string, unknown>>();
+
+  const remember = (files: SceneFiles | null | undefined) => {
+    if (!files || typeof files !== "object") return;
+    for (const [fileId, meta] of Object.entries(files)) {
+      if (!meta || typeof meta !== "object") continue;
+      const url = String(meta.dataURL || meta.url || "");
+      if (isTransientFileUrl(url) || meta.status === "error") {
+        hydratedIds.add(fileId);
+        hydratedMeta.set(fileId, meta);
+      }
+    }
+  };
+
+  const getOrStartFlight = (
+    fileId: string,
+    meta: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<HydrateFileOutcome> => {
+    const existing = inFlight.get(fileId);
+    if (existing) return existing;
+    const gen = generation;
+    const promise = hydrateOneBoardFile(fileId, meta, { signal }).then((outcome) => {
+      if (generation === gen && !signal?.aborted) {
+        hydratedIds.add(fileId);
+        hydratedMeta.set(fileId, outcome.meta);
+      }
+      return outcome;
+    }).finally(() => {
+      if (generation === gen) inFlight.delete(fileId);
+    });
+    inFlight.set(fileId, promise);
+    return promise;
+  };
+
+  return {
+    remember,
+    reset() {
+      generation += 1;
+      inFlight.clear();
+      hydratedIds.clear();
+      hydratedMeta.clear();
+    },
+    isHydrated: (fileId) => hydratedIds.has(fileId),
+    isInFlight: (fileId) => inFlight.has(fileId),
+    needsHydrate(files, localFiles) {
+      return filesNeedRemoteHydrate(files, localFiles);
+    },
+    async hydrateMissing(files, localFiles, opts) {
+      const subset = collectFilesNeedingRemoteHydrate(files, localFiles);
+      const blobUrls: string[] = [];
+      const missingFileIds: string[] = [];
+      const failedFileIds: string[] = [];
+      const resultFiles: SceneFiles = {};
+      const fetchedFileIds: string[] = [];
+      const fromCacheFileIds: string[] = [];
+      const ids = Object.keys(subset);
+      if (!ids.length) {
+        return {
+          files: {},
+          blobUrls,
+          missingFileIds,
+          failedFileIds,
+          fetchedFileIds,
+          fromCacheFileIds,
+        };
+      }
+
+      const applyOutcome = (outcome: HydrateFileOutcome) => {
+        resultFiles[outcome.fileId] = outcome.meta;
+        if (outcome.blobUrl) blobUrls.push(outcome.blobUrl);
+        if (outcome.missing) missingFileIds.push(outcome.fileId);
+        if (outcome.failed) failedFileIds.push(outcome.fileId);
+      };
+
+      const workIds: string[] = [];
+      for (const fileId of ids) {
+        const cached = hydratedMeta.get(fileId);
+        if (cached && hydratedIds.has(fileId)) {
+          resultFiles[fileId] = cached;
+          fromCacheFileIds.push(fileId);
+          continue;
+        }
+        workIds.push(fileId);
+      }
+
+      await mapPool(workIds, HYDRATE_CONCURRENCY, async (fileId) => {
+        const outcome = await getOrStartFlight(fileId, subset[fileId], opts?.signal);
+        fetchedFileIds.push(fileId);
+        applyOutcome(outcome);
+      });
+
+      return {
+        files: resultFiles,
+        blobUrls,
+        missingFileIds,
+        failedFileIds,
+        fetchedFileIds,
+        fromCacheFileIds,
+      };
+    },
+  };
+}
+
 /**
  * Перед монтированием Excalidraw: стабильные API URL → blob URL + decode.
  * Excalidraw надёжно рисует blob/data с первого кадра; raw /api/... часто
@@ -453,64 +704,11 @@ export async function hydrateBoardFiles(
 
   await mapPool(entries, HYDRATE_CONCURRENCY, async ([fileId, meta]) => {
     if (opts.signal?.aborted) return;
-    const record = meta as Record<string, unknown>;
-    const rawUrl = String(record.dataURL || record.url || "");
-    if (!rawUrl) {
-      missingFileIds.push(fileId);
-      next[fileId] = {
-        ...record,
-        id: record.id || fileId,
-        mimeType: record.mimeType || "image/png",
-        dataURL: MISSING_IMAGE_DATA_URL,
-        url: MISSING_IMAGE_DATA_URL,
-        status: "error",
-      };
-      return;
-    }
-    // Уже data:/blob: — только decode для надёжного первого кадра.
-    if (isTransientFileUrl(rawUrl)) {
-      if (rawUrl.startsWith("blob:")) {
-        try {
-          const blob = await parseBlobUrl(rawUrl).then((p) => (
-            p ? new Blob([p.bytes.buffer as ArrayBuffer], { type: p.mime }) : null
-          ));
-          if (blob) await decodeImageBlob(blob);
-        } catch {
-          /* best-effort */
-        }
-      }
-      next[fileId] = { ...record, id: record.id || fileId };
-      return;
-    }
-
-    try {
-      const blob = await fetchAssetAsBlob(rawUrl);
-      if (opts.signal?.aborted) return;
-      await decodeImageBlob(blob);
-      if (opts.signal?.aborted) return;
-      const objectUrl = URL.createObjectURL(blob);
-      blobUrls.push(objectUrl);
-      next[fileId] = {
-        ...record,
-        id: record.id || fileId,
-        mimeType: record.mimeType || blob.type || "image/png",
-        dataURL: objectUrl,
-        url: objectUrl,
-        [STABLE_URL_KEY]: rawUrl,
-        created: record.created || Date.now(),
-      };
-    } catch {
-      failedFileIds.push(fileId);
-      next[fileId] = {
-        ...record,
-        id: record.id || fileId,
-        mimeType: record.mimeType || "image/png",
-        dataURL: MISSING_IMAGE_DATA_URL,
-        url: MISSING_IMAGE_DATA_URL,
-        [STABLE_URL_KEY]: rawUrl,
-        status: "error",
-      };
-    }
+    const outcome = await hydrateOneBoardFile(fileId, meta as Record<string, unknown>, opts);
+    next[fileId] = outcome.meta;
+    if (outcome.blobUrl) blobUrls.push(outcome.blobUrl);
+    if (outcome.missing) missingFileIds.push(fileId);
+    if (outcome.failed) failedFileIds.push(fileId);
   });
 
   return { files: next, blobUrls, missingFileIds, failedFileIds };
