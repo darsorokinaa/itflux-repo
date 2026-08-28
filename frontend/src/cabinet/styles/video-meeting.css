@@ -1806,7 +1806,7 @@ body.vl-room-fullscreen .student-cabinet-nav {
   display: none !important;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 820px) {
   .video-lesson-page {
     --vl-header-height: 56px;
   }
@@ -1819,6 +1819,11 @@ body.vl-room-fullscreen .student-cabinet-nav {
     min-height: 44px;
     height: 44px;
     font-size: 0.9rem;
+  }
+
+  /* Табы Звонок/Материалы уже есть — кнопка в шапке дублирует и жмёт заголовок. */
+  .video-lesson-header__materials-btn {
+    display: none;
   }
 
   .video-lesson-page--workspace .video-lesson-workspace {
@@ -1847,7 +1852,7 @@ body.vl-room-fullscreen .student-cabinet-nav {
     border-top: 1px solid var(--vl-border);
   }
 
-  /* Phone: show either call or materials, keep Jitsi mounted */
+  /* Phone / tablet portrait: show either call or materials, keep Jitsi mounted */
   .video-lesson-page--mobile-materials:not(.video-lesson-page--workspace) .video-lesson-content {
     position: absolute;
     width: min(34vw, 140px);
@@ -1890,6 +1895,30 @@ body.vl-room-fullscreen .student-cabinet-nav {
     width: 100%;
     max-width: none;
     flex: 1 1 auto;
+  }
+
+  /* Доска должна занимать холст: 360×248 поверх 375px почти закрывала рисование. */
+  .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content {
+    position: fixed;
+    z-index: 40;
+    flex: 0 0 auto;
+    width: min(42vw, 168px);
+    height: min(32vw, 118px);
+    right: max(8px, env(safe-area-inset-right, 0px));
+    bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-compact-drag {
+    min-height: 44px;
+    padding: 4px 6px;
+    font-size: 0.68rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content {
+    width: min(38vw, 128px);
+    height: min(28vw, 96px);
   }
 }
 

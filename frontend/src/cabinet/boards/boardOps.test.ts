@@ -100,4 +100,43 @@ describe("boardOps", () => {
     expect(gone?.isDeleted).toBe(true);
     expect(gone?.version).toBe(4);
   });
+
+  it("stale hydrate ops do not roll back a newer local edit", () => {
+    const afterUser = {
+      elements: [{ id: "text", version: 6, type: "text", text: "new" }],
+      appState: {},
+      files: {},
+    };
+    const next = applyBoardOps(afterUser, {
+      ops: [{ op: "upsert", element: { id: "text", version: 3, type: "text", text: "old" } }],
+    });
+    const el = next.elements.find((e) => (e as { id: string }).id === "text") as {
+      version: number;
+      text: string;
+    };
+    expect(el.version).toBe(6);
+    expect(el.text).toBe("new");
+  });
+
+  it("reconnect delete vs modify: higher version wins deterministically", () => {
+    const deletedLocal = {
+      elements: [{ id: "z", version: 8, isDeleted: true, type: "rectangle" }],
+      appState: {},
+      files: {},
+    };
+    const afterOlderModify = applyBoardOps(deletedLocal, {
+      ops: [{ op: "upsert", element: { id: "z", version: 6, isDeleted: false, x: 4 } }],
+    });
+    expect((afterOlderModify.elements[0] as { isDeleted?: boolean }).isDeleted).toBe(true);
+
+    const liveLocal = {
+      elements: [{ id: "z", version: 6, isDeleted: false, x: 4 }],
+      appState: {},
+      files: {},
+    };
+    const afterNewerDelete = applyBoardOps(liveLocal, {
+      ops: [{ op: "delete", id: "z", version: 8 }],
+    });
+    expect((afterNewerDelete.elements[0] as { isDeleted?: boolean }).isDeleted).toBe(true);
+  });
 });

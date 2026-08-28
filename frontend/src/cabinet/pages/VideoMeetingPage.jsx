@@ -2314,9 +2314,8 @@ export default function VideoMeetingPage() {
           {showJitsi ? (
             <button
               type="button"
-              // На мобильном (≤720px) под шапкой уже есть таб-переключатель
-              // Звонок/Материалы — эта кнопка дублировала бы его, отнимая
-              // место у заголовка урока, поэтому там скрыта через CSS.
+              // На телефоне и узком планшете (≤820px) под шапкой уже есть
+              // таб-переключатель Звонок/Материалы — эта кнопка дублировала бы его.
               className={`video-lesson-btn video-lesson-btn--ghost video-lesson-header__materials-btn${asideOpen ? " is-active" : ""}`}
               onClick={() => {
                 setFocusCall(false);

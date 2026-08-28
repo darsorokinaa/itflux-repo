@@ -23,6 +23,10 @@ ALLOWED_EVENTS = frozenset(
         "chunk_load_failed",
         "service_worker_update_failed",
         "board_payload_large",
+        "board_full_state_requested",
+        "board_full_state_received",
+        "board_error",
+        "board_health_sample",
         "api_timeout",
     }
 )

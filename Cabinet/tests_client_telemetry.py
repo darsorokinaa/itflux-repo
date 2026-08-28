@@ -25,3 +25,18 @@ class ClientTelemetryApiTests(TestCase):
         )
         self.assertEqual(res.status_code, 200)
         self.assertTrue(res.json().get("ok"))
+
+    def test_board_snapshot_events_allowed(self):
+        for event in (
+            "board_full_state_requested",
+            "board_full_state_received",
+            "board_error",
+            "board_health_sample",
+        ):
+            res = self.client.post(
+                "/api/cabinet/client-telemetry/",
+                data={"event": event, "extra": {"boardId": "x"}},
+                content_type="application/json",
+            )
+            self.assertEqual(res.status_code, 200, event)
+            self.assertTrue(res.json().get("ok"), event)

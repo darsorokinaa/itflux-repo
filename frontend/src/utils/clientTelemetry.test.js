@@ -21,9 +21,10 @@ describe("clientTelemetry", () => {
     expect(navigator.sendBeacon).not.toHaveBeenCalled();
   });
 
-  it("sends allowed events without scene payloads", () => {
+    it("sends allowed events without scene payloads", () => {
     expect(reportClientEvent("board_ws_closed", { code: 1006 })).toBe(true);
-    expect(navigator.sendBeacon).toHaveBeenCalledTimes(1);
+    expect(reportClientEvent("board_full_state_requested", { attempt: 1 })).toBe(true);
+    expect(navigator.sendBeacon).toHaveBeenCalledTimes(2);
     const body = navigator.sendBeacon.mock.calls[0][1];
     expect(body).toBeInstanceOf(Blob);
   });

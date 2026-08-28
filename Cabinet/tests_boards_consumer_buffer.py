@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import json
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock
 
@@ -215,3 +216,106 @@ class ViewportRelayTests(IsolatedAsyncioTestCase):
         self.assertIn("t_server", ack)
         # Также ретрансляция пирам.
         self.assertTrue(consumer.channel_layer.group_send.called)
+
+
+class SnapshotRequestRelayTests(IsolatedAsyncioTestCase):
+    async def test_snapshot_request_acks_and_broadcasts_to_peers(self):
+        consumer = _make_consumer()
+        consumer.user = type("U", (), {"id": 3})()
+        consumer.client_id = "rejoin-1"
+        consumer.display_name = "Ученик"
+        consumer.role = "student"
+        consumer.permission = "edit"
+        consumer.board_id = "board-snap"
+        consumer.can_edit = True
+        consumer.send = AsyncMock()
+        await consumer.receive(
+            text_data='{"type":"snapshot_request","client_id":"rejoin-1","known_revision":7}'
+        )
+        ack = json.loads(
+            consumer.send.call_args.kwargs.get("text_data") or consumer.send.call_args.args[0]
+        )
+        self.assertEqual(ack["type"], "snapshot_request_ack")
+        self.assertEqual(ack["known_revision"], 7)
+        self.assertTrue(consumer.channel_layer.group_send.called)
+        event = consumer.channel_layer.group_send.call_args.args[1]
+        self.assertEqual(event["payload"]["type"], "snapshot_request")
+        self.assertEqual(event["payload"]["client_id"], "rejoin-1")
+
+    async def test_snapshot_request_not_delivered_to_requester_or_viewer(self):
+        requester = _make_consumer()
+        requester.client_id = "rejoin-1"
+        requester.can_edit = True
+        requester.send = AsyncMock()
+        await requester.board_collab(
+            {"payload": {"type": "snapshot_request", "client_id": "rejoin-1"}}
+        )
+        self.assertFalse(requester.send.called)
+
+        viewer = _make_consumer()
+        viewer.client_id = "view-1"
+        viewer.can_edit = False
+        viewer.send = AsyncMock()
+        await viewer.board_collab(
+            {"payload": {"type": "snapshot_request", "client_id": "rejoin-1"}}
+        )
+        self.assertFalse(viewer.send.called)
+
+        editor = _make_consumer()
+        editor.client_id = "teacher-1"
+        editor.can_edit = True
+        editor.send = AsyncMock()
+        await editor.board_collab(
+            {"payload": {"type": "snapshot_request", "client_id": "rejoin-1"}}
+        )
+        self.assertTrue(editor.send.called)
+
+    async def test_snapshot_response_reaches_only_target(self):
+        teacher = _make_consumer()
+        teacher.user = type("U", (), {"id": 1})()
+        teacher.client_id = "teacher-1"
+        teacher.display_name = "Учитель"
+        teacher.can_edit = True
+        teacher.board_id = "board-snap"
+        teacher.send = AsyncMock()
+        await teacher.receive(
+            text_data=json.dumps(
+                {
+                    "type": "snapshot_response",
+                    "client_id": "teacher-1",
+                    "target_client_id": "rejoin-1",
+                    "version": 4,
+                    "scene": {
+                        "elements": [{"id": "a", "version": 1}],
+                        "appState": {},
+                        "files": {"f1": {"dataURL": "blob:x"}},
+                    },
+                }
+            )
+        )
+        self.assertTrue(teacher.channel_layer.group_send.called)
+        event = teacher.channel_layer.group_send.call_args.args[1]
+        self.assertEqual(event["payload"]["type"], "snapshot_response")
+        self.assertEqual(event["payload"]["target_client_id"], "rejoin-1")
+        self.assertNotIn("f1", event["payload"]["scene"]["files"])
+
+        target = _make_consumer()
+        target.client_id = "rejoin-1"
+        target.can_edit = True
+        target.send = AsyncMock()
+        await target.board_collab(event)
+        self.assertTrue(target.send.called)
+
+        other = _make_consumer()
+        other.client_id = "student-2"
+        other.can_edit = True
+        other.send = AsyncMock()
+        await other.board_collab(event)
+        self.assertFalse(other.send.called)
+
+        sender = _make_consumer()
+        sender.client_id = "teacher-1"
+        sender.can_edit = True
+        sender.send = AsyncMock()
+        await sender.board_collab(event)
+        self.assertFalse(sender.send.called)

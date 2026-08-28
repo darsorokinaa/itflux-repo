@@ -183,3 +183,63 @@ export function mergeCollabScenes(local: CollabScene, remote: CollabScene): Coll
     files: mergeSceneFiles(local.files, remote.files),
   };
 }
+
+export type PendingRemoteSceneMeta = {
+  fromSaved?: boolean;
+  version?: number;
+  cleared?: boolean;
+  lite?: boolean;
+};
+
+export type PendingRemoteScene = {
+  scene: CollabScene;
+  meta: PendingRemoteSceneMeta;
+};
+
+function bumpVersion(
+  prev: PendingRemoteSceneMeta,
+  incoming: PendingRemoteSceneMeta,
+): number | undefined {
+  if (typeof incoming.version === "number") {
+    return Math.max(Number(prev.version) || 0, incoming.version);
+  }
+  return prev.version;
+}
+
+/**
+ * Очередь remote scene за кадр/жест: merge полных сцен, lite/clear не затирают снимок.
+ */
+export function coalescePendingRemoteScene(
+  prev: PendingRemoteScene | null,
+  scene: CollabScene,
+  meta: PendingRemoteSceneMeta,
+): PendingRemoteScene {
+  if (prev?.meta?.cleared && meta.lite && !meta.cleared) {
+    return {
+      scene: prev.scene,
+      meta: { ...prev.meta, version: bumpVersion(prev.meta, meta) },
+    };
+  }
+  if (prev?.meta?.cleared && !meta.cleared && meta.fromSaved) {
+    return prev;
+  }
+  if (prev && !prev.meta?.cleared && !prev.meta?.lite && meta.lite && !meta.cleared) {
+    return {
+      scene: prev.scene,
+      meta: { ...prev.meta, version: bumpVersion(prev.meta, meta) },
+    };
+  }
+  if (
+    prev
+    && !prev.meta?.cleared
+    && !prev.meta?.lite
+    && !meta.cleared
+    && !meta.lite
+  ) {
+    return {
+      scene: mergeCollabScenes(prev.scene, scene),
+      meta: { ...meta, version: bumpVersion(prev.meta, meta) },
+    };
+  }
+  return { scene, meta };
+}

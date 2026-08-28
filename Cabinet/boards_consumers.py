@@ -99,13 +99,12 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
         self.role = "teacher" if perm == "owner" else ("student" if self.can_edit else "viewer")
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
-        if _board_debug_enabled():
-            logger.info(
-                "board_ws connect board=%s user=%s perm=%s",
-                self.board_id,
-                getattr(self.user, "id", None),
-                self.permission,
-            )
+        logger.info(
+            "board_ws_connect board_id=%s user_id=%s perm=%s",
+            self.board_id,
+            getattr(self.user, "id", None),
+            self.permission,
+        )
         await self.send(
             text_data=json.dumps(
                 {
@@ -161,14 +160,13 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                     },
                 )
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
-        if _board_debug_enabled():
-            logger.info(
-                "board_ws disconnect board=%s user=%s client=%s code=%s",
-                getattr(self, "board_id", None),
-                getattr(getattr(self, "user", None), "id", None),
-                getattr(self, "client_id", ""),
-                close_code,
-            )
+        logger.info(
+            "board_ws_disconnect board_id=%s user_id=%s client_id=%s code=%s",
+            getattr(self, "board_id", None),
+            getattr(getattr(self, "user", None), "id", None),
+            getattr(self, "client_id", ""),
+            close_code,
+        )
 
     async def _flush_all_pending(self):
         pending_map = self._pending_scene_by_client
@@ -410,6 +408,8 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                             "user_id": self.user.id,
                             "display_name": self.display_name,
                             "version": data.get("version"),
+                            "seq": data.get("seq"),
+                            "t_sent": data.get("t_sent"),
                             "ops": {
                                 "baseVersion": ops_payload.get("baseVersion"),
                                 "ops": clean_ops,
@@ -450,6 +450,8 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                         "user_id": self.user.id,
                         "display_name": self.display_name,
                         "version": data.get("version"),
+                        "seq": data.get("seq"),
+                        "t_sent": data.get("t_sent"),
                         "scene": {
                             "elements": elements,
                             "appState": scene.get("appState") or {},
@@ -599,7 +601,9 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                 self._last_viewport_at = time.monotonic()
                 if self.role == "teacher" or self.permission == "owner":
                     state = {**payload, "type": "viewport_state"}
-                    await database_sync_to_async(set_teacher_viewport)(str(self.board_id), state)
+                    await database_sync_to_async(set_teacher_viewport)(
+                        str(self.board_id), state, force
+                    )
                 await self.channel_layer.group_send(self.group_name, event)
                 return
 
@@ -621,7 +625,7 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                         if self.role == "teacher" or self.permission == "owner":
                             state = {**pl, "type": "viewport_state"}
                             await database_sync_to_async(set_teacher_viewport)(
-                                str(self.board_id), state
+                                str(self.board_id), state, True
                             )
                         await self.channel_layer.group_send(self.group_name, pending)
                     except asyncio.CancelledError:
@@ -640,7 +644,9 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             if pending_vp and (self.role == "teacher" or self.permission == "owner"):
                 pl = pending_vp.get("payload") or {}
                 state = {**pl, "type": "viewport_state"}
-                await database_sync_to_async(set_teacher_viewport)(str(self.board_id), state)
+                await database_sync_to_async(set_teacher_viewport)(
+                    str(self.board_id), state, True
+                )
             cached = await database_sync_to_async(get_teacher_viewport)(str(self.board_id))
             if cached:
                 try:
@@ -758,16 +764,82 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             return
 
         if msg_type == "snapshot_request":
-            # Клиент после reconnect запрашивает REST snapshot сам; здесь только ack.
-            # Оставляем тип для совместимости протокола — без тяжёлой работы в consumer.
+            # REST snapshot reconnecting-клиент тянет сам; здесь просим пиров
+            # отдать живую сцену (autosave отстаёт на debounce).
+            requester = str(data.get("client_id") or self.client_id)[:64]
+            known_revision = data.get("known_revision")
+            logger.info(
+                "board_ws_snapshot_request board_id=%s user_id=%s client_id=%s",
+                self.board_id,
+                getattr(self.user, "id", None),
+                requester,
+            )
             await self.send(
                 text_data=json.dumps(
                     {
                         "type": "snapshot_request_ack",
                         "board_id": str(self.board_id),
-                        "known_revision": data.get("known_revision"),
+                        "known_revision": known_revision,
                     }
                 )
+            )
+            await self.channel_layer.group_send(
+                self.group_name,
+                {
+                    "type": "board.collab",
+                    "payload": {
+                        "type": "snapshot_request",
+                        "client_id": requester,
+                        "known_revision": known_revision,
+                    },
+                },
+            )
+            return
+
+        if msg_type == "snapshot_response":
+            if not self.can_edit:
+                return
+            target = str(data.get("target_client_id") or "")[:64]
+            if not target or target == str(data.get("client_id") or self.client_id)[:64]:
+                return
+            scene = data.get("scene")
+            if not isinstance(scene, dict):
+                return
+            clean_files = {}
+            raw_files = scene.get("files") or {}
+            if isinstance(raw_files, dict):
+                for fid, meta in raw_files.items():
+                    if not isinstance(meta, dict):
+                        continue
+                    url = str(meta.get("dataURL") or meta.get("url") or "")
+                    if url.startswith("blob:") or url.startswith("data:"):
+                        continue
+                    clean_files[str(fid)[:128]] = meta
+            elements = scene.get("elements") or []
+            if isinstance(elements, list) and len(elements) > 20_000:
+                return
+            # Unicast через group + filter: не scene_live и не scene-buffer,
+            # иначе снимок затирает накопленные ops отправителя и применяется всей комнатой.
+            await self.channel_layer.group_send(
+                self.group_name,
+                {
+                    "type": "board.collab",
+                    "payload": {
+                        "type": "snapshot_response",
+                        "client_id": str(data.get("client_id") or self.client_id)[:64],
+                        "target_client_id": target,
+                        "user_id": self.user.id,
+                        "display_name": self.display_name,
+                        "version": data.get("version"),
+                        "seq": data.get("seq"),
+                        "t_sent": data.get("t_sent"),
+                        "scene": {
+                            "elements": elements,
+                            "appState": {},
+                            "files": clean_files,
+                        },
+                    },
+                },
             )
             return
 
@@ -794,6 +866,8 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                 "active_tool_change",
                 "sync_probe",
                 "paper_style",
+                "snapshot_request",
+                "snapshot_response",
             )
             and payload.get("client_id")
             and payload.get("client_id") == self.client_id
@@ -804,6 +878,13 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             return
         if payload.get("type") == "paper_request" and self.role not in ("teacher",) and self.permission != "owner":
             return
+        if payload.get("type") == "snapshot_request":
+            # Отвечает учитель; если его нет — любой editor (фильтр на клиенте).
+            if not self.can_edit:
+                return
+        if payload.get("type") == "snapshot_response":
+            if payload.get("target_client_id") != self.client_id:
+                return
         # sync_probe_ack с echo=False — доставляем всем, инициатор отфильтрует по probe_id.
         try:
             await self.send(text_data=json.dumps(payload, ensure_ascii=False))

@@ -73,6 +73,7 @@ import {
 import {
   createBoardCollabSession,
   mergeCollabScenes,
+  coalescePendingRemoteScene,
   type BoardSceneOpsPayload,
   type CollabPeer,
   type CollabScene,
@@ -363,6 +364,7 @@ export default function CabinetBoardEditorPage() {
   const [boardTheme, setBoardTheme] = useState<"light" | "dark">("light");
   const [hasSelection, setHasSelection] = useState(false);
   const [collabPeers, setCollabPeers] = useState<CollabPeer[]>([]);
+  const collabPeersRef = useRef<CollabPeer[]>([]);
   const [collabStatus, setCollabStatus] = useState<"off" | "connecting" | "open" | "closed" | "error">("off");
   const editorRootRef = useRef<HTMLDivElement | null>(null);
   const paperOverlayRef = useRef<HTMLDivElement | null>(null);
@@ -443,9 +445,14 @@ export default function CabinetBoardEditorPage() {
   const collaborative = Boolean(board?.collaborative_edit);
   const boardReady = Boolean(board);
 
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showNotice = useCallback((text: string) => {
     setNotice(text);
-    window.setTimeout(() => setNotice(""), 2800);
+    if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = window.setTimeout(() => {
+      noticeTimerRef.current = null;
+      setNotice("");
+    }, 2800);
   }, []);
 
   const safeSetSaveStatus = useCallback((status: SaveStatus | ((prev: SaveStatus) => SaveStatus)) => {
@@ -633,7 +640,9 @@ export default function CabinetBoardEditorPage() {
             }
             latestSceneRef.current = buildScenePayload(merged.elements, merged.appState, merged.files);
             lastElementsRef.current = merged.elements;
+            lastElementsVersionSumRef.current = boardElementsVersionSum(merged.elements);
             lastFilesRef.current = merged.files;
+            collabRef.current?.acknowledgeRemoteElements(remoteScene.elements);
             // Новые картинки из серверной сцены (например, добавил пир, пока
             // мы не успели сохранить) ещё не blob — не блокируем merge, но
             // догружаем их так же, как для scene_saved/resync.
@@ -671,7 +680,9 @@ export default function CabinetBoardEditorPage() {
               const mergedFiles = { ...freshFiles, ...reMerged.files };
               latestSceneRef.current = buildScenePayload(reMerged.elements, reMerged.appState, mergedFiles);
               lastElementsRef.current = reMerged.elements;
+              lastElementsVersionSumRef.current = boardElementsVersionSum(reMerged.elements);
               lastFilesRef.current = mergedFiles;
+              collabRef.current?.acknowledgeRemoteElements(remoteScene.elements);
             });
             // Remote merge сам по себе не локальная правка — иначе PATCH↔409 ping-pong.
             // Повторный PATCH только если пользователь правил после снимка этого запроса.
@@ -775,6 +786,10 @@ export default function CabinetBoardEditorPage() {
   useEffect(() => {
     return () => {
       mountedRef.current = false;
+      if (noticeTimerRef.current) {
+        window.clearTimeout(noticeTimerRef.current);
+        noticeTimerRef.current = null;
+      }
       if (thumbnailTimerRef.current) {
         clearTimeout(thumbnailTimerRef.current);
         thumbnailTimerRef.current = null;
@@ -1308,22 +1323,7 @@ export default function CabinetBoardEditorPage() {
     meta: { fromSaved?: boolean; version?: number; cleared?: boolean; lite?: boolean },
   ) => {
     const slot = target === "gesture" ? pendingRemoteSceneRef : pendingRemoteSceneFrameRef;
-    const prev = slot.current;
-    if (prev?.meta?.cleared && meta.lite && !meta.cleared) {
-      // Sticky clear: lite только подтягивает version.
-      slot.current = {
-        scene: prev.scene,
-        meta: {
-          ...prev.meta,
-          version: typeof meta.version === "number" ? meta.version : prev.meta.version,
-        },
-      };
-      return;
-    }
-    if (prev?.meta?.cleared && !meta.cleared && meta.fromSaved) {
-      return;
-    }
-    slot.current = { scene, meta };
+    slot.current = coalescePendingRemoteScene(slot.current, scene, meta);
   }, []);
 
   const handleChange = useCallback(
@@ -1539,7 +1539,11 @@ export default function CabinetBoardEditorPage() {
         });
         latestSceneRef.current = buildScenePayload(elements, applied.appState, attached);
         lastElementsRef.current = elements;
+        lastElementsVersionSumRef.current = boardElementsVersionSum(elements);
         lastFilesRef.current = attached;
+        // Только чужие id: полный resetPublishBase(canvas) глотает неотправленый локальный штрих
+        // и flushLive может разослать delete только что принятого remote id.
+        collabRef.current?.acknowledgeRemoteOps(ops);
         if (typeof meta.version === "number" && meta.version > versionRef.current) {
           versionRef.current = meta.version;
         }
@@ -1554,18 +1558,89 @@ export default function CabinetBoardEditorPage() {
         for (const id of Object.keys(hydratedFiles)) {
           if (stableFileUrlsRef.current.has(id)) loadedFilesRef.current.add(id);
         }
+        if (!apiRef.current || boardIdRef.current !== boardId) return;
+        const nowElements = getLocalElementsForMerge(
+          apiRef.current,
+          latestSceneRef.current?.elements,
+        );
+        const nowApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
+        const nowFiles = attachStableUrls(
+          (apiRef.current.getFiles?.() || localFiles) as Record<string, Record<string, unknown>>,
+          stableFileUrlsRef.current,
+        );
+        const reApplied = applyBoardOps(
+          {
+            elements: nowElements,
+            appState: nowApp,
+            files: { ...nowFiles, ...hydratedFiles },
+          },
+          ops,
+        );
         const savedElements = markImageElementsSaved(
-          applied.elements,
+          reApplied.elements,
           Object.keys(hydratedFiles),
         );
-        paintNow({ ...paintFiles, ...hydratedFiles }, savedElements);
+        paintNow({ ...nowFiles, ...hydratedFiles }, savedElements);
       };
+
+      const nonImageOps = (ops.ops || []).filter((op) => {
+        if (op.op === "delete") return true;
+        if (op.op !== "upsert" || !op.element) return true;
+        return (op.element as { type?: string }).type !== "image";
+      });
+      // Штрихи/текст из того же пакета не ждут HTTP картинки — иначе задержка
+      // на 1–3 с и ощущение «элемент не появился».
+      if (imageUpserts && needsHydrate && nonImageOps.length) {
+        const immediate = applyBoardOps(
+          { elements: localElements, appState: localApp, files: localFiles },
+          { ...ops, ops: nonImageOps, files: {} },
+        );
+        applyingRemoteRef.current = true;
+        applyRemoteSceneToApi(apiRef.current, {
+          elements: immediate.elements,
+          appState: { ...immediate.appState, collaborators: buildCollaboratorsMap(remoteCursorsRef.current) },
+          files: attachStableUrls(
+            { ...localFiles, ...(immediate.files || {}) } as Record<string, Record<string, unknown>>,
+            stableFileUrlsRef.current,
+          ),
+        });
+        latestSceneRef.current = buildScenePayload(immediate.elements, immediate.appState, localFiles);
+        lastElementsRef.current = immediate.elements;
+        lastElementsVersionSumRef.current = boardElementsVersionSum(immediate.elements);
+        collabRef.current?.acknowledgeRemoteOps(ops);
+        clearApplyingRemoteSoon();
+      }
 
       // Image-элемент нельзя применять до addFiles — иначе вечный pending у пира.
       if (imageUpserts && needsHydrate) {
         const remoteFiles = applied.files as Record<string, Record<string, unknown>>;
         void fileHydratorRef.current.hydrateMissing(remoteFiles, localFiles).then((hydrated) => {
-          if (!hydrateMissingDidWork(hydrated)) return;
+          // Пустой hydrate (файл уже в api / in-flight завершился) раньше
+          // дропал ВЕСЬ пакет ops — картинка так и не появлялась.
+          if (!hydrateMissingDidWork(hydrated)) {
+            if (!apiRef.current || boardIdRef.current !== boardId) return;
+            const nowElements = getLocalElementsForMerge(
+              apiRef.current,
+              latestSceneRef.current?.elements,
+            );
+            const nowApp = (apiRef.current.getAppState?.() || {}) as Record<string, unknown>;
+            const nowFiles = attachStableUrls(
+              (apiRef.current.getFiles?.() || localFiles) as Record<string, Record<string, unknown>>,
+              stableFileUrlsRef.current,
+            );
+            const reApplied = applyBoardOps(
+              { elements: nowElements, appState: nowApp, files: nowFiles },
+              ops,
+            );
+            paintNow(
+              attachStableUrls(
+                { ...nowFiles, ...(reApplied.files || {}) } as Record<string, Record<string, unknown>>,
+                stableFileUrlsRef.current,
+              ),
+              reApplied.elements,
+            );
+            return;
+          }
           boardLog("hydrate:remoteOpsBeforeImage", {
             ok: hydrated.blobUrls.length,
             missing: hydrated.missingFileIds,
@@ -1704,7 +1779,9 @@ export default function CabinetBoardEditorPage() {
         );
         latestSceneRef.current = buildScenePayload(merged.elements, merged.appState, attached);
         lastElementsRef.current = merged.elements;
+        lastElementsVersionSumRef.current = boardElementsVersionSum(merged.elements);
         lastFilesRef.current = attached;
+        collabRef.current?.acknowledgeRemoteElements(savedRemote);
         clearApplyingRemoteSoon();
         boardLog("file_add:applied", {
           fileIds: Object.keys(displayFiles),
@@ -1837,8 +1914,9 @@ export default function CabinetBoardEditorPage() {
               clearApplyingRemoteSoon();
               latestSceneRef.current = buildScenePayload(merged.elements, merged.appState, displayFiles);
               lastElementsRef.current = merged.elements;
+              lastElementsVersionSumRef.current = boardElementsVersionSum(merged.elements);
               lastFilesRef.current = displayFiles;
-              collabRef.current?.resetPublishBase(merged.elements);
+              collabRef.current?.acknowledgeRemoteElements(remoteScene.elements);
               if (dirtyRef.current) {
                 saveRequestedRef.current = true;
                 saverRef.current?.schedule();
@@ -1914,6 +1992,7 @@ export default function CabinetBoardEditorPage() {
             applyRemoteSceneToApi(apiRef.current, clearedScene);
             latestSceneRef.current = buildScenePayload([], clearedScene.appState, {});
             lastElementsRef.current = [];
+            lastElementsVersionSumRef.current = 0;
             lastFilesRef.current = {};
             knownElementIdsRef.current.clear();
             collabRef.current?.resetPublishBase([]);
@@ -1970,7 +2049,11 @@ export default function CabinetBoardEditorPage() {
             const payload = buildScenePayload(elements, nextApp, displayFiles);
             latestSceneRef.current = payload;
             lastElementsRef.current = elements;
+            lastElementsVersionSumRef.current = boardElementsVersionSum(elements);
             lastFilesRef.current = displayFiles;
+            collabRef.current?.acknowledgeRemoteElements(
+              Array.isArray(scene.elements) ? scene.elements : [],
+            );
             // Бумага из полной сцены (если пришла) — как у учителя.
             if (appStateIn && (GRID_STYLE_KEY in appStateIn || BG_COLOR_KEY in appStateIn)) {
               applyRemotePaperStyleRef.current(appStateIn);
@@ -2163,6 +2246,7 @@ export default function CabinetBoardEditorPage() {
           setCollabStatus(status === "connecting" ? "connecting" : status);
         },
         onPeersChange: (peers) => {
+          collabPeersRef.current = peers;
           setCollabPeers(peers);
           if (canManage && peers.length) {
             publishOwnViewportNow(true);
@@ -2210,6 +2294,28 @@ export default function CabinetBoardEditorPage() {
             return;
           }
           handleResyncNeededNow();
+        },
+        onSnapshotRequest: (fromClientId) => {
+          // Живая сцена reconnecting-пиру. Отвечает учитель; если его нет — любой editor.
+          // Не scene_live в группу: остальные не должны apply полного снимка.
+          if (!canEdit && !canManage) return;
+          const teacherPresent =
+            canManage || collabPeersRef.current.some((peer) => peer.role === "teacher");
+          if (teacherPresent && !canManage) return;
+          const scene = latestSceneRef.current;
+          if (!scene) return;
+          collabRef.current?.publishSnapshot(
+            {
+              elements: scene.elements as unknown[],
+              appState: scene.appState,
+              files: attachStableUrls(
+                (scene.files || {}) as Record<string, Record<string, unknown>>,
+                stableFileUrlsRef.current,
+              ),
+            },
+            versionRef.current,
+            fromClientId,
+          );
         },
         onRemoteCursor: (cursor, clientId) => {
           if (!cursor) {
@@ -2488,7 +2594,7 @@ export default function CabinetBoardEditorPage() {
         }
       },
     );
-  }, [loading, loadPhase, board]);
+  }, [boardId, loading, excalidrawReady, hostReady]);
 
   const applyBackground = (color: string) => {
     setBgColor(color);

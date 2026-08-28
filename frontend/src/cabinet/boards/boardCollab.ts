@@ -8,14 +8,14 @@ import {
   cloneBoardElement,
   type BoardSceneOpsPayload,
 } from "./boardOps";
-import { mergeCollabScenes, type CollabScene } from "./boardSceneMerge";
+import { mergeBoardElements, mergeCollabScenes, coalescePendingRemoteScene, type CollabScene } from "./boardSceneMerge";
 import {
   normalizeViewportPayload,
   type TeacherViewport,
 } from "./boardViewport";
 
 export type { CollabScene } from "./boardSceneMerge";
-export { mergeCollabScenes };
+export { mergeCollabScenes, coalescePendingRemoteScene };
 export type { BoardSceneOpsPayload };
 export type { TeacherViewport };
 
@@ -56,6 +56,28 @@ function snapshotElementsForDiff(elements: unknown[] | null | undefined): unknow
   });
 }
 
+function boardElementId(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const id = (raw as { id?: unknown }).id;
+  return typeof id === "string" && id ? id : null;
+}
+
+function elementsFromOps(ops: BoardSceneOpsPayload): unknown[] {
+  const out: unknown[] = [];
+  for (const op of ops.ops || []) {
+    if (op.op === "upsert" && op.element) out.push(op.element);
+    else if (op.op === "delete" && op.id) {
+      out.push({
+        id: op.id,
+        isDeleted: true,
+        version: op.version,
+        versionNonce: op.versionNonce,
+      });
+    }
+  }
+  return out;
+}
+
 export type CollabPeer = {
   clientId: string;
   userId?: number | null;
@@ -79,7 +101,18 @@ export type CollabMessage =
   | { type: "ready"; board_id: string; can_edit: boolean; permission: string; role?: string }
   | { type: "presence_join"; client_id: string; user_id?: number; display_name?: string; can_edit?: boolean; role?: string }
   | { type: "presence_leave"; client_id: string; user_id?: number; display_name?: string }
-  | { type: "scene_live"; client_id: string; user_id?: number; display_name?: string; version?: number; scene: CollabScene; t_sent?: number; seq?: number }
+  | { type: "scene_live"; client_id: string; user_id?: number; display_name?: string; version?: number; scene: CollabScene; t_sent?: number; seq?: number; snapshot?: boolean }
+  | {
+      type: "snapshot_response";
+      client_id: string;
+      target_client_id: string;
+      user_id?: number;
+      display_name?: string;
+      version?: number;
+      scene: CollabScene;
+      t_sent?: number;
+      seq?: number;
+    }
   | { type: "scene_ops"; client_id: string; user_id?: number; display_name?: string; version?: number; ops: BoardSceneOpsPayload; t_sent?: number; seq?: number }
   | { type: "scene_saved"; board_id?: string; version: number; scene?: CollabScene; user_id?: number; display_name?: string; client_id?: string; cleared?: boolean; lite?: boolean; element_count?: number }
   | {
@@ -150,6 +183,7 @@ export type CollabMessage =
     }
   | { type: "pong"; t?: number }
   | { type: "error"; code?: string; detail?: string }
+  | { type: "snapshot_request"; client_id: string; known_revision?: number }
   | { type: "snapshot_request_ack"; board_id?: string; known_revision?: number };
 
 export type SyncProbeResult = {
@@ -181,6 +215,8 @@ type Handlers = {
   onRemoteViewport?: (viewport: TeacherViewport) => void;
   onStatus?: (status: "connecting" | "open" | "closed" | "error") => void;
   onResyncNeeded?: () => void;
+  /** Пир после reconnect просит текущую живую сцену (не REST). */
+  onSnapshotRequest?: (fromClientId: string) => void;
   /** Учитель: ответить актуальным viewport новому участнику. */
   onViewportRequest?: (fromClientId: string) => void;
   /** Бумага (клетки/линии/точки/цвет) — shared appearance. */
@@ -277,6 +313,12 @@ export function createBoardCollabSession(
   let lastViewportSentAt = 0;
   let viewportSeq = 0;
   let liveSeq = 0;
+  let awaitingSnapshot = false;
+  let reconnectsTotal = 0;
+  let inboundTotal = 0;
+  let inboundBytesTotal = 0;
+  let outboundTotal = 0;
+  let lastHealthSampleAt = 0;
   const pendingProbes = new Map<
     string,
     { tSent: number; resolve: (r: SyncProbeResult) => void; timer: number; gotEcho?: boolean }
@@ -299,6 +341,7 @@ export function createBoardCollabSession(
     try {
       const raw = JSON.stringify(payload);
       socket.send(raw);
+      outboundTotal += 1;
       notePayload(raw.length, String(payload.type || ""));
       return true;
     } catch {
@@ -376,6 +419,7 @@ export function createBoardCollabSession(
 
   const startHeartbeat = () => {
     stopHeartbeat();
+    lastHealthSampleAt = Date.now();
     heartbeatTimer = window.setInterval(() => {
       const now = Date.now();
       if (lastPongAt && now - lastPongAt > BOARD_RECONNECT.PONG_STALE_MS) {
@@ -384,6 +428,24 @@ export function createBoardCollabSession(
       }
       lastPingAt = now;
       sendRaw({ type: "ping", t: now });
+      if (boardSyncDebugEnabled() && now - lastHealthSampleAt >= 45_000) {
+        lastHealthSampleAt = now;
+        const mem = (
+          performance as Performance & { memory?: { usedJSHeapSize?: number } }
+        ).memory;
+        reportClientEvent("board_health_sample", {
+          boardId: String(boardId).slice(0, 64),
+          ws: socket?.readyState === WebSocket.OPEN ? 1 : 0,
+          reconnects: reconnectsTotal,
+          out: outboundTotal,
+          inbound: inboundTotal,
+          inB: inboundBytesTotal,
+          peers: peers.size,
+          pending: pendingLive ? 1 : 0,
+          heap: typeof mem?.usedJSHeapSize === "number" ? mem.usedJSHeapSize : 0,
+          nodes: typeof document !== "undefined" ? document.querySelectorAll("*").length : 0,
+        });
+      }
     }, 25000);
   };
 
@@ -475,6 +537,11 @@ export function createBoardCollabSession(
           client_id: clientId,
           known_revision: pendingVersion,
         });
+        awaitingSnapshot = true;
+        reportClientEvent("board_full_state_requested", {
+          boardId: String(boardId).slice(0, 64),
+          attempt: reconnectAttempt,
+        });
         handlers.onResyncNeeded?.();
       }
       reconnectAttempt = 0;
@@ -483,6 +550,8 @@ export function createBoardCollabSession(
 
     ws.onmessage = (event) => {
       if (closed || socket !== ws) return;
+      inboundTotal += 1;
+      inboundBytesTotal += String(event.data || "").length;
       let data: CollabMessage;
       try {
         data = JSON.parse(String(event.data));
@@ -681,6 +750,44 @@ export function createBoardCollabSession(
         boardWsLog("server error", { code: data.code, detail: data.detail });
         return;
       }
+      if (data.type === "snapshot_request") {
+        if (data.client_id === clientId) return;
+        boardWsLog("recv snapshot_request", { fromClient: data.client_id });
+        handlers.onSnapshotRequest?.(data.client_id);
+        return;
+      }
+      if (data.type === "snapshot_response") {
+        if (data.target_client_id !== clientId) return;
+        if (data.client_id === clientId) return;
+        const snapScene = data.scene;
+        if (!snapScene || !Array.isArray(snapScene.elements)) return;
+        awaitingSnapshot = false;
+        reportClientEvent("board_full_state_received", {
+          boardId: String(boardId).slice(0, 64),
+          via: "snapshot_response",
+          elementCount: snapScene.elements.length,
+        });
+        boardWsLog("recv snapshot_response", {
+          fromClient: data.client_id,
+          elementCount: snapScene.elements.length,
+          fileIds: Object.keys(snapScene.files || {}),
+          version: typeof data.version === "number" ? data.version : undefined,
+        });
+        handlers.onRemoteScene?.(
+          {
+            elements: snapScene.elements,
+            appState: (snapScene.appState || {}) as Record<string, unknown>,
+            files: (snapScene.files || {}) as Record<string, unknown>,
+          },
+          {
+            version: typeof data.version === "number" ? data.version : undefined,
+            fromSaved: false,
+            clientId: data.client_id,
+            lite: false,
+          },
+        );
+        return;
+      }
       if (data.type === "snapshot_request_ack") {
         boardWsLog("snapshot_request_ack", {
           boardId: data.board_id,
@@ -725,10 +832,21 @@ export function createBoardCollabSession(
           version: typeof data.version === "number" ? data.version : undefined,
           clientId: data.client_id,
         });
+        if (awaitingSnapshot) {
+          awaitingSnapshot = false;
+          reportClientEvent("board_full_state_received", {
+            boardId: String(boardId).slice(0, 64),
+            via: "scene_ops",
+            opsCount: ops.ops.length,
+          });
+        }
         return;
       }
       if (data.type === "scene_live" || data.type === "scene_saved") {
         if (data.type === "scene_live" && data.client_id === clientId) return;
+        // Snapshot для reconnect — только snapshot_response (unicast).
+        // Старый scene_live+snapshot=true не должен применяться всей комнатой.
+        if (data.type === "scene_live" && data.snapshot && !awaitingSnapshot) return;
         // Lite scene_saved: только version bump — без тяжёлого apply полной сцены.
         if (data.type === "scene_saved" && data.lite) {
           boardWsLog("recv scene_saved lite", {
@@ -749,6 +867,14 @@ export function createBoardCollabSession(
         }
         const scene = data.scene;
         if (!scene || !Array.isArray(scene.elements)) return;
+        if (awaitingSnapshot) {
+          awaitingSnapshot = false;
+          reportClientEvent("board_full_state_received", {
+            boardId: String(boardId).slice(0, 64),
+            via: data.type,
+            elementCount: scene.elements.length,
+          });
+        }
         boardWsLog(`recv ${data.type}`, {
           fromClient: "client_id" in data ? data.client_id : undefined,
           elementCount: scene.elements.length,
@@ -777,6 +903,10 @@ export function createBoardCollabSession(
       if (closed || socket !== ws) return;
       handlers.onStatus?.("error");
       boardWsLog("error", { boardId, clientId });
+      reportClientEvent("board_error", {
+        boardId: String(boardId).slice(0, 64),
+        source: "ws",
+      });
     };
 
     ws.onclose = (event) => {
@@ -787,6 +917,7 @@ export function createBoardCollabSession(
         socket = null;
       }
       if (closed) return;
+      reconnectsTotal += 1;
       if (isSocketLive(socket)) return;
       handlers.onStatus?.("closed");
       reportClientEvent("board_ws_closed", {
@@ -859,6 +990,41 @@ export function createBoardCollabSession(
     lastPublishedElements = snapshotElementsForDiff(pendingLive.elements);
     pendingLive = null;
     lastLiveSentAt = Date.now();
+  };
+
+  /**
+   * Чужие элементы уже есть у пиров: помечаем их известными для diff.
+   * Нельзя подменять lastPublished всей локальной сценой — тогда
+   * ещё не отправленный штрих считается «уже в эфире» и пропадает.
+   * pendingLive тоже дополняем, иначе flush удалит только что принятый id.
+   */
+  const acknowledgeRemoteElements = (remoteElements: unknown[] | null | undefined) => {
+    const incoming = snapshotElementsForDiff(remoteElements);
+    if (!incoming?.length) return;
+    if (!lastPublishedElements?.length) {
+      lastPublishedElements = incoming;
+    } else {
+      const map = new Map<string, unknown>();
+      for (const raw of lastPublishedElements) {
+        const id = boardElementId(raw);
+        if (id) map.set(id, raw);
+      }
+      for (const raw of incoming) {
+        const id = boardElementId(raw);
+        if (id) map.set(id, raw);
+      }
+      lastPublishedElements = [...map.values()];
+    }
+    if (pendingLive) {
+      pendingLive = {
+        ...pendingLive,
+        elements: mergeBoardElements(pendingLive.elements, incoming),
+      };
+    }
+  };
+
+  const acknowledgeRemoteOps = (ops: BoardSceneOpsPayload) => {
+    acknowledgeRemoteElements(elementsFromOps(ops));
   };
 
   const flushCursor = () => {
@@ -937,9 +1103,15 @@ export function createBoardCollabSession(
       }
       flushLive();
     },
-    /** После полного resync — база для следующего diff. */
+    /** После полной очистки доски — база для следующего diff. */
     resetPublishBase(elements: unknown[] | null | undefined) {
       lastPublishedElements = snapshotElementsForDiff(elements);
+    },
+    acknowledgeRemoteElements(remoteElements: unknown[] | null | undefined) {
+      acknowledgeRemoteElements(remoteElements);
+    },
+    acknowledgeRemoteOps(ops: BoardSceneOpsPayload) {
+      acknowledgeRemoteOps(ops);
     },
     applyOpsLocally(local: CollabScene, ops: BoardSceneOpsPayload): CollabScene {
       return applyBoardOps(local, ops);
@@ -1006,6 +1178,39 @@ export function createBoardCollabSession(
     },
     requestPaperStyle() {
       sendRaw({ type: "paper_request", client_id: clientId });
+    },
+    /**
+     * Unicast текущей сцены переподключившемуся пиру.
+     * Не scene_live: иначе комната применяет снимок как live-апдейт и
+     * буфер consumer затирает накопленные scene_ops этого клиента.
+     */
+    publishSnapshot(scene: CollabScene, version?: number, targetClientId?: string) {
+      const target = String(targetClientId || "").slice(0, 64);
+      if (!target || target === clientId) return false;
+      const files = filesForLivePublish(scene.files as Record<string, Record<string, unknown>>);
+      const elements = Array.isArray(scene.elements) ? scene.elements.slice(0, 20_000) : [];
+      liveSeq += 1;
+      const tSent = Date.now();
+      boardWsLog("send snapshot_response", {
+        elementCount: elements.length,
+        fileIds: Object.keys(files),
+        version,
+        seq: liveSeq,
+        target,
+      });
+      return sendRaw({
+        type: "snapshot_response",
+        client_id: clientId,
+        target_client_id: target,
+        version,
+        seq: liveSeq,
+        t_sent: tSent,
+        scene: {
+          elements,
+          appState: {},
+          files,
+        },
+      });
     },
     /**
      * Измерить RTT комнаты (server echo). Без второго клиента.
@@ -1108,10 +1313,18 @@ export function createBoardCollabSession(
       return {
         connected: Boolean(socket && socket.readyState === WebSocket.OPEN),
         reconnectAttempt,
+        reconnectsTotal,
+        inboundTotal,
+        inboundBytesTotal,
+        outboundTotal,
+        pendingLive: Boolean(pendingLive),
         lastCloseCode,
         lastPingAt,
         lastPongAt,
         ...payloadStats(),
+        peerCount: peers.size,
+        awaitingSnapshot,
+        seenEventKeys: seenEventKeys.size,
       };
     },
   };
