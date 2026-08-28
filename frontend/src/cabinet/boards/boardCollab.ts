@@ -1,6 +1,7 @@
 /** WebSocket-синхронизация совместного редактирования доски. */
 
 import { filesForLivePublish } from "./boardFiles";
+import { reportClientEvent } from "../../utils/clientTelemetry";
 import {
   applyBoardOps,
   buildLivePublishPayload,
@@ -194,6 +195,43 @@ function wsUrl(boardId: string): string {
   return `${proto}//${window.location.host}/ws/interactive-boards/${boardId}/`;
 }
 
+function isSocketLive(ws: WebSocket | null): boolean {
+  return Boolean(
+    ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN),
+  );
+}
+
+/** Exponential backoff for board WS reconnect. attempt is 1-based. */
+export const BOARD_RECONNECT = {
+  BASE_MS: 1000,
+  FACTOR: 1.6,
+  MAX_MS: 8000,
+  JITTER: 0.2,
+  MAX_ATTEMPT: 8,
+  PONG_STALE_MS: 40000,
+  HIDDEN_RESUME_MS: 5000,
+  LARGE_PAYLOAD_BYTES: 80_000,
+};
+
+export function boardReconnectDelayMs(attempt: number, random = Math.random): number {
+  const n = Math.max(1, Math.min(Number(attempt) || 1, BOARD_RECONNECT.MAX_ATTEMPT));
+  const base = Math.min(
+    BOARD_RECONNECT.MAX_MS,
+    Math.round(BOARD_RECONNECT.BASE_MS * BOARD_RECONNECT.FACTOR ** (n - 1)),
+  );
+  const jitterMul = 1 + (random() * 2 - 1) * BOARD_RECONNECT.JITTER;
+  const delay = Math.round(base * jitterMul);
+  const floor = Math.round(BOARD_RECONNECT.BASE_MS * (1 - BOARD_RECONNECT.JITTER));
+  const ceil = Math.round(BOARD_RECONNECT.MAX_MS * (1 + BOARD_RECONNECT.JITTER));
+  return Math.max(floor, Math.min(ceil, delay));
+}
+
+function percentile(sorted: number[], p: number): number {
+  if (!sorted.length) return 0;
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+  return sorted[idx];
+}
+
 export function createBoardCollabSession(
   boardId: string,
   displayName: string,
@@ -219,6 +257,14 @@ export function createBoardCollabSession(
   let lastCursorSentAt = 0;
   let lastLiveSentAt = 0;
   let reconnectAttempt = 0;
+  let lastPingAt = 0;
+  let lastPongAt = 0;
+  let lastHiddenAt = 0;
+  let lastCloseCode: number | null = null;
+  let payloadSizes: number[] = [];
+  let bytesWindowStart = Date.now();
+  let bytesWindowTotal = 0;
+  let messagesWindowTotal = 0;
   let viewportTimer: number | null = null;
   let pendingViewport: {
     scrollX: number;
@@ -250,8 +296,46 @@ export function createBoardCollabSession(
 
   const sendRaw = (payload: Record<string, unknown>) => {
     if (!socket || socket.readyState !== WebSocket.OPEN) return false;
-    socket.send(JSON.stringify(payload));
-    return true;
+    try {
+      const raw = JSON.stringify(payload);
+      socket.send(raw);
+      notePayload(raw.length, String(payload.type || ""));
+      return true;
+    } catch {
+      forceReconnect("send-failed");
+      return false;
+    }
+  };
+
+  const notePayload = (bytes: number, type: string) => {
+    const now = Date.now();
+    if (now - bytesWindowStart > 1000) {
+      bytesWindowStart = now;
+      bytesWindowTotal = 0;
+      messagesWindowTotal = 0;
+    }
+    bytesWindowTotal += bytes;
+    messagesWindowTotal += 1;
+    payloadSizes.push(bytes);
+    if (payloadSizes.length > 80) payloadSizes = payloadSizes.slice(-80);
+    if (bytes >= BOARD_RECONNECT.LARGE_PAYLOAD_BYTES) {
+      reportClientEvent("board_payload_large", {
+        bytes,
+        type: type.slice(0, 32),
+        elementsHint: 0,
+      });
+    }
+  };
+
+  const payloadStats = () => {
+    const sorted = [...payloadSizes].sort((a, b) => a - b);
+    return {
+      messagesPerSec: messagesWindowTotal,
+      bytesPerSec: bytesWindowTotal,
+      payloadP50: percentile(sorted, 50),
+      payloadP95: percentile(sorted, 95),
+      payloadMax: sorted.length ? sorted[sorted.length - 1] : 0,
+    };
   };
 
   const sendJoin = () => {
@@ -270,22 +354,117 @@ export function createBoardCollabSession(
     }
   };
 
+  const clearReconnectTimer = () => {
+    if (reconnectTimer != null) {
+      window.clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  };
+
+  const detachSocket = (ws: WebSocket | null) => {
+    if (!ws) return;
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onerror = null;
+    ws.onclose = null;
+  };
+
+  const isPongStale = () => {
+    if (!lastPongAt) return false;
+    return Date.now() - lastPongAt > BOARD_RECONNECT.PONG_STALE_MS;
+  };
+
   const startHeartbeat = () => {
     stopHeartbeat();
     heartbeatTimer = window.setInterval(() => {
-      sendRaw({ type: "ping", t: Date.now() });
+      const now = Date.now();
+      if (lastPongAt && now - lastPongAt > BOARD_RECONNECT.PONG_STALE_MS) {
+        forceReconnect("pong-timeout");
+        return;
+      }
+      lastPingAt = now;
+      sendRaw({ type: "ping", t: now });
     }, 25000);
+  };
+
+  const scheduleReconnect = () => {
+    if (closed) return;
+    if (reconnectTimer != null) return;
+    if (isSocketLive(socket)) return;
+    reconnectAttempt = Math.min(reconnectAttempt + 1, BOARD_RECONNECT.MAX_ATTEMPT);
+    const delay = boardReconnectDelayMs(reconnectAttempt);
+    reconnectTimer = window.setTimeout(() => {
+      reconnectTimer = null;
+      if (closed) return;
+      if (isSocketLive(socket)) return;
+      connect();
+    }, delay);
+  };
+
+  const forceReconnect = (reason = "manual") => {
+    if (closed) return;
+    if (reason === "visibility" || reason === "pageshow" || reason === "online" || reason === "resume") {
+      reconnectAttempt = 0;
+    }
+    clearReconnectTimer();
+    const ws = socket;
+    socket = null;
+    stopHeartbeat();
+    detachSocket(ws);
+    try {
+      ws?.close();
+    } catch {
+      /* ignore */
+    }
+    handlers.onStatus?.("connecting");
+    reportClientEvent("board_ws_reconnect", { reason: String(reason).slice(0, 32) });
+    connect();
+  };
+
+  const resumeIfNeeded = (reason: string) => {
+    if (closed) return;
+    if (reason === "visibility" && document.visibilityState === "hidden") {
+      lastHiddenAt = Date.now();
+      return;
+    }
+    const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : 0;
+    lastHiddenAt = 0;
+    const live = isSocketLive(socket);
+    const frozenOpen = live && hiddenMs >= BOARD_RECONNECT.HIDDEN_RESUME_MS;
+    if (!live || isPongStale() || frozenOpen) {
+      forceReconnect(reason);
+      return;
+    }
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      lastPingAt = Date.now();
+      sendRaw({ type: "ping", t: lastPingAt });
+    }
   };
 
   const connect = () => {
     if (closed) return;
+    if (isSocketLive(socket)) return;
+    clearReconnectTimer();
+    if (socket) {
+      detachSocket(socket);
+      try {
+        socket.close();
+      } catch {
+        /* ignore */
+      }
+      socket = null;
+    }
     handlers.onStatus?.("connecting");
     boardWsLog("connecting", { boardId, clientId, attempt: reconnectAttempt });
-    socket = new WebSocket(wsUrl(boardId));
+    const ws = new WebSocket(wsUrl(boardId));
+    socket = ws;
 
-    socket.onopen = () => {
+    ws.onopen = () => {
+      if (closed || socket !== ws) return;
       handlers.onStatus?.("open");
       boardWsLog("open", { boardId, clientId, reconnect: reconnectAttempt > 0 });
+      lastPongAt = Date.now();
+      lastHiddenAt = 0;
       sendJoin();
       startHeartbeat();
       handlers.onReady?.();
@@ -299,9 +478,11 @@ export function createBoardCollabSession(
         handlers.onResyncNeeded?.();
       }
       reconnectAttempt = 0;
+      clearReconnectTimer();
     };
 
-    socket.onmessage = (event) => {
+    ws.onmessage = (event) => {
+      if (closed || socket !== ws) return;
       let data: CollabMessage;
       try {
         data = JSON.parse(String(event.data));
@@ -309,6 +490,11 @@ export function createBoardCollabSession(
         return;
       }
       if (!data || typeof data !== "object") return;
+
+      if (data.type === "pong") {
+        lastPongAt = Date.now();
+        return;
+      }
 
       if (data.type === "ready") {
         handlers.onReady?.({
@@ -587,24 +773,41 @@ export function createBoardCollabSession(
       }
     };
 
-    socket.onerror = () => {
+    ws.onerror = () => {
+      if (closed || socket !== ws) return;
       handlers.onStatus?.("error");
       boardWsLog("error", { boardId, clientId });
     };
 
-    socket.onclose = () => {
-      handlers.onStatus?.("closed");
-      boardWsLog("closed", { boardId, clientId, willReconnect: !closed });
-      stopHeartbeat();
-      socket = null;
+    ws.onclose = (event) => {
+      lastCloseCode = typeof event?.code === "number" ? event.code : null;
+      boardWsLog("closed", { boardId, clientId, willReconnect: !closed, code: lastCloseCode });
+      if (socket === ws) {
+        stopHeartbeat();
+        socket = null;
+      }
       if (closed) return;
-      reconnectAttempt += 1;
-      const delay = Math.min(8000, 800 + reconnectAttempt * 700);
-      reconnectTimer = window.setTimeout(connect, delay);
+      if (isSocketLive(socket)) return;
+      handlers.onStatus?.("closed");
+      reportClientEvent("board_ws_closed", {
+        code: lastCloseCode,
+        reason: String(event?.reason || "").slice(0, 64),
+        attempt: reconnectAttempt,
+      });
+      scheduleReconnect();
     };
   };
 
   connect();
+
+  const onVisibility = () => resumeIfNeeded("visibility");
+  const onPageShow = () => resumeIfNeeded("pageshow");
+  const onOnline = () => resumeIfNeeded("online");
+  const onResume = () => resumeIfNeeded("resume");
+  document.addEventListener("visibilitychange", onVisibility);
+  window.addEventListener("pageshow", onPageShow);
+  window.addEventListener("online", onOnline);
+  window.addEventListener("resume", onResume);
 
   const flushLive = () => {
     liveTimer = null;
@@ -877,20 +1080,39 @@ export function createBoardCollabSession(
     },
     close() {
       closed = true;
-      if (reconnectTimer != null) window.clearTimeout(reconnectTimer);
+      clearReconnectTimer();
       if (liveTimer != null) window.clearTimeout(liveTimer);
       if (viewportTimer != null) window.clearTimeout(viewportTimer);
       if (cursorRaf != null) window.cancelAnimationFrame(cursorRaf);
       for (const [, p] of pendingProbes) window.clearTimeout(p.timer);
       pendingProbes.clear();
       stopHeartbeat();
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("resume", onResume);
+      const ws = socket;
+      socket = null;
+      detachSocket(ws);
       try {
-        socket?.close();
+        ws?.close();
       } catch {
         /* ignore */
       }
-      socket = null;
       peers.clear();
+    },
+    resumeNow() {
+      resumeIfNeeded("manual");
+    },
+    getDiagnostics() {
+      return {
+        connected: Boolean(socket && socket.readyState === WebSocket.OPEN),
+        reconnectAttempt,
+        lastCloseCode,
+        lastPingAt,
+        lastPongAt,
+        ...payloadStats(),
+      };
     },
   };
 }

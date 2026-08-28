@@ -7,6 +7,7 @@ from . import (
     api_views,
     billing_api,
     boards_api,
+    client_telemetry,
     files_api,
     homework_attachments,
     journal_api,
@@ -41,6 +42,11 @@ router.register("notifications", schedule_api.NotificationViewSet, basename="cab
 router.register("materials", api_views.MaterialViewSet, basename="cabinet-materials")
 
 urlpatterns = [
+    path(
+        "client-telemetry/",
+        client_telemetry.client_telemetry,
+        name="cabinet_client_telemetry",
+    ),
     path(
         "student/interactive-boards/",
         boards_api.StudentInteractiveBoardsView.as_view(),

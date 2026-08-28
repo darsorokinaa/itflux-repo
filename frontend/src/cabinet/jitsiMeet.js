@@ -22,6 +22,7 @@ import {
   jitsiRoomsMatch,
   reportMeetingTechnicalEvent,
 } from "./jitsiTelemetry";
+import { reportClientEvent } from "../utils/clientTelemetry";
 
 export {
   createBrowserTabSessionId,
@@ -358,6 +359,11 @@ export function registerJoinDiagnostics(api, { onMediaWarning, diagnostics } = {
             readyToClose: "ready_to_close",
           };
           if (meetingUuid) {
+            if (eventName === "connectionFailed" || eventName === "conferenceFailed") {
+              reportClientEvent("jitsi_connection_failed", {
+                reason: String(event?.error || event?.message || eventName).slice(0, 120),
+              });
+            }
             void reportMeetingTechnicalEvent(meetingUuid, {
               eventType: typeMap[eventName],
               role: diagnostics?.role || "",
@@ -504,8 +510,10 @@ export function createJitsiIframeEmbed(config, container, {
   const frame = document.createElement("iframe");
   frame.src = embedUrl;
   frame.title = "Видеоурок";
-  frame.allow = "camera; microphone; display-capture; autoplay; clipboard-write; fullscreen";
+  frame.allow = "camera; microphone; display-capture; autoplay; clipboard-write; fullscreen; picture-in-picture";
   frame.allowFullscreen = true;
+  frame.setAttribute("playsinline", "true");
+  frame.setAttribute("webkit-playsinline", "true");
   frame.style.width = "100%";
   frame.style.height = "100%";
   frame.style.border = "0";

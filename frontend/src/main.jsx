@@ -12,12 +12,14 @@ import { ensureSiteFavicon } from './utils/ensureSiteFavicon'
 import { bindPushNavigation, registerServiceWorker } from './cabinet/pwa/pwaHelpers'
 import { migrateClientDataSchema } from './utils/appVersion'
 import { startAppUpdateMonitor } from './utils/appUpdate'
+import { startClientTelemetry } from './utils/clientTelemetry'
 
 ensureSiteFavicon()
 migrateClientDataSchema()
 registerServiceWorker()
 bindPushNavigation()
 startAppUpdateMonitor()
+startClientTelemetry()
 
 // Метрика — только если согласие уже было дано ранее (не до баннера).
 import('./utils/analytics.js').then((m) => {

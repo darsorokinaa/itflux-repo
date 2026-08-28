@@ -76,13 +76,23 @@ describe("boardAutosave", () => {
   });
 
   it("не запускает второй save пока первый in-flight", async () => {
-    let resolveSave: (() => void) | undefined;
-    const saveFn = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveSave = resolve;
-        }),
-    );
+    let release: (() => void) | undefined;
+    let hold = true;
+    let concurrent = 0;
+    let maxConcurrent = 0;
+    const saveFn = vi.fn(async () => {
+      concurrent += 1;
+      maxConcurrent = Math.max(maxConcurrent, concurrent);
+      try {
+        if (hold) {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+      } finally {
+        concurrent -= 1;
+      }
+    });
     const saver = createDebouncedSaver(saveFn, 10);
     saver.schedule();
     await vi.advanceTimersByTimeAsync(10);
@@ -90,9 +100,118 @@ describe("boardAutosave", () => {
     saver.schedule();
     await vi.advanceTimersByTimeAsync(10);
     expect(saveFn).toHaveBeenCalledTimes(1);
-    resolveSave?.();
+    expect(saver.isInFlight).toBe(true);
+    hold = false;
+    release?.();
     await Promise.resolve();
     await Promise.resolve();
+    expect(saveFn).toHaveBeenCalledTimes(1);
+    expect(maxConcurrent).toBe(1);
+  });
+
+  it("queued save после inFlight снова ждёт debounce", async () => {
+    let release: (() => void) | undefined;
+    let hold = true;
+    const saveFn = vi.fn(async () => {
+      if (hold) {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+    });
+    const saver = createDebouncedSaver(saveFn, AUTOSAVE_DEBOUNCE_MS);
+    saver.schedule();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
+    expect(saveFn).toHaveBeenCalledTimes(1);
+
+    saver.schedule();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
+    expect(saveFn).toHaveBeenCalledTimes(1);
+
+    hold = false;
+    release?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(saveFn).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS - 1);
+    expect(saveFn).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(saveFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("несколько schedule во время inFlight схлопываются в одно последующее сохранение", async () => {
+    let release: (() => void) | undefined;
+    let hold = true;
+    let concurrent = 0;
+    let maxConcurrent = 0;
+    const saveFn = vi.fn(async () => {
+      concurrent += 1;
+      maxConcurrent = Math.max(maxConcurrent, concurrent);
+      try {
+        if (hold) {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+      } finally {
+        concurrent -= 1;
+      }
+    });
+    const saver = createDebouncedSaver(saveFn, AUTOSAVE_DEBOUNCE_MS);
+    saver.schedule();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
+    expect(saveFn).toHaveBeenCalledTimes(1);
+
+    saver.schedule();
+    saver.schedule();
+    saver.schedule();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
+    expect(saveFn).toHaveBeenCalledTimes(1);
+
+    hold = false;
+    release?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(saveFn).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
+    expect(saveFn).toHaveBeenCalledTimes(2);
+    expect(maxConcurrent).toBe(1);
+  });
+
+  it("flush сохраняет pending изменения сразу", async () => {
+    const saveFn = vi.fn(async () => undefined);
+    const saver = createDebouncedSaver(saveFn, AUTOSAVE_DEBOUNCE_MS);
+    saver.schedule();
+    expect(saveFn).not.toHaveBeenCalled();
+    await saver.flush();
+    expect(saveFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("flush после inFlight запускает queued save без ожидания debounce", async () => {
+    let release: (() => void) | undefined;
+    let hold = true;
+    const saveFn = vi.fn(async () => {
+      if (hold) {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+    });
+    const saver = createDebouncedSaver(saveFn, AUTOSAVE_DEBOUNCE_MS);
+    saver.schedule();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
+    saver.schedule();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
+    hold = false;
+    release?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(saveFn).toHaveBeenCalledTimes(1);
+
+    await saver.flush();
     expect(saveFn).toHaveBeenCalledTimes(2);
   });
 

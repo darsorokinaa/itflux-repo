@@ -139,8 +139,43 @@ class InteractiveBoardApiTests(TestCase):
         self.assertEqual(res.status_code, 200, res.content)
         data = res.json()
         self.assertEqual(data["version"], 2)
-        self.assertEqual(len(data["scene_data"]["elements"]), 1)
-        self.assertNotIn("selectedElementIds", data["scene_data"]["appState"])
+        self.assertNotIn("scene_data", data)
+        board.refresh_from_db()
+        self.assertEqual(len(board.scene_data["elements"]), 1)
+        self.assertNotIn("selectedElementIds", board.scene_data.get("appState") or {})
+
+    def test_scene_patch_returns_lightweight_response(self):
+        board = InteractiveBoard.objects.create(owner=self.teacher, title="LitePatch")
+        old_version = board.version
+        self._auth(self.teacher)
+        scene = {
+            "elements": [{"id": "e1", "type": "rectangle", "x": 1, "y": 2}],
+            "appState": {"viewBackgroundColor": "#fff"},
+            "files": {},
+        }
+        res = self.client.patch(
+            f"/api/cabinet/interactive-boards/{board.id}/",
+            {"scene_data": scene, "version": old_version},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        data = res.json()
+        self.assertNotIn("scene_data", data)
+        self.assertEqual(data["version"], old_version + 1)
+        self.assertEqual(data["id"], str(board.id))
+        self.assertIn("updated_at", data)
+        self.assertIn("permission", data)
+        self.assertTrue(data["can_edit"])
+        self.assertTrue(data["can_manage"])
+
+        board.refresh_from_db()
+        self.assertEqual(board.version, old_version + 1)
+        self.assertEqual(len(board.scene_data["elements"]), 1)
+
+        detail = self.client.get(f"/api/cabinet/interactive-boards/{board.id}/")
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn("scene_data", detail.json())
+        self.assertEqual(len(detail.json()["scene_data"]["elements"]), 1)
 
     def test_version_conflict(self):
         board = InteractiveBoard.objects.create(owner=self.teacher, title="Conflict", version=3)
@@ -641,8 +676,11 @@ class InteractiveBoardApiTests(TestCase):
             format="json",
         )
         self.assertEqual(second.status_code, 200, second.content)
+        self.assertNotIn("scene_data", second.json())
         self.assertEqual(InteractiveBoardAsset.objects.filter(board=board).count(), 1)
-        scene_url = (second.json()["scene_data"]["files"]["f1"].get("dataURL") or "")
+        detail = self.client.get(f"/api/cabinet/interactive-boards/{board.id}/")
+        self.assertEqual(detail.status_code, 200, detail.content)
+        scene_url = (detail.json()["scene_data"]["files"]["f1"].get("dataURL") or "")
         self.assertIn("/assets/", scene_url)
 
     def test_scene_get_does_not_require_orphan_assets(self):

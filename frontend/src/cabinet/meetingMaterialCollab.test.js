@@ -7,6 +7,10 @@ import {
 } from "./meetingMaterialCollab";
 import { applyMaterialOperation } from "./materials/collab";
 
+vi.mock("../utils/clientTelemetry", () => ({
+  reportClientEvent: vi.fn(() => true),
+}));
+
 class FakeWebSocket {
   static CONNECTING = 0;
   static OPEN = 1;
@@ -106,16 +110,24 @@ describe("materialReconnectDelayMs", () => {
 
 describe("createMeetingMaterialCollab reconnect", () => {
   let originalWebSocket;
+  let collab;
 
   beforeEach(() => {
     originalWebSocket = globalThis.WebSocket;
     FakeWebSocket.instances = [];
+    collab = null;
     vi.stubGlobal("WebSocket", FakeWebSocket);
     vi.spyOn(Math, "random").mockReturnValue(0.5);
     vi.useFakeTimers();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
   });
 
   afterEach(() => {
+    collab?.close();
+    collab = null;
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -128,7 +140,7 @@ describe("createMeetingMaterialCollab reconnect", () => {
   }
 
   it("reconnects once after a single close", () => {
-    createMeetingMaterialCollab("meet-1");
+    collab = createMeetingMaterialCollab("meet-1");
     expect(FakeWebSocket.instances).toHaveLength(1);
     lastSocket().close();
     expect(FakeWebSocket.instances).toHaveLength(1);
@@ -139,7 +151,7 @@ describe("createMeetingMaterialCollab reconnect", () => {
   });
 
   it("increases delay across consecutive failures", () => {
-    createMeetingMaterialCollab("meet-1");
+    collab = createMeetingMaterialCollab("meet-1");
     lastSocket().close();
     vi.advanceTimersByTime(1000);
     expect(FakeWebSocket.instances).toHaveLength(2);
@@ -156,7 +168,7 @@ describe("createMeetingMaterialCollab reconnect", () => {
   });
 
   it("resets attempt after a successful open", () => {
-    const collab = createMeetingMaterialCollab("meet-1");
+    collab = createMeetingMaterialCollab("meet-1");
     lastSocket().close();
     vi.advanceTimersByTime(1000);
     expect(collab.getDiagnostics().reconnectAttempt).toBe(1);
@@ -170,14 +182,14 @@ describe("createMeetingMaterialCollab reconnect", () => {
   });
 
   it("does not reconnect after close()", () => {
-    const collab = createMeetingMaterialCollab("meet-1");
+    collab = createMeetingMaterialCollab("meet-1");
     collab.close();
     vi.advanceTimersByTime(30_000);
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
   it("does not reconnect if unmount happens while a timer is pending", () => {
-    const collab = createMeetingMaterialCollab("meet-1");
+    collab = createMeetingMaterialCollab("meet-1");
     lastSocket().close();
     expect(FakeWebSocket.instances).toHaveLength(1);
     collab.close();
@@ -186,7 +198,7 @@ describe("createMeetingMaterialCollab reconnect", () => {
   });
 
   it("multiple close/error events schedule only one reconnect timer", () => {
-    createMeetingMaterialCollab("meet-1");
+    collab = createMeetingMaterialCollab("meet-1");
     const first = lastSocket();
     first.error();
     first.close();
@@ -201,7 +213,7 @@ describe("createMeetingMaterialCollab reconnect", () => {
   });
 
   it("does not open a second socket while one is already live", () => {
-    createMeetingMaterialCollab("meet-1");
+    collab = createMeetingMaterialCollab("meet-1");
     const first = lastSocket();
     first.open();
     first.close();
@@ -214,5 +226,24 @@ describe("createMeetingMaterialCollab reconnect", () => {
     expect(first.readyState).toBe(FakeWebSocket.CLOSED);
     vi.advanceTimersByTime(10_000);
     expect(FakeWebSocket.instances.filter((ws) => ws.readyState === FakeWebSocket.OPEN)).toHaveLength(1);
+  });
+
+  it("replaces a zombie OPEN socket after returning from background", () => {
+    collab = createMeetingMaterialCollab("meet-1");
+    lastSocket().open();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    vi.advanceTimersByTime(MATERIAL_RECONNECT.HIDDEN_RESUME_MS + 1);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.CLOSED);
   });
 });

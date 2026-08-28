@@ -7,6 +7,12 @@
   var params = new URLSearchParams(location.search || "");
   var recovered = params.has("_recover");
   var local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  var ua = String(navigator.userAgent || "");
+  var mobile = /iPhone|iPad|iPod|Android/i.test(ua)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  // 1MB gzip JS + MathJax on LTE often exceeds 8s. Auto-recover then looks like
+  // «страница не открылась» and can fight a still-in-flight first load.
+  var timeoutMs = local ? 25000 : recovered ? 18000 : mobile ? 20000 : 8000;
 
   function appMounted() {
     var root = document.getElementById("root");
@@ -51,6 +57,12 @@
 
   function showStuck() {
     if (appMounted()) return;
+    if (navigator.onLine === false) {
+      paint(
+        '<div style="max-width:28rem;text-align:center"><p style="font-size:1.15rem;font-weight:700;margin:0 0 10px">Нет сети</p><p style="margin:0 0 16px;line-height:1.5">Проверьте Wi-Fi или мобильный интернет и нажмите «Повторить».</p><button type="button" id="itflux-boot-reload" style="min-height:44px;padding:0 18px;border:0;border-radius:12px;background:#1550D8;color:#fff;font-weight:700">Повторить</button></div>'
+      );
+      return;
+    }
     if (recovered) {
       paint(
         '<div style="max-width:28rem;text-align:center"><p style="font-size:1.15rem;font-weight:700;margin:0 0 10px">Страница так и не открылась</p><p style="margin:0 0 16px;line-height:1.5">Если вы заходите с иконки на рабочем столе — удалите её, откройте сайт в Safari или Chrome и добавьте ярлык заново.</p><button type="button" id="itflux-boot-reload" style="min-height:44px;padding:0 18px;border:0;border-radius:12px;background:#1550D8;color:#fff;font-weight:700">Обновить ещё раз</button></div>'
@@ -63,5 +75,5 @@
     recover();
   }
 
-  setTimeout(showStuck, local ? 25000 : recovered ? 14000 : 8000);
+  setTimeout(showStuck, timeoutMs);
 })();

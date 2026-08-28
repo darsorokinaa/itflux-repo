@@ -1108,6 +1108,7 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
+        saved_scene = None
         try:
             with transaction.atomic():
                 locked = InteractiveBoard.objects.select_for_update().get(pk=board.pk)
@@ -1150,6 +1151,7 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
                             status=status.HTTP_400_BAD_REQUEST,
                         )
 
+                    saved_scene = scene
                     locked.scene_data = scene
                     locked.version = locked.version + 1
 
@@ -1192,8 +1194,7 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Доска не найдена."}, status=status.HTTP_404_NOT_FOUND)
 
         if touches_scene:
-            scene_norm = rewrite_scene_asset_urls(board, normalize_scene_data(board.scene_data))
-            elements = scene_norm.get("elements") if isinstance(scene_norm, dict) else None
+            elements = saved_scene.get("elements") if isinstance(saved_scene, dict) else None
             element_count = len(elements) if isinstance(elements, list) else 0
             # Lite: пиры уже на live-ops — не гоняем полный JSON сцены/files по WS.
             # Полный snapshot остаётся в REST; reconnect делает snapshot_request/fetch.
@@ -1215,11 +1216,27 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
                 },
             )
 
+        permission = board.get_permission_for(request.user)
+        if touches_scene:
+            # Autosave не должен получать полный scene_data — ответ в мегабайты
+            # на каждый PATCH во время урока. GET detail по-прежнему отдаёт сцену.
+            return Response(
+                {
+                    "id": str(board.id),
+                    "version": board.version,
+                    "updated_at": board.updated_at,
+                    "permission": permission,
+                    "can_edit": permission in ("owner", InteractiveBoardAccess.EDIT),
+                    "can_manage": permission == "owner",
+                    "can_export": bool(board.allow_export or permission == "owner"),
+                }
+            )
+
         out = InteractiveBoardDetailSerializer(board, context={"request": request}).data
-        out["permission"] = board.get_permission_for(request.user)
-        out["can_edit"] = out["permission"] in ("owner", InteractiveBoardAccess.EDIT)
-        out["can_manage"] = out["permission"] == "owner"
-        out["can_export"] = bool(board.allow_export or out["permission"] == "owner")
+        out["permission"] = permission
+        out["can_edit"] = permission in ("owner", InteractiveBoardAccess.EDIT)
+        out["can_manage"] = permission == "owner"
+        out["can_export"] = bool(board.allow_export or permission == "owner")
         return Response(out)
 
     def destroy(self, request, *args, **kwargs):

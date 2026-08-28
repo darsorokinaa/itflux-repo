@@ -206,7 +206,15 @@ export function createDebouncedSaver(
       inFlight = false;
       if (queued) {
         queued = false;
-        void run();
+        // Не стартуем следующий тяжёлый snapshot сразу после длинного PATCH —
+        // снова ждём debounce, иначе на большой доске получается непрерывная цепочка.
+        if (timer) {
+          clearTimeout(timer);
+        }
+        timer = setTimeout(() => {
+          timer = null;
+          void run();
+        }, delayMs);
       }
     }
   };

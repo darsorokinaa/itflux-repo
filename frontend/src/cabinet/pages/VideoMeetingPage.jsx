@@ -1082,7 +1082,13 @@ export default function VideoMeetingPage() {
     };
     const onOnline = () => reconcile("online");
     const onVisible = () => {
-      if (document.visibilityState === "visible") reconcile("visible");
+      if (document.visibilityState !== "visible") return;
+      reconcile("visible");
+      try {
+        apiRef.current?.watchdog?.inspect?.();
+      } catch {
+        /* ignore */
+      }
     };
     window.addEventListener("online", onOnline);
     document.addEventListener("visibilitychange", onVisible);

@@ -1,6 +1,7 @@
 /** WebSocket-синхронизация материалов видеоурока (не доска / не вариант). */
 
 import { THROTTLE } from "./materials/collab/constants";
+import { reportClientEvent } from "../utils/clientTelemetry";
 
 export function inferSyncResourceKind(row) {
   if (!row) return null;
@@ -74,6 +75,8 @@ export const MATERIAL_RECONNECT = {
   MAX_MS: 8000,
   JITTER: 0.2,
   MAX_ATTEMPT: 8,
+  PONG_STALE_MS: 40000,
+  HIDDEN_RESUME_MS: 5000,
 };
 
 function _isSocketLive(ws) {
@@ -116,6 +119,8 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
   const knownPeers = new Set();
   let lastPingAt = 0;
   let lastPongAt = 0;
+  let lastHiddenAt = 0;
+  let lastCloseCode = null;
   let eventsLastMinute = 0;
   let eventsWindowStart = Date.now();
   const pendingOps = new Map();
@@ -142,7 +147,12 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
 
   const send = (payload) => {
     if (!socket || socket.readyState !== WebSocket.OPEN) return false;
-    socket.send(JSON.stringify(payload));
+    try {
+      socket.send(JSON.stringify(payload));
+    } catch {
+      forceReconnect("send-failed");
+      return false;
+    }
     bumpEventCount();
     return true;
   };
@@ -157,9 +167,64 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
   const startHeartbeat = () => {
     stopHeartbeat();
     heartbeatTimer = window.setInterval(() => {
-      lastPingAt = Date.now();
+      const now = Date.now();
+      if (lastPongAt && now - lastPongAt > MATERIAL_RECONNECT.PONG_STALE_MS) {
+        forceReconnect("pong-timeout");
+        return;
+      }
+      lastPingAt = now;
       send({ type: "ping", t: lastPingAt });
     }, 25000);
+  };
+
+  const isPongStale = () => {
+    if (!lastPongAt) return false;
+    return Date.now() - lastPongAt > MATERIAL_RECONNECT.PONG_STALE_MS;
+  };
+
+  const forceReconnect = (reason = "manual") => {
+    if (closed) return;
+    if (reason === "visibility" || reason === "pageshow" || reason === "online" || reason === "resume") {
+      reconnectAttempt = 0;
+    }
+    clearReconnectTimer();
+    const ws = socket;
+    socket = null;
+    stopHeartbeat();
+    detachSocket(ws);
+    try {
+      ws?.close();
+    } catch {
+      /* ignore */
+    }
+    handlers.onStatus?.("connecting");
+    reportClientEvent("material_ws_reconnect", { reason: String(reason).slice(0, 32) });
+    connect();
+  };
+
+  const resumeIfNeeded = (reason) => {
+    if (closed) return;
+    if (reason === "visibility" && document.visibilityState === "hidden") {
+      lastHiddenAt = Date.now();
+      return;
+    }
+    const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : 0;
+    lastHiddenAt = 0;
+    const live = _isSocketLive(socket);
+    const frozenOpen = live && hiddenMs >= MATERIAL_RECONNECT.HIDDEN_RESUME_MS;
+    if (!live || isPongStale() || frozenOpen) {
+      forceReconnect(reason);
+      return;
+    }
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      lastPingAt = Date.now();
+      send({ type: "ping", t: lastPingAt });
+      send({
+        type: "material.request_sync",
+        client_revision: version || 0,
+        session_id: sessionId,
+      });
+    }
   };
 
   const clearReconnectTimer = () => {
@@ -211,6 +276,8 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     ws.onopen = () => {
       if (closed || socket !== ws) return;
       reconnectAttempt = 0;
+      lastPongAt = Date.now();
+      lastHiddenAt = 0;
       clearReconnectTimer();
       handlers.onStatus?.("open");
       startHeartbeat();
@@ -358,7 +425,8 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       handlers.onStatus?.("error");
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      lastCloseCode = typeof event?.code === "number" ? event.code : null;
       if (socket === ws) {
         stopHeartbeat();
         socket = null;
@@ -366,11 +434,25 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       if (closed) return;
       if (_isSocketLive(socket)) return;
       handlers.onStatus?.("closed");
+      reportClientEvent("material_ws_closed", {
+        code: lastCloseCode,
+        reason: String(event?.reason || "").slice(0, 64),
+        attempt: reconnectAttempt,
+      });
       scheduleReconnect();
     };
   };
 
   connect();
+
+  const onVisibility = () => resumeIfNeeded("visibility");
+  const onPageShow = () => resumeIfNeeded("pageshow");
+  const onOnline = () => resumeIfNeeded("online");
+  const onResume = () => resumeIfNeeded("resume");
+  document.addEventListener("visibilitychange", onVisibility);
+  window.addEventListener("pageshow", onPageShow);
+  window.addEventListener("online", onOnline);
+  window.addEventListener("resume", onResume);
 
   const sendCursorThrottled = throttle((x, y) => {
     send({
@@ -423,6 +505,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       serverRevision: version,
       lastPingAt,
       lastPongAt,
+      lastCloseCode,
       pendingOps: pendingOps.size,
       eventsLastMinute,
       peerCount: knownPeers.size,
@@ -521,10 +604,15 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
         payload: payload || {},
       });
     }, THROTTLE.POINTER_MS),
+    resumeNow: () => resumeIfNeeded("manual"),
     close: () => {
       closed = true;
       clearReconnectTimer();
       stopHeartbeat();
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("resume", onResume);
       const ws = socket;
       socket = null;
       detachSocket(ws);
