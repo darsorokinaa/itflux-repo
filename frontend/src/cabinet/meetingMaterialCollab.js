@@ -67,6 +67,38 @@ function throttle(fn, waitMs) {
   };
 }
 
+/** Exponential backoff for material WS reconnect. attempt is 1-based. */
+export const MATERIAL_RECONNECT = {
+  BASE_MS: 1000,
+  FACTOR: 1.6,
+  MAX_MS: 8000,
+  JITTER: 0.2,
+  MAX_ATTEMPT: 8,
+};
+
+function _isSocketLive(ws) {
+  return Boolean(
+    ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN),
+  );
+}
+
+/**
+ * delay = min(8000, round(1000 * 1.6^(attempt-1))) * (1 ± 20% jitter)
+ * attempt 1 → 800–1200ms, then ~1.6s, ~2.6s, ~4.1s, then cap 6.4–9.6s.
+ */
+export function materialReconnectDelayMs(attempt, random = Math.random) {
+  const n = Math.max(1, Math.min(Number(attempt) || 1, MATERIAL_RECONNECT.MAX_ATTEMPT));
+  const base = Math.min(
+    MATERIAL_RECONNECT.MAX_MS,
+    Math.round(MATERIAL_RECONNECT.BASE_MS * MATERIAL_RECONNECT.FACTOR ** (n - 1)),
+  );
+  const jitterMul = 1 + (random() * 2 - 1) * MATERIAL_RECONNECT.JITTER;
+  const delay = Math.round(base * jitterMul);
+  const floor = Math.round(MATERIAL_RECONNECT.BASE_MS * (1 - MATERIAL_RECONNECT.JITTER));
+  const ceil = Math.round(MATERIAL_RECONNECT.MAX_MS * (1 + MATERIAL_RECONNECT.JITTER));
+  return Math.max(floor, Math.min(ceil, delay));
+}
+
 /**
  * @param {string} meetingUuid
  * @param {object} handlers
@@ -75,6 +107,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
   let socket = null;
   let closed = false;
   let reconnectTimer = null;
+  let reconnectAttempt = 0;
   let heartbeatTimer = null;
   let version = 0;
   let sessionId = null;
@@ -129,12 +162,56 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     }, 25000);
   };
 
+  const clearReconnectTimer = () => {
+    if (reconnectTimer != null) {
+      window.clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  };
+
+  const detachSocket = (ws) => {
+    if (!ws) return;
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onerror = null;
+    ws.onclose = null;
+  };
+
+  const scheduleReconnect = () => {
+    if (closed) return;
+    if (reconnectTimer != null) return;
+    if (_isSocketLive(socket)) return;
+    reconnectAttempt = Math.min(reconnectAttempt + 1, MATERIAL_RECONNECT.MAX_ATTEMPT);
+    const delay = materialReconnectDelayMs(reconnectAttempt);
+    reconnectTimer = window.setTimeout(() => {
+      reconnectTimer = null;
+      if (closed) return;
+      if (_isSocketLive(socket)) return;
+      connect();
+    }, delay);
+  };
+
   const connect = () => {
     if (closed) return;
+    if (_isSocketLive(socket)) return;
+    clearReconnectTimer();
+    if (socket) {
+      detachSocket(socket);
+      try {
+        socket.close();
+      } catch {
+        /* ignore */
+      }
+      socket = null;
+    }
     handlers.onStatus?.("connecting");
-    socket = new WebSocket(wsUrl(meetingUuid));
+    const ws = new WebSocket(wsUrl(meetingUuid));
+    socket = ws;
 
-    socket.onopen = () => {
+    ws.onopen = () => {
+      if (closed || socket !== ws) return;
+      reconnectAttempt = 0;
+      clearReconnectTimer();
       handlers.onStatus?.("open");
       startHeartbeat();
       send({
@@ -144,7 +221,8 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       });
     };
 
-    socket.onmessage = (event) => {
+    ws.onmessage = (event) => {
+      if (closed || socket !== ws) return;
       let data;
       try {
         data = JSON.parse(String(event.data));
@@ -275,15 +353,20 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       }
     };
 
-    socket.onerror = () => {
+    ws.onerror = () => {
+      if (closed || socket !== ws) return;
       handlers.onStatus?.("error");
     };
 
-    socket.onclose = () => {
-      handlers.onStatus?.("closed");
-      stopHeartbeat();
+    ws.onclose = () => {
+      if (socket === ws) {
+        stopHeartbeat();
+        socket = null;
+      }
       if (closed) return;
-      reconnectTimer = window.setTimeout(connect, 1500);
+      if (_isSocketLive(socket)) return;
+      handlers.onStatus?.("closed");
+      scheduleReconnect();
     };
   };
 
@@ -343,6 +426,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       pendingOps: pendingOps.size,
       eventsLastMinute,
       peerCount: knownPeers.size,
+      reconnectAttempt,
     }),
     requestSync: () => send({
       type: "material.request_sync",
@@ -439,14 +523,16 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     }, THROTTLE.POINTER_MS),
     close: () => {
       closed = true;
-      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      clearReconnectTimer();
       stopHeartbeat();
+      const ws = socket;
+      socket = null;
+      detachSocket(ws);
       try {
-        socket?.close();
+        ws?.close();
       } catch {
         /* ignore */
       }
-      socket = null;
     },
   };
 }
