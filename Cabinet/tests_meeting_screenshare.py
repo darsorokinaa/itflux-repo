@@ -12,6 +12,7 @@ from django.utils import timezone
 from Cabinet.meeting_consumers import VideoMeetingConsumer
 from Cabinet.meeting_screenshare import (
     apply_screenshare_operation,
+    get_active_screenshare_session,
     report_screenshare_state,
     set_screenshare_permission,
 )
@@ -364,6 +365,30 @@ class ScreenShareAnnotationServiceTests(TestCase):
                 presenter_jitsi_id="out",
             )
 
+    def test_get_active_screenshare_session_none_without_share(self):
+        self.assertIsNone(get_active_screenshare_session(self.meeting))
+        payload = sync_state_payload(self.meeting, self.student_user)
+        self.assertIsNone(payload["screenshareSession"])
+
+    def test_get_active_screenshare_session_ignores_ended(self):
+        session = report_screenshare_state(
+            meeting=self.meeting,
+            user=self.teacher,
+            active=True,
+            local_sharing=True,
+            presenter_jitsi_id="abc",
+        )
+        report_screenshare_state(
+            meeting=self.meeting,
+            user=self.teacher,
+            active=False,
+            local_sharing=True,
+            presenter_jitsi_id="abc",
+        )
+        self.assertIsNone(get_active_screenshare_session(self.meeting))
+        session.refresh_from_db()
+        self.assertFalse(session.is_active)
+
     def test_snapshot_contains_existing_annotations(self):
         session = report_screenshare_state(
             meeting=self.meeting,
@@ -384,6 +409,7 @@ class ScreenShareAnnotationServiceTests(TestCase):
             operation_id="keep-1",
             session_id=str(session.uuid),
         )
+        self.assertEqual(get_active_screenshare_session(self.meeting).uuid, session.uuid)
         payload = sync_state_payload(self.meeting, self.student_user)
         snap = payload["screenshareSession"]
         self.assertEqual(snap["sessionId"], str(session.uuid))
@@ -447,6 +473,15 @@ class ScreenShareAnnotationWsTests(TransactionTestCase):
             if msg.get("type") == msg_type:
                 return msg
         self.fail(f"не дождались {msg_type}")
+
+    async def test_connect_without_screenshare_sends_null_session(self):
+        ws = await self._connect(self.student_user)
+        try:
+            snap = await ws.receive_json_from(timeout=2)
+            self.assertEqual(snap["type"], "material.sync_state")
+            self.assertIsNone(snap["screenshareSession"])
+        finally:
+            await ws.disconnect()
 
     async def test_student_stroke_reaches_teacher_and_late_join_gets_snapshot(self):
         teacher_ws = await self._connect(self.teacher)

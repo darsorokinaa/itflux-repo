@@ -36,6 +36,52 @@ def event_local_date(event):
     return starts.date()
 
 
+def linked_schedule_event_for_item(item):
+    """Событие расписания, по которому у темы есть дата занятия."""
+    event = getattr(item, "scheduled_event", None) if getattr(item, "scheduled_event_id", None) else None
+    if event is not None and getattr(event, "lesson_plan_item_id", None) == item.id:
+        return event
+    linked = getattr(item, "schedule_events_linked", None)
+    if linked is None:
+        return None
+    rows = linked.all() if hasattr(linked, "all") else linked
+    for ev in rows:
+        if getattr(ev, "lesson_plan_item_id", None) == item.id:
+            return ev
+    return None
+
+
+def plan_item_is_passed(item, *, now=None):
+    """
+    Тема пройдена по дате занятия: прошедшая дата считается,
+    будущая — нет, даже если статус в плане сбился на completed.
+    Без даты остаётся статус completed.
+    """
+    if item.status == PlanItemStatus.SKIPPED:
+        return False
+    now = now or timezone.now()
+    today = timezone.localtime(now).date() if timezone.is_aware(now) else now.date()
+
+    event = linked_schedule_event_for_item(item)
+    starts_at = getattr(event, "starts_at", None) if event is not None else None
+    if starts_at is not None:
+        return starts_at <= now
+
+    scheduled = getattr(item, "scheduled_date", None)
+    if scheduled:
+        if scheduled < today:
+            return True
+        if scheduled > today:
+            return False
+        return item.status == PlanItemStatus.COMPLETED
+
+    return item.status == PlanItemStatus.COMPLETED
+
+
+def plan_passed_items_count(plan, *, now=None):
+    return sum(1 for item in plan.items.all() if plan_item_is_passed(item, now=now))
+
+
 def get_active_enrollment(event):
     qs = LessonPlanEnrollment.objects.filter(
         teacher=event.owner,

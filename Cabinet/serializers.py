@@ -779,17 +779,8 @@ class LessonPlanItemSerializer(serializers.ModelSerializer):
 
     def _linked_schedule_event(self, obj):
         """Дата в плане только у темы, выбранной в карточке урока."""
-        event = getattr(obj, "scheduled_event", None) if obj.scheduled_event_id else None
-        if event is not None and event.lesson_plan_item_id == obj.id:
-            return event
-        linked = getattr(obj, "schedule_events_linked", None)
-        if linked is None:
-            return None
-        rows = linked.all() if hasattr(linked, "all") else linked
-        for ev in rows:
-            if ev.lesson_plan_item_id == obj.id:
-                return ev
-        return None
+        from .plan_schedule import linked_schedule_event_for_item
+        return linked_schedule_event_for_item(obj)
 
     def get_materials(self, obj):
         return [
@@ -936,6 +927,7 @@ class LessonPlanListSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     progress_percent = serializers.IntegerField(read_only=True)
     items_count = serializers.IntegerField(read_only=True)
+    completed_count = serializers.SerializerMethodField()
 
     class Meta:
         model = LessonPlan
@@ -955,6 +947,7 @@ class LessonPlanListSerializer(serializers.ModelSerializer):
             "status_label",
             "progress_percent",
             "items_count",
+            "completed_count",
             "is_public",
             "created_at",
             "updated_at",
@@ -965,6 +958,10 @@ class LessonPlanListSerializer(serializers.ModelSerializer):
 
     def get_subject_label(self, obj):
         return get_plan_subject_label(obj.subject)
+
+    def get_completed_count(self, obj):
+        from .plan_schedule import plan_passed_items_count
+        return plan_passed_items_count(obj)
 
 
 class LessonPlanDetailSerializer(LessonPlanListSerializer):

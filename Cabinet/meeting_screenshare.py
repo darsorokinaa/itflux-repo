@@ -178,6 +178,9 @@ def _safe_nonneg_int(value: Any, cap: int = 1_000_000) -> int:
     except (TypeError, ValueError):
         return 0
     return max(0, min(cap, n))
+
+
+def get_active_screenshare_session(meeting: VideoMeeting) -> MeetingScreenShareSession | None:
     return (
         MeetingScreenShareSession.objects.filter(meeting=meeting, is_active=True)
         .order_by("-started_at")

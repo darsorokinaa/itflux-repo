@@ -137,14 +137,75 @@ export function planDescription(plan) {
   return "";
 }
 
-export function planProgressLabel(plan) {
-  const total = plan.lessonsCount || plan.itemsCount || 0;
-  if (!total) return undefined;
-  if (plan.progressPercent > 0) {
-    const done = Math.round((total * plan.progressPercent) / 100);
-    return `${done} из ${total} занятий`;
+function planLessonsWord(n) {
+  const abs = Math.abs(n);
+  const mod10 = abs % 10;
+  const mod100 = abs % 100;
+  if (mod10 === 1 && mod100 !== 11) return "занятие";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "занятия";
+  return "занятий";
+}
+
+export function planProgressTotal(plan) {
+  return plan.itemsCount || plan.lessonsCount || plan.items?.length || 0;
+}
+
+function parsePlanDateTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parsePlanDateOnly(value) {
+  if (!value) return null;
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return parsePlanDateTime(value);
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function startOfLocalDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+/** Тема пройдена по дате занятия; будущее не считаем, даже если статус completed. */
+export function planItemIsPassed(item, now = new Date()) {
+  if (item?.status === "skipped") return false;
+
+  const eventAt = parsePlanDateTime(item?.scheduledEventStartsAt);
+  if (eventAt) return eventAt.getTime() <= now.getTime();
+
+  const scheduled = parsePlanDateOnly(item?.scheduledDate);
+  if (scheduled) {
+    const today = startOfLocalDay(now);
+    const day = startOfLocalDay(scheduled);
+    if (day < today) return true;
+    if (day > today) return false;
+    return item.status === "completed";
   }
-  return `${total} ${total === 1 ? "занятие" : total >= 2 && total <= 4 ? "занятия" : "занятий"}`;
+
+  return item?.status === "completed";
+}
+
+export function planProgressCompleted(plan, now = new Date()) {
+  const items = Array.isArray(plan.items) ? plan.items : [];
+  if (items.length) {
+    return items.filter((item) => planItemIsPassed(item, now)).length;
+  }
+  if (Number.isFinite(plan.completedCount)) return plan.completedCount;
+  const total = planProgressTotal(plan);
+  if (!total || !plan.progressPercent) return 0;
+  return Math.round((total * plan.progressPercent) / 100);
+}
+
+export function planProgressLabel(plan, options = {}) {
+  const total = planProgressTotal(plan);
+  if (!total) return undefined;
+  const isCatalog = options.isCatalog ?? Boolean(plan.isPublic);
+  if (isCatalog) {
+    return `${total} ${planLessonsWord(total)}`;
+  }
+  const done = planProgressCompleted(plan);
+  return `${done} из ${total} занятий`;
 }
 
 const PLAN_COVER_VARIANT_POOLS = {
@@ -175,10 +236,10 @@ export function mapPlanToHomeworkCard(plan, options = {}) {
     subject: planSubjectLine(plan),
     title: plan.title,
     description: planDescription(plan),
-    progressLabel: planProgressLabel(plan),
+    progressLabel: planProgressLabel(plan, { isCatalog }),
     progressPercent: plan.progressPercent || 0,
     progressTone: plan.progressPercent >= 100 ? "completed" : "default",
-    hideProgressBar: isCatalog || !plan.progressPercent,
+    hideProgressBar: isCatalog,
     actionLabel: isCatalog ? "Использовать план" : "Редактировать",
     secondaryActionLabel: isCatalog ? "Открыть" : undefined,
     actionPrimary: true,
@@ -271,6 +332,7 @@ export function mapApiPlan(plan) {
     grade: plan.grade || "",
     lessonsCount: plan.lessons_count || 0,
     itemsCount: plan.items_count || 0,
+    completedCount: typeof plan.completed_count === "number" ? plan.completed_count : undefined,
     status: plan.status,
     statusLabel: PLAN_STATUS_LABELS[plan.status] || plan.status,
     progressPercent: plan.progress_percent || 0,

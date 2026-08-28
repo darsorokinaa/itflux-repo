@@ -915,11 +915,15 @@ class LessonPlan(models.Model):
 
     @property
     def progress_percent(self):
-        items = self.items.all()
-        total = items.count()
+        from .plan_schedule import plan_passed_items_count
+
+        items = list(self.items.all())
+        total = len(items)
+        if not total:
+            total = self.__dict__.get("items_count") or 0
         if not total:
             return 0
-        completed = items.filter(status=PlanItemStatus.COMPLETED).count()
+        completed = plan_passed_items_count(self) if items else (self.__dict__.get("completed_count") or 0)
         return round(completed * 100 / total)
 
 

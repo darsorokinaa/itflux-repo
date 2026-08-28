@@ -8,6 +8,7 @@ import {
   PLAN_STATUS_LABELS,
   mapApiPlan,
   planExamLabel,
+  planItemIsPassed,
   planStatusTone,
   planSubjectLabel,
 } from "../lessonPlansData";
@@ -240,7 +241,7 @@ export default function CabinetLessonPlanDetailPage() {
   if (notFound) return <Navigate to="/cabinet/plans" replace />;
 
   const tone = planStatusTone(plan.status);
-  const totalItems = plan.items.length;
+  const totalItems = plan.items.length || plan.itemsCount || plan.lessonsCount || 0;
   const materialsTotal = plan.items.reduce(
     (sum, item) => sum + lessonResourceRows(item).length + (item.materialsNotes?.trim() ? 1 : 0),
     0,
@@ -249,12 +250,9 @@ export default function CabinetLessonPlanDetailPage() {
     Boolean(item.homeworkDescription?.trim())
     || homeworkResourceRows(item).length > 0
   )).length;
-  const completedItems = plan.items.filter((item) => {
-    if (item.status !== "completed") return false;
-    if (!item.scheduledEventStartsAt) return true;
-    const startsAt = new Date(item.scheduledEventStartsAt);
-    return Number.isNaN(startsAt.getTime()) || startsAt.getTime() <= Date.now();
-  }).length;
+  const completedItems = plan.items.length
+    ? plan.items.filter((item) => planItemIsPassed(item)).length
+    : (plan.completedCount || 0);
   const skippedItems = plan.items.filter((item) => item.status === "skipped").length;
   const remainingItems = Math.max(0, totalItems - completedItems - skippedItems);
   const showNearEndBanner = remainingItems > 0 && remainingItems <= 5 && totalItems > 0;

@@ -4,7 +4,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.utils import timezone
 
-from Cabinet.choices import NotificationChannel, ParticipantRole, ParticipantStatus
+from Cabinet.choices import NotificationChannel, ParticipantRole, ParticipantStatus, PlanItemStatus
 from Cabinet.models import (
     Homework,
     Material,
@@ -673,6 +673,60 @@ class LessonPlanCatalogTests(TestCase):
         self.assertEqual(response.status_code, 200)
         titles = {item["title"] for item in response.data}
         self.assertEqual(titles, {"Мой черновик", "Мой опубликованный"})
+
+    def test_mine_list_returns_completed_lesson_counts(self):
+        from rest_framework.test import APIClient
+
+        for order, title in enumerate(["Тема 1", "Тема 2", "Тема 3"], start=1):
+            LessonPlanItem.objects.create(
+                plan=self.my_plan,
+                order=order,
+                title=title,
+                status=PlanItemStatus.COMPLETED if order <= 2 else PlanItemStatus.NOT_STARTED,
+            )
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        response = client.get("/api/cabinet/lesson-plans/?mine=true")
+        self.assertEqual(response.status_code, 200)
+        row = next(item for item in response.data if item["id"] == self.my_plan.pk)
+        self.assertEqual(row["items_count"], 3)
+        self.assertEqual(row["completed_count"], 2)
+        self.assertEqual(row["progress_percent"], 67)
+
+    def test_completed_count_follows_lesson_dates_not_status_alone(self):
+        from rest_framework.test import APIClient
+
+        today = timezone.localdate()
+        LessonPlanItem.objects.create(
+            plan=self.my_plan,
+            order=1,
+            title="Прошедшая без статуса",
+            scheduled_date=today - timedelta(days=7),
+            status=PlanItemStatus.NOT_STARTED,
+        )
+        LessonPlanItem.objects.create(
+            plan=self.my_plan,
+            order=2,
+            title="Будущая со статусом completed",
+            scheduled_date=today + timedelta(days=7),
+            status=PlanItemStatus.COMPLETED,
+        )
+        LessonPlanItem.objects.create(
+            plan=self.my_plan,
+            order=3,
+            title="Без даты, completed",
+            status=PlanItemStatus.COMPLETED,
+        )
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        response = client.get("/api/cabinet/lesson-plans/?mine=true")
+        self.assertEqual(response.status_code, 200)
+        row = next(item for item in response.data if item["id"] == self.my_plan.pk)
+        self.assertEqual(row["items_count"], 3)
+        self.assertEqual(row["completed_count"], 2)
+        self.assertEqual(row["progress_percent"], 67)
 
     def test_teacher_can_copy_public_plan(self):
         from rest_framework.test import APIClient
