@@ -2,8 +2,9 @@
  * Диагностика реального пути загрузки Jitsi (External API + комната),
  * без VideoMeeting и без участия в уроке.
  *
- * Пороги завязаны на JOIN_TIMEOUT_MS из jitsiMeet.js (15 с) — тот же лимит,
- * после которого настоящий урок считает вход неуспешным.
+ * Пороги пробы завязаны на JOIN_TIMEOUT_MS (15 с, мягкий порог урока).
+ * Урок больше не считает 15 с без videoConferenceJoined fatal:
+ * fatal watchdog — JOIN_FATAL_TIMEOUT_MS (60 с).
  */
 
 import {

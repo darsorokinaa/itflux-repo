@@ -32,9 +32,17 @@ export {
 };
 
 const SCRIPT_ID = "jitsi-external-api-script";
-/** Таймаут входа в конференцию и загрузки External API — из реального урока. */
-export const JOIN_TIMEOUT_MS = 15000;
-export const JITSI_SCRIPT_LOAD_TIMEOUT_MS = JOIN_TIMEOUT_MS;
+/**
+ * 15 с без videoConferenceJoined — не доказанный connection failure.
+ * Мягкий порог: обновить hint и продолжать ждать. Не dispose / не reject.
+ */
+export const JOIN_SLOW_THRESHOLD_MS = 15000;
+/** Safety watchdog: только если join так и не состоялся. */
+export const JOIN_FATAL_TIMEOUT_MS = 60000;
+export const JOIN_SLOW_HINT = "Подключение занимает больше времени…";
+/** Историческое имя: мягкий порог join и лимит пробы/загрузки скрипта. Не fatal для урока. */
+export const JOIN_TIMEOUT_MS = JOIN_SLOW_THRESHOLD_MS;
+export const JITSI_SCRIPT_LOAD_TIMEOUT_MS = JOIN_SLOW_THRESHOLD_MS;
 
 let sessionInitializing = false;
 
@@ -268,6 +276,168 @@ function sanitizeJitsiEvent(event) {
   return safe;
 }
 
+function logJitsiDiagnostic(eventName, details = {}, { error = false } = {}) {
+  const safe = { ...details };
+  delete safe.jwt;
+  delete safe.token;
+  delete safe.password;
+  const logger = error ? console.error : console.info;
+  logger(`[Jitsi] ${eventName}`, safe);
+}
+
+/**
+ * Jitsi ждёт JSON-строку объекта в appData.localStorageContent.
+ * null / "null" ломает Object.keys внутри iframe.
+ */
+export function hasValidJitsiLocalStorageContent(value) {
+  if (typeof value !== "string" || !value) return false;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "null" || trimmed === "undefined" || trimmed === '"null"') {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed != null && typeof parsed === "object";
+  } catch {
+    return false;
+  }
+}
+
+export function buildJitsiAppData(localStorageContent) {
+  if (!hasValidJitsiLocalStorageContent(localStorageContent)) return undefined;
+  return { localStorageContent };
+}
+
+export function readJitsiLocalStorageContent() {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const raw = window.localStorage?.getItem?.("jitsiLocalStorage");
+    return hasValidJitsiLocalStorageContent(raw) ? raw : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function stripNullJitsiLocalStorageContentFromUrl(url) {
+  const raw = String(url || "");
+  const hashIdx = raw.indexOf("#");
+  if (hashIdx < 0) return raw;
+  const base = raw.slice(0, hashIdx);
+  const hash = raw.slice(hashIdx + 1);
+  const kept = hash.split("&").filter((part) => {
+    if (!part) return false;
+    const eq = part.indexOf("=");
+    const key = eq >= 0 ? part.slice(0, eq) : part;
+    if (key !== "appData.localStorageContent") return true;
+    const value = eq >= 0 ? part.slice(eq + 1) : "";
+    let decoded = value;
+    try {
+      decoded = decodeURIComponent(value.replace(/\+/g, " "));
+    } catch {
+      decoded = value;
+    }
+    return hasValidJitsiLocalStorageContent(decoded);
+  });
+  return kept.length ? `${base}#${kept.join("&")}` : base;
+}
+
+export function sanitizeJitsiIframeElement(iframe) {
+  if (!iframe) return iframe;
+  try {
+    const src = iframe.src || iframe.getAttribute?.("src") || "";
+    const next = stripNullJitsiLocalStorageContentFromUrl(src);
+    if (next && next !== src) {
+      iframe.src = next;
+    }
+  } catch {
+    /* ignore */
+  }
+  return iframe;
+}
+
+function interceptIframeSrc(iframe) {
+  if (!iframe) return;
+  try {
+    const desc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "src");
+    if (!desc?.get || !desc?.set) return;
+    Object.defineProperty(iframe, "src", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        return desc.get.call(this);
+      },
+      set(value) {
+        desc.set.call(this, stripNullJitsiLocalStorageContentFromUrl(String(value || "")));
+      },
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+export function installJitsiIframeCreateSanitizer() {
+  if (typeof document === "undefined" || typeof document.createElement !== "function") {
+    return () => {};
+  }
+  const originalCreate = document.createElement;
+  document.createElement = function createElementSanitized(tagName, options) {
+    const el = originalCreate.call(document, tagName, options);
+    if (String(tagName || "").toLowerCase() === "iframe") {
+      interceptIframeSrc(el);
+    }
+    return el;
+  };
+  return () => {
+    document.createElement = originalCreate;
+  };
+}
+
+export function hookContainerForJitsiIframeSanitize(container) {
+  if (!container || typeof container.appendChild !== "function") {
+    return () => {};
+  }
+  const originalAppend = container.appendChild;
+  container.appendChild = function appendSanitized(node) {
+    if (node && String(node.tagName || "").toUpperCase() === "IFRAME") {
+      interceptIframeSrc(node);
+      sanitizeJitsiIframeElement(node);
+    }
+    return originalAppend.call(this, node);
+  };
+  return () => {
+    container.appendChild = originalAppend;
+  };
+}
+
+export function buildJitsiExternalApiOptions({
+  roomName,
+  parentNode,
+  configOverwrite,
+  interfaceConfigOverwrite,
+  jwt,
+  userInfo,
+  lang = "ru",
+  localStorageContent,
+} = {}) {
+  const options = {
+    roomName,
+    parentNode,
+    width: "100%",
+    height: "100%",
+    lang,
+    configOverwrite,
+    interfaceConfigOverwrite,
+  };
+  if (userInfo) options.userInfo = userInfo;
+  if (jwt) options.jwt = jwt;
+  const content = localStorageContent === undefined
+    ? readJitsiLocalStorageContent()
+    : localStorageContent;
+  const appData = buildJitsiAppData(content);
+  if (appData) options.appData = appData;
+  return options;
+}
+
 export function registerJoinDiagnostics(api, { onMediaWarning, diagnostics } = {}) {
   const events = [
     "videoConferenceJoined",
@@ -463,7 +633,10 @@ export function buildJitsiEmbedUrl(config) {
   ];
 
   const q = params.toString();
-  return `https://${domain}/${encodeURIComponent(roomName)}${q ? `?${q}` : ""}#${hashParts.join("&")}`;
+  // Не передаём appData.localStorageContent: Jitsi падает на Object.keys(null).
+  return stripNullJitsiLocalStorageContentFromUrl(
+    `https://${domain}/${encodeURIComponent(roomName)}${q ? `?${q}` : ""}#${hashParts.join("&")}`,
+  );
 }
 
 function wireParticipantListeners(api, hooks) {
@@ -570,6 +743,115 @@ export function createJitsiIframeEmbed(config, container, {
   };
 }
 
+const JOIN_OUTCOME = {
+  joined: "joined",
+  aborted: "aborted",
+  auth: "auth",
+  connection: "connection",
+  conference: "conference",
+  fatal: "fatal",
+};
+
+function waitForConferenceJoined(api, {
+  signal,
+  onSlow,
+  slowMs = JOIN_SLOW_THRESHOLD_MS,
+  fatalMs = JOIN_FATAL_TIMEOUT_MS,
+} = {}) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let conferenceJoined = false;
+    let slowTimer = 0;
+    let fatalTimer = 0;
+    const joinListeners = [];
+
+    const listen = (name, handler) => {
+      api.addListener(name, handler);
+      joinListeners.push([name, handler]);
+    };
+
+    const cleanup = () => {
+      window.clearTimeout(slowTimer);
+      window.clearTimeout(fatalTimer);
+      slowTimer = 0;
+      fatalTimer = 0;
+      signal?.removeEventListener?.("abort", onAbort);
+      for (const [name, handler] of joinListeners) {
+        try {
+          api.removeListener?.(name, handler);
+        } catch {
+          /* ignore */
+        }
+      }
+      joinListeners.length = 0;
+    };
+
+    const finish = (outcome) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve({ outcome, conferenceJoined });
+    };
+
+    const onAbort = () => finish(JOIN_OUTCOME.aborted);
+
+    listen("videoConferenceJoined", () => {
+      conferenceJoined = true;
+      finish(JOIN_OUTCOME.joined);
+    });
+    listen("connectionFailed", (event) => {
+      finish(isJitsiAuthJoinFailure(event) ? JOIN_OUTCOME.auth : JOIN_OUTCOME.connection);
+    });
+    listen("conferenceFailed", (event) => {
+      finish(isJitsiAuthJoinFailure(event) ? JOIN_OUTCOME.auth : JOIN_OUTCOME.conference);
+    });
+
+    slowTimer = window.setTimeout(() => {
+      if (settled || conferenceJoined) return;
+      onSlow?.();
+    }, slowMs);
+
+    fatalTimer = window.setTimeout(() => {
+      if (settled || conferenceJoined) return;
+      finish(JOIN_OUTCOME.fatal);
+    }, fatalMs);
+
+    if (signal?.aborted) {
+      finish(JOIN_OUTCOME.aborted);
+    } else {
+      signal?.addEventListener?.("abort", onAbort, { once: true });
+    }
+  });
+}
+
+function joinFailureFromOutcome(outcome, { signal } = {}) {
+  const err = new Error("Не удалось войти во встречу");
+  if (outcome === JOIN_OUTCOME.aborted || signal?.aborted) {
+    err.message = "Подключение к конференции отменено";
+    err.code = "jitsi_aborted";
+    err.category = "aborted";
+    return err;
+  }
+  if (outcome === JOIN_OUTCOME.auth) {
+    err.code = "jitsi_auth";
+    err.category = "jitsi_auth";
+    return err;
+  }
+  if (outcome === JOIN_OUTCOME.connection) {
+    err.code = "jitsi_connection_failed";
+    err.category = "connection_failed";
+    return err;
+  }
+  if (outcome === JOIN_OUTCOME.conference) {
+    err.code = "jitsi_conference_failed";
+    err.category = "conference_failed";
+    return err;
+  }
+  err.code = "jitsi_join_timeout";
+  err.category = "join_timeout";
+  return err;
+}
+
 async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
   const roomName = String(config.roomName || "").trim();
   const domain = String(config.domain || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
@@ -597,12 +879,11 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
   const subject = resolveJitsiSubject(config);
   const startWithVideoMuted = Boolean(config.startWithVideoMuted);
   const startWithAudioMuted = config.startWithAudioMuted !== false;
-  const options = {
+  const options = buildJitsiExternalApiOptions({
     roomName,
     parentNode: container,
-    width: "100%",
-    height: "100%",
     lang: "ru",
+    jwt: config.jwt,
     configOverwrite: buildJitsiConfigOverwrite({
       subject,
       startWithVideoMuted,
@@ -614,20 +895,17 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
       email: config.userInfo?.email || undefined,
       avatarURL: config.userInfo?.avatarUrl || undefined,
     },
-  };
-  if (config.jwt) {
-    options.jwt = config.jwt;
-  }
+  });
 
-  console.info("[Jitsi] External API", {
+  logJitsiDiagnostic("jitsi_init_started", {
     meetingUuid: config.meeting?.uuid,
     configuredDomain: domain,
-    configuredRoomName: roomName,
     roomSuffix: roomName.slice(-8),
     hasJwt: Boolean(config.jwt),
     authMode: config.authMode || "",
+    startWithVideoMuted,
+    startWithAudioMuted,
     subject,
-    diagnostics: config.diagnostics || null,
   });
 
   if (!config.jwt && config.authMode === "jwt") {
@@ -650,54 +928,23 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     callSessionId: config.diagnostics?.callSessionId || createCallSessionId(),
   };
 
-  const api = new JitsiMeetExternalAPI(domain, options);
-
-  let conferenceJoined = false;
-  let authFailed = false;
-  const joinedWait = new Promise((resolve) => {
-    let settled = false;
-    let timer = 0;
-    const finish = (ok) => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timer);
-      hooks.signal?.removeEventListener?.("abort", onAbort);
-      resolve(ok);
-    };
-    const onAbort = () => finish(false);
-    const onAuthFail = (eventName, event) => {
-      if (!isJitsiAuthJoinFailure(event)) return;
-      authFailed = true;
-      console.error(`[Jitsi] ${eventName} auth rejected`, {
-        roomName,
-        meetingUuid: diagnostics.meetingUuid,
-        domain,
-        hasJwt: Boolean(config.jwt),
-        authMode: config.authMode || "",
-      });
-      finish(false);
-    };
-    api.addListener("videoConferenceJoined", () => {
-      conferenceJoined = true;
-      finish(true);
-    });
-    api.addListener("connectionFailed", (event) => onAuthFail("connectionFailed", event));
-    api.addListener("conferenceFailed", (event) => onAuthFail("conferenceFailed", event));
-    timer = window.setTimeout(() => {
-      if (!conferenceJoined) {
-        console.error("[Jitsi] videoConferenceJoined was not received", {
-          roomName,
-          meetingUuid: diagnostics.meetingUuid,
-          tab: diagnostics.browserTabSessionId,
-        });
-      }
-      finish(false);
-    }, JOIN_TIMEOUT_MS);
-    if (hooks.signal?.aborted) {
-      finish(false);
-    } else {
-      hooks.signal?.addEventListener?.("abort", onAbort, { once: true });
-    }
+  const unhookCreate = installJitsiIframeCreateSanitizer();
+  const unhookAppend = hookContainerForJitsiIframeSanitize(container);
+  let api;
+  try {
+    api = new JitsiMeetExternalAPI(domain, options);
+  } finally {
+    unhookCreate();
+  }
+  try {
+    sanitizeJitsiIframeElement(api.getIFrame?.());
+  } catch {
+    /* ignore */
+  }
+  logJitsiDiagnostic("jitsi_iframe_created", {
+    meetingUuid: diagnostics.meetingUuid,
+    roomSuffix: roomName.slice(-8),
+    hasIframe: Boolean(api.getIFrame?.()),
   });
 
   const { presence, screenShare, watchdog } = wireParticipantListeners(api, {
@@ -706,12 +953,16 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     diagnostics,
   });
 
-  let joined = await joinedWait;
-  // participants>=1 и локальный snapshot — не доказательство входа:
-  // getNumberOfParticipants() считает текущего пользователя. Без
-  // videoConferenceJoined не фиксируем join и не открываем сессию.
-
-  if (!joined) {
+  let disposed = false;
+  const disposeOnce = (reason) => {
+    if (disposed) return;
+    disposed = true;
+    unhookAppend();
+    logJitsiDiagnostic("jitsi_disposed", {
+      reason,
+      meetingUuid: diagnostics.meetingUuid,
+      roomSuffix: roomName.slice(-8),
+    });
     try {
       watchdog.dispose?.();
     } catch {
@@ -732,23 +983,57 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     } catch {
       /* ignore */
     }
-    container.innerHTML = "";
-    const err = new Error("Не удалось войти во встречу");
-    if (hooks.signal?.aborted) {
-      err.code = "jitsi_aborted";
-      err.category = "aborted";
-    } else if (authFailed) {
-      err.code = "jitsi_auth";
-      err.category = "jitsi_auth";
-    } else if (config.authMode === "jwt" && !config.jwt) {
-      err.code = "jitsi_join_timeout";
-      err.category = "jwt_missing";
-    } else {
-      err.code = "jitsi_join_timeout";
-      err.category = "join_timeout";
+    try {
+      container.innerHTML = "";
+    } catch {
+      /* ignore */
     }
-    throw err;
+  };
+
+  // participants>=1 — не доказательство входа. Ждём videoConferenceJoined.
+  // 15 с без join ≠ fatal: только hint. Dispose только на explicit failure / abort / fatal watchdog.
+  const { outcome, conferenceJoined } = await waitForConferenceJoined(api, {
+    signal: hooks.signal,
+    onSlow: () => {
+      logJitsiDiagnostic("jitsi_join_slow", {
+        meetingUuid: diagnostics.meetingUuid,
+        roomSuffix: roomName.slice(-8),
+        tab: diagnostics.browserTabSessionId,
+      });
+      hooks.onConnectionHint?.(JOIN_SLOW_HINT);
+    },
+  });
+
+  if (outcome !== JOIN_OUTCOME.joined || !conferenceJoined) {
+    if (outcome === JOIN_OUTCOME.fatal) {
+      logJitsiDiagnostic("jitsi_join_fatal_timeout", {
+        meetingUuid: diagnostics.meetingUuid,
+        roomSuffix: roomName.slice(-8),
+        tab: diagnostics.browserTabSessionId,
+        conferenceJoined: false,
+      }, { error: true });
+      if (diagnostics.meetingUuid) {
+        void reportMeetingTechnicalEvent(diagnostics.meetingUuid, {
+          eventType: "conference_failed",
+          role: diagnostics.role || "",
+          reason: "jitsi_join_fatal_timeout",
+          browserTabSessionId: diagnostics.browserTabSessionId || "",
+          callSessionId: diagnostics.callSessionId || "",
+          metadata: { domain, roomSuffix: roomName.slice(-8) },
+        });
+      }
+    }
+    disposeOnce(
+      outcome === JOIN_OUTCOME.aborted
+        ? "aborted"
+        : outcome === JOIN_OUTCOME.fatal
+          ? "fatal_timeout"
+          : outcome,
+    );
+    throw joinFailureFromOutcome(outcome, { signal: hooks.signal });
   }
+
+  unhookAppend();
 
   return {
     api,
@@ -758,33 +1043,7 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     screenShare,
     watchdog,
     callSessionId: diagnostics.callSessionId,
-    dispose: () => {
-      try {
-        watchdog.dispose?.();
-      } catch {
-        /* ignore */
-      }
-      try {
-        screenShare.dispose?.();
-      } catch {
-        /* ignore */
-      }
-      try {
-        presence.dispose?.();
-      } catch {
-        /* ignore */
-      }
-      try {
-        api.dispose();
-      } catch {
-        /* ignore */
-      }
-      try {
-        container.innerHTML = "";
-      } catch {
-        /* ignore */
-      }
-    },
+    dispose: () => disposeOnce("user"),
     executeCommand: (cmd, ...args) => {
       try {
         api.executeCommand(cmd, ...args);

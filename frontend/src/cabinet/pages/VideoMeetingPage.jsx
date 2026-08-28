@@ -147,7 +147,12 @@ function mapJoinError(err) {
   if (code === "jitsi_auth") {
     return "Сервер конференции отклонил токен входа. Обновите страницу урока. Локально JITSI_APP_SECRET в Generator/.env должен совпадать с Prosody на lesson.itflux-academy.ru.";
   }
-  if (code === "jitsi_join_timeout" || code === "join_timeout") {
+  if (
+    code === "jitsi_join_timeout"
+    || code === "join_timeout"
+    || code === "jitsi_connection_failed"
+    || code === "jitsi_conference_failed"
+  ) {
     return "Не удалось соединиться с сервером конференции. Нажмите «Повторить» или откройте звонок в Safari / Chrome — не с иконки на рабочем столе.";
   }
   if (code === "jitsi_script" || code === "jitsi_script_timeout" || code === "jitsi_public_blocked") {
