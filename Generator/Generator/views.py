@@ -3967,7 +3967,9 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
             "vpr_advanced": bool(item.task.vpr_advanced),
         }
         if include_answers:
-            row["answer"] = process_latex(str(item.task.answer or ""), for_browser=True)
+            raw_answer = str(item.task.answer or "")
+            processed = process_latex(raw_answer, for_browser=True)
+            row["answer"] = processed if str(processed).strip() else raw_answer
         else:
             row["answer"] = ""
         tasks_data.append(row)
@@ -3982,20 +3984,24 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
 
 
 def _request_should_see_variant_answers(request) -> bool:
-    """Ученику правильные ответы в JSON варианта не отдаём."""
+    """Ученику правильные ответы в JSON варианта не отдаём. Учителю — всегда."""
     user = getattr(request, "user", None)
+    role = (request.GET.get("role") or "").strip().lower()
+    if role in ("student", "pupil"):
+        return False
     if user is not None and getattr(user, "is_authenticated", False):
         try:
             from Cabinet.models import Profile
             profile = getattr(user, "profile", None)
-            if profile is not None and profile.role == Profile.Role.STUDENT:
-                return False
+            if profile is not None:
+                if profile.role == Profile.Role.STUDENT:
+                    return False
+                if profile.role == Profile.Role.TEACHER:
+                    return True
         except Exception:
             pass
-    # Явный режим ДЗ ученика / роли в query
-    role = (request.GET.get("role") or "").strip().lower()
-    if role in ("student", "pupil"):
-        return False
+        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+            return True
     hw_mode = (request.GET.get("homework") or request.GET.get("cabinet_homework") or "").strip().lower()
     if hw_mode in ("1", "true", "yes", "student"):
         return False
@@ -4010,13 +4016,15 @@ def api_variant_detail(request, level, subject, variant_id):
         raise Http404()
     if (variant.var_subject.subject_short or "").strip().lower() != url_subject:
         raise Http404()
-    return JsonResponse(
+    response = JsonResponse(
         _variant_detail_payload(
             request,
             variant,
             include_answers=_request_should_see_variant_answers(request),
         )
     )
+    response["Cache-Control"] = "private, no-store"
+    return response
 
 
 @csrf_exempt
@@ -4071,13 +4079,15 @@ def api_variant_check_answer(request, variant_id):
 def api_lesson_variant_detail(request, variant_id):
     """Вариант для урока: всегда по /api, без зависимости от роутинга SPA."""
     variant = get_object_or_404(Variant.objects.select_related("level", "var_subject"), id=variant_id)
-    return JsonResponse(
+    response = JsonResponse(
         _variant_detail_payload(
             request,
             variant,
             include_answers=_request_should_see_variant_answers(request),
         )
     )
+    response["Cache-Control"] = "private, no-store"
+    return response
 
 
 @require_http_methods(["GET"])

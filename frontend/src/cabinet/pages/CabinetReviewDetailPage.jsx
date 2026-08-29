@@ -10,6 +10,7 @@ import CabinetFloatingMenu from "../components/CabinetFloatingMenu";
 import {
   buildTeacherVariantUrl,
   formatReviewDate,
+  hasOfficialTaskAnswer,
   homeworkTaskAnswer,
   homeworkTaskAttachments,
   homeworkTaskComment,
@@ -391,7 +392,11 @@ export default function CabinetReviewDetailPage() {
     }
     const ac = new AbortController();
     const url = `/api/${encodeURIComponent(reviewCtx.level)}/${encodeURIComponent(reviewCtx.subject)}/variant/${encodeURIComponent(String(reviewCtx.variant_id))}/`;
-    fetch(url, { signal: ac.signal })
+    fetch(`${url}?role=teacher`, {
+      credentials: "same-origin",
+      cache: "no-store",
+      signal: ac.signal,
+    })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => setVariant(data))
       .catch(() => setVariant(null));
@@ -908,7 +913,7 @@ export default function CabinetReviewDetailPage() {
                         <div
                           className={`cb-review-detail__task-answer${tableAnswer ? " cb-review-detail__task-answer--pre" : ""}`}
                         >
-                          {task.answer ? (
+                          {hasOfficialTaskAnswer(task.answer) ? (
                             <MathContent html={String(task.answer)} plainHtml />
                           ) : (
                             <span className="cb-review-detail__empty-answer">Нет ответа в базе</span>
@@ -982,7 +987,7 @@ export default function CabinetReviewDetailPage() {
                       <TaskCondition task={task} level={level} subject={subject} />
                       <div className="cb-review-detail__answer-block">
                         <span className="cb-review-detail__section-label">Правильный ответ</span>
-                        {task.answer ? (
+                        {hasOfficialTaskAnswer(task.answer) ? (
                           <div className="cb-review-detail__task-answer">
                             <MathContent html={String(task.answer)} plainHtml />
                           </div>

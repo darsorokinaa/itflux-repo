@@ -1,10 +1,26 @@
 import { describe, expect, it } from "vitest";
 import {
   buildStudentHomeworkReviewRows,
+  hasOfficialTaskAnswer,
   homeworkTaskAnswer,
   resolvePart1Verdict,
 } from "./cabinetReviewUtils";
 import { homeworkResultToUiState, buildHomeworkResultPayload } from "../utils/cabinetHomework";
+
+describe("hasOfficialTaskAnswer", () => {
+  it("treats empty CKEditor html as missing", () => {
+    expect(hasOfficialTaskAnswer("")).toBe(false);
+    expect(hasOfficialTaskAnswer("<p></p>")).toBe(false);
+    expect(hasOfficialTaskAnswer("<p>&nbsp;</p>")).toBe(false);
+    expect(hasOfficialTaskAnswer("<p><br></p>")).toBe(false);
+  });
+
+  it("keeps image and formula answers that have no plain text", () => {
+    expect(hasOfficialTaskAnswer('<p><img src="/media/a.png" alt=""></p>')).toBe(true);
+    expect(hasOfficialTaskAnswer("<svg viewBox='0 0 1 1'></svg>")).toBe(true);
+    expect(hasOfficialTaskAnswer("26")).toBe(true);
+  });
+});
 
 describe("homeworkTaskAnswer legacy number keys", () => {
   const tasks = [

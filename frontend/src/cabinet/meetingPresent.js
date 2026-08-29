@@ -1,5 +1,23 @@
 /** Хелперы показа материала во время видеоурока. */
 
+/** Не встраивать страницу самого звонка — получится двойной Jitsi в iframe. */
+export function isLessonWorkspaceSelfMeetingUrl(url, meetingUuid) {
+  const raw = String(url || "").trim();
+  if (!raw || !meetingUuid) return false;
+  return /\/cabinet\/meetings\//i.test(raw) && String(raw).includes(String(meetingUuid));
+}
+
+/**
+ * Любой материал с URL показываем в рабочей области урока.
+ * Внешняя вкладка / Safari не используются.
+ */
+export function shouldEmbedMaterialInLesson(url, { meetingUuid } = {}) {
+  const raw = String(url || "").trim();
+  if (!raw) return false;
+  if (isLessonWorkspaceSelfMeetingUrl(raw, meetingUuid)) return false;
+  return true;
+}
+
 export const MEETING_CALL_CHANNEL = "itflux-meeting-call";
 
 export function appendMeetingParam(url, meetingUuid) {
@@ -53,35 +71,11 @@ export function presentedOpenKey(presented) {
 }
 
 /**
- * Открыть материал в новой вкладке.
- * Каждый материал — отдельная вкладка (_blank).
- * При блокировке попапа — переход в этой же вкладке.
- * @returns {"tab"|"same"|"failed"}
+ * @deprecated Материалы урока открываются в рабочей области, не во внешней вкладке.
+ * Нельзя location.assign — на iOS PWA это выкидывает из комнаты в Safari.
  */
-export function openPresentedMaterial(url) {
-  const target = String(url || "").trim();
-  if (!target) return "failed";
-  try {
-    // Не передаём "noopener" в features: иначе window.open часто возвращает null,
-    // и мы ошибочно уходим location.assign на вкладке звонка.
-    const popup = window.open(target, "_blank");
-    if (popup && !popup.closed) {
-      try {
-        popup.opener = null;
-      } catch {
-        /* ignore */
-      }
-      return "tab";
-    }
-  } catch {
-    /* fallback below */
-  }
-  try {
-    window.location.assign(target);
-    return "same";
-  } catch {
-    return "failed";
-  }
+export function openPresentedMaterial() {
+  return "in-room";
 }
 
 export function postMeetingCallMessage(payload) {

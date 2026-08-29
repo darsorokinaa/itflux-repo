@@ -42,7 +42,6 @@ import {
   pickHomeworkFields,
   homeworkResultToUiState,
   buildHomeworkResultPayload,
-  buildLiveCheckedHomeworkResult,
   saveHomeworkDraft,
   shouldHideHomeworkFinishButton,
   shouldShowHomeworkBottomActions,
@@ -914,6 +913,7 @@ function ExamPage() {
     const ac = new AbortController();
     fetch(variantUrl, {
       credentials: "same-origin",
+      cache: "no-store",
       signal: ac.signal,
     })
       .then(async (res) => {
@@ -1584,7 +1584,7 @@ function ExamPage() {
     }
   }, [isHomework, cabinetAssignmentId, variant, userAnswers, scores, checkedTasks, homeworkLkOpts, hwApiRaw, isTeacherHomeworkView, isEmbeddedHomework, isLiveVariant]);
 
-  // Живой урок: учителю видны только ответы после «Проверить».
+  // Живой урок: в базу уходят все ответы; учителю вердикт — только после «Проверить».
   useEffect(() => {
     if (!isLiveVariant || isLiveTeacherView || !cabinetAssignmentId || !variant || homeworkFieldsLocked) {
       return undefined;
@@ -1592,9 +1592,10 @@ function ExamPage() {
     const statusNorm = pickHomeworkFields(hwApiRaw, cabinetAssignmentId || "").status;
     if (homeworkIsReviewed(statusNorm) || statusNorm === "reviewing") return undefined;
     const checked = checkedTasks || {};
-    if (!Object.keys(checked).length) return undefined;
+    const hasAnswer = Object.values(userAnswers || {}).some((v) => v != null && String(v).trim() !== "");
+    if (!hasAnswer && !Object.keys(checked).length) return undefined;
     const timer = window.setTimeout(() => {
-      const r = buildLiveCheckedHomeworkResult(variant.tasks, userAnswers, scores, checked);
+      const r = buildHomeworkResultPayload(variant.tasks, userAnswers, scores, checked);
       void saveHomeworkDraft(cabinetAssignmentId, { result: r }, homeworkLkOpts)
         .then((data) => {
           const serverChecked = data?.result?.checked;

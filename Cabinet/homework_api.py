@@ -558,15 +558,39 @@ def _submission_upload_readonly(submission: HomeworkSubmission) -> bool:
     return not _submission_student_editable(submission)
 
 
+_RESULT_MAP_KEYS = (
+    "by_task_id",
+    "by_number",
+    "checked",
+    "scores",
+    "attachments_by_task_id",
+    "attachments_by_number",
+    "teacher_attachments_by_task_id",
+    "teacher_attachments_by_number",
+    "comments_by_task_id",
+    "comments_by_number",
+)
+
+
 def _merge_result_payload(
     existing: dict | None,
     new: dict | None,
 ) -> dict:
-    merged = dict(new) if isinstance(new, dict) else {}
+    """Частичный save-draft не затирает уже сохранённые ответы и вложения."""
     prev = existing if isinstance(existing, dict) else {}
-    for key in ("attachments_by_task_id", "attachments_by_number", "teacher_attachments_by_task_id", "teacher_attachments_by_number"):
-        if key not in merged and key in prev:
-            merged[key] = prev[key]
+    incoming = new if isinstance(new, dict) else {}
+    if not prev:
+        return dict(incoming)
+    if not incoming:
+        return dict(prev)
+    merged = dict(prev)
+    for key, val in incoming.items():
+        if key in _RESULT_MAP_KEYS:
+            old = merged.get(key) if isinstance(merged.get(key), dict) else {}
+            nxt = val if isinstance(val, dict) else {}
+            merged[key] = {**old, **nxt}
+        else:
+            merged[key] = val
     return merged
 
 

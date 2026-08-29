@@ -1760,6 +1760,41 @@ class HomeworkSubmissionApiTests(TestCase):
         self.assertEqual(submission.result_payload["by_task_id"]["1"], "answer")
         self.assertIn("99", submission.result_payload["attachments_by_task_id"])
 
+    def test_homework_save_draft_merges_existing_answers(self):
+        from rest_framework.test import APIClient
+        from Cabinet.models import HomeworkSubmission
+
+        client = APIClient()
+        client.force_login(self.student_user)
+        first = client.post(
+            f"/api/homework/assignment/{self.homework.pk}/save-draft/",
+            {
+                "result": {
+                    "by_task_id": {"101": "first", "102": "second"},
+                    "checked": {"101": True},
+                }
+            },
+            format="json",
+        )
+        self.assertEqual(first.status_code, 200, first.content)
+        response = client.post(
+            f"/api/homework/assignment/{self.homework.pk}/save-draft/",
+            {
+                "result": {
+                    "by_task_id": {"103": "third"},
+                    "checked": {"103": True},
+                }
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        submission = HomeworkSubmission.objects.get(homework=self.homework, student=self.student)
+        self.assertEqual(submission.result_payload["by_task_id"]["101"], "first")
+        self.assertEqual(submission.result_payload["by_task_id"]["102"], "second")
+        self.assertEqual(submission.result_payload["by_task_id"]["103"], "third")
+        self.assertTrue(submission.result_payload["checked"]["101"])
+        self.assertTrue(submission.result_payload["checked"]["103"])
+
     def test_student_can_submit_text_and_file(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
         from rest_framework.test import APIClient

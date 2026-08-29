@@ -66,6 +66,7 @@ import {
   appendLiveVariantParams,
   presentedOpenKey,
   postMeetingUnpresent,
+  shouldEmbedMaterialInLesson,
 } from "../meetingPresent";
 import {
   canSyncPresentRow,
@@ -232,21 +233,6 @@ async function copyText(text) {
   } catch {
     return false;
   }
-}
-
-function isEmbeddableMaterialUrl(url) {
-  const raw = String(url || "").trim();
-  if (!raw) return false;
-  try {
-    const abs = raw.startsWith("http")
-      ? new URL(raw)
-      : new URL(raw, window.location.origin);
-    if (abs.origin === window.location.origin) return true;
-    if (/\.(pdf|png|jpe?g|gif|webp|svg)(\?|$)/i.test(abs.pathname)) return true;
-  } catch {
-    return raw.startsWith("/");
-  }
-  return false;
 }
 
 const LESSON_COMPACT_MQ = "(max-width: 768px), (max-height: 600px) and (orientation: landscape)";
@@ -1004,7 +990,7 @@ export default function VideoMeetingPage() {
         title: next.title || "Материал",
         url,
         kind: next.kind,
-        embed: isEmbeddableMaterialUrl(url),
+        embed: shouldEmbedMaterialInLesson(url, { meetingUuid }),
       });
       setAsideOpen(false);
       setMobilePane("materials");
@@ -1717,6 +1703,7 @@ export default function VideoMeetingPage() {
             url: presentedPayload.openUrl,
             boardId: presentedPayload.boardId,
             homeworkId: presentedPayload.homeworkId,
+            embed: shouldEmbedMaterialInLesson(presentedPayload.openUrl, { meetingUuid }),
           });
           setMaterialSession(null);
           setFocusCall(false);
@@ -2036,26 +2023,17 @@ export default function VideoMeetingPage() {
   const openWorkspaceMaterial = useCallback((payload) => {
     if (!payload?.url && !payload?.text) return;
     const rawUrl = String(payload.url || "").trim();
-    // Не встраиваем страницу самого звонка — получится двойная шапка в iframe.
-    const embedsSelfMeeting = Boolean(
-      meetingUuid
-      && rawUrl
-      && /\/cabinet\/meetings\//i.test(rawUrl)
-      && rawUrl.includes(meetingUuid),
-    );
-    if (embedsSelfMeeting || (payload.url && !isEmbeddableMaterialUrl(payload.url) && !payload.forceEmbed)) {
-      window.open(payload.url, "_blank", "noopener,noreferrer");
-      return;
-    }
+    const embed = Boolean(rawUrl) && shouldEmbedMaterialInLesson(rawUrl, { meetingUuid });
+    if (rawUrl && !embed) return;
     setMaterialSession(null);
     setFocusCall(false);
     setCallCollapsed(isLessonCompactViewport());
     setWorkspaceMaterial({
       title: payload.title || "Материал",
-      url: payload.url || "",
+      url: rawUrl,
       text: payload.text || "",
       kind: payload.kind || "material",
-      embed: Boolean(payload.url) && (payload.forceEmbed || isEmbeddableMaterialUrl(payload.url)),
+      embed,
     });
     // Для варианта оставляем сайдбар с ответами; звонок уйдёт в compact.
     if (payload.kind === "variant") setAsideOpen(true);
@@ -2133,13 +2111,19 @@ export default function VideoMeetingPage() {
         title: board.title || "Доска",
       };
       setPresented(next);
+      openWorkspaceMaterial({
+        title: next.title || board.title || "Доска",
+        url: `/cabinet/boards/${board.id}`,
+        kind: "board",
+        forceEmbed: true,
+      });
       showMaterialsToast("Материал показан ученику");
     } catch (err) {
       setError(err?.message || "Не удалось показать доску");
     } finally {
       setPresentBusy(false);
     }
-  }, [applyMaterialSession, meetingUuid, showMaterialsToast]);
+  }, [applyMaterialSession, meetingUuid, openWorkspaceMaterial, showMaterialsToast]);
 
   const onShowVariant = useCallback(async (row) => {
     if (!meetingUuid || !row) return;
@@ -2152,14 +2136,30 @@ export default function VideoMeetingPage() {
         url: row.url || "",
         materialId: row.materialId || null,
       });
-      setPresented(data?.presented || null);
+      const next = data?.presented || {
+        kind: "variant",
+        title: row.label || "",
+        openUrl: row.url || "",
+        materialId: row.materialId || null,
+      };
+      setPresented(next);
+      const url = resolveMaterialOpenUrl(row, meetingUuid, next, { forEmbed: true });
+      if (url || row.text) {
+        openWorkspaceMaterial({
+          title: next.title || row.label,
+          url,
+          text: row.text || "",
+          kind: "variant",
+          forceEmbed: true,
+        });
+      }
       showMaterialsToast("Материал показан ученику");
     } catch (err) {
       setError(err?.message || "Не удалось показать вариант");
     } finally {
       setPresentBusy(false);
     }
-  }, [applyMaterialSession, meetingUuid, showMaterialsToast]);
+  }, [applyMaterialSession, meetingUuid, openWorkspaceMaterial, showMaterialsToast]);
 
   const onClearPresented = useCallback(async () => {
     if (!meetingUuid) return;
@@ -2906,7 +2906,7 @@ export default function VideoMeetingPage() {
             >
               {workspaceMaterial.text && !workspaceMaterial.url ? (
                 <div className="video-lesson-workspace__text">{workspaceMaterial.text}</div>
-              ) : workspaceMaterial.embed && workspaceMaterial.url ? (
+              ) : workspaceMaterial.url ? (
                 <iframe
                   key={workspaceFrameKey}
                   title={workspaceMaterial.title}
@@ -2919,17 +2919,8 @@ export default function VideoMeetingPage() {
                 />
               ) : (
                 <div className="vl-empty">
-                  <p className="vl-empty__title">Материал открывается во внешней вкладке</p>
-                  {workspaceMaterial.url ? (
-                    <a
-                      className="video-lesson-btn video-lesson-btn--primary"
-                      href={workspaceMaterial.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Открыть
-                    </a>
-                  ) : null}
+                  <p className="vl-empty__title">Материал недоступен</p>
+                  <p className="vl-empty__text">Покажите материал ученику ещё раз.</p>
                 </div>
               )}
             </div>

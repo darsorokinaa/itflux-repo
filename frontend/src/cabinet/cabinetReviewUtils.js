@@ -61,6 +61,22 @@ export function homeworkTaskAnswer(result, taskId, taskNumber, tasks) {
   return "";
 }
 
+/** Эталон в базе есть, даже если это картинка/формула без видимого текста. */
+export function hasOfficialTaskAnswer(html) {
+  const raw = String(html ?? "").trim();
+  if (!raw) return false;
+  if (/<(img|svg|math|table|canvas|iframe)\b/i.test(raw)) return true;
+  const text = raw
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length > 0;
+}
+
 export function homeworkTaskScore(result, taskId) {
   const scores = result?.scores || {};
   const v = scores[String(taskId)];
