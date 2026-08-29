@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import secrets
 from datetime import timedelta
@@ -13,11 +14,13 @@ from django.utils import timezone
 
 from .models import NotificationPreference, TelegramConnectToken
 from .notifications import get_or_create_preferences
+from Generator.telegram_utils import escape_telegram_html
 
 logger = logging.getLogger(__name__)
 
 TELEGRAM_CONNECT_TTL = timedelta(minutes=15)
 TOKEN_PREFIX = "tg_"
+DEFAULT_PUBLIC_BASE = "https://itflux-academy.ru"
 
 
 def telegram_bot_username() -> str:
@@ -33,7 +36,7 @@ def platform_base_url() -> str:
     return (
         getattr(settings, "LK_PUBLIC_URL", "")
         or getattr(settings, "ITFLUX_PUBLIC_HOME_URL", "")
-        or ""
+        or DEFAULT_PUBLIC_BASE
     ).rstrip("/")
 
 
@@ -42,8 +45,21 @@ def platform_path_url(path: str) -> str:
     if not path.startswith("/"):
         path = f"/{path}"
     if not base:
-        return path
+        return f"{DEFAULT_PUBLIC_BASE}{path}"
     return f"{base}{path}"
+
+
+def telegram_open_html(path: str, label: str = "Открыть в кабинете") -> str:
+    """Кликабельная ссылка на кабинет учителя/ученика, не сырой путь."""
+    url = platform_path_url(path)
+    return f'<a href="{html.escape(url, quote=True)}">{escape_telegram_html(label)}</a>'
+
+
+def telegram_message_with_open(body: str, path: str, label: str = "Открыть в кабинете") -> str:
+    from .notification_links import strip_open_path_from_message
+
+    cleaned = strip_open_path_from_message(body)
+    return f"{cleaned.rstrip()}\n\n{telegram_open_html(path, label)}"
 
 
 def generate_connect_token() -> str:
@@ -355,23 +371,26 @@ def update_notification_preferences(user: User, data: dict) -> dict:
     return telegram_status_payload(user)
 
 
-def send_telegram_to_user(user: User, text: str) -> bool:
+def send_telegram_to_user(user: User, text: str, reply_markup: dict | None = None) -> bool:
     prefs = get_or_create_preferences(user)
     if not prefs.telegram_connected:
         return False
     from Generator.telegram_utils import send_telegram_message
 
-    return send_telegram_message(text, chat_id=prefs.telegram_chat_id)
+    return send_telegram_message(
+        text,
+        chat_id=prefs.telegram_chat_id,
+        reply_markup=reply_markup,
+    )
 
 
 def send_test_telegram_notification(user: User) -> None:
     if not telegram_connected(user):
         raise ValueError("Telegram не подключён")
-    schedule_url = platform_path_url("/cabinet/schedule/")
     text = (
         "Тестовое уведомление\n\n"
         "Если вы видите это сообщение, Telegram подключён правильно.\n\n"
-        f'<a href="{schedule_url}">Открыть расписание</a>'
+        f"{telegram_open_html('/cabinet/schedule/', 'Открыть расписание')}"
     )
     ok = send_telegram_to_user(user, text)
     if not ok:

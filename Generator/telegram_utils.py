@@ -27,6 +27,7 @@ def send_telegram_message(
     message_thread_id: int | None = None,
     *,
     parse_mode: str | None = "HTML",
+    reply_markup: dict | None = None,
 ) -> bool:
     """
     Отправляет сообщение в Telegram одному или нескольким получателям.
@@ -38,6 +39,7 @@ def send_telegram_message(
                  Если None — из settings (TELEGRAM_CHAT_ID, через запятую).
         message_thread_id: ID топика в чате (для групп с темами). Если None — из settings.
         parse_mode: HTML по умолчанию; при ошибке разбора повторяем без parse_mode.
+        reply_markup: ReplyKeyboardMarkup или InlineKeyboardMarkup (словарь Bot API).
 
     Returns:
         True если хотя бы одному доставлено, иначе False.
@@ -88,6 +90,8 @@ def send_telegram_message(
         }
         if mode:
             data["parse_mode"] = mode
+        if reply_markup:
+            data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
         if use_thread and thread_id is not None:
             data["message_thread_id"] = thread_id
         try:
@@ -138,3 +142,30 @@ def send_telegram_message(
             logger.info("Telegram: отправлено в общий чат (топик недоступен)")
             success = True
     return success
+
+
+def answer_telegram_callback_query(
+    callback_query_id: str,
+    text: str = "",
+    bot_token: str | None = None,
+) -> bool:
+    """Закрывает крутилку на inline-кнопке."""
+    from django.conf import settings
+
+    token = bot_token or getattr(settings, "TELEGRAM_BOT_TOKEN", None)
+    if not token or not callback_query_id:
+        return False
+    url = f"https://api.telegram.org/bot{token}/answerCallbackQuery"
+    data = {"callback_query_id": str(callback_query_id)}
+    if text:
+        data["text"] = text[:200]
+    try:
+        body = urllib.parse.urlencode(data).encode("utf-8")
+        req = urllib.request.Request(url, data=body, method="POST")
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        with _NO_PROXY_OPENER.open(req, timeout=10) as resp:
+            result = json.loads(resp.read().decode())
+            return bool(result.get("ok"))
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        logger.exception("Telegram answerCallbackQuery failed")
+        return False

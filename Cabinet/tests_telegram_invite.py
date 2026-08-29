@@ -175,3 +175,173 @@ class InvitePathAndTelegramConnectTests(TestCase):
         text = send_mock.call_args.args[1]
         self.assertIn("Вы присоединились к учителю", text)
         self.assertIn("ОГЭ по информатике", text)
+
+
+class TelegramCabinetAndLinksTests(TestCase):
+    def setUp(self):
+        self.teacher = User.objects.create_user(
+            username="cab_teacher",
+            email="cab_teacher@test.ru",
+            password="StrongPass123!",
+        )
+        self.teacher.profile.role = Profile.Role.TEACHER
+        self.teacher.profile.name = "Дарья"
+        self.teacher.profile.save()
+
+        self.student_user = User.objects.create_user(
+            username="cab_student",
+            email="cab_student@test.ru",
+            password="StrongPass123!",
+        )
+        self.student_user.profile.role = Profile.Role.STUDENT
+        self.student_user.profile.name = "Анна"
+        self.student_user.profile.save()
+
+        from Cabinet.models import Student
+
+        self.student = Student.objects.create(
+            teacher=self.teacher,
+            user=self.student_user,
+            first_name="Анна",
+            last_name="Иванова",
+        )
+        teacher_prefs, _ = NotificationPreference.objects.get_or_create(user=self.teacher)
+        teacher_prefs.telegram_enabled = True
+        teacher_prefs.telegram_chat_id = "7001"
+        teacher_prefs.save()
+
+    def _post(self, payload, secret="hook-secret"):
+        client = Client()
+        return client.post(
+            "/api/cabinet/telegram/webhook/",
+            data=payload,
+            content_type="application/json",
+            HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN=secret,
+        )
+
+    @override_settings(LK_PUBLIC_URL="https://itflux-academy.ru")
+    def test_teacher_open_link_is_full_url(self):
+        from Cabinet.telegram_connect import telegram_message_with_open, telegram_open_html
+
+        html = telegram_open_html("/cabinet/payments", "Открыть оплаты")
+        self.assertIn('href="https://itflux-academy.ru/cabinet/payments"', html)
+        self.assertIn("Открыть оплаты", html)
+        self.assertNotIn("Открыть: /cabinet", html)
+
+        text = telegram_message_with_open(
+            "Поступила оплата\n\nОткрыть: /cabinet/payments",
+            "/cabinet/payments?student=12",
+            "Открыть оплаты",
+        )
+        self.assertNotIn("Открыть: /cabinet", text)
+        self.assertIn("https://itflux-academy.ru/cabinet/payments?student=12", text)
+
+    @override_settings(
+        TELEGRAM_BOT_TOKEN="test-token",
+        TELEGRAM_BOT_USERNAME="itflux_bot",
+        TELEGRAM_WEBHOOK_SECRET="hook-secret",
+        DEBUG=False,
+        LK_PUBLIC_URL="https://itflux-academy.ru",
+    )
+    @patch("Generator.telegram_utils.send_telegram_message", return_value=True)
+    def test_teacher_menu_and_today(self, send_mock):
+        from Cabinet.models import ScheduleEvent
+        from Cabinet.notification_time import user_local_now
+
+        starts = user_local_now(self.teacher).replace(hour=15, minute=0, second=0, microsecond=0)
+        ScheduleEvent.objects.create(
+            owner=self.teacher,
+            title="Алгебра",
+            starts_at=starts,
+            ends_at=starts + timedelta(hours=1),
+            student=self.student,
+        )
+
+        response = self._post(
+            {"message": {"text": "/start", "chat": {"id": 7001}, "from": {"username": "daria"}}}
+        )
+        self.assertEqual(response.status_code, 200)
+        menu_text = send_mock.call_args.args[0]
+        self.assertIn("Личный кабинет в Telegram", menu_text)
+        self.assertIn("Напомнить", menu_text)
+
+        send_mock.reset_mock()
+        response = self._post(
+            {"message": {"text": "Сегодня", "chat": {"id": 7001}, "from": {"username": "daria"}}}
+        )
+        self.assertEqual(response.status_code, 200)
+        today_text = send_mock.call_args.args[0]
+        self.assertIn("Алгебра", today_text)
+        self.assertIn("https://itflux-academy.ru/cabinet/schedule", today_text)
+        self.assertNotIn("Открыть: /cabinet", today_text)
+
+    @override_settings(
+        TELEGRAM_BOT_TOKEN="test-token",
+        TELEGRAM_BOT_USERNAME="itflux_bot",
+        TELEGRAM_WEBHOOK_SECRET="hook-secret",
+        DEBUG=False,
+        LK_PUBLIC_URL="https://itflux-academy.ru",
+    )
+    @patch("Generator.telegram_utils.answer_telegram_callback_query", return_value=True)
+    @patch("Generator.telegram_utils.send_telegram_message", return_value=True)
+    def test_teacher_can_forward_or_send_reminder(self, send_mock, _answer):
+        from Cabinet.models import Homework, ScheduleEvent
+        from Cabinet.telegram_cabinet import build_student_reminder_text
+
+        starts = timezone.now() + timedelta(hours=3)
+        ScheduleEvent.objects.create(
+            owner=self.teacher,
+            title="Алгебра",
+            starts_at=starts,
+            ends_at=starts + timedelta(hours=1),
+            student=self.student,
+        )
+        Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="Дроби",
+            status="assigned",
+        )
+
+        reminder = build_student_reminder_text(self.teacher, self.student)
+        self.assertIn("Привет, Анна!", reminder)
+        self.assertIn("Алгебра", reminder)
+        self.assertIn("Дроби", reminder)
+        self.assertIn("https://itflux-academy.ru/cabinet/student", reminder)
+        self.assertNotIn("/cabinet/payments", reminder)
+
+        response = self._post(
+            {
+                "callback_query": {
+                    "id": "cb1",
+                    "data": f"c:r:{self.student.pk}",
+                    "from": {"id": 7001},
+                    "message": {"chat": {"id": 7001}},
+                }
+            }
+        )
+        self.assertEqual(response.status_code, 200)
+        shown = send_mock.call_args.args[0]
+        self.assertIn("Привет, Анна!", shown)
+        self.assertIn("переслать", shown.lower())
+
+        student_prefs, _ = NotificationPreference.objects.get_or_create(user=self.student_user)
+        student_prefs.telegram_enabled = True
+        student_prefs.telegram_chat_id = "8002"
+        student_prefs.save()
+
+        send_mock.reset_mock()
+        response = self._post(
+            {
+                "callback_query": {
+                    "id": "cb2",
+                    "data": f"c:x:{self.student.pk}",
+                    "from": {"id": 7001},
+                    "message": {"chat": {"id": 7001}},
+                }
+            }
+        )
+        self.assertEqual(response.status_code, 200)
+        sent_texts = [call.args[0] for call in send_mock.call_args_list]
+        self.assertTrue(any("Напоминание отправлено" in text for text in sent_texts))
+        self.assertTrue(any("Привет, Анна!" in text and "Алгебра" in text for text in sent_texts))

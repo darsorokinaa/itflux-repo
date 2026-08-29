@@ -40,21 +40,29 @@ def notify_payment_received(teacher: User, payment: StudentPayment) -> None:
     if not _override_allows(payment.student, "billing", True):
         return
 
+    from .telegram_connect import telegram_message_with_open
+    from Generator.telegram_utils import escape_telegram_html
+
     privacy = prefs.push_privacy_mode
     student_name = payment.student.full_name
+    payments_path = f"/cabinet/payments?student={payment.student_id}"
     if privacy:
         title = "Поступила оплата"
         message = f"Ученик: {student_name}"
-        tg_text = f"Поступила оплата\n\nУченик: {student_name}\n\nОткрыть: /cabinet/payments"
+        tg_text = telegram_message_with_open(
+            f"Поступила оплата\n\nУченик: {escape_telegram_html(student_name)}",
+            payments_path,
+            "Открыть оплаты",
+        )
     else:
-        from Generator.telegram_utils import escape_telegram_html
         title = "Поступила оплата"
         message = f"Ученик: {student_name}\nСумма: {payment.amount} {payment.currency}"
-        tg_text = (
+        tg_text = telegram_message_with_open(
             f"Поступила оплата\n\n"
             f"Ученик: {escape_telegram_html(student_name)}\n"
-            f"Сумма: {payment.amount} {payment.currency}\n\n"
-            f"Открыть: /cabinet/payments"
+            f"Сумма: {payment.amount} {payment.currency}",
+            payments_path,
+            "Открыть оплаты",
         )
 
     from .notification_catalog import NotificationEventType
@@ -164,10 +172,9 @@ def send_teacher_billing_digest(teacher: User, summary: dict, *, weekly: bool = 
     text = build_daily_digest_text(summary)
     if weekly:
         text = text.replace("за сегодня", "за неделю")
-    from .webpush import notify_user_channels
-
     from .notification_catalog import NotificationEventType
     from .notification_dispatch import NotificationDispatcher
+    from .telegram_connect import telegram_message_with_open
     from django.utils import timezone as dj_tz
 
     period = "weekly" if weekly else "daily"
@@ -190,7 +197,7 @@ def send_teacher_billing_digest(teacher: User, summary: dict, *, weekly: bool = 
         skip_actor=False,
         force=weekly,  # weekly already checked its own pref; bypass daily-field gate
         create_telegram=True,
-        telegram_text=f"{text}\n\nОткрыть: /cabinet/payments",
+        telegram_text=telegram_message_with_open(text, "/cabinet/payments", "Открыть оплаты"),
         push_tag=f"billing-digest-{period}",
         private_title=title,
         private_message="Финансовая сводка за период",

@@ -424,6 +424,17 @@ class NotificationDispatcher:
                         )
                     else:
                         text = telegram_text or f"{title}\n\n{message}"
+                    from .notification_links import strip_open_path_from_message
+                    from .telegram_connect import telegram_message_with_open
+
+                    text = strip_open_path_from_message(text)
+                    open_path = url if isinstance(url, str) and url.startswith("/") else ""
+                    if not open_path:
+                        raw_payload_url = payload.get("url")
+                        if isinstance(raw_payload_url, str) and raw_payload_url.startswith("/"):
+                            open_path = raw_payload_url
+                    if open_path and "<a href" not in text:
+                        text = telegram_message_with_open(text, open_path)
                     ok = send_telegram_to_user(recipient, text)
                     try:
                         Notification.objects.create(
