@@ -39,28 +39,31 @@ def _cabinet_path(user: User) -> str:
     return "/cabinet/schedule" if _is_teacher(user) else "/cabinet/student"
 
 
-def teacher_reply_keyboard() -> dict:
-    return {
-        "keyboard": [
-            [{"text": BTN_TODAY}, {"text": BTN_STUDENTS}],
-            [{"text": BTN_REMIND}, {"text": BTN_CABINET}],
-        ],
-        "resize_keyboard": True,
-    }
-
-
-def student_reply_keyboard() -> dict:
-    return {
-        "keyboard": [
-            [{"text": BTN_TODAY}, {"text": BTN_ASSIGNMENTS}],
-            [{"text": BTN_CABINET}],
-        ],
-        "resize_keyboard": True,
-    }
-
-
 def menu_keyboard(user: User) -> dict:
-    return teacher_reply_keyboard() if _is_teacher(user) else student_reply_keyboard()
+    """Кнопки сразу под сообщением — так их видно после /start."""
+    cabinet_url = platform_path_url(_cabinet_path(user))
+    if _is_teacher(user):
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": BTN_TODAY, "callback_data": "c:today"},
+                    {"text": BTN_STUDENTS, "callback_data": "c:students"},
+                ],
+                [
+                    {"text": BTN_REMIND, "callback_data": "c:remind"},
+                    {"text": BTN_CABINET, "url": cabinet_url},
+                ],
+            ]
+        }
+    return {
+        "inline_keyboard": [
+            [
+                {"text": BTN_TODAY, "callback_data": "c:today"},
+                {"text": BTN_ASSIGNMENTS, "callback_data": "c:hw"},
+            ],
+            [{"text": BTN_CABINET, "url": cabinet_url}],
+        ]
+    }
 
 
 def user_by_chat_id(chat_id) -> User | None:
@@ -393,6 +396,32 @@ def handle_callback(callback: dict) -> None:
         show_menu(chat_id, user)
         return
     action = parts[1]
+    if action == "today":
+        _reply(chat_id, _format_today(user), menu_keyboard(user))
+        return
+    if action == "cabinet":
+        path = _cabinet_path(user)
+        label = "Открыть кабинет учителя" if _is_teacher(user) else "Открыть кабинет"
+        _reply(chat_id, telegram_open_html(path, label), menu_keyboard(user))
+        return
+    if action == "hw":
+        _reply(chat_id, _format_assignments(user), menu_keyboard(user))
+        return
+    if action == "students":
+        if _is_teacher(user):
+            _show_students(chat_id, user, action="s")
+        else:
+            show_menu(chat_id, user)
+        return
+    if action == "remind":
+        if _is_teacher(user):
+            _show_students(chat_id, user, action="r")
+        else:
+            show_menu(chat_id, user)
+        return
+    if action == "menu":
+        show_menu(chat_id, user)
+        return
     if not _is_teacher(user):
         show_menu(chat_id, user)
         return
@@ -458,9 +487,11 @@ def handle_telegram_update(update: dict) -> None:
             )
             _reply(
                 chat_id,
-                "Telegram подключён.\n\nЗдесь будут приходить напоминания об уроках и заданиях.",
+                "Telegram подключён.\n\n"
+                "Здесь будут приходить напоминания об уроках и заданиях.\n\n"
+                + _welcome_text(user),
+                menu_keyboard(user),
             )
-            show_menu(chat_id, user)
             logger.info("Telegram linked for user_id=%s chat_id=%s", user.id, chat_id)
         except ValueError as exc:
             _reply(chat_id, str(exc))

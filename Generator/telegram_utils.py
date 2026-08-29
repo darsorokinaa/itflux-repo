@@ -91,13 +91,13 @@ def send_telegram_message(
         if mode:
             data["parse_mode"] = mode
         if reply_markup:
-            data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+            data["reply_markup"] = reply_markup
         if use_thread and thread_id is not None:
             data["message_thread_id"] = thread_id
         try:
-            body = urllib.parse.urlencode(data).encode("utf-8")
+            body = json.dumps(data, ensure_ascii=False).encode("utf-8")
             req = urllib.request.Request(url, data=body, method="POST")
-            req.add_header("Content-Type", "application/x-www-form-urlencoded")
+            req.add_header("Content-Type", "application/json")
             with _NO_PROXY_OPENER.open(req, timeout=15) as resp:
                 result = json.loads(resp.read().decode())
                 if result.get("ok"):

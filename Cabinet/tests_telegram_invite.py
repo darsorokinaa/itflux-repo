@@ -264,6 +264,15 @@ class TelegramCabinetAndLinksTests(TestCase):
         menu_text = send_mock.call_args.args[0]
         self.assertIn("Личный кабинет в Telegram", menu_text)
         self.assertIn("Напомнить", menu_text)
+        markup = send_mock.call_args.kwargs.get("reply_markup") or {}
+        buttons = [
+            btn.get("text")
+            for row in markup.get("inline_keyboard", [])
+            for btn in row
+        ]
+        self.assertIn("Сегодня", buttons)
+        self.assertIn("Напомнить", buttons)
+        self.assertIn("Кабинет", buttons)
 
         send_mock.reset_mock()
         response = self._post(
