@@ -279,7 +279,7 @@ function resourceNoun(type: AccessResourceType) {
     case "schedule":
       return "расписание";
     case "ai":
-      return "ИИ-помощник";
+      return "эта возможность";
     case "students":
       return "ученики";
     case "groups":

@@ -79,6 +79,7 @@ def _plan_public(plan, *, promotion=None) -> dict:
         "is_featured": getattr(plan, "is_featured", False),
         "is_free": _plan_is_free(plan),
         "is_public": getattr(plan, "is_public", True),
+        "sort_order": getattr(plan, "sort_order", 0),
         "cta_type": getattr(plan, "cta_type", "checkout"),
         "content_access_rank": getattr(plan, "content_access_rank", 0),
         "monthly_library_promise": getattr(plan, "monthly_library_promise", False),
@@ -332,7 +333,7 @@ def _get_or_create_teacher_referral_link(user) -> ReferralLink:
 
 
 def _plan_short(plan, *, promotion=None) -> dict:
-    """Кабинет: публичные поля плюс лимиты, которые на витрине не акцентируем (ИИ)."""
+    """Кабинет: те же поля, что на витрине, плюс служебные лимиты."""
     data = _plan_public(plan, promotion=promotion)
     data["limits"] = {
         **data["limits"],

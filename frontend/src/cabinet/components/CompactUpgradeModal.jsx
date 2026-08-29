@@ -3,7 +3,7 @@
  *
  * Показывает основные тарифы. Клик по карточке делает её активной и показывает цену.
  * Props:
- *   currentPlan  — { name, slug, limits: { students, groups, ai_requests } }
+ *   currentPlan  — { name, slug, limits: { students, groups } }
  *   plans        — полный список тарифов из API
  *   recommendedSlug — slug рекомендуемого тарифа
  *   onSelectPlan(slug) — callback при выборе тарифа
@@ -16,7 +16,9 @@ import { Link } from "react-router-dom";
 import { validatePromoCode } from "../../utils/cabinetAuth";
 import { formatStorageLabel } from "../../utils/planHighlights";
 
-const MAIN_SLUGS = ["start", "teacher", "pro", "premium"];
+function isContactPlan(plan) {
+  return plan?.cta_type === "contact" || plan?.slug === "school";
+}
 
 function formatRub(value) {
   const n = Number(value);
@@ -42,7 +44,6 @@ function PlanCard({ plan, isCurrent, isSelected, onSelect, onActivate, promoDisc
     l.students != null ? `${l.students} учеников` : null,
     l.groups != null ? `${l.groups} групп` : l.groups === null ? "группы без лимита" : null,
     storage ? `${storage} хранилища` : null,
-    l.ai_requests != null ? `${l.ai_requests} ИИ` : null,
   ].filter(Boolean).join(" · ");
 
   const offer = plan.promotion?.can_redeem ? plan.promotion : null;
@@ -136,8 +137,8 @@ export default function CompactUpgradeModal({
   const [selectedSlug, setSelectedSlug] = useState(recommendedSlug || currentSlug || null);
 
   const visiblePlans = useMemo(() => {
-    const main = MAIN_SLUGS.map((slug) => plans.find((p) => p.slug === slug)).filter(Boolean);
-    if (main.length) return main;
+    const checkout = (plans || []).filter((p) => !isContactPlan(p));
+    if (checkout.length) return checkout;
     return plans.filter((p) => p.slug === currentSlug || p.slug === recommendedSlug);
   }, [plans, currentSlug, recommendedSlug]);
 

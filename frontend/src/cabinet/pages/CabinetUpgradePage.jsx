@@ -42,8 +42,22 @@ async function pollLocalPaymentUntilPaid(paymentId, { attempts = 45, intervalMs 
 }
 import { CabinetPageHeader, CabinetPageShell } from "../CabinetSectionUi";
 
-const MAIN_SLUGS = ["start", "teacher", "pro", "premium"];
 const SCHOOL_SLUG = "school";
+
+function isContactPlan(plan) {
+  return plan?.cta_type === "contact" || plan?.slug === SCHOOL_SLUG;
+}
+
+function listCheckoutPlans(plans) {
+  return (plans || [])
+    .filter((p) => !isContactPlan(p))
+    .slice()
+    .sort((a, b) => {
+      const byOrder = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+      if (byOrder !== 0) return byOrder;
+      return Number(a.price_month || 0) - Number(b.price_month || 0);
+    });
+}
 
 const FAQ_ITEMS = [
   {
@@ -98,7 +112,6 @@ const COMPARE_ROWS = [
   { key: "workbooks", label: "Рабочие тетради", type: "limit_monthly", field: "workbooks_monthly" },
   { key: "interactives", label: "Создание интерактивов", type: "limit_monthly", field: "interactives" },
   { key: "lessons", label: "Занятия в расписании", type: "limit", field: "lessons" },
-  { key: "ai", label: "ИИ-запросы", type: "ai_monthly", field: "ai_requests" },
   { key: "schedule", label: "Расписание", type: "rank", min: 1 },
   { key: "journal", label: "Журнал", type: "rank", min: 1 },
   { key: "video", label: "Видеоконференции", type: "rank", min: 1 },
@@ -182,9 +195,13 @@ function formatPromoAppliedMessage(data) {
   return parts.join(" · ");
 }
 
-function planRank(slug) {
+function planRank(planOrSlug) {
+  if (planOrSlug && typeof planOrSlug === "object") {
+    if (planOrSlug.content_access_rank != null) return Number(planOrSlug.content_access_rank);
+    planOrSlug = planOrSlug.slug;
+  }
   const map = { start: 0, teacher: 1, pro: 2, premium: 3, school: 4 };
-  return map[slug] ?? 0;
+  return map[planOrSlug] ?? 0;
 }
 
 function formatDateShort(iso) {
@@ -210,12 +227,12 @@ function activeOffer(plan, period) {
   return offer;
 }
 
-function ctaLabel(plan, isCurrent, { expiresAt, currentSlug, period } = {}) {
+function ctaLabel(plan, isCurrent, { expiresAt, currentSlug, currentPlan, period } = {}) {
   if (plan.cta_type === "contact" || plan.slug === SCHOOL_SLUG) return "Оставить заявку";
   const isFree = Boolean(plan.is_free) || plan.slug === "start";
   if (isCurrent && isFree) return "Текущий тариф";
   if (isCurrent) return period === "year" ? "Продлить на год" : "Продлить на месяц";
-  const isDown = currentSlug && planRank(plan.slug) < planRank(currentSlug);
+  const isDown = currentSlug && planRank(plan) < planRank(currentPlan || currentSlug);
   if (isDown && expiresAt) {
     if (plan.slug === "start") return "Перейти на Старт после окончания подписки";
     return `Перейти с ${formatDateShort(expiresAt)}`;
@@ -229,7 +246,7 @@ function ctaLabel(plan, isCurrent, { expiresAt, currentSlug, period } = {}) {
 
 /** Ключевые пункты карточки — лимиты, которые реально отличаются между тарифами. */
 function buildHighlights(plan) {
-  return buildPlanHighlights(plan, { includeAi: true });
+  return buildPlanHighlights(plan);
 }
 
 function compareCell(plan, row) {
@@ -264,11 +281,6 @@ function compareCell(plan, row) {
     case "storage": {
       const label = formatStorageLabel(l.storage_mb);
       return label || "—";
-    }
-    case "ai_monthly": {
-      const v = l.ai_requests;
-      if (v == null) return "—";
-      return `${v}/мес`;
     }
     case "notifications":
       if (f.advanced_notifications) return "Расширенные";
@@ -561,6 +573,7 @@ function PlanCard({
   onToggleFeatures,
   paymentsEnabled = true,
   currentSlug = null,
+  currentPlan = null,
   expiresAt = null,
   onOfferDetails,
 }) {
@@ -573,8 +586,8 @@ function PlanCard({
   const offer = activeOffer(plan, period);
   const offerLive = Boolean(offer?.can_redeem);
   const buttonLabel = offerLive
-    ? offer.button_text || ctaLabel(plan, isCurrent, { expiresAt, currentSlug, period })
-    : ctaLabel(plan, isCurrent, { expiresAt, currentSlug, period });
+    ? offer.button_text || ctaLabel(plan, isCurrent, { expiresAt, currentSlug, currentPlan, period })
+    : ctaLabel(plan, isCurrent, { expiresAt, currentSlug, currentPlan, period });
 
   const basePrice = period === "year" && priceYear > 0 ? priceYear : priceMonth;
   const referralFirstPrice =
@@ -773,7 +786,7 @@ function PlanCard({
 
 function CompareSection({ plans, open, onOpenChange }) {
   const [openKey, setOpenKey] = useState(null);
-  const mainPlans = plans.filter((p) => MAIN_SLUGS.includes(p.slug));
+  const mainPlans = plans;
 
   if (!mainPlans.length) return null;
 
@@ -1125,7 +1138,7 @@ export default function CabinetUpgradePage() {
     const qp = searchParams.get("period");
     if (qp === "year" || qp === "month") setPeriod(qp);
     const planQp = searchParams.get("plan");
-    if (planQp && MAIN_SLUGS.includes(planQp)) setSelectedSlug(planQp);
+    if (planQp) setSelectedSlug(planQp);
   }, [searchParams]);
 
   useEffect(() => {
@@ -1263,10 +1276,7 @@ export default function CabinetUpgradePage() {
   }, [searchParams, navigate]);
 
   const plans = plansData?.plans || [];
-  const mainPlans = useMemo(
-    () => MAIN_SLUGS.map((slug) => plans.find((p) => p.slug === slug)).filter(Boolean),
-    [plans],
-  );
+  const mainPlans = useMemo(() => listCheckoutPlans(plans), [plans]);
 
   useEffect(() => {
     if (!mainPlans.length) return;
@@ -1830,6 +1840,7 @@ export default function CabinetUpgradePage() {
                 onToggleFeatures={() => setCompareOpen((v) => !v)}
                 paymentsEnabled={paymentsEnabled}
                 currentSlug={currentSlug}
+                currentPlan={currentPlan}
                 expiresAt={subscription?.expires_at || subscription?.promo_ends_at}
                 onOfferDetails={setOfferModal}
               />
