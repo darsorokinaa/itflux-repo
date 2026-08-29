@@ -15,7 +15,7 @@ const {
   classifyEntryFailure,
 } = require("./entry-diag");
 
-const PREJOIN_TIMEOUT_MS = 45_000;
+const { TIMEOUTS } = require("./timeouts");
 
 async function freshCameraButton(browser) {
   return browser.$(xpathButton(SELECTORS.cameraWithout));
@@ -25,7 +25,7 @@ async function waitForPrejoinOrLive(browser, timeline) {
   const started = Date.now();
   let staleElementCount = 0;
   let lastSnap = null;
-  while (Date.now() - started < PREJOIN_TIMEOUT_MS) {
+  while (Date.now() - started < TIMEOUTS.PREJOIN) {
     const snap = await captureEntrySnapshot(browser);
     lastSnap = snap;
     applySnapshotToTimeline(timeline, snap);
@@ -203,5 +203,5 @@ async function runRoomEntryAttempt(browser, secrets, { platform = "ios" } = {}) 
 module.exports = {
   runRoomEntryAttempt,
   waitForPrejoinOrLive,
-  PREJOIN_TIMEOUT_MS,
+  PREJOIN_TIMEOUT_MS: TIMEOUTS.PREJOIN,
 };

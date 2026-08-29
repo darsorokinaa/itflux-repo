@@ -25,7 +25,9 @@ const {
 } = require("../helpers/board");
 const { parseBoardTestEnv } = require("../helpers/catalog");
 const { isSessionGone } = require("../helpers/classify");
-const { runSmokeBoardSession, runStressBoardSession, runQuickBoardSession, performMeasuredStroke, runCoreTabRestore } = require("../helpers/board-session");
+const { TIMEOUTS } = require("../helpers/timeouts");
+const { assertLessonRoomTopLevelOrigin } = require("../../helpers/lessonRoomOrigin");
+const { runSmokeBoardSession, runStressBoardSession, runQuickBoardSession, runReliabilityBoardSession, runTabCycleSession, performMeasuredStroke, runCoreTabRestore } = require("../helpers/board-session");
 
 async function runRoomFlow(browser, secrets, options = {}) {
   const platform = String(options.platform || "ios").toLowerCase();
@@ -131,27 +133,35 @@ async function runRoomFlow(browser, secrets, options = {}) {
 
   await step("PREJOIN", async () => {
     await openLessonRoom(browser, secrets.lessonRoomUrl);
+    const originInfo = assertLessonRoomTopLevelOrigin(await browser.getUrl());
     await screenshot(browser, "02-room-prejoin");
     const camera = await clickWithoutCamera(browser);
     await screenshot(browser, "03-before-native-permission");
-    return camera;
+    return { camera, origin: originInfo.origin, pathname: originInfo.pathname };
   });
 
   await step("NATIVE MIC ALLOW", async () => {
     const result = await allowMicrophonePrompt(browser, {
       platform,
-      timeoutMs: 20_000,
+      timeoutMs: TIMEOUTS.MIC_PERMISSION,
       isAlreadyLive: () => isLiveRoomUi(browser),
     });
     await screenshot(browser, "04-after-native-allow");
     return result;
   });
 
+  if (mode === "permission") {
+    report.RESULT = "passed";
+    report.CORE_FLOW = "PASS";
+    return report;
+  }
+
   await step("JITSI JOIN", async () => {
     try {
-      const join = await waitForSuccessfulJoin(browser, { timeoutMs: 60_000 });
+      const join = await waitForSuccessfulJoin(browser, { timeoutMs: TIMEOUTS.JITSI });
+      const originInfo = assertLessonRoomTopLevelOrigin(await browser.getUrl());
       await screenshot(browser, "05-room-live");
-      return join;
+      return { ...join, origin: originInfo.origin, pathname: originInfo.pathname };
     } catch (err) {
       if (isSessionGone(err)) throw err;
       const liveErr = await joinError(browser);
@@ -167,17 +177,19 @@ async function runRoomFlow(browser, secrets, options = {}) {
     }
   });
 
-  if (mode !== "quick") {
-    await step("CALL", async () => {
-      await switchToCall(browser);
-      await assertClickableRoom(browser);
-      const count = await jitsiIframeCount(browser);
-      assert.ok(count <= 1, `Jitsi iframe count ${count} > 1`);
-      return { jitsiIframes: count };
-    });
-  } else {
-    report.CALL = { status: "skip" };
+  if (mode === "entry") {
+    report.RESULT = "passed";
+    report.CORE_FLOW = "PASS";
+    return report;
   }
+
+  await step("CALL", async () => {
+    await switchToCall(browser);
+    await assertClickableRoom(browser);
+    const count = await jitsiIframeCount(browser);
+    assert.ok(count <= 1, `Jitsi iframe count ${count} > 1`);
+    return { jitsiIframes: count };
+  });
 
   await step("MATERIALS", async () => {
     const switched = await assertMaterialsUsable(browser);
@@ -190,22 +202,18 @@ async function runRoomFlow(browser, secrets, options = {}) {
     };
   });
 
-  if (mode !== "quick") {
-    await step("OVERFLOW", async () => {
-      const viewport = await captureViewport(browser);
-      report.viewport = viewport;
-      if (!viewport.overflowOk) {
-        throw new FlowError(
-          "LAYOUT",
-          `horizontal overflow scrollWidth=${viewport.scrollWidth} clientWidth=${viewport.clientWidth} viewport=${viewport.width}x${viewport.height}`,
-          { productFailure: true },
-        );
-      }
-      return viewport;
-    });
-  } else {
-    report.OVERFLOW = { status: "skip" };
-  }
+  await step("OVERFLOW", async () => {
+    const viewport = await captureViewport(browser);
+    report.viewport = viewport;
+    if (!viewport.overflowOk) {
+      throw new FlowError(
+        "LAYOUT",
+        `horizontal overflow scrollWidth=${viewport.scrollWidth} clientWidth=${viewport.clientWidth} viewport=${viewport.width}x${viewport.height}`,
+        { productFailure: true },
+      );
+    }
+    return viewport;
+  });
 
   await step("BOARD", async () => {
     openedBoard = await openExistingBoard(browser);
@@ -241,25 +249,43 @@ async function runRoomFlow(browser, secrets, options = {}) {
     return { ...size, boardIframes: boardCount };
   });
 
-  if (mode === "quick") {
-    await step("QUICK", async () => {
+  if (mode === "quick" || mode === "full") {
+    await step("DRAW", async () => {
       const quick = await runQuickBoardSession(browser, openedBoard);
       openedBoard = quick.opened;
       report.CORE_FLOW = "PASS";
-      report.ROUND_1 = { status: "ok", detail: { strokes: 3 } };
-      report.ROUND_2 = { status: "ok", detail: { strokes: 3 } };
-      report.ROUND_3 = { status: "ok", detail: { strokes: 3 } };
-      report.CONTROL = { status: "ok", detail: { strokes: 1 } };
+      report.DRAW_1 = { status: "ok", detail: quick.strokeMs && quick.strokeMs[0] };
+      report.DRAW_AFTER_TAB = { status: "ok", detail: quick.strokeMs && quick.strokeMs[1] };
       report.loginMs = report.durations.LOGIN || null;
       report.jitsiJoinMs = report.durations["JITSI JOIN"] || null;
       report.boardOpenMs = report.durations.BOARD || null;
       report.strokeMs = quick.strokeMs;
       report.tabCycleMs = quick.tabCycleMs;
-      report.tabCycles = quick.tabCycles;
-      report.FREEZE_CHECKED = Boolean(quick.freezeChecked);
-      report.FREEZE = quick.freezeChecked ? "none" : "not_checked";
-      console.log(`QUICK timings loginMs=${report.loginMs} jitsiJoinMs=${report.jitsiJoinMs} boardOpenMs=${report.boardOpenMs} tabCycleMs=${report.tabCycleMs} strokeMs=${JSON.stringify(report.strokeMs)}`);
+      report.FREEZE_CHECKED = false;
+      report.FREEZE = "not_checked";
       return quick;
+    });
+  } else if (mode === "reliability") {
+    await step("FREEZE", async () => {
+      const rel = await runReliabilityBoardSession(browser, openedBoard);
+      openedBoard = rel.opened;
+      report.CORE_FLOW = "PASS";
+      report.DRAW = { status: "ok", detail: rel.strokeMs };
+      report.strokeMs = rel.strokeMs;
+      report.tabCycleMs = rel.tabCycleMs;
+      report.FREEZE_CHECKED = true;
+      report.FREEZE = "none";
+      return rel;
+    });
+  } else if (mode === "tabcycle") {
+    await step("TAB_CYCLE", async () => {
+      const tabs = await runTabCycleSession(browser, openedBoard);
+      openedBoard = tabs.opened;
+      report.CORE_FLOW = "PASS";
+      report.DRAW = { status: "ok" };
+      report.FREEZE_CHECKED = true;
+      report.FREEZE = "none";
+      return tabs;
     });
   } else if (mode === "core") {
     const coreDraws = [];
@@ -336,7 +362,11 @@ async function runRoomFlow(browser, secrets, options = {}) {
     report.SMOKE_STARTED = false;
     await step("STRESS", async () => {
       try {
-        const stress = await runStressBoardSession(browser, openedBoard, { testMinutes });
+        const stress = await runStressBoardSession(browser, openedBoard, {
+          testMinutes,
+          stressStrokes: boardEnv.stressStrokes,
+          soak: mode === "soak",
+        });
         openedBoard = stress.opened;
         report.FREEZE_CHECKED = Boolean(stress.freezeChecked);
         report.FREEZE = stress.freezeChecked ? "none" : "not_checked";

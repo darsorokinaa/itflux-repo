@@ -85,12 +85,30 @@ import {
   filterUnauthorizedMutations,
   stampElementOwnership,
 } from "../boards/boardOwnership";
+import { isNewerViewport, sceneCenterFromAppState, viewportAppStatePatch, viewportDriftTooFar, zoomValueOf } from "../boards/boardViewport";
 import {
-  isNewerViewport,
-  viewportAppStatePatch,
-  viewportDriftTooFar,
-  zoomValueOf,
-} from "../boards/boardViewport";
+  FOLLOW_SMOOTH_MS,
+  lerpViewportCenters,
+  shouldSnapFollow,
+} from "../boards/boardFollow";
+import BoardCollabControls, { peersToPresence } from "../boards/BoardCollabControls";
+import {
+  bindBoardVisualViewport,
+  isBoardCompactShell,
+  lockBoardPageScroll,
+} from "../boards/boardMobileShell";
+import {
+  BOARD_IMAGE_INSERT_ERROR,
+  binaryFileDataOf,
+  createBoardImageElement,
+  imageElementNeedsViewportFix,
+  isBoardImageFileInput,
+  logBoardImage,
+  patchedImageInViewport,
+  placementForPreparedImage,
+  prepareBoardImageFile,
+  readCanvasAppState,
+} from "../boards/boardImageInsert";
 import {
   createBoardLoadMetrics,
   logBoardMetrics,
@@ -99,10 +117,15 @@ import {
   type BoardLoadPhase,
 } from "../boards/boardLifecycle";
 import { compactBoardScene } from "../boards/boardSceneCompact";
+import ConnectionRecoveryBanner from "../components/ConnectionRecoveryBanner";
 import {
-  bindBoardVisualViewport,
-  lockBoardPageScroll,
-} from "../boards/boardMobileShell";
+  RESUME_TIMING,
+  classifyResumeUi,
+  isResumeMessage,
+  reloadSameOriginRoom,
+} from "../pwa/pwaResumeLifecycle";
+import { reportClientEvent } from "../../utils/clientTelemetry";
+import { isStandaloneDisplay } from "../pwa/pwaHelpers";
 import "../styles/boards.css";
 
 const TEACHER_CURSOR = { background: "#2563eb", stroke: "#1d4ed8" };
@@ -285,34 +308,6 @@ function slugDownloadName(title: string, ext: string) {
   return `${boardFileSlug(title)}.${ext}`;
 }
 
-function participantInitials(name: string): string {
-  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "?";
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toLocaleUpperCase("ru-RU");
-  }
-  return `${parts[0][0] || ""}${parts[parts.length - 1][0] || ""}`.toLocaleUpperCase("ru-RU");
-}
-
-const AVATAR_PALETTE = [
-  "#0f766e",
-  "#1d4ed8",
-  "#7c3aed",
-  "#b45309",
-  "#be123c",
-  "#047857",
-  "#0369a1",
-];
-
-function avatarColor(name: string): string {
-  const raw = String(name || "");
-  let hash = 0;
-  for (let i = 0; i < raw.length; i += 1) {
-    hash = (hash * 31 + raw.charCodeAt(i)) >>> 0;
-  }
-  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
-}
-
 export default function CabinetBoardEditorPage() {
   const { boardId = "" } = useParams();
   const navigate = useNavigate();
@@ -338,6 +333,9 @@ export default function CabinetBoardEditorPage() {
   const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadPhase, setLoadPhase] = useState<BoardLoadPhase>("initializing");
+  const loadPhaseRef = useRef<BoardLoadPhase>("initializing");
+  loadPhaseRef.current = loadPhase;
+  const [recoveryElapsedMs, setRecoveryElapsedMs] = useState(0);
   const [loadError, setLoadError] = useState("");
   const [loadErrorCode, setLoadErrorCode] = useState("");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
@@ -365,7 +363,7 @@ export default function CabinetBoardEditorPage() {
   const [hasSelection, setHasSelection] = useState(false);
   const [collabPeers, setCollabPeers] = useState<CollabPeer[]>([]);
   const collabPeersRef = useRef<CollabPeer[]>([]);
-  const [collabStatus, setCollabStatus] = useState<"off" | "connecting" | "open" | "closed" | "error">("off");
+  const [collabStatus, setCollabStatus] = useState<"off" | "connecting" | "open" | "closed" | "error" | "failed">("off");
   const editorRootRef = useRef<HTMLDivElement | null>(null);
   const paperOverlayRef = useRef<HTMLDivElement | null>(null);
   const gridStyleRef = useRef<BoardGridStyle>("none");
@@ -407,14 +405,27 @@ export default function CabinetBoardEditorPage() {
   const saverRef = useRef<{ schedule: () => void; flush: () => Promise<void>; cancel: () => void } | null>(null);
   const collabRef = useRef<ReturnType<typeof createBoardCollabSession> | null>(null);
   const remoteCursorsRef = useRef(new Map<string, RemoteCursor>());
-  const lastTeacherViewportRef = useRef<TeacherViewport | null>(null);
-  const followingTeacherRef = useRef(false);
+  const peerViewportsRef = useRef(new Map<string, TeacherViewport>());
+  const followTargetRef = useRef<{ clientId: string; name: string } | null>(null);
   const applyingViewportRef = useRef(false);
+  const followAnimRef = useRef<number | null>(null);
+  const lastAppliedFollowRef = useRef<TeacherViewport | null>(null);
+  const homeViewportRef = useRef<{
+    scrollX: number;
+    scrollY: number;
+    zoom: number;
+    centerX: number;
+    centerY: number;
+  } | null>(null);
+  const applyPeerViewportRef = useRef<(vp: TeacherViewport, opts?: { notice?: string; follow?: boolean }) => void>(() => {});
   const remoteApplyRafRef = useRef<number | null>(null);
   const pendingRemoteOpsFrameRef = useRef<Array<{ ops: BoardSceneOpsPayload; meta: { version?: number } }>>([]);
   const pendingRemoteSceneFrameRef = useRef<{ scene: CollabScene; meta: { fromSaved?: boolean; version?: number; cleared?: boolean; lite?: boolean } } | null>(null);
   const cursorApplyRafRef = useRef<number | null>(null);
-  const [followingTeacher, setFollowingTeacher] = useState(false);
+  const [followTarget, setFollowTarget] = useState<{ clientId: string; name: string } | null>(null);
+  const [compactShell, setCompactShell] = useState(() => (
+    typeof window !== "undefined" ? isBoardCompactShell() : false
+  ));
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
   const [cssImmersive, setCssImmersive] = useState(false);
   const boardNamesRef = useRef({ owner: "", student: "" });
@@ -427,6 +438,15 @@ export default function CabinetBoardEditorPage() {
   const fileHydratorRef = useRef(createBoardFileHydrator());
   const lastActiveToolRef = useRef("");
   const imageUploadStatusRef = useRef<"idle" | "uploading" | "error">("idle");
+  const insertingImageRef = useRef(false);
+  const repairingImageRef = useRef(false);
+  const repairNewLocalImagesRef = useRef<
+    ((
+      images: Record<string, unknown>[],
+      appState: Record<string, unknown>,
+      files: Record<string, unknown>,
+    ) => void) | null
+  >(null);
   const [imageUploadStatus, setImageUploadStatus] = useState<"idle" | "uploading" | "error">("idle");
   gridStyleRef.current = gridStyle;
   bgColorRef.current = bgColor;
@@ -444,6 +464,17 @@ export default function CabinetBoardEditorPage() {
   const viewModeEnabled = !canEdit;
   const collaborative = Boolean(board?.collaborative_edit);
   const boardReady = Boolean(board);
+  const selfRole = canManage ? "teacher" : (board?.viewer_role || "student");
+
+  useEffect(() => {
+    const onResize = () => setCompactShell(isBoardCompactShell());
+    window.addEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onResize);
+    };
+  }, []);
 
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showNotice = useCallback((text: string) => {
@@ -847,9 +878,11 @@ export default function CabinetBoardEditorPage() {
     pendingHydrateFilesRef.current = null;
     pendingRemoteOpsFrameRef.current = [];
     pendingRemoteSceneFrameRef.current = null;
-    lastTeacherViewportRef.current = null;
-    followingTeacherRef.current = false;
-    setFollowingTeacher(false);
+    peerViewportsRef.current = new Map();
+    followTargetRef.current = null;
+    setFollowTarget(null);
+    lastAppliedFollowRef.current = null;
+    homeViewportRef.current = null;
     metricsRef.current = createBoardLoadMetrics();
     setLoading(true);
     setLoadPhase("loading_scene");
@@ -1263,7 +1296,7 @@ export default function CabinetBoardEditorPage() {
       setImageUploadStatus("error");
       const error = err as { message?: string };
       boardLog("upload:error", { ids: pendingIds, message: error?.message || "unknown" });
-      showNotice(error?.message || "Не удалось загрузить изображение на доску");
+      showNotice(BOARD_IMAGE_INSERT_ERROR);
       // Не публикуем blob:/data: пирам — только локальный предпросмотр. Элемент не удаляем.
       return scene;
     }
@@ -1312,8 +1345,12 @@ export default function CabinetBoardEditorPage() {
     applyingRemoteRef.current = false;
     applyingCollaboratorsRef.current = false;
     applyingViewportRef.current = false;
-    followingTeacherRef.current = false;
-    setFollowingTeacher(false);
+    followTargetRef.current = null;
+    setFollowTarget(null);
+    if (followAnimRef.current != null) {
+      window.cancelAnimationFrame(followAnimRef.current);
+      followAnimRef.current = null;
+    }
   }, []);
 
   /** Не даём lite/scene_saved затереть pending cleared во время жеста. */
@@ -1386,9 +1423,19 @@ export default function CabinetBoardEditorPage() {
         actorRole: viewerRoleRef.current,
         canManage: canManageRefLocal.current,
       });
+      const incomingNewImages: Record<string, unknown>[] = [];
+      for (const raw of nextElements) {
+        const el = raw && typeof raw === "object" ? raw as { id?: string; type?: string; isDeleted?: boolean } : null;
+        if (el?.type === "image" && el.id && !el.isDeleted && !knownElementIdsRef.current.has(el.id)) {
+          incomingNewImages.push(raw as Record<string, unknown>);
+        }
+      }
       for (const raw of nextElements) {
         const id = raw && typeof raw === "object" ? (raw as { id?: string }).id : null;
         if (id) knownElementIdsRef.current.add(id);
+      }
+      if (incomingNewImages.length && !repairingImageRef.current && !insertingImageRef.current) {
+        void repairNewLocalImagesRef.current?.(incomingNewImages, appState, files);
       }
 
       // Excalidraw onChange отдаёт BinaryFileData без itfluxStableURL — возвращаем из registry.
@@ -1478,15 +1525,19 @@ export default function CabinetBoardEditorPage() {
     };
 
     const publishOwnViewportNow = (immediate = false) => {
-      if (!canManage || !apiRef.current) return;
+      if (!apiRef.current || followTargetRef.current || applyingViewportRef.current) return;
       const app = apiRef.current.getAppState?.() || {};
+      const center = sceneCenterFromAppState(app);
+      if (!(center.width > 8 && center.height > 8)) return;
       collabRef.current?.publishViewport(
         {
-          scrollX: Number(app.scrollX) || 0,
-          scrollY: Number(app.scrollY) || 0,
-          zoom: zoomValueOf(app.zoom),
-          width: Number(app.width) || undefined,
-          height: Number(app.height) || undefined,
+          scrollX: center.scrollX,
+          scrollY: center.scrollY,
+          zoom: center.zoom,
+          centerX: center.centerX,
+          centerY: center.centerY,
+          width: center.width,
+          height: center.height,
         },
         { immediate },
       );
@@ -2214,10 +2265,11 @@ export default function CabinetBoardEditorPage() {
         onStatus: (status) => {
           if (status === "open") {
             metricsRef.current.wsConnectedAt = performance.now();
+            setRecoveryElapsedMs(0);
             setLoadPhase(hostReadyRef.current ? "ready" : "connecting");
-            // Учитель сразу отдаёт viewport — ученик может включить follow без ожидания pan.
+            // Любой участник сразу отдаёт viewport — follow не ждёт первого pan.
+            window.setTimeout(() => publishOwnViewportNow(true), 80);
             if (canManage) {
-              window.setTimeout(() => publishOwnViewportNow(true), 80);
               window.setTimeout(() => publishOwnPaperStyleRef.current(), 100);
             } else {
               collabRef.current?.requestViewport();
@@ -2239,18 +2291,33 @@ export default function CabinetBoardEditorPage() {
             } catch {
               /* ignore */
             }
+          } else if (status === "failed") {
+            metricsRef.current.reconnectCount += 1;
+            setLoadPhase("failed");
           } else if (status === "closed") {
             metricsRef.current.reconnectCount += 1;
             setLoadPhase("reconnecting");
+          } else if (status === "connecting") {
+            const prev = loadPhaseRef.current;
+            if (prev === "ready" || prev === "reconnecting" || prev === "failed") {
+              setLoadPhase("reconnecting");
+            }
           }
           setCollabStatus(status === "connecting" ? "connecting" : status);
         },
         onPeersChange: (peers) => {
           collabPeersRef.current = peers;
           setCollabPeers(peers);
+          publishOwnViewportNow(true);
           if (canManage && peers.length) {
-            publishOwnViewportNow(true);
             publishOwnPaperStyleRef.current();
+          }
+          const target = followTargetRef.current;
+          if (target && !peers.some((peer) => peer.clientId === target.clientId)) {
+            followTargetRef.current = null;
+            setFollowTarget(null);
+            lastAppliedFollowRef.current = null;
+            showNotice("Участник отключился");
           }
         },
         onRemoteOps: (ops, meta) => {
@@ -2326,23 +2393,15 @@ export default function CabinetBoardEditorPage() {
           scheduleCollaboratorsApply();
         },
         onRemoteViewport: (vp) => {
-          if (!isNewerViewport(lastTeacherViewportRef.current, vp)) return;
-          lastTeacherViewportRef.current = vp;
-          if (followingTeacherRef.current) {
-            applyingViewportRef.current = true;
-            apiRef.current?.updateScene?.({
-              appState: viewportAppStatePatch(vp),
-              captureUpdate: CaptureUpdateAction.NEVER,
-            });
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                applyingViewportRef.current = false;
-              });
-            });
+          const prev = peerViewportsRef.current.get(vp.clientId) || null;
+          if (!isNewerViewport(prev, vp)) return;
+          peerViewportsRef.current.set(vp.clientId, vp);
+          if (followTargetRef.current?.clientId === vp.clientId) {
+            applyPeerViewportRef.current(vp, { follow: true });
           }
         },
         onViewportRequest: () => {
-          if (canManage) publishOwnViewportNow(true);
+          publishOwnViewportNow(true);
         },
         onRemotePaperStyle: (paper) => {
           applyRemotePaperStyleRef.current(paper);
@@ -2387,77 +2446,150 @@ export default function CabinetBoardEditorPage() {
     showNotice,
   ]);
 
-  const applyTeacherViewport = useCallback((vp: TeacherViewport, opts: { notice?: boolean } = {}) => {
+  const applyPeerViewport = useCallback((vp: TeacherViewport, opts: { notice?: string; follow?: boolean } = {}) => {
     const api = apiRef.current;
     if (!api) return;
+    if (followAnimRef.current != null) {
+      window.cancelAnimationFrame(followAnimRef.current);
+      followAnimRef.current = null;
+    }
+    const paint = (centerX: number, centerY: number, zoom: number) => {
+      const receiver = api.getAppState?.() || {};
+      api.updateScene?.({
+        appState: viewportAppStatePatch({ ...vp, centerX, centerY, zoom }, receiver),
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+    };
+    applyingViewportRef.current = true;
+    const finishApply = () => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          applyingViewportRef.current = false;
+        });
+      });
+    };
+    const prev = lastAppliedFollowRef.current;
+    if (!opts.follow || !prev || shouldSnapFollow(prev, vp)) {
+      paint(vp.centerX, vp.centerY, vp.zoom);
+      lastAppliedFollowRef.current = vp;
+      finishApply();
+      if (opts.notice) showNotice(opts.notice);
+      return;
+    }
+    const from = prev;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / FOLLOW_SMOOTH_MS);
+      const lerped = lerpViewportCenters(from, vp, t);
+      paint(lerped.centerX, lerped.centerY, lerped.zoom);
+      if (t < 1) {
+        followAnimRef.current = window.requestAnimationFrame(tick);
+        return;
+      }
+      followAnimRef.current = null;
+      lastAppliedFollowRef.current = vp;
+      finishApply();
+    };
+    followAnimRef.current = window.requestAnimationFrame(tick);
+    if (opts.notice) showNotice(opts.notice);
+  }, [showNotice]);
+  applyPeerViewportRef.current = applyPeerViewport;
+
+  const captureHomeViewport = useCallback(() => {
+    const api = apiRef.current;
+    if (!api) return;
+    homeViewportRef.current = sceneCenterFromAppState(api.getAppState?.() || {});
+  }, []);
+
+  const stopFollow = useCallback((reason?: string) => {
+    if (!followTargetRef.current) return;
+    followTargetRef.current = null;
+    setFollowTarget(null);
+    lastAppliedFollowRef.current = null;
+    if (followAnimRef.current != null) {
+      window.cancelAnimationFrame(followAnimRef.current);
+      followAnimRef.current = null;
+    }
+    if (reason) showNotice(reason);
+  }, [showNotice]);
+
+  const goToPeer = useCallback((clientId: string | null, name: string, notice?: string) => {
+    if (!clientId) {
+      showNotice("Участник ещё не подключился");
+      return;
+    }
+    const cached = peerViewportsRef.current.get(clientId);
+    if (!cached) {
+      collabRef.current?.requestViewport();
+      showNotice("Ожидаем область участника…");
+      return;
+    }
+    applyPeerViewport(cached, { notice: notice || `Перешли к ${name}` });
+  }, [applyPeerViewport, showNotice]);
+
+  const startFollow = useCallback((clientId: string | null, name: string) => {
+    if (!clientId) {
+      showNotice("Участник ещё не подключился");
+      return;
+    }
+    captureHomeViewport();
+    followTargetRef.current = { clientId, name };
+    setFollowTarget({ clientId, name });
+    const cached = peerViewportsRef.current.get(clientId);
+    if (cached) {
+      applyPeerViewport(cached, { follow: true });
+    } else {
+      showNotice("Ожидаем положение участника…");
+    }
+    collabRef.current?.requestViewport();
+  }, [applyPeerViewport, captureHomeViewport, showNotice]);
+
+  const returnToMyArea = useCallback(() => {
+    stopFollow();
+    const home = homeViewportRef.current;
+    const api = apiRef.current;
+    if (!home || !api) return;
     applyingViewportRef.current = true;
     api.updateScene?.({
-      appState: viewportAppStatePatch(vp),
+      appState: {
+        scrollX: home.scrollX,
+        scrollY: home.scrollY,
+        zoom: { value: home.zoom },
+      },
       captureUpdate: CaptureUpdateAction.NEVER,
     });
-    // Снимаем флаг после кадра — onScrollChange от нашего apply не должен гасить follow.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         applyingViewportRef.current = false;
       });
     });
-    if (opts.notice) {
-      showNotice("Перешли к области учителя");
-    }
-  }, [showNotice]);
-
-  const stopFollowTeacher = useCallback((reason?: string) => {
-    if (!followingTeacherRef.current) return;
-    followingTeacherRef.current = false;
-    setFollowingTeacher(false);
-    if (reason) showNotice(reason);
-  }, [showNotice]);
-
-  const startFollowTeacher = useCallback(() => {
-    followingTeacherRef.current = true;
-    setFollowingTeacher(true);
-    const cached = lastTeacherViewportRef.current;
-    if (cached) {
-      applyTeacherViewport(cached);
-    } else {
-      showNotice("Ожидаем положение учителя…");
-    }
-    collabRef.current?.requestViewport();
-  }, [applyTeacherViewport, showNotice]);
-
-  /** Вернуться к последнему viewport учителя (без постоянного слежения). */
-  const returnToTeacherViewport = useCallback(() => {
-    const cached = lastTeacherViewportRef.current;
-    if (!cached) {
-      collabRef.current?.requestViewport();
-      showNotice("Курсор/область учителя пока не известны");
-      return;
-    }
-    applyTeacherViewport(cached, { notice: true });
-  }, [applyTeacherViewport, showNotice]);
+  }, [stopFollow]);
 
   const handleScrollChange = useCallback((scrollX: number, scrollY: number, zoom: number) => {
-    // Учитель публикует viewport отдельно от курсора и сцены.
-    if (canManageRefLocal.current) {
-      const api = apiRef.current;
-      const app = api?.getAppState?.() || {};
-      collabRef.current?.publishViewport({
-        scrollX,
-        scrollY,
-        zoom,
-        width: Number(app.width) || undefined,
-        height: Number(app.height) || undefined,
-      });
+    if (applyingViewportRef.current) return;
+    const api = apiRef.current;
+    const app = api?.getAppState?.() || {};
+    const local = { scrollX, scrollY, zoom, width: app.width, height: app.height };
+    const targetId = followTargetRef.current?.clientId;
+    if (targetId) {
+      const target = peerViewportsRef.current.get(targetId);
+      if (target && viewportDriftTooFar(local, target)) {
+        stopFollow("Слежение отключено — вы переместили доску");
+      }
       return;
     }
-    // Ученик в follow: ручной pan/zoom отключает слежение.
-    if (!followingTeacherRef.current || applyingViewportRef.current) return;
-    const target = lastTeacherViewportRef.current;
-    if (!target) return;
-    if (viewportDriftTooFar({ scrollX, scrollY, zoom }, target)) {
-      stopFollowTeacher("Слежение отключено — вы переместили доску");
-    }
-  }, [stopFollowTeacher]);
+    const center = sceneCenterFromAppState(local);
+    if (!(center.width > 8 && center.height > 8)) return;
+    collabRef.current?.publishViewport({
+      scrollX: center.scrollX,
+      scrollY: center.scrollY,
+      zoom: center.zoom,
+      centerX: center.centerX,
+      centerY: center.centerY,
+      width: center.width,
+      height: center.height,
+    });
+  }, [stopFollow]);
 
   const handlePointerSceneMove = useCallback((x: number, y: number, tool: string) => {
     if (!collaborative && !canEdit) return;
@@ -2506,6 +2638,216 @@ export default function CabinetBoardEditorPage() {
     if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
     return `file-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }, []);
+
+  const boardHostEl = useCallback((): Element | null => {
+    return editorRootRef.current?.querySelector(".cb-board-excalidraw-host")
+      || editorRootRef.current;
+  }, []);
+
+  const insertPreparedImage = useCallback(async (
+    prepared: {
+      fileName: string;
+      fileType: string;
+      fileSize: number;
+      mimeType: string;
+      dataURL: string;
+      naturalWidth: number;
+      naturalHeight: number;
+      generatedFileId: string;
+    },
+  ): Promise<boolean> => {
+    const api = apiRef.current;
+    if (!api) return false;
+    const host = boardHostEl();
+    const appState = await readCanvasAppState(api, host);
+    const place = placementForPreparedImage(prepared, appState, host);
+    if (!(place.width > 0) || !(place.height > 0) || !Number.isFinite(place.x) || !Number.isFinite(place.y)) {
+      logBoardImage({
+        fileName: prepared.fileName,
+        fileType: prepared.fileType,
+        fileSize: prepared.fileSize,
+        naturalWidth: prepared.naturalWidth,
+        naturalHeight: prepared.naturalHeight,
+        generatedFileId: prepared.generatedFileId,
+        x: place.x,
+        y: place.y,
+        width: place.width,
+        height: place.height,
+        scrollX: place.scrollX,
+        scrollY: place.scrollY,
+        zoom: place.zoom,
+        error: "invalid_placement",
+      });
+      return false;
+    }
+    const element = createBoardImageElement({
+      fileId: prepared.generatedFileId,
+      x: place.x,
+      y: place.y,
+      width: place.width,
+      height: place.height,
+    });
+    logBoardImage({
+      fileName: prepared.fileName,
+      fileType: prepared.fileType,
+      fileSize: prepared.fileSize,
+      naturalWidth: prepared.naturalWidth,
+      naturalHeight: prepared.naturalHeight,
+      generatedFileId: prepared.generatedFileId,
+      elementId: element.id,
+      x: place.x,
+      y: place.y,
+      width: place.width,
+      height: place.height,
+      scrollX: place.scrollX,
+      scrollY: place.scrollY,
+      zoom: place.zoom,
+    });
+    api.addFiles?.([binaryFileDataOf(prepared)]);
+    const current = getLocalElementsForMerge(api, latestSceneRef.current?.elements);
+    api.updateScene?.({
+      elements: [...current, element],
+      appState: {
+        selectedElementIds: { [String(element.id)]: true },
+      },
+    });
+    return true;
+  }, [boardHostEl]);
+
+  const insertImagesFromFileList = useCallback(async (list: File[]) => {
+    if (!canEditRef.current || viewModeEnabled || !list.length) return;
+    if (insertingImageRef.current) return;
+    insertingImageRef.current = true;
+    try {
+      const cloned: File[] = [];
+      try {
+        for (const file of list) {
+          const buf = await file.arrayBuffer();
+          cloned.push(new File([buf], file.name || "image", {
+            type: file.type,
+            lastModified: file.lastModified,
+          }));
+        }
+      } catch {
+        showNotice(BOARD_IMAGE_INSERT_ERROR);
+        return;
+      }
+      for (const file of cloned) {
+        const result = await prepareBoardImageFile(file, { generateId: generateIdForFile });
+        if (!result.ok) {
+          logBoardImage({
+            fileName: file.name,
+            fileType: file.type,
+            fileSize: file.size,
+            error: result.reason,
+          });
+          showNotice(result.message);
+          continue;
+        }
+        const ok = await insertPreparedImage(result.prepared);
+        if (!ok) {
+          URL.revokeObjectURL(result.prepared.dataURL);
+          showNotice(BOARD_IMAGE_INSERT_ERROR);
+        }
+      }
+    } catch {
+      showNotice(BOARD_IMAGE_INSERT_ERROR);
+    } finally {
+      insertingImageRef.current = false;
+    }
+  }, [generateIdForFile, insertPreparedImage, showNotice, viewModeEnabled]);
+
+  const repairNewLocalImages = useCallback(async (
+    images: Record<string, unknown>[],
+    appState: Record<string, unknown>,
+    files: Record<string, unknown>,
+  ) => {
+    if (!images.length || repairingImageRef.current) return;
+    const api = apiRef.current;
+    if (!api) return;
+    const host = boardHostEl();
+    const fresh = await readCanvasAppState(api, host);
+    const state = Number(fresh.width) > 8 ? fresh : appState;
+    const current = getLocalElementsForMerge(api, latestSceneRef.current?.elements);
+    const ids = new Set(images.map((img) => String(img.id || "")));
+    let changed = false;
+    const apiFiles = (api.getFiles?.() || {}) as Record<string, unknown>;
+    const next = current.map((raw) => {
+      if (!raw || typeof raw !== "object") return raw;
+      const el = raw as Record<string, unknown>;
+      if (!ids.has(String(el.id || ""))) return raw;
+      const fileId = String(el.fileId || "");
+      const inFiles = Boolean(fileId && ((files && files[fileId]) || apiFiles[fileId]));
+      logBoardImage({
+        generatedFileId: fileId,
+        elementId: el.id,
+        x: el.x,
+        y: el.y,
+        width: el.width,
+        height: el.height,
+        scrollX: state.scrollX,
+        scrollY: state.scrollY,
+        zoom: zoomValueOf(state.zoom),
+        inFiles,
+        repairCheck: true,
+      });
+      if (!imageElementNeedsViewportFix(el, state, host)) return raw;
+      const nw = Number(el.width) > 0 ? Number(el.width) : Number(images.find((i) => i.id === el.id)?.width) || 0;
+      const nh = Number(el.height) > 0 ? Number(el.height) : Number(images.find((i) => i.id === el.id)?.height) || 0;
+      if (!(nw > 0) || !(nh > 0) || !inFiles) {
+        showNotice(BOARD_IMAGE_INSERT_ERROR);
+        return raw;
+      }
+      changed = true;
+      const patched = patchedImageInViewport(el, nw, nh, state, host);
+      logBoardImage({
+        generatedFileId: fileId,
+        elementId: patched.id,
+        x: patched.x,
+        y: patched.y,
+        width: patched.width,
+        height: patched.height,
+        scrollX: state.scrollX,
+        scrollY: state.scrollY,
+        zoom: zoomValueOf(state.zoom),
+        repair: true,
+      });
+      return patched;
+    });
+    if (!changed) return;
+    repairingImageRef.current = true;
+    try {
+      api.updateScene?.({ elements: next });
+    } finally {
+      requestAnimationFrame(() => {
+        repairingImageRef.current = false;
+      });
+    }
+  }, [boardHostEl, showNotice]);
+  repairNewLocalImagesRef.current = repairNewLocalImages;
+
+  useEffect(() => {
+    if (viewModeEnabled) return undefined;
+    const onFileChange = (event: Event) => {
+      const input = event.target;
+      if (!isBoardImageFileInput(input)) return;
+      const list = input.files ? Array.from(input.files) : [];
+      if (!list.length) return;
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      if (typeof event.preventDefault === "function") event.preventDefault();
+      void insertImagesFromFileList(list).finally(() => {
+        try {
+          input.value = "";
+        } catch {
+          /* ignore */
+        }
+      });
+    };
+    document.addEventListener("change", onFileChange, true);
+    return () => document.removeEventListener("change", onFileChange, true);
+  }, [insertImagesFromFileList, viewModeEnabled]);
+
   const handleApiReady = useCallback((api: ExcalidrawAPI) => {
     apiRef.current = api;
     setExcalidrawReady(true);
@@ -2555,6 +2897,69 @@ export default function CabinetBoardEditorPage() {
 
   const retryBoardLoad = useCallback(() => {
     setReloadToken((n) => n + 1);
+  }, []);
+
+  const recoveryUi = useMemo(() => {
+    if (loadPhase === "failed") {
+      return classifyResumeUi("FAILED", recoveryElapsedMs, navigator.onLine !== false);
+    }
+    if (loadPhase === "reconnecting") {
+      return classifyResumeUi("RECONNECTING", recoveryElapsedMs, navigator.onLine !== false);
+    }
+    return classifyResumeUi("ACTIVE", 0, true);
+  }, [loadPhase, recoveryElapsedMs]);
+
+  const onManualBoardReconnect = useCallback(() => {
+    reportClientEvent("MANUAL_RECONNECT_CLICK", {
+      meetingId: String(boardId || "").slice(0, 64),
+      stage: "board",
+      pwa: isStandaloneDisplay(),
+    });
+    setRecoveryElapsedMs(0);
+    setLoadPhase("reconnecting");
+    if (recoveryUi.phase === "failed" || !collabRef.current) {
+      retryBoardLoad();
+      return;
+    }
+    collabRef.current.reconnectNow();
+  }, [boardId, recoveryUi.phase, retryBoardLoad]);
+
+  const onManualRoomReload = useCallback(() => {
+    reportClientEvent("MANUAL_RELOAD_CLICK", {
+      meetingId: String(boardId || "").slice(0, 64),
+      stage: "board",
+      pwa: isStandaloneDisplay(),
+    });
+    reloadSameOriginRoom();
+  }, [boardId]);
+
+  useEffect(() => {
+    if (loadPhase !== "reconnecting") {
+      if (loadPhase !== "failed") setRecoveryElapsedMs(0);
+      return undefined;
+    }
+    const started = Date.now();
+    setRecoveryElapsedMs(0);
+    const tick = window.setInterval(() => {
+      setRecoveryElapsedMs(Date.now() - started);
+    }, 500);
+    const fail = window.setTimeout(() => {
+      setLoadPhase((prev) => (prev === "reconnecting" ? "failed" : prev));
+    }, RESUME_TIMING.FAIL_MS);
+    return () => {
+      window.clearInterval(tick);
+      window.clearTimeout(fail);
+    };
+  }, [loadPhase]);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (!isResumeMessage(event.data)) return;
+      collabRef.current?.resumeNow?.();
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
   }, []);
 
   // Превью не снимаем при открытии — exportToBlob на большой доске вешает урок.
@@ -2821,36 +3226,6 @@ export default function CabinetBoardEditorPage() {
     setCssImmersive(true);
   };
 
-  const handleImageUpload = async (
-    files: File[],
-  ): Promise<{ dataURL: string; id: string; mimeType: string } | null> => {
-    const file = files?.[0];
-    if (!file || !boardId) return null;
-    const allowed = ["image/png", "image/jpeg", "image/webp"];
-    if (!allowed.includes(file.type)) {
-      showNotice("Допустимы форматы PNG, JPEG и WebP");
-      return null;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      showNotice("Изображение слишком большое (макс. 5 МБ)");
-      return null;
-    }
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      const uploaded = await uploadInteractiveBoardImage(boardId, form);
-      return {
-        id: uploaded.id,
-        dataURL: uploaded.dataURL || uploaded.url,
-        mimeType: uploaded.mimeType || file.type,
-      };
-    } catch (err: unknown) {
-      const error = err as { message?: string };
-      showNotice(error?.message || "Не удалось загрузить изображение");
-      return null;
-    }
-  };
-
   if (loading || loadPhase === "loading_scene" || loadPhase === "loading_files") {
     return (
       <div className="cb-board-editor" aria-busy="true" ref={editorRootRef}>
@@ -2906,35 +3281,14 @@ export default function CabinetBoardEditorPage() {
     ? Boolean(board.can_export)
     : board.allow_export !== false || canManage;
 
-  const collabParticipants = (() => {
-    if (!collaborative) return [] as Array<{ key: string; name: string; initials: string; color: string; clientId: string | null }>;
-    const selfName =
-      (canManage ? board.owner_name : board.student_name)
-      || (canManage ? "Учитель" : "Ученик");
-    const byKey = new Map<string, { name: string; clientId: string | null }>();
-    byKey.set("self", { name: selfName, clientId: null });
-    if (collabPeers.length > 0) {
-      for (const peer of collabPeers) {
-        const name = peer.displayName || "Участник";
-        if (name === selfName) continue;
-        byKey.set(peer.clientId, { name, clientId: peer.clientId });
-      }
-    } else {
-      const other = canManage ? board.student_name : board.owner_name;
-      if (other && other !== selfName) byKey.set("other", { name: other, clientId: null });
-    }
-    return Array.from(byKey.entries()).map(([key, info]) => ({
-      key,
-      name: info.name,
-      initials: participantInitials(info.name),
-      color: avatarColor(info.name),
-      clientId: info.clientId,
-    }));
-  })();
-
-  const collabTitle = collabParticipants.length
-    ? `На доске: ${collabParticipants.map((p) => p.name).join(", ")}`
-    : "Совместное редактирование";
+  const collabPeople = collaborative
+    ? peersToPresence(collabPeers, {
+      selfName: (canManage ? board.owner_name : board.student_name) || (canManage ? "Учитель" : "Ученик"),
+      selfRole,
+      fallbackOther: canManage ? board.student_name : board.owner_name,
+      ownerName: board.owner_name,
+    })
+    : [];
 
   const editorClassName = [
     "cb-board-editor",
@@ -2994,60 +3348,6 @@ export default function CabinetBoardEditorPage() {
           {statusLabel ? (
             <span className={statusClass} aria-live="polite">{statusLabel}</span>
           ) : null}
-          {collaborative && collabParticipants.length > 0 ? (
-            <div
-              className={[
-                "cb-board-editor__avatars",
-                collabStatus === "open" ? "cb-board-editor__avatars--live" : "",
-              ].filter(Boolean).join(" ")}
-              title={collabTitle}
-              aria-label={collabTitle}
-            >
-              {collabParticipants.map((person) => (
-                <span
-                  key={person.key}
-                  className="cb-board-editor__avatar"
-                  style={{ backgroundColor: person.color }}
-                  title={person.name}
-                >
-                  {person.initials}
-                </span>
-              ))}
-            </div>
-          ) : null}
-          {collaborative && !canManage ? (
-            <div className="cb-board-editor__follow cb-board-editor__desktop-only" role="group" aria-label="Слежение за учителем">
-              {followingTeacher ? (
-                <button
-                  type="button"
-                  className="cb-board-editor__follow-btn cb-board-editor__follow-btn--active"
-                  onClick={() => stopFollowTeacher("Слежение выключено")}
-                  title="Слежение включено — нажмите, чтобы выключить"
-                >
-                  Слежение
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="cb-board-editor__follow-btn"
-                  onClick={startFollowTeacher}
-                  title="Следовать за областью учителя"
-                >
-                  Следить
-                </button>
-              )}
-              {!followingTeacher ? (
-                <button
-                  type="button"
-                  className="cb-board-editor__follow-btn cb-board-editor__follow-btn--ghost"
-                  onClick={returnToTeacherViewport}
-                  title="Один раз перейти к области учителя"
-                >
-                  К учителю
-                </button>
-              ) : null}
-            </div>
-          ) : null}
           {saveStatus === "error" ? (
             <button type="button" className="cb-board-editor__btn" onClick={handleRetrySave}>
               Повторить
@@ -3101,24 +3401,6 @@ export default function CabinetBoardEditorPage() {
             </button>
             {moreOpen ? (
               <div className="cb-board-editor__menu-panel" role="menu">
-                {collaborative && !canManage ? (
-                  <div className="cb-board-editor__mobile-only">
-                    {followingTeacher ? (
-                      <button type="button" onClick={() => { setMoreOpen(false); stopFollowTeacher("Слежение выключено"); }}>
-                        Выключить слежение
-                      </button>
-                    ) : (
-                      <button type="button" onClick={() => { setMoreOpen(false); startFollowTeacher(); }}>
-                        Следить за учителем
-                      </button>
-                    )}
-                    {!followingTeacher ? (
-                      <button type="button" onClick={() => { setMoreOpen(false); returnToTeacherViewport(); }}>
-                        К области учителя
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
                 {allowExport ? (
                   <div className="cb-board-editor__mobile-only">
                     <button type="button" onClick={() => { setMoreOpen(false); void handleExportPng(); }}>Скачать PNG</button>
@@ -3267,6 +3549,20 @@ export default function CabinetBoardEditorPage() {
           ) : null}
         </div>
 
+        {collaborative && collabPeople.length > 0 ? (
+          <BoardCollabControls
+            people={collabPeople}
+            selfRole={selfRole}
+            followingName={followTarget?.name || ""}
+            followingClientId={followTarget?.clientId || null}
+            compact={compactShell}
+            onGoTo={(person) => goToPeer(person.clientId, person.name)}
+            onFollow={(person) => startFollow(person.clientId, person.name)}
+            onStopFollow={() => stopFollow("Слежение выключено")}
+            onMyArea={returnToMyArea}
+          />
+        ) : null}
+
         <BoardExcalidrawCanvas
           key={`${boardId}:${reloadToken}`}
           initialElements={initialData.elements}
@@ -3284,9 +3580,15 @@ export default function CabinetBoardEditorPage() {
         />
       </div>
 
-      {loadPhase === "reconnecting" ? (
-        <div className="cb-soon-toast" role="status">Восстанавливаем соединение…</div>
-      ) : null}
+      <ConnectionRecoveryBanner
+        phase={recoveryUi.phase}
+        title={recoveryUi.title}
+        showReconnect={recoveryUi.showReconnect}
+        showReload={recoveryUi.showReload}
+        onReconnect={onManualBoardReconnect}
+        onReload={onManualRoomReload}
+        testId="board-connection-recovery"
+      />
       {missingImageCount > 0 && hostReady ? (
         <div className="cb-soon-toast" role="status">
           Часть изображений недоступна ({missingImageCount}).
@@ -3300,20 +3602,16 @@ export default function CabinetBoardEditorPage() {
         <div className="cb-soon-toast" role="status">Загрузка изображения…</div>
       ) : null}
       {imageUploadStatus === "error" ? (
-        <div className="cb-soon-toast" role="status">Ошибка загрузки изображения. Повторите вставку.</div>
+        <div className="cb-soon-toast" role="status">{BOARD_IMAGE_INSERT_ERROR}</div>
       ) : null}
 
-      {/* Скрытый input для программной загрузки — Excalidraw имеет свой UI; серверная загрузка через API при необходимости */}
+      {/* Скрытый input: e2e/setInputFiles и наш capture-listener на document. */}
       <input
         type="file"
-        accept="image/png,image/jpeg,image/webp"
+        accept="image/png,image/jpeg,image/jpg,image/webp,image/heic,image/heif,.png,.jpg,.jpeg,.webp,.heic,.heif"
+        data-testid="board-image-input"
         style={{ display: "none" }}
         aria-hidden="true"
-        onChange={async (e) => {
-          const list = e.target.files ? Array.from(e.target.files) : [];
-          await handleImageUpload(list);
-          e.target.value = "";
-        }}
       />
 
       {accessOpen ? (

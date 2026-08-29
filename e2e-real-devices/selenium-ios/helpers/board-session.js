@@ -1,3 +1,4 @@
+const { TIMEOUTS } = require("./timeouts");
 const { writeJson } = require("./artifacts");
 const { waitFor, xpathButton, SELECTORS, displayed, FlowError } = require("./dom");
 const { switchToCall, clickMaterialsTab, jitsiIframeCount } = require("./room");
@@ -44,7 +45,7 @@ async function switchToMaterialsLight(browser) {
     const aside = await browser.$(SELECTORS.materialsPanel);
     return displayed(aside);
   }, {
-    timeoutMs: 20_000,
+    timeoutMs: TIMEOUTS.MATERIALS,
     message: "Materials UI did not appear after tab click",
   });
 }
@@ -187,7 +188,7 @@ async function performMeasuredStroke(browser, opened, { index = 1, variant = "no
   }
 }
 
-async function runMeasuredStrokeSeries(browser, opened, count, variant, successCount, { logPrefix = "SMOKE" } = {}) {
+async function runMeasuredStrokeSeries(browser, opened, count, variant, successCount, { logPrefix = "SMOKE", healthEvery = 1 } = {}) {
   const records = [];
   for (let i = 0; i < count; i += 1) {
     const n = i + 1;
@@ -197,8 +198,10 @@ async function runMeasuredStrokeSeries(browser, opened, count, variant, successC
         variant,
         successCount: successCount + i,
       });
-      const health = await captureStrokeHealth(browser);
-      assertStrokeHealth(health, { successCount: successCount + n });
+      if (healthEvery > 0 && n % healthEvery === 0) {
+        const health = await captureStrokeHealth(browser);
+        assertStrokeHealth(health, { successCount: successCount + n });
+      }
       records.push(record);
       console.log(`${logPrefix} stroke ${n}/${count} PASS ${record.durationMs}ms`);
     } catch (err) {
@@ -249,7 +252,7 @@ async function cycleCallMaterialsBoard(browser, opened, { cycleIndex, successCou
   try {
     reopened = await withActionTimeout(
       () => openExistingBoard(browser, { quiet: true, artifactPrefix: `cycle-${cycleIndex}` }),
-      { timeoutMs: 30_000, label: "Materials → Board", successCount },
+      { timeoutMs: TIMEOUTS.BOARD, label: "Materials → Board", successCount },
     );
   } catch (err) {
     rethrowAsFreezeIfProven(err, { successCount, context: "board did not restore after Call/Materials" });
@@ -335,7 +338,10 @@ async function idleKeepalive(browser, ms) {
   }
 }
 
-async function runStressBoardSession(browser, opened, { testMinutes = 60 } = {}) {
+async function runStressBoardSession(browser, opened, { testMinutes = 60, stressStrokes = 30, soak = false } = {}) {
+  if (!soak) {
+    return runDrawStressSession(browser, opened, { strokes: stressStrokes });
+  }
   const sessionStart = Date.now();
   const endAt = sessionStart + testMinutes * 60 * 1000;
   const marks = checkpointMinutesFor(testMinutes);
@@ -452,89 +458,159 @@ async function assertIframeCounts(browser, { successCount, context }) {
 
 async function runQuickBoardSession(browser, opened) {
   let current = opened;
-  let successCount = 0;
-  const strokeMs = [];
-  const tabCycles = [];
-
-  async function roundStrokes(label, count, startIndex) {
-    const series = await runMeasuredStrokeSeries(browser, current, count, "normal", successCount, {
-      logPrefix: label,
-    });
-    successCount += series.records.length;
-    for (const record of series.records) strokeMs.push(record.durationMs);
-    const canvas = await waitForBoardReady(browser, current);
-    if (!canvas || !canvas.displayed || Number(canvas.canvasW) < 1 || Number(canvas.canvasH) < 1) {
-      throw new FlowError("QUICK", `${label}: canvas not usable ${JSON.stringify(canvas)}`, {
-        productFailure: successCount >= 1,
-        classification: successCount >= 1 ? "PRODUCT BUG" : "TEST BUG",
-        strokeSucceededBefore: successCount >= 1,
-      });
-    }
-    return { series, canvas, startIndex };
-  }
-
-  const round1 = await roundStrokes("QUICK R1", 3, 1);
-
-  const cycle2 = await cycleCallMaterialsBoard(browser, current, {
-    cycleIndex: "quick-2",
-    successCount,
-  });
-  current = cycle2.opened;
-  tabCycles.push(cycle2.switchMs);
-  await waitForBoardReady(browser, current);
-  const round2 = await roundStrokes("QUICK R2", 3, 4);
-
-  await idleKeepalive(browser, 30_000);
-  const idleCounts = await assertIframeCounts(browser, { successCount, context: "30s idle" });
-  await waitForBoardReady(browser, current);
-  const round3 = await roundStrokes("QUICK R3", 3, 7);
-
-  const cycle3 = await cycleCallMaterialsBoard(browser, current, {
-    cycleIndex: "quick-control",
-    successCount,
-  });
-  current = cycle3.opened;
-  tabCycles.push(cycle3.switchMs);
-  const control = await timedControlStroke(browser, current, {
-    successCount,
-    index: 10,
-    logPrefix: "QUICK",
-  });
-  successCount += 1;
-  strokeMs.push(control.durationMs);
-
-  const health = await assertLiveBoard(browser, current, successCount);
-  const finalCounts = await assertIframeCounts(browser, { successCount, context: "final tab cycle" });
-  const summary = {
+  const draw1 = await performMeasuredStroke(browser, current, { index: 1, variant: "normal", successCount: 0 });
+  console.log(`QUICK stroke 1/2 PASS ${draw1.durationMs}ms`);
+  const cycle = await cycleCallMaterialsBoard(browser, current, { cycleIndex: "quick", successCount: 1 });
+  current = cycle.opened;
+  const draw2 = await timedControlStroke(browser, current, { successCount: 1, index: 2, logPrefix: "QUICK" });
+  writeJson("quick-summary.json", {
     mode: "quick",
     completed: true,
-    freezeChecked: true,
-    successCount,
-    strokeMs,
-    tabCycleMs: tabCycles[tabCycles.length - 1] || null,
-    tabCycles,
-    idleCounts,
-    finalCounts,
-    health,
-    firstStrokeMs: strokeMs[0] || null,
-    lastStrokeMs: strokeMs[strokeMs.length - 1] || null,
-    rounds: {
-      round1: round1.series.stats,
-      round2: round2.series.stats,
-      round3: round3.series.stats,
-      controlMs: control.durationMs,
-    },
-  };
-  writeJson("quick-summary.json", summary);
-  writeJson("quick-strokes.json", {
-    strokeMs,
-    tabCycles,
-    round1: round1.series,
-    round2: round2.series,
-    round3: round3.series,
-    control,
+    freezeChecked: false,
+    strokeMs: [draw1.durationMs, draw2.durationMs],
+    tabCycleMs: cycle.switchMs,
   });
-  return { opened: current, ...summary };
+  return {
+    opened: current,
+    mode: "quick",
+    completed: true,
+    freezeChecked: false,
+    strokeMs: [draw1.durationMs, draw2.durationMs],
+    tabCycleMs: cycle.switchMs,
+    firstStrokeMs: draw1.durationMs,
+    lastStrokeMs: draw2.durationMs,
+  };
+}
+
+async function runReliabilityBoardSession(browser, opened) {
+  let current = opened;
+  let successCount = 0;
+  const strokeMs = [];
+
+  async function draw(label, index) {
+    const record = await performMeasuredStroke(browser, current, {
+      index,
+      variant: "normal",
+      successCount,
+    });
+    const health = await captureStrokeHealth(browser);
+    assertStrokeHealth(health, { successCount: successCount + 1 });
+    successCount += 1;
+    strokeMs.push(record.durationMs);
+    console.log(`${label} PASS ${record.durationMs}ms`);
+    return record;
+  }
+
+  await draw("RELIABILITY draw 1", 1);
+  await sleep(TIMEOUTS.RELIABILITY_IDLE);
+  await draw("RELIABILITY draw 2", 2);
+
+  const cycle1 = await cycleCallMaterialsBoard(browser, current, { cycleIndex: "rel-1", successCount });
+  current = cycle1.opened;
+  await draw("RELIABILITY draw 3", 3);
+
+  await leaveBoardFrame(browser);
+  await switchToMaterialsLight(browser);
+  const reopen = await openExistingBoard(browser, { quiet: true, artifactPrefix: "rel-materials-board" });
+  current = reopen;
+  await waitForBoardReady(browser, current);
+  await draw("RELIABILITY draw 4", 4);
+
+  const counts = await assertIframeCounts(browser, { successCount, context: "reliability" });
+  writeJson("reliability-summary.json", {
+    mode: "reliability",
+    completed: true,
+    freezeChecked: true,
+    strokeMs,
+    tabCycles: [cycle1.switchMs],
+    counts,
+  });
+  return {
+    opened: current,
+    mode: "reliability",
+    completed: true,
+    freezeChecked: true,
+    strokeMs,
+    tabCycleMs: cycle1.switchMs,
+  };
+}
+
+async function runTabCycleSession(browser, opened) {
+  let current = opened;
+  let successCount = 0;
+  const draw1 = await performMeasuredStroke(browser, current, { index: 1, variant: "normal", successCount: 0 });
+  successCount = 1;
+  const hops = ["call", "materials", "call", "board", "materials", "board", "call", "board"];
+  for (let i = 0; i < hops.length; i += 1) {
+    const hop = hops[i];
+    await leaveBoardFrame(browser);
+    if (hop === "call") {
+      await switchToCall(browser);
+    } else if (hop === "materials") {
+      await switchToMaterialsLight(browser);
+    } else {
+      current = await openExistingBoard(browser, { quiet: true, artifactPrefix: `tab-${i}` });
+      await waitForBoardReady(browser, current);
+      const canvas = await lookupCanvas(browser).catch(() => null);
+      if (!canvas || !canvas.displayed || canvas.width < 1) {
+        throw new FlowError("TAB_CYCLE", `canvas missing after hop ${i} BOARD`, {
+          productFailure: true,
+          classification: "PRODUCT BUG",
+          strokeSucceededBefore: true,
+        });
+      }
+    }
+  }
+  const draw2 = await timedControlStroke(browser, current, { successCount, index: 2, logPrefix: "TAB" });
+  writeJson("tabcycle-summary.json", {
+    mode: "tabcycle",
+    completed: true,
+    freezeChecked: true,
+    hops,
+    strokeMs: [draw1.durationMs, draw2.durationMs],
+  });
+  return {
+    opened: current,
+    mode: "tabcycle",
+    completed: true,
+    freezeChecked: true,
+    strokeMs: [draw1.durationMs, draw2.durationMs],
+  };
+}
+
+async function runDrawStressSession(browser, opened, { strokes = 30 } = {}) {
+  const count = Math.max(20, Math.min(50, Number(strokes) || 30));
+  let current = opened;
+  const series = await runMeasuredStrokeSeries(browser, current, count, "normal", 1, {
+    logPrefix: "STRESS",
+    healthEvery: 10,
+  });
+  const cycle = await cycleCallMaterialsBoard(browser, current, {
+    cycleIndex: "stress-end",
+    successCount: series.records.length,
+  });
+  current = cycle.opened;
+  const control = await timedControlStroke(browser, current, {
+    successCount: series.records.length,
+    index: count + 1,
+    logPrefix: "STRESS",
+  });
+  writeJson("stress-summary.json", {
+    mode: "stress",
+    completed: true,
+    freezeChecked: true,
+    strokes: series.records.length,
+    strokeMs: series.records.map((row) => row.durationMs),
+    tabCycleMs: cycle.switchMs,
+    controlMs: control.durationMs,
+  });
+  return {
+    opened: current,
+    mode: "stress",
+    completed: true,
+    freezeChecked: true,
+    ...series.stats,
+  };
 }
 
 async function runCoreTabRestore(browser, opened) {
@@ -589,7 +665,10 @@ async function runCoreTabRestore(browser, opened) {
 module.exports = {
   runSmokeBoardSession,
   runStressBoardSession,
+  runDrawStressSession,
   runQuickBoardSession,
+  runReliabilityBoardSession,
+  runTabCycleSession,
   runCoreTabRestore,
   cycleCallMaterialsBoard,
   switchToMaterialsLight,

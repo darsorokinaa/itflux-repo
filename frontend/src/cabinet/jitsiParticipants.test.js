@@ -220,7 +220,24 @@ describe("attachConferencePresence", () => {
     expect(onLeft).not.toHaveBeenCalled();
     api.emit("videoConferenceJoined", { id: "t" });
     api.emit("videoConferenceLeft", {});
-    expect(onLeft).toHaveBeenCalledWith({ id: "t" });
+    expect(onLeft).toHaveBeenCalledWith({ id: "t", source: "videoConferenceLeft" });
+    presence.dispose();
+  });
+
+  it("notifies onHangup only on readyToClose after join", () => {
+    const api = fakeApi({ participants: [{ participantId: "s" }] });
+    const onHangup = vi.fn();
+    const presence = attachConferencePresence(api, {
+      diagnostics: { roomName: "r" },
+      onHangup,
+    });
+    api.emit("readyToClose", {});
+    expect(onHangup).not.toHaveBeenCalled();
+    api.emit("videoConferenceJoined", { id: "s" });
+    api.emit("videoConferenceLeft", {});
+    expect(onHangup).not.toHaveBeenCalled();
+    api.emit("readyToClose", {});
+    expect(onHangup).toHaveBeenCalledWith({ id: "s", source: "readyToClose" });
     presence.dispose();
   });
 });

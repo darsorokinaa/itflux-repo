@@ -15,7 +15,6 @@ import {
   formatLessonTimeRange,
   formatStudentDate,
   formatStudentTime,
-  isInternalMeetingHref,
   isLessonInProgress,
   lessonMeetingHref,
   studentLessonMetaParts,
@@ -28,6 +27,7 @@ import ConnectionCheckButton from "../../connectionCheck/ConnectionCheckButton";
 import { closeConnectionCheck } from "../../connectionCheck/openConnectionCheck";
 import { usePageTitle } from "../../hooks/usePageTitle";
 import { formatDayLabel } from "../studentDisplay";
+import { resolveAuthenticatedMeetingNavigation } from "../../meetingNavigation";
 
 const FILTERS = [
   { id: "upcoming", label: "Предстоящие" },
@@ -81,15 +81,17 @@ function MeetingConnectLink({ href, className, children, onClick }) {
     closeConnectionCheck();
     onClick?.(event);
   };
-  if (isInternalMeetingHref(href)) {
+  const nav = resolveAuthenticatedMeetingNavigation(href);
+  if (nav.kind === "internal") {
     return (
-      <Link to={href} className={className} onClick={handleClick}>
+      <Link to={nav.href} className={className} onClick={handleClick}>
         {children}
       </Link>
     );
   }
+  if (nav.kind !== "external") return null;
   return (
-    <a href={href} className={className} target="_blank" rel="noreferrer" onClick={handleClick}>
+    <a href={nav.href} className={className} target="_blank" rel="noreferrer" onClick={handleClick}>
       {children}
     </a>
   );

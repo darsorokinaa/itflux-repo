@@ -2,6 +2,7 @@
 
 import { THROTTLE } from "./materials/collab/constants";
 import { reportClientEvent } from "../utils/clientTelemetry";
+import { trackRealtimeSocket } from "./pwa/runtimeResources";
 
 export function inferSyncResourceKind(row) {
   if (!row) return null;
@@ -76,7 +77,8 @@ export const MATERIAL_RECONNECT = {
   JITTER: 0.2,
   MAX_ATTEMPT: 8,
   PONG_STALE_MS: 40000,
-  HIDDEN_RESUME_MS: 5000,
+  HIDDEN_RESUME_MS: 2500,
+  PING_ACK_MS: 2500,
 };
 
 function _isSocketLive(ws) {
@@ -108,6 +110,7 @@ export function materialReconnectDelayMs(attempt, random = Math.random) {
  */
 export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
   let socket = null;
+  let untrackSocket = () => {};
   let closed = false;
   let reconnectTimer = null;
   let reconnectAttempt = 0;
@@ -120,6 +123,10 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
   let lastPingAt = 0;
   let lastPongAt = 0;
   let lastHiddenAt = 0;
+  let pingAckTimer = null;
+  let awaitingPingAck = false;
+  let resumeInProgress = false;
+  let resumeUnlockTimer = null;
   let lastCloseCode = null;
   let eventsLastMinute = 0;
   let eventsWindowStart = Date.now();
@@ -182,14 +189,51 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     return Date.now() - lastPongAt > MATERIAL_RECONNECT.PONG_STALE_MS;
   };
 
+  const clearPingAckTimer = () => {
+    if (pingAckTimer != null) {
+      window.clearTimeout(pingAckTimer);
+      pingAckTimer = null;
+    }
+  };
+
+  const unlockResume = () => {
+    resumeInProgress = false;
+    if (resumeUnlockTimer != null) {
+      window.clearTimeout(resumeUnlockTimer);
+      resumeUnlockTimer = null;
+    }
+  };
+
+  const lockResume = () => {
+    if (resumeInProgress) return false;
+    resumeInProgress = true;
+    if (resumeUnlockTimer != null) window.clearTimeout(resumeUnlockTimer);
+    resumeUnlockTimer = window.setTimeout(() => {
+      resumeUnlockTimer = null;
+      resumeInProgress = false;
+    }, 4000);
+    return true;
+  };
+
   const forceReconnect = (reason = "manual") => {
     if (closed) return;
-    if (reason === "visibility" || reason === "pageshow" || reason === "online" || reason === "resume") {
+    if (
+      reason === "visibility"
+      || reason === "pageshow"
+      || reason === "pagehide"
+      || reason === "online"
+      || reason === "resume"
+      || reason === "manual"
+      || reason === "ping-ack-timeout"
+    ) {
       reconnectAttempt = 0;
     }
     clearReconnectTimer();
+    clearPingAckTimer();
+    awaitingPingAck = false;
     const ws = socket;
     socket = null;
+    untrackSocket();
     stopHeartbeat();
     detachSocket(ws);
     try {
@@ -202,29 +246,67 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     connect();
   };
 
+  const verifyOpenSocket = (reason) => {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      forceReconnect(reason);
+      return;
+    }
+    const pingAt = Date.now();
+    lastPingAt = pingAt;
+    awaitingPingAck = true;
+    const sent = send({ type: "ping", t: pingAt });
+    if (!sent) {
+      awaitingPingAck = false;
+      forceReconnect(`${reason}-ping-fail`);
+      return;
+    }
+    send({
+      type: "material.request_sync",
+      client_revision: version || 0,
+      session_id: sessionId,
+    });
+    clearPingAckTimer();
+    pingAckTimer = window.setTimeout(() => {
+      pingAckTimer = null;
+      if (awaitingPingAck) {
+        awaitingPingAck = false;
+        forceReconnect("ping-ack-timeout");
+        return;
+      }
+      unlockResume();
+    }, MATERIAL_RECONNECT.PING_ACK_MS);
+  };
+
   const resumeIfNeeded = (reason) => {
     if (closed) return;
     if (reason === "visibility" && document.visibilityState === "hidden") {
       lastHiddenAt = Date.now();
       return;
     }
-    const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : 0;
+    if (reason === "pagehide" || reason === "freeze") {
+      lastHiddenAt = Date.now();
+      return;
+    }
+    if (reason === "manual") unlockResume();
+    if (!lockResume()) return;
+    const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : null;
     lastHiddenAt = 0;
-    const live = _isSocketLive(socket);
-    const frozenOpen = live && hiddenMs >= MATERIAL_RECONNECT.HIDDEN_RESUME_MS;
-    if (!live || isPongStale() || frozenOpen) {
+    const knownShort = hiddenMs != null && hiddenMs < MATERIAL_RECONNECT.HIDDEN_RESUME_MS;
+    if (knownShort && reason !== "online" && reason !== "manual") {
+      unlockResume();
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        lastPingAt = Date.now();
+        send({ type: "ping", t: lastPingAt });
+      }
+      return;
+    }
+    const open = Boolean(socket && socket.readyState === WebSocket.OPEN);
+    const frozenOpen = open && hiddenMs != null && hiddenMs >= MATERIAL_RECONNECT.HIDDEN_RESUME_MS;
+    if (!open || isPongStale() || frozenOpen) {
       forceReconnect(reason);
       return;
     }
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      lastPingAt = Date.now();
-      send({ type: "ping", t: lastPingAt });
-      send({
-        type: "material.request_sync",
-        client_revision: version || 0,
-        session_id: sessionId,
-      });
-    }
+    verifyOpenSocket(reason);
   };
 
   const clearReconnectTimer = () => {
@@ -246,7 +328,12 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
     if (closed) return;
     if (reconnectTimer != null) return;
     if (_isSocketLive(socket)) return;
-    reconnectAttempt = Math.min(reconnectAttempt + 1, MATERIAL_RECONNECT.MAX_ATTEMPT);
+    reconnectAttempt += 1;
+    if (reconnectAttempt > MATERIAL_RECONNECT.MAX_ATTEMPT) {
+      unlockResume();
+      handlers.onStatus?.("failed");
+      return;
+    }
     const delay = materialReconnectDelayMs(reconnectAttempt);
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = null;
@@ -270,11 +357,15 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       socket = null;
     }
     handlers.onStatus?.("connecting");
+    untrackSocket();
     const ws = new WebSocket(wsUrl(meetingUuid));
     socket = ws;
+    untrackSocket = trackRealtimeSocket(ws);
 
     ws.onopen = () => {
       if (closed || socket !== ws) return;
+      unlockResume();
+      clearPingAckTimer();
       reconnectAttempt = 0;
       lastPongAt = Date.now();
       lastHiddenAt = 0;
@@ -301,6 +392,7 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
 
       if (data.type === "pong") {
         lastPongAt = Date.now();
+        awaitingPingAck = false;
         handlers.onPong?.({ pingAt: data.t, pongAt: lastPongAt });
         return;
       }
@@ -447,12 +539,16 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
 
   const onVisibility = () => resumeIfNeeded("visibility");
   const onPageShow = () => resumeIfNeeded("pageshow");
+  const onPageHide = () => resumeIfNeeded("pagehide");
   const onOnline = () => resumeIfNeeded("online");
   const onResume = () => resumeIfNeeded("resume");
+  const onFreeze = () => resumeIfNeeded("freeze");
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("pageshow", onPageShow);
+  window.addEventListener("pagehide", onPageHide);
   window.addEventListener("online", onOnline);
   window.addEventListener("resume", onResume);
+  window.addEventListener("freeze", onFreeze);
 
   const sendCursorThrottled = throttle((x, y) => {
     send({
@@ -605,16 +701,26 @@ export function createMeetingMaterialCollab(meetingUuid, handlers = {}) {
       });
     }, THROTTLE.POINTER_MS),
     resumeNow: () => resumeIfNeeded("manual"),
+    reconnectNow: () => {
+      unlockResume();
+      reconnectAttempt = 0;
+      forceReconnect("manual");
+    },
     close: () => {
       closed = true;
+      unlockResume();
+      clearPingAckTimer();
       clearReconnectTimer();
       stopHeartbeat();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("online", onOnline);
       window.removeEventListener("resume", onResume);
+      window.removeEventListener("freeze", onFreeze);
       const ws = socket;
       socket = null;
+      untrackSocket();
       detachSocket(ws);
       try {
         ws?.close();

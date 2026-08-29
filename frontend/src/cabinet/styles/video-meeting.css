@@ -814,14 +814,14 @@
   position: fixed;
   right: 16px;
   bottom: 16px;
-  width: min(360px, calc(100vw - 32px));
-  height: min(248px, 36vh);
+  width: min(320px, calc(100vw - 24px));
+  height: min(220px, 34vh);
   z-index: 40;
-  border-radius: var(--vl-radius);
+  border-radius: 14px;
   overflow: hidden;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
   border: 1px solid rgba(148, 163, 184, 0.35);
-  background: var(--vl-surface);
+  background: #0f172a;
   display: flex;
   flex-direction: column;
   touch-action: none;
@@ -833,12 +833,12 @@
 }
 
 .video-lesson-compact-drag {
-  flex: 0 0 auto;
+  flex: 0 0 40px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 8px 6px 10px;
+  padding: 0 8px 0 12px;
   background: rgba(15, 23, 42, 0.96);
   border-bottom: 1px solid rgba(148, 163, 184, 0.25);
   color: #f8fafc;
@@ -860,8 +860,10 @@
   background: rgba(30, 41, 59, 0.9);
   color: #e2e8f0;
   border-radius: 8px;
-  padding: 3px 8px;
-  font-size: 0.7rem;
+  min-height: 32px;
+  min-width: 44px;
+  padding: 0 10px;
+  font-size: 0.72rem;
   font-weight: 600;
   cursor: pointer;
 }
@@ -876,8 +878,12 @@
 .video-lesson-content--call-collapsed {
   width: auto !important;
   height: auto !important;
-  min-width: 200px;
-  min-height: 0;
+  min-width: 168px;
+  min-height: 44px;
+}
+
+.video-lesson-content--call-collapsed .video-lesson-compact-drag {
+  border-bottom: 0;
 }
 
 .video-lesson-content--call-collapsed #jitsi-container {
@@ -905,8 +911,15 @@
 
 .video-lesson-page--compact #jitsi-container {
   min-height: 0;
-  height: auto;
+  height: 100%;
   flex: 1 1 auto;
+}
+
+.video-lesson-page--compact #jitsi-container iframe {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  border: 0;
 }
 
 .video-lesson-page--compact .video-lesson-aside {
@@ -1808,17 +1821,26 @@ body.vl-room-fullscreen .student-cabinet-nav {
 
 @media (max-width: 820px) {
   .video-lesson-page {
-    --vl-header-height: 56px;
+    --vl-header-height: 44px;
+  }
+
+  .video-lesson-header {
+    min-height: 44px;
+    height: 44px;
+    padding: 0 8px;
+    gap: 6px;
   }
 
   .video-lesson-mobile-switch {
     display: flex;
+    padding: 4px 8px 0;
+    gap: 4px;
   }
 
   .video-lesson-mobile-switch button {
-    min-height: 44px;
-    height: 44px;
-    font-size: 0.9rem;
+    min-height: 36px;
+    height: 36px;
+    font-size: 0.8rem;
   }
 
   /* Табы Звонок/Материалы уже есть — кнопка в шапке дублирует и жмёт заголовок. */
@@ -1827,7 +1849,7 @@ body.vl-room-fullscreen .student-cabinet-nav {
   }
 
   .video-lesson-page--workspace .video-lesson-workspace {
-    padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   .video-lesson-page--workspace .video-lesson-body,
@@ -1897,28 +1919,180 @@ body.vl-room-fullscreen .student-cabinet-nav {
     flex: 1 1 auto;
   }
 
-  /* Доска должна занимать холст: 360×248 поверх 375px почти закрывала рисование. */
+  /* Плавающий звонок: не перекрывать холст, но оставить узнаваемое видео. */
   .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content {
     position: fixed;
     z-index: 40;
     flex: 0 0 auto;
-    width: min(42vw, 168px);
-    height: min(32vw, 118px);
+    width: min(52vw, 200px);
+    height: min(40vw, 148px);
     right: max(8px, env(safe-area-inset-right, 0px));
     bottom: max(8px, env(safe-area-inset-bottom, 0px));
   }
 
   .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-compact-drag {
-    min-height: 44px;
-    padding: 4px 6px;
+    min-height: 36px;
+    flex-basis: 36px;
+    padding: 0 6px 0 10px;
     font-size: 0.68rem;
   }
 }
 
 @media (max-width: 480px) {
   .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content {
-    width: min(38vw, 128px);
-    height: min(28vw, 96px);
+    width: min(56vw, 188px);
+    height: min(42vw, 136px);
+  }
+}
+
+/*
+ * Телефон portrait (≤768) и landscape любого флагмана (высота ≤600):
+ * CSS-ширина в landscape часто >820px, поэтому desktop-chrome нельзя оставлять.
+ */
+@media (max-width: 768px), (max-height: 600px) and (orientation: landscape) {
+  .video-lesson-page {
+    --vl-header-height: 40px;
+    height: 100dvh;
+    max-height: 100dvh;
+  }
+
+  .video-lesson-header {
+    flex: 0 0 40px;
+    min-height: 40px;
+    height: 40px;
+    padding: 0 8px;
+    gap: 4px;
+  }
+
+  .video-lesson-header__sub {
+    display: none;
+  }
+
+  .video-lesson-header__avatar {
+    width: 24px;
+    height: 24px;
+  }
+
+  .video-lesson-header__title {
+    font-size: 0.82rem;
+  }
+
+  .video-lesson-btn {
+    padding: 4px 6px;
+    min-height: 32px;
+    font-size: 0.72rem;
+  }
+
+  .video-lesson-icon-btn {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  .video-lesson-btn__label,
+  .video-lesson-btn__label-tail {
+    display: none;
+  }
+
+  .video-lesson-mobile-switch {
+    padding: 2px 8px 0;
+    gap: 4px;
+  }
+
+  .video-lesson-mobile-switch button {
+    min-height: 36px;
+    height: 36px;
+    font-size: 0.78rem;
+  }
+
+  .video-lesson-page--workspace .video-lesson-mobile-switch {
+    display: none;
+  }
+
+  .video-lesson-body,
+  .video-lesson-workspace,
+  .video-lesson-workspace--synced,
+  .video-lesson-workspace__stage,
+  .video-lesson-workspace__stage--board,
+  .vl-synced-content,
+  .vl-material-surface--fill {
+    min-height: 0;
+    min-width: 0;
+  }
+
+  .video-lesson-workspace,
+  .video-lesson-workspace--synced .video-lesson-workspace__stage,
+  .vl-material-surface--fill {
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+
+  .video-lesson-page--workspace .vl-collab-bar {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 2px 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .video-lesson-page--workspace .vl-collab-bar__notice,
+  .video-lesson-page--workspace .vl-collab-bar__main {
+    display: none;
+  }
+
+  .video-lesson-page--workspace .vl-collab-bar__actions {
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+
+  .video-lesson-page--workspace .vl-collab-bar .video-lesson-btn {
+    min-height: 32px;
+    padding: 4px 8px;
+    font-size: 0.7rem;
+    white-space: nowrap;
+  }
+
+  .video-lesson-page--compact .video-lesson-content,
+  .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content {
+    width: min(48vw, 188px);
+    height: min(34vw, 132px);
+    right: max(8px, env(safe-area-inset-right, 0px));
+    bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .video-lesson-content--call-collapsed {
+    min-width: 0;
+    width: auto !important;
+    height: auto !important;
+  }
+
+  .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-compact-drag {
+    min-height: 36px;
+    padding: 0 6px;
+    font-size: 0.65rem;
+  }
+
+  .video-lesson-compact-drag__expand {
+    min-height: 32px;
+    padding: 0 8px;
+    font-size: 0.65rem;
+  }
+}
+
+@media (max-height: 600px) and (orientation: landscape) {
+  .video-lesson-page--compact .video-lesson-content,
+  .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content {
+    width: min(32vw, 176px);
+    height: min(48vh, 120px);
+  }
+
+  .video-lesson-page--workspace.video-lesson-page--compact .video-lesson-content--call-collapsed {
+    width: auto !important;
+    height: auto !important;
   }
 }
 
@@ -2575,11 +2749,6 @@ body.vl-room-fullscreen .student-cabinet-nav {
     padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
   }
 
-  .video-lesson-page,
-  .video-lesson-workspace {
-    min-height: 100dvh;
-  }
-
   .vl-collab-bar__actions {
     flex-wrap: wrap;
   }
@@ -2858,4 +3027,79 @@ body.vl-room-fullscreen .student-cabinet-nav {
 .ss-ann-v2-pip-body .ss-ann-v2-toolbar {
   width: 100%;
   border-radius: 0;
+}
+
+.itflux-recovery-banner {
+  position: fixed;
+  left: 50%;
+  bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 40;
+  width: min(420px, calc(100vw - 24px));
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.94);
+  color: #f8fafc;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
+  pointer-events: auto;
+}
+
+.itflux-recovery-banner__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.itflux-recovery-banner__title {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.itflux-recovery-banner__spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(248, 250, 252, 0.25);
+  border-top-color: #93c5fd;
+  border-radius: 50%;
+  animation: itflux-recovery-spin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
+
+.itflux-recovery-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.itflux-recovery-banner__btn {
+  appearance: none;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(226, 232, 240, 0.35);
+  background: transparent;
+  color: #f8fafc;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.itflux-recovery-banner__btn--primary {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+@keyframes itflux-recovery-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .itflux-recovery-banner {
+    bottom: 8px;
+    padding: 8px 12px;
+  }
 }

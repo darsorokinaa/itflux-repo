@@ -7,6 +7,7 @@ import {
   CONNECTION_CHECK_CLOSE_EVENT,
   CONNECTION_CHECK_OPEN_EVENT,
 } from "./openConnectionCheck";
+import { resolveAuthenticatedMeetingNavigation } from "../meetingNavigation";
 
 function isInternalHref(href) {
   return typeof href === "string" && href.startsWith("/");
@@ -57,6 +58,12 @@ export default function ConnectionCheckHost() {
       return;
     }
     if (!joinHref) return;
+    const meetingNav = resolveAuthenticatedMeetingNavigation(joinHref);
+    if (meetingNav.kind === "internal") {
+      navigate(meetingNav.href);
+      return;
+    }
+    if (meetingNav.kind === "jitsi-embed") return;
     if (isInternalHref(joinHref)) {
       navigate(joinHref);
       return;

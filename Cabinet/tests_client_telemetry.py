@@ -26,6 +26,24 @@ class ClientTelemetryApiTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertTrue(res.json().get("ok"))
 
+    def test_resume_events_allowed(self):
+        for event in (
+            "PWA_BACKGROUND",
+            "RESUME_START",
+            "RESUME_TIMEOUT",
+            "MANUAL_RECONNECT_CLICK",
+            "MANUAL_RELOAD_CLICK",
+            "APP_FATAL_ERROR",
+            "APP_RENDER_ERROR",
+        ):
+            res = self.client.post(
+                "/api/cabinet/client-telemetry/",
+                data={"event": event, "extra": {"pwa": True, "stage": "jitsi"}},
+                content_type="application/json",
+            )
+            self.assertEqual(res.status_code, 200, event)
+            self.assertTrue(res.json().get("ok"), event)
+
     def test_board_snapshot_events_allowed(self):
         for event in (
             "board_full_state_requested",

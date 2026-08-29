@@ -1,6 +1,8 @@
+const { TIMEOUTS } = require("./timeouts");
 const { SELECTORS, displayed, waitFor, FlowError } = require("./dom");
 const { writeJson, screenshot, redactSecrets } = require("./artifacts");
 const { isWebDriverInfraError } = require("./classify");
+const { sleep } = require("./lifecycle");
 
 const FRAME_SELECTORS = [
   SELECTORS.boardWorkspaceFrame,
@@ -244,51 +246,171 @@ async function findBoardOpenButton(browser) {
   );
 }
 
-async function resolveFrameElement(browser) {
-  await leaveBoardFrame(browser);
-  const frames = await listIframes(browser);
-  const picked = pickBoardIframe(frames);
-  if (picked && picked.el) {
-    return {
-      el: picked.el,
-      selector: picked.selectorHint,
-      width: picked.width,
-      height: picked.height,
-      displayed: picked.displayed,
-    };
-  }
-  return null;
+function isStaleElementError(err) {
+  return /stale element/i.test(String((err && err.message) || err || ""));
 }
 
 function isFrameSwitchError(err) {
-  return /switchFrame|switch to frame|no such frame|doesn't exist/i.test(String((err && err.message) || err || ""));
+  return /switchFrame|switch to frame|no such frame|doesn't exist|when running ["']?frame/i
+    .test(String((err && err.message) || err || ""));
 }
 
-async function enterBoardFrame(browser, { timeoutMs = 25_000 } = {}) {
-  try {
-    return await waitFor(browser, async () => {
-      await leaveBoardFrame(browser);
-      const frame = await resolveFrameElement(browser);
-      if (!frame || !frame.el) return false;
-      try {
-        await browser.switchFrame(frame.el);
+function frameSwitchReason(err) {
+  if (isStaleElementError(err)) return "stale";
+  if (isFrameSwitchError(err)) return "frame";
+  return String((err && err.message) || err || "unknown").replace(/\s+/g, " ").slice(0, 80);
+}
+
+async function queryVisibleBoardIframe(browser) {
+  await leaveBoardFrame(browser);
+  for (const selector of FRAME_SELECTORS) {
+    const el = await browser.$(selector);
+    const exists = Boolean(el && await el.isExisting().catch(() => false));
+    if (!exists) continue;
+    const vis = await displayed(el);
+    const size = await el.getSize().catch(() => ({ width: 0, height: 0 }));
+    return {
+      found: true,
+      displayed: vis,
+      el,
+      selector,
+      width: Number(size.width) || 0,
+      height: Number(size.height) || 0,
+    };
+  }
+  return {
+    found: false,
+    displayed: false,
+    el: null,
+    selector: SELECTORS.boardWorkspaceFrame,
+    width: 0,
+    height: 0,
+  };
+}
+
+async function resolveFrameElement(browser) {
+  const frame = await queryVisibleBoardIframe(browser);
+  if (!frame.found || !frame.el) return null;
+  return {
+    el: frame.el,
+    selector: frame.selector,
+    width: frame.width,
+    height: frame.height,
+    displayed: frame.displayed,
+  };
+}
+
+async function enterFreshBoardFrame(browser, {
+  requireCanvas = false,
+  maxSwitchAttempts = 4,
+  timeoutMs = TIMEOUTS.BOARD,
+} = {}) {
+  const started = Date.now();
+  let attempt = 0;
+  let switchFails = 0;
+  let lastReason = "not attempted";
+  let lastCanvas = null;
+  let lastIframe = null;
+  let lastEntered = false;
+
+  while (Date.now() - started < timeoutMs) {
+    attempt += 1;
+    const frame = await queryVisibleBoardIframe(browser);
+    lastIframe = {
+      selector: frame.selector,
+      width: frame.width,
+      height: frame.height,
+      displayed: frame.displayed,
+      found: frame.found,
+    };
+
+    if (!frame.found || !frame.el) {
+      lastReason = "not found";
+      lastEntered = false;
+      if (attempt <= 2 || attempt % 5 === 0) {
+        console.log(`BOARD FRAME attempt=${attempt} found=false displayed=false switch=SKIP reason=${lastReason}`);
+      }
+      await sleep(200);
+      continue;
+    }
+    if (!frame.displayed) {
+      lastReason = "not displayed";
+      lastEntered = false;
+      if (attempt <= 2 || attempt % 5 === 0) {
+        console.log(`BOARD FRAME attempt=${attempt} found=true displayed=false switch=SKIP reason=${lastReason}`);
+      }
+      await sleep(200);
+      continue;
+    }
+
+    try {
+      await browser.switchFrame(frame.el);
+      lastEntered = true;
+      if (!requireCanvas) {
+        console.log(`BOARD FRAME attempt=${attempt} found=true displayed=true switch=OK canvas=n/a`);
         return {
           selector: frame.selector,
           width: frame.width,
           height: frame.height,
-          displayed: frame.displayed,
+          displayed: true,
         };
-      } catch (err) {
-        await leaveBoardFrame(browser);
-        if (!isFrameSwitchError(err) && !isStaleElementError(err) && !isWebDriverInfraError(err)) {
-          throw err;
-        }
-        return false;
       }
-    }, {
+      const canvas = await lookupCanvas(browser);
+      lastCanvas = canvas
+        ? { width: canvas.width, height: canvas.height, displayed: canvas.displayed }
+        : null;
+      const canvasOk = Boolean(canvas && canvas.displayed && canvas.width > 0 && canvas.height > 0);
+      if (!canvasOk) {
+        lastReason = "canvas not found";
+        console.log(`BOARD FRAME attempt=${attempt} found=true displayed=true switch=OK canvas=false reason=${lastReason}`);
+        await leaveBoardFrame(browser);
+        await sleep(200);
+        continue;
+      }
+      console.log(`BOARD FRAME attempt=${attempt} found=true displayed=true switch=OK canvas=true`);
+      return {
+        selector: frame.selector,
+        width: frame.width,
+        height: frame.height,
+        displayed: true,
+        canvasW: canvas.width,
+        canvasH: canvas.height,
+      };
+    } catch (err) {
+      lastEntered = false;
+      lastReason = frameSwitchReason(err);
+      console.log(`BOARD FRAME attempt=${attempt} found=true displayed=true switch=FAIL reason=${lastReason}`);
+      await leaveBoardFrame(browser);
+      if (!isStaleElementError(err) && !isFrameSwitchError(err) && !isWebDriverInfraError(err)) {
+        throw err;
+      }
+      switchFails += 1;
+      if (switchFails >= maxSwitchAttempts) break;
+      await sleep(200);
+    }
+  }
+
+  const last = { entered: lastEntered, iframe: lastIframe, canvas: lastCanvas, reason: lastReason, attempts: attempt };
+  const fail = boardFail(
+    requireCanvas ? "CANVAS = TEST INFRA BUG" : "BOARD = TEST INFRA BUG",
+    requireCanvas
+      ? `Could not enter a freshly queried board iframe/canvas. last=${JSON.stringify(last)}`
+      : `could not switch into a freshly queried board iframe last=${JSON.stringify(last)}`,
+    {
+      classification: "TEST INFRA BUG",
+      boardClick: "PASS",
+    },
+  );
+  fail.lastBoardFrame = last;
+  throw fail;
+}
+
+async function enterBoardFrame(browser, { timeoutMs = TIMEOUTS.BOARD } = {}) {
+  try {
+    return await enterFreshBoardFrame(browser, {
+      requireCanvas: false,
+      maxSwitchAttempts: 4,
       timeoutMs,
-      intervalMs: 400,
-      message: "could not switch into a freshly queried board iframe",
     });
   } catch (err) {
     if (err instanceof FlowError) throw err;
@@ -318,7 +440,7 @@ async function inBoardContext(browser, opened, fn) {
       const retryable = isStaleElementError(err) || isFrameSwitchError(err) || isWebDriverInfraError(err);
       if (!retryable || attempt === 2) throw err;
       await leaveBoardFrame(browser);
-      await browser.pause(350);
+      await sleep(200);
     }
   }
   throw lastErr;
@@ -331,7 +453,7 @@ async function waitForBoardNavigation(browser, before) {
     if (verdict.opened) return { after, verdict };
     return false;
   }, {
-    timeoutMs: 25_000,
+    timeoutMs: TIMEOUTS.BOARD,
     intervalMs: 700,
     message: "board did not open after «Открыть»",
   });
@@ -416,51 +538,20 @@ async function waitForBoardReady(browser, opened) {
         return { canvasW: canvas.width, canvasH: canvas.height, displayed: true };
       }
       return false;
-    }, { timeoutMs: 45_000, intervalMs: 500, message: "canvas not ready on board route" });
+    }, { timeoutMs: TIMEOUTS.CANVAS, intervalMs: 400, message: "canvas not ready on board route" });
   }
 
-  let last = { entered: false, iframe: null, canvas: null, switchError: null };
   try {
-    return await waitFor(browser, async () => {
-      await leaveBoardFrame(browser);
-      const frames = await listIframes(browser);
-      const picked = pickBoardIframe(frames);
-      last.iframe = picked
-        ? {
-          selector: picked.selectorHint,
-          width: picked.width,
-          height: picked.height,
-          displayed: picked.displayed,
-        }
-        : null;
-      if (!picked || !picked.el) return false;
-      try {
-        await browser.switchFrame(picked.el);
-        last.entered = true;
-        last.switchError = null;
-        const canvas = await lookupCanvas(browser);
-        last.canvas = canvas
-          ? { width: canvas.width, height: canvas.height, displayed: canvas.displayed }
-          : null;
-        const ok = Boolean(canvas && canvas.displayed && canvas.width > 0 && canvas.height > 0);
-        await leaveBoardFrame(browser);
-        if (ok) {
-          return { canvasW: canvas.width, canvasH: canvas.height, displayed: true };
-        }
-        return false;
-      } catch (err) {
-        last.entered = false;
-        last.switchError = String((err && err.message) || err);
-        await leaveBoardFrame(browser);
-        return false;
-      }
-    }, {
-      timeoutMs: 45_000,
-      intervalMs: 500,
-      message: "fresh board iframe/canvas not ready",
+    const entered = await enterFreshBoardFrame(browser, {
+      requireCanvas: true,
+      maxSwitchAttempts: 4,
+      timeoutMs: TIMEOUTS.CANVAS,
     });
+    await leaveBoardFrame(browser);
+    return { canvasW: entered.canvasW, canvasH: entered.canvasH, displayed: true };
   } catch (err) {
-    if (last.entered && last.canvas && last.canvas.width < 1 && last.iframe && last.iframe.width > 1) {
+    const last = err && err.lastBoardFrame;
+    if (last && last.entered && last.canvas && last.canvas.width < 1 && last.iframe && last.iframe.width > 1) {
       throw productFail(
         "CANVAS",
         `canvas not usable after fresh frame enter displayed=${last.canvas.displayed} size=${last.canvas.width}x${last.canvas.height} iframe=${JSON.stringify(last.iframe)}`,
@@ -474,7 +565,7 @@ async function waitForBoardReady(browser, opened) {
     }
     throw boardFail(
       "CANVAS = TEST INFRA BUG",
-      `Could not enter a freshly queried board iframe/canvas. last=${JSON.stringify(last)} ${String((err && err.message) || err)}`,
+      `Could not enter a freshly queried board iframe/canvas. last=${JSON.stringify(last || null)} ${String((err && err.message) || err)}`,
       {
         boardClick: "PASS",
         navigation: opened && opened.navigation,
@@ -483,10 +574,6 @@ async function waitForBoardReady(browser, opened) {
       },
     );
   }
-}
-
-function isStaleElementError(err) {
-  return /stale element reference/i.test(String((err && err.message) || err || ""));
 }
 
 async function lookupCanvas(browser) {
@@ -568,7 +655,7 @@ async function selectFreedrawTool(browser, { focusTap = true } = {}) {
   }
   const tool = await browser.$(`[data-testid="${SELECTORS.toolFreedraw}"]`);
   try {
-    await tool.waitForExist({ timeout: 20_000 });
+    await tool.waitForExist({ timeout: TIMEOUTS.CANVAS });
   } catch (err) {
     throw boardFail("DRAW", `freedraw tool not in board document: ${String((err && err.message) || err)}`, {
       classification: "TEST BUG",
@@ -625,7 +712,13 @@ async function strokeOnceInFrame(browser, { variant = "normal", index = 0, scree
 function wrapDrawError(err, { firstDraw = false, strokeSucceededBefore = false } = {}) {
   const proven = strokeSucceededBefore && !firstDraw;
   if (err instanceof FlowError && err.classification === "BOARD FREEZE" && proven) return err;
-  if (isStaleElementError(err) || isReleaseActionsUnsupported(err) || isFrameSwitchError(err) || isWebDriverInfraError(err)) {
+  if (isStaleElementError(err) || isFrameSwitchError(err)) {
+    return boardFail("DRAW", String((err && err.message) || err), {
+      classification: "TEST INFRA BUG",
+      boardClick: "PASS",
+    });
+  }
+  if (isReleaseActionsUnsupported(err) || isWebDriverInfraError(err)) {
     return boardFail("DRAW", String((err && err.message) || err), {
       classification: /TEST INFRA/i.test(String((err && err.code) || "")) ? "TEST INFRA BUG" : "TEST BUG",
       boardClick: "PASS",
@@ -756,6 +849,8 @@ module.exports = {
   lookupCanvas,
   inBoardContext,
   enterBoardFrame,
+  enterFreshBoardFrame,
+  queryVisibleBoardIframe,
   resolveFrameElement,
   countBoardIframes,
   isStaleElementError,

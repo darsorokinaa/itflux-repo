@@ -145,7 +145,7 @@ class ViewportRelayTests(IsolatedAsyncioTestCase):
         await consumer.receive(
             text_data=(
                 '{"type":"viewport_update","client_id":"teacher-1",'
-                '"scrollX":120.5,"scrollY":-40,"zoom":1.25,"seq":3}'
+                '"scrollX":120.5,"scrollY":-40,"zoom":1.25,"centerX":840,"centerY":500,"seq":3}'
             )
         )
         self.assertEqual(consumer.channel_layer.group_send.call_count, 1)
@@ -155,6 +155,8 @@ class ViewportRelayTests(IsolatedAsyncioTestCase):
         self.assertEqual(payload["scrollX"], 120.5)
         self.assertEqual(payload["scrollY"], -40)
         self.assertEqual(payload["zoom"], 1.25)
+        self.assertEqual(payload["centerX"], 840)
+        self.assertEqual(payload["centerY"], 500)
         cached = get_teacher_viewport("board-vp-1")
         self.assertIsNotNone(cached)
         self.assertEqual(cached["type"], "viewport_state")
@@ -193,6 +195,28 @@ class ViewportRelayTests(IsolatedAsyncioTestCase):
         data = json.loads(sent)
         self.assertEqual(data["type"], "viewport_state")
         self.assertEqual(data["scrollX"], 10)
+
+    async def test_student_viewport_update_is_relayed(self):
+        consumer = _make_consumer()
+        consumer.user = type("U", (), {"id": 4})()
+        consumer.client_id = "student-2"
+        consumer.display_name = "Анна"
+        consumer.role = "student"
+        consumer.permission = "edit"
+        consumer.board_id = "board-vp-student"
+        consumer.can_edit = True
+        consumer._last_viewport_at = 0.0
+        await consumer.receive(
+            text_data=(
+                '{"type":"viewport_update","client_id":"student-2",'
+                '"scrollX":10,"scrollY":20,"zoom":1,"centerX":200,"centerY":160,"seq":1}'
+            )
+        )
+        self.assertEqual(consumer.channel_layer.group_send.call_count, 1)
+        payload = consumer.channel_layer.group_send.call_args.args[1]["payload"]
+        self.assertEqual(payload["role"], "student")
+        self.assertEqual(payload["centerX"], 200)
+
     async def test_sync_probe_echoes_ack_to_sender(self):
         consumer = _make_consumer()
         consumer.user = type("U", (), {"id": 1})()

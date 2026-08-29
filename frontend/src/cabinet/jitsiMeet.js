@@ -23,6 +23,11 @@ import {
   reportMeetingTechnicalEvent,
 } from "./jitsiTelemetry";
 import { reportClientEvent } from "../utils/clientTelemetry";
+import {
+  logLifecycle,
+  registerJitsiSession,
+  unregisterJitsiSession,
+} from "./pwa/runtimeResources";
 
 export {
   createBrowserTabSessionId,
@@ -583,6 +588,8 @@ export function registerJoinDiagnostics(api, { onMediaWarning, diagnostics } = {
 
 /**
  * Минимальный embed URL: один path/room для всех ролей.
+ * Только для iframe / External API. Не использовать как top-level
+ * window.location — iOS PWA воспримет другой origin и сбросит сессию.
  */
 export function buildJitsiEmbedUrl(config) {
   const roomName = String(config.roomName || "").trim();
@@ -954,15 +961,18 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
   });
 
   let disposed = false;
+  const sessionHolder = { current: null };
   const disposeOnce = (reason) => {
     if (disposed) return;
     disposed = true;
+    unregisterJitsiSession(sessionHolder.current);
     unhookAppend();
     logJitsiDiagnostic("jitsi_disposed", {
       reason,
       meetingUuid: diagnostics.meetingUuid,
       roomSuffix: roomName.slice(-8),
     });
+    logLifecycle("JITSI_DISPOSE", { reason: String(reason || "").slice(0, 32) });
     try {
       watchdog.dispose?.();
     } catch {
@@ -975,6 +985,12 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
     }
     try {
       presence.dispose?.();
+    } catch {
+      /* ignore */
+    }
+    try {
+      const iframe = api.getIFrame?.();
+      if (iframe) iframe.src = "about:blank";
     } catch {
       /* ignore */
     }
@@ -1035,7 +1051,7 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
 
   unhookAppend();
 
-  return {
+  const session = {
     api,
     mode: "external-api",
     roomName,
@@ -1069,6 +1085,10 @@ async function createJitsiExternalApiEmbed(config, container, hooks = {}) {
       }
     },
   };
+  sessionHolder.current = session;
+  registerJitsiSession(session);
+  logLifecycle("JITSI_INIT", { roomSuffix: roomName.slice(-8) });
+  return session;
 }
 
 /**
@@ -1085,6 +1105,7 @@ export async function createJitsiMeetSession(config, container, hooks = {}) {
     onPresence,
     onJoined,
     onLeft,
+    onHangup,
     onEmbedded,
     onMediaWarning,
     onBecameModerator,
@@ -1123,6 +1144,7 @@ export async function createJitsiMeetSession(config, container, hooks = {}) {
     onPresence,
     onJoined,
     onLeft,
+    onHangup,
     onMediaWarning,
     onBecameModerator,
     onAudioMuteStatusChanged,

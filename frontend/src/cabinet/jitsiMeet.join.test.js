@@ -6,6 +6,7 @@ import {
   JOIN_SLOW_THRESHOLD_MS,
   createJitsiMeetSession,
 } from "./jitsiMeet";
+import { resetRuntimeResourceState } from "./pwa/runtimeResources";
 
 function createFakeJitsiApi({ participantCount = 1, autoJoin = false, iframe = null } = {}) {
   const listeners = new Map();
@@ -73,6 +74,7 @@ describe("createJitsiMeetSession join gating", () => {
   afterEach(() => {
     container.remove();
     delete window.JitsiMeetExternalAPI;
+    resetRuntimeResourceState();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });

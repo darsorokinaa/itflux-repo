@@ -16,7 +16,8 @@
 
   function appMounted() {
     var root = document.getElementById("root");
-    return Boolean(window.__ITFLUX_BOOTED || (root && root.childElementCount > 0));
+    var fatal = document.querySelector("[data-testid='app-error-fallback'], .itflux-fatal-fallback");
+    return Boolean((root && root.childElementCount > 0) || fatal);
   }
 
   function recover() {
@@ -63,9 +64,10 @@
       );
       return;
     }
-    if (recovered) {
+    var meeting = /\/cabinet\/meetings\//.test(location.pathname || "");
+    if (recovered || meeting) {
       paint(
-        '<div style="max-width:28rem;text-align:center"><p style="font-size:1.15rem;font-weight:700;margin:0 0 10px">Страница так и не открылась</p><p style="margin:0 0 16px;line-height:1.5">Если вы заходите с иконки на рабочем столе — удалите её, откройте сайт в Safari или Chrome и добавьте ярлык заново.</p><button type="button" id="itflux-boot-reload" style="min-height:44px;padding:0 18px;border:0;border-radius:12px;background:#1550D8;color:#fff;font-weight:700">Обновить ещё раз</button></div>'
+        '<div style="max-width:28rem;text-align:center"><p style="font-size:1.15rem;font-weight:700;margin:0 0 10px">Не удалось загрузить приложение.</p><p style="margin:0 0 16px;line-height:1.5">Попробуйте ещё раз. Если ошибка повторяется — обновите приложение или вернитесь в кабинет.</p><div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center"><button type="button" id="itflux-boot-reload" style="min-height:44px;padding:0 18px;border:0;border-radius:12px;background:#1550D8;color:#fff;font-weight:700">Обновить приложение</button><a href="/cabinet" style="min-height:44px;padding:10px 18px;border-radius:12px;background:#fff;color:#1550D8;font-weight:700;text-decoration:none;display:inline-flex;align-items:center">В кабинет</a></div></div>'
       );
       return;
     }
@@ -76,4 +78,9 @@
   }
 
   setTimeout(showStuck, timeoutMs);
+  setInterval(function () {
+    if (document.getElementById("itflux-boot-recover")) return;
+    if (appMounted()) return;
+    if (window.__ITFLUX_BOOTED) showStuck();
+  }, 4000);
 })();

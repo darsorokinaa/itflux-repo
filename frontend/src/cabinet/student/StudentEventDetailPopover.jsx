@@ -15,6 +15,7 @@ import {
 } from "../lessonCardContent";
 import { fetchStudentScheduleEvent } from "../../utils/cabinetAuth";
 import { formatLessonTimeRange, useLessonConnectAvailable } from "./StudentSectionUi";
+import { resolveAuthenticatedMeetingNavigation } from "../meetingNavigation";
 
 const EVENT_TYPES = {
   group: { label: "Групповое занятие", color: "#2563EB" },
@@ -222,12 +223,15 @@ export default function StudentEventDetailPopover({ eventId, onClose }) {
       onStart={() => {
         const href = event.videoMeeting?.pageUrl || event.link || "";
         if (!href) return;
-        if (href.startsWith("/cabinet/meetings/")) {
-          navigate(href);
+        const nav = resolveAuthenticatedMeetingNavigation(href);
+        if (nav.kind === "internal") {
+          navigate(nav.href);
           onClose();
           return;
         }
-        window.open(href, "_blank", "noopener,noreferrer");
+        if (nav.kind === "external") {
+          window.open(nav.href, "_blank", "noopener,noreferrer");
+        }
       }}
       onRequestDelete={() => {}}
       onRequestCancel={() => {}}

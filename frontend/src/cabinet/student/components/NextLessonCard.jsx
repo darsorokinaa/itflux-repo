@@ -4,7 +4,6 @@ import {
   LESSON_CONNECT_BEFORE_MS,
   formatLessonTimeRange,
   formatStudentTime,
-  isInternalMeetingHref,
   lessonMeetingHref,
   studentLessonMetaParts,
   useLessonConnectAvailable,
@@ -16,12 +15,14 @@ import ConnectionCheckButton from "../../connectionCheck/ConnectionCheckButton";
 import { closeConnectionCheck } from "../../connectionCheck/openConnectionCheck";
 import LastCheckHint from "../../connectionCheck/LastCheckHint";
 import { shouldRemindBeforeLesson } from "../../connectionCheck/storage";
+import { resolveAuthenticatedMeetingNavigation } from "../../meetingNavigation";
 
 function MeetingButton({ href, className, children, onClick }) {
-  if (isInternalMeetingHref(href)) {
+  const nav = resolveAuthenticatedMeetingNavigation(href);
+  if (nav.kind === "internal") {
     return (
       <Link
-        to={href}
+        to={nav.href}
         className={className}
         onClick={(e) => {
           closeConnectionCheck();
@@ -32,9 +33,10 @@ function MeetingButton({ href, className, children, onClick }) {
       </Link>
     );
   }
+  if (nav.kind !== "external") return null;
   return (
     <a
-      href={href}
+      href={nav.href}
       className={className}
       target="_blank"
       rel="noreferrer"

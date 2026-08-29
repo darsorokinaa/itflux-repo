@@ -13,6 +13,7 @@ const {
   callTab,
 } = require("./helpers/room");
 const { SELECTORS } = require("./helpers/locators");
+const { assertLessonRoomTopLevelOrigin } = require("../helpers/lessonRoomOrigin");
 
 installErrorCapture(test);
 
@@ -22,7 +23,9 @@ test.describe("TEST 1 — basic room", () => {
     skipIosFullRoomPlaywright(test);
     await runGuarded(test, async () => {
       await openLessonRoom(page);
+      assertLessonRoomTopLevelOrigin(page.url());
       await expect(page.locator(SELECTORS.roomRoot)).toBeVisible();
+      await expect(page.getByLabel(SELECTORS.passwordField)).toHaveCount(0);
       await expect(cameraPrompt(page)).toBeHidden();
       await screenshotNamed(page, testInfo, "room-after-entry");
 
@@ -46,6 +49,7 @@ test.describe("TEST 1 — basic room", () => {
       await switchToCall(page);
       expect(await jitsiIframeCount(page)).toBeLessThanOrEqual(1);
       await expect(page.locator(SELECTORS.roomRoot)).toBeVisible();
+      assertLessonRoomTopLevelOrigin(page.url());
 
       await assertNoHorizontalOverflow(page);
     }, { page }, testInfo);

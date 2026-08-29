@@ -65,6 +65,11 @@ function mockBrowser({ strokeMs = 40 } = {}) {
       const sel = String(selector);
       if (sel === SELECTORS.excalidrawCanvas) return canvas;
       if (sel.includes(SELECTORS.toolFreedraw)) return tool;
+      if (
+        sel === SELECTORS.boardWorkspaceFrame
+        || sel === SELECTORS.boardIframeSrc
+        || sel === SELECTORS.boardWorkspaceFrameAny
+      ) return board;
       return missing;
     },
     $$: async (selector) => {
@@ -90,14 +95,11 @@ function mockBrowser({ strokeMs = 40 } = {}) {
   };
 }
 
-test("quick session is 3+3+3+1 strokes and 30s idle, not smoke 10+20+5", () => {
+test("quick session is 2 real draws with one tab restore, not smoke 10+20+5", () => {
   const src = fs.readFileSync(path.join(__dirname, "board-session.js"), "utf8");
   assert.match(src, /async function runQuickBoardSession/);
-  assert.match(src, /QUICK R1", 3/);
-  assert.match(src, /QUICK R2", 3/);
-  assert.match(src, /QUICK R3", 3/);
-  assert.match(src, /idleKeepalive\(browser, 30_000\)/);
-  assert.equal(/runMeasuredStrokeSeries\(browser, current, 10/.test(src.slice(src.indexOf("async function runQuickBoardSession"))), false);
+  assert.match(src, /QUICK stroke 1\/2/);
+  assert.equal(/idleKeepalive\(browser, 30_000\)/.test(src), false);
 });
 
 test("board-session no longer uses a shared timeout for 10 strokes", () => {
@@ -142,9 +144,10 @@ test("measured series logs per-stroke PASS and does not treat slow completes as 
     assert.equal(result.records[2].index, 3);
     assert.ok(result.stats.firstStrokeMs >= 45);
     assert.ok(result.stats.maxStrokeMs >= result.stats.firstStrokeMs);
-    assert.match(logs[0], /^SMOKE stroke 1\/3 PASS \d+ms$/);
-    assert.match(logs[1], /^SMOKE stroke 2\/3 PASS \d+ms$/);
-    assert.match(logs[2], /^SMOKE stroke 3\/3 PASS \d+ms$/);
+    const smoke = logs.filter((line) => /^SMOKE stroke/.test(line));
+    assert.match(smoke[0], /^SMOKE stroke 1\/3 PASS \d+ms$/);
+    assert.match(smoke[1], /^SMOKE stroke 2\/3 PASS \d+ms$/);
+    assert.match(smoke[2], /^SMOKE stroke 3\/3 PASS \d+ms$/);
   } finally {
     console.log = original;
   }

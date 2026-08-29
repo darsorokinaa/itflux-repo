@@ -36,6 +36,11 @@ function writeText(name, text) {
   return file;
 }
 
+function browserStackSessionUrl(sessionId) {
+  if (!sessionId) return null;
+  return `https://automate.browserstack.com/dashboard/v2/sessions/${sessionId}`;
+}
+
 function redactSecrets(value) {
   return String(value || "")
     .replace(/eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9._-]+/g, "[jwt]")
@@ -80,4 +85,5 @@ module.exports = {
   screenshot,
   markSession,
   redactSecrets,
+  browserStackSessionUrl,
 };

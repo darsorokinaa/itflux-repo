@@ -4,7 +4,7 @@
  */
 
 const ENDPOINT = "/api/cabinet/client-telemetry/";
-const MAX_PER_MINUTE = 20;
+const MAX_PER_MINUTE = 40;
 const CHUNK_RECOVER_KEY = "itflux.chunk-recover";
 const VERSION_QUERY = "_itflux_v";
 
@@ -22,6 +22,35 @@ export const CLIENT_TELEMETRY_EVENTS = Object.freeze([
   "board_error",
   "board_health_sample",
   "api_timeout",
+  "PWA_BACKGROUND",
+  "PWA_FOREGROUND",
+  "RESUME_START",
+  "RESUME_AUTH_OK",
+  "RESUME_AUTH_FAIL",
+  "RESUME_REALTIME_START",
+  "RESUME_REALTIME_OK",
+  "RESUME_REALTIME_FAIL",
+  "RESUME_JITSI_START",
+  "RESUME_JITSI_OK",
+  "RESUME_JITSI_FAIL",
+  "RESUME_BOARD_START",
+  "RESUME_BOARD_OK",
+  "RESUME_BOARD_FAIL",
+  "RESUME_READY",
+  "RESUME_TIMEOUT",
+  "MANUAL_RECONNECT_CLICK",
+  "MANUAL_RELOAD_CLICK",
+  "APP_FATAL_ERROR",
+  "APP_UNHANDLED_REJECTION",
+  "APP_RENDER_ERROR",
+  "MAIN_THREAD_STALL",
+  "JITSI_DUPLICATE",
+  "RESOURCE_SNAPSHOT",
+  "SW_INSTALL",
+  "SW_ACTIVATE",
+  "SW_CONTROLLER_CHANGE",
+  "SW_NAVIGATION_FETCH",
+  "SW_UPDATE_FOUND",
 ]);
 
 const ALLOWED = new Set(CLIENT_TELEMETRY_EVENTS);
@@ -70,10 +99,21 @@ function collectContext() {
     page: typeof window !== "undefined" ? String(window.location.pathname || "").slice(0, 160) : "",
     visibility: typeof document !== "undefined" ? String(document.visibilityState || "") : "",
     dpr: typeof window !== "undefined" ? Number(window.devicePixelRatio) || 1 : 1,
+    pwa: (() => {
+      try {
+        return Boolean(
+          window.matchMedia?.("(display-mode: standalone)")?.matches
+          || window.navigator?.standalone,
+        );
+      } catch {
+        return false;
+      }
+    })(),
+    appVersion: typeof window !== "undefined" ? String(window.__APP_VERSION__ || "").slice(0, 64) : "",
   };
 }
 
-function isChunkLoadError(error) {
+export function isChunkLoadError(error) {
   const blob = [
     error?.name,
     error?.message,
@@ -83,7 +123,7 @@ function isChunkLoadError(error) {
   ]
     .filter(Boolean)
     .join(" ");
-  return /ChunkLoadError|Loading chunk [\d]+ failed|Failed to fetch dynamically imported module|error loading dynamically imported module/i.test(
+  return /ChunkLoadError|Loading chunk [\d]+ failed|Failed to fetch dynamically imported module|error loading dynamically imported module|Unexpected token '<'/i.test(
     blob,
   );
 }
@@ -160,21 +200,33 @@ export function startClientTelemetry() {
 
   const onError = (event) => {
     const err = event?.error || event;
-    if (!isChunkLoadError(err) && !isChunkLoadError(event)) return;
-    reportClientEvent("chunk_load_failed", {
-      message: String(err?.message || event?.message || "chunk").slice(0, 240),
-      recovered: alreadyRecoveredChunk(),
+    if (isChunkLoadError(err) || isChunkLoadError(event)) {
+      reportClientEvent("chunk_load_failed", {
+        message: String(err?.message || event?.message || "chunk").slice(0, 240),
+        recovered: alreadyRecoveredChunk(),
+      });
+      recoverChunkLoadOnce();
+      return;
+    }
+    reportClientEvent("APP_FATAL_ERROR", {
+      message: String(err?.message || event?.message || "error").slice(0, 240),
+      stack: String(err?.stack || "").slice(0, 800),
     });
-    recoverChunkLoadOnce();
   };
   const onRejection = (event) => {
     const reason = event?.reason;
-    if (!isChunkLoadError(reason) && !isChunkLoadError(event)) return;
-    reportClientEvent("chunk_load_failed", {
-      message: String(reason?.message || reason || "chunk").slice(0, 240),
-      recovered: alreadyRecoveredChunk(),
+    if (isChunkLoadError(reason) || isChunkLoadError(event)) {
+      reportClientEvent("chunk_load_failed", {
+        message: String(reason?.message || reason || "chunk").slice(0, 240),
+        recovered: alreadyRecoveredChunk(),
+      });
+      recoverChunkLoadOnce();
+      return;
+    }
+    reportClientEvent("APP_UNHANDLED_REJECTION", {
+      message: String(reason?.message || reason || "rejection").slice(0, 240),
+      stack: String(reason?.stack || "").slice(0, 800),
     });
-    recoverChunkLoadOnce();
   };
 
   window.addEventListener("error", onError);

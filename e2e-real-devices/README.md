@@ -26,7 +26,14 @@ npm run test:browserstack:ios-selenium
 
 ### SELENIUM DEVICE MATRIX
 
-Список устройств **не хардкодится**. Перед запуском: `GET https://api.browserstack.com/automate/browsers.json` (`real_mobile === true`). iOS Safari + Android Chrome, телефоны portrait, планшеты portrait и landscape. По умолчанию sequential (`DEVICE_CONCURRENCY=1`).
+Список устройств **не хардкодится**. Перед запуском: `GET https://api.browserstack.com/automate/browsers.json` (`real_mobile === true`). Параллельность берётся из `GET /automate/plan.json` (`parallel_sessions_max_allowed`), если не задан `DEVICE_CONCURRENCY`.
+
+Ежедневный release smoke (~2–5 мин wall-clock при параллели):
+
+```bash
+cd e2e-real-devices
+npm run test:quick
+```
 
 Сначала безопасная проверка на трёх устройствах:
 

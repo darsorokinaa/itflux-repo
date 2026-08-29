@@ -246,4 +246,34 @@ describe("createMeetingMaterialCollab reconnect", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
     expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.CLOSED);
   });
+
+  it("replaces a zombie OPEN socket when resume ping is not acked", () => {
+    collab = createMeetingMaterialCollab("meet-1");
+    lastSocket().open();
+    window.dispatchEvent(new Event("pageshow"));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    vi.advanceTimersByTime(MATERIAL_RECONNECT.PING_ACK_MS + 1);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.CLOSED);
+  });
+
+  it("coalesces pageshow and visibility into one reconnect", () => {
+    collab = createMeetingMaterialCollab("meet-1");
+    lastSocket().open();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("pagehide"));
+    vi.advanceTimersByTime(MATERIAL_RECONNECT.HIDDEN_RESUME_MS + 1);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("pageshow"));
+    window.dispatchEvent(new Event("focus"));
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
 });

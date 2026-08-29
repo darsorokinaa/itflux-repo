@@ -38,6 +38,15 @@ describe("boardMobileShell", () => {
     expect(isBoardCompactShell(win)).toBe(true);
   });
 
+  it("isBoardCompactShell includes short landscape", () => {
+    const win = {
+      matchMedia: (query: string) => ({
+        matches: query.includes("max-height: 600px"),
+      }),
+    } as Window;
+    expect(isBoardCompactShell(win)).toBe(true);
+  });
+
   it("isBoardTouchShell includes coarse tablet pointer", () => {
     const win = {
       matchMedia: (query: string) => ({

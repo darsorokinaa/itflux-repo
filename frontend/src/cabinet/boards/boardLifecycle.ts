@@ -7,6 +7,7 @@ export type BoardLoadPhase =
   | "connecting"
   | "ready"
   | "reconnecting"
+  | "failed"
   | "error";
 
 export type BoardLoadMetrics = {
@@ -109,6 +110,8 @@ export function phaseLabel(phase: BoardLoadPhase): string {
       return "Готово";
     case "reconnecting":
       return "Восстанавливаем соединение…";
+    case "failed":
+      return "Не удалось восстановить соединение.";
     case "error":
       return "Ошибка загрузки";
     default:

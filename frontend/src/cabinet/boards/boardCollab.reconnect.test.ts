@@ -535,4 +535,70 @@ describe("createBoardCollabSession reconnect", () => {
     expect(open).toHaveLength(0);
     expect(FakeWebSocket.instances.length).toBeGreaterThanOrEqual(5);
   });
+
+  it("closes a zombie OPEN socket after pageshow when ping is not acked", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    window.dispatchEvent(new Event("pageshow"));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().sent.some((row) => row.includes('"ping"'))).toBe(true);
+    vi.advanceTimersByTime(BOARD_RECONNECT.PING_ACK_MS + 1);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.CLOSED);
+  });
+
+  it("keeps the socket if resume ping is acked", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    window.dispatchEvent(new Event("pageshow"));
+    lastSocket().onmessage?.({
+      data: JSON.stringify({ type: "pong", t: Date.now() }),
+    } as MessageEvent);
+    vi.advanceTimersByTime(BOARD_RECONNECT.PING_ACK_MS + 1);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().readyState).toBe(FakeWebSocket.OPEN);
+  });
+
+  it("coalesces pageshow + visibility + focus into one reconnect", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("pagehide"));
+    vi.advanceTimersByTime(BOARD_RECONNECT.HIDDEN_RESUME_MS + 1);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("pageshow"));
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("online"));
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("stops auto-reconnect after MAX_ATTEMPT and reports failed", () => {
+    const onStatus = vi.fn();
+    session = createBoardCollabSession("board-1", "A", { onStatus });
+    for (let i = 0; i <= BOARD_RECONNECT.MAX_ATTEMPT + 1; i += 1) {
+      lastSocket().close();
+      vi.advanceTimersByTime(10_000);
+    }
+    expect(onStatus).toHaveBeenCalledWith("failed");
+    const before = FakeWebSocket.instances.length;
+    vi.advanceTimersByTime(20_000);
+    expect(FakeWebSocket.instances.length).toBe(before);
+  });
+
+  it("reconnectNow tears down a live socket and opens a new one", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    session.reconnectNow();
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.CLOSED);
+  });
 });

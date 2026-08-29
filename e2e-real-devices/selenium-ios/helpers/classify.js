@@ -20,7 +20,7 @@ function isWebDriverInfraError(err) {
   return isExecuteSerializeError(err)
     || /stale element|not attached to the page document|element cache|cached element/i.test(message)
     || /unsupported.*actions|when running "actions"|DELETE.*actions|mapped resource/i.test(message)
-    || /switchFrame|switch to frame|no such frame|no such window|doesn't exist/i.test(message)
+    || /switchFrame|switch to frame|no such frame|no such window|doesn't exist|when running ["']?frame/i.test(message)
     || /no such element|element not found|invalid selector|invalid element/i.test(message)
     || /cannot be transferred|Recursive object|circular structure|JSON\.parse/i.test(message)
     || /not interactable|element click intercepted|element not visible/i.test(message)
@@ -36,20 +36,41 @@ function isSessionGone(err) {
   return /session not started|not started or terminated|invalid session id|session deleted|session terminated|UND_ERR_CLOSED|socket hang up|ECONNRESET|ECONNREFUSED/i.test(message);
 }
 
+function isBrowserStackQuotaError(err) {
+  const message = errorText(err);
+  const code = String((err && err.code) || (err && err.classification) || "");
+  return /automate testing time expired|testing time expired/i.test(message)
+    || /BROWSERSTACK[_ ]QUOTA/i.test(code)
+    || (/quota/i.test(message) && /expired|exhaust|exceed|minute/i.test(message));
+}
+
 function isInfraSkipError(err) {
   const message = errorText(err);
-  return /UND_ERR_CLOSED|socket hang up|ECONNRESET|ECONNREFUSED|transport timeout|idle timeout|testing time expired|quota/i.test(message)
+  if (isBrowserStackQuotaError(err)) return true;
+  return /UND_ERR_CLOSED|socket hang up|ECONNRESET|ECONNREFUSED|transport timeout|idle timeout/i.test(message)
     || /device.*not (available|supported)|All parallel tests|could not start|session not created|failed to create session/i.test(message);
 }
 
 function classifyVendorError(err) {
   const message = errorText(err);
-  if (/testing time expired/i.test(message)) {
+  if (err && err.watchdog) {
+    return {
+      RESULT: "failed",
+      code: "WATCHDOG",
+      productFailure: false,
+      matrixResult: MATRIX.TEST_BUG,
+      classification: err.classification || "TEST INFRA BUG",
+      error: message,
+    };
+  }
+  if (isBrowserStackQuotaError(err)) {
     return {
       RESULT: "blocked",
-      code: "BROWSERSTACK QUOTA EXPIRED",
+      code: "BROWSERSTACK_QUOTA_EXPIRED",
       productFailure: false,
       matrixResult: MATRIX.INFRA_SKIP,
+      classification: "ENVIRONMENT BUG",
+      sessionStarted: false,
       error: message,
       hint: "BrowserStack Automate minutes are exhausted. This is not a lesson-room, Jitsi, or capability failure.",
     };
@@ -95,17 +116,24 @@ function classifyVendorError(err) {
   else if (/Login did not leave \/cabinet\/login/i.test(message)) {
     productFailure = false;
   }
+  else if (/click intercepted|cookie-banner/i.test(message)) {
+    productFailure = false;
+  }
   else if (/timeout|timed out|ECONNRESET|ECONNREFUSED|session not created|failed to create session|could not start|All parallel tests|Neither login form|not a valid device|unsupported device|unsupported version|os version.*not/i.test(message)) {
     productFailure = false;
   }
 
   let classification = (err && err.classification) || null;
   if (freeze && productFailure) classification = "BOARD FREEZE";
+  else if (/click intercepted|cookie-banner|stale element|when running ["']?frame|switch to frame|no such frame|unknown server-side error/i.test(message)
+    || /TEST INFRA/i.test(String(code))) {
+    classification = "TEST INFRA BUG";
+  }
   else if (/Login did not leave \/cabinet\/login/i.test(message)) {
     classification = "TEST BUG";
   }
   else if (isWebDriverInfraError(err) || (drawLike && !strokeSucceededBefore)) {
-    classification = /TEST INFRA/i.test(String(code)) ? "TEST INFRA BUG" : "TEST BUG";
+    classification = "TEST BUG";
   } else if (!classification) {
     classification = boardish ? "TEST BUG" : null;
   }
@@ -197,5 +225,6 @@ module.exports = {
   isWebDriverInfraError,
   isSessionGone,
   isInfraSkipError,
+  isBrowserStackQuotaError,
   errorText,
 };

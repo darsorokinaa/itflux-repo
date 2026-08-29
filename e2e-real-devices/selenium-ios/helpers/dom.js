@@ -35,6 +35,10 @@ const SELECTORS = {
   toolText: "toolbar-text",
   wysiwyg: "textarea.excalidraw-wysiwyg",
   boardSyncDebugKey: "itflux_board_sync_debug",
+  cookieBanner: ".cookie-banner",
+  cookieBannerText: ".cookie-banner-text",
+  cookieAcceptBtn: ".cookie-banner-btn",
+  cookieAccept: "Принять",
 };
 
 function xpathButton(name) {

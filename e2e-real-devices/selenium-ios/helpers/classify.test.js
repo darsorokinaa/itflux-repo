@@ -9,10 +9,20 @@ test("unsupported device/version is UNSUPPORTED_DEVICE, not product fail", () =>
   assert.equal(classified.productFailure, false);
 });
 
-test("quota expiry is INFRA_SKIP", () => {
-  const classified = classifyVendorError(new Error("Automate testing time expired"));
+test("quota expiry is INFRA_SKIP ENVIRONMENT BUG, not a device CORE FAIL", () => {
+  const classified = classifyVendorError(new Error(
+    'WebDriverError: Automate testing time expired. when running "https://hub.browserstack.com/wd/hub/session" with method "POST"',
+  ));
   assert.equal(classified.matrixResult, MATRIX.INFRA_SKIP);
   assert.equal(classified.productFailure, false);
+  assert.equal(classified.code, "BROWSERSTACK_QUOTA_EXPIRED");
+  assert.equal(classified.classification, "ENVIRONMENT BUG");
+});
+
+test("isBrowserStackQuotaError matches Automate testing time expired", () => {
+  const { isBrowserStackQuotaError } = require("./classify");
+  assert.equal(isBrowserStackQuotaError(new Error("Automate testing time expired")), true);
+  assert.equal(isBrowserStackQuotaError(new Error("UND_ERR_CLOSED: socket closed")), false);
 });
 
 test("login stuck on /cabinet/login is TEST_BUG, not PRODUCT_FAIL or INFRA timeout", () => {
@@ -64,20 +74,40 @@ test("first DRAW WebDriver/tool error is TEST_BUG, not PRODUCT_FAIL", () => {
   assert.equal(classified.matrixResult, MATRIX.TEST_BUG);
 });
 
-test("frame switch error is TEST_BUG", () => {
+test("frame switch error is TEST INFRA BUG, matrix stays TEST_BUG", () => {
   const classified = classifyVendorError(new Error("Can't switch to frame with selector iframe.video-lesson-workspace__frame--board because it doesn't exist"));
   assert.equal(classified.productFailure, false);
+  assert.equal(classified.classification, "TEST INFRA BUG");
   assert.equal(classified.matrixResult, MATRIX.TEST_BUG);
 });
 
-test("stale element stays TEST_BUG, not freeze", () => {
+test("stale element is TEST INFRA BUG, not freeze or PRODUCT_FAIL", () => {
   const err = new FlowError("DRAW", "stale canvas during stroke: stale element reference", {
     productFailure: false,
     classification: "TEST BUG",
   });
   const classified = classifyVendorError(err);
+  assert.equal(classified.classification, "TEST INFRA BUG");
   assert.equal(classified.matrixResult, MATRIX.TEST_BUG);
   assert.equal(classified.productFailure, false);
+});
+
+test("cookie banner click intercepted is TEST INFRA BUG", () => {
+  const classified = classifyVendorError(new Error(
+    'element click intercepted: Element <input type="password"> is not clickable. Other element would receive the click: <p class="cookie-banner-text">',
+  ));
+  assert.equal(classified.productFailure, false);
+  assert.equal(classified.classification, "TEST INFRA BUG");
+  assert.equal(classified.matrixResult, MATRIX.TEST_BUG);
+});
+
+test("WebDriver frame command error is TEST INFRA BUG", () => {
+  const classified = classifyVendorError(new Error(
+    'WebDriverError: An unknown server-side error occurred while processing the command. when running "frame"',
+  ));
+  assert.equal(classified.productFailure, false);
+  assert.equal(classified.classification, "TEST INFRA BUG");
+  assert.equal(classified.matrixResult, MATRIX.TEST_BUG);
 });
 
 test("session terminated without a live session is TEST_BUG, not PRODUCT_FAIL", () => {

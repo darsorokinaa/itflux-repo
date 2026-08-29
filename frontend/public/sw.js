@@ -5,9 +5,25 @@
 const APP_VERSION = "__ITFLUX_APP_VERSION__";
 const SW_VERSION = `itflux-sw-${APP_VERSION}`;
 
+let lastNavDiagAt = 0;
+
+function postSwDiag(type, extra) {
+  const payload = { type, t: Date.now(), ...(extra || {}) };
+  console.info("[ITFLUX_SW]", type, extra || {});
+  return self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+    clients.forEach((client) => {
+      try {
+        client.postMessage(payload);
+      } catch {
+        /* ignore */
+      }
+    });
+  }).catch(() => {});
+}
+
 self.addEventListener("install", (event) => {
   self.skipWaiting();
-  event.waitUntil(Promise.resolve());
+  event.waitUntil(postSwDiag("SW_INSTALL", { version: APP_VERSION }));
 });
 
 async function clearOldCaches() {
@@ -32,7 +48,8 @@ async function notifyClients() {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    Promise.all([self.clients.claim(), clearOldCaches()]).then(() => notifyClients()),
+    Promise.all([self.clients.claim(), clearOldCaches(), postSwDiag("SW_ACTIVATE", { version: APP_VERSION })])
+      .then(() => notifyClients()),
   );
 });
 
@@ -43,8 +60,24 @@ self.addEventListener("fetch", (event) => {
   if (request.mode !== "navigate") {
     return;
   }
+  const now = Date.now();
+  if (now - lastNavDiagAt > 5000) {
+    lastNavDiagAt = now;
+    void postSwDiag("SW_NAVIGATION_FETCH", { path: String(new URL(request.url).pathname || "").slice(0, 80) });
+  }
   event.respondWith(
-    fetch(request, { cache: "reload", credentials: request.credentials }).catch(() => fetch(request)),
+    fetch(request, { cache: "reload", credentials: request.credentials }).catch(() => (
+      new Response(
+        "<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Нет сети</title></head><body style=\"font-family:system-ui,-apple-system,sans-serif;padding:32px 20px;text-align:center;background:#f8fafc;color:#0f172a\"><h1 style=\"font-size:1.2rem\">Нет сети</h1><p>Не удалось загрузить приложение. Проверьте интернет и нажмите «Повторить».</p><button type=\"button\" onclick=\"location.reload()\" style=\"min-height:44px;padding:0 18px;border:0;border-radius:12px;background:#2563eb;color:#fff;font-weight:700\">Повторить</button></body></html>",
+        {
+          status: 503,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-store",
+          },
+        },
+      )
+    )),
   );
 });
 

@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import CabinetIcon from "../CabinetIcons";
 import { usePageTitle } from "../hooks/usePageTitle";
+import {
+  cabinetMeetingPathFromHref,
+  isCabinetMeetingHref,
+  resolveAuthenticatedMeetingNavigation,
+} from "../meetingNavigation";
 
 export const ASSIGNMENT_STATUS_COLORS = {
   new: "#2563EB",
@@ -283,13 +288,27 @@ export function lessonMeetingHref(event) {
   const status = event?.video_meeting?.status || event?.videoMeeting?.status;
   // Пока учитель не начал урок — не отдаём ссылку для «Подключиться».
   if (status && status !== "live") return "";
-  const vmUrl = event?.video_meeting?.pageUrl || event?.videoMeeting?.pageUrl;
-  if (vmUrl) return vmUrl;
-  return event?.meeting_url || event?.link || "";
+  const candidates = [
+    event?.video_meeting?.pageUrl,
+    event?.videoMeeting?.pageUrl,
+    event?.video_meeting?.joinUrl,
+    event?.videoMeeting?.joinUrl,
+    event?.meeting_url,
+    event?.link,
+  ];
+  for (const raw of candidates) {
+    const path = cabinetMeetingPathFromHref(raw);
+    if (path) return path;
+  }
+  for (const raw of candidates) {
+    const nav = resolveAuthenticatedMeetingNavigation(raw);
+    if (nav.kind === "external") return nav.href;
+  }
+  return "";
 }
 
 export function isInternalMeetingHref(href) {
-  return typeof href === "string" && href.startsWith("/cabinet/meetings/");
+  return isCabinetMeetingHref(href);
 }
 
 export function useLessonConnectAvailable(startsAt, endsAt, meetingStatus = "") {

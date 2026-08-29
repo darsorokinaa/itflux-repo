@@ -105,6 +105,8 @@ class VideoMeetingApiTests(TestCase):
         self.assertTrue(meeting["joinUrl"].startswith("/cabinet/meetings/"))
         self.assertNotIn("jwt", str(meeting).lower())
         self.assertNotIn("meet.example.test", meeting["joinUrl"])
+        self.assertFalse(meeting["joinUrl"].startswith("http"))
+        self.assertNotIn("lesson.", meeting["joinUrl"])
 
         db = VideoMeeting.objects.get(uuid=meeting["uuid"])
         self.assertEqual(db.status, VideoMeeting.Status.SCHEDULED)
@@ -415,6 +417,10 @@ class VideoMeetingApiTests(TestCase):
         self.assertTrue(teacher_payload["context"]["user"]["moderator"] in (True, "true"))
         self.assertTrue(student_payload["context"]["user"]["moderator"] in (False, "false"))
         self.assertNotIn("JITSI_APP_SECRET", str(teacher_config))
+        self.assertTrue(teacher_config["meeting"]["returnUrl"].startswith("/cabinet/"))
+        self.assertTrue(student_config["meeting"]["returnUrl"].startswith("/cabinet/"))
+        self.assertNotIn("lesson.", teacher_config["meeting"]["returnUrl"])
+        self.assertNotIn("http", teacher_config["meeting"]["returnUrl"])
         self.assertNotIn("test-secret-not-for-production", str(teacher_config))
 
     def test_join_config_does_not_create_or_rotate_room(self):
@@ -703,6 +709,8 @@ class VideoMeetingApiTests(TestCase):
         self.assertIsNotNone(event_payload.get("videoMeeting"))
         self.assertTrue(event_payload["videoMeeting"]["pageUrl"].startswith("/cabinet/meetings/"))
         self.assertEqual(event_payload.get("link"), event_payload["videoMeeting"]["pageUrl"])
+        self.assertFalse(str(event_payload["videoMeeting"]["pageUrl"]).startswith("http"))
+        self.assertNotIn("lesson.", str(event_payload["videoMeeting"]["pageUrl"]))
         self.assertEqual(event_payload["videoMeeting"]["status"], "scheduled")
 
         event_id = int(str(event_payload["id"]).replace("local-", ""))

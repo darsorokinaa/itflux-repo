@@ -14,12 +14,14 @@ const {
   lookupCanvas,
   leaveBoardFrame,
   pickBoardIframe,
+  enterBoardFrame,
 } = require("./board");
 
+const { TIMEOUTS } = require("./timeouts");
 const STROKE_DEGRADE_MS = 10_000;
 const BOARD_SWITCH_DEGRADE_MS = 10_000;
-const ACTION_HANG_MS = 20_000;
-const STROKE_HANG_MS = 90_000;
+const ACTION_HANG_MS = TIMEOUTS.ACTION_HANG;
+const STROKE_HANG_MS = TIMEOUTS.STROKE_HANG;
 const CHECKPOINT_MINUTES = [0, 10, 20, 30, 45, 60];
 
 function freezeFail(message, extras = {}) {
@@ -192,10 +194,9 @@ async function probeBoardLiveness(browser) {
     const iframes = await listIframes(browser);
     probe.boardIframes = countBoardIframes(iframes);
     probe.domResponds = true;
-    const picked = pickBoardIframe(iframes);
-    if (picked && picked.el) {
+    if (probe.boardIframes > 0) {
       try {
-        await browser.switchFrame(picked.el);
+        await enterBoardFrame(browser, { timeoutMs: 4_000 });
         const inner = await lookupCanvas(browser);
         if (inner && inner.displayed && inner.width > 0 && inner.height > 0) {
           probe.canvasFound = true;
@@ -237,10 +238,9 @@ async function captureStrokeHealth(browser) {
     snapshot.jitsiIframes = await jitsiIframeCount(browser);
     const iframes = await listIframes(browser);
     snapshot.boardIframes = countBoardIframes(iframes);
-    const picked = pickBoardIframe(iframes);
-    if (picked && picked.el) {
+    if (snapshot.boardIframes > 0) {
       try {
-        await browser.switchFrame(picked.el);
+        await enterBoardFrame(browser, { timeoutMs: 4_000 });
         const inner = await lookupCanvas(browser);
         if (inner) {
           snapshot.canvas = {
@@ -488,7 +488,7 @@ async function captureFailureContext(browser, extras = {}) {
       from: "board-iframe-box",
     };
     try {
-      await browser.switchFrame(picked.el);
+      await enterBoardFrame(browser, { timeoutMs: 4_000 });
       const inner = await lookupCanvas(browser);
       if (inner) {
         canvas = {

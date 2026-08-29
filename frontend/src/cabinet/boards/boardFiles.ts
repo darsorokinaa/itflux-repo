@@ -1,6 +1,8 @@
 /** Вынос dataURL/blob из сцены в защищённые asset URL через API. */
 
-const ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp"]);
+import { BOARD_IMAGE_ALLOWED_MIME, resolveBoardImageMime } from "./boardImageMime";
+
+const ALLOWED_MIME = BOARD_IMAGE_ALLOWED_MIME;
 
 /** Стабильный URL для persist/live — не blob/data. */
 const STABLE_URL_KEY = "itfluxStableURL";
@@ -20,7 +22,7 @@ function parseDataUrl(dataUrl: string): { mime: string; bytes: Uint8Array } | nu
     const binary = atob(b64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-    return { mime, bytes };
+    return { mime: resolveBoardImageMime(mime, bytes) || mime, bytes };
   } catch {
     return null;
   }
@@ -30,9 +32,10 @@ async function parseBlobUrl(blobUrl: string): Promise<{ mime: string; bytes: Uin
   try {
     const res = await fetch(blobUrl);
     const blob = await res.blob();
-    const mime = (blob.type || "application/octet-stream").split(";", 1)[0];
     const buf = await blob.arrayBuffer();
-    return { mime, bytes: new Uint8Array(buf) };
+    const bytes = new Uint8Array(buf);
+    const mime = resolveBoardImageMime(blob.type, bytes) || "application/octet-stream";
+    return { mime, bytes };
   } catch {
     return null;
   }
@@ -170,9 +173,11 @@ export async function externalizeSceneFiles(
       parsed = await parseBlobUrl(dataUrl);
     }
     if (!parsed) continue;
-    if (!ALLOWED_MIME.has(parsed.mime)) {
+    const mime = resolveBoardImageMime(parsed.mime, parsed.bytes);
+    if (!ALLOWED_MIME.has(mime)) {
       throw new Error("Допустимы только PNG, JPEG и WebP. SVG не поддерживается.");
     }
+    parsed = { ...parsed, mime };
 
     const form = new FormData();
     const blob = new Blob([parsed.bytes.buffer as ArrayBuffer], { type: parsed.mime });

@@ -12,6 +12,7 @@
 
 const { writeJson, writeText, screenshot } = require("./artifacts");
 const { FlowError } = require("./dom");
+const { TIMEOUTS } = require("./timeouts");
 
 function isNativeContext(name) {
   return String(name || "").toUpperCase() === "NATIVE_APP";
@@ -128,7 +129,7 @@ async function waitAllowGone(browser, { timeoutMs = 8_000, selectors = ALLOW_SEL
  * @param {object} browser
  * @param {{ isAlreadyLive?: () => Promise<boolean> }} opts
  */
-async function allowIosMicrophonePrompt(browser, { timeoutMs = 20_000, intervalMs = 1_200, isAlreadyLive } = {}) {
+async function allowIosMicrophonePrompt(browser, { timeoutMs = TIMEOUTS.MIC_PERMISSION, intervalMs = 800, isAlreadyLive } = {}) {
   const started = Date.now();
   const initial = await browser.getContexts();
   writeJson("contexts-before-permission.json", { contexts: initial, at: new Date().toISOString() });
@@ -225,7 +226,7 @@ async function allowIosMicrophonePrompt(browser, { timeoutMs = 20_000, intervalM
   };
 }
 
-async function allowAndroidMicrophonePrompt(browser, { timeoutMs = 20_000, intervalMs = 1_200, isAlreadyLive } = {}) {
+async function allowAndroidMicrophonePrompt(browser, { timeoutMs = TIMEOUTS.MIC_PERMISSION, intervalMs = 800, isAlreadyLive } = {}) {
   const started = Date.now();
   let lastError = "";
   let initial = [];

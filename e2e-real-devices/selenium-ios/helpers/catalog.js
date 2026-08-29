@@ -138,14 +138,17 @@ function parseBoardTestEnv(env = process.env) {
   const modeRaw = String(env.BOARD_TEST_MODE || "core").trim().toLowerCase();
   const minutesRaw = env.TEST_MINUTES;
   const minutes = minutesRaw == null || minutesRaw === "" ? 60 : Number(minutesRaw);
-  let mode = "core";
-  if (modeRaw === "stress") mode = "stress";
-  else if (modeRaw === "smoke") mode = "smoke";
-  else if (modeRaw === "quick") mode = "quick";
-  else if (modeRaw === "core") mode = "core";
+  const strokesRaw = env.STRESS_STROKES;
+  const strokes = strokesRaw == null || strokesRaw === "" ? 30 : Number(strokesRaw);
+  const allowed = new Set([
+    "quick", "reliability", "tabcycle", "stress", "smoke", "core", "full",
+    "permission", "entry", "soak",
+  ]);
+  const mode = allowed.has(modeRaw) ? modeRaw : "core";
   return {
     mode,
     testMinutes: Number.isFinite(minutes) && minutes > 0 ? Math.floor(minutes) : 60,
+    stressStrokes: Number.isFinite(strokes) && strokes > 0 ? Math.min(50, Math.floor(strokes)) : 30,
   };
 }
 
@@ -155,7 +158,7 @@ function parseMatrixEnv(env = process.env) {
   const maxRaw = env.MAX_DEVICES;
   const maxDevices = maxRaw == null || maxRaw === "" ? 0 : Number(maxRaw);
   const concRaw = env.DEVICE_CONCURRENCY;
-  const concurrency = concRaw == null || concRaw === "" ? 1 : Number(concRaw);
+  const concurrency = concRaw == null || concRaw === "" ? 0 : Number(concRaw);
   const board = parseBoardTestEnv(env);
   const deviceNames = String(env.DEVICE_NAME || "")
     .split(",")
@@ -167,9 +170,10 @@ function parseMatrixEnv(env = process.env) {
     os: os === "ios" || os === "android" ? os : "all",
     kind: kind === "phone" || kind === "tablet" ? kind : "all",
     maxDevices: Number.isFinite(maxDevices) && maxDevices > 0 ? Math.floor(maxDevices) : 0,
-    concurrency: Number.isFinite(concurrency) && concurrency > 1 ? Math.floor(concurrency) : 1,
+    concurrency: Number.isFinite(concurrency) && concurrency > 0 ? Math.floor(concurrency) : 0,
     mode: board.mode,
     testMinutes: board.testMinutes,
+    stressStrokes: board.stressStrokes,
     deviceNames,
     deviceOsVersion,
     matrixSet: matrixSet === "all" || matrixSet === "representatives" ? matrixSet : "",
@@ -224,7 +228,20 @@ function entryKey(entry) {
   return `${entry.device}|${entry.os_version}|${osFamily(entry)}`;
 }
 
-function pickStressRepresentatives(sortedEntries) {
+function isIphoneProMax(device) {
+  return /iPhone\s+\d+\s+Pro\s+Max/i.test(String(device || ""));
+}
+
+function isIphonePro(device) {
+  return /iPhone\s+\d+\s+Pro(?!\s+Max)/i.test(String(device || ""));
+}
+
+function isIphonePlain(device) {
+  const d = String(device || "");
+  return /iPhone/i.test(d) && !/Pro/i.test(d);
+}
+
+function pickFromSorted(sortedEntries) {
   const list = Array.isArray(sortedEntries) ? sortedEntries : [];
   const used = new Set();
   const takeFirst = (pred) => {
@@ -247,6 +264,11 @@ function pickStressRepresentatives(sortedEntries) {
   const add = (entry) => {
     if (entry) out.push(entry);
   };
+  return { takeFirst, takeLast, add, out };
+}
+
+function pickCoverageRepresentatives(sortedEntries) {
+  const { takeFirst, takeLast, add, out } = pickFromSorted(sortedEntries);
   add(takeFirst((e) => osFamily(e) === "ios" && kindOf(e) === "phone" && iphoneGeneration(e.device) >= 12));
   add(
     takeFirst((e) => osFamily(e) === "ios" && kindOf(e) === "phone" && iphoneGeneration(e.device) < 12)
@@ -259,23 +281,58 @@ function pickStressRepresentatives(sortedEntries) {
   return out;
 }
 
-function pickCoverageRepresentatives(sortedEntries) {
-  return pickStressRepresentatives(sortedEntries);
+function pickQuickRepresentatives(sortedEntries) {
+  const { takeFirst, takeLast, add, out } = pickFromSorted(sortedEntries);
+  add(takeFirst((e) => osFamily(e) === "ios" && kindOf(e) === "phone" && isIphoneProMax(e.device)));
+  add(takeFirst((e) => osFamily(e) === "ios" && kindOf(e) === "phone" && isIphonePro(e.device)));
+  add(takeFirst((e) => osFamily(e) === "ios" && kindOf(e) === "phone" && isIphonePlain(e.device) && iphoneGeneration(e.device) >= 12));
+  add(
+    takeFirst((e) => osFamily(e) === "ios" && kindOf(e) === "phone" && iphoneGeneration(e.device) < 12)
+    || takeLast((e) => osFamily(e) === "ios" && kindOf(e) === "phone"),
+  );
+  add(takeFirst((e) => osFamily(e) === "ios" && kindOf(e) === "tablet"));
+  add(takeFirst((e) => osFamily(e) === "android" && kindOf(e) === "phone" && androidVendor(e.device) === "pixel"));
+  add(takeFirst((e) => osFamily(e) === "android" && kindOf(e) === "phone" && androidVendor(e.device) === "samsung"));
+  add(takeFirst((e) => osFamily(e) === "android" && kindOf(e) === "tablet"));
+  return out;
+}
+
+function pickDrawStressRepresentatives(sortedEntries) {
+  const { takeFirst, add, out } = pickFromSorted(sortedEntries);
+  add(takeFirst((e) => osFamily(e) === "ios" && kindOf(e) === "phone" && iphoneGeneration(e.device) >= 12));
+  add(takeFirst((e) => osFamily(e) === "ios" && kindOf(e) === "tablet"));
+  add(
+    takeFirst((e) => osFamily(e) === "android" && kindOf(e) === "phone" && androidVendor(e.device) === "pixel")
+    || takeFirst((e) => osFamily(e) === "android" && kindOf(e) === "phone" && androidVendor(e.device) === "samsung"),
+  );
+  return out;
+}
+
+function pickStressRepresentatives(sortedEntries) {
+  return pickCoverageRepresentatives(sortedEntries);
+}
+
+function representativePicker(mode) {
+  if (mode === "stress") return pickDrawStressRepresentatives;
+  if (mode === "quick" || mode === "tabcycle" || mode === "permission" || mode === "entry") {
+    return pickQuickRepresentatives;
+  }
+  if (mode === "reliability" || mode === "smoke") return pickCoverageRepresentatives;
+  return null;
 }
 
 function shouldUseRepresentatives(opts) {
   if (opts.deviceNames && opts.deviceNames.length) return false;
-  if (opts.matrixSet === "all") return false;
+  if (opts.matrixSet === "all" || opts.mode === "full" || opts.mode === "core") return false;
   if (opts.matrixSet === "representatives") return true;
-  return opts.mode === "stress" || opts.mode === "smoke" || opts.mode === "quick";
+  return Boolean(representativePicker(opts.mode));
 }
 
 function buildDeviceMatrix(catalog, env = process.env) {
   const opts = parseMatrixEnv(env);
   let selected = filterEntries(selectRealMobileEntries(catalog), opts).sort(compareEntries);
-  if (shouldUseRepresentatives(opts)) {
-    selected = pickCoverageRepresentatives(selected);
-  }
+  const picker = shouldUseRepresentatives(opts) ? representativePicker(opts.mode) || pickCoverageRepresentatives : null;
+  if (picker) selected = picker(selected);
   let runs = uniqueRuns(expandRuns(selected, {
     tabletOrientations: shouldUseRepresentatives(opts) ? ["portrait"] : ["portrait", "landscape"],
   }));
@@ -321,6 +378,8 @@ module.exports = {
   parseBoardTestEnv,
   pickStressRepresentatives,
   pickCoverageRepresentatives,
+  pickQuickRepresentatives,
+  pickDrawStressRepresentatives,
   uniqueRuns,
   runKey,
 };

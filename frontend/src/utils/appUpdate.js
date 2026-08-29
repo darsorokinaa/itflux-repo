@@ -1,5 +1,6 @@
 import { getAppVersion } from "./appVersion";
 import { isAppUpdateUnsafe } from "./appUpdateGuard";
+import { reportClientEvent } from "./clientTelemetry";
 
 const RELOAD_ONCE_KEY = "itflux.reload-for-version";
 const VERSION_QUERY = "_itflux_v";
@@ -173,7 +174,9 @@ async function requestSwUpdate() {
 }
 
 function onControllerChange() {
+  reportClientEvent("SW_CONTROLLER_CHANGE", {});
   // New SW took control — verify against /version.json before reloading.
+  // Never auto-reload a live lesson / board (isAppUpdateUnsafe).
   checkForAppUpdate().then((state) => {
     if (!state.updateAvailable) return;
     if (!isAppUpdateUnsafe() && !alreadyReloadedFor(state.remoteVersion)) {
@@ -184,6 +187,13 @@ function onControllerChange() {
 
 function onSwMessage(event) {
   if (!event?.data) return;
+  const swType = event.data.type;
+  if (swType === "SW_INSTALL" || swType === "SW_ACTIVATE" || swType === "SW_NAVIGATION_FETCH") {
+    reportClientEvent(swType, {
+      path: String(event.data.path || "").slice(0, 80),
+      version: String(event.data.version || "").slice(0, 64),
+    });
+  }
   if (event.data.type === "ITFLUX_SW_ACTIVATED") {
     const version = event.data.version || "";
     if (!isRemoteNewer(version)) return;

@@ -204,6 +204,7 @@ export default function SyncedMaterialWorkspace({
   onConfigurePermissions = null,
   studentViewports = {},
   onSendStudentViewport = null,
+  embedResetKey = 0,
 }) {
   const stageRef = useRef(null);
   const surfaceRef = useRef(null);
@@ -1136,7 +1137,7 @@ export default function SyncedMaterialWorkspace({
                   iframeRef.current = el;
                   mediaRef.current = el;
                 }}
-                key={frameBaseKey(frameSrc)}
+                key={`${frameBaseKey(frameSrc)}:${embedResetKey}`}
                 title={material?.title || "Материал"}
                 src={frameSrc}
                 className={`video-lesson-workspace__frame${isBoard ? " video-lesson-workspace__frame--board" : ""}`}

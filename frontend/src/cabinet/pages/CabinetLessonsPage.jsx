@@ -18,6 +18,7 @@ import {
   sessionStatusTone,
   sessionTypeLabel,
 } from "../scheduleLessonUtils";
+import { resolveAuthenticatedMeetingNavigation } from "../meetingNavigation";
 
 const FILTERS = [
   { id: "all", label: "Все" },
@@ -111,12 +112,18 @@ export default function CabinetLessonsPage() {
   }, [navigate]);
 
   const handleJoin = useCallback((event) => {
-    if (event.link) {
-      window.open(event.link, "_blank", "noopener,noreferrer");
+    const href = event.videoMeeting?.pageUrl || event.videoMeeting?.joinUrl || event.link || "";
+    const nav = resolveAuthenticatedMeetingNavigation(href);
+    if (nav.kind === "internal") {
+      navigate(nav.href);
+      return;
+    }
+    if (nav.kind === "external") {
+      window.open(nav.href, "_blank", "noopener,noreferrer");
       return;
     }
     notifySoon();
-  }, [notifySoon]);
+  }, [navigate, notifySoon]);
 
   return (
     <CabinetPageShell className="cb-section--lessons">

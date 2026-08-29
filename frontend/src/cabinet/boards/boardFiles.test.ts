@@ -72,6 +72,23 @@ describe("externalizeSceneFiles", () => {
     ).rejects.toThrow(/SVG/);
   });
 
+  it("принимает JPEG с пустым MIME из Android picker", async () => {
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 1, 2, 3, 4, 5, 6, 7]);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+    const dataURL = `data:application/octet-stream;base64,${btoa(binary)}`;
+    const upload = vi.fn().mockResolvedValue({
+      id: "f1",
+      dataURL: "/api/cabinet/interactive-boards/b/assets/a/",
+      mimeType: "image/jpeg",
+    });
+    await externalizeSceneFiles({ f1: { dataURL } }, upload);
+    expect(upload).toHaveBeenCalledTimes(1);
+    const form = upload.mock.calls[0][0] as FormData;
+    const blob = form.get("file") as Blob;
+    expect(blob.type).toBe("image/jpeg");
+  });
+
   it("filesForLivePublish отбрасывает blob/data", () => {
     const out = filesForLivePublish({
       a: { dataURL: "blob:http://local/1" },

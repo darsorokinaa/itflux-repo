@@ -1,13 +1,23 @@
 import { Component } from "react";
+import { reportClientEvent } from "../utils/clientTelemetry";
+import { cabinetHomePath } from "../utils/appBoot";
+import { isStandaloneDisplay } from "../cabinet/pwa/pwaHelpers";
+
+function safeMessage(error) {
+  return String(error?.message || error || "render").slice(0, 240);
+}
+
+function safeStack(error, info) {
+  return String(error?.stack || info?.componentStack || "").slice(0, 800);
+}
 
 /**
- * Перехватывает ошибки рендера/эффектов в поддереве, чтобы при сбое
- * пользователь видел понятное сообщение, а не полностью пустой экран.
+ * Top-level and route crash catcher. Never leave a blank #root.
  */
 class ErrorBoundary extends Component {
   constructor(props) {
     super(props);
-    this.state = { error: null };
+    this.state = { error: null, repeats: 0 };
   }
 
   static getDerivedStateFromError(error) {
@@ -15,73 +25,87 @@ class ErrorBoundary extends Component {
   }
 
   componentDidCatch(error, info) {
-    console.error("UI_ERROR_BOUNDARY:", error, info?.componentStack);
+    const repeats = (this.state.repeats || 0) + 1;
+    this.setState({ repeats });
+    // eslint-disable-next-line no-console
+    console.error("[APP_FATAL]", error, info?.componentStack);
+    try {
+      reportClientEvent("APP_RENDER_ERROR", {
+        message: safeMessage(error),
+        stack: safeStack(error, info),
+        route: typeof window !== "undefined" ? String(window.location.pathname || "").slice(0, 160) : "",
+        meetingId: String(this.props.meetingId || "").slice(0, 64),
+        role: String(this.props.role || "").slice(0, 32),
+        pwa: isStandaloneDisplay(),
+        repeats,
+      });
+    } catch {
+      /* ignore */
+    }
+    this.props.onError?.(error, info);
   }
 
-  handleReload = () => {
+  handleRetry = () => {
     this.setState({ error: null });
+    this.props.onRetry?.();
+  };
+
+  handleReload = () => {
     if (typeof window !== "undefined") window.location.reload();
   };
 
+  handleHome = () => {
+    if (typeof window === "undefined") return;
+    const href = this.props.homeHref || cabinetHomePath(window.location.pathname);
+    window.location.assign(href);
+  };
+
   render() {
-    const { error } = this.state;
+    const { error, repeats } = this.state;
     if (!error) return this.props.children;
 
+    const kind = this.props.kind === "room" ? "room" : "app";
+    const title = kind === "room"
+      ? "Не удалось открыть урок."
+      : "Не удалось загрузить приложение.";
+    const showHome = kind === "room" || repeats >= 1;
+
     return (
-      <div
-        role="alert"
-        style={{
-          maxWidth: 640,
-          margin: "32px auto",
-          padding: 24,
-          borderRadius: 16,
-          border: "1.5px solid #fecaca",
-          background: "#fef2f2",
-          color: "#7f1d1d",
-          fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
-        }}
-      >
-        <h2 style={{ margin: "0 0 10px", fontSize: 22, lineHeight: 1.2 }}>
-          Что-то пошло не так при отображении страницы
-        </h2>
-        <p style={{ margin: "0 0 16px", fontSize: 15, lineHeight: 1.5, color: "#b91c1c" }}>
-          Произошла ошибка при формировании страницы. Попробуйте обновить — если ошибка
-          повторяется, сообщите этот текст разработчику.
+      <div className="itflux-fatal-fallback" role="alert" data-testid="app-error-fallback">
+        <h2 className="itflux-fatal-fallback__title">{title}</h2>
+        <p className="itflux-fatal-fallback__text">
+          {kind === "room"
+            ? "Комната не открылась. Можно переподключиться или вернуться в кабинет."
+            : "Попробуйте ещё раз. Если ошибка повторится — обновите приложение."}
         </p>
-        <pre
-          style={{
-            margin: "0 0 16px",
-            padding: 12,
-            borderRadius: 8,
-            background: "#fff",
-            border: "1px solid #fecaca",
-            color: "#991b1b",
-            fontSize: 12,
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-            maxHeight: 240,
-            overflow: "auto",
-          }}
-        >
-          {String(error?.stack || error?.message || error)}
-        </pre>
-        <button
-          type="button"
-          onClick={this.handleReload}
-          style={{
-            appearance: "none",
-            border: "none",
-            borderRadius: 999,
-            padding: "10px 18px",
-            background: "#2b52f5",
-            color: "#fff",
-            fontWeight: 700,
-            fontSize: 14,
-            cursor: "pointer",
-          }}
-        >
-          Обновить страницу
-        </button>
+        <div className="itflux-fatal-fallback__actions">
+          <button
+            type="button"
+            className="itflux-fatal-fallback__btn itflux-fatal-fallback__btn--primary"
+            data-testid="app-error-retry"
+            onClick={this.handleRetry}
+          >
+            {kind === "room" ? "Переподключиться" : "Повторить"}
+          </button>
+          <button
+            type="button"
+            className="itflux-fatal-fallback__btn"
+            data-testid="app-error-reload"
+            onClick={this.handleReload}
+          >
+            {kind === "room" ? "Обновить" : "Обновить приложение"}
+          </button>
+          {showHome ? (
+            <button
+              type="button"
+              className="itflux-fatal-fallback__btn"
+              data-testid="app-error-home"
+              onClick={this.handleHome}
+            >
+              Вернуться в кабинет
+            </button>
+          ) : null}
+        </div>
       </div>
     );
   }

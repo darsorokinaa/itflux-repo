@@ -294,9 +294,30 @@ function App() {
           <Route path="/cabinet/join/:token" element={<LegacyInviteRedirect />} />
           <Route path="/cabinet/join/:token/" element={<LegacyInviteRedirect />} />
           <Route path="/cabinet/interactives/:id/play" element={<CabinetInteractivePlayPage />} />
-          <Route path="/cabinet/boards/:boardId" element={<CabinetBoardEditorPage />} />
-          <Route path="/teacher/boards/:boardId" element={<CabinetBoardEditorPage />} />
-          <Route path="/cabinet/meetings/:meetingUuid" element={<VideoMeetingPage />} />
+          <Route
+            path="/cabinet/boards/:boardId"
+            element={(
+              <ErrorBoundary kind="room" homeHref="/cabinet">
+                <CabinetBoardEditorPage />
+              </ErrorBoundary>
+            )}
+          />
+          <Route
+            path="/teacher/boards/:boardId"
+            element={(
+              <ErrorBoundary kind="room" homeHref="/cabinet">
+                <CabinetBoardEditorPage />
+              </ErrorBoundary>
+            )}
+          />
+          <Route
+            path="/cabinet/meetings/:meetingUuid"
+            element={(
+              <ErrorBoundary kind="room" homeHref="/cabinet">
+                <VideoMeetingPage />
+              </ErrorBoundary>
+            )}
+          />
           <Route path="/cabinet/student" element={<StudentCabinetPage />}>
             <Route index element={<StudentDashboard />} />
             {/* === Основные вкладки MVP === */}

@@ -1,6 +1,7 @@
 /** Mobile/tablet shell helpers for the board editor. Does not touch scene data. */
 
 export const BOARD_PHONE_MQ = "(max-width: 768px)";
+export const BOARD_LANDSCAPE_MQ = "(max-height: 600px) and (orientation: landscape)";
 export const BOARD_TOUCH_MQ = "(max-width: 1024px) and (pointer: coarse)";
 
 export function isBoardEmbeddedInIframe(): boolean {
@@ -14,7 +15,7 @@ export function isBoardEmbeddedInIframe(): boolean {
 
 export function isBoardCompactShell(win: Window = window): boolean {
   if (typeof win.matchMedia !== "function") return false;
-  return win.matchMedia(BOARD_PHONE_MQ).matches;
+  return win.matchMedia(BOARD_PHONE_MQ).matches || win.matchMedia(BOARD_LANDSCAPE_MQ).matches;
 }
 
 export function isBoardTouchShell(win: Window = window): boolean {

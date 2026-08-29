@@ -2,6 +2,8 @@
 
 import { filesForLivePublish } from "./boardFiles";
 import { reportClientEvent } from "../../utils/clientTelemetry";
+import { RESUME_TIMING } from "../pwa/pwaResumeLifecycle";
+import { trackRealtimeSocket } from "../pwa/runtimeResources";
 import {
   applyBoardOps,
   buildLivePublishPayload,
@@ -147,6 +149,8 @@ export type CollabMessage =
       zoom: number;
       width?: number;
       height?: number;
+      centerX?: number;
+      centerY?: number;
       seq?: number;
       t_sent?: number;
     }
@@ -161,6 +165,8 @@ export type CollabMessage =
       zoom: number;
       width?: number;
       height?: number;
+      centerX?: number;
+      centerY?: number;
       seq?: number;
       t_sent?: number;
     }
@@ -213,7 +219,7 @@ type Handlers = {
   onRemoteCursor?: (cursor: RemoteCursor | null, clientId: string) => void;
   onRemoteTool?: (clientId: string, tool: string) => void;
   onRemoteViewport?: (viewport: TeacherViewport) => void;
-  onStatus?: (status: "connecting" | "open" | "closed" | "error") => void;
+  onStatus?: (status: "connecting" | "open" | "closed" | "error" | "failed") => void;
   onResyncNeeded?: () => void;
   /** Пир после reconnect просит текущую живую сцену (не REST). */
   onSnapshotRequest?: (fromClientId: string) => void;
@@ -245,7 +251,8 @@ export const BOARD_RECONNECT = {
   JITTER: 0.2,
   MAX_ATTEMPT: 8,
   PONG_STALE_MS: 40000,
-  HIDDEN_RESUME_MS: 5000,
+  HIDDEN_RESUME_MS: RESUME_TIMING.MIN_BACKGROUND_MS,
+  PING_ACK_MS: RESUME_TIMING.PING_ACK_MS,
   LARGE_PAYLOAD_BYTES: 80_000,
 };
 
@@ -280,6 +287,7 @@ export function createBoardCollabSession(
       : `c-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
   let socket: WebSocket | null = null;
+  let untrackSocket = () => {};
   let closed = false;
   let reconnectTimer: number | null = null;
   let liveTimer: number | null = null;
@@ -296,6 +304,10 @@ export function createBoardCollabSession(
   let lastPingAt = 0;
   let lastPongAt = 0;
   let lastHiddenAt = 0;
+  let pingAckTimer: number | null = null;
+  let awaitingPingAck = false;
+  let resumeInProgress = false;
+  let resumeUnlockTimer: number | null = null;
   let lastCloseCode: number | null = null;
   let payloadSizes: number[] = [];
   let bytesWindowStart = Date.now();
@@ -306,6 +318,8 @@ export function createBoardCollabSession(
     scrollX: number;
     scrollY: number;
     zoom: number;
+    centerX: number;
+    centerY: number;
     width?: number;
     height?: number;
   } | null = null;
@@ -397,6 +411,32 @@ export function createBoardCollabSession(
     }
   };
 
+  const clearPingAckTimer = () => {
+    if (pingAckTimer != null) {
+      window.clearTimeout(pingAckTimer);
+      pingAckTimer = null;
+    }
+  };
+
+  const unlockResume = () => {
+    resumeInProgress = false;
+    if (resumeUnlockTimer != null) {
+      window.clearTimeout(resumeUnlockTimer);
+      resumeUnlockTimer = null;
+    }
+  };
+
+  const lockResume = () => {
+    if (resumeInProgress) return false;
+    resumeInProgress = true;
+    if (resumeUnlockTimer != null) window.clearTimeout(resumeUnlockTimer);
+    resumeUnlockTimer = window.setTimeout(() => {
+      resumeUnlockTimer = null;
+      resumeInProgress = false;
+    }, 4000);
+    return true;
+  };
+
   const clearReconnectTimer = () => {
     if (reconnectTimer != null) {
       window.clearTimeout(reconnectTimer);
@@ -453,7 +493,12 @@ export function createBoardCollabSession(
     if (closed) return;
     if (reconnectTimer != null) return;
     if (isSocketLive(socket)) return;
-    reconnectAttempt = Math.min(reconnectAttempt + 1, BOARD_RECONNECT.MAX_ATTEMPT);
+    reconnectAttempt += 1;
+    if (reconnectAttempt > BOARD_RECONNECT.MAX_ATTEMPT) {
+      unlockResume();
+      handlers.onStatus?.("failed");
+      return;
+    }
     const delay = boardReconnectDelayMs(reconnectAttempt);
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = null;
@@ -465,12 +510,23 @@ export function createBoardCollabSession(
 
   const forceReconnect = (reason = "manual") => {
     if (closed) return;
-    if (reason === "visibility" || reason === "pageshow" || reason === "online" || reason === "resume") {
+    if (
+      reason === "visibility"
+      || reason === "pageshow"
+      || reason === "pagehide"
+      || reason === "online"
+      || reason === "resume"
+      || reason === "manual"
+      || reason === "ping-ack-timeout"
+    ) {
       reconnectAttempt = 0;
     }
     clearReconnectTimer();
+    clearPingAckTimer();
+    awaitingPingAck = false;
     const ws = socket;
     socket = null;
+    untrackSocket();
     stopHeartbeat();
     detachSocket(ws);
     try {
@@ -483,24 +539,64 @@ export function createBoardCollabSession(
     connect();
   };
 
+  const verifyOpenSocket = (reason: string) => {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      forceReconnect(reason);
+      return;
+    }
+    const pingAt = Date.now();
+    lastPingAt = pingAt;
+    awaitingPingAck = true;
+    const sent = sendRaw({ type: "ping", t: pingAt });
+    if (!sent) {
+      awaitingPingAck = false;
+      forceReconnect(`${reason}-ping-fail`);
+      return;
+    }
+    clearPingAckTimer();
+    pingAckTimer = window.setTimeout(() => {
+      pingAckTimer = null;
+      if (awaitingPingAck) {
+        awaitingPingAck = false;
+        forceReconnect("ping-ack-timeout");
+        return;
+      }
+      unlockResume();
+    }, BOARD_RECONNECT.PING_ACK_MS);
+  };
+
   const resumeIfNeeded = (reason: string) => {
     if (closed) return;
     if (reason === "visibility" && document.visibilityState === "hidden") {
       lastHiddenAt = Date.now();
       return;
     }
-    const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : 0;
+    if (reason === "pagehide" || reason === "freeze") {
+      lastHiddenAt = Date.now();
+      return;
+    }
+    if (reason === "manual") {
+      unlockResume();
+    }
+    if (!lockResume()) return;
+    const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : null;
     lastHiddenAt = 0;
-    const live = isSocketLive(socket);
-    const frozenOpen = live && hiddenMs >= BOARD_RECONNECT.HIDDEN_RESUME_MS;
-    if (!live || isPongStale() || frozenOpen) {
+    const knownShort = hiddenMs != null && hiddenMs < BOARD_RECONNECT.HIDDEN_RESUME_MS;
+    if (knownShort && reason !== "online" && reason !== "manual") {
+      unlockResume();
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        lastPingAt = Date.now();
+        sendRaw({ type: "ping", t: lastPingAt });
+      }
+      return;
+    }
+    const open = Boolean(socket && socket.readyState === WebSocket.OPEN);
+    const frozenOpen = open && hiddenMs != null && hiddenMs >= BOARD_RECONNECT.HIDDEN_RESUME_MS;
+    if (!open || isPongStale() || frozenOpen) {
       forceReconnect(reason);
       return;
     }
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      lastPingAt = Date.now();
-      sendRaw({ type: "ping", t: lastPingAt });
-    }
+    verifyOpenSocket(reason);
   };
 
   const connect = () => {
@@ -518,11 +614,15 @@ export function createBoardCollabSession(
     }
     handlers.onStatus?.("connecting");
     boardWsLog("connecting", { boardId, clientId, attempt: reconnectAttempt });
+    untrackSocket();
     const ws = new WebSocket(wsUrl(boardId));
     socket = ws;
+    untrackSocket = trackRealtimeSocket(ws);
 
     ws.onopen = () => {
       if (closed || socket !== ws) return;
+      unlockResume();
+      clearPingAckTimer();
       handlers.onStatus?.("open");
       boardWsLog("open", { boardId, clientId, reconnect: reconnectAttempt > 0 });
       lastPongAt = Date.now();
@@ -562,6 +662,7 @@ export function createBoardCollabSession(
 
       if (data.type === "pong") {
         lastPongAt = Date.now();
+        awaitingPingAck = false;
         return;
       }
 
@@ -641,17 +742,17 @@ export function createBoardCollabSession(
             zoom: data.zoom,
             width: data.width,
             height: data.height,
+            centerX: data.centerX,
+            centerY: data.centerY,
             seq: data.seq,
             role: data.role,
+            displayName: data.display_name,
           },
           data.client_id,
           data.user_id,
           data.role,
         );
         if (!vp) return;
-        // Follow-target — только учитель (роль со сервера / presence).
-        const role = String(vp.role || peers.get(data.client_id)?.role || "");
-        if (role !== "teacher") return;
         if (!peers.has(data.client_id)) {
           peers.set(data.client_id, {
             clientId: data.client_id,
@@ -933,12 +1034,16 @@ export function createBoardCollabSession(
 
   const onVisibility = () => resumeIfNeeded("visibility");
   const onPageShow = () => resumeIfNeeded("pageshow");
+  const onPageHide = () => resumeIfNeeded("pagehide");
   const onOnline = () => resumeIfNeeded("online");
   const onResume = () => resumeIfNeeded("resume");
+  const onFreeze = () => resumeIfNeeded("freeze");
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("pageshow", onPageShow);
+  window.addEventListener("pagehide", onPageHide);
   window.addEventListener("online", onOnline);
   window.addEventListener("resume", onResume);
+  window.addEventListener("freeze", onFreeze);
 
   const flushLive = () => {
     liveTimer = null;
@@ -1070,6 +1175,8 @@ export function createBoardCollabSession(
       scrollX: Math.round(vp.scrollX * 100) / 100,
       scrollY: Math.round(vp.scrollY * 100) / 100,
       zoom: Math.round(vp.zoom * 10000) / 10000,
+      centerX: Math.round(vp.centerX * 100) / 100,
+      centerY: Math.round(vp.centerY * 100) / 100,
       width: vp.width,
       height: vp.height,
       seq: viewportSeq,
@@ -1129,13 +1236,15 @@ export function createBoardCollabSession(
       });
     },
     /**
-     * Viewport учителя (scroll/zoom). Отдельно от курсора и элементов.
-     * Не сохраняется в БД на backend.
+     * Viewport участника (центр сцены + zoom). Не пишется в БД.
+     * Follow на приёмнике пересчитывает scroll под свой размер экрана.
      */
     publishViewport(vp: {
       scrollX: number;
       scrollY: number;
       zoom: number;
+      centerX: number;
+      centerY: number;
       width?: number;
       height?: number;
     }, opts: { immediate?: boolean } = {}) {
@@ -1143,6 +1252,8 @@ export function createBoardCollabSession(
         scrollX: vp.scrollX,
         scrollY: vp.scrollY,
         zoom: vp.zoom > 0 ? vp.zoom : 1,
+        centerX: vp.centerX,
+        centerY: vp.centerY,
         width: vp.width,
         height: vp.height,
       };
@@ -1283,8 +1394,15 @@ export function createBoardCollabSession(
         elements: Array.isArray(elements) ? elements.slice(0, 50) : [],
       });
     },
+    reconnectNow() {
+      unlockResume();
+      reconnectAttempt = 0;
+      forceReconnect("manual");
+    },
     close() {
       closed = true;
+      unlockResume();
+      clearPingAckTimer();
       clearReconnectTimer();
       if (liveTimer != null) window.clearTimeout(liveTimer);
       if (viewportTimer != null) window.clearTimeout(viewportTimer);
@@ -1294,10 +1412,13 @@ export function createBoardCollabSession(
       stopHeartbeat();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("online", onOnline);
       window.removeEventListener("resume", onResume);
+      window.removeEventListener("freeze", onFreeze);
       const ws = socket;
       socket = null;
+      untrackSocket();
       detachSocket(ws);
       try {
         ws?.close();

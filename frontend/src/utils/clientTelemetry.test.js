@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { recoverChunkLoadOnce, reportClientEvent } from "./clientTelemetry";
+import { isChunkLoadError, recoverChunkLoadOnce, reportClientEvent } from "./clientTelemetry";
 
 describe("clientTelemetry", () => {
   beforeEach(() => {
@@ -23,7 +23,7 @@ describe("clientTelemetry", () => {
 
     it("sends allowed events without scene payloads", () => {
     expect(reportClientEvent("board_ws_closed", { code: 1006 })).toBe(true);
-    expect(reportClientEvent("board_full_state_requested", { attempt: 1 })).toBe(true);
+    expect(reportClientEvent("RESUME_START", { pwa: true, stage: "start" })).toBe(true);
     expect(navigator.sendBeacon).toHaveBeenCalledTimes(2);
     const body = navigator.sendBeacon.mock.calls[0][1];
     expect(body).toBeInstanceOf(Blob);
@@ -40,5 +40,14 @@ describe("clientTelemetry", () => {
     expect(String(replace.mock.calls[0][0])).toContain("_itflux_v=");
     expect(recoverChunkLoadOnce()).toBe(false);
     expect(replace).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats Unexpected token '<' as a stale chunk that can recover once", () => {
+    expect(isChunkLoadError({ message: "Unexpected token '<'" })).toBe(true);
+    expect(reportClientEvent("APP_FATAL_ERROR", { message: "boom" })).toBe(true);
+    expect(reportClientEvent("APP_RENDER_ERROR", { route: "/cabinet/meetings/x" })).toBe(true);
+    expect(reportClientEvent("MAIN_THREAD_STALL", { delayMs: 8000 })).toBe(true);
+    expect(reportClientEvent("JITSI_DUPLICATE", { existing: 1 })).toBe(true);
+    expect(reportClientEvent("SW_CONTROLLER_CHANGE")).toBe(true);
   });
 });

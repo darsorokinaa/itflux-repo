@@ -25,6 +25,7 @@ import "../styles/payments.css";
 import { useCabinetCall } from "../CabinetCallContext";
 import { mapApiStudent } from "../cabinetMappers";
 import { isTelemostMeetingUrl } from "../telemostPopup";
+import { cabinetMeetingPathFromHref, isCabinetMeetingHref } from "../meetingNavigation";
 import CreateScheduleLessonModal from "../components/CreateScheduleLessonModal";
 import EditScheduleLessonModal from "../components/EditScheduleLessonModal";
 import EventDetailCard from "../components/EventDetailCard";
@@ -323,7 +324,7 @@ function hasJitsiMeeting(event) {
 }
 
 function isCabinetMeetingPath(url) {
-  return typeof url === "string" && url.startsWith("/cabinet/meetings/");
+  return isCabinetMeetingHref(url);
 }
 
 function matchesSeriesScope(ev, event, scope) {
@@ -2224,7 +2225,7 @@ export default function CabinetSchedulePage() {
       try {
         let meetingUuid = event.videoMeeting?.uuid;
         if (!meetingUuid && isCabinetMeetingPath(event.link)) {
-          meetingUuid = event.link.split("/cabinet/meetings/")[1]?.split(/[/?#]/)[0];
+          meetingUuid = cabinetMeetingPathFromHref(event.link).split("/cabinet/meetings/")[1];
         }
         // Создание комнаты — только через «Создать ссылку»; здесь открываем существующую.
         if (!meetingUuid) {

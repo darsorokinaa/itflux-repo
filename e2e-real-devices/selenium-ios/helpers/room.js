@@ -1,6 +1,7 @@
 const { SELECTORS, xpathButton, xpathTab, displayed, waitFor, FlowError } = require("./dom");
 const { writeJson, screenshot, redactSecrets } = require("./artifacts");
 const { executeJson } = require("./execute-json");
+const { TIMEOUTS } = require("./timeouts");
 
 async function jitsiIframeCount(browser) {
   const frames = await browser.$$(SELECTORS.jitsiIframe);
@@ -56,24 +57,24 @@ async function isLiveRoomUi(browser) {
 async function openLessonRoom(browser, lessonRoomUrl) {
   await browser.url(lessonRoomUrl);
   const root = await browser.$(SELECTORS.roomRoot);
-  await root.waitForDisplayed({ timeout: 60_000 });
+  await root.waitForDisplayed({ timeout: TIMEOUTS.ROOM_ROOT });
   const start = await browser.$(xpathButton(SELECTORS.startLesson));
   if (await displayed(start)) await start.click();
 }
 
 async function clickWithoutCamera(browser) {
-  const btn = await browser.$(xpathButton(SELECTORS.cameraWithout));
   const shown = await waitFor(browser, async () => {
-    if (await displayed(btn)) return "camera";
-    if (await isLiveRoomUi(browser)) return "already-live";
+    const btn = await browser.$(xpathButton(SELECTORS.cameraWithout));
+    if (await displayed(btn)) return { kind: "camera", btn };
+    if (await isLiveRoomUi(browser)) return { kind: "already-live" };
     return false;
-  }, { timeoutMs: 60_000, message: "Neither «Без камеры» nor live room UI appeared" });
-  if (shown === "already-live") return { clicked: false, alreadyLive: true };
-  await btn.click();
+  }, { timeoutMs: TIMEOUTS.PREJOIN, message: "Neither «Без камеры» nor live room UI appeared" });
+  if (shown.kind === "already-live") return { clicked: false, alreadyLive: true };
+  await shown.btn.click();
   return { clicked: true, alreadyLive: false };
 }
 
-async function waitForSuccessfulJoin(browser, { timeoutMs = 60_000 } = {}) {
+async function waitForSuccessfulJoin(browser, { timeoutMs = TIMEOUTS.JITSI } = {}) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const err = await joinError(browser);
@@ -90,7 +91,7 @@ async function waitForSuccessfulJoin(browser, { timeoutMs = 60_000 } = {}) {
       }
       return { iframeCount, waitedMs: Date.now() - started };
     }
-    await browser.pause(1_000);
+    await browser.pause(400);
   }
   throw new FlowError(
     "Jitsi did not join after permission",
@@ -305,7 +306,7 @@ async function switchToMaterials(browser) {
     const openVisible = (snap.openText || []).some((el) => el.displayed);
     return Boolean(snap.materialsTabSelected && (panelShown || openVisible || snap.mobileMaterialsClass));
   }, {
-    timeoutMs: 15_000,
+    timeoutMs: TIMEOUTS.MATERIALS,
     message: "Materials tab clicked but mobile materials UI did not appear",
   });
 

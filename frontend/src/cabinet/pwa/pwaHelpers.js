@@ -2,15 +2,21 @@
  * Shared PWA helpers — one installable app for teacher and student.
  */
 
+import { reportClientEvent } from "../../utils/clientTelemetry";
+
 const INSTALL_DISMISS_KEY = "itflux-pwa-install-dismissed";
 const PUSH_PROMPT_DISMISS_KEY = "itflux-push-prompt-dismissed";
 
 export function isStandaloneDisplay() {
   if (typeof window === "undefined") return false;
-  return (
-    window.matchMedia("(display-mode: standalone)").matches
-    || window.navigator.standalone === true
-  );
+  try {
+    return Boolean(
+      window.matchMedia?.("(display-mode: standalone)")?.matches
+      || window.navigator.standalone === true,
+    );
+  } catch {
+    return Boolean(window.navigator?.standalone);
+  }
 }
 
 export function isIosDevice() {
@@ -19,7 +25,7 @@ export function isIosDevice() {
     || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 
-/** iPhone/iPad «На экран Домой»: WebRTC/iframe звонка часто не стартует. */
+/** iPhone/iPad «На экран Домой» (standalone). Не использовать для смены origin. */
 export function isIosStandaloneDisplay() {
   return isIosDevice() && isStandaloneDisplay();
 }
@@ -99,6 +105,7 @@ export async function registerServiceWorker() {
       reg.waiting.postMessage({ type: "ITFLUX_SKIP_WAITING" });
     }
     reg.addEventListener?.("updatefound", () => {
+      reportClientEvent("SW_UPDATE_FOUND", {});
       const worker = reg.installing;
       if (!worker) return;
       worker.addEventListener("statechange", () => {

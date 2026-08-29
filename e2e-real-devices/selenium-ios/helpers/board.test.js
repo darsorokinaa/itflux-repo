@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { SELECTORS } = require("./dom");
-const { classifyBoardOpen } = require("./board");
+const { classifyBoardOpen, isStaleElementError, isFrameSwitchError, enterFreshBoardFrame } = require("./board");
 
 const meetingUrl = "https://itflux-academy.ru/cabinet/meetings/abc-uuid";
 
@@ -92,4 +92,50 @@ test("click with no DOM/route change is PRODUCT BUG classification", () => {
   assert.equal(verdict.opened, false);
   assert.equal(verdict.navigation, "none");
   assert.equal(verdict.classification, "PRODUCT BUG");
+});
+
+test("isStaleElementError matches BrowserStack wording, not only W3C stale element reference", () => {
+  assert.equal(isStaleElementError(new Error("stale element reference: element is not attached")), true);
+  assert.equal(isStaleElementError(new Error("Request encountered a stale element")), true);
+  assert.equal(isStaleElementError(new Error("canvas width 0")), false);
+});
+
+test("isFrameSwitchError matches WebDriver when running frame", () => {
+  assert.equal(isFrameSwitchError(new Error('WebDriverError: An unknown server-side error occurred while processing the command. when running "frame"')), true);
+  assert.equal(isFrameSwitchError(new Error("Can't switch to frame with selector iframe.video-lesson-workspace__frame--board because it doesn't exist")), true);
+  assert.equal(isFrameSwitchError(new Error("canvas missing")), false);
+});
+
+test("enterFreshBoardFrame re-queries iframe and does not reuse a stale WebElement", async () => {
+  const iframeEls = [];
+  const browser = {
+    switchFrame: async (target) => {
+      if (target == null) return;
+      if (iframeEls.length === 1) {
+        throw new Error("Request encountered a stale element");
+      }
+    },
+    $: async (selector) => {
+      if (selector !== SELECTORS.boardWorkspaceFrame) {
+        return {
+          isExisting: async () => false,
+          isDisplayed: async () => false,
+          getSize: async () => ({ width: 0, height: 0 }),
+        };
+      }
+      const el = {
+        id: iframeEls.length + 1,
+        isExisting: async () => true,
+        isDisplayed: async () => true,
+        getSize: async () => ({ width: 390, height: 500 }),
+      };
+      iframeEls.push(el);
+      return el;
+    },
+  };
+  const entered = await enterFreshBoardFrame(browser, { timeoutMs: 3_000, maxSwitchAttempts: 4 });
+  assert.equal(entered.displayed, true);
+  assert.equal(entered.selector, SELECTORS.boardWorkspaceFrame);
+  assert.ok(iframeEls.length >= 2, "iframe must be queried again after stale switch");
+  assert.notEqual(iframeEls[0], iframeEls[1]);
 });

@@ -4,6 +4,7 @@ import CabinetIcon from "../CabinetIcons";
 import BoardLessonBlock from "./BoardLessonBlock";
 import CabinetFloatingMenu from "./CabinetFloatingMenu";
 import { openConnectionCheck, closeConnectionCheck } from "../connectionCheck/openConnectionCheck";
+import { resolveAuthenticatedMeetingNavigation } from "../meetingNavigation";
 import {
   compactLessonBillingLabel,
   financialStatusMod,
@@ -1133,9 +1134,17 @@ export default function EventDetailCard({
   const handleOpenExternalOrMeeting = () => {
     closeConnectionCheck();
     const link = meetingPageUrl || event.link || "";
-    const isInternalJitsi = typeof link === "string" && link.startsWith("/cabinet/meetings/");
-    if (hasLink && link && !isInternalJitsi && !event.videoMeeting?.uuid) {
-      window.open(link, "_blank", "noopener,noreferrer");
+    const nav = resolveAuthenticatedMeetingNavigation(link);
+    if (nav.kind === "external") {
+      window.open(nav.href, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (nav.kind === "jitsi-embed") {
+      if (onOpenMeetingPage && event.videoMeeting?.uuid) {
+        onOpenMeetingPage(event);
+        return;
+      }
+      onStart?.(event);
       return;
     }
     if (onOpenMeetingPage) {

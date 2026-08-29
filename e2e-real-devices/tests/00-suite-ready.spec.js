@@ -12,6 +12,7 @@ const {
 const { hasProductionSecrets } = require("./helpers/env");
 const { isLoginPath, isLoggedInUrl } = require("./helpers/login");
 const { redactUrl, redactText, isMeetingOrJitsiUrl } = require("./helpers/entryDiagnostics");
+const { assertLessonRoomTopLevelOrigin } = require("../helpers/lessonRoomOrigin");
 
 const assetsDir = path.join(__dirname, "assets");
 const helpersDir = path.join(__dirname, "helpers");
@@ -30,6 +31,7 @@ test.describe("suite ready", () => {
     for (const name of ["locators.js", "env.js", "login.js", "room.js", "board.js", "capture.js", "entryDiagnostics.js", "iosMicPermission.js"]) {
       expect(fs.existsSync(path.join(helpersDir, name))).toBeTruthy();
     }
+    expect(fs.existsSync(path.join(__dirname, "..", "helpers", "lessonRoomOrigin.js"))).toBeTruthy();
 
     const specsDir = __dirname;
     for (const name of [
@@ -153,5 +155,16 @@ test.describe("suite ready", () => {
     expect(isMeetingOrJitsiUrl("https://app.test/api/video-meetings/abc/join-config/")).toBeTruthy();
     expect(isMeetingOrJitsiUrl("https://jitsi.example/external_api.js")).toBeTruthy();
     expect(isMeetingOrJitsiUrl("https://cdn.example/app.js")).toBeFalsy();
+  });
+
+  test("LESSON_ROOM_TOP_LEVEL_ORIGIN helper rejects Jitsi host as window.location", async () => {
+    expect(() => assertLessonRoomTopLevelOrigin(
+      "https://itflux-academy.ru/cabinet/meetings/abc",
+      { testBaseUrl: "https://itflux-academy.ru" },
+    )).not.toThrow();
+    expect(() => assertLessonRoomTopLevelOrigin(
+      "https://lesson.itflux-academy.ru/Room?jwt=secret",
+      { testBaseUrl: "https://itflux-academy.ru" },
+    )).toThrow(/LESSON_ROOM_TOP_LEVEL_ORIGIN/);
   });
 });

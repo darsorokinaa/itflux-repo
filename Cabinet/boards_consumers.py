@@ -568,6 +568,16 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             except (TypeError, ValueError):
                 width = None
                 height = None
+            center_x = None
+            center_y = None
+            try:
+                if data.get("centerX") is not None:
+                    center_x = float(data.get("centerX"))
+                if data.get("centerY") is not None:
+                    center_y = float(data.get("centerY"))
+            except (TypeError, ValueError):
+                center_x = None
+                center_y = None
             payload = {
                 "type": "viewport_update",
                 "client_id": str(data.get("client_id") or self.client_id)[:64],
@@ -584,6 +594,10 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                 payload["width"] = width
             if height is not None:
                 payload["height"] = height
+            if center_x is not None:
+                payload["centerX"] = center_x
+            if center_y is not None:
+                payload["centerY"] = center_y
             force = bool(data.get("immediate") or data.get("force"))
             event = {"type": "board.collab", "payload": payload}
             now = time.monotonic()
@@ -873,9 +887,7 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             and payload.get("client_id") == self.client_id
         ):
             return
-        # viewport_request / paper_request нужны только учителю (ответит свежим состоянием).
-        if payload.get("type") == "viewport_request" and self.role not in ("teacher",) and self.permission != "owner":
-            return
+        # paper_request — только учителю. viewport_request — всем (ученик тоже отдаёт свой viewport).
         if payload.get("type") == "paper_request" and self.role not in ("teacher",) and self.permission != "owner":
             return
         if payload.get("type") == "snapshot_request":

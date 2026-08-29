@@ -46,6 +46,8 @@ test("production room selectors", () => {
   assert.equal(SELECTORS.excalidrawCanvas, "canvas.excalidraw__canvas");
   assert.equal(SELECTORS.toolFreedraw, "toolbar-freedraw");
   assert.equal(SELECTORS.materialsPanel, "aside.video-lesson-aside");
+  assert.equal(SELECTORS.cookieBanner, ".cookie-banner");
+  assert.equal(SELECTORS.cookieAcceptBtn, ".cookie-banner-btn");
 });
 
 test("materials success does not require role=complementary attribute", () => {

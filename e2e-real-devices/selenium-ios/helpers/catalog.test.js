@@ -87,15 +87,16 @@ test("parseMatrixEnv defaults", () => {
     os: "all",
     kind: "all",
     maxDevices: 0,
-    concurrency: 1,
+    concurrency: 0,
     mode: "core",
     testMinutes: 60,
+    stressStrokes: 30,
     deviceNames: [],
     deviceOsVersion: "",
     matrixSet: "",
   });
   assert.equal(parseMatrixEnv({ DEVICE_CONCURRENCY: "3" }).concurrency, 3);
-  assert.equal(parseMatrixEnv({ DEVICE_CONCURRENCY: "0" }).concurrency, 1);
+  assert.equal(parseMatrixEnv({ DEVICE_CONCURRENCY: "0" }).concurrency, 0);
   assert.equal(parseMatrixEnv({ BOARD_TEST_MODE: "core" }).mode, "core");
   assert.equal(parseMatrixEnv({ BOARD_TEST_MODE: "smoke" }).mode, "smoke");
   assert.equal(parseMatrixEnv({ BOARD_TEST_MODE: "stress", TEST_MINUTES: "45" }).mode, "stress");
@@ -129,18 +130,20 @@ test("DEVICE_NAME is exact and does not match Pro variants", () => {
   assert.equal(three.runs.length, 3);
 });
 
-test("stress matrix picks one representative per device class, portrait only for tablets", () => {
+test("stress matrix picks 3 representatives: modern iPhone, iPad, Android", () => {
   const stress = buildDeviceMatrix(catalog, { BOARD_TEST_MODE: "stress" });
   assert.deepEqual(stress.selected.map((e) => e.device), [
     "iPhone 15 Pro Max",
-    "iPhone 11",
     "iPad Air 5",
     "Google Pixel 8",
-    "Samsung Galaxy S23",
-    "Samsung Galaxy Tab S8",
   ]);
   assert.ok(stress.runs.every((r) => r.orientation === "portrait"));
-  assert.equal(stress.runs.length, 6);
+  assert.equal(stress.runs.length, 3);
+});
+
+test("reliability matrix uses the 6-class coverage set", () => {
+  const rel = buildDeviceMatrix(catalog, { BOARD_TEST_MODE: "reliability" });
+  assert.equal(rel.runs.length, 6);
 });
 
 test("quick matrix uses representatives, not the full catalog", () => {

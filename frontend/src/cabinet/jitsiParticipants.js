@@ -252,6 +252,7 @@ export function attachConferencePresence(api, {
   onParticipantCount,
   onJoined,
   onLeft,
+  onHangup,
   onBecameModerator,
   onMediaWarning,
   diagnostics = {},
@@ -374,8 +375,18 @@ export function attachConferencePresence(api, {
       participantId: store.localId,
     });
     if (!disposed && joinedOnce) {
-      onLeft?.({ id: store.localId });
+      onLeft?.({ id: store.localId, source: "videoConferenceLeft" });
       void reconcile("videoConferenceLeft");
+    }
+  });
+
+  api.addListener("readyToClose", () => {
+    logJitsiPresence("JITSI_READY_TO_CLOSE", {
+      ...diagnostics,
+      participantId: store.localId,
+    });
+    if (!disposed && joinedOnce) {
+      onHangup?.({ id: store.localId, source: "readyToClose" });
     }
   });
 
