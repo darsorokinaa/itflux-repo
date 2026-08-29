@@ -262,7 +262,7 @@ class TelegramCabinetAndLinksTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         menu_text = send_mock.call_args.args[0]
-        self.assertIn("Личный кабинет в Telegram", menu_text)
+        self.assertIn("Короткое меню", menu_text)
         self.assertIn("Напомнить", menu_text)
         markup = send_mock.call_args.kwargs.get("reply_markup") or {}
         buttons = [
@@ -270,8 +270,10 @@ class TelegramCabinetAndLinksTests(TestCase):
             for row in markup.get("inline_keyboard", [])
             for btn in row
         ]
-        self.assertIn("Сегодня", buttons)
+        self.assertIn("Расписание", buttons)
         self.assertIn("Напомнить", buttons)
+        self.assertIn("ДЗ", buttons)
+        self.assertIn("Журнал", buttons)
         self.assertIn("Кабинет", buttons)
 
         send_mock.reset_mock()
@@ -314,10 +316,12 @@ class TelegramCabinetAndLinksTests(TestCase):
 
         reminder = build_student_reminder_text(self.teacher, self.student)
         self.assertIn("Привет, Анна!", reminder)
+        self.assertIn("Буду ждать", reminder)
         self.assertIn("Алгебра", reminder)
-        self.assertIn("Дроби", reminder)
+        self.assertIn("По заданию «Дроби»", reminder)
         self.assertIn("https://itflux-academy.ru/cabinet/student", reminder)
         self.assertNotIn("/cabinet/payments", reminder)
+        self.assertNotIn("Не забудь", reminder)
 
         response = self._post(
             {
@@ -352,5 +356,30 @@ class TelegramCabinetAndLinksTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         sent_texts = [call.args[0] for call in send_mock.call_args_list]
-        self.assertTrue(any("Напоминание отправлено" in text for text in sent_texts))
+        self.assertTrue(any("отправлено ученику" in text for text in sent_texts))
         self.assertTrue(any("Привет, Анна!" in text and "Алгебра" in text for text in sent_texts))
+
+    def test_homework_and_journal_forward_texts(self):
+        from Cabinet.models import Homework
+        from Cabinet.telegram_cabinet import (
+            build_homework_overdue_text,
+            build_journal_parent_text,
+        )
+
+        Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="Дроби",
+            status="overdue",
+            due_at=timezone.now() - timedelta(days=2),
+        )
+        overdue = build_homework_overdue_text(self.teacher, self.student)
+        self.assertIn("Анна, привет!", overdue)
+        self.assertIn("Дроби", overdue)
+        self.assertIn("Кабинет:", overdue)
+
+        parent = build_journal_parent_text(self.teacher, self.student)
+        self.assertIn("Здравствуйте!", parent)
+        self.assertIn("Анна", parent)
+        self.assertIn("опубликованных итогов", parent)
+        self.assertIn("Дарья", parent)

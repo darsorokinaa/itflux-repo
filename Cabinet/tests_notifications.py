@@ -431,6 +431,33 @@ class HomeworkReviewNotifyTests(TestCase):
         )
         self.assertIn("focus=results", (note.payload or {}).get("url", ""))
 
+    def test_check_sends_telegram_immediately_when_connected(self):
+        from unittest.mock import patch
+
+        from Cabinet.models import NotificationPreference
+        from Cabinet.student_notifications import notify_student_homework_reviewed
+
+        prefs, _ = NotificationPreference.objects.get_or_create(user=self.student_user)
+        prefs.telegram_enabled = True
+        prefs.telegram_chat_id = "9001"
+        prefs.notify_review = True
+        prefs.save()
+
+        with patch("Cabinet.telegram_connect.send_telegram_to_user", return_value=True) as send_mock:
+            ok = notify_student_homework_reviewed(
+                review_item=self.review,
+                submission=self.submission,
+                checked=True,
+                actor=self.teacher,
+            )
+        self.assertTrue(ok)
+        self.assertTrue(send_mock.called)
+        text = send_mock.call_args.args[1]
+        self.assertIn("Работа проверена", text)
+        self.assertIn("HW1", text)
+        self.assertIn("Открыть результат", text)
+        self.assertNotIn("Открыть: /cabinet", text)
+
     def test_check_skipped_when_review_disabled(self):
         from Cabinet.student_notifications import notify_student_homework_reviewed
 

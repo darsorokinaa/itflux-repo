@@ -1,15 +1,15 @@
-"""Минимальный кабинет в Telegram: расписание, ученики, напоминание для пересылки."""
+"""Минимальный кабинет в Telegram: расписание, напоминание, ДЗ, сводка журнала."""
 
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils import timezone
 
-from .choices import HomeworkStatus, StudentStatus
+from .choices import CommentVisibility, HomeworkStatus, StudentStatus
 from .models import Homework, NotificationPreference, ScheduleEvent, Student
 from .notification_catalog import ROLE_STUDENT
 from .notification_dispatch import user_role
@@ -23,12 +23,41 @@ from Generator.telegram_utils import escape_telegram_html
 
 logger = logging.getLogger(__name__)
 
+BTN_SCHEDULE = "Расписание"
 BTN_TODAY = "Сегодня"
-BTN_STUDENTS = "Ученики"
+BTN_TOMORROW = "Завтра"
+BTN_WEEK = "Неделя"
+BTN_MONTH = "Месяц"
 BTN_REMIND = "Напомнить"
+BTN_HOMEWORK = "ДЗ"
+BTN_JOURNAL = "Журнал"
 BTN_ASSIGNMENTS = "Задания"
 BTN_CABINET = "Кабинет"
 STUDENTS_PAGE_SIZE = 8
+
+_MONTHS = (
+    "",
+    "января",
+    "февраля",
+    "марта",
+    "апреля",
+    "мая",
+    "июня",
+    "июля",
+    "августа",
+    "сентября",
+    "октября",
+    "ноября",
+    "декабря",
+)
+_WEEKDAYS = ("пн", "вт", "ср", "чт", "пт", "сб", "вс")
+
+PERIODS = {
+    "today": (0, 1, "сегодня", 20),
+    "tom": (1, 2, "завтра", 20),
+    "week": (0, 7, "неделю", 40),
+    "month": (0, 31, "месяц", 50),
+}
 
 
 def _is_teacher(user: User) -> bool:
@@ -39,29 +68,71 @@ def _cabinet_path(user: User) -> str:
     return "/cabinet/schedule" if _is_teacher(user) else "/cabinet/student"
 
 
+def _first_name(student: Student) -> str:
+    return (student.first_name or student.full_name or "друг").split()[0]
+
+
+def _teacher_name(teacher: User) -> str:
+    profile = getattr(teacher, "profile", None)
+    if profile:
+        return profile.get_display_name()
+    return (teacher.get_full_name() or "").strip()
+
+
+def _human_date(value: date) -> str:
+    return f"{_WEEKDAYS[value.weekday()]}, {value.day} {_MONTHS[value.month]}"
+
+
+def _student_cabinet_url() -> str:
+    return platform_path_url("/cabinet/student")
+
+
 def menu_keyboard(user: User) -> dict:
-    """Кнопки сразу под сообщением — так их видно после /start."""
     cabinet_url = platform_path_url(_cabinet_path(user))
     if _is_teacher(user):
         return {
             "inline_keyboard": [
                 [
-                    {"text": BTN_TODAY, "callback_data": "c:today"},
-                    {"text": BTN_STUDENTS, "callback_data": "c:students"},
+                    {"text": BTN_SCHEDULE, "callback_data": "c:today"},
+                    {"text": BTN_HOMEWORK, "callback_data": "c:hw"},
                 ],
                 [
                     {"text": BTN_REMIND, "callback_data": "c:remind"},
-                    {"text": BTN_CABINET, "url": cabinet_url},
+                    {"text": BTN_JOURNAL, "callback_data": "c:journal"},
                 ],
+                [{"text": BTN_CABINET, "url": cabinet_url}],
             ]
         }
     return {
         "inline_keyboard": [
             [
                 {"text": BTN_TODAY, "callback_data": "c:today"},
-                {"text": BTN_ASSIGNMENTS, "callback_data": "c:hw"},
+                {"text": BTN_TOMORROW, "callback_data": "c:tom"},
             ],
-            [{"text": BTN_CABINET, "url": cabinet_url}],
+            [
+                {"text": BTN_WEEK, "callback_data": "c:week"},
+                {"text": BTN_MONTH, "callback_data": "c:month"},
+            ],
+            [
+                {"text": BTN_ASSIGNMENTS, "callback_data": "c:hw"},
+                {"text": BTN_CABINET, "url": cabinet_url},
+            ],
+        ]
+    }
+
+
+def schedule_keyboard() -> dict:
+    return {
+        "inline_keyboard": [
+            [
+                {"text": BTN_TODAY, "callback_data": "c:today"},
+                {"text": BTN_TOMORROW, "callback_data": "c:tom"},
+            ],
+            [
+                {"text": BTN_WEEK, "callback_data": "c:week"},
+                {"text": BTN_MONTH, "callback_data": "c:month"},
+            ],
+            [{"text": "Меню", "callback_data": "c:menu"}],
         ]
     }
 
@@ -102,11 +173,12 @@ def _event_audience(event: ScheduleEvent) -> str:
     return event.title or "занятие"
 
 
-def _today_events(user: User) -> tuple[list[ScheduleEvent], object]:
+def _events_for_period(user: User, period: str) -> tuple[list[ScheduleEvent], object, str]:
+    offset, span, label, limit = PERIODS.get(period) or PERIODS["today"]
     tz = user_zoneinfo(user)
     now = user_local_now(user)
-    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    day_end = day_start + timedelta(days=1)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=offset)
+    day_end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=span)
     statuses = [ScheduleEvent.Status.PLANNED, ScheduleEvent.Status.MOVED]
     qs = ScheduleEvent.objects.filter(
         status__in=statuses,
@@ -120,27 +192,45 @@ def _today_events(user: User) -> tuple[list[ScheduleEvent], object]:
         qs = qs.filter(
             Q(student_id__in=student_ids) | Q(participants__student_id__in=student_ids)
         ).distinct()
-    return list(qs.order_by("starts_at")[:15]), tz
+    return list(qs.order_by("starts_at")[:limit]), tz, label
 
 
-def _format_today(user: User) -> str:
-    events, tz = _today_events(user)
-    lines = ["Расписание на сегодня", ""]
+def format_schedule(user: User, period: str = "today") -> str:
+    events, tz, label = _events_for_period(user, period)
+    lines = [f"Расписание на {label}", ""]
     if not events:
-        lines.append("Сегодня уроков нет.")
+        empty = {
+            "сегодня": "Сегодня уроков нет.",
+            "завтра": "Завтра уроков нет.",
+            "неделю": "На эту неделю уроков нет.",
+            "месяц": "На ближайший месяц уроков нет.",
+        }
+        lines.append(empty.get(label, "Уроков нет."))
     else:
+        last_day = None
+        show_dates = period in ("week", "month")
         for event in events:
-            when = event.starts_at.astimezone(tz).strftime("%H:%M")
+            local = event.starts_at.astimezone(tz)
+            if show_dates and local.date() != last_day:
+                if last_day is not None:
+                    lines.append("")
+                lines.append(_human_date(local.date()))
+                last_day = local.date()
             title = event.title or "Занятие"
             extra = _event_audience(event)
+            when = local.strftime("%H:%M")
             if extra and extra != title:
                 lines.append(f"{when} — {escape_telegram_html(title)} · {escape_telegram_html(extra)}")
             else:
                 lines.append(f"{when} — {escape_telegram_html(title)}")
     path = "/cabinet/schedule" if _is_teacher(user) else "/cabinet/student/lessons"
-    label = "Открыть расписание" if _is_teacher(user) else "Открыть занятия"
-    lines.extend(["", telegram_open_html(path, label)])
+    label_link = "Открыть расписание" if _is_teacher(user) else "Открыть занятия"
+    lines.extend(["", telegram_open_html(path, label_link)])
     return "\n".join(lines)
+
+
+def _format_today(user: User) -> str:
+    return format_schedule(user, "today")
 
 
 def _teacher_students(teacher: User):
@@ -151,7 +241,7 @@ def _teacher_students(teacher: User):
     )
 
 
-def _students_keyboard(students: list[Student], *, page: int = 0, action: str = "s") -> dict:
+def _students_keyboard(students: list[Student], *, page: int = 0, action: str = "r") -> dict:
     start = page * STUDENTS_PAGE_SIZE
     chunk = students[start : start + STUDENTS_PAGE_SIZE]
     rows = []
@@ -166,6 +256,7 @@ def _students_keyboard(students: list[Student], *, page: int = 0, action: str = 
         nav.append({"text": "Ещё →", "callback_data": f"c:l:{action}:{page + 1}"})
     if nav:
         rows.append(nav)
+    rows.append([{"text": "Меню", "callback_data": "c:menu"}])
     return {"inline_keyboard": rows}
 
 
@@ -194,15 +285,35 @@ def _next_lesson_for_student(teacher: User, student: Student) -> ScheduleEvent |
     )
 
 
-def _pending_homework(teacher: User, student: Student) -> list[Homework]:
+def _student_homeworks(teacher: User, student: Student, statuses: list[str], limit: int = 5):
     return list(
-        Homework.objects.filter(
-            teacher=teacher,
-            status__in=[HomeworkStatus.ASSIGNED, HomeworkStatus.OVERDUE],
-        )
+        Homework.objects.filter(teacher=teacher, status__in=statuses)
         .filter(Q(student=student) | Q(group__students=student))
         .distinct()
-        .order_by("due_at", "id")[:3]
+        .order_by("due_at", "id")[:limit]
+    )
+
+
+def _overdue_homework(teacher: User, student: Student) -> list[Homework]:
+    now = timezone.now()
+    return list(
+        Homework.objects.filter(teacher=teacher)
+        .filter(Q(student=student) | Q(group__students=student))
+        .filter(
+            Q(status=HomeworkStatus.OVERDUE)
+            | Q(status=HomeworkStatus.ASSIGNED, due_at__lt=now)
+        )
+        .distinct()
+        .order_by("due_at", "id")[:5]
+    )
+
+
+def _pending_homework(teacher: User, student: Student) -> list[Homework]:
+    return _student_homeworks(
+        teacher,
+        student,
+        [HomeworkStatus.ASSIGNED, HomeworkStatus.OVERDUE],
+        limit=3,
     )
 
 
@@ -221,8 +332,8 @@ def _student_homework(user: User) -> list[Homework]:
 
 
 def build_student_reminder_text(teacher: User, student: Student) -> str:
-    """Текст, который учитель может переслать ученику как есть."""
-    first = (student.first_name or student.full_name or "друг").split()[0]
+    """Тёплый текст, который учитель может переслать ученику."""
+    first = _first_name(student)
     tz = user_zoneinfo(teacher)
     lines = [f"Привет, {first}!", ""]
     event = _next_lesson_for_student(teacher, student)
@@ -236,7 +347,8 @@ def build_student_reminder_text(teacher: User, student: Student) -> str:
         else:
             when_label = when.strftime("%d.%m в %H:%M")
         title = event.title or "занятие"
-        lines.append(f"Напоминаю про занятие {when_label} — «{title}».")
+        lines.append(f"Напоминаю совсем коротко: занятие {when_label} — «{title}».")
+        lines.append("Буду ждать.")
     homework = _pending_homework(teacher, student)
     if homework:
         if event:
@@ -244,17 +356,102 @@ def build_student_reminder_text(teacher: User, student: Student) -> str:
         if len(homework) == 1:
             hw = homework[0]
             due = hw.due_at.astimezone(tz).strftime("%d.%m") if hw.due_at else ""
-            due_bit = f" (до {due})" if due else ""
-            lines.append(f"Не забудь сдать «{hw.title}»{due_bit}.")
+            if due:
+                lines.append(
+                    f"По заданию «{hw.title}» срок — до {due}. "
+                    "Если что-то не получается, напиши, разберёмся."
+                )
+            else:
+                lines.append(
+                    f"По заданию «{hw.title}» пока без срока. "
+                    "Если что-то не получается, напиши, разберёмся."
+                )
         else:
-            lines.append("Не забудь сдать задания:")
+            lines.append("Ещё лежат задания. Давай потихоньку закроем:")
             for hw in homework:
                 due = hw.due_at.astimezone(tz).strftime("%d.%m") if hw.due_at else ""
                 due_bit = f" — до {due}" if due else ""
                 lines.append(f"• {hw.title}{due_bit}")
+            lines.append("Если где-то застрял(а) — напиши, помогу.")
     if not event and not homework:
-        lines.append("Напоминаю заглянуть в кабинет — там расписание и задания.")
-    lines.extend(["", f"Кабинет: {platform_path_url('/cabinet/student')}"])
+        lines.append("Просто написала напомнить о себе: в кабинете есть расписание и задания.")
+        lines.append("Если нужно что-то уточнить — напиши.")
+    lines.extend(["", f"Кабинет: {_student_cabinet_url()}"])
+    return "\n".join(lines)
+
+
+def build_homework_overdue_text(teacher: User, student: Student) -> str:
+    first = _first_name(student)
+    tz = user_zoneinfo(teacher)
+    rows = _overdue_homework(teacher, student)
+    lines = [f"{first}, привет!", ""]
+    if not rows:
+        lines.append("Просроченных заданий сейчас нет. Всё хорошо.")
+    else:
+        lines.append("По домашнему заданию пока висит то, что лучше закрыть:")
+        for hw in rows:
+            due = hw.due_at.astimezone(tz).strftime("%d.%m") if hw.due_at else ""
+            due_bit = f" — срок был {due}" if due else ""
+            lines.append(f"• {hw.title}{due_bit}")
+        lines.append("")
+        lines.append("Давай разберём это на ближайших днях. Если застрял(а) — напиши, помогу.")
+    lines.extend(["", f"Кабинет: {platform_path_url('/cabinet/student/assignments')}"])
+    return "\n".join(lines)
+
+
+def build_journal_parent_text(teacher: User, student: Student) -> str:
+    """Аккуратная сводка для пересылки родителю. Без внутренних заметок."""
+    from .journal_models import AttendanceStatus, RecordPublishStatus, StudentLessonRecord
+
+    first = _first_name(student)
+    name = student.full_name or first
+    records = list(
+        StudentLessonRecord.objects.filter(
+            journal__teacher=teacher,
+            student=student,
+            publish_status__in=[
+                RecordPublishStatus.PUBLISHED,
+                RecordPublishStatus.EDITED_AFTER_PUBLISH,
+            ],
+        )
+        .select_related("journal")
+        .order_by("-journal__lesson_date", "-id")[:3]
+    )
+    lines = ["Здравствуйте!", "", f"Короткая сводка по занятиям ({name})."]
+    if not records:
+        lines.append("")
+        lines.append("Пока нет опубликованных итогов. Как только заполню журнал — пришлю сводку.")
+    else:
+        att_map = {
+            AttendanceStatus.PRESENT: "был(а) на занятии",
+            AttendanceStatus.LATE: "немного опоздал(а)",
+            AttendanceStatus.LEFT_EARLY: "ушёл(а) чуть раньше",
+            AttendanceStatus.PARTIAL: "был(а) часть занятия",
+            AttendanceStatus.ABSENT_EXCUSED: "не было на занятии, причина уважительная",
+            AttendanceStatus.ABSENT_UNEXCUSED: "не было на занятии",
+            AttendanceStatus.CANCELLED_BY_STUDENT: "занятие не состоялось",
+            AttendanceStatus.CANCELLED_BY_TEACHER: "занятие перенесено / не состоялось",
+            AttendanceStatus.TECHNICAL_ISSUE: "занятие не состоялось по технической причине",
+        }
+        for record in records:
+            journal = record.journal
+            topic = journal.actual_topic or journal.planned_topic or "занятие"
+            lines.extend(["", f"{journal.lesson_date.strftime('%d.%m')} — «{topic}»"])
+            att = att_map.get(record.attendance_status)
+            if att:
+                lines.append(att.capitalize() + ".")
+            if record.overall_score is not None:
+                score = str(record.overall_score).rstrip("0").rstrip(".")
+                lines.append(f"Оценка: {score}.")
+            if (record.recommendation or "").strip():
+                lines.append(f"Рекомендация: {record.recommendation.strip()}")
+            comment = (record.teacher_comment or "").strip()
+            if comment and record.comment_visibility == CommentVisibility.STUDENT_AND_PARENT:
+                lines.append(comment)
+    teacher_name = _teacher_name(teacher)
+    if teacher_name:
+        lines.extend(["", f"— {teacher_name}"])
+    lines.extend(["", f"Кабинет: {platform_path_url('/cabinet/student/results')}"])
     return "\n".join(lines)
 
 
@@ -262,7 +459,7 @@ def _format_assignments(user: User) -> str:
     rows = _student_homework(user)
     lines = ["Задания", ""]
     if not rows:
-        lines.append("Сейчас нет невыполненных заданий.")
+        lines.append("Сейчас нет невыполненных заданий. Можно выдохнуть.")
     else:
         tz = user_zoneinfo(user)
         for hw in rows:
@@ -275,17 +472,16 @@ def _format_assignments(user: User) -> str:
 def _welcome_text(user: User) -> str:
     if _is_teacher(user):
         return (
-            "Личный кабинет в Telegram\n\n"
-            "Сегодня — уроки на день.\n"
-            "Ученики — список.\n"
-            "Напомнить — текст, который можно переслать ученику или отправить сюда.\n"
-            "Кабинет — полная версия на сайте."
+            "Короткое меню\n\n"
+            "Расписание — сегодня, завтра, неделя или месяц.\n"
+            "ДЗ — просроченные, текст можно переслать.\n"
+            "Напомнить — тёплое сообщение ученику.\n"
+            "Журнал — аккуратная сводка для родителя."
         )
     return (
-        "Личный кабинет в Telegram\n\n"
-        "Сегодня — занятия на день.\n"
-        "Задания — что нужно сдать.\n"
-        "Кабинет — полная версия на сайте."
+        "Короткое меню\n\n"
+        "Расписание — сегодня, завтра, неделя или месяц.\n"
+        "Задания — что нужно сдать."
     )
 
 
@@ -293,51 +489,66 @@ def show_menu(chat_id, user: User) -> None:
     _reply(chat_id, _welcome_text(user), menu_keyboard(user))
 
 
-def _show_students(chat_id, teacher: User, *, page: int = 0, action: str = "s") -> None:
+def _picker_title(action: str) -> str:
+    return {
+        "r": "Кому напомнить?",
+        "h": "ДЗ — выберите ученика",
+        "j": "Журнал — сводка для родителя",
+    }.get(action, "Ученики")
+
+
+def _show_students(chat_id, teacher: User, *, page: int = 0, action: str = "r") -> None:
     students = _teacher_students(teacher)
     if not students:
         _reply(chat_id, "Пока нет учеников.", menu_keyboard(teacher))
         return
-    title = "Кому напомнить?" if action == "r" else "Ученики"
-    _reply(chat_id, title, _students_keyboard(students, page=page, action=action))
+    _reply(chat_id, _picker_title(action), _students_keyboard(students, page=page, action=action))
 
 
-def _show_student_card(chat_id, teacher: User, student: Student) -> None:
-    connected = _student_has_telegram(student)
-    tg_line = "Telegram подключён" if connected else "Telegram не подключён — можно переслать сообщение"
-    text = (
-        f"{escape_telegram_html(student.full_name)}\n\n"
-        f"{tg_line}\n\n"
-        f"{telegram_open_html(f'/cabinet/students?student={student.pk}', 'Открыть в кабинете')}"
+def _show_homework_overdue(chat_id, teacher: User, student: Student) -> None:
+    send_cb = f"c:xo:{student.pk}" if _student_has_telegram(student) else ""
+    _show_forwardable(
+        chat_id,
+        build_homework_overdue_text(teacher, student),
+        send_cb=send_cb,
+        back_cb="c:l:h:0",
     )
-    buttons = [[{"text": "Напомнить", "callback_data": f"c:r:{student.pk}"}]]
-    _reply(chat_id, text, {"inline_keyboard": buttons})
+
+
+def _show_forwardable(chat_id, text: str, *, send_cb: str = "", back_cb: str = "c:menu") -> None:
+    body = escape_telegram_html(text)
+    hint = "\n\nМожно переслать как есть."
+    buttons = []
+    if send_cb:
+        buttons.append([{"text": "Отправить ученику", "callback_data": send_cb}])
+    buttons.append([{"text": "Назад", "callback_data": back_cb}])
+    _reply(chat_id, body + hint, {"inline_keyboard": buttons})
 
 
 def _show_reminder(chat_id, teacher: User, student: Student) -> None:
-    text = escape_telegram_html(build_student_reminder_text(teacher, student))
-    hint = (
-        "\n\nМожно переслать ученику как есть."
-        if not _student_has_telegram(student)
-        else "\n\nМожно переслать или отправить ученику в бот."
+    send_cb = f"c:x:{student.pk}" if _student_has_telegram(student) else ""
+    _show_forwardable(
+        chat_id,
+        build_student_reminder_text(teacher, student),
+        send_cb=send_cb,
+        back_cb="c:l:r:0",
     )
-    buttons = []
-    if _student_has_telegram(student):
-        buttons.append([{"text": "Отправить ученику", "callback_data": f"c:x:{student.pk}"}])
-    buttons.append([{"text": "К ученикам", "callback_data": "c:l:r:0"}])
-    _reply(chat_id, text + hint, {"inline_keyboard": buttons} if buttons else None)
 
 
-def _send_reminder_to_student(teacher: User, student: Student) -> str:
+def _send_text_to_student(student: Student, text: str) -> str:
     user = student.user
     if user is None or not _student_has_telegram(student):
         return "Ученик ещё не подключил Telegram. Перешлите сообщение вручную."
     from .telegram_connect import send_telegram_to_user
 
-    ok = send_telegram_to_user(user, escape_telegram_html(build_student_reminder_text(teacher, student)))
+    ok = send_telegram_to_user(user, escape_telegram_html(text))
     if ok:
-        return "Напоминание отправлено ученику."
+        return "Сообщение отправлено ученику."
     return "Не получилось отправить. Перешлите сообщение вручную."
+
+
+def _send_reminder_to_student(teacher: User, student: Student) -> str:
+    return _send_text_to_student(student, build_student_reminder_text(teacher, student))
 
 
 def _get_teacher_student(teacher: User, student_id: str) -> Student | None:
@@ -357,21 +568,33 @@ def handle_connected_text(chat_id, user: User, text: str) -> None:
     if command.startswith("/"):
         command = command.split("@", 1)[0]
 
-    if command in (BTN_TODAY, "/today"):
-        _reply(chat_id, _format_today(user), menu_keyboard(user))
+    if command in (BTN_TODAY, "/today", BTN_SCHEDULE, "/schedule"):
+        _reply(chat_id, format_schedule(user, "today"), schedule_keyboard())
+        return
+    if command in (BTN_TOMORROW, "/tomorrow"):
+        _reply(chat_id, format_schedule(user, "tom"), schedule_keyboard())
+        return
+    if command in (BTN_WEEK, "/week"):
+        _reply(chat_id, format_schedule(user, "week"), schedule_keyboard())
+        return
+    if command in (BTN_MONTH, "/month"):
+        _reply(chat_id, format_schedule(user, "month"), schedule_keyboard())
         return
     if command in (BTN_CABINET, "/cabinet"):
         path = _cabinet_path(user)
         label = "Открыть кабинет учителя" if _is_teacher(user) else "Открыть кабинет"
         _reply(chat_id, telegram_open_html(path, label), menu_keyboard(user))
         return
-    if _is_teacher(user) and command in (BTN_STUDENTS, "/students"):
-        _show_students(chat_id, user, action="s")
-        return
     if _is_teacher(user) and command in (BTN_REMIND, "/remind"):
         _show_students(chat_id, user, action="r")
         return
-    if not _is_teacher(user) and command in (BTN_ASSIGNMENTS, "/homework", "/dz"):
+    if _is_teacher(user) and command in (BTN_HOMEWORK, "/homework", "/dz"):
+        _show_students(chat_id, user, action="h")
+        return
+    if _is_teacher(user) and command in (BTN_JOURNAL, "/journal"):
+        _show_students(chat_id, user, action="j")
+        return
+    if not _is_teacher(user) and command in (BTN_ASSIGNMENTS, BTN_HOMEWORK, "/homework", "/dz"):
         _reply(chat_id, _format_assignments(user), menu_keyboard(user))
         return
     show_menu(chat_id, user)
@@ -396,8 +619,8 @@ def handle_callback(callback: dict) -> None:
         show_menu(chat_id, user)
         return
     action = parts[1]
-    if action == "today":
-        _reply(chat_id, _format_today(user), menu_keyboard(user))
+    if action in PERIODS:
+        _reply(chat_id, format_schedule(user, action), schedule_keyboard())
         return
     if action == "cabinet":
         path = _cabinet_path(user)
@@ -405,17 +628,20 @@ def handle_callback(callback: dict) -> None:
         _reply(chat_id, telegram_open_html(path, label), menu_keyboard(user))
         return
     if action == "hw":
-        _reply(chat_id, _format_assignments(user), menu_keyboard(user))
-        return
-    if action == "students":
         if _is_teacher(user):
-            _show_students(chat_id, user, action="s")
+            _show_students(chat_id, user, action="h")
         else:
-            show_menu(chat_id, user)
+            _reply(chat_id, _format_assignments(user), menu_keyboard(user))
         return
     if action == "remind":
         if _is_teacher(user):
             _show_students(chat_id, user, action="r")
+        else:
+            show_menu(chat_id, user)
+        return
+    if action == "journal":
+        if _is_teacher(user):
+            _show_students(chat_id, user, action="j")
         else:
             show_menu(chat_id, user)
         return
@@ -438,14 +664,28 @@ def handle_callback(callback: dict) -> None:
     if student is None:
         _reply(chat_id, "Ученик не найден.", menu_keyboard(user))
         return
-    if action == "s":
-        _show_student_card(chat_id, user, student)
-        return
     if action == "r":
         _show_reminder(chat_id, user, student)
         return
     if action == "x":
         _reply(chat_id, _send_reminder_to_student(user, student), menu_keyboard(user))
+        return
+    if action in ("h", "ho"):
+        _show_homework_overdue(chat_id, user, student)
+        return
+    if action == "xo":
+        _reply(
+            chat_id,
+            _send_text_to_student(student, build_homework_overdue_text(user, student)),
+            menu_keyboard(user),
+        )
+        return
+    if action == "j":
+        _show_forwardable(
+            chat_id,
+            build_journal_parent_text(user, student),
+            back_cb="c:l:j:0",
+        )
         return
     show_menu(chat_id, user)
 
@@ -487,9 +727,7 @@ def handle_telegram_update(update: dict) -> None:
             )
             _reply(
                 chat_id,
-                "Telegram подключён.\n\n"
-                "Здесь будут приходить напоминания об уроках и заданиях.\n\n"
-                + _welcome_text(user),
+                "Telegram подключён.\n\n" + _welcome_text(user),
                 menu_keyboard(user),
             )
             logger.info("Telegram linked for user_id=%s chat_id=%s", user.id, chat_id)

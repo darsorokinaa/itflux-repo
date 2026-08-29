@@ -58,6 +58,15 @@ def notify_student_homework_reviewed(
         if comment:
             message = f"{message}\n{comment[:160]}"
 
+    from .telegram_connect import telegram_message_with_open
+    from Generator.telegram_utils import escape_telegram_html
+
+    link_label = "Открыть результат" if checked else "Открыть задание"
+    telegram_text = telegram_message_with_open(
+        f"{escape_telegram_html(title)}\n\n{escape_telegram_html(message)}",
+        url,
+        link_label,
+    )
     dedup = f"{event_type}:{review_item.pk}:{user.pk}"
     result = NotificationDispatcher.notify(
         user,
@@ -79,6 +88,7 @@ def notify_student_homework_reviewed(
         recipient_student=student,
         skip_actor=True,
         create_telegram=True,
+        telegram_text=telegram_text,
         push_tag=f"hw-review-result-{review_item.pk}",
     )
     return not result.skipped
