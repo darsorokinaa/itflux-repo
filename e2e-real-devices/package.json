@@ -1,0 +1,28 @@
+{
+  "name": "itflux-e2e-real-devices",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Playwright production-validation suite for the lesson room on BrowserStack real devices",
+  "scripts": {
+    "test": "playwright test --config=playwright.config.js",
+    "test:local": "playwright test --config=playwright.config.js --project=local-chromium",
+    "test:local:smoke": "playwright test --config=playwright.config.js --project=local-chromium tests/00-suite-ready.spec.js tests/01-basic-room.spec.js tests/02-drawing.spec.js tests/07-tab-cycles.spec.js",
+    "test:browserstack": "browserstack-node-sdk playwright test --config=playwright.config.js",
+    "test:browserstack:smoke": "browserstack-node-sdk playwright test --config=playwright.config.js tests/00-suite-ready.spec.js tests/01-ios-permission-diagnostic.spec.js",
+    "test:browserstack:extended": "BROWSERSTACK_CONFIG_FILE=browserstack.extended.yml browserstack-node-sdk playwright test --config=playwright.config.js",
+    "test:browserstack:ios-selenium": "node selenium-ios/run.js",
+    "test:browserstack:device-matrix": "node selenium-ios/matrix.js",
+    "test:browserstack:core-matrix": "BOARD_TEST_MODE=core node selenium-ios/matrix.js",
+    "test:browserstack:smoke-matrix": "BOARD_TEST_MODE=smoke node selenium-ios/matrix.js",
+    "test:browserstack:stress-matrix": "BOARD_TEST_MODE=stress node selenium-ios/matrix.js",
+    "test:browserstack:quick": "BOARD_TEST_MODE=quick node selenium-ios/matrix.js",
+    "test:browserstack:room-entry-repeat": "node selenium-ios/entry-repeat.js",
+    "test:selenium:local": "node --test selenium-ios/helpers/*.test.js selenium-ios/helpers/matrix-retry.test.js",
+    "install:browsers": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.50.1",
+    "browserstack-node-sdk": "^1.68.0",
+    "webdriverio": "^9.16.2"
+  }
+}

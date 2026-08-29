@@ -1,0 +1,48 @@
+# BrowserStack Automate — Playwright on REAL devices.
+# Credentials come from env (never commit secrets):
+#   BROWSERSTACK_USERNAME
+#   BROWSERSTACK_ACCESS_KEY
+userName: ${BROWSERSTACK_USERNAME}
+accessKey: ${BROWSERSTACK_ACCESS_KEY}
+
+projectName: itflux lesson-room
+buildName: e2e-real-devices smoke
+buildIdentifier: ${DATE_TIME}
+
+framework: playwright
+# Production URLs are public — no Local tunnel.
+browserstackLocal: false
+
+# Keep-alive for TEST 5 rest periods (30–90s without commands).
+# Playwright iOS smoke is DIAGNOSTIC only (native mic Allow cannot be tapped).
+# Full room: npm run test:browserstack:ios-selenium
+idleTimeout: 300
+
+parallelsPerPlatform: 1
+
+# First smoke set — combinations from BrowserStack Playwright iOS docs:
+# https://www.browserstack.com/docs/automate/playwright/playwright-ios/nodejs
+platforms:
+  - deviceName: iPhone 15 Pro Max
+    osVersion: "17"
+    browserName: safari
+    realMobile: true
+  - deviceName: iPhone 14
+    osVersion: "18"
+    browserName: safari
+    realMobile: true
+  
+
+# iOS Playwright does NOT support playwrightLogs or consoleLogs.
+# Do not enable them here — iOS sessions error if they are set.
+#
+# Do NOT add Selenium/Appium permission caps here (autoAcceptAlerts,
+# autoGrantPermissions, NATIVE_APP). They are not Playwright iOS capabilities:
+# https://www.browserstack.com/docs/automate/playwright/playwright-capabilities
+# https://www.browserstack.com/docs/automate/playwright/playwright-ios/nodejs
+# Native Safari microphone Allow cannot be auto-tapped by Playwright on real iOS.
+# Diagnostics: Playwright screenshots/traces + existing board_health_sample telemetry.
+consoleLogs: disable
+networkLogs: false
+debug: false
+testObservability: true

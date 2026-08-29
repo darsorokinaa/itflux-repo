@@ -43,3 +43,15 @@ import_tasks_universal.py
 
 # User/media files
 Generator/media/
+
+# Playwright real-device E2E artifacts
+e2e-real-devices/test-results/
+e2e-real-devices/playwright-report/
+e2e-real-devices/blob-report/
+e2e-real-devices/playwright/.cache/
+
+# Selenium real-iOS E2E artifacts
+e2e-real-devices/selenium-ios/screenshots/
+e2e-real-devices/selenium-ios/artifacts/
+e2e-selenium-ios/screenshots/
+e2e-selenium-ios/artifacts/

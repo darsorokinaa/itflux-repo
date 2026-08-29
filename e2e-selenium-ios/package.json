@@ -1,0 +1,14 @@
+{
+  "name": "itflux-e2e-selenium-ios",
+  "private": true,
+  "version": "1.0.0",
+  "description": "BrowserStack Selenium real-iOS Safari lesson-room test with native microphone Allow",
+  "scripts": {
+    "test": "node ../e2e-real-devices/selenium-ios/run.js",
+    "test:browserstack": "node ../e2e-real-devices/selenium-ios/run.js",
+    "test:local": "node --test ../e2e-real-devices/selenium-ios/helpers/permissions.test.js"
+  },
+  "devDependencies": {
+    "webdriverio": "^9.16.2"
+  }
+}

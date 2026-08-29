@@ -1,0 +1,74 @@
+# Extended real-device matrix.
+# Run only after the smoke set in browserstack.yml succeeds.
+# Device names/os versions are taken from BrowserStack Playwright docs
+# (iOS sample + Android sample) and the Automate device list.
+# Do not invent deviceName/osVersion pairs.
+userName: ${BROWSERSTACK_USERNAME}
+accessKey: ${BROWSERSTACK_ACCESS_KEY}
+
+projectName: itflux lesson-room
+buildName: e2e-real-devices extended
+buildIdentifier: ${DATE_TIME}
+
+framework: playwright
+browserstackLocal: false
+idleTimeout: 300
+parallelsPerPlatform: 1
+
+platforms:
+  # --- smoke (Playwright iOS docs) ---
+  - deviceName: iPhone 15 Pro Max
+    osVersion: "17"
+    browserName: safari
+    realMobile: true
+  - deviceName: iPhone 14
+    osVersion: "18"
+    browserName: safari
+    realMobile: true
+  - deviceName: iPhone 12 Pro
+    osVersion: "14"
+    browserName: safari
+    realMobile: true
+
+  # --- small iPhone (Automate device list: iPhone SE 2022 / iOS 15) ---
+  - deviceName: iPhone SE 2022
+    osVersion: "15"
+    browserName: safari
+    realMobile: true
+
+  # --- modern iPhone (Automate device list: iPhone 16 Pro Max / iOS 18) ---
+  - deviceName: iPhone 16 Pro Max
+    osVersion: "18"
+    browserName: safari
+    realMobile: true
+
+  # --- iPad (Automate device list). Playwright iOS cannot set deviceOrientation;
+  #     devices boot in portrait by default.
+  - deviceName: iPad 9th
+    osVersion: "18"
+    browserName: safari
+    realMobile: true
+
+  - deviceName: iPad Pro 11 2024
+    osVersion: "17"
+    browserName: safari
+    realMobile: true
+
+  # --- Android (Playwright Android docs) ---
+  - deviceName: Samsung Galaxy S25 Ultra
+    osVersion: "15.0"
+    browserName: chrome
+    realMobile: true
+    deviceOrientation: portrait
+
+  - deviceName: Google Pixel 10
+    osVersion: "16.0"
+    browserName: chrome
+    realMobile: true
+    deviceOrientation: portrait
+
+consoleLogs: disable
+networkLogs: false
+debug: false
+testObservability: true
+# Playwright iOS: do not copy Selenium autoAcceptAlerts / NATIVE_APP here.
