@@ -289,11 +289,13 @@ USE_I18N = True
 USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
-# Vite с base: '/static/' отдаёт /static/assets/xxx.css — нужна структура dist целиком
+# Vite base '/static/' нужен collectstatic; hashed бандлы в HTML идут с /assets/
+# (на itflux-academy.ru /static/assets/*.js даёт 404, /assets/*.js — 200).
+FRONTEND_DIR = BASE_DIR / "frontend" / "dist"
 STATIC_URL = "/static/"
 STATICFILES_DIRS = [
-    BASE_DIR / "frontend" / "dist",
-]
+    FRONTEND_DIR,
+] if FRONTEND_DIR.is_dir() else []
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Media (если используется)

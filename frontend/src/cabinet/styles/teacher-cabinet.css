@@ -1,16 +1,16 @@
 /* Teacher cabinet — mobile-first overrides (mirrors student LK patterns) */
 
-.cb-layout {
-  background: #F5F7FB;
-}
-
 .cb-loading-screen {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: #F5F7FB;
-  color: #64748B;
+  background-color: var(--bg-page, #f2f4ff);
+  background-image:
+    linear-gradient(rgba(43, 82, 245, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(43, 82, 245, 0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
+  color: var(--text-sub, #5a6490);
   font-size: 0.9rem;
 }
 

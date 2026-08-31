@@ -58,8 +58,16 @@ if (!index.includes(String(version.version))) fail("index.html version mismatch"
 if (/fonts\.googleapis\.com|fonts\.gstatic\.com|cdn\.jsdelivr\.net|unpkg\.com/.test(index)) {
   fail("index.html must not load Google Fonts / jsDelivr / unpkg (blocked without VPN)");
 }
-if (index.includes("/static/vendor/") || index.includes("/static/fonts/") || index.includes("/static/boot-watchdog.js")) {
-  fail("index.html must load vendor/fonts/boot-watchdog from /vendor /fonts /boot-watchdog.js, not /static/… (those 404 on nginx)");
+if (
+  index.includes("/static/assets/")
+  || index.includes("/static/vendor/")
+  || index.includes("/static/fonts/")
+  || index.includes("/static/boot-watchdog.js")
+) {
+  fail("index.html must load assets/vendor/fonts/boot-watchdog from /assets /vendor /fonts /boot-watchdog.js, not /static/… (/static/assets 404 on itflux-academy.ru)");
+}
+if (!/src="\/assets\/main-[^"]+\.js"/.test(index) && !/src='\/assets\/main-[^']+\.js'/.test(index)) {
+  fail("index.html must load the hashed bundle from /assets/main-*.js (the URL that nginx actually serves)");
 }
 if (!index.includes('src="/vendor/mathjax/itflux-config.js"') && !index.includes("src='/vendor/mathjax/itflux-config.js'")) {
   fail("index.html missing local MathJax config at /vendor/mathjax/itflux-config.js");

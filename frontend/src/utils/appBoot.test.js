@@ -77,6 +77,15 @@ describe("appBoot", () => {
     expect(window.__ITFLUX_BOOT_STAGE).toBe(BOOT_STAGES.READY);
   });
 
+  it("removes the boot overlay once #root has UI", () => {
+    const overlay = document.createElement("div");
+    overlay.id = "itflux-boot-recover";
+    document.body.appendChild(overlay);
+    document.getElementById("root").appendChild(document.createElement("div"));
+    expect(markAppReady()).toBe(true);
+    expect(document.getElementById("itflux-boot-recover")).toBeNull();
+  });
+
   it("clears the one-shot chunk flag after a successful paint", () => {
     sessionStorage.setItem(CHUNK_RECOVER_KEY, "1");
     document.getElementById("root").appendChild(document.createElement("div"));

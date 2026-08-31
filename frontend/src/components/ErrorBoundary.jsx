@@ -72,39 +72,41 @@ class ErrorBoundary extends Component {
 
     return (
       <div className="itflux-fatal-fallback" role="alert" data-testid="app-error-fallback">
-        <h2 className="itflux-fatal-fallback__title">{title}</h2>
-        <p className="itflux-fatal-fallback__text">
-          {kind === "room"
-            ? "Комната не открылась. Можно переподключиться или вернуться в кабинет."
-            : "Попробуйте ещё раз. Если ошибка повторится — обновите приложение."}
-        </p>
-        <div className="itflux-fatal-fallback__actions">
-          <button
-            type="button"
-            className="itflux-fatal-fallback__btn itflux-fatal-fallback__btn--primary"
-            data-testid="app-error-retry"
-            onClick={this.handleRetry}
-          >
-            {kind === "room" ? "Переподключиться" : "Повторить"}
-          </button>
-          <button
-            type="button"
-            className="itflux-fatal-fallback__btn"
-            data-testid="app-error-reload"
-            onClick={this.handleReload}
-          >
-            {kind === "room" ? "Обновить" : "Обновить приложение"}
-          </button>
-          {showHome ? (
+        <div className="itflux-fatal-fallback__card">
+          <h2 className="itflux-fatal-fallback__title">{title}</h2>
+          <p className="itflux-fatal-fallback__text">
+            {kind === "room"
+              ? "Комната не открылась. Можно переподключиться или вернуться в кабинет."
+              : "Попробуйте ещё раз. Если ошибка повторится — обновите приложение."}
+          </p>
+          <div className="itflux-fatal-fallback__actions">
+            <button
+              type="button"
+              className="itflux-fatal-fallback__btn itflux-fatal-fallback__btn--primary"
+              data-testid="app-error-retry"
+              onClick={this.handleRetry}
+            >
+              {kind === "room" ? "Переподключиться" : "Повторить"}
+            </button>
             <button
               type="button"
               className="itflux-fatal-fallback__btn"
-              data-testid="app-error-home"
-              onClick={this.handleHome}
+              data-testid="app-error-reload"
+              onClick={this.handleReload}
             >
-              Вернуться в кабинет
+              {kind === "room" ? "Обновить" : "Обновить приложение"}
             </button>
-          ) : null}
+            {showHome ? (
+              <button
+                type="button"
+                className="itflux-fatal-fallback__btn"
+                data-testid="app-error-home"
+                onClick={this.handleHome}
+              >
+                Вернуться в кабинет
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
     );

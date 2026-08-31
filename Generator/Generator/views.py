@@ -897,9 +897,9 @@ _FRONTEND_PUBLIC_TYPES = {
 
 
 def frontend_public_tree(request, prefix, relpath):
-    """Локальные шрифты и vendor (MathJax, Bootstrap, Pyodide) без зарубежных CDN."""
+    """Локальные шрифты, vendor и hashed Vite assets без зарубежных CDN."""
     prefix = (prefix or "").strip("/")
-    if prefix not in ("fonts", "vendor"):
+    if prefix not in ("fonts", "vendor", "assets"):
         return HttpResponse(status=404)
     normalized = (relpath or "").replace("\\", "/").lstrip("/")
     if not normalized or ".." in normalized.split("/"):
@@ -910,7 +910,10 @@ def frontend_public_tree(request, prefix, relpath):
     suffix = path.suffix.lower()
     content_type = _FRONTEND_PUBLIC_TYPES.get(suffix) or mimetypes.guess_type(str(path))[0]
     resp = FileResponse(open(path, "rb"), content_type=content_type)
-    resp["Cache-Control"] = "public, max-age=604800"
+    if prefix == "assets":
+        resp["Cache-Control"] = "public, max-age=31536000, immutable"
+    else:
+        resp["Cache-Control"] = "public, max-age=604800"
     return resp
 
 

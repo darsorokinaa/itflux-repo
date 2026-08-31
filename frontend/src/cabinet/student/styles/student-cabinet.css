@@ -1,9 +1,5 @@
 /* Student cabinet — extends teacher cabinet shell */
 
-.st-layout {
-  background: #F5F7FB;
-}
-
 .st-loading-screen,
 .st-loading {
   display: flex;

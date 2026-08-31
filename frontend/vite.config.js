@@ -86,14 +86,16 @@ function injectAppVersionPlugin() {
 }
 
 /**
- * Vite `base: '/static/'` переписывает /vendor и /fonts в /static/vendor и /static/fonts.
- * На проде nginx отдаёт их с корня (/vendor/, /fonts/), а /static/vendor/ — 404.
- * MathJax из‑за этого не загружается, формулы остаются сырым LaTeX.
+ * Vite `base: '/static/'` переписывает публичные URL в /static/….
+ * На itflux-academy.ru nginx отдаёт бандлы с /assets/, а /static/assets/*.js — 404.
+ * Тогда #root пустой и boot-watchdog показывает «Не удалось загрузить приложение».
+ * vendor/fonts/boot-watchdog — та же история: живые URL без префикса /static/.
  */
 function restoreRootPublicUrls(indexPath) {
   if (!fs.existsSync(indexPath)) return
   let html = fs.readFileSync(indexPath, 'utf8')
   html = html
+    .replaceAll('/static/assets/', '/assets/')
     .replaceAll('/static/vendor/', '/vendor/')
     .replaceAll('/static/fonts/', '/fonts/')
     .replaceAll('/static/boot-watchdog.js', '/boot-watchdog.js')
@@ -143,6 +145,7 @@ export default defineConfig(({ command }) => ({
   experimental: {
     renderBuiltUrl(filename) {
       if (
+        filename.startsWith('assets/') ||
         filename.startsWith('vendor/') ||
         filename.startsWith('fonts/') ||
         filename === 'boot-watchdog.js'
