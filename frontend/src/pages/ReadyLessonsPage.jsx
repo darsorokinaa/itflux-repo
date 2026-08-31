@@ -7,8 +7,8 @@ import LessonPreviewModal from "../components/LessonPreviewModal";
 import StateView from "../components/StateView";
 import { isCatalogLocked } from "../accessGate/accessGate";
 import { useAccessGate, useCabinetAuthed } from "../hooks/useAccessGate";
-import { getLessonViewerUrl, getLessonCardActionLabel, lessonCanPurchase, lessonHasActiveDemo, lessonPreviewUrl, lessonPurchaseLabel } from "../cabinet/lessonCardUtils";
-import { CATALOG_ORDERING_OPTIONS, registerCatalogView } from "../utils/catalogEngagement";
+import { getLessonCardActionLabel, lessonCanPurchase, lessonHasActiveDemo, lessonPreviewUrl, lessonPurchaseLabel } from "../cabinet/lessonCardUtils";
+import { CATALOG_ORDERING_OPTIONS } from "../utils/catalogEngagement";
 import { purchaseReadyLesson } from "../utils/cabinetAuth";
 import "../styles/material-access.css";
 
@@ -100,20 +100,13 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
       : canOpenLesson
         ? "Открыть урок"
         : "Скоро";
-  const lessonUrl = locked
-    ? lessonPreviewUrl(lesson.slug)
-    : getLessonViewerUrl(lesson.slug);
+  const lessonUrl = lessonPreviewUrl(lesson.slug);
 
   const coverUrl = mediaUrl(lesson.cover_image_url);
 
   const handleOpen = (event) => {
-    if (locked) {
-      event.preventDefault();
-      onLockedOpen?.(lesson);
-      return;
-    }
-    if (!lesson.slug) return;
-    registerCatalogView("lessons", lesson.slug).catch(() => {});
+    event.preventDefault();
+    onLockedOpen?.(lesson);
   };
 
   const tags = [
@@ -206,8 +199,6 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
             <a
               href={lessonUrl}
               className="lesson-card-v3__btn lesson-card-v3__btn--ghost"
-              target="_blank"
-              rel="noopener noreferrer"
               onClick={handleOpen}
             >
               Продолжить демо
@@ -224,8 +215,6 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
           <a
             href={lessonUrl}
             className="lesson-card-v3__btn"
-            target="_blank"
-            rel="noopener noreferrer"
             onClick={handleOpen}
           >
             {actionLabel}

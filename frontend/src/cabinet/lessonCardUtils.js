@@ -153,7 +153,7 @@ export function getLessonOpenUrl(lesson) {
   if (!lesson?.slug) return null;
   const locked = lesson?.access?.can_view === false || lesson?.access?.allowed === false;
   if (lessonHasActiveDemo(lesson) || locked || lesson.archive_url || lesson.file_url) {
-    return getLessonViewerUrl(lesson.slug);
+    return lessonPreviewUrl(lesson.slug);
   }
   return null;
 }

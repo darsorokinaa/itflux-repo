@@ -145,12 +145,11 @@ export default function LessonPreviewModal({
   }, [open, paymentId, paymentStatus, authed, load]);
 
   const access = lesson?.access || {};
-  const locked = Boolean(lesson) && access.can_view === false;
   const demoActive = access.demo_active === true || access.can_continue_demo === true;
   const durationMinutes = access.demo_duration_minutes || 40;
   const isPaidLesson = lesson?.access_level && lesson.access_level !== "free";
   const demoExpired = demoExpiredProp || access.reason_code === "DEMO_EXPIRED";
-  const shouldAutoOpen = Boolean(lesson) && access.can_view === true && !demoActive;
+  const canOpenContent = Boolean(lesson) && access.can_view === true;
 
   const priceLabel = useMemo(
     () => formatPrice(access.standalone_price, access.standalone_currency),
@@ -158,18 +157,13 @@ export default function LessonPreviewModal({
   );
 
   useEffect(() => {
-    if (!open || !lesson || (!locked && !demoActive)) return;
+    if (!open || !lesson) return;
     trackGoal("lesson_preview_viewed", {
       lesson_id: String(lesson.id || ""),
       access_type: access.access_type || "locked",
     });
     onOpened?.(lesson);
-  }, [open, lesson, locked, demoActive, access.access_type, onOpened]);
-
-  useEffect(() => {
-    if (!open || !lesson || !shouldAutoOpen || !slug) return;
-    window.location.href = getLessonContentUrl(slug);
-  }, [open, lesson, shouldAutoOpen, slug]);
+  }, [open, lesson, access.access_type, onOpened]);
 
   useEffect(() => {
     if (!open || typeof document === "undefined") return undefined;
@@ -194,9 +188,13 @@ export default function LessonPreviewModal({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open, warningOpen, busy, onClose]);
 
-  const onContinueDemo = () => {
+  const onOpenContent = () => {
     if (!lesson?.slug) return;
     window.location.href = getLessonContentUrl(lesson.slug);
+  };
+
+  const onContinueDemo = () => {
+    onOpenContent();
   };
 
   const onOpenDemo = () => {
@@ -311,6 +309,19 @@ export default function LessonPreviewModal({
         </Link>
       );
     }
+    if (cta.type === "open") {
+      return (
+        <button
+          key={`${cta.type}-${cta.label}`}
+          type="button"
+          className={`material-access-btn ${cta.primary ? "material-access-btn--primary" : "material-access-btn--ghost"}`}
+          onClick={onOpenContent}
+          disabled={busy}
+        >
+          {cta.label || "Открыть урок"}
+        </button>
+      );
+    }
     return null;
   };
 
@@ -353,9 +364,7 @@ export default function LessonPreviewModal({
             <div className="lesson-preview-modal__loading">
               <p>{error}</p>
             </div>
-          ) : lesson && shouldAutoOpen ? (
-            <div className="lesson-preview-modal__loading">Открываем урок…</div>
-          ) : lesson && (locked || demoActive) ? (
+          ) : lesson ? (
             <div className={`material-preview material-preview--modal${lesson.cover_image_url ? "" : " material-preview--modal--no-cover"}`}>
               {lesson.cover_image_url ? (
                 <div className="material-preview__cover-wrap">
@@ -433,14 +442,17 @@ export default function LessonPreviewModal({
                   <p className="material-paywall__message">
                     {access.message || "Демоверсия активна. Продолжите просмотр, пока не истечёт таймер."}
                   </p>
-                ) : (
+                ) : access.message ? (
                   <p className="material-paywall__message">{access.message}</p>
-                )}
+                ) : null}
 
                 {error ? <p className="material-viewer__error" role="alert">{error}</p> : null}
 
                 <div className="material-paywall__actions">
-                  {(access.cta || []).map(renderCta)}
+                  {((access.cta || []).length
+                    ? access.cta
+                    : (canOpenContent ? [{ type: "open", label: "Открыть урок", primary: true }] : [])
+                  ).map(renderCta)}
                 </div>
 
                 {access.demo_used && !demoActive && !demoExpired ? (

@@ -85,11 +85,6 @@ export default function InterestingPreviewModal({ open, slug, onClose }) {
   const requiredPlan = planName(access.min_plan || access.required_plan);
 
   useEffect(() => {
-    if (!open || !item || locked || !slug) return;
-    window.location.href = contentUrl(slug);
-  }, [open, item, locked, slug]);
-
-  useEffect(() => {
     if (!open || typeof document === "undefined") return undefined;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -147,8 +142,6 @@ export default function InterestingPreviewModal({ open, slug, onClose }) {
           <div className="lesson-preview-modal__loading">
             <p>{error}</p>
           </div>
-        ) : item && !locked ? (
-          <div className="lesson-preview-modal__loading">Открываем материал…</div>
         ) : item ? (
           <div className={`material-preview material-preview--modal${item.cover_image_url ? "" : " material-preview--modal--no-cover"}`}>
             {item.cover_image_url ? (
@@ -158,7 +151,7 @@ export default function InterestingPreviewModal({ open, slug, onClose }) {
             ) : null}
             <div className="material-preview__body">
               <div className="material-preview__badges">
-                <span className="material-access-badge">Платный материал</span>
+                {locked ? <span className="material-access-badge">Платный материал</span> : null}
               </div>
               <h1 id="interesting-preview-title" className="material-preview__title">{item.title}</h1>
               {item.tag ? <p className="material-preview__meta">{item.tag}</p> : null}
@@ -173,9 +166,17 @@ export default function InterestingPreviewModal({ open, slug, onClose }) {
                   </div>
                 </div>
               ) : null}
-              <p className="material-paywall__message">{message}</p>
+              {locked ? <p className="material-paywall__message">{message}</p> : null}
               <div className="material-paywall__actions">
-                {!authed ? (
+                {!locked ? (
+                  <button
+                    type="button"
+                    className="material-access-btn material-access-btn--primary"
+                    onClick={() => { window.location.href = contentUrl(slug); }}
+                  >
+                    Открыть
+                  </button>
+                ) : !authed ? (
                   <Link
                     className="material-access-btn material-access-btn--primary"
                     to={registerHref(returnUrl)}

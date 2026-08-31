@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, Map, Search } from "lucide-react";
+import { Map, Search } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import AccessGateBadge from "../components/AccessGateBadge";
 import CatalogEngagementBar from "../components/CatalogEngagementBar";
 import InterestingPreviewModal from "../components/InterestingPreviewModal";
 import StateView from "../components/StateView";
-import { isCatalogLocked } from "../accessGate/accessGate";
-import { CATALOG_ORDERING_OPTIONS, registerCatalogView } from "../utils/catalogEngagement";
+import { CATALOG_ORDERING_OPTIONS } from "../utils/catalogEngagement";
 import "../styles/material-access.css";
 
 function mediaUrl(url) {
@@ -16,18 +15,13 @@ function mediaUrl(url) {
   return url;
 }
 
-function viewerUrl(slug) {
-  return `/interesting/${encodeURIComponent(slug)}/view`;
-}
-
 function previewUrl(slug) {
   return `/interesting?preview=${encodeURIComponent(slug)}`;
 }
 
 function InterestingCard({ item, onEngagementChange, onLockedOpen }) {
   const coverUrl = mediaUrl(item.cover_image_url);
-  const locked = isCatalogLocked(item);
-  const openUrl = item?.slug ? (locked ? previewUrl(item.slug) : viewerUrl(item.slug)) : null;
+  const openUrl = item?.slug ? previewUrl(item.slug) : null;
   const accent = item.accent_color || "#1F3A8A";
   const bannerStyle = coverUrl
     ? {
@@ -39,13 +33,8 @@ function InterestingCard({ item, onEngagementChange, onLockedOpen }) {
     : { backgroundColor: accent };
 
   const handleOpen = (event) => {
-    if (locked) {
-      event.preventDefault();
-      onLockedOpen?.(item);
-      return;
-    }
-    if (!item.slug) return;
-    registerCatalogView("interesting", item.slug).catch(() => {});
+    event.preventDefault();
+    onLockedOpen?.(item);
   };
 
   return (
@@ -81,12 +70,9 @@ function InterestingCard({ item, onEngagementChange, onLockedOpen }) {
           <a
             href={openUrl}
             className="interesting-card__btn"
-            target={locked ? undefined : "_blank"}
-            rel={locked ? undefined : "noopener noreferrer"}
             onClick={handleOpen}
           >
             Открыть
-            {locked ? null : <ExternalLink size={16} strokeWidth={2.2} aria-hidden="true" />}
           </a>
         ) : (
           <button type="button" className="interesting-card__btn interesting-card__btn--disabled" disabled>

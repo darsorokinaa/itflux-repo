@@ -4,7 +4,6 @@ import CabinetIcon from "../CabinetIcons";
 import CabinetHomeworkCard from "../CabinetHomeworkCard";
 import LessonPreviewModal from "../../components/LessonPreviewModal";
 import {
-  getLessonOpenUrl,
   libraryLessonMatchesFilter,
   mapLessonToHomeworkCard,
 } from "../lessonCardUtils";
@@ -16,7 +15,6 @@ import {
   useSoonToast,
 } from "../CabinetSectionUi";
 import { fetchLibraryNewThisMonth, fetchLessonPurchases } from "../../utils/cabinetAuth";
-import { isCatalogLocked } from "../../accessGate/accessGate";
 import { useAccessGate } from "../../hooks/useAccessGate";
 import "../../styles/material-access.css";
 
@@ -100,13 +98,8 @@ export default function CabinetLibraryPage() {
 
   const handleOpenLesson = useCallback((card) => {
     const lesson = card.lesson;
-    if (isCatalogLocked(lesson) && lesson?.slug) {
+    if (lesson?.slug) {
       setPreviewSlug(lesson.slug);
-      return;
-    }
-    const url = getLessonOpenUrl(lesson);
-    if (url) {
-      window.open(url, "_blank", "noopener,noreferrer");
       return;
     }
     notifySoon();
@@ -234,7 +227,13 @@ export default function CabinetLibraryPage() {
                 hideProgressBar
                 actionLabel="Открыть"
                 actionPrimary
-                onAction={() => navigate(item.open_url || `/lessons/${item.slug}/view`)}
+                onAction={() => {
+                  if (item.slug) {
+                    setPreviewSlug(item.slug);
+                    return;
+                  }
+                  navigate(item.open_url || "/lessons");
+                }}
               />
             ))}
           </div>
