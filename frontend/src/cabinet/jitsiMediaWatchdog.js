@@ -233,8 +233,9 @@ export function attachMediaWatchdog(api, {
   }, listeners);
 
   listen(api, "peerConnectionFailure", () => {
-    onConnectionState?.("degraded", "peerConnectionFailure");
-    hint("Не удалось установить медиасоединение. Попробуйте переподключиться.");
+    // ICE/P2P can fail on one of several peer connections while the room still works.
+    onConnectionState?.("reconnecting", "peerConnectionFailure");
+    hint("Соединение нестабильно. Восстанавливаем связь…");
   }, listeners);
 
   listen(api, "videoConferenceJoined", () => {

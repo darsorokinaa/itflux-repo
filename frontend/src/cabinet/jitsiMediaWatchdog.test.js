@@ -60,4 +60,24 @@ describe("attachMediaWatchdog", () => {
     expect(api.executeCommand).not.toHaveBeenCalled();
     handle.dispose();
   });
+
+  it("treats peerConnectionFailure as a transient reconnect, not a hard fail", () => {
+    const listeners = new Map();
+    const api = {
+      addListener(event, handler) {
+        listeners.set(event, handler);
+      },
+      removeListener(event) {
+        listeners.delete(event);
+      },
+      executeCommand: vi.fn(),
+    };
+    const onConnectionState = vi.fn();
+    const onHint = vi.fn();
+    const handle = attachMediaWatchdog(api, { onConnectionState, onHint });
+    listeners.get("peerConnectionFailure")?.();
+    expect(onConnectionState).toHaveBeenCalledWith("reconnecting", "peerConnectionFailure");
+    expect(onHint.mock.calls[0][0]).toMatch(/Восстанавливаем/);
+    handle.dispose();
+  });
 });

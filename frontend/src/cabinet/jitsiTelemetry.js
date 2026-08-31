@@ -58,9 +58,14 @@ export function classifyConferencePresence({
   remoteCount = 0,
   participantCount = null,
   mediaFailed = false,
+  mediaUp = false,
   reconnecting = false,
 } = {}) {
   const count = typeof participantCount === "number" ? participantCount : (remoteCount + (conferenceJoined ? 1 : 0));
+  if (mediaUp) {
+    mediaFailed = false;
+    reconnecting = false;
+  }
   if (mediaFailed && conferenceJoined && count >= 2) {
     return {
       scenario: "B",

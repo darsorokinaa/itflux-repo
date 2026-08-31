@@ -47,4 +47,13 @@ describe("presence events change conference presence", () => {
     expect(waiting.code).toBe("waiting_peer");
     expect(together.code).toBe("peer_connecting_media");
   });
+
+  it("does not keep a media-failed hint after media is up", () => {
+    expect(classifyConferencePresence({
+      conferenceJoined: true,
+      participantCount: 2,
+      mediaFailed: true,
+      mediaUp: true,
+    }).code).toBe("peer_connecting_media");
+  });
 });

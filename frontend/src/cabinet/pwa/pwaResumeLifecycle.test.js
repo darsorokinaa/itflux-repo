@@ -209,12 +209,21 @@ describe("createPwaResumeController", () => {
     ctl.detach();
   });
 
-  it("pageshow without a recorded hide still verifies", () => {
+  it("pageshow without a recorded hide does not start a false recovery", () => {
     const onResume = vi.fn();
     const ctl = make(onResume);
     window.dispatchEvent(new Event("pageshow"));
+    expect(onResume).not.toHaveBeenCalled();
+    ctl.detach();
+  });
+
+  it("bfcache pageshow still verifies", () => {
+    const onResume = vi.fn();
+    const ctl = make(onResume);
+    const event = new Event("pageshow");
+    Object.defineProperty(event, "persisted", { value: true });
+    window.dispatchEvent(event);
     expect(onResume).toHaveBeenCalledTimes(1);
-    expect(onResume.mock.calls[0][0].unknownDuration).toBe(true);
     ctl.detach();
   });
 });

@@ -602,9 +602,10 @@ export default function VideoMeetingPage() {
               conferenceJoined: conferencePresenceRef.current.joined,
               participantCount: n,
               mediaFailed: conferencePresenceRef.current.mediaFailed,
+              mediaUp: conferencePresenceRef.current.mediaUp,
               reconnecting: conferencePresenceRef.current.reconnecting,
             });
-            if (conferencePresenceRef.current.mediaUp && n >= 2 && !conferencePresenceRef.current.mediaFailed) {
+            if (conferencePresenceRef.current.mediaUp && n >= 2) {
               setConnectionHint("");
             } else {
               setConnectionHint(classified.label);
@@ -636,6 +637,7 @@ export default function VideoMeetingPage() {
             conferenceJoined: true,
             participantCount: conferencePresenceRef.current.count || 1,
             mediaFailed: false,
+            mediaUp: conferencePresenceRef.current.mediaUp,
             reconnecting: false,
           });
           setConnectionHint(classified.label);
@@ -669,16 +671,19 @@ export default function VideoMeetingPage() {
           if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return;
           if (next === "joined") {
             conferencePresenceRef.current.reconnecting = false;
-            conferencePresenceRef.current.mediaUp = why === "dataChannelOpened" || conferencePresenceRef.current.mediaUp;
+            conferencePresenceRef.current.mediaFailed = false;
+            conferencePresenceRef.current.mediaUp = why === "dataChannelOpened" || conferencePresenceRef.current.mediaUp || why === "videoConferenceJoined";
             resumeControllerRef.current?.succeed?.();
             callStateRef.current?.transition(CALL_STATES.joined, why);
-            if (conferencePresenceRef.current.mediaUp && conferencePresenceRef.current.count >= 2) {
+            if (conferencePresenceRef.current.count >= 2) {
               setConnectionHint("");
             }
           } else if (next === "reconnecting") {
             conferencePresenceRef.current.reconnecting = true;
             callStateRef.current?.transition(CALL_STATES.reconnecting, why);
-            setConnectionHint("Соединение восстанавливается…");
+            if (!conferencePresenceRef.current.joined) {
+              setConnectionHint("Соединение восстанавливается…");
+            }
             void reportMeetingTechnicalEvent(meetingUuid, {
               eventType: "connection_reconnecting",
               reason: why || "",
@@ -687,6 +692,9 @@ export default function VideoMeetingPage() {
             });
             void apiRef.current?.reconcileParticipants?.("connection-state");
           } else if (next === "degraded") {
+            if (conferencePresenceRef.current.joined && conferencePresenceRef.current.mediaUp) {
+              return;
+            }
             conferencePresenceRef.current.mediaFailed = true;
             callStateRef.current?.transition(CALL_STATES.degraded, why);
             setConnectionHint(
@@ -1186,7 +1194,14 @@ export default function VideoMeetingPage() {
           pwa: Boolean(ctx.pwa),
         };
         if (controller.getAttemptId() !== ctx.attemptId) return;
+        const alreadyLive = Boolean(
+          conferencePresenceRef.current.joined && apiRef.current,
+        );
         if (!ctx.online) {
+          if (alreadyLive) {
+            controller.succeed();
+            return;
+          }
           controller.markDegraded("offline");
           return;
         }
@@ -1207,7 +1222,22 @@ export default function VideoMeetingPage() {
             return;
           }
         } else if (!auth.ok && auth.code === "auth_network") {
+          if (alreadyLive) {
+            controller.succeed();
+            return;
+          }
           controller.markDegraded("auth_network");
+          return;
+        }
+
+        if (alreadyLive) {
+          try {
+            materialCollabRef.current?.resumeNow?.();
+          } catch {
+            /* keep the live room */
+          }
+          postResumeToBoardFrames(ctx.attemptId);
+          controller.succeed();
           return;
         }
 
@@ -1298,7 +1328,9 @@ export default function VideoMeetingPage() {
         const resources = snapshotRuntimeResources();
         logLifecycle("RESOURCE_SNAPSHOT", resources);
         reportClientEvent("RESOURCE_SNAPSHOT", resources);
-        if (!remountCall) controller.succeed();
+        if (conferencePresenceRef.current.joined || !remountCall) {
+          controller.succeed();
+        }
       },
     });
     resumeControllerRef.current = controller;

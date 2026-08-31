@@ -412,7 +412,10 @@ export function createPwaResumeController({
   };
 
   const onPageHide = () => markBackground("pagehide");
-  const onPageShow = () => considerResume("pageshow");
+  const onPageShow = (event) => {
+    if (!backgroundStartedAt && !event?.persisted) return;
+    considerResume("pageshow");
+  };
   const onFocus = () => considerResume("focus");
   const onOnline = () => considerResume("online");
   const onOffline = () => markDegraded("offline");
