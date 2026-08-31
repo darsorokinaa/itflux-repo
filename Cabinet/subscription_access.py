@@ -474,7 +474,6 @@ class SubscriptionAccessService:
     @staticmethod
     def serialize_access_gate(user: Optional[User], content) -> dict[str, Any]:
         from Generator.models import Lesson as GeneratorLesson
-        from .models import Material
 
         if isinstance(content, GeneratorLesson):
             from .lesson_access import LessonAccessService
@@ -489,11 +488,10 @@ class SubscriptionAccessService:
         allowed = SubscriptionAccessService.can_access_content(user, content)
         payload = {
             "allowed": allowed,
+            "can_view": allowed,
             "access_level": getattr(content, "access_level", "free"),
             "min_plan": SubscriptionAccessService.get_minimum_plan_for_content(content),
         }
-        if isinstance(content, Material):
-            payload["can_view"] = allowed
         return payload
 
 

@@ -99,6 +99,7 @@ _SPA_KNOWN_PATH_PATTERNS = (
     re.compile(r"^/lessons/?$"),
     re.compile(r"^/lessons/[^/]+/view/?$"),
     re.compile(r"^/interesting/?$"),
+    re.compile(r"^/interesting/[^/]+/view/?$"),
     re.compile(r"^/teachers/?$"),
     re.compile(r"^/for-teachers/?$"),
     re.compile(r"^/cabinet/login/?$"),
@@ -4537,6 +4538,30 @@ def api_lessons(request):
     return JsonResponse({"lessons": serializer.data, "total": len(serializer.data)})
 
 
+def _is_browser_document_request(request) -> bool:
+    """Top-level browser/iframe navigation, not fetch()/XHR/API clients or assets."""
+    if request.method != "GET":
+        return False
+    if (request.GET.get("format") or "").lower() == "json":
+        return False
+    if str(request.GET.get("raw") or "").strip().lower() in ("1", "true", "yes"):
+        return False
+    accept = (request.headers.get("Accept") or "").lower()
+    mode = (request.headers.get("Sec-Fetch-Mode") or "").lower()
+    dest = (request.headers.get("Sec-Fetch-Dest") or "").lower()
+    if dest and dest not in ("document", "iframe"):
+        return False
+    if mode == "navigate" or dest in ("document", "iframe"):
+        return True
+    return "text/html" in accept and "application/json" not in accept
+
+
+def _catalog_preview_redirect(preview_url: str):
+    response = HttpResponseRedirect(preview_url)
+    response["Cache-Control"] = "private, no-store"
+    return response
+
+
 def _lesson_content_access(request, lesson):
     """(access, denied_response). denied_response is None if can_view."""
     from Cabinet.lesson_access import LessonAccessService
@@ -4722,6 +4747,8 @@ def api_lesson_archive_view(request, slug):
     lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
     access, denied = _lesson_content_access(request, lesson)
     if denied:
+        if _is_browser_document_request(request):
+            return _catalog_preview_redirect(f"/lessons?preview={slug}")
         return denied
 
     from .lesson_archive import (
@@ -4852,7 +4879,7 @@ def _visible_interesting_queryset(request):
 
 
 def _interesting_content_access_denied(request, item):
-    """None если доступ есть; иначе JsonResponse 403."""
+    """None если доступ есть; иначе редирект в предпросмотр или JsonResponse 403."""
     if _lesson_viewer_is_teacher_or_admin(request):
         return None
     from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
@@ -4861,6 +4888,8 @@ def _interesting_content_access_denied(request, item):
     try:
         SubscriptionAccessService.raise_if_cannot_access_content(user, item)
     except AccessDenied as exc:
+        if _is_browser_document_request(request):
+            return _catalog_preview_redirect(f"/interesting?preview={item.slug}")
         return JsonResponse({"error": exc.to_dict()}, status=403)
     return None
 
@@ -4967,14 +4996,9 @@ def api_interesting_detail(request, slug):
 def api_interesting_view(request, slug):
     item = get_object_or_404(_visible_interesting_queryset(request), slug=slug)
 
-    if not _lesson_viewer_is_teacher_or_admin(request):
-        from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
-
-        user = request.user if getattr(request.user, "is_authenticated", False) else None
-        try:
-            SubscriptionAccessService.raise_if_cannot_access_content(user, item)
-        except AccessDenied as exc:
-            return JsonResponse({"error": exc.to_dict()}, status=403)
+    denied = _interesting_content_access_denied(request, item)
+    if denied:
+        return denied
 
     from .lesson_archive import (
         archive_base_dir,

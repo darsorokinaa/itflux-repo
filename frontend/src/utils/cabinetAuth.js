@@ -1330,6 +1330,20 @@ export async function fetchReadyLesson(slug) {
   return data?.lesson || data;
 }
 
+export async function fetchInterestingItem(slug) {
+  const res = await fetch(`/api/interesting/${encodeURIComponent(slug)}/`, {
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = data?.message || data?.detail || data?.error || "Не удалось загрузить материал";
+    throw new Error(typeof message === "string" ? message : "Не удалось загрузить материал");
+  }
+  return data?.item || data;
+}
+
 export async function startReadyLessonDemo(slug) {
   await ensureCsrfCookie();
   const headers = { Accept: "application/json", "Content-Type": "application/json" };

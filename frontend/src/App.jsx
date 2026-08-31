@@ -17,6 +17,7 @@ import LessonJoinBridge from "./pages/LessonJoinBridge";
 import ReadyLessonsPage from "./pages/ReadyLessonsPage";
 import LessonViewerPage from "./pages/LessonViewerPage";
 import InterestingPage from "./pages/InterestingPage";
+import InterestingViewerPage from "./pages/InterestingViewerPage";
 import ForTeachersPage from "./pages/ForTeachersPage";
 import CabinetAuthPage from "./pages/CabinetAuthPage";
 import CabinetJoinPage from "./cabinet/pages/CabinetJoinPage";
@@ -284,6 +285,7 @@ function App() {
           <Route path="/lessons" element={<ReadyLessonsPage />} />
           <Route path="/lessons/:slug/view" element={<LessonViewerPage />} />
           <Route path="/interesting" element={<InterestingPage />} />
+          <Route path="/interesting/:slug/view" element={<InterestingViewerPage />} />
           <Route path="/teachers" element={<ForTeachersPage />} />
           <Route path="/for-teachers" element={<Navigate to="/teachers" replace />} />
           <Route path="/cabinet/login" element={<CabinetAuthPage />} />

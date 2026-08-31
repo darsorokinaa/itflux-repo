@@ -106,6 +106,11 @@ export function getLessonContentUrl(slug) {
   return `/api/lessons/${encodeURIComponent(slug)}/view/`;
 }
 
+export function getLessonViewerUrl(slug) {
+  if (!slug) return null;
+  return `/lessons/${encodeURIComponent(slug)}/view`;
+}
+
 export function lessonPreviewUrl(slug, extra = {}) {
   if (!slug) return "/lessons";
   const params = new URLSearchParams({ preview: slug });
@@ -146,18 +151,9 @@ export function lessonPurchaseLabel(lesson) {
 
 export function getLessonOpenUrl(lesson) {
   if (!lesson?.slug) return null;
-  if (lessonHasActiveDemo(lesson)) {
-    return getLessonContentUrl(lesson.slug);
-  }
-  const fileExtLower = (lesson.file_url || "").toLowerCase().split("?")[0];
-  const isReactViewer = Boolean(
-    !lesson.archive_url && lesson.file_url && !fileExtLower.endsWith(".html"),
-  );
-  if (isReactViewer) {
-    return `/lessons/${encodeURIComponent(lesson.slug)}/view`;
-  }
-  if (lesson.archive_url || lesson.file_url) {
-    return getLessonContentUrl(lesson.slug);
+  const locked = lesson?.access?.can_view === false || lesson?.access?.allowed === false;
+  if (lessonHasActiveDemo(lesson) || locked || lesson.archive_url || lesson.file_url) {
+    return getLessonViewerUrl(lesson.slug);
   }
   return null;
 }

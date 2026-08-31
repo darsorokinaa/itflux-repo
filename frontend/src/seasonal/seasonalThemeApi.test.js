@@ -67,6 +67,7 @@ describe("seasonalThemeApi", () => {
     expect(isHeavyRoute("/cabinet/boards/abc")).toBe(true);
     expect(isHeavyRoute("/cabinet/meetings/uuid")).toBe(true);
     expect(isHeavyRoute("/lessons/slug/view")).toBe(true);
+    expect(isHeavyRoute("/interesting/slug/view")).toBe(true);
     expect(isHeavyRoute("/cabinet")).toBe(false);
   });
 

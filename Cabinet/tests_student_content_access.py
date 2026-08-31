@@ -198,3 +198,23 @@ class StudentContentAccessTests(TestCase):
         data = res.json()["lesson"]
         self.assertFalse(data["access"]["can_view"])
         self.assertTrue(data["locked"])
+
+    def test_teacher_browser_interesting_view_redirects_to_preview(self):
+        self.client.force_login(self.teacher)
+        res = self.client.get(
+            f"/api/interesting/{self.interesting.slug}/view/",
+            HTTP_ACCEPT="text/html,application/xhtml+xml",
+            HTTP_SEC_FETCH_MODE="navigate",
+            HTTP_SEC_FETCH_DEST="document",
+        )
+        self.assertEqual(res.status_code, 302)
+        self.assertEqual(res.url, f"/interesting?preview={self.interesting.slug}")
+
+    def test_interesting_api_view_without_access_still_returns_json(self):
+        self.client.force_login(self.teacher)
+        res = self.client.get(
+            f"/api/interesting/{self.interesting.slug}/view/",
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertIn("application/json", res["Content-Type"])

@@ -7,7 +7,7 @@ import LessonPreviewModal from "../components/LessonPreviewModal";
 import StateView from "../components/StateView";
 import { isCatalogLocked } from "../accessGate/accessGate";
 import { useAccessGate, useCabinetAuthed } from "../hooks/useAccessGate";
-import { getLessonContentUrl, getLessonCardActionLabel, lessonCanPurchase, lessonHasActiveDemo, lessonPurchaseLabel } from "../cabinet/lessonCardUtils";
+import { getLessonViewerUrl, getLessonCardActionLabel, lessonCanPurchase, lessonHasActiveDemo, lessonPreviewUrl, lessonPurchaseLabel } from "../cabinet/lessonCardUtils";
 import { CATALOG_ORDERING_OPTIONS, registerCatalogView } from "../utils/catalogEngagement";
 import { purchaseReadyLesson } from "../utils/cabinetAuth";
 import "../styles/material-access.css";
@@ -100,17 +100,9 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
       : canOpenLesson
         ? "Открыть урок"
         : "Скоро";
-  const fileExtLower = (lesson.file_url || "").toLowerCase().split("?")[0];
-  const isReactViewer = Boolean(
-    !lesson.archive_url &&
-      lesson.file_url &&
-      !fileExtLower.endsWith(".html")
-  );
-  const lessonUrl = demoActive
-    ? getLessonContentUrl(lesson.slug)
-    : isReactViewer
-      ? `/lessons/${encodeURIComponent(lesson.slug)}/view`
-      : `/api/lessons/${encodeURIComponent(lesson.slug)}/view/`;
+  const lessonUrl = locked
+    ? lessonPreviewUrl(lesson.slug)
+    : getLessonViewerUrl(lesson.slug);
 
   const coverUrl = mediaUrl(lesson.cover_image_url);
 
@@ -120,8 +112,7 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
       onLockedOpen?.(lesson);
       return;
     }
-    if (!lesson.slug || isReactViewer) return;
-    // HTML/архив открывается в новой вкладке — регистрируем просмотр здесь
+    if (!lesson.slug) return;
     registerCatalogView("lessons", lesson.slug).catch(() => {});
   };
 
@@ -207,9 +198,9 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
         />
 
         {locked ? (
-          <button type="button" className="lesson-card-v3__btn" onClick={() => onLockedOpen?.(lesson)}>
+          <a href={lessonUrl} className="lesson-card-v3__btn" onClick={handleOpen}>
             Подробнее
-          </button>
+          </a>
         ) : demoActive && purchaseAvailable ? (
           <div className="lesson-card-v3__actions">
             <a

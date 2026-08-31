@@ -252,6 +252,7 @@ export const HEAVY_ROUTE_PATTERNS = [
   /^\/teacher\/boards(\/|$)/,
   /^\/cabinet\/meetings(\/|$)/,
   /^\/lessons\/[^/]+\/view/,
+  /^\/interesting\/[^/]+\/view/,
   /^\/cabinet\/interactives\/[^/]+\/play/,
   /^\/cabinet\/student\/interactives\/\d+\/play/,
   /^\/lesson\/join/,

@@ -227,6 +227,31 @@ class LessonAccessPolicyTests(LessonAccessBase):
         res = self.client.get(f"/api/lessons/{self.paid.slug}/view/")
         self.assertEqual(res.status_code, 403)
 
+    def test_browser_view_without_access_redirects_to_preview(self):
+        headers = {
+            "HTTP_ACCEPT": "text/html,application/xhtml+xml",
+            "HTTP_SEC_FETCH_MODE": "navigate",
+            "HTTP_SEC_FETCH_DEST": "document",
+        }
+        res = self.client.get(f"/api/lessons/{self.free.slug}/view/", **headers)
+        self.assertEqual(res.status_code, 302)
+        self.assertEqual(res.url, f"/lessons?preview={self.free.slug}")
+
+        self._login()
+        res = self.client.get(f"/api/lessons/{self.paid.slug}/view/", **headers)
+        self.assertEqual(res.status_code, 302)
+        self.assertEqual(res.url, f"/lessons?preview={self.paid.slug}")
+
+    def test_api_view_without_access_still_returns_json(self):
+        res = self.client.get(
+            f"/api/lessons/{self.paid.slug}/view/",
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertIn("application/json", res["Content-Type"])
+        payload = res.json()
+        self.assertTrue(payload.get("error") or payload.get("code"))
+
     def test_premium_full_hides_purchase(self):
         self._set_plan("premium")
         access = LessonAccessService.get_access(self.user, self.paid)

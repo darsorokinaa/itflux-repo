@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { ExternalLink, Map, Search } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import AccessGateBadge from "../components/AccessGateBadge";
 import CatalogEngagementBar from "../components/CatalogEngagementBar";
+import InterestingPreviewModal from "../components/InterestingPreviewModal";
 import StateView from "../components/StateView";
 import { isCatalogLocked } from "../accessGate/accessGate";
-import { useAccessGate, useCabinetAuthed } from "../hooks/useAccessGate";
 import { CATALOG_ORDERING_OPTIONS, registerCatalogView } from "../utils/catalogEngagement";
+import "../styles/material-access.css";
 
 function mediaUrl(url) {
   if (!url) return null;
@@ -14,18 +16,18 @@ function mediaUrl(url) {
   return url;
 }
 
-function getOpenUrl(item) {
-  if (!item?.slug) return null;
-  if (item.archive_url || item.file_url) {
-    return `/api/interesting/${encodeURIComponent(item.slug)}/view/`;
-  }
-  return null;
+function viewerUrl(slug) {
+  return `/interesting/${encodeURIComponent(slug)}/view`;
+}
+
+function previewUrl(slug) {
+  return `/interesting?preview=${encodeURIComponent(slug)}`;
 }
 
 function InterestingCard({ item, onEngagementChange, onLockedOpen }) {
   const coverUrl = mediaUrl(item.cover_image_url);
   const locked = isCatalogLocked(item);
-  const openUrl = locked ? null : getOpenUrl(item);
+  const openUrl = item?.slug ? (locked ? previewUrl(item.slug) : viewerUrl(item.slug)) : null;
   const accent = item.accent_color || "#1F3A8A";
   const bannerStyle = coverUrl
     ? {
@@ -36,7 +38,12 @@ function InterestingCard({ item, onEngagementChange, onLockedOpen }) {
       }
     : { backgroundColor: accent };
 
-  const handleOpen = () => {
+  const handleOpen = (event) => {
+    if (locked) {
+      event.preventDefault();
+      onLockedOpen?.(item);
+      return;
+    }
     if (!item.slug) return;
     registerCatalogView("interesting", item.slug).catch(() => {});
   };
@@ -70,20 +77,16 @@ function InterestingCard({ item, onEngagementChange, onLockedOpen }) {
           isLiked={item.is_liked}
           onChange={(next) => onEngagementChange?.(item.slug, next)}
         />
-        {locked ? (
-          <button type="button" className="interesting-card__btn" onClick={() => onLockedOpen?.(item)}>
-            Открыть
-          </button>
-        ) : openUrl ? (
+        {openUrl ? (
           <a
             href={openUrl}
             className="interesting-card__btn"
-            target="_blank"
-            rel="noopener noreferrer"
+            target={locked ? undefined : "_blank"}
+            rel={locked ? undefined : "noopener noreferrer"}
             onClick={handleOpen}
           >
             Открыть
-            <ExternalLink size={16} strokeWidth={2.2} aria-hidden="true" />
+            {locked ? null : <ExternalLink size={16} strokeWidth={2.2} aria-hidden="true" />}
           </a>
         ) : (
           <button type="button" className="interesting-card__btn interesting-card__btn--disabled" disabled>
@@ -96,6 +99,8 @@ function InterestingCard({ item, onEngagementChange, onLockedOpen }) {
 }
 
 export default function InterestingPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const previewSlug = searchParams.get("preview") || "";
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -103,11 +108,6 @@ export default function InterestingPage() {
   const [ordering, setOrdering] = useState("newest");
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
-  const authed = useCabinetAuthed();
-  const { modal: accessGateModal, openGate } = useAccessGate({
-    authenticated: authed,
-    sourcePage: "/interesting",
-  });
 
   const handleEngagementChange = useCallback((slug, next) => {
     setItems((prev) =>
@@ -125,14 +125,15 @@ export default function InterestingPage() {
   }, []);
 
   const handleLockedOpen = useCallback((item) => {
-    openGate({
-      reason: authed ? "insufficient_plan" : "anonymous",
-      resourceType: "interesting",
-      requiredPlan: item?.access?.min_plan,
-      resourceId: item?.slug,
-      returnUrl: "/interesting",
-    });
-  }, [authed, openGate]);
+    if (!item?.slug) return;
+    setSearchParams({ preview: item.slug }, { replace: false });
+  }, [setSearchParams]);
+
+  const closePreview = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("preview");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -251,7 +252,11 @@ export default function InterestingPage() {
           )}
         </main>
       </div>
-      {accessGateModal}
+      <InterestingPreviewModal
+        open={Boolean(previewSlug)}
+        slug={previewSlug}
+        onClose={closePreview}
+      />
     </div>
   );
 }
