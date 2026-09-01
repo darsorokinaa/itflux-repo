@@ -51,6 +51,16 @@ export function logJitsiPresence(tag, fields = {}) {
   }
 }
 
+const BOT_DISPLAY_NAMES = /^(focus|jicofo|jibri|recorder|transcriber)$/i;
+
+export function isHiddenOrBotParticipant(raw) {
+  if (!raw || typeof raw !== "object") return false;
+  if (raw.hidden === true || raw.isHidden === true) return true;
+  if (safeStr(raw.botType || raw.bot_type)) return true;
+  const name = safeStr(raw.displayName || raw.formattedDisplayName || raw.name);
+  return BOT_DISPLAY_NAMES.test(name);
+}
+
 export function normalizeParticipant(raw, { localId = "" } = {}) {
   if (!raw || typeof raw !== "object") return null;
   const id = safeStr(
@@ -60,6 +70,8 @@ export function normalizeParticipant(raw, { localId = "" } = {}) {
     || raw.occupantJid,
   );
   if (!id) return null;
+  const local = Boolean(localId) && id === localId;
+  if (!local && isHiddenOrBotParticipant(raw)) return null;
   const displayName = safeStr(
     raw.displayName
     || raw.formattedDisplayName
@@ -69,7 +81,7 @@ export function normalizeParticipant(raw, { localId = "" } = {}) {
     id,
     displayName,
     role: safeStr(raw.role),
-    local: Boolean(localId) && id === localId,
+    local,
   };
 }
 

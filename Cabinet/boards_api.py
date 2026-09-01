@@ -60,6 +60,7 @@ def _parse_optional_pk(value):
 MAX_SCENE_JSON_BYTES = 15 * 1024 * 1024
 MAX_BOARD_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_THUMBNAIL_CHARS = 200_000
+DEFAULT_BOARD_TITLE = "Новая доска"
 
 # SVG намеренно запрещён (XSS). Только растровые форматы.
 ALLOWED_BOARD_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
@@ -878,7 +879,7 @@ class InteractiveBoardWriteSerializer(serializers.ModelSerializer):
     def validate_title(self, value):
         title = (value or "").strip()
         if not title:
-            return "Новая доска"
+            return DEFAULT_BOARD_TITLE
         return title[:255]
 
     def validate_thumbnail(self, value):
@@ -965,12 +966,33 @@ def resolve_related_for_teacher(teacher: User, data: dict) -> dict:
                 raise Http404("Занятие не найдено")
             event = get_object_or_404(ScheduleEvent, pk=pk, owner=teacher)
             resolved["schedule_event"] = event
-            # Автоматически привязываем ученика/группу урока к доске.
+            # Автоматически привязываем ученика/группу/урок занятия к доске.
             if student_id is serializers.empty and event.student_id:
                 resolved["student"] = event.student
             if group_id is serializers.empty and event.group_id:
                 resolved["group"] = event.group
+            if lesson_id is serializers.empty and event.lesson_id:
+                resolved["lesson"] = event.lesson
     return resolved
+
+
+def inferred_board_title(related: dict) -> str | None:
+    """Название новой доски по связанному занятию или уроку."""
+    event = related.get("schedule_event")
+    lesson = related.get("lesson")
+    candidates = []
+    if event is not None:
+        candidates.append(getattr(event, "topic", None))
+    if lesson is not None:
+        candidates.append(getattr(lesson, "title", None))
+        candidates.append(getattr(lesson, "topic", None))
+    if event is not None:
+        candidates.append(getattr(event, "title", None))
+    for raw in candidates:
+        name = (raw or "").strip()
+        if name:
+            return name[:255]
+    return None
 
 
 class InteractiveBoardViewSet(viewsets.ModelViewSet):
@@ -1048,7 +1070,11 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
             },
         )
 
-        title = data.get("title") or "Новая доска"
+        title = data.get("title") or DEFAULT_BOARD_TITLE
+        if title == DEFAULT_BOARD_TITLE:
+            inferred = inferred_board_title(related)
+            if inferred:
+                title = inferred
         board = InteractiveBoard.objects.create(
             owner=request.user,
             title=title,

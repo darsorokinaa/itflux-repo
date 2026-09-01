@@ -1632,6 +1632,7 @@ export default function EventDetailCard({
                     embedded
                     scheduleEventId={event.id}
                     lessonId={event.lesson || event.lessonId || null}
+                    lessonTitle={lessonTopic || event.title || ""}
                     studentId={event.student || event.studentId || null}
                     groupId={event.group || event.groupId || null}
                     studentMode={studentMode || Boolean(event.readOnly)}

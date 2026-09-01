@@ -109,6 +109,52 @@ class InteractiveBoardApiTests(TestCase):
         self.assertEqual(res.status_code, 201)
         self.assertEqual(res.json()["title"], "Новая доска")
 
+    def test_create_board_uses_lesson_title(self):
+        self._auth(self.teacher)
+        res = self.client.post(
+            "/api/cabinet/interactive-boards/",
+            {"lesson_id": self.lesson.pk},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(res.json()["title"], "Урок по алгоритмам")
+        self.assertEqual(res.json()["lesson"], self.lesson.pk)
+
+    def test_create_board_keeps_custom_title_with_lesson(self):
+        self._auth(self.teacher)
+        res = self.client.post(
+            "/api/cabinet/interactive-boards/",
+            {"title": "Черновик схем", "lesson_id": self.lesson.pk},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(res.json()["title"], "Черновик схем")
+
+    def test_create_board_uses_schedule_event_topic(self):
+        starts = timezone.now()
+        event = ScheduleEvent.objects.create(
+            owner=self.teacher,
+            title="Анна Ученица",
+            topic="Бинарный поиск",
+            starts_at=starts,
+            ends_at=starts + timedelta(hours=1),
+            student=self.student,
+            lesson=self.lesson,
+            event_type=ScheduleEvent.EventType.INDIVIDUAL_LESSON,
+            status=ScheduleEvent.Status.PLANNED,
+        )
+        self._auth(self.teacher)
+        res = self.client.post(
+            "/api/cabinet/interactive-boards/",
+            {"schedule_event_id": event.pk},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+        data = res.json()
+        self.assertEqual(data["title"], "Бинарный поиск")
+        self.assertEqual(data["schedule_event"], event.pk)
+        self.assertEqual(data["lesson"], self.lesson.pk)
+
     def test_owner_can_retrieve_board(self):
         board = InteractiveBoard.objects.create(owner=self.teacher, title="T")
         self._auth(self.teacher)

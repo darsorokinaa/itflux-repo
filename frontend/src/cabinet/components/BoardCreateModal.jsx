@@ -2,12 +2,37 @@ import { useEffect, useState } from "react";
 import CabinetModal from "./CabinetModal";
 import { createInteractiveBoard, fetchGroups, fetchLessons, fetchStudents, normalizeCabinetList } from "../../utils/cabinetAuth";
 
+export const DEFAULT_BOARD_TITLE = "Новая доска";
+
+export function lessonDisplayTitle(lesson) {
+  if (!lesson) return "";
+  return String(lesson.title || lesson.topic || "").trim();
+}
+
+export function nextBoardTitleOnLessonChange({
+  currentTitle,
+  previousLessonTitle,
+  nextLessonTitle,
+  fallbackTitle = DEFAULT_BOARD_TITLE,
+}) {
+  const current = String(currentTitle || "").trim();
+  const previous = String(previousLessonTitle || "").trim();
+  const next = String(nextLessonTitle || "").trim();
+  const canReplace = !current
+    || current === DEFAULT_BOARD_TITLE
+    || (previous && current === previous);
+  if (!canReplace) return currentTitle;
+  return next || fallbackTitle;
+}
+
 export default function BoardCreateModal({
   onClose,
   onCreated,
   initial = {},
 }) {
-  const [title, setTitle] = useState(initial.title || "Новая доска");
+  const [title, setTitle] = useState(
+    String(initial.title || "").trim() || DEFAULT_BOARD_TITLE,
+  );
   const [description, setDescription] = useState(initial.description || "");
   const [groupId, setGroupId] = useState(initial.groupId || "");
   const [studentId, setStudentId] = useState(initial.studentId || "");
@@ -39,7 +64,7 @@ export default function BoardCreateModal({
     setError("");
     try {
       const payload = {
-        title: (title || "").trim() || "Новая доска",
+        title: (title || "").trim() || DEFAULT_BOARD_TITLE,
         description: description.trim(),
         group_id: groupId ? Number(groupId) : null,
         student_id: studentId ? Number(studentId) : null,
@@ -118,7 +143,21 @@ export default function BoardCreateModal({
         </label>
         <label>
           Урок
-          <select value={lessonId} onChange={(e) => setLessonId(e.target.value)}>
+          <select
+            value={lessonId}
+            onChange={(e) => {
+              const nextId = e.target.value;
+              const previous = lessons.find((item) => String(item.id) === String(lessonId));
+              const selected = lessons.find((item) => String(item.id) === String(nextId));
+              setLessonId(nextId);
+              setTitle((current) => nextBoardTitleOnLessonChange({
+                currentTitle: current,
+                previousLessonTitle: lessonDisplayTitle(previous),
+                nextLessonTitle: lessonDisplayTitle(selected),
+                fallbackTitle: String(initial.title || "").trim() || DEFAULT_BOARD_TITLE,
+              }));
+            }}
+          >
             <option value="">Не выбран</option>
             {lessons.map((l) => (
               <option key={l.id} value={l.id}>{l.title}</option>

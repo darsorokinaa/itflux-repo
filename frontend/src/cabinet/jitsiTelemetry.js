@@ -55,18 +55,23 @@ export function sanitizeTelemetryMetadata(value, depth = 0) {
 
 export function classifyConferencePresence({
   conferenceJoined = false,
-  remoteCount = 0,
+  remoteCount = null,
   participantCount = null,
   mediaFailed = false,
   mediaUp = false,
   reconnecting = false,
+  isTeacher = false,
 } = {}) {
-  const count = typeof participantCount === "number" ? participantCount : (remoteCount + (conferenceJoined ? 1 : 0));
+  const count = typeof participantCount === "number" ? participantCount : ((Number(remoteCount) || 0) + (conferenceJoined ? 1 : 0));
+  const remotes = remoteCount == null
+    ? Math.max(0, count - (conferenceJoined ? 1 : 0))
+    : Math.max(0, Number(remoteCount) || 0);
+  const peerInRoom = remotes >= 1;
   if (mediaUp) {
     mediaFailed = false;
     reconnecting = false;
   }
-  if (mediaFailed && conferenceJoined && count >= 2) {
+  if (mediaFailed && conferenceJoined && peerInRoom) {
     return {
       scenario: "B",
       code: "media_failed",
@@ -87,11 +92,11 @@ export function classifyConferencePresence({
       label: "Подключение к комнате…",
     };
   }
-  if (count <= 1) {
+  if (!peerInRoom) {
     return {
       scenario: "A",
       code: "waiting_peer",
-      label: "Ученик подключается…",
+      label: isTeacher ? "Ждём ученика" : "Ждём учителя",
     };
   }
   if (mediaFailed) {
@@ -101,10 +106,17 @@ export function classifyConferencePresence({
       label: "Не удалось установить медиасоединение. Попробуйте переподключиться.",
     };
   }
+  if (mediaUp) {
+    return {
+      scenario: "B",
+      code: "in_call",
+      label: "",
+    };
+  }
   return {
     scenario: "B-pending",
     code: "peer_connecting_media",
-    label: "Участник в комнате, устанавливаем соединение…",
+    label: isTeacher ? "Ученик подключается…" : "Учитель подключается…",
   };
 }
 

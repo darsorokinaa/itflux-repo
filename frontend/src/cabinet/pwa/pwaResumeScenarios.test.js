@@ -21,7 +21,7 @@ describe("iPhone PWA resume scenarios (unit)", () => {
 
   it("C: 2 min background still uses the same recovery path, not a full reload", () => {
     expect(shouldVerifyAfterBackground(120_000, "visibility")).toBe(true);
-    expect(classifyResumeUi(RESUME_STATES.RECONNECTING, 2_000).showReload).toBe(false);
+    expect(classifyResumeUi(RESUME_STATES.RECONNECTING, RESUME_TIMING.SHOW_MS).showReload).toBe(false);
   });
 
   it("D: offline resume shows reconnecting without a fake reconnect button", () => {

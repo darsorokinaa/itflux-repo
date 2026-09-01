@@ -197,6 +197,8 @@ class SeasonalThemeApiTests(TestCase):
         self.assertIsNotNone(data["theme"])
         self.assertEqual(data["theme"]["slug"], "api-active")
         self.assertEqual(data["theme"]["name"], "Новогоднее")
+        self.assertIn("header", data["theme"])
+        self.assertIn("meeting_decor_url", data["theme"]["header"])
         self.assertNotIn("force_active_for_testing", data["theme"])
 
     def test_manual_preference_saved(self):

@@ -45,6 +45,7 @@ import { stopAllConnectionCheckStreams } from "../connectionCheck/mediaCleanup";
 import { clearPrimedMedia } from "../connectionCheck/mediaDevices";
 import ConfirmActionModal from "../components/ConfirmActionModal";
 import { lessonJournalFromMeetingPath, openLessonSummaryTab } from "../journal/openLessonSummary";
+import { classifyLiveDurationUi } from "../meetingLiveDuration";
 import { getMeetingAttendanceTracker } from "../meetingAttendance";
 import {
   classifyConferencePresence,
@@ -94,6 +95,7 @@ import { LASER_TTL_MS } from "../screenshare/constants";
 import { AnnotationProvider } from "../annotations/AnnotationContext";
 import { AnnotationHeaderButton } from "../annotations/AnnotationToolbar";
 import { useFloatingDrag } from "../useFloatingDrag";
+import FloatingResizeHandles from "../FloatingResizeHandles";
 import {
   STUDENT_HOME_ROUTE,
   createLeaveOnce,
@@ -350,6 +352,7 @@ export default function VideoMeetingPage() {
   const conferencePresenceRef = useRef({
     joined: false,
     count: 0,
+    remoteCount: 0,
     mediaFailed: false,
     reconnecting: false,
     mediaUp: false,
@@ -364,6 +367,7 @@ export default function VideoMeetingPage() {
   const [copied, setCopied] = useState(false);
   const [copyHint, setCopyHint] = useState("");
   const [connectionHint, setConnectionHint] = useState("");
+  const [liveClockMs, setLiveClockMs] = useState(() => Date.now());
   const [resumeState, setResumeState] = useState(RESUME_STATES.ACTIVE);
   const [resumeElapsedMs, setResumeElapsedMs] = useState(0);
   const [workspaceFrameKey, setWorkspaceFrameKey] = useState(0);
@@ -592,24 +596,28 @@ export default function VideoMeetingPage() {
         }, 3200);
       };
 
+      const applyConferenceHint = () => {
+        const presence = conferencePresenceRef.current;
+        const classified = classifyConferencePresence({
+          conferenceJoined: presence.joined,
+          participantCount: presence.count,
+          remoteCount: presence.remoteCount || 0,
+          mediaFailed: presence.mediaFailed,
+          mediaUp: presence.mediaUp,
+          reconnecting: presence.reconnecting,
+          isTeacher: canManageRef.current,
+        });
+        setConnectionHint(classified.label || "");
+        return classified;
+      };
+
       const wrapped = await createJitsiMeetSession(joinConfig, containerRef.current, {
         signal: abort.signal,
         onParticipantCount: (n) => {
           if (typeof n === "number" && n >= 0) {
             setParticipantCount(n);
             conferencePresenceRef.current.count = n;
-            const classified = classifyConferencePresence({
-              conferenceJoined: conferencePresenceRef.current.joined,
-              participantCount: n,
-              mediaFailed: conferencePresenceRef.current.mediaFailed,
-              mediaUp: conferencePresenceRef.current.mediaUp,
-              reconnecting: conferencePresenceRef.current.reconnecting,
-            });
-            if (conferencePresenceRef.current.mediaUp && n >= 2) {
-              setConnectionHint("");
-            } else {
-              setConnectionHint(classified.label);
-            }
+            const classified = applyConferenceHint();
             void reportMeetingTechnicalEvent(meetingUuid, {
               eventType: "participant_count",
               role: config.diagnostics?.role || config.meeting?.role || "",
@@ -617,6 +625,7 @@ export default function VideoMeetingPage() {
               callSessionId: callSessionIdRef.current,
               metadata: {
                 participantCount: n,
+                remoteCount: conferencePresenceRef.current.remoteCount || 0,
                 scenario: classified.scenario,
                 presenceCode: classified.code,
               },
@@ -627,20 +636,17 @@ export default function VideoMeetingPage() {
           if (typeof snap?.count === "number" && snap.count >= 0) {
             setParticipantCount(snap.count);
             conferencePresenceRef.current.count = snap.count;
+            conferencePresenceRef.current.remoteCount = Array.isArray(snap.remoteParticipants)
+              ? snap.remoteParticipants.length
+              : 0;
+            applyConferenceHint();
           }
         },
         onJoined: (event) => {
           setJoinState("joined");
           conferencePresenceRef.current.joined = true;
           resumeControllerRef.current?.succeed?.();
-          const classified = classifyConferencePresence({
-            conferenceJoined: true,
-            participantCount: conferencePresenceRef.current.count || 1,
-            mediaFailed: false,
-            mediaUp: conferencePresenceRef.current.mediaUp,
-            reconnecting: false,
-          });
-          setConnectionHint(classified.label);
+          applyConferenceHint();
           callStateRef.current?.transition(CALL_STATES.joined, "videoConferenceJoined");
           void attendanceTracker.onVerifiedJoin(event);
           if (event?.roomName && config.roomName && !jitsiRoomsMatch(config.roomName, event.roomName)) {
@@ -672,12 +678,13 @@ export default function VideoMeetingPage() {
           if (next === "joined") {
             conferencePresenceRef.current.reconnecting = false;
             conferencePresenceRef.current.mediaFailed = false;
-            conferencePresenceRef.current.mediaUp = why === "dataChannelOpened" || conferencePresenceRef.current.mediaUp || why === "videoConferenceJoined";
+            // Local videoConferenceJoined is not proof the peer is in the call.
+            if (why === "dataChannelOpened") {
+              conferencePresenceRef.current.mediaUp = true;
+            }
             resumeControllerRef.current?.succeed?.();
             callStateRef.current?.transition(CALL_STATES.joined, why);
-            if (conferencePresenceRef.current.count >= 2) {
-              setConnectionHint("");
-            }
+            applyConferenceHint();
           } else if (next === "reconnecting") {
             conferencePresenceRef.current.reconnecting = true;
             callStateRef.current?.transition(CALL_STATES.reconnecting, why);
@@ -825,6 +832,7 @@ export default function VideoMeetingPage() {
       conferencePresenceRef.current = {
         joined: false,
         count: 0,
+        remoteCount: 0,
         mediaFailed: false,
         reconnecting: false,
         mediaUp: false,
@@ -1066,6 +1074,20 @@ export default function VideoMeetingPage() {
             setMobilePane("materials");
           }
         }
+        if (statusPayload?.actualStartedAt || statusPayload?.status) {
+          setDetail((prev) => (
+            prev
+              ? {
+                ...prev,
+                videoMeeting: {
+                  ...(prev.videoMeeting || {}),
+                  status: statusPayload.status || prev.videoMeeting?.status,
+                  actualStartedAt: statusPayload.actualStartedAt || prev.videoMeeting?.actualStartedAt,
+                },
+              }
+              : prev
+          ));
+        }
         if (statusPayload?.status === "finished") {
           setPageState("finished");
         }
@@ -1080,6 +1102,26 @@ export default function VideoMeetingPage() {
       window.clearInterval(id);
     };
   }, [meetingUuid, pageState]);
+
+  useEffect(() => {
+    if (pageState !== "live") return undefined;
+    setLiveClockMs(Date.now());
+    const id = window.setInterval(() => setLiveClockMs(Date.now()), 15000);
+    return () => window.clearInterval(id);
+  }, [pageState]);
+
+  useEffect(() => {
+    if (pageState !== "finished" && pageState !== "cancelled") return undefined;
+    if (!apiRef.current) return undefined;
+    try {
+      apiRef.current.executeCommand?.("hangup");
+    } catch {
+      /* ignore */
+    }
+    sendLeave(true);
+    disposeApi();
+    return undefined;
+  }, [disposeApi, pageState, sendLeave]);
 
   useEffect(() => {
     canManageRef.current = Boolean(detail?.canManage);
@@ -1197,14 +1239,52 @@ export default function VideoMeetingPage() {
         const alreadyLive = Boolean(
           conferencePresenceRef.current.joined && apiRef.current,
         );
-        if (!ctx.online) {
-          if (alreadyLive) {
-            controller.succeed();
-            return;
+        // Live room: finish silently. Waiting on auth here used to flash
+        // "Восстанавливаем соединение…" even though the call was still up.
+        if (alreadyLive) {
+          try {
+            materialCollabRef.current?.resumeNow?.();
+          } catch {
+            /* keep the live room */
           }
+          postResumeToBoardFrames(ctx.attemptId);
+          try {
+            apiRef.current?.watchdog?.inspect?.();
+          } catch {
+            /* ignore */
+          }
+          try {
+            void apiRef.current?.reconcileParticipants?.("resume");
+          } catch {
+            /* ignore */
+          }
+          controller.succeed();
+          if (ctx.online) {
+            void probeAuthSession().then(async (auth) => {
+              if (controller.getAttemptId() !== ctx.attemptId) return;
+              reportClientEvent(auth.ok ? "RESUME_AUTH_OK" : "RESUME_AUTH_FAIL", {
+                ...extra,
+                stage: "auth",
+                errorCode: auth.ok ? "" : auth.code,
+              });
+              if (!auth.ok && auth.code === "auth_expired") {
+                try {
+                  await fetchVideoMeetingDetail(meetingUuid);
+                } catch {
+                  /* live call still works */
+                }
+              }
+            });
+          }
+          return;
+        }
+
+        if (!ctx.online) {
           controller.markDegraded("offline");
           return;
         }
+
+        controller.markReconnecting();
 
         markResumeStage("auth");
         const auth = await probeAuthSession();
@@ -1222,22 +1302,7 @@ export default function VideoMeetingPage() {
             return;
           }
         } else if (!auth.ok && auth.code === "auth_network") {
-          if (alreadyLive) {
-            controller.succeed();
-            return;
-          }
           controller.markDegraded("auth_network");
-          return;
-        }
-
-        if (alreadyLive) {
-          try {
-            materialCollabRef.current?.resumeNow?.();
-          } catch {
-            /* keep the live room */
-          }
-          postResumeToBoardFrames(ctx.attemptId);
-          controller.succeed();
           return;
         }
 
@@ -1350,6 +1415,20 @@ export default function VideoMeetingPage() {
     };
   }, [meetingUuid, pageState, remountJitsi, roleLabel]);
 
+  useEffect(() => {
+    const pending =
+      resumeState === RESUME_STATES.RESUMING
+      || resumeState === RESUME_STATES.RECONNECTING
+      || resumeState === RESUME_STATES.DEGRADED;
+    if (!pending) return undefined;
+    const origin = Date.now() - resumeElapsedMs;
+    const tick = window.setInterval(() => {
+      setResumeElapsedMs(Date.now() - origin);
+    }, 400);
+    return () => window.clearInterval(tick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keep origin fixed for this attempt
+  }, [resumeState]);
+
   const onStartLesson = async () => {
     if (!meetingUuid || starting) return;
     setStarting(true);
@@ -1416,6 +1495,11 @@ export default function VideoMeetingPage() {
   const status = meeting?.status || "scheduled";
   const returnUrl = returnUrlRef.current || (canManage ? "/cabinet/schedule" : "/cabinet/student/lessons");
   const scheduleUrl = "/cabinet/schedule";
+  const liveDurationUi = classifyLiveDurationUi({
+    startedAt: meeting?.actualStartedAt || "",
+    now: liveClockMs,
+    canManage,
+  });
 
   const materialRows = useMemo(() => {
     const planItem = event?.planItem || null;
@@ -2426,9 +2510,14 @@ export default function VideoMeetingPage() {
     nodeRef: compactCallRef,
     style: compactCallStyle,
     dragging: compactCallDragging,
+    resizing: compactCallResizing,
     onPointerDown: onCompactCallPointerDown,
+    onResizePointerDown: onCompactCallResizePointerDown,
   } = useFloatingDrag({
     enabled: compactCall,
+    resizable: compactCall && !callCollapsed,
+    minWidth: 160,
+    minHeight: 120,
     storageKey: meetingUuid ? `vl-compact-call:${meetingUuid}` : null,
     handleSelector: ".video-lesson-compact-drag",
   });
@@ -2708,6 +2797,32 @@ export default function VideoMeetingPage() {
         onReload={onManualRoomReload}
         testId="room-connection-recovery"
       />
+      {showJitsi && liveDurationUi.phase !== "ok" ? (
+        <div
+          className={`itflux-recovery-banner itflux-recovery-banner--${liveDurationUi.phase === "overdue" ? "failed" : "slow"}`}
+          role="status"
+          data-testid="live-duration-warning"
+        >
+          <div className="itflux-recovery-banner__row">
+            <p className="itflux-recovery-banner__title">{liveDurationUi.title}</p>
+          </div>
+          {liveDurationUi.text ? (
+            <p className="itflux-recovery-banner__text">{liveDurationUi.text}</p>
+          ) : null}
+          {liveDurationUi.showFinish ? (
+            <div className="itflux-recovery-banner__actions">
+              <button
+                type="button"
+                className="itflux-recovery-banner__btn itflux-recovery-banner__btn--primary"
+                disabled={finishing}
+                onClick={() => setFinishConfirm(true)}
+              >
+                Завершить звонок
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <div className="video-lesson-body">
         {focusCall && (syncedWorkspaceOpen || workspaceMaterial) && showJitsi ? (
           <div className="video-lesson-material-chip" role="status">
@@ -2963,8 +3078,9 @@ export default function VideoMeetingPage() {
           ref={compactCall ? compactCallRef : undefined}
           className={[
             "video-lesson-content",
-            compactCallDragging ? "video-lesson-content--dragging" : "",
+            compactCallDragging || compactCallResizing ? "video-lesson-content--dragging" : "",
             compactCall && callCollapsed ? "video-lesson-content--call-collapsed" : "",
+            compactCall && !callCollapsed ? "video-lesson-content--resizable" : "",
           ].filter(Boolean).join(" ")}
           style={compactCall ? compactCallStyle : undefined}
           onPointerDown={compactCall ? onCompactCallPointerDown : undefined}
@@ -3201,6 +3317,9 @@ export default function VideoMeetingPage() {
                 </button>
               </div>
             </div>
+          ) : null}
+          {compactCall && !callCollapsed ? (
+            <FloatingResizeHandles onPointerDown={onCompactCallResizePointerDown} />
           ) : null}
 
           <div

@@ -14,6 +14,7 @@ from Cabinet.jitsi_service import (
 from Cabinet.models import (
     InteractiveBoard,
     MeetingAttendance,
+    Notification,
     Profile,
     ScheduleEvent,
     Student,
@@ -1074,7 +1075,7 @@ class VideoMeetingApiTests(TestCase):
         )
         VideoMeeting.objects.filter(pk=meeting.pk).update(
             updated_at=now - timedelta(hours=10),
-            actual_started_at=now - timedelta(hours=3),
+            actual_started_at=now - timedelta(minutes=90),
         )
         report = expire_stale_live_meetings(now=now, dry_run=False)
         self.assertEqual(report["checked"], 0)
@@ -1094,7 +1095,7 @@ class VideoMeetingApiTests(TestCase):
         )
         VideoMeeting.objects.filter(pk=meeting.pk).update(
             updated_at=now - timedelta(minutes=20),
-            actual_started_at=now - timedelta(hours=20),
+            actual_started_at=now - timedelta(minutes=90),
         )
         report = expire_stale_live_meetings(now=now, dry_run=False)
         self.assertEqual(report["expired"], [])
@@ -1118,12 +1119,65 @@ class VideoMeetingApiTests(TestCase):
         )
         VideoMeeting.objects.filter(pk=meeting.pk).update(
             updated_at=now - timedelta(hours=10),
-            actual_started_at=now - timedelta(hours=20),
+            actual_started_at=now - timedelta(minutes=90),
         )
         report = expire_stale_live_meetings(now=now, dry_run=False)
         self.assertEqual(report["expired"], [])
         meeting.refresh_from_db()
         self.assertEqual(meeting.status, VideoMeeting.Status.LIVE)
+
+    def test_overlong_watchdog_closes_live_call_after_two_hours(self):
+        from Cabinet.video_meeting_service import expire_overlong_live_meetings
+
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        now = timezone.now()
+        VideoMeeting.objects.filter(pk=meeting.pk).update(
+            actual_started_at=now - timedelta(hours=2, minutes=1),
+            updated_at=now,
+        )
+        report = expire_overlong_live_meetings(now=now, dry_run=False)
+        self.assertEqual(len(report["expired"]), 1)
+        meeting.refresh_from_db()
+        self.event.refresh_from_db()
+        self.assertEqual(meeting.status, VideoMeeting.Status.FINISHED)
+        self.assertEqual(self.event.status, ScheduleEvent.Status.PLANNED)
+        note = Notification.objects.filter(
+            recipient_user=self.teacher,
+            event_type="meeting_auto_finished",
+        ).first()
+        self.assertIsNotNone(note)
+        self.assertIn("забыли", note.message)
+
+    def test_overlong_watchdog_keeps_call_under_two_hours(self):
+        from Cabinet.video_meeting_service import expire_overlong_live_meetings
+
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        now = timezone.now()
+        VideoMeeting.objects.filter(pk=meeting.pk).update(
+            actual_started_at=now - timedelta(hours=1, minutes=50),
+            updated_at=now,
+        )
+        report = expire_overlong_live_meetings(now=now, dry_run=False)
+        self.assertEqual(report["expired"], [])
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.status, VideoMeeting.Status.LIVE)
+
+    def test_status_poll_expires_overlong_live_meeting(self):
+        meeting = self._create_meeting()
+        start_meeting(meeting=meeting, user=self.teacher)
+        now = timezone.now()
+        VideoMeeting.objects.filter(pk=meeting.pk).update(
+            actual_started_at=now - timedelta(hours=2, minutes=5),
+            updated_at=now,
+        )
+        self.client.force_login(self.teacher)
+        res = self.client.get(f"/api/video-meetings/{meeting.uuid}/status/")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.data["status"], "finished")
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.status, VideoMeeting.Status.FINISHED)
 
     def test_live_status_poll_touches_activity(self):
         from Cabinet.video_meeting_service import LIVE_ACTIVITY_TOUCH_INTERVAL

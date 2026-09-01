@@ -1,36 +1,41 @@
 /**
  * Статичные декоративные изображения темы (pointer-events: none, кроме click_url).
  */
+import { decorationAllowedOnRoute } from "./seasonalThemeApi";
+
 export default function SeasonalThemeDecorations({
   decorations,
   intensity,
   isMobile,
   animationsEnabled,
   pathname,
+  allowedZones = null,
+  heavy = false,
+  className = "",
 }) {
-  if (!Array.isArray(decorations) || !decorations.length || intensity === "off") {
+  if (!Array.isArray(decorations) || !decorations.length) {
     return null;
   }
 
   const isTablet = !isMobile && typeof window !== "undefined" && window.matchMedia("(max-width: 1024px)").matches;
+  const motionOn = Boolean(animationsEnabled) && intensity !== "off";
 
   const visible = decorations.filter((d) => {
     if (!d?.image_url) return false;
     if (isMobile && !d.show_mobile) return false;
     if (!isMobile && isTablet && !d.show_tablet) return false;
     if (!isMobile && !isTablet && !d.show_desktop) return false;
-    if (d.zone === "custom_routes") {
-      const routes = d.custom_routes || [];
-      if (!routes.length) return false;
-      return routes.some((r) => pathname === r || pathname.startsWith(r));
+    if (Array.isArray(allowedZones)) {
+      if (!allowedZones.length) return false;
+      if (!allowedZones.includes(d.zone || "page_background")) return false;
     }
-    return true;
+    return decorationAllowedOnRoute(d, pathname, { heavy });
   });
 
   if (!visible.length) return null;
 
   return (
-    <div className="seasonal-decor-layer" aria-hidden="true">
+    <div className={`seasonal-decor-layer${className ? ` ${className}` : ""}`} aria-hidden="true">
       {visible.map((d) => {
         const animType = d.animation?.type;
         const delay = Math.max(Number(d.animation?.delay) || 0, 0);
@@ -50,7 +55,7 @@ export default function SeasonalThemeDecorations({
             : `${delay}s`,
         };
         const animClass =
-          animationsEnabled && d.animation?.type && d.animation.type !== "none"
+          motionOn && d.animation?.type && d.animation.type !== "none"
             ? `seasonal-decor--${d.animation.type}`
             : "";
         const posClass = `seasonal-decor--pos-${d.position || "top-right"}`;

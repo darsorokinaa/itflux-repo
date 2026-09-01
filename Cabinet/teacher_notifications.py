@@ -535,6 +535,50 @@ def send_student_absent_alerts(*, after_minutes: int = 5) -> int:
     return sent
 
 
+def notify_teacher_meeting_auto_finished(*, meeting, reason: str = "max_duration") -> None:
+    """In-app + push: звонок закрыли автоматически, занятие в журнале не проводили."""
+    from .notification_catalog import NotificationEventType
+    from .notification_dispatch import NotificationDispatcher
+
+    event = getattr(meeting, "schedule_event", None)
+    teacher = getattr(event, "owner", None) if event is not None else None
+    if teacher is None:
+        return
+    event_id = event.pk
+    url = f"/cabinet/journal/lesson/{event_id}?from=meeting"
+    if reason == "stale_watchdog":
+        message = (
+            "Зависший звонок закрыт автоматически. Похоже, вы забыли завершить урок самостоятельно. "
+            "Если занятие продолжается — создайте новый урок."
+        )
+    else:
+        message = (
+            "Звонок шёл больше 2 часов и закрыт автоматически. "
+            "Похоже, вы забыли завершить его самостоятельно. "
+            "Если занятие продолжается — создайте новый урок."
+        )
+    NotificationDispatcher.notify(
+        teacher,
+        NotificationEventType.MEETING_AUTO_FINISHED,
+        title="Урок завершился",
+        message=message,
+        payload={
+            "type": NotificationEventType.MEETING_AUTO_FINISHED,
+            "event_type": NotificationEventType.MEETING_AUTO_FINISHED,
+            "meeting_uuid": str(meeting.uuid),
+            "event_id": event_id,
+            "reason": str(reason or "")[:64],
+            "url": url,
+        },
+        url=url,
+        dedup_key=f"meeting_auto_finished:{meeting.uuid}",
+        recipient_teacher=teacher,
+        skip_actor=False,
+        force=True,
+        push_tag=f"meeting-auto-finish-{meeting.uuid}",
+    )
+
+
 def _plural(n, one, few, many):
     abs_n = abs(n) % 100
     last = abs_n % 10

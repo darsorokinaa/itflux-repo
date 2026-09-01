@@ -340,6 +340,7 @@ export default function VideoLessonMaterialsPanel({
               embedded
               scheduleEventId={event.id}
               lessonId={event.lessonId || event.lesson || null}
+              lessonTitle={event.topic || event.eventTitle || ""}
               studentId={event.studentId || event.student || null}
               groupId={event.groupId || event.group || null}
               studentMode={false}

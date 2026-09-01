@@ -30,6 +30,8 @@ export const RESUME_STATES = Object.freeze({
 
 export const RESUME_TIMING = Object.freeze({
   MIN_BACKGROUND_MS: 2500,
+  /** Don't flash a lost-connection banner for brief probes / socket blips. */
+  SHOW_MS: 2000,
   SLOW_MS: 8000,
   FAIL_MS: 14000,
   PING_ACK_MS: 2500,
@@ -80,9 +82,26 @@ export function isBackgroundLifecycleReason(reason, visibilityState) {
   return false;
 }
 
+function isPendingResumeState(state) {
+  return state === RESUME_STATES.RESUMING
+    || state === RESUME_STATES.RECONNECTING
+    || state === RESUME_STATES.DEGRADED;
+}
+
+function hiddenResumeUi(online = true) {
+  return {
+    phase: "hidden",
+    title: "",
+    showReconnect: false,
+    showReload: false,
+    offline: !online,
+  };
+}
+
 export function classifyResumeUi(state, elapsedMs = 0, online = true) {
   const elapsed = Math.max(0, Number(elapsedMs) || 0);
-  if (state === RESUME_STATES.FAILED) {
+  const pending = isPendingResumeState(state);
+  if (state === RESUME_STATES.FAILED || (pending && elapsed >= RESUME_TIMING.FAIL_MS)) {
     return {
       phase: "failed",
       title: "Не удалось восстановить соединение.",
@@ -91,12 +110,7 @@ export function classifyResumeUi(state, elapsedMs = 0, online = true) {
       offline: !online,
     };
   }
-  if (!online && (
-    state === RESUME_STATES.RESUMING
-    || state === RESUME_STATES.RECONNECTING
-    || state === RESUME_STATES.DEGRADED
-    || state === RESUME_STATES.BACKGROUND
-  )) {
+  if (!online && (pending || state === RESUME_STATES.BACKGROUND)) {
     return {
       phase: "reconnecting",
       title: "Нет сети. Восстановим соединение, когда интернет появится.",
@@ -105,29 +119,23 @@ export function classifyResumeUi(state, elapsedMs = 0, online = true) {
       offline: true,
     };
   }
-  if (state === RESUME_STATES.DEGRADED || elapsed >= RESUME_TIMING.FAIL_MS) {
-    if (elapsed >= RESUME_TIMING.FAIL_MS || state === RESUME_STATES.FAILED) {
+  // Health check after tab resume: connection is not known-lost yet.
+  if (state === RESUME_STATES.RESUMING) {
+    if (elapsed >= RESUME_TIMING.SLOW_MS) {
       return {
-        phase: "failed",
-        title: "Не удалось восстановить соединение.",
+        phase: "slow",
+        title: "Соединение восстанавливается дольше обычного.",
         showReconnect: true,
-        showReload: true,
-        offline: !online,
+        showReload: false,
+        offline: false,
       };
     }
-    return {
-      phase: "slow",
-      title: "Соединение восстанавливается дольше обычного.",
-      showReconnect: true,
-      showReload: false,
-      offline: !online,
-    };
+    return hiddenResumeUi(true);
   }
-  if (
-    state === RESUME_STATES.RESUMING
-    || state === RESUME_STATES.RECONNECTING
-    || (state === RESUME_STATES.DEGRADED && elapsed < RESUME_TIMING.FAIL_MS)
-  ) {
+  if (state === RESUME_STATES.RECONNECTING || state === RESUME_STATES.DEGRADED) {
+    if (elapsed < RESUME_TIMING.SHOW_MS) {
+      return hiddenResumeUi(online);
+    }
     if (elapsed >= RESUME_TIMING.SLOW_MS) {
       return {
         phase: "slow",
@@ -145,13 +153,7 @@ export function classifyResumeUi(state, elapsedMs = 0, online = true) {
       offline: !online,
     };
   }
-  return {
-    phase: "hidden",
-    title: "",
-    showReconnect: false,
-    showReload: false,
-    offline: !online,
-  };
+  return hiddenResumeUi(online);
 }
 
 export async function probeAuthSession({
@@ -322,10 +324,16 @@ export function createPwaResumeController({
     recoveryPromise = null;
     autoFailCount = 0;
     backgroundStartedAt = 0;
+    resumeStartedAt = 0;
     markResumeStage("ready");
     notify(RESUME_STATES.READY);
     emit("RESUME_READY", { stage: "ready" });
     notify(RESUME_STATES.ACTIVE);
+  };
+
+  const markReconnecting = (reason = "reconnect") => {
+    if (!inProgress) return;
+    notify(RESUME_STATES.RECONNECTING, { reason });
   };
 
   const markDegraded = (errorCode = "degraded") => {
@@ -363,7 +371,6 @@ export function createPwaResumeController({
     notify(RESUME_STATES.RESUMING, { reason, backgroundDurationMs });
     emit("PWA_FOREGROUND", { reason, backgroundDurationMs, stage: "foreground" });
     emit("RESUME_START", { reason, backgroundDurationMs, stage: "start" });
-    notify(RESUME_STATES.RECONNECTING, { reason, backgroundDurationMs });
 
     slowTimer = window.setTimeout(() => {
       if (!inProgress) return;
@@ -459,6 +466,7 @@ export function createPwaResumeController({
     markBackground,
     succeed,
     fail,
+    markReconnecting,
     markDegraded,
     manualReconnect() {
       emit("MANUAL_RECONNECT_CLICK", { stage: "manual" });

@@ -274,6 +274,34 @@ export function routeMatchesList(pathname, list) {
   });
 }
 
+export function isMeetingChromeRoute(pathname) {
+  const path = pathname || "";
+  return (
+    /^\/cabinet\/boards(\/|$)/.test(path)
+    || /^\/teacher\/boards(\/|$)/.test(path)
+    || /^\/cabinet\/meetings(\/|$)/.test(path)
+  );
+}
+
+/** Зоны декора, которые можно показать на звонке/доске без тяжёлых эффектов. */
+export const MEETING_CHROME_ZONES = ["top_bar", "video_meeting"];
+
+export function decorationAllowedOnRoute(decoration, pathname, { heavy = false } = {}) {
+  const zone = decoration?.zone || "page_background";
+  if (zone === "custom_routes") {
+    const routes = decoration.custom_routes || [];
+    if (!routes.length) return false;
+    return routes.some((r) => pathname === r || pathname.startsWith(r));
+  }
+  if (zone === "video_meeting") {
+    return isMeetingChromeRoute(pathname);
+  }
+  if (heavy) {
+    return MEETING_CHROME_ZONES.includes(zone);
+  }
+  return true;
+}
+
 export function themeAppliesToRoute(theme, pathname) {
   if (!theme) return false;
   const exclude = theme.exclude_routes || [];
@@ -339,6 +367,8 @@ export function buildSeasonalCssVars(theme) {
 
   const header = theme.header || {};
   if (header.decor_url) vars["--seasonal-header-decor"] = `url(${header.decor_url})`;
+  const meetingDecor = header.meeting_decor_url || header.decor_url;
+  if (meetingDecor) vars["--seasonal-meeting-header-decor"] = `url(${meetingDecor})`;
 
   if (task.background_color) vars["--seasonal-card-background"] = task.background_color;
   if (task.pattern_url) vars["--seasonal-card-pattern"] = `url(${task.pattern_url})`;

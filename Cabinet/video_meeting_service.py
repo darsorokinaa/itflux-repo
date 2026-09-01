@@ -39,6 +39,9 @@ ATTENDANCE_RECONNECT_GRACE = timedelta(seconds=180)
 STALE_LIVE_AFTER_EVENT_END = timedelta(hours=12)
 STALE_LIVE_INACTIVITY = timedelta(hours=6)
 LIVE_ACTIVITY_TOUCH_INTERVAL = timedelta(minutes=2)
+# Жёсткий потолок длительности звонка, даже если участники ещё в комнате.
+MAX_LIVE_DURATION = timedelta(hours=2)
+LIVE_DURATION_WARN = MAX_LIVE_DURATION - timedelta(minutes=15)
 
 
 class VideoMeetingError(Exception):
@@ -250,7 +253,8 @@ def assert_can_join_meeting(user: User, meeting: VideoMeeting, *, for_config: bo
     JWT / join-config и посещаемость доступны только при статусе live.
     Страница ожидания (detail/status) доступна и до старта.
     """
-    meeting.refresh_from_db(fields=["status", "room_name"])
+    meeting.refresh_from_db(fields=["status", "room_name", "actual_started_at", "created_at"])
+    meeting = maybe_expire_overlong_meeting(meeting)
     event = meeting.schedule_event
     if hasattr(event, "refresh_from_db"):
         event.refresh_from_db(fields=["status", "starts_at", "ends_at"])
@@ -543,6 +547,114 @@ def is_stale_live_meeting(
     return True
 
 
+def live_started_at(meeting: VideoMeeting):
+    return meeting.actual_started_at or meeting.created_at
+
+
+def is_overlong_live_meeting(meeting: VideoMeeting, *, now=None, max_duration=MAX_LIVE_DURATION) -> bool:
+    now = now or timezone.now()
+    if meeting.status != VideoMeeting.Status.LIVE:
+        return False
+    started = live_started_at(meeting)
+    if started is None:
+        return False
+    return now - started >= max_duration
+
+
+def _notify_meeting_auto_closed(meeting: VideoMeeting, *, reason: str) -> None:
+    try:
+        from .teacher_notifications import notify_teacher_meeting_auto_finished
+
+        notify_teacher_meeting_auto_finished(meeting=meeting, reason=reason)
+    except Exception:
+        logger.exception(
+            "Failed to notify teacher about auto-finished meeting=%s reason=%s",
+            getattr(meeting, "uuid", None),
+            reason,
+        )
+
+
+def expire_overlong_live_meetings(*, now=None, dry_run=True, max_duration=MAX_LIVE_DURATION) -> dict:
+    """Закрывает LIVE-звонки дольше max_duration, даже если участники ещё в комнате."""
+    now = now or timezone.now()
+    cutoff = now - max_duration
+    candidates = (
+        VideoMeeting.objects.filter(status=VideoMeeting.Status.LIVE)
+        .filter(
+            Q(actual_started_at__lte=cutoff)
+            | (Q(actual_started_at__isnull=True) & Q(created_at__lte=cutoff))
+        )
+        .select_related("schedule_event")
+        .order_by("id")
+    )
+    report = {"dry_run": dry_run, "checked": 0, "expired": [], "skipped": []}
+    to_notify = []
+    for meeting in candidates:
+        report["checked"] += 1
+        if not is_overlong_live_meeting(meeting, now=now, max_duration=max_duration):
+            report["skipped"].append(
+                {
+                    "uuid": str(meeting.uuid),
+                    "event_id": meeting.schedule_event_id,
+                    "reason": "under_limit",
+                }
+            )
+            continue
+        row = {
+            "uuid": str(meeting.uuid),
+            "event_id": meeting.schedule_event_id,
+            "event_status": meeting.schedule_event.status,
+            "started_at": live_started_at(meeting).isoformat() if live_started_at(meeting) else None,
+        }
+        if dry_run:
+            report["expired"].append(row)
+            continue
+        with transaction.atomic():
+            locked = (
+                VideoMeeting.objects.select_for_update()
+                .select_related("schedule_event")
+                .get(pk=meeting.pk)
+            )
+            if not is_overlong_live_meeting(locked, now=now, max_duration=max_duration):
+                report["skipped"].append(
+                    {
+                        "uuid": str(meeting.uuid),
+                        "event_id": meeting.schedule_event_id,
+                        "reason": "changed_before_lock",
+                    }
+                )
+                continue
+            _close_live_meeting_locked(locked, now=now, reason="max_duration")
+            row["event_status_after"] = locked.schedule_event.status
+            report["expired"].append(row)
+            to_notify.append(locked)
+    for closed in to_notify:
+        _notify_meeting_auto_closed(closed, reason="max_duration")
+    return report
+
+
+def maybe_expire_overlong_meeting(meeting: VideoMeeting, *, now=None) -> VideoMeeting:
+    """Закрыть эту комнату, если звонок уже дольше MAX_LIVE_DURATION."""
+    now = now or timezone.now()
+    if not is_overlong_live_meeting(meeting, now=now):
+        return meeting
+    closed = None
+    with transaction.atomic():
+        locked = (
+            VideoMeeting.objects.select_for_update()
+            .select_related("schedule_event")
+            .get(pk=meeting.pk)
+        )
+        if not is_overlong_live_meeting(locked, now=now):
+            return locked
+        _close_live_meeting_locked(locked, now=now, reason="max_duration")
+        closed = locked
+    if closed is not None:
+        _notify_meeting_auto_closed(closed, reason="max_duration")
+        return closed
+    return meeting
+
+
 def expire_stale_live_meetings(
     *,
     now=None,
@@ -572,6 +684,7 @@ def expire_stale_live_meetings(
         "expired": [],
         "skipped": [],
     }
+    to_notify = []
     for meeting in candidates:
         report["checked"] += 1
         if not is_stale_live_meeting(
@@ -615,6 +728,13 @@ def expire_stale_live_meetings(
             _close_live_meeting_locked(locked, now=now, reason="stale_watchdog")
             row["event_status_after"] = locked.schedule_event.status
             report["expired"].append(row)
+            to_notify.append((locked, "stale_watchdog"))
+    for closed, reason in to_notify:
+        _notify_meeting_auto_closed(closed, reason=reason)
+    overlong = expire_overlong_live_meetings(now=now, dry_run=dry_run)
+    report["overlong_expired"] = overlong.get("expired") or []
+    report["overlong_checked"] = overlong.get("checked") or 0
+    report["checked"] += report["overlong_checked"]
     return report
 
 

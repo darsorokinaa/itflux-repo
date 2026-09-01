@@ -262,6 +262,17 @@ class SeasonalTheme(models.Model):
         upload_to=seasonal_theme_upload_to,
         blank=True,
         null=True,
+        help_text="Картинка в шапке кабинета. Если для звонка не загружено своё фото — используется и там.",
+    )
+    meeting_header_decor = models.ImageField(
+        "Декор шапки звонка и доски",
+        upload_to=seasonal_theme_upload_to,
+        blank=True,
+        null=True,
+        help_text=(
+            "Картинка на верхней панели видеозвонка и интерактивной доски. "
+            "Если пусто — берётся «Декор верхней панели»."
+        ),
     )
     corner_image = models.ImageField(
         "Декор в углу страницы",
@@ -454,6 +465,7 @@ class SeasonalThemeDecoration(models.Model):
         CATALOG = "catalog", "Каталог"
         PROFILE = "profile", "Профиль"
         LOGIN = "login", "Экран входа"
+        VIDEO_MEETING = "video_meeting", "Видеозвонок и доска"
         CUSTOM_ROUTES = "custom_routes", "Конкретные маршруты"
 
     class Position(models.TextChoices):

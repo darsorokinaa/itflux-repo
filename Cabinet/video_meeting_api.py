@@ -43,6 +43,7 @@ from .video_meeting_service import (
     lesson_meeting_audience,
     lesson_meeting_subject,
     list_attendance_for_teacher,
+    maybe_expire_overlong_meeting,
     meeting_join_window_state,
     record_attendance_join,
     record_attendance_leave,
@@ -197,8 +198,10 @@ class VideoMeetingStatusView(APIView):
             return _error_response(exc)
 
         event = meeting.schedule_event
+        meeting = maybe_expire_overlong_meeting(meeting)
         state = meeting_join_window_state(event, meeting)
-        touch_live_meeting_activity(meeting)
+        if meeting.status == "live":
+            touch_live_meeting_activity(meeting)
         return Response({
             "uuid": str(meeting.uuid),
             "status": meeting.status,

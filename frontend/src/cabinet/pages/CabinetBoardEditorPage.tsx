@@ -2296,7 +2296,10 @@ export default function CabinetBoardEditorPage() {
             setLoadPhase("failed");
           } else if (status === "closed") {
             metricsRef.current.reconnectCount += 1;
-            setLoadPhase("reconnecting");
+            const prev = loadPhaseRef.current;
+            if (prev === "ready" || prev === "reconnecting" || prev === "failed") {
+              setLoadPhase("reconnecting");
+            }
           } else if (status === "connecting") {
             const prev = loadPhaseRef.current;
             if (prev === "ready" || prev === "reconnecting" || prev === "failed") {

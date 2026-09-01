@@ -40,6 +40,7 @@ class NotificationEventType:
     STUDENT_MESSAGE = "student_message"
     STUDENT_ENTERED_ROOM = "student_entered_room"
     STUDENT_ABSENT = "student_absent"
+    MEETING_AUTO_FINISHED = "meeting_auto_finished"
 
     # Journal
     JOURNAL_RESULTS = "journal_results"
@@ -346,6 +347,17 @@ def _init_catalog() -> None:
             default_enabled=False,
             group="classroom",
             url_default="/cabinet/meetings",
+        ),
+        EventDefinition(
+            code=NotificationEventType.MEETING_AUTO_FINISHED,
+            label="Звонок закрыт автоматически",
+            description="Сообщать, если видеозвонок закрыли по лимиту времени, потому что его забыли завершить.",
+            preference_field=None,
+            roles=frozenset({ROLE_TEACHER}),
+            can_disable=False,
+            priority="important",
+            group="classroom",
+            url_default="/cabinet/journal",
         ),
         EventDefinition(
             code=NotificationEventType.JOURNAL_RESULTS,

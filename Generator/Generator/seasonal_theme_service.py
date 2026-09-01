@@ -315,6 +315,10 @@ def serialize_theme(request, theme: SeasonalTheme) -> dict:
         },
         "header": {
             "decor_url": media_url(request, theme.header_decor),
+            "meeting_decor_url": (
+                media_url(request, theme.meeting_header_decor)
+                or media_url(request, theme.header_decor)
+            ),
         },
         "button_icon_url": media_url(request, theme.button_icon),
         "button_emoji": (theme.button_emoji or "✦").strip() or "✦",

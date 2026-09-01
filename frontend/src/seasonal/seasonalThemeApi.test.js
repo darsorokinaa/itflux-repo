@@ -2,6 +2,8 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
   buildSeasonalCssVars,
   isHeavyRoute,
+  isMeetingChromeRoute,
+  decorationAllowedOnRoute,
   readDayOverride,
   readCachedThemePayload,
   writeCachedThemePayload,
@@ -45,6 +47,22 @@ describe("seasonalThemeApi", () => {
     expect(vars["--seasonal-accent"]).toBe("#4D8FC9");
   });
 
+  it("uses meeting header decor when provided, otherwise cabinet header", () => {
+    const withMeeting = buildSeasonalCssVars({
+      header: {
+        decor_url: "/media/header.png",
+        meeting_decor_url: "/media/meeting.png",
+      },
+    });
+    expect(withMeeting["--seasonal-header-decor"]).toContain("header.png");
+    expect(withMeeting["--seasonal-meeting-header-decor"]).toContain("meeting.png");
+
+    const fallback = buildSeasonalCssVars({
+      header: { decor_url: "/media/header.png" },
+    });
+    expect(fallback["--seasonal-meeting-header-decor"]).toContain("header.png");
+  });
+
   it("normalizes strip pattern settings to full-page tiling", () => {
     const vars = buildSeasonalCssVars({
       background: {
@@ -69,6 +87,23 @@ describe("seasonalThemeApi", () => {
     expect(isHeavyRoute("/lessons/slug/view")).toBe(true);
     expect(isHeavyRoute("/interesting/slug/view")).toBe(true);
     expect(isHeavyRoute("/cabinet")).toBe(false);
+  });
+
+  it("detects meeting and board chrome routes", () => {
+    expect(isMeetingChromeRoute("/cabinet/meetings/uuid")).toBe(true);
+    expect(isMeetingChromeRoute("/cabinet/boards/abc")).toBe(true);
+    expect(isMeetingChromeRoute("/teacher/boards/abc")).toBe(true);
+    expect(isMeetingChromeRoute("/lessons/slug/view")).toBe(false);
+    expect(isMeetingChromeRoute("/cabinet")).toBe(false);
+  });
+
+  it("shows video_meeting decorations only on call and board routes", () => {
+    const decor = { zone: "video_meeting" };
+    expect(decorationAllowedOnRoute(decor, "/cabinet/meetings/1")).toBe(true);
+    expect(decorationAllowedOnRoute(decor, "/cabinet/boards/1")).toBe(true);
+    expect(decorationAllowedOnRoute(decor, "/cabinet")).toBe(false);
+    expect(decorationAllowedOnRoute({ zone: "page_background" }, "/cabinet/meetings/1", { heavy: true })).toBe(false);
+    expect(decorationAllowedOnRoute({ zone: "top_bar" }, "/cabinet/meetings/1", { heavy: true })).toBe(true);
   });
 
   it("forces minimal intensity on mobile", () => {

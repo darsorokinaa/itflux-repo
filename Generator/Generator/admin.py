@@ -863,6 +863,7 @@ class SeasonalThemeAdmin(admin.ModelAdmin):
         "hero_history_icon_preview",
         "hero_history_image_preview",
         "hero_history_corner_preview",
+        "meeting_header_decor_preview",
     )
     inlines = [SeasonalThemeDecorationInline]
     fieldsets = (
@@ -927,7 +928,8 @@ class SeasonalThemeAdmin(admin.ModelAdmin):
             "2. Картинки оформления — просто загрузите файлы",
             {
                 "description": (
-                    "Одна тема = один набор картинок. Необязательные поля можно оставить пустыми."
+                    "Одна тема = один набор картинок. Необязательные поля можно оставить пустыми. "
+                    "Декор шапки звонка/доски: своя картинка или, если пусто, «Декор верхней панели»."
                 ),
                 "fields": (
                     "background_color",
@@ -940,6 +942,8 @@ class SeasonalThemeAdmin(admin.ModelAdmin):
                     "card_pattern_opacity",
                     "card_border_color",
                     "header_decor",
+                    "meeting_header_decor",
+                    "meeting_header_decor_preview",
                     "corner_image",
                     "accent_color",
                 ),
@@ -1084,6 +1088,17 @@ class SeasonalThemeAdmin(admin.ModelAdmin):
             '<img src="{}" style="max-width:220px;max-height:120px;object-fit:contain;'
             'border-radius:10px;background:#f8f1e3;padding:4px;" alt="">',
             obj.hero_history_image.url,
+        )
+
+    @admin.display(description="Превью декора звонка")
+    def meeting_header_decor_preview(self, obj):
+        image = (obj and (obj.meeting_header_decor or obj.header_decor)) or None
+        if not image:
+            return "—"
+        return format_html(
+            '<img src="{}" style="max-width:220px;max-height:72px;object-fit:contain;'
+            'border-radius:10px;background:#f1f5f9;padding:4px;" alt="">',
+            image.url,
         )
 
     @admin.display(description="Превью декора углов")

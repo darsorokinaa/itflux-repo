@@ -20,6 +20,7 @@ import {
   subscribeMeetingCall,
 } from "../meetingCallOwnership";
 import { useFloatingDrag } from "../useFloatingDrag";
+import FloatingResizeHandles from "../FloatingResizeHandles";
 import "../styles/video-meeting.css";
 
 const PRESENT_POLL_MS = 2500;
@@ -69,9 +70,14 @@ export default function MeetingCallDock() {
     nodeRef: dockRef,
     style: dockStyle,
     dragging: dockDragging,
+    resizing: dockResizing,
     onPointerDown: onDockPointerDown,
+    onResizePointerDown: onDockResizePointerDown,
   } = useFloatingDrag({
     enabled: !inIframe && (visible || callElsewhere),
+    resizable: visible && !collapsed,
+    minWidth: 180,
+    minHeight: 140,
     storageKey: meetingUuid ? `meeting-call-dock:${meetingUuid}` : null,
     handleSelector: ".meeting-call-dock__bar",
   });
@@ -169,6 +175,11 @@ export default function MeetingCallDock() {
       try {
         const status = await fetchVideoMeetingStatus(meetingUuid);
         if (cancelled) return;
+        if (status?.status === "finished" || status?.status === "cancelled") {
+          dispose();
+          setVisible(false);
+          return;
+        }
         // Файлы идут через materialSession — не считаем «пусто», если файл открыт.
         const hasPresented = Boolean(status?.presented?.openUrl);
         const hasMaterialSession = Boolean(status?.materialSession?.material);
@@ -330,7 +341,8 @@ export default function MeetingCallDock() {
       className={[
         "meeting-call-dock",
         collapsed ? "meeting-call-dock--collapsed" : "",
-        dockDragging ? "meeting-call-dock--dragging" : "",
+        dockDragging || dockResizing ? "meeting-call-dock--dragging" : "",
+        visible && !collapsed ? "meeting-call-dock--resizable" : "",
       ].filter(Boolean).join(" ")}
       style={dockStyle}
       role="complementary"
@@ -367,6 +379,9 @@ export default function MeetingCallDock() {
           hidden={collapsed}
         />
       )}
+      {visible && !collapsed ? (
+        <FloatingResizeHandles onPointerDown={onDockResizePointerDown} />
+      ) : null}
     </div>
   );
 }

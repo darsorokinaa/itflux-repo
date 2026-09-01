@@ -87,6 +87,18 @@ describe("jitsi participant store", () => {
     );
     expect(store.snapshot().count).toBe(1);
   });
+
+  it("does not count hidden bots as a remote student", () => {
+    const store = createParticipantStore();
+    store.setLocalId("local-1");
+    store.upsert({ id: "local-1", displayName: "Учитель" });
+    store.upsert({ id: "jibri-1", displayName: "Recorder", hidden: true });
+    store.upsert({ id: "focus", displayName: "Focus" });
+    store.upsert({ id: "bot-1", displayName: "Helper", botType: "poltergeist" });
+    const snap = store.snapshot();
+    expect(snap.count).toBe(1);
+    expect(snap.remoteParticipants).toHaveLength(0);
+  });
 });
 
 describe("extract participants", () => {

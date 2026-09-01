@@ -236,6 +236,26 @@ html.seasonal-theme-active .cabinet-header {
   background-repeat: no-repeat;
 }
 
+html.seasonal-theme-active .video-lesson-header,
+html.seasonal-theme-active .cb-board-editor__top {
+  background-image: var(--seasonal-meeting-header-decor, var(--seasonal-header-decor, none));
+  background-size: auto 100%;
+  background-position: right center;
+  background-repeat: no-repeat;
+}
+
+.seasonal-decor-layer--chrome {
+  z-index: 91;
+  height: calc(56px + env(safe-area-inset-top, 0px));
+  bottom: auto;
+  overflow: hidden;
+}
+
+html.cb-board-editor-iframe .seasonal-decor-layer--chrome,
+html.cb-board-editor-open .seasonal-decor-layer--chrome {
+  height: calc(44px + env(safe-area-inset-top, 0px));
+}
+
 /* Кластер: стикер слева от синего hero (нижняя треть) */
 .seasonal-hero-sticker-cluster {
   position: absolute;

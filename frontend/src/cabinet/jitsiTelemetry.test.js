@@ -48,12 +48,49 @@ describe("presence events change conference presence", () => {
     expect(together.code).toBe("peer_connecting_media");
   });
 
+  it("shows waiting until a remote peer is actually in the room", () => {
+    expect(classifyConferencePresence({
+      conferenceJoined: true,
+      participantCount: 1,
+      remoteCount: 0,
+      isTeacher: true,
+    }).label).toBe("Ждём ученика");
+    expect(classifyConferencePresence({
+      conferenceJoined: true,
+      participantCount: 1,
+      remoteCount: 0,
+      isTeacher: false,
+    }).label).toBe("Ждём учителя");
+  });
+
+  it("shows connecting only after the peer joined and media is not up yet", () => {
+    expect(classifyConferencePresence({
+      conferenceJoined: true,
+      participantCount: 2,
+      remoteCount: 1,
+      isTeacher: true,
+    }).label).toBe("Ученик подключается…");
+    expect(classifyConferencePresence({
+      conferenceJoined: true,
+      participantCount: 2,
+      remoteCount: 1,
+      mediaUp: true,
+      isTeacher: true,
+    }).label).toBe("");
+    expect(classifyConferencePresence({
+      conferenceJoined: true,
+      participantCount: 2,
+      remoteCount: 1,
+      isTeacher: false,
+    }).label).toBe("Учитель подключается…");
+  });
+
   it("does not keep a media-failed hint after media is up", () => {
     expect(classifyConferencePresence({
       conferenceJoined: true,
       participantCount: 2,
       mediaFailed: true,
       mediaUp: true,
-    }).code).toBe("peer_connecting_media");
+    }).code).toBe("in_call");
   });
 });

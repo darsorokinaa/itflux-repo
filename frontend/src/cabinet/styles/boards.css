@@ -495,7 +495,7 @@ html.cb-board-editor-open body {
   min-height: 44px;
   padding: 0.35rem 0.65rem;
   padding-top: max(0.35rem, env(safe-area-inset-top, 0px));
-  background: color-mix(in srgb, var(--cb-board-surface) 92%, transparent);
+  background-color: color-mix(in srgb, var(--cb-board-surface) 92%, transparent);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border-bottom: 1px solid color-mix(in srgb, var(--cb-board-border) 80%, transparent);
@@ -1731,7 +1731,7 @@ html.cb-board-editor-open body {
   right: 0;
   top: 0;
   z-index: 90;
-  background: color-mix(in srgb, var(--cb-board-surface) 82%, transparent);
+  background-color: color-mix(in srgb, var(--cb-board-surface) 82%, transparent);
 }
 
 .cb-board-editor--immersive .cb-board-editor__canvas {

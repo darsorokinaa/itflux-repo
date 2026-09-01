@@ -14,6 +14,8 @@ import {
   consumeDayOverrideExpiredFlag,
   fetchSeasonalThemeCurrent,
   isHeavyRoute,
+  isMeetingChromeRoute,
+  MEETING_CHROME_ZONES,
   readCachedThemePayload,
   readDayOverride,
   readGuestPreference,
@@ -273,6 +275,7 @@ export function SeasonalThemeProvider({ children }) {
   const preferenceMode = payload?.preference_mode || payload?.mode || "auto";
   const applies = themeAppliesToRoute(theme, pathname);
   const heavy = isHeavyRoute(pathname);
+  const meetingChrome = isMeetingChromeRoute(pathname);
   const effectiveTheme = applies ? theme : null;
   const availableThemes = payload?.available_themes || [];
   const periodThemes = payload?.period_themes || [];
@@ -448,13 +451,16 @@ export function SeasonalThemeProvider({ children }) {
           isMobile={isMobile}
         />
       ) : null}
-      {effectiveTheme && !heavy ? (
+      {effectiveTheme ? (
         <SeasonalThemeDecorations
           decorations={effectiveTheme.decorations || []}
-          intensity={intensity}
+          intensity={meetingChrome ? "off" : intensity}
           isMobile={isMobile}
-          animationsEnabled={Boolean(effectiveTheme) && intensity !== "off" && pageVisible}
+          animationsEnabled={Boolean(effectiveTheme) && intensity !== "off" && pageVisible && !heavy}
           pathname={pathname}
+          heavy={meetingChrome}
+          allowedZones={meetingChrome ? MEETING_CHROME_ZONES : (heavy ? [] : null)}
+          className={meetingChrome ? "seasonal-decor-layer--chrome" : ""}
         />
       ) : null}
       {preview?.active ? (

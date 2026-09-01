@@ -27,6 +27,7 @@ function toNumericId(value) {
 export default function BoardLessonBlock({
   scheduleEventId = null,
   lessonId = null,
+  lessonTitle = "",
   studentId = null,
   groupId = null,
   studentMode = false,
@@ -307,6 +308,7 @@ export default function BoardLessonBlock({
       {showCreate ? (
         <BoardCreateModal
           initial={{
+            title: String(lessonTitle || "").trim(),
             scheduleEventId: eventPk,
             lessonId: lessonPk,
             studentId: toNumericId(studentId),

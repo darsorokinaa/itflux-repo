@@ -35,7 +35,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
-  background: #ffffff;
+  background-color: #ffffff;
   border-bottom: 1px solid var(--vl-border);
   z-index: 2;
 }
@@ -816,6 +816,10 @@
   bottom: 16px;
   width: min(320px, calc(100vw - 24px));
   height: min(220px, 34vh);
+  min-width: 160px;
+  min-height: 120px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
   z-index: 40;
   border-radius: 14px;
   overflow: hidden;
@@ -830,6 +834,79 @@
 .video-lesson-content--dragging {
   cursor: grabbing;
   user-select: none;
+}
+
+.video-lesson-content--resizable {
+  min-width: 160px;
+  min-height: 120px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+}
+
+.vl-resize-handle {
+  position: absolute;
+  z-index: 20;
+  background: transparent;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.vl-resize-handle--n {
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 10px;
+  cursor: ns-resize;
+}
+
+.vl-resize-handle--s {
+  bottom: 0;
+  left: 14px;
+  right: 14px;
+  height: 10px;
+  cursor: ns-resize;
+}
+
+.vl-resize-handle--e {
+  right: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 10px;
+  cursor: ew-resize;
+}
+
+.vl-resize-handle--w {
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 10px;
+  cursor: ew-resize;
+}
+
+.vl-resize-handle--ne,
+.vl-resize-handle--nw,
+.vl-resize-handle--se,
+.vl-resize-handle--sw {
+  width: 18px;
+  height: 18px;
+}
+
+.vl-resize-handle--ne { top: 0; right: 0; cursor: nesw-resize; }
+.vl-resize-handle--nw { top: 0; left: 0; cursor: nwse-resize; }
+.vl-resize-handle--se { bottom: 0; right: 0; cursor: nwse-resize; }
+.vl-resize-handle--sw { bottom: 0; left: 0; cursor: nesw-resize; }
+
+.vl-resize-handle--se::after {
+  content: "";
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid rgba(248, 250, 252, 0.72);
+  border-bottom: 2px solid rgba(248, 250, 252, 0.72);
+  border-radius: 0 0 1px 0;
+  pointer-events: none;
 }
 
 .video-lesson-compact-drag {
@@ -942,7 +1019,14 @@
   right: 16px;
   bottom: 16px;
   z-index: 11050;
+  display: flex;
+  flex-direction: column;
   width: min(360px, calc(100vw - 24px));
+  height: min(280px, 42vh);
+  min-width: 180px;
+  min-height: 140px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
   border-radius: 14px;
   overflow: hidden;
   background: #0f172a;
@@ -968,8 +1052,10 @@
 }
 
 .meeting-call-dock--collapsed {
-  width: auto;
+  width: auto !important;
+  height: auto !important;
   min-width: 180px;
+  min-height: 0;
 }
 
 .meeting-call-dock__bar {
@@ -1020,7 +1106,9 @@
 
 .meeting-call-dock__stage {
   width: 100%;
-  height: min(220px, 32vh);
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
   background: #000;
 }
 
@@ -3055,6 +3143,13 @@ body.vl-room-fullscreen .student-cabinet-nav {
   font-size: 0.88rem;
   font-weight: 650;
   line-height: 1.35;
+}
+
+.itflux-recovery-banner__text {
+  margin: 6px 0 0;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: rgba(248, 250, 252, 0.88);
 }
 
 .itflux-recovery-banner__spinner {

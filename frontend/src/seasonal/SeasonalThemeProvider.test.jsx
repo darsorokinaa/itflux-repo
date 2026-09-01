@@ -163,6 +163,46 @@ describe("SeasonalThemeProvider", () => {
     expect(document.querySelector(".seasonal-decor-layer")).toBeNull();
   });
 
+  it("shows chrome decorations on the meeting header", async () => {
+    fetchSeasonalThemeCurrent.mockResolvedValue({
+      mode: "auto",
+      theme: {
+        id: 1,
+        name: "Honey",
+        slug: "honey",
+        background: { color: "#fff" },
+        header: { decor_url: "/header.png", meeting_decor_url: "/meeting.png" },
+        cards: {},
+        surfaces: {},
+        animation: { type: "snow", intensity: "normal", max_elements: 20 },
+        decorations: [
+          { id: 1, image_url: "/leaf.png", zone: "video_meeting", position: "top-right", show_desktop: true, show_tablet: true, show_mobile: true },
+          { id: 2, image_url: "/bg.png", zone: "page_background", show_desktop: true, show_tablet: true, show_mobile: true },
+        ],
+        include_routes: [],
+        exclude_routes: [],
+      },
+      animations_enabled: true,
+      available_themes: [],
+      preview: { active: false },
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/cabinet/meetings/abc"]}>
+        <SeasonalThemeProvider>
+          <div />
+        </SeasonalThemeProvider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(document.documentElement.classList.contains("seasonal-theme-active")).toBe(true));
+    expect(document.documentElement.style.getPropertyValue("--seasonal-meeting-header-decor")).toContain("meeting.png");
+    const layer = document.querySelector(".seasonal-decor-layer--chrome");
+    expect(layer).not.toBeNull();
+    expect(layer.querySelectorAll("img")).toHaveLength(1);
+    expect(layer.querySelector("img").getAttribute("src")).toBe("/leaf.png");
+    expect(document.querySelector(".seasonal-fx-canvas")).toBeNull();
+  });
+
   it("saves preference and updates mode", async () => {
     fetchSeasonalThemeCurrent.mockResolvedValue({
       mode: "auto",
