@@ -1295,19 +1295,19 @@ html.cb-board-editor-open body {
   z-index: var(--zIndex-layerUI, 4);
 }
 
-/* Панель масштаба / undo — компактные «острова» только на desktop layout.
+/* Панель масштаба / undo — компактный «остров» в левом нижнем углу.
    На .excalidraw--mobile нижний бар — это основной тулбар, его нельзя сжимать в остров. */
 @media (min-width: 769px) {
   .cb-board-editor .excalidraw:not(.excalidraw--mobile) .App-menu_bottom,
   .cb-board-editor .excalidraw:not(.excalidraw--mobile) .layer-ui__wrapper__footer {
-    left: 50% !important;
+    left: max(0.65rem, env(safe-area-inset-left, 0px)) !important;
     right: auto !important;
     bottom: max(0.65rem, env(safe-area-inset-bottom, 0px)) !important;
     width: auto !important;
     max-width: calc(100% - 1.5rem) !important;
     margin: 0 !important;
     padding: 0.3rem 0.4rem !important;
-    transform: translateX(-50%) !important;
+    transform: none !important;
     box-sizing: border-box;
     align-items: center !important;
     gap: 0.35rem !important;
@@ -1340,7 +1340,10 @@ html.cb-board-editor-open body {
   }
 
   .cb-board-editor .excalidraw:not(.excalidraw--mobile) .scroll-back-to-content {
+    left: max(0.65rem, env(safe-area-inset-left, 0px)) !important;
+    right: auto !important;
     bottom: calc(3.75rem + env(safe-area-inset-bottom, 0px)) !important;
+    transform: none !important;
     z-index: 8 !important;
   }
 }
