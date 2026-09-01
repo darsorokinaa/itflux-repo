@@ -125,6 +125,7 @@ describe("createBoardCollabSession reconnect", () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
     vi.advanceTimersByTime(1000);
     expect(FakeWebSocket.instances).toHaveLength(2);
+    lastSocket().open();
     vi.advanceTimersByTime(10_000);
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
@@ -586,7 +587,7 @@ describe("createBoardCollabSession reconnect", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
-  it("stops auto-reconnect after MAX_ATTEMPT and reports failed", () => {
+  it("keeps retrying after MAX_ATTEMPT instead of leaving a dead socket", () => {
     const onStatus = vi.fn();
     session = createBoardCollabSession("board-1", "A", { onStatus });
     for (let i = 0; i <= BOARD_RECONNECT.MAX_ATTEMPT + 1; i += 1) {
@@ -596,7 +597,16 @@ describe("createBoardCollabSession reconnect", () => {
     expect(onStatus).toHaveBeenCalledWith("failed");
     const before = FakeWebSocket.instances.length;
     vi.advanceTimersByTime(20_000);
-    expect(FakeWebSocket.instances.length).toBe(before);
+    expect(FakeWebSocket.instances.length).toBeGreaterThan(before);
+  });
+
+  it("aborts a socket stuck in CONNECTING and opens a new one", () => {
+    session = createBoardCollabSession("board-1", "A");
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().readyState).toBe(FakeWebSocket.CONNECTING);
+    vi.advanceTimersByTime(BOARD_RECONNECT.CONNECTING_TIMEOUT_MS);
+    vi.advanceTimersByTime(BOARD_RECONNECT.BASE_MS);
+    expect(FakeWebSocket.instances.length).toBeGreaterThanOrEqual(2);
   });
 
   it("reconnectNow tears down a live socket and opens a new one", () => {
@@ -645,5 +655,16 @@ describe("createBoardCollabSession reconnect", () => {
       }
     });
     expect(sent.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("re-sends join and snapshot_request after reconnect handshake", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    lastSocket().close();
+    vi.advanceTimersByTime(1000);
+    lastSocket().open();
+    const msgs = lastSocket().sent.map((row) => JSON.parse(row));
+    expect(msgs.some((row) => row.type === "join")).toBe(true);
+    expect(msgs.some((row) => row.type === "snapshot_request")).toBe(true);
   });
 });

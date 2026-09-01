@@ -46,6 +46,19 @@ function boardWsLog(tag: string, data?: Record<string, unknown>) {
   console.debug(`[board-ws] ${tag} ${json}`);
 }
 
+/** Always-on transport lifecycle. Format is stable for support / incident matching. */
+function boardWsLifecycle(socketId: string, event: string, extra = "") {
+  const line = extra
+    ? `[BOARD-WS][${socketId}] ${event} ${extra}`
+    : `[BOARD-WS][${socketId}] ${event}`;
+  try {
+    // eslint-disable-next-line no-console
+    console.info(line);
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Excalidraw мутирует элементы in-place. Для diff нужна копия полей версии
  * и points — иначе prev и next делят один points[] и elKey «не меняется».
@@ -101,6 +114,7 @@ export type RemoteCursor = {
 
 export type CollabMessage =
   | { type: "ready"; board_id: string; can_edit: boolean; permission: string; role?: string }
+  | { type: "room_joined"; board_id: string; client_id: string; can_edit?: boolean; permission?: string; role?: string }
   | { type: "presence_join"; client_id: string; user_id?: number; display_name?: string; can_edit?: boolean; role?: string }
   | { type: "presence_leave"; client_id: string; user_id?: number; display_name?: string }
   | { type: "scene_live"; client_id: string; user_id?: number; display_name?: string; version?: number; scene: CollabScene; t_sent?: number; seq?: number; snapshot?: boolean }
@@ -254,6 +268,8 @@ export const BOARD_RECONNECT = {
   HIDDEN_RESUME_MS: RESUME_TIMING.MIN_BACKGROUND_MS,
   /** After iOS/tab wake the first pong is often slower than the PWA UI probe. */
   PING_ACK_MS: 8000,
+  /** Abort a WebSocket stuck in CONNECTING — otherwise isSocketLive blocks forever. */
+  CONNECTING_TIMEOUT_MS: 8000,
   LARGE_PAYLOAD_BYTES: 80_000,
 };
 
@@ -306,6 +322,7 @@ export function createBoardCollabSession(
   let lastPongAt = 0;
   let lastHiddenAt = 0;
   let pingAckTimer: number | null = null;
+  let connectingTimer: number | null = null;
   let awaitingPingAck = false;
   let resumeInProgress = false;
   let resumeUnlockTimer: number | null = null;
@@ -330,6 +347,8 @@ export function createBoardCollabSession(
   let liveSeq = 0;
   let awaitingSnapshot = false;
   let openedOnce = false;
+  let socketSeq = 0;
+  let currentSocketId = "";
   let reconnectsTotal = 0;
   let inboundTotal = 0;
   let inboundBytesTotal = 0;
@@ -353,7 +372,12 @@ export function createBoardCollabSession(
   };
 
   const sendRaw = (payload: Record<string, unknown>) => {
-    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      if (!closed && payload?.type !== "ping") {
+        scheduleReconnect();
+      }
+      return false;
+    }
     try {
       const raw = JSON.stringify(payload);
       socket.send(raw);
@@ -417,6 +441,13 @@ export function createBoardCollabSession(
     if (pingAckTimer != null) {
       window.clearTimeout(pingAckTimer);
       pingAckTimer = null;
+    }
+  };
+
+  const clearConnectingTimer = () => {
+    if (connectingTimer != null) {
+      window.clearTimeout(connectingTimer);
+      connectingTimer = null;
     }
   };
 
@@ -497,11 +528,11 @@ export function createBoardCollabSession(
     if (isSocketLive(socket)) return;
     reconnectAttempt += 1;
     if (reconnectAttempt > BOARD_RECONNECT.MAX_ATTEMPT) {
-      unlockResume();
       handlers.onStatus?.("failed");
-      return;
+      reconnectAttempt = BOARD_RECONNECT.MAX_ATTEMPT;
     }
     const delay = boardReconnectDelayMs(reconnectAttempt);
+    boardWsLifecycle(currentSocketId || clientId.slice(0, 8), "RECONNECT", `attempt=${reconnectAttempt}`);
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = null;
       if (closed) return;
@@ -525,6 +556,7 @@ export function createBoardCollabSession(
     }
     clearReconnectTimer();
     clearPingAckTimer();
+    clearConnectingTimer();
     awaitingPingAck = false;
     const ws = socket;
     socket = null;
@@ -617,6 +649,7 @@ export function createBoardCollabSession(
     if (closed) return;
     if (isSocketLive(socket)) return;
     clearReconnectTimer();
+    clearConnectingTimer();
     if (socket) {
       detachSocket(socket);
       try {
@@ -627,27 +660,54 @@ export function createBoardCollabSession(
       socket = null;
     }
     handlers.onStatus?.("connecting");
+    socketSeq += 1;
+    currentSocketId = `${clientId.slice(0, 8)}-${socketSeq}`;
+    const url = wsUrl(boardId);
     boardWsLog("connecting", { boardId, clientId, attempt: reconnectAttempt });
+    boardWsLifecycle(currentSocketId, "CREATE", `url=${url}`);
+    if (openedOnce) {
+      boardWsLifecycle(currentSocketId, "RECONNECT", `attempt=${reconnectAttempt}`);
+    }
     untrackSocket();
-    const ws = new WebSocket(wsUrl(boardId));
+    const ws = new WebSocket(url);
     socket = ws;
     untrackSocket = trackRealtimeSocket(ws);
+    connectingTimer = window.setTimeout(() => {
+      connectingTimer = null;
+      if (closed || socket !== ws) return;
+      if (ws.readyState !== WebSocket.CONNECTING) return;
+      boardWsLifecycle(currentSocketId, "CLOSE", "code=4000 reason=connecting-timeout wasClean=false");
+      detachSocket(ws);
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
+      if (socket === ws) socket = null;
+      scheduleReconnect();
+    }, BOARD_RECONNECT.CONNECTING_TIMEOUT_MS);
 
     ws.onopen = () => {
       if (closed || socket !== ws) return;
+      clearConnectingTimer();
       unlockResume();
       clearPingAckTimer();
       const isReconnect = openedOnce;
       openedOnce = true;
       handlers.onStatus?.("open");
-      boardWsLog("open", { boardId, clientId, reconnect: isReconnect });
+      boardWsLifecycle(currentSocketId, "OPEN");
+      if (isReconnect) {
+        boardWsLifecycle(currentSocketId, "RECONNECT SUCCESS");
+      }
       lastPongAt = Date.now();
       lastHiddenAt = 0;
       sendJoin();
+      boardWsLifecycle(currentSocketId, "JOIN ROOM", `boardId=${boardId}`);
       startHeartbeat();
       handlers.onReady?.();
       if (isReconnect) {
         boardWsLog("resync after reconnect", { boardId, clientId, attempt: reconnectAttempt });
+        boardWsLifecycle(currentSocketId, "SYNC START");
         sendRaw({
           type: "snapshot_request",
           client_id: clientId,
@@ -669,6 +729,7 @@ export function createBoardCollabSession(
       if (closed || socket !== ws) return;
       inboundTotal += 1;
       inboundBytesTotal += String(event.data || "").length;
+      lastPongAt = Date.now();
       let data: CollabMessage;
       try {
         data = JSON.parse(String(event.data));
@@ -676,17 +737,25 @@ export function createBoardCollabSession(
         return;
       }
       if (!data || typeof data !== "object") return;
+      if (
+        data.type !== "pong"
+        && data.type !== "cursor_move"
+        && data.type !== "cursor"
+        && data.type !== "viewport_update"
+      ) {
+        boardWsLifecycle(currentSocketId, "MESSAGE", `type=${data.type || "?"}`);
+      }
 
       if (data.type === "pong") {
-        lastPongAt = Date.now();
         awaitingPingAck = false;
         return;
       }
 
-      if (data.type === "ready") {
+      if (data.type === "ready" || data.type === "room_joined") {
+        boardWsLifecycle(currentSocketId, "ROOM JOINED");
         handlers.onReady?.({
-          canEdit: data.can_edit,
-          permission: data.permission,
+          canEdit: "can_edit" in data ? data.can_edit : undefined,
+          permission: "permission" in data ? data.permission : undefined,
           role: data.role,
         });
         return;
@@ -880,6 +949,7 @@ export function createBoardCollabSession(
         const snapScene = data.scene;
         if (!snapScene || !Array.isArray(snapScene.elements)) return;
         awaitingSnapshot = false;
+        boardWsLifecycle(currentSocketId, "SYNC COMPLETE");
         reportClientEvent("board_full_state_received", {
           boardId: String(boardId).slice(0, 64),
           via: "snapshot_response",
@@ -1020,6 +1090,7 @@ export function createBoardCollabSession(
     ws.onerror = () => {
       if (closed || socket !== ws) return;
       handlers.onStatus?.("error");
+      boardWsLifecycle(currentSocketId, "ERROR");
       boardWsLog("error", { boardId, clientId });
       reportClientEvent("board_error", {
         boardId: String(boardId).slice(0, 64),
@@ -1029,6 +1100,14 @@ export function createBoardCollabSession(
 
     ws.onclose = (event) => {
       lastCloseCode = typeof event?.code === "number" ? event.code : null;
+      clearConnectingTimer();
+      const reason = String(event?.reason || "");
+      const wasClean = Boolean(event?.wasClean);
+      boardWsLifecycle(
+        currentSocketId,
+        "CLOSE",
+        `code=${lastCloseCode ?? ""} reason=${reason.slice(0, 64)} wasClean=${wasClean}`,
+      );
       boardWsLog("closed", { boardId, clientId, willReconnect: !closed, code: lastCloseCode });
       if (socket === ws) {
         stopHeartbeat();
@@ -1040,8 +1119,9 @@ export function createBoardCollabSession(
       handlers.onStatus?.("closed");
       reportClientEvent("board_ws_closed", {
         code: lastCloseCode,
-        reason: String(event?.reason || "").slice(0, 64),
+        reason: reason.slice(0, 64),
         attempt: reconnectAttempt,
+        wasClean,
       });
       scheduleReconnect();
     };
@@ -1420,6 +1500,7 @@ export function createBoardCollabSession(
       closed = true;
       unlockResume();
       clearPingAckTimer();
+      clearConnectingTimer();
       clearReconnectTimer();
       if (liveTimer != null) window.clearTimeout(liveTimer);
       if (viewportTimer != null) window.clearTimeout(viewportTimer);

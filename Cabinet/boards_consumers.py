@@ -16,6 +16,17 @@ from .board_viewport_store import get_teacher_viewport, set_teacher_viewport
 
 logger = logging.getLogger(__name__)
 
+
+def _ws_log(event: str, *, user=None, board=None, **fields) -> None:
+    extra = " ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
+    logger.info(
+        "WS %s user=%s board=%s%s",
+        event,
+        getattr(user, "id", None) if user is not None else None,
+        board,
+        f" {extra}" if extra else "",
+    )
+
 MAX_WS_TEXT_BYTES = 2_000_000
 CURSOR_MIN_INTERVAL_SEC = 0.035  # ~28 Hz
 SCENE_LIVE_MIN_INTERVAL_SEC = 0.020  # ~50 Hz max relay — не копить очередь
@@ -86,19 +97,24 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
         self._viewport_flush_task = None
 
         if not self.user or not self.user.is_authenticated:
+            _ws_log("CONNECT", user=self.user, board=self.board_id, result="reject", code=4401)
             await self.close(code=4401)
             return
 
         perm = await self._get_permission()
         if perm not in ("owner", "edit", "view"):
+            _ws_log("CONNECT", user=self.user, board=self.board_id, result="reject", code=4403)
             await self.close(code=4403)
             return
 
         self.permission = perm
         self.can_edit = perm in ("owner", "edit")
         self.role = "teacher" if perm == "owner" else ("student" if self.can_edit else "viewer")
+        _ws_log("CONNECT", user=self.user, board=self.board_id, perm=self.permission)
         await self.channel_layer.group_add(self.group_name, self.channel_name)
+        _ws_log("JOIN GROUP", user=self.user, board=self.board_id, group=self.group_name)
         await self.accept()
+        _ws_log("ACCEPT", user=self.user, board=self.board_id)
         logger.info(
             "board_ws_connect board_id=%s user_id=%s perm=%s",
             self.board_id,
@@ -160,6 +176,19 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                     },
                 )
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
+            _ws_log(
+                "LEAVE GROUP",
+                user=getattr(self, "user", None),
+                board=getattr(self, "board_id", None),
+                group=self.group_name,
+            )
+        _ws_log(
+            "DISCONNECT",
+            user=getattr(self, "user", None),
+            board=getattr(self, "board_id", None),
+            code=close_code,
+            client_id=getattr(self, "client_id", "") or None,
+        )
         logger.info(
             "board_ws_disconnect board_id=%s user_id=%s client_id=%s code=%s",
             getattr(self, "board_id", None),
@@ -299,6 +328,14 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
             return
 
         msg_type = data.get("type")
+        if msg_type != "ping":
+            _ws_log(
+                "RECEIVE",
+                user=self.user,
+                board=self.board_id,
+                type=msg_type,
+                client_id=str(data.get("client_id") or getattr(self, "client_id", "") or "")[:64] or None,
+            )
         if msg_type == "ping":
             await self.send(text_data=json.dumps({"type": "pong", "t": data.get("t")}))
             return
@@ -335,6 +372,25 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
                         "role": self.role,
                     },
                 },
+            )
+            _ws_log(
+                "BROADCAST",
+                user=self.user,
+                board=self.board_id,
+                type="presence_join",
+                client_id=self.client_id,
+            )
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "room_joined",
+                        "board_id": str(self.board_id),
+                        "client_id": self.client_id,
+                        "can_edit": self.can_edit,
+                        "permission": self.permission,
+                        "role": self.role,
+                    }
+                )
             )
             # Shared Redis/L1 viewport — доступен с любого ASGI worker.
             cached = await database_sync_to_async(get_teacher_viewport)(str(self.board_id))
@@ -900,7 +956,32 @@ class InteractiveBoardConsumer(AsyncWebsocketConsumer):
         # sync_probe_ack с echo=False — доставляем всем, инициатор отфильтрует по probe_id.
         try:
             await self.send(text_data=json.dumps(payload, ensure_ascii=False))
+            kind = payload.get("type")
+            if kind in (
+                "scene_ops",
+                "scene_live",
+                "presence_join",
+                "presence_leave",
+                "snapshot_request",
+                "snapshot_response",
+                "file_add",
+                "room_joined",
+            ):
+                _ws_log(
+                    "BROADCAST",
+                    user=getattr(self, "user", None),
+                    board=getattr(self, "board_id", None),
+                    type=kind,
+                    to_client=getattr(self, "client_id", None) or None,
+                )
         except Exception:
+            _ws_log(
+                "ERROR",
+                user=getattr(self, "user", None),
+                board=getattr(self, "board_id", None),
+                detail="send_failed",
+                type=payload.get("type"),
+            )
             logger.debug("board collab send failed", exc_info=True)
 
     @database_sync_to_async

@@ -101,3 +101,57 @@ class BoardWebsocketRapidStrokeTests(TransactionTestCase):
                     await ws.disconnect()
                 except BaseException:
                     pass
+
+    async def test_student_reconnect_still_receives_teacher_ops(self):
+        teacher_ws = await self._connect(self.teacher)
+        student_ws = await self._connect(self.student_user)
+        try:
+            await teacher_ws.receive_json_from(timeout=2)
+            await student_ws.receive_json_from(timeout=2)
+            await student_ws.disconnect()
+
+            student_ws = await self._connect(self.student_user)
+            ready = await student_ws.receive_json_from(timeout=2)
+            self.assertEqual(ready.get("type"), "ready")
+            await student_ws.send_json_to({
+                "type": "join",
+                "client_id": "student-rejoin",
+                "display_name": "Ученик",
+            })
+            joined = await student_ws.receive_json_from(timeout=2)
+            self.assertEqual(joined.get("type"), "room_joined")
+            self.assertEqual(joined.get("client_id"), "student-rejoin")
+
+            await teacher_ws.send_json_to({
+                "type": "scene_ops",
+                "client_id": "teacher-tab",
+                "version": 1,
+                "ops": {
+                    "baseVersion": 0,
+                    "ops": [{
+                        "op": "upsert",
+                        "element": {"id": "after-reconnect", "version": 1},
+                    }],
+                    "files": {},
+                    "appStatePatch": {},
+                },
+            })
+            seen = []
+            for _ in range(8):
+                try:
+                    msg = await student_ws.receive_json_from(timeout=1)
+                except Exception:
+                    break
+                seen.append(msg.get("type"))
+                if msg.get("type") != "scene_ops":
+                    continue
+                for op in msg.get("ops", {}).get("ops", []):
+                    if op.get("element", {}).get("id") == "after-reconnect":
+                        return
+            self.fail(f"После reconnect ученик не получил ops. Типы: {seen}")
+        finally:
+            for ws in (teacher_ws, student_ws):
+                try:
+                    await ws.disconnect()
+                except BaseException:
+                    pass
