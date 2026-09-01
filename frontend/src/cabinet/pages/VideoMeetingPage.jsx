@@ -679,7 +679,15 @@ export default function VideoMeetingPage() {
         },
         onBecameModerator: showModeratorToast,
         onMediaWarning: (msg) => setMediaWarning(msg || ""),
-        onConnectionHint: (msg) => setConnectionHint(msg || ""),
+        onConnectionHint: (msg) => {
+          const live = conferencePresenceRef.current.joined
+            && (conferencePresenceRef.current.mediaUp
+              || (conferencePresenceRef.current.remoteCount || 0) >= 1);
+          if (live && msg && /восстанавливаем/i.test(String(msg))) {
+            return;
+          }
+          setConnectionHint(msg || "");
+        },
         onConnectionState: (next, why) => {
           if (shouldIgnoreReconnect(intentionalLeaveRef.current)) return;
           if (next === "joined") {
@@ -692,7 +700,15 @@ export default function VideoMeetingPage() {
             resumeControllerRef.current?.succeed?.();
             callStateRef.current?.transition(CALL_STATES.joined, why);
             applyConferenceHint();
+          } else if (next === "peer_glitch") {
+            return;
           } else if (next === "reconnecting") {
+            const live = conferencePresenceRef.current.joined
+              && (conferencePresenceRef.current.mediaUp
+                || (conferencePresenceRef.current.remoteCount || 0) >= 1);
+            if (live) {
+              return;
+            }
             conferencePresenceRef.current.reconnecting = true;
             callStateRef.current?.transition(CALL_STATES.reconnecting, why);
             if (!conferencePresenceRef.current.joined) {

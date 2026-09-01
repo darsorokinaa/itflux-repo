@@ -233,9 +233,10 @@ export function attachMediaWatchdog(api, {
   }, listeners);
 
   listen(api, "peerConnectionFailure", () => {
-    // ICE/P2P can fail on one of several peer connections while the room still works.
-    onConnectionState?.("reconnecting", "peerConnectionFailure");
-    hint("Соединение нестабильно. Восстанавливаем связь…");
+    // One ICE peer connection can fail while the room still works
+    // (p2p disabled, extra PCs). Do not flash a lost-connection banner.
+    log("JITSI_PEER_CONNECTION_FAILURE", {});
+    onConnectionState?.("peer_glitch", "peerConnectionFailure");
   }, listeners);
 
   listen(api, "videoConferenceJoined", () => {

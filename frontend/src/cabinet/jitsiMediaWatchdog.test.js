@@ -61,7 +61,7 @@ describe("attachMediaWatchdog", () => {
     handle.dispose();
   });
 
-  it("treats peerConnectionFailure as a transient reconnect, not a hard fail", () => {
+  it("does not treat peerConnectionFailure as a lost room", () => {
     const listeners = new Map();
     const api = {
       addListener(event, handler) {
@@ -76,8 +76,8 @@ describe("attachMediaWatchdog", () => {
     const onHint = vi.fn();
     const handle = attachMediaWatchdog(api, { onConnectionState, onHint });
     listeners.get("peerConnectionFailure")?.();
-    expect(onConnectionState).toHaveBeenCalledWith("reconnecting", "peerConnectionFailure");
-    expect(onHint.mock.calls[0][0]).toMatch(/Восстанавливаем/);
+    expect(onConnectionState).toHaveBeenCalledWith("peer_glitch", "peerConnectionFailure");
+    expect(onHint).not.toHaveBeenCalled();
     handle.dispose();
   });
 });

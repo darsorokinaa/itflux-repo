@@ -136,7 +136,7 @@ describe("createBoardCollabSession reconnect", () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
-  it("replaces a zombie OPEN socket after returning from background", () => {
+  it("replaces a zombie OPEN socket after returning from background if ping is not acked", () => {
     session = createBoardCollabSession("board-1", "A");
     lastSocket().open();
     expect(FakeWebSocket.instances).toHaveLength(1);
@@ -151,6 +151,9 @@ describe("createBoardCollabSession reconnect", () => {
       value: "visible",
     });
     document.dispatchEvent(new Event("visibilitychange"));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().sent.some((row) => row.includes('"ping"'))).toBe(true);
+    vi.advanceTimersByTime(BOARD_RECONNECT.PING_ACK_MS + 1);
     expect(FakeWebSocket.instances).toHaveLength(2);
     expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.CLOSED);
   });
@@ -536,7 +539,7 @@ describe("createBoardCollabSession reconnect", () => {
     expect(FakeWebSocket.instances.length).toBeGreaterThanOrEqual(5);
   });
 
-  it("closes a zombie OPEN socket after pageshow when ping is not acked", () => {
+  it("does not tear down a live socket on pageshow without a freeze", () => {
     session = createBoardCollabSession("board-1", "A");
     lastSocket().open();
     expect(FakeWebSocket.instances).toHaveLength(1);
@@ -544,8 +547,8 @@ describe("createBoardCollabSession reconnect", () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
     expect(lastSocket().sent.some((row) => row.includes('"ping"'))).toBe(true);
     vi.advanceTimersByTime(BOARD_RECONNECT.PING_ACK_MS + 1);
-    expect(FakeWebSocket.instances).toHaveLength(2);
-    expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.CLOSED);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().readyState).toBe(FakeWebSocket.OPEN);
   });
 
   it("keeps the socket if resume ping is acked", () => {
@@ -560,7 +563,7 @@ describe("createBoardCollabSession reconnect", () => {
     expect(lastSocket().readyState).toBe(FakeWebSocket.OPEN);
   });
 
-  it("coalesces pageshow + visibility + focus into one reconnect", () => {
+  it("coalesces pageshow + visibility + focus into one reconnect after a freeze", () => {
     session = createBoardCollabSession("board-1", "A");
     lastSocket().open();
     Object.defineProperty(document, "visibilityState", {
@@ -578,6 +581,8 @@ describe("createBoardCollabSession reconnect", () => {
     window.dispatchEvent(new Event("pageshow"));
     window.dispatchEvent(new Event("focus"));
     window.dispatchEvent(new Event("online"));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    vi.advanceTimersByTime(BOARD_RECONNECT.PING_ACK_MS + 1);
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
@@ -600,5 +605,45 @@ describe("createBoardCollabSession reconnect", () => {
     session.reconnectNow();
     expect(FakeWebSocket.instances).toHaveLength(2);
     expect(FakeWebSocket.instances[0].readyState).toBe(FakeWebSocket.CLOSED);
+  });
+
+  it("resumeNow does not replace a healthy open socket", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    session.resumeNow();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    vi.advanceTimersByTime(BOARD_RECONNECT.PING_ACK_MS + 1);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().readyState).toBe(FakeWebSocket.OPEN);
+  });
+
+  it("requests a snapshot after reconnectNow", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    session.reconnectNow();
+    lastSocket().open();
+    expect(lastSocket().sent.some((row) => row.includes("snapshot_request"))).toBe(true);
+  });
+
+  it("flushes pending live ops after the socket reconnects", () => {
+    session = createBoardCollabSession("board-1", "A");
+    lastSocket().open();
+    lastSocket().close();
+    session.publishLive({
+      elements: [{ id: "stroke", version: 1, isDeleted: false }],
+      appState: {},
+      files: {},
+    });
+    vi.advanceTimersByTime(1000);
+    lastSocket().open();
+    const sent = lastSocket().sent.filter((row) => {
+      try {
+        const parsed = JSON.parse(row);
+        return parsed.type === "scene_ops" || parsed.type === "scene_live";
+      } catch {
+        return false;
+      }
+    });
+    expect(sent.length).toBeGreaterThanOrEqual(1);
   });
 });

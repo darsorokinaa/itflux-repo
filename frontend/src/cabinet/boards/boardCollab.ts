@@ -252,7 +252,8 @@ export const BOARD_RECONNECT = {
   MAX_ATTEMPT: 8,
   PONG_STALE_MS: 40000,
   HIDDEN_RESUME_MS: RESUME_TIMING.MIN_BACKGROUND_MS,
-  PING_ACK_MS: RESUME_TIMING.PING_ACK_MS,
+  /** After iOS/tab wake the first pong is often slower than the PWA UI probe. */
+  PING_ACK_MS: 8000,
   LARGE_PAYLOAD_BYTES: 80_000,
 };
 
@@ -328,6 +329,7 @@ export function createBoardCollabSession(
   let viewportSeq = 0;
   let liveSeq = 0;
   let awaitingSnapshot = false;
+  let openedOnce = false;
   let reconnectsTotal = 0;
   let inboundTotal = 0;
   let inboundBytesTotal = 0;
@@ -565,6 +567,12 @@ export function createBoardCollabSession(
     }, BOARD_RECONNECT.PING_ACK_MS);
   };
 
+  const softPing = () => {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    lastPingAt = Date.now();
+    sendRaw({ type: "ping", t: lastPingAt });
+  };
+
   const resumeIfNeeded = (reason: string) => {
     if (closed) return;
     if (reason === "visibility" && document.visibilityState === "hidden") {
@@ -582,22 +590,28 @@ export function createBoardCollabSession(
     const hiddenMs = lastHiddenAt ? Date.now() - lastHiddenAt : null;
     lastHiddenAt = 0;
     const knownShort = hiddenMs != null && hiddenMs < BOARD_RECONNECT.HIDDEN_RESUME_MS;
-    if (knownShort && reason !== "online" && reason !== "manual") {
-      unlockResume();
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        lastPingAt = Date.now();
-        sendRaw({ type: "ping", t: lastPingAt });
-      }
-      return;
-    }
     const open = Boolean(socket && socket.readyState === WebSocket.OPEN);
     const frozenOpen = open && hiddenMs != null && hiddenMs >= BOARD_RECONNECT.HIDDEN_RESUME_MS;
-    if (!open || isPongStale() || frozenOpen) {
+    // Live socket: never tear it down just because the parent tab resumed.
+    // Ack-kill only after a long freeze (zombie OPEN) or a stale pong.
+    if (open && !isPongStale() && !frozenOpen && reason !== "online") {
+      unlockResume();
+      softPing();
+      return;
+    }
+    if (knownShort && reason !== "online") {
+      unlockResume();
+      softPing();
+      return;
+    }
+    if (!open || isPongStale()) {
       forceReconnect(reason);
       return;
     }
     verifyOpenSocket(reason);
   };
+
+  let flushLive = () => {};
 
   const connect = () => {
     if (closed) return;
@@ -623,14 +637,16 @@ export function createBoardCollabSession(
       if (closed || socket !== ws) return;
       unlockResume();
       clearPingAckTimer();
+      const isReconnect = openedOnce;
+      openedOnce = true;
       handlers.onStatus?.("open");
-      boardWsLog("open", { boardId, clientId, reconnect: reconnectAttempt > 0 });
+      boardWsLog("open", { boardId, clientId, reconnect: isReconnect });
       lastPongAt = Date.now();
       lastHiddenAt = 0;
       sendJoin();
       startHeartbeat();
       handlers.onReady?.();
-      if (reconnectAttempt > 0) {
+      if (isReconnect) {
         boardWsLog("resync after reconnect", { boardId, clientId, attempt: reconnectAttempt });
         sendRaw({
           type: "snapshot_request",
@@ -644,6 +660,7 @@ export function createBoardCollabSession(
         });
         handlers.onResyncNeeded?.();
       }
+      flushLive();
       reconnectAttempt = 0;
       clearReconnectTimer();
     };
@@ -1045,7 +1062,7 @@ export function createBoardCollabSession(
   window.addEventListener("resume", onResume);
   window.addEventListener("freeze", onFreeze);
 
-  const flushLive = () => {
+  flushLive = () => {
     liveTimer = null;
     if (!pendingLive || !socket || socket.readyState !== WebSocket.OPEN) return;
     const built = buildLivePublishPayload(lastPublishedElements, pendingLive, pendingVersion);
