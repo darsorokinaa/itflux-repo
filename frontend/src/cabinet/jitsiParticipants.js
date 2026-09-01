@@ -52,13 +52,22 @@ export function logJitsiPresence(tag, fields = {}) {
 }
 
 const BOT_DISPLAY_NAMES = /^(focus|jicofo|jibri|recorder|transcriber)$/i;
+const BOT_ID_RE = /(?:^|[/@._-])(focus|jicofo|jibri|recorder|transcriber)(?:$|[/@._-])/;
 
+/**
+ * Jicofo/Jibri/recorder — не ученик и не учитель.
+ * Нельзя резать по `hidden`: External API часто помечает так живых людей
+ * (hiddenFromRecorder, не в filmstrip, камера выкл.) — из-за этого оба
+ * видели «ещё не подключились», хотя уже были в комнате, и доска не
+ * считала пира онлайн.
+ */
 export function isHiddenOrBotParticipant(raw) {
   if (!raw || typeof raw !== "object") return false;
-  if (raw.hidden === true || raw.isHidden === true) return true;
   if (safeStr(raw.botType || raw.bot_type)) return true;
   const name = safeStr(raw.displayName || raw.formattedDisplayName || raw.name);
-  return BOT_DISPLAY_NAMES.test(name);
+  if (BOT_DISPLAY_NAMES.test(name)) return true;
+  const id = safeStr(raw.participantId || raw.id || raw.jid || raw.occupantJid).toLowerCase();
+  return BOT_ID_RE.test(id);
 }
 
 export function normalizeParticipant(raw, { localId = "" } = {}) {

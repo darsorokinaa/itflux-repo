@@ -63,6 +63,22 @@ describe("presence events change conference presence", () => {
     }).label).toBe("Ждём учителя");
   });
 
+  it("does not keep waiting when roster count already includes a peer", () => {
+    expect(classifyConferencePresence({
+      conferenceJoined: true,
+      participantCount: 2,
+      remoteCount: 0,
+      isTeacher: true,
+    }).code).toBe("peer_connecting_media");
+    expect(classifyConferencePresence({
+      conferenceJoined: true,
+      participantCount: 2,
+      remoteCount: 0,
+      mediaUp: true,
+      isTeacher: false,
+    }).code).toBe("in_call");
+  });
+
   it("shows connecting only after the peer joined and media is not up yet", () => {
     expect(classifyConferencePresence({
       conferenceJoined: true,

@@ -88,16 +88,27 @@ describe("jitsi participant store", () => {
     expect(store.snapshot().count).toBe(1);
   });
 
-  it("does not count hidden bots as a remote student", () => {
+  it("does not count jicofo/jibri/bots as a remote student", () => {
     const store = createParticipantStore();
     store.setLocalId("local-1");
     store.upsert({ id: "local-1", displayName: "Учитель" });
     store.upsert({ id: "jibri-1", displayName: "Recorder", hidden: true });
     store.upsert({ id: "focus", displayName: "Focus" });
+    store.upsert({ id: "room@conference/focus", displayName: "", hidden: true });
     store.upsert({ id: "bot-1", displayName: "Helper", botType: "poltergeist" });
     const snap = store.snapshot();
     expect(snap.count).toBe(1);
     expect(snap.remoteParticipants).toHaveLength(0);
+  });
+
+  it("keeps a real remote even when Jitsi marks them hidden", () => {
+    const store = createParticipantStore();
+    store.setLocalId("local-1");
+    store.upsert({ id: "local-1", displayName: "Учитель" });
+    store.upsert({ id: "remote-1", displayName: "Ученик", hidden: true, isHidden: true });
+    const snap = store.snapshot();
+    expect(snap.count).toBe(2);
+    expect(snap.remoteParticipants.map((p) => p.id)).toEqual(["remote-1"]);
   });
 });
 
@@ -111,6 +122,11 @@ describe("extract participants", () => {
     expect(extractParticipantsFromRoomsInfo({
       rooms: [{ participants: [{ id: "c", displayName: "C" }] }],
     }).map((p) => p.id)).toEqual(["c"]);
+
+    expect(extractParticipantsFromInfo([
+      { participantId: "local-1", displayName: "Учитель" },
+      { id: "remote-1", displayName: "Ученик", hidden: true },
+    ]).map((p) => p.id)).toEqual(["local-1", "remote-1"]);
   });
 });
 
@@ -143,6 +159,21 @@ describe("reconcileConferenceParticipants", () => {
     const snap = await reconcileConferenceParticipants(api, store, { reason: "stale-info" });
     expect(snap.count).toBe(2);
     expect(snap.ids.sort()).toEqual(["local-1", "remote-1"]);
+  });
+
+  it("recovers an already-present remote even if Jitsi flags them hidden", async () => {
+    const store = createParticipantStore();
+    store.setLocalId("local-1");
+    store.upsert({ id: "local-1" });
+    const api = fakeApi({
+      participants: [
+        { participantId: "local-1", displayName: "Учитель" },
+        { participantId: "remote-1", displayName: "Ученик", hidden: true },
+      ],
+    });
+    const snap = await reconcileConferenceParticipants(api, store, { reason: "joined" });
+    expect(snap.count).toBe(2);
+    expect(snap.remoteParticipants.map((p) => p.id)).toEqual(["remote-1"]);
   });
 });
 

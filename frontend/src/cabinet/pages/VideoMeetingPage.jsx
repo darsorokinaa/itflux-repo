@@ -352,7 +352,7 @@ export default function VideoMeetingPage() {
   const conferencePresenceRef = useRef({
     joined: false,
     count: 0,
-    remoteCount: 0,
+    remoteCount: null,
     mediaFailed: false,
     reconnecting: false,
     mediaUp: false,
@@ -601,7 +601,7 @@ export default function VideoMeetingPage() {
         const classified = classifyConferencePresence({
           conferenceJoined: presence.joined,
           participantCount: presence.count,
-          remoteCount: presence.remoteCount || 0,
+          remoteCount: presence.remoteCount,
           mediaFailed: presence.mediaFailed,
           mediaUp: presence.mediaUp,
           reconnecting: presence.reconnecting,
@@ -625,7 +625,7 @@ export default function VideoMeetingPage() {
               callSessionId: callSessionIdRef.current,
               metadata: {
                 participantCount: n,
-                remoteCount: conferencePresenceRef.current.remoteCount || 0,
+                remoteCount: conferencePresenceRef.current.remoteCount,
                 scenario: classified.scenario,
                 presenceCode: classified.code,
               },
@@ -636,9 +636,17 @@ export default function VideoMeetingPage() {
           if (typeof snap?.count === "number" && snap.count >= 0) {
             setParticipantCount(snap.count);
             conferencePresenceRef.current.count = snap.count;
-            conferencePresenceRef.current.remoteCount = Array.isArray(snap.remoteParticipants)
+            const remotes = Array.isArray(snap.remoteParticipants)
               ? snap.remoteParticipants.length
               : 0;
+            conferencePresenceRef.current.remoteCount = remotes;
+            // Roster already has the peer: they are in the call. Requiring
+            // dataChannelOpened left a false «подключается» overlay; combined
+            // with a filtered-out hidden remote it looked like «ещё не
+            // подключились» and follow/board presence stayed empty.
+            if (remotes >= 1) {
+              conferencePresenceRef.current.mediaUp = true;
+            }
             applyConferenceHint();
           }
         },
@@ -646,7 +654,6 @@ export default function VideoMeetingPage() {
           setJoinState("joined");
           conferencePresenceRef.current.joined = true;
           resumeControllerRef.current?.succeed?.();
-          applyConferenceHint();
           callStateRef.current?.transition(CALL_STATES.joined, "videoConferenceJoined");
           void attendanceTracker.onVerifiedJoin(event);
           if (event?.roomName && config.roomName && !jitsiRoomsMatch(config.roomName, event.roomName)) {
@@ -832,7 +839,7 @@ export default function VideoMeetingPage() {
       conferencePresenceRef.current = {
         joined: false,
         count: 0,
-        remoteCount: 0,
+        remoteCount: null,
         mediaFailed: false,
         reconnecting: false,
         mediaUp: false,

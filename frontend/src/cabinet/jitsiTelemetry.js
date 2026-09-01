@@ -63,9 +63,11 @@ export function classifyConferencePresence({
   isTeacher = false,
 } = {}) {
   const count = typeof participantCount === "number" ? participantCount : ((Number(remoteCount) || 0) + (conferenceJoined ? 1 : 0));
+  const remotesFromCount = Math.max(0, count - (conferenceJoined ? 1 : 0));
+  // `remoteCount: 0` must not hide a live peer when Jitsi already reports 2+ in-room.
   const remotes = remoteCount == null
-    ? Math.max(0, count - (conferenceJoined ? 1 : 0))
-    : Math.max(0, Number(remoteCount) || 0);
+    ? remotesFromCount
+    : Math.max(Number(remoteCount) || 0, remotesFromCount);
   const peerInRoom = remotes >= 1;
   if (mediaUp) {
     mediaFailed = false;
