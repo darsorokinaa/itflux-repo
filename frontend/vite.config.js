@@ -78,10 +78,44 @@ function injectAppVersionPlugin() {
       order: 'post',
       sequential: true,
       handler() {
+        stripSpaCollidingPublicDirs(resolvedOutDir)
         writeVersionedArtifacts(resolvedOutDir)
         restoreRootPublicUrls(path.join(resolvedOutDir, 'index.html'))
       },
     },
+  }
+}
+
+/**
+ * Vite копирует public/ в корень dist/. Каталог с тем же именем, что SPA-маршрут
+ * (например public/interesting/), на проде даёт nginx 403: try_files заходит
+ * в директорию без index.html вместо fallback на SPA.
+ */
+const SPA_RESERVED_PUBLIC_DIRS = [
+  'interesting',
+  'lessons',
+  'cabinet',
+  'teachers',
+  'for-teachers',
+  'generator',
+  'tasks',
+  'about',
+  'privacy',
+  'login',
+  'subject',
+  'pricing',
+]
+
+function stripSpaCollidingPublicDirs(outDir) {
+  for (const name of SPA_RESERVED_PUBLIC_DIRS) {
+    const target = path.join(outDir, name)
+    try {
+      if (fs.existsSync(target) && fs.statSync(target).isDirectory()) {
+        fs.rmSync(target, { recursive: true, force: true })
+      }
+    } catch {
+      /* ignore */
+    }
   }
 }
 

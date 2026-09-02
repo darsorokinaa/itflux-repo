@@ -24,7 +24,8 @@ def _repo_root() -> Path:
 
 
 def _default_source_dir() -> Path:
-    return _repo_root() / "frontend" / "public" / "interesting" / "history-map"
+    # Не public/: иначе Vite кладёт dist/interesting/ и nginx отдаёт 403 на SPA /interesting/.
+    return _repo_root() / "frontend" / "content" / "interesting" / "history-map"
 
 
 def _zip_directory(source_dir: Path, zip_path: Path) -> None:
@@ -46,7 +47,7 @@ class Command(BaseCommand):
             "--zip",
             dest="zip_path",
             default="",
-            help="Путь к готовому ZIP (иначе соберём из папки public/interesting/history-map)",
+            help="Путь к готовому ZIP (иначе соберём из папки content/interesting/history-map)",
         )
         parser.add_argument(
             "--dir",

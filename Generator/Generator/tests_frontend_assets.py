@@ -6,6 +6,18 @@ from django.test import RequestFactory, SimpleTestCase, override_settings
 from Generator.views import frontend_public_tree
 
 
+class InterestingPublicCollisionTests(SimpleTestCase):
+    def test_history_map_is_not_copied_from_vite_public(self):
+        repo = Path(__file__).resolve().parents[2]
+        public_interesting = repo / "frontend" / "public" / "interesting"
+        content_index = repo / "frontend" / "content" / "interesting" / "history-map" / "index.html"
+        self.assertFalse(
+            public_interesting.exists(),
+            "public/interesting/ becomes dist/interesting/ and nginx returns 403 for SPA /interesting/",
+        )
+        self.assertTrue(content_index.is_file())
+
+
 class FrontendAssetsUrlTests(SimpleTestCase):
     def test_rejects_unknown_prefix_and_traversal(self):
         factory = RequestFactory()

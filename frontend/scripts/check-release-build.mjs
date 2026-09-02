@@ -94,4 +94,28 @@ const hashed = fs.readdirSync(assetsDir).filter((f) => /-[a-zA-Z0-9_-]{6,}\.(js|
 if (hashed.length < 1) fail("production assets must include content hashes");
 ok(`hashed assets: ${hashed.length} (entry ${mains[0]})`);
 
+const spaCollidingDirs = [
+  "interesting",
+  "lessons",
+  "cabinet",
+  "teachers",
+  "for-teachers",
+  "generator",
+  "tasks",
+  "about",
+  "privacy",
+  "login",
+  "subject",
+  "pricing",
+];
+for (const name of spaCollidingDirs) {
+  const dir = path.join(distDir, name);
+  if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
+    fail(
+      `${name}/ must not ship in dist (nginx treats it as a static directory and returns 403 for SPA /${name}/)`,
+    );
+  }
+}
+ok("no SPA-colliding public directories in dist");
+
 console.log("Release build checks passed.");

@@ -37,6 +37,11 @@ fi
 # Хэшированные чанки обязаны содержать content-hash в имени
 js_count="$(find dist-next/assets -maxdepth 1 -type f -name 'main-*.js' | wc -l | tr -d ' ')"
 test "$js_count" -ge 1 || { echo "Ошибка: нет hashed main-*.js в dist-next/assets"; exit 1; }
+# public/interesting/ → dist/interesting/ ломает SPA: nginx 403 на /interesting/
+if [[ -d dist-next/interesting ]]; then
+  echo "Ошибка: dist-next/interesting/ не должен попадать в сборку (nginx 403 на /interesting/)"
+  exit 1
+fi
 
 # Сохраняем старые hashed-чанки на период открытых вкладок (не перезаписываем новые)
 if [[ -d dist/assets ]]; then
