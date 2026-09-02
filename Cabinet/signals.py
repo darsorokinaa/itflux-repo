@@ -2,8 +2,8 @@ from django.contrib.auth.models import User
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
-from .models import HomeworkSubmission, Profile, ReviewItem, ScheduleEvent, Student
-from .choices import StudentStatus, SubmissionStatus
+from .models import HomeworkSubmission, Profile, ScheduleEvent, Student
+from .choices import StudentStatus
 
 # Статус ученика до save: {student_pk: old_status}
 _pre_save_student_statuses: dict[int, str] = {}
@@ -48,27 +48,9 @@ def sync_billing_account_on_student_status(sender, instance, created, **kwargs):
 @receiver(post_save, sender=HomeworkSubmission)
 def ensure_review_item_for_submission(sender, instance, created, **kwargs):
     # Только после реальной сдачи. Выдача через «Задать ДЗ» ставит в очередь отдельно.
-    if instance.status != SubmissionStatus.SUBMITTED:
-        return
-    if not instance.submitted_at:
-        return
-    homework = instance.homework
-    from .homework_api import is_live_meeting_homework
+    from .homework_api import _ensure_review_item
 
-    if is_live_meeting_homework(homework):
-        return
-    ReviewItem.objects.get_or_create(
-        teacher=homework.teacher,
-        source_type="homework",
-        source_id=instance.pk,
-        defaults={
-            "student": instance.student,
-            "group": homework.group,
-            "title": f"{homework.title} — {instance.student.full_name}",
-            "status": "pending",
-            "priority": "normal",
-        },
-    )
+    _ensure_review_item(instance)
 
 
 PLAN_SYNC_STATUSES = {"done", "completed"}

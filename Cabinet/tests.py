@@ -2300,6 +2300,143 @@ class ReviewApiTests(TestCase):
         self.assertEqual(submission.status, "returned")
         self.assertEqual(submission.teacher_comment, "Нужна доработка")
 
+    def test_resubmit_after_return_reopens_review_for_check(self):
+        from rest_framework.test import APIClient
+        from Cabinet.models import HomeworkSubmission
+
+        self.submission.submitted_at = timezone.now()
+        self.submission.save(update_fields=["submitted_at"])
+
+        teacher = APIClient()
+        teacher.force_login(self.teacher)
+        returned = teacher.post(
+            f"/api/cabinet/review/{self.review_item.pk}/return/",
+            {"teacher_comment": "Исправьте №20"},
+            format="json",
+        )
+        self.assertEqual(returned.status_code, 200, returned.content)
+        self.review_item.refresh_from_db()
+        self.assertEqual(self.review_item.status, "returned")
+
+        student = APIClient()
+        student.force_login(self.student_user)
+        resubmit = student.post(
+            f"/api/homework/assignment/{self.homework.pk}/submit/",
+            {
+                "result": {
+                    "by_task_id": {"10": "42", "20": "исправленный ответ"},
+                    "checked": {"10": True},
+                }
+            },
+            format="json",
+        )
+        self.assertEqual(resubmit.status_code, 200, resubmit.content)
+        self.review_item.refresh_from_db()
+        submission = HomeworkSubmission.objects.get(pk=self.submission.pk)
+        self.assertEqual(submission.status, "submitted")
+        self.assertEqual(self.review_item.status, "pending")
+        self.assertIsNone(self.review_item.checked_at)
+
+        checked = teacher.post(
+            f"/api/cabinet/review/{self.review_item.pk}/check/",
+            {"teacher_comment": "Теперь хорошо", "checked": {"10": True, "20": True}},
+            format="json",
+        )
+        self.assertEqual(checked.status_code, 200, checked.content)
+        self.review_item.refresh_from_db()
+        submission.refresh_from_db()
+        self.assertEqual(self.review_item.status, "checked")
+        self.assertEqual(submission.status, "checked")
+
+        detail = student.get(f"/api/cabinet/student/assignments/{self.homework.pk}/")
+        self.assertEqual(detail.status_code, 200, detail.content)
+        data = detail.json()
+        self.assertEqual(data.get("status"), "checked")
+        self.assertIsNotNone(data.get("result"))
+
+    def test_stale_returned_review_reopens_when_already_resubmitted(self):
+        from rest_framework.test import APIClient
+
+        self.submission.status = "submitted"
+        self.submission.submitted_at = timezone.now()
+        self.submission.save(update_fields=["status", "submitted_at"])
+        self.review_item.status = "returned"
+        self.review_item.checked_at = timezone.now()
+        self.review_item.save(update_fields=["status", "checked_at"])
+
+        client = APIClient()
+        client.force_login(self.teacher)
+        detail = client.get(f"/api/cabinet/review/{self.review_item.pk}/")
+        self.assertEqual(detail.status_code, 200, detail.content)
+        self.assertEqual(detail.json()["status"], "pending")
+
+        self.review_item.refresh_from_db()
+        self.assertEqual(self.review_item.status, "pending")
+        self.assertIsNone(self.review_item.checked_at)
+
+    def test_simple_homework_resubmit_after_return_can_be_checked(self):
+        from rest_framework.test import APIClient
+        from Cabinet.models import Homework, HomeworkSubmission, ReviewItem
+
+        hw = Homework.objects.create(
+            teacher=self.teacher,
+            student=self.student,
+            title="ДЗ: текст",
+            status="assigned",
+        )
+        student = APIClient()
+        student.force_login(self.student_user)
+        first = student.post(
+            f"/api/cabinet/student/assignments/{hw.pk}/",
+            {"answer_text": "Первый ответ"},
+            format="multipart",
+        )
+        self.assertEqual(first.status_code, 200, first.content)
+        submission = HomeworkSubmission.objects.get(homework=hw, student=self.student)
+        review = ReviewItem.objects.get(source_type="homework", source_id=submission.pk)
+
+        teacher = APIClient()
+        teacher.force_login(self.teacher)
+        returned = teacher.post(
+            f"/api/cabinet/review/{review.pk}/return/",
+            {"teacher_comment": "Дополните ответ"},
+            format="json",
+        )
+        self.assertEqual(returned.status_code, 200, returned.content)
+        review.refresh_from_db()
+        self.assertEqual(review.status, "returned")
+
+        resubmit = student.post(
+            f"/api/cabinet/student/assignments/{hw.pk}/",
+            {"answer_text": "Исправленный ответ"},
+            format="multipart",
+        )
+        self.assertEqual(resubmit.status_code, 200, resubmit.content)
+        review.refresh_from_db()
+        submission.refresh_from_db()
+        self.assertEqual(submission.status, "submitted")
+        self.assertEqual(review.status, "pending")
+
+        checked = teacher.post(
+            f"/api/cabinet/review/{review.pk}/check/",
+            {
+                "teacher_comment": "Отлично",
+                "manual_stats": {"total": 1, "correct": 1, "incorrect": 0, "unsolved": 0},
+            },
+            format="json",
+        )
+        self.assertEqual(checked.status_code, 200, checked.content)
+        review.refresh_from_db()
+        submission.refresh_from_db()
+        self.assertEqual(review.status, "checked")
+        self.assertEqual(submission.status, "checked")
+
+        detail = student.get(f"/api/cabinet/student/assignments/{hw.pk}/")
+        self.assertEqual(detail.status_code, 200, detail.content)
+        data = detail.json()
+        self.assertEqual(data.get("status"), "checked")
+        self.assertIsNotNone(data.get("result"))
+
     def test_teacher_can_upload_review_feedback_file(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
         from rest_framework.test import APIClient

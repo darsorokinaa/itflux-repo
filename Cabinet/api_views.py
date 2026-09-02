@@ -2076,10 +2076,16 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
         return students, subjects
 
     def list(self, request, *args, **kwargs):
-        from .homework_api import prefetch_submissions_for_review_items, sync_assigned_homework_into_review_queue
+        from .homework_api import (
+            prefetch_submissions_for_review_items,
+            reopen_resubmitted_review_items,
+            sync_assigned_homework_into_review_queue,
+        )
 
         # Подтянуть выданные ДЗ без ReviewItem (авто-выдача после урока).
-        sync_assigned_homework_into_review_queue(self.get_teacher())
+        teacher = self.get_teacher()
+        sync_assigned_homework_into_review_queue(teacher)
+        reopen_resubmitted_review_items(teacher)
 
         scoped_qs = self._review_qs(apply_status=False)
         counts = {
@@ -2109,6 +2115,12 @@ class ReviewViewSet(TeacherScopedMixin, mixins.ListModelMixin, mixins.RetrieveMo
 
     def get_queryset(self):
         return self._review_qs(apply_status=True)
+
+    def get_object(self):
+        from .homework_api import reopen_review_item_if_resubmitted
+
+        item = super().get_object()
+        return reopen_review_item_if_resubmitted(item)
 
     @action(detail=True, methods=["post"], url_path="check")
     def check(self, request, pk=None):
@@ -2780,9 +2792,14 @@ class NavCountsView(TeacherScopedMixin, APIView):
     """Лёгкие счётчики для пунктов меню кабинета учителя."""
 
     def get(self, request):
-        from .homework_api import exclude_live_meeting_review_items, review_items_ready_to_check
+        from .homework_api import (
+            exclude_live_meeting_review_items,
+            reopen_resubmitted_review_items,
+            review_items_ready_to_check,
+        )
 
         teacher = self.get_teacher()
+        reopen_resubmitted_review_items(teacher)
         students_count = Student.objects.filter(
             teacher=teacher,
             status=StudentStatus.ACTIVE,

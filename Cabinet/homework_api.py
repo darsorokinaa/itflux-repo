@@ -22,7 +22,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .choices import SubmissionStatus
+from .choices import ReviewStatus, SubmissionStatus
 from .models import Homework, HomeworkSubmission, HomeworkTask, InteractiveAssignment, Profile, Student
 from .student_api import _homework_qs, _pick_student, resolve_roster_students
 from .submission_files import submission_has_files
@@ -818,7 +818,7 @@ def _ensure_review_item(submission: HomeworkSubmission):
         return None
     if is_live_meeting_homework(submission.homework):
         return None
-    item, _ = ReviewItem.objects.get_or_create(
+    item, created = ReviewItem.objects.get_or_create(
         teacher=submission.homework.teacher,
         source_type="homework",
         source_id=submission.pk,
@@ -826,11 +826,65 @@ def _ensure_review_item(submission: HomeworkSubmission):
             "student": submission.student,
             "group": submission.homework.group,
             "title": f"{submission.homework.title} — {submission.student.full_name}",
-            "status": "pending",
+            "status": ReviewStatus.PENDING,
             "priority": "normal",
         },
     )
+    if not created:
+        reopen_review_item_if_resubmitted(item, submission=submission)
     return item
+
+
+def reopen_review_item_if_resubmitted(item, submission=None):
+    """
+    Если ученик снова сдал работу после возврата, вернуть её в очередь проверки.
+    Иначе учитель не видит кнопку «Проверено» и результаты не появляются.
+    """
+    if item is None or item.source_type != "homework":
+        return item
+    if item.status == ReviewStatus.PENDING:
+        return item
+    if item.status == ReviewStatus.CHECKED:
+        return item
+    if submission is None:
+        submission = HomeworkSubmission.objects.filter(pk=item.source_id).first()
+    if (
+        submission is None
+        or submission.status != SubmissionStatus.SUBMITTED
+        or not submission.submitted_at
+    ):
+        return item
+    item.status = ReviewStatus.PENDING
+    item.checked_at = None
+    item.save(update_fields=["status", "checked_at"])
+    return item
+
+
+def reopen_resubmitted_review_items(teacher) -> int:
+    """Починить уже застрявшие ReviewItem после возврата и повторной сдачи."""
+    from .models import ReviewItem
+
+    if teacher is None:
+        return 0
+    returned = ReviewItem.objects.filter(
+        teacher=teacher,
+        source_type="homework",
+        status=ReviewStatus.RETURNED,
+    )
+    source_ids = list(returned.values_list("source_id", flat=True)[:500])
+    if not source_ids:
+        return 0
+    resubmitted_ids = HomeworkSubmission.objects.filter(
+        pk__in=source_ids,
+        status=SubmissionStatus.SUBMITTED,
+        submitted_at__isnull=False,
+    ).values_list("pk", flat=True)
+    if not resubmitted_ids:
+        return 0
+    return returned.filter(source_id__in=list(resubmitted_ids)).update(
+        status=ReviewStatus.PENDING,
+        checked_at=None,
+    )
 
 
 def _notify_homework_submitted(submission: HomeworkSubmission, review_item=None, *, is_resubmit=False):
