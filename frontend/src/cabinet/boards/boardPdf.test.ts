@@ -19,7 +19,9 @@ describe("boardPdf", () => {
     expect(fileLooksLikePdf({ name: "a.pdf", type: "" })).toBe(true);
     expect(fileLooksLikePdf({ name: "a.PNG", type: "image/png" })).toBe(false);
     expect(fileLooksLikePdf({ name: "x", type: "application/pdf" })).toBe(true);
+    expect(fileLooksLikePdf({ name: "x", type: "application/x-pdf" })).toBe(true);
     expect(sniffPdfBytes(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]))).toBe(true);
+    expect(sniffPdfBytes(new Uint8Array([0x00, 0x00, 0x25, 0x50, 0x44, 0x46]))).toBe(true);
     expect(sniffPdfBytes(new Uint8Array([0x89, 0x50, 0x4e, 0x47]))).toBe(false);
   });
 

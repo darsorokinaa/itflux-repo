@@ -437,7 +437,10 @@ def validate_board_image_upload(uploaded) -> None:
 
 
 def detect_pdf_mime(content: bytes) -> str | None:
-    if content.startswith(b"%PDF"):
+    if not content:
+        return None
+    head = content[:1024]
+    if head.startswith(b"%PDF") or b"%PDF" in head:
         return "application/pdf"
     return None
 
@@ -450,7 +453,7 @@ def validate_board_pdf_bytes(content: bytes) -> str:
     return "application/pdf"
 
 
-def validate_board_pdf_upload(uploaded) -> None:
+def validate_board_pdf_upload(uploaded) -> bytes:
     if not uploaded:
         raise UploadValidationError("Файл не передан", "FILE_REQUIRED")
 
@@ -458,22 +461,13 @@ def validate_board_pdf_upload(uploaded) -> None:
     if size is not None and size > MAX_BOARD_PDF_BYTES:
         raise UploadValidationError("PDF слишком большой (макс. 20 МБ)", "FILE_TOO_LARGE")
 
-    name = getattr(uploaded, "name", "") or "file"
-    ext = os.path.splitext(name)[1].lower()
-    if ext and ext != ".pdf":
-        raise UploadValidationError("Нужен файл в формате PDF", "FILE_TYPE_NOT_ALLOWED")
-
-    content_type = (getattr(uploaded, "content_type", "") or "").split(";", 1)[0].strip().lower()
-    if content_type and content_type not in ("application/pdf", "application/octet-stream", "binary/octet-stream"):
-        raise UploadValidationError("Нужен файл в формате PDF", "FILE_TYPE_NOT_ALLOWED")
-
-    pos = uploaded.tell() if hasattr(uploaded, "tell") else None
-    raw = uploaded.read(MAX_BOARD_PDF_BYTES + 1)
-    if hasattr(uploaded, "seek") and pos is not None:
-        uploaded.seek(pos)
-    elif hasattr(uploaded, "seek"):
+    if hasattr(uploaded, "seek"):
+        uploaded.seek(0)
+    raw = uploaded.read()
+    if hasattr(uploaded, "seek"):
         uploaded.seek(0)
     validate_board_pdf_bytes(raw)
+    return raw
 
 
 def board_asset_api_path(board_id, asset_id) -> str:
@@ -1556,7 +1550,8 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
 
         uploaded = request.FILES.get("file") or request.FILES.get("pdf")
         try:
-            validate_board_pdf_upload(uploaded)
+            raw = validate_board_pdf_upload(uploaded)
+            mime = validate_board_pdf_bytes(raw)
         except UploadValidationError as exc:
             return Response(
                 {"detail": exc.message, "code": exc.code},
@@ -1564,14 +1559,6 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
             )
 
         file_id = request.data.get("id") or str(uuid.uuid4())
-        raw = uploaded.read()
-        try:
-            mime = validate_board_pdf_bytes(raw)
-        except UploadValidationError as exc:
-            return Response(
-                {"detail": exc.message, "code": exc.code},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
 
         original_name = getattr(uploaded, "name", "") or f"{file_id}.pdf"
         asset, _created = get_or_create_board_asset(

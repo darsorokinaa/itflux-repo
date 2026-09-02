@@ -116,6 +116,7 @@ import {
   BOARD_PDF_UNPACK_ERROR,
   ITFLUX_PDF_KEY,
   MAX_BOARD_PDF_PAGES,
+  asPdfUploadFile,
   buildItfluxPdfMeta,
   createBoardFrameElement,
   dataTransferHasPdf,
@@ -2879,7 +2880,7 @@ export default function CabinetBoardEditorPage() {
             continue;
           }
           const form = new FormData();
-          form.append("file", file, file.name || "document.pdf");
+          form.append("file", asPdfUploadFile(file));
           const uploaded = await uploadInteractiveBoardFile(boardId, form) as {
             asset_id?: string;
             url?: string;
@@ -2908,6 +2909,11 @@ export default function CabinetBoardEditorPage() {
           if (opened.opened.truncated) {
             showNotice(`Добавлены первые ${MAX_BOARD_PDF_PAGES} страниц`);
           }
+        } catch (err) {
+          const message = err && typeof err === "object" && "message" in err
+            ? String((err as { message?: string }).message || "")
+            : "";
+          showNotice(message || BOARD_PDF_INSERT_ERROR);
         } finally {
           await closeBoardPdf(opened.opened.doc);
         }

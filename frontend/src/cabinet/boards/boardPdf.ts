@@ -42,15 +42,38 @@ export function normalizePdfMime(raw: string | null | undefined): string {
   return String(raw || "").split(";", 1)[0].trim().toLowerCase();
 }
 
+const PDF_MIME = new Set([
+  "application/pdf",
+  "application/x-pdf",
+  "application/acrobat",
+  "application/vnd.pdf",
+  "text/pdf",
+]);
+
 export function sniffPdfBytes(bytes: Uint8Array | null | undefined): boolean {
   if (!bytes || bytes.length < 4) return false;
-  return bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
+  const limit = Math.min(bytes.length - 3, 1024);
+  for (let i = 0; i < limit; i += 1) {
+    if (bytes[i] === 0x25 && bytes[i + 1] === 0x50 && bytes[i + 2] === 0x44 && bytes[i + 3] === 0x46) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function fileLooksLikePdf(file: { type?: string; name?: string } | null | undefined): boolean {
   if (!file) return false;
-  if (normalizePdfMime(file.type) === "application/pdf") return true;
+  if (PDF_MIME.has(normalizePdfMime(file.type))) return true;
   return String(file.name || "").toLowerCase().endsWith(".pdf");
+}
+
+export function asPdfUploadFile(file: Blob, fileName?: string): File {
+  const rawName = String(fileName || (file instanceof File ? file.name : "") || "document.pdf").trim();
+  const name = rawName.toLowerCase().endsWith(".pdf") ? rawName : `${rawName || "document"}.pdf`;
+  return new File([file], name, {
+    type: "application/pdf",
+    lastModified: file instanceof File ? file.lastModified : Date.now(),
+  });
 }
 
 export function dataTransferHasPdf(data: DataTransfer | null | undefined): boolean {

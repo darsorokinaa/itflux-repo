@@ -558,6 +558,21 @@ class InteractiveBoardApiTests(TestCase):
         self.assertEqual(dl.status_code, 200)
         self.assertEqual(dl["Content-Type"], "application/pdf")
 
+    def test_pdf_upload_accepts_pdf_with_generic_content_type(self):
+        board = InteractiveBoard.objects.create(owner=self.teacher, title="PdfOctet")
+        self._auth(self.teacher)
+        pdf = SimpleUploadedFile(
+            "konspekt.bin",
+            b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n",
+            content_type="image/png",
+        )
+        res = self.client.post(
+            f"/api/cabinet/interactive-boards/{board.id}/upload-file/",
+            {"file": pdf},
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+
     def test_pdf_upload_rejects_non_pdf(self):
         board = InteractiveBoard.objects.create(owner=self.teacher, title="PdfBad")
         self._auth(self.teacher)

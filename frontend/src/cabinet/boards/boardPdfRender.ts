@@ -1,7 +1,8 @@
 /** Клиентский рендер PDF-страниц через pdf.js. */
 
-import * as pdfjs from "pdfjs-dist";
-import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { getDocument, GlobalWorkerOptions, PDFWorker } from "pdfjs-dist";
+import type { PDFDocumentProxy } from "pdfjs-dist";
+import PdfJsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?worker";
 import {
   BOARD_PDF_FORMAT_ERROR,
   BOARD_PDF_INSERT_ERROR,
@@ -15,7 +16,7 @@ const MAX_PAGE_EDGE = 1600;
 const JPEG_QUALITY = 0.86;
 
 export type OpenedBoardPdf = {
-  doc: pdfjs.PDFDocumentProxy;
+  doc: PDFDocumentProxy;
   pageCount: number;
   truncated: boolean;
 };
@@ -27,14 +28,29 @@ export type RenderedPdfPage = {
   height: number;
 };
 
-let workerReady = false;
+let pdfWorker: PDFWorker | null = null;
 
-function ensureWorker(): typeof pdfjs {
-  if (!workerReady) {
-    pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
-    workerReady = true;
+function copyPdfBytes(bytes: Uint8Array): Uint8Array {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy;
+}
+
+function ensurePdfWorker(): PDFWorker {
+  if (pdfWorker && !pdfWorker.destroyed) {
+    return pdfWorker;
   }
-  return pdfjs;
+  try {
+    pdfWorker = new PDFWorker({ port: new PdfJsWorker() });
+    return pdfWorker;
+  } catch {
+    GlobalWorkerOptions.workerSrc = new URL(
+      "pdfjs-dist/build/pdf.worker.min.mjs",
+      import.meta.url,
+    ).toString();
+    pdfWorker = new PDFWorker();
+    return pdfWorker;
+  }
 }
 
 async function canvasToJpeg(canvas: HTMLCanvasElement): Promise<Blob | null> {
@@ -74,9 +90,9 @@ export async function openBoardPdf(source: Blob | ArrayBuffer): Promise<
   }
 
   try {
-    const lib = ensureWorker();
-    const task = lib.getDocument({
-      data: bytes.slice(),
+    const task = getDocument({
+      data: copyPdfBytes(bytes),
+      worker: ensurePdfWorker(),
       disableAutoFetch: true,
       disableStream: true,
     });
@@ -92,12 +108,12 @@ export async function openBoardPdf(source: Blob | ArrayBuffer): Promise<
       },
     };
   } catch {
-    return { ok: false, reason: "format", message: BOARD_PDF_FORMAT_ERROR };
+    return { ok: false, reason: "format", message: BOARD_PDF_INSERT_ERROR };
   }
 }
 
 export async function renderBoardPdfPage(
-  doc: pdfjs.PDFDocumentProxy,
+  doc: PDFDocumentProxy,
   pageNumber: number,
 ): Promise<RenderedPdfPage> {
   const page = await doc.getPage(pageNumber);
@@ -130,7 +146,7 @@ export async function renderBoardPdfPage(
   }
 }
 
-export async function closeBoardPdf(doc: pdfjs.PDFDocumentProxy | null | undefined): Promise<void> {
+export async function closeBoardPdf(doc: PDFDocumentProxy | null | undefined): Promise<void> {
   if (!doc) return;
   try {
     await doc.destroy();
