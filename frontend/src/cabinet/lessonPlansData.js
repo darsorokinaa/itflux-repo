@@ -79,27 +79,105 @@ const PLAN_SUBJECT_LABELS = {
   phys: "Физика",
   physics: "Физика",
   prog: "Программирование",
+  programming: "Программирование",
   rus: "Русский язык",
+  russian: "Русский язык",
   other: "Другое",
 };
 
+const PLAN_SUBJECT_ALIASES = {
+  informatics: "inf",
+  inf: "inf",
+  math: "math",
+  math_base: "math",
+  physics: "phys",
+  phys: "phys",
+  rus: "rus",
+  russian: "rus",
+  prog: "prog",
+  programming: "prog",
+};
+
+export function canonicalPlanSubjectId(subjectId) {
+  const id = String(subjectId || "").trim().toLowerCase();
+  if (!id) return "";
+  return PLAN_SUBJECT_ALIASES[id] || id;
+}
+
+export function canonicalizePlanSubjectId(value, optionIds = []) {
+  const ids = new Set((optionIds || []).map(String));
+  const current = String(value || "").trim();
+  if (!current) return "";
+  if (ids.has(current)) return current;
+
+  const lower = current.toLowerCase();
+  if (ids.has(lower)) return lower;
+
+  const canonical = PLAN_SUBJECT_ALIASES[lower] || lower;
+  if (ids.has(canonical)) return canonical;
+
+  for (const [from, to] of Object.entries(PLAN_SUBJECT_ALIASES)) {
+    if (to === canonical && ids.has(from)) return from;
+  }
+
+  return current;
+}
+
+export function resolvePlanSubjectSelection(value, options = PLAN_SUBJECTS) {
+  const list = Array.isArray(options) && options.length ? options : PLAN_SUBJECTS;
+  const current = String(value || "").trim();
+  if (!current) return "";
+
+  const byId = list.find((item) => String(item.id) === current || String(item.id).toLowerCase() === current.toLowerCase());
+  if (byId) return byId.id;
+
+  const byLabel = list.find((item) => String(item.label).toLowerCase() === current.toLowerCase());
+  if (byLabel) return byLabel.id;
+
+  return canonicalizePlanSubjectId(current, list.map((item) => item.id));
+}
+
 export function planSubjectLabelFromId(subjectId) {
-  return PLAN_SUBJECT_LABELS[subjectId] || "";
+  const id = String(subjectId || "").trim();
+  if (!id) return "";
+  if (PLAN_SUBJECT_LABELS[id]) return PLAN_SUBJECT_LABELS[id];
+  const canonical = canonicalPlanSubjectId(id);
+  return PLAN_SUBJECT_LABELS[canonical] || PLAN_SUBJECT_LABELS[id.toLowerCase()] || "";
+}
+
+export function planLevelLabelFromId(levelId) {
+  return PLAN_DIRECTION_LABELS[levelId] || "";
+}
+
+const PLAN_LEVEL_ALIASES = {
+  "огэ": "oge",
+  "егэ": "ege",
+  "ёгэ": "ege",
+  "впр": "vpr",
+  "школа": "school",
+  "школьная программа": "school",
+  "школьная база": "school",
+};
+
+export function resolvePlanLevelSelection(value, options = PLAN_LEVELS) {
+  const list = Array.isArray(options) && options.length ? options : PLAN_LEVELS;
+  const current = String(value || "").trim();
+  if (!current) return "";
+
+  const lower = current.toLowerCase();
+  const canonical = PLAN_LEVEL_ALIASES[lower] || lower;
+  const match = list.find((item) => {
+    const id = String(item.id).toLowerCase();
+    return id === lower || id === canonical;
+  });
+  return match ? match.id : current;
 }
 
 export function planSubjectsMatch(planSubject, studentSubject) {
-  const aliases = {
-    informatics: "inf",
-    inf: "inf",
-    math: "math",
-    math_base: "math",
-    physics: "phys",
-    phys: "phys",
-  };
-  const a = String(planSubject || "").trim().toLowerCase();
-  const b = String(studentSubject || "").trim().toLowerCase();
+  const a = canonicalPlanSubjectId(planSubject);
+  const b = canonicalPlanSubjectId(studentSubject);
   if (!a || !b) return true;
-  return (aliases[a] || a) === (aliases[b] || b);
+  return a === b;
 }
 
 export function defaultSubjectForDirection(direction) {
@@ -250,20 +328,19 @@ export function mapPlanToHomeworkCard(plan, options = {}) {
 
 export function planSubjectLabel(planOrDirection) {
   if (planOrDirection && typeof planOrDirection === "object") {
-    const explicit = planOrDirection.subjectLabel
-      || planSubjectLabelFromId(planOrDirection.subject);
-    if (explicit) return explicit;
-    return planSubjectLabel(planOrDirection.direction);
+    return planOrDirection.subjectLabel
+      || planSubjectLabelFromId(planOrDirection.subject)
+      || "";
   }
-  if (planOrDirection === "school") return "Математика";
-  return "Информатика";
+  return planSubjectLabelFromId(planOrDirection);
 }
 
 export function planExamLabel(plan) {
-  const examType = plan?.examType || plan?.exam_type;
-  if (examType === "oge" || plan?.direction === "oge") return "ОГЭ";
-  if (examType === "ege" || plan?.direction === "ege") return "ЕГЭ";
-  const label = PLAN_DIRECTION_LABELS[plan?.direction];
+  const examType = String(plan?.examType || plan?.exam_type || "").toLowerCase();
+  const direction = String(plan?.direction || "").toLowerCase();
+  if (examType === "oge" || direction === "oge") return "ОГЭ";
+  if (examType === "ege" || direction === "ege") return "ЕГЭ";
+  const label = PLAN_DIRECTION_LABELS[plan?.direction] || planLevelLabelFromId(direction);
   if (label && !["Другое", "Школьная база", "Python"].includes(label)) return label;
   return null;
 }
@@ -279,29 +356,25 @@ export function itemStatusTone(status) {
   return map[status] || "gray";
 }
 
-const INFORMATICS_DIRECTIONS = new Set(["oge", "ege", "python", "school"]);
-const MATH_DIRECTIONS = new Set(["vpr"]);
-
 const INFORMATICS_KEYWORDS = /информат|логик|алгоритм|python|программ|булев|систем.*счисл|компьютер/i;
 const MATH_KEYWORDS = /математ|алгебр|геометр|уравнен|функци|график|теорем|тригоном/i;
+const PHYSICS_KEYWORDS = /физик|механик|электрич|оптик|кинемат/i;
+const RUSSIAN_KEYWORDS = /русск(ий|ого)|орфограф|пунктуац|сочинен/i;
 
 function planSubjectKind(plan) {
-  if (plan.subject && plan.subject !== "other") {
-    const subjectId = String(plan.subject).toLowerCase();
-    if (subjectId === "inf" || subjectId === "informatics") return "informatics";
-    if (subjectId === "math" || subjectId === "math_base") return "math";
-    if (subjectId === "phys" || subjectId === "physics") return "physics";
-    if (subjectId === "rus" || subjectId === "russian") return "russian";
+  const subjectId = canonicalPlanSubjectId(plan.subject);
+  if (subjectId && subjectId !== "other") {
+    if (subjectId === "inf") return "informatics";
+    if (subjectId === "math") return "math";
+    if (subjectId === "phys") return "physics";
+    if (subjectId === "rus") return "russian";
     return subjectId;
   }
   const hay = `${plan.title || ""} ${plan.description || ""} ${plan.goal || ""}`;
-
-  if (MATH_DIRECTIONS.has(plan.direction) || MATH_KEYWORDS.test(hay)) {
-    return "math";
-  }
-  if (INFORMATICS_DIRECTIONS.has(plan.direction) || INFORMATICS_KEYWORDS.test(hay)) {
-    return "informatics";
-  }
+  if (MATH_KEYWORDS.test(hay)) return "math";
+  if (PHYSICS_KEYWORDS.test(hay)) return "physics";
+  if (RUSSIAN_KEYWORDS.test(hay)) return "russian";
+  if (INFORMATICS_KEYWORDS.test(hay)) return "informatics";
   return null;
 }
 
@@ -325,8 +398,8 @@ export function mapApiPlan(plan) {
     description: plan.description || "",
     goal: plan.goal || "",
     direction: plan.direction,
-    directionLabel: plan.direction_label || plan.direction,
-    subject: plan.subject || defaultSubjectForDirection(plan.direction),
+    directionLabel: plan.direction_label || planLevelLabelFromId(plan.direction) || plan.direction,
+    subject: plan.subject || "",
     subjectLabel: plan.subject_label || planSubjectLabelFromId(plan.subject),
     examType: plan.exam_type,
     grade: plan.grade || "",

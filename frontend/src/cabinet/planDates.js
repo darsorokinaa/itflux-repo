@@ -90,3 +90,124 @@ export function nextPlanDateAfter(iso, index, intervalId = "weekly") {
   if (!iso) return "";
   return addDaysLocal(iso, intervalStepDays(intervalId, index));
 }
+
+export function calendarDateKey(value) {
+  const match = String(value || "").match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : "";
+}
+
+export function calendarDaysBetween(fromIso, toIso) {
+  const from = parseLocalISODate(fromIso);
+  const to = parseLocalISODate(toIso);
+  if (!from || !to) return null;
+  return Math.round((to.getTime() - from.getTime()) / 86400000);
+}
+
+function ruPlural(n, one, few, many) {
+  const abs = Math.abs(Number(n) || 0);
+  const mod10 = abs % 10;
+  const mod100 = abs % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
+export function formatPlanDateNumeric(iso) {
+  const date = parseLocalISODate(iso);
+  if (!date) return "";
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${day}.${month}.${date.getFullYear()}`;
+}
+
+export function plannedDateAtIndex(sessions, index, intervalId = "weekly") {
+  const start = calendarDateKey(sessions?.[0]?.scheduledDate);
+  if (!start || index < 0) return "";
+  return generatePlanDates(start, index + 1, intervalId)[index] || "";
+}
+
+export function isManualDateOverride(sessions, index, intervalId = "weekly") {
+  if (index <= 0) return false;
+  const current = calendarDateKey(sessions?.[index]?.scheduledDate);
+  const planned = plannedDateAtIndex(sessions, index, intervalId);
+  return Boolean(current && planned && current !== planned);
+}
+
+export function countSessionsOnDate(sessions, iso, exceptIndex = -1) {
+  const day = calendarDateKey(iso);
+  if (!day) return 0;
+  return (sessions || []).filter((session, index) => (
+    index !== exceptIndex && calendarDateKey(session?.scheduledDate) === day
+  )).length;
+}
+
+export function describeDateDeviation(fromIso, toIso, intervalId = "weekly") {
+  const days = calendarDaysBetween(fromIso, toIso);
+  if (days == null || days === 0) {
+    return { days: 0, sameDay: true, message: "", extra: "" };
+  }
+  const abs = Math.abs(days);
+  const later = days > 0;
+  const prefix = later
+    ? "Эта дата отличается от текущего плана"
+    : "Новая дата раньше текущего плана";
+
+  let amount;
+  if (abs % 7 === 0) {
+    const weeks = abs / 7;
+    amount = ` примерно на ${weeks} ${ruPlural(weeks, "неделю", "недели", "недель")}`;
+  } else {
+    amount = ` на ${abs} ${ruPlural(abs, "день", "дня", "дней")}`;
+  }
+
+  let extra = "";
+  const step = intervalId === "weekly" ? 7
+    : intervalId === "biweekly" ? 14
+      : intervalId === "daily" ? 1
+        : 0;
+  if (step && abs === step) {
+    extra = "Это сдвинет занятие примерно на одно занятие относительно плана.";
+  } else if (step && abs === step * 2) {
+    extra = "Это сдвинет занятие примерно на два занятия относительно плана.";
+  }
+
+  return {
+    days,
+    sameDay: false,
+    message: `${prefix}${amount}.`,
+    extra,
+  };
+}
+
+export function compressPlanDatesAfterRemove(sessions, removedIndices) {
+  if (!Array.isArray(sessions) || !sessions.length) return sessions;
+  const removed = new Set(
+    (Array.isArray(removedIndices) ? removedIndices : [removedIndices])
+      .map(Number)
+      .filter((index) => index >= 0 && index < sessions.length),
+  );
+  if (!removed.size) return sessions;
+
+  const slots = sessions.map((session) => session.scheduledDate || "");
+  const remaining = sessions.filter((_, index) => !removed.has(index));
+  const firstRemoved = Math.min(...removed);
+  const tailSlots = slots.slice(firstRemoved);
+  let offset = 0;
+  return remaining.map((session, index) => {
+    if (index < firstRemoved) return session;
+    const nextDate = tailSlots[offset] || "";
+    offset += 1;
+    if ((session.scheduledDate || "") === nextDate) return session;
+    return { ...session, scheduledDate: nextDate };
+  });
+}
+
+export function willCompressDatesAfterRemove(sessions, removedIndices) {
+  const list = Array.isArray(sessions) ? sessions : [];
+  const removed = (Array.isArray(removedIndices) ? removedIndices : [removedIndices])
+    .map(Number)
+    .filter((index) => index >= 0 && index < list.length);
+  if (!removed.length) return false;
+  if (!list.some((session) => session?.scheduledDate)) return false;
+  return Math.max(...removed) < list.length - 1;
+}

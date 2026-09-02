@@ -4,7 +4,7 @@ import PlanItemDetailModal from "./PlanItemDetailModal";
 import { planExamLabel, planSubjectLabel } from "../lessonPlansData";
 
 function PreviewSessionCard({ item, plan, onOpen }) {
-  const subject = planSubjectLabel(plan.direction);
+  const subject = planSubjectLabel(plan);
   const exam = planExamLabel(plan);
   const meta = [exam, subject].filter(Boolean).join(" · ");
   const materialsCount = item.materials?.length || 0;
@@ -62,7 +62,7 @@ export default function PlanEditorPreviewModal({ plan, onClose }) {
   }, []);
 
   const items = plan.items || [];
-  const subject = planSubjectLabel(plan.direction);
+  const subject = planSubjectLabel(plan);
   const exam = planExamLabel(plan);
 
   return (

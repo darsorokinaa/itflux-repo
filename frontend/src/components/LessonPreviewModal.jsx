@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { rememberReturnPath, safeReturnPath } from "../accessGate/accessGate";
 import MaterialDemoWarningModal from "./MaterialDemoWarningModal";
 import { useCabinetAuthed } from "../hooks/useAccessGate";
@@ -12,7 +12,7 @@ import {
   startReadyLessonDemo,
   syncSubscriptionPayment,
 } from "../utils/cabinetAuth";
-import { getLessonContentUrl, lessonPreviewUrl } from "../cabinet/lessonCardUtils";
+import { getLessonViewerUrl, lessonPreviewUrl } from "../cabinet/lessonCardUtils";
 
 function registerHref(returnUrl) {
   const next = safeReturnPath(returnUrl) || "/lessons";
@@ -90,6 +90,7 @@ export default function LessonPreviewModal({
   paymentStatus = "",
   onOpened,
 }) {
+  const navigate = useNavigate();
   const authed = useCabinetAuthed();
   const [lesson, setLesson] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -190,7 +191,8 @@ export default function LessonPreviewModal({
 
   const onOpenContent = () => {
     if (!lesson?.slug) return;
-    window.location.href = getLessonContentUrl(lesson.slug);
+    onClose?.();
+    navigate(getLessonViewerUrl(lesson.slug));
   };
 
   const onContinueDemo = () => {
@@ -216,7 +218,8 @@ export default function LessonPreviewModal({
       const result = await startReadyLessonDemo(lesson.slug);
       trackGoal("lesson_demo_started", { lesson_id: String(lesson.id), access_type: "demo" });
       setWarningOpen(false);
-      window.location.href = result?.view_url || getLessonContentUrl(lesson.slug);
+      onClose?.();
+      navigate(getLessonViewerUrl(lesson.slug));
     } catch (err) {
       setError(err?.message || "Не удалось открыть демоверсию");
     } finally {

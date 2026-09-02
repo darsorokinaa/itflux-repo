@@ -66,7 +66,9 @@ self.addEventListener("fetch", (event) => {
     void postSwDiag("SW_NAVIGATION_FETCH", { path: String(new URL(request.url).pathname || "").slice(0, 80) });
   }
   event.respondWith(
-    fetch(request, { cache: "reload", credentials: request.credentials }).catch(() => (
+    // Не передавать init: иначе Sec-Fetch-Dest становится empty и API отдает JSON 403
+    // вместо HTML/редиректа на предпросмотр после F5 на /api/.../view/.
+    fetch(request).catch(() => (
       new Response(
         "<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Нет сети</title></head><body style=\"font-family:system-ui,-apple-system,sans-serif;padding:32px 20px;text-align:center;background:#f8fafc;color:#0f172a\"><h1 style=\"font-size:1.2rem\">Нет сети</h1><p>Не удалось загрузить приложение. Проверьте интернет и нажмите «Повторить».</p><button type=\"button\" onclick=\"location.reload()\" style=\"min-height:44px;padding:0 18px;border:0;border-radius:12px;background:#2563eb;color:#fff;font-weight:700\">Повторить</button></body></html>",
         {

@@ -10,10 +10,12 @@ export default function ConfirmActionModal({
   text,
   confirmLabel = "Подтвердить",
   cancelLabel = "Отмена",
+  secondaryConfirmLabel,
   danger = false,
   loading = false,
   confirmDisabled = false,
   onConfirm,
+  onSecondaryConfirm,
   onClose,
 }) {
   if (!open) return null;
@@ -32,6 +34,16 @@ export default function ConfirmActionModal({
           >
             {cancelLabel}
           </button>
+          {secondaryConfirmLabel && onSecondaryConfirm ? (
+            <button
+              type="button"
+              className="cb-btn cb-btn--ghost"
+              onClick={onSecondaryConfirm}
+              disabled={loading || confirmDisabled}
+            >
+              {secondaryConfirmLabel}
+            </button>
+          ) : null}
           <button
             type="button"
             className={`cb-btn ${danger ? "cb-btn--danger" : "cb-btn--primary"}`}

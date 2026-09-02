@@ -252,6 +252,27 @@ class LessonAccessPolicyTests(LessonAccessBase):
         payload = res.json()
         self.assertTrue(payload.get("error") or payload.get("code"))
 
+    def test_service_worker_navigation_without_access_redirects_to_preview(self):
+        """fetch(request, {cache}) from SW often sends Sec-Fetch-Dest: empty."""
+        headers = {
+            "HTTP_ACCEPT": "text/html,application/xhtml+xml,*/*;q=0.8",
+            "HTTP_SEC_FETCH_MODE": "navigate",
+            "HTTP_SEC_FETCH_DEST": "empty",
+        }
+        res = self.client.get(f"/api/lessons/{self.paid.slug}/view/", **headers)
+        self.assertEqual(res.status_code, 302)
+        self.assertEqual(res.url, f"/lessons?preview={self.paid.slug}")
+
+    def test_start_demo_returns_spa_view_url(self):
+        self._login()
+        res = self.client.post(
+            f"/api/lessons/{self.paid.slug}/demo/",
+            data='{"terms_accepted": true}',
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.json().get("view_url"), f"/lessons/{self.paid.slug}/view")
+
     def test_premium_full_hides_purchase(self):
         self._set_plan("premium")
         access = LessonAccessService.get_access(self.user, self.paid)
@@ -421,6 +442,16 @@ class LessonFileProtectionTests(LessonAccessBase):
     def test_anonymous_cannot_fetch_protected_asset(self):
         res = self.client.get(f"/api/lessons/{self.paid.slug}/assets/style.css")
         self.assertEqual(res.status_code, 403)
+
+    def test_browser_asset_without_access_redirects_to_preview(self):
+        res = self.client.get(
+            f"/api/lessons/{self.paid.slug}/assets/style.css",
+            HTTP_ACCEPT="text/html,application/xhtml+xml",
+            HTTP_SEC_FETCH_MODE="navigate",
+            HTTP_SEC_FETCH_DEST="document",
+        )
+        self.assertEqual(res.status_code, 302)
+        self.assertEqual(res.url, f"/lessons?preview={self.paid.slug}")
 
     def test_demo_user_can_fetch_protected_asset(self):
         LessonAccessService.start_demo(self.user, self.paid, terms_accepted=True)

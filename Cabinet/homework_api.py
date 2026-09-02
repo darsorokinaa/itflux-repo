@@ -23,7 +23,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .choices import SubmissionStatus
-from .models import Homework, HomeworkSubmission, HomeworkTask, Profile, Student
+from .models import Homework, HomeworkSubmission, HomeworkTask, InteractiveAssignment, Profile, Student
 from .student_api import _homework_qs, _pick_student, resolve_roster_students
 from .submission_files import submission_has_files
 from .upload_validation import UploadValidationError, validate_uploaded_file
@@ -1330,12 +1330,28 @@ def serialize_student_task(
     elif not is_variant and resource_url and task.task_type in ("external_link", "file"):
         file_url = resource_url
 
+    interactive_assignment_id = None
+    if task.interactive_id:
+        qs = InteractiveAssignment.objects.filter(
+            interactive_id=task.interactive_id,
+            teacher_id=homework.teacher_id,
+        )
+        student_filter = Q()
+        if homework.student_id:
+            student_filter |= Q(student_id=homework.student_id)
+        if homework.group_id:
+            student_filter |= Q(group_id=homework.group_id)
+        if student_filter:
+            qs = qs.filter(student_filter)
+        interactive_assignment_id = qs.order_by("-id").values_list("id", flat=True).first()
+
     return {
         "id": task.id,
         "title": task.title,
         "description": task.description,
         "task_type": task.task_type,
         "interactive_id": task.interactive_id,
+        "interactive_assignment_id": interactive_assignment_id,
         "is_variant": is_variant,
         "variant_id": extract_variant_id(resource_url or task.description),
         "file_url": file_url,

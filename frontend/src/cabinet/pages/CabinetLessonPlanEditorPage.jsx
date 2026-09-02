@@ -3,10 +3,28 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import CabinetIcon from "../CabinetIcons";
 import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
 import ConfirmActionModal from "../components/ConfirmActionModal";
-import PlanEditorResourceBlock from "../components/PlanEditorResourceBlock";
+import CabinetFloatingMenu from "../components/CabinetFloatingMenu";
 import PlanEditorPreviewModal from "../components/PlanEditorPreviewModal";
 import CreateScheduleLessonModal from "../components/CreateScheduleLessonModal";
 import PlanItemResourcesPicker from "../components/PlanItemResourcesPicker";
+import {
+  PlanEditorSkeleton,
+  PlanSessionsList,
+} from "../components/PlanEditorLessonList";
+import { usePlanListPointerReorder } from "../hooks/usePlanListPointerReorder";
+import {
+  applyReorderWithTopic,
+  groupSessionsByTopic,
+  lessonsWord,
+  mapIndexAfterMove,
+  moveSessionToTopic,
+  renameTopicInRange,
+  shouldShowTopicChrome,
+  topicsWord,
+  topicKeyOf,
+  visualDropLineIndex,
+} from "../planEditorGrouping";
+import "../styles/plan-editor.css";
 import {
   addLessonPlanItem,
   createLessonPlan,
@@ -28,7 +46,10 @@ import {
   PLAN_STATUS_LABELS,
   PLAN_SUBJECTS,
   defaultSubjectForDirection,
+  planLevelLabelFromId,
   planSubjectLabelFromId,
+  resolvePlanLevelSelection,
+  resolvePlanSubjectSelection,
 } from "../lessonPlansData";
 import { mapApiInteractiveAttachment } from "../planItemAttachments";
 import {
@@ -37,322 +58,55 @@ import {
   clonePlanSession,
   editorSessionToPlanItem,
   mapApiItemResponseToSession,
-  mapPlanItemToEditorSession,
-  planEditorStats,
-  sessionHomeworkAttachmentRows,
-  sessionLessonAttachmentRows,
-  sessionResourceSummary,
 } from "../planEditorSession";
 import { useAutoSave } from "../hooks/useAutoSave";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
   PLAN_DATE_INTERVALS,
   applyPlanDates,
-  formatPlanDateLabel,
+  calendarDateKey,
+  compressPlanDatesAfterRemove,
+  countSessionsOnDate,
+  describeDateDeviation,
   inferPlanDateInterval,
   nextPlanDateAfter,
+  plannedDateAtIndex,
+  willCompressDatesAfterRemove,
 } from "../planDates";
 
 function planTypeLabel(id, options = PLAN_LEVELS) {
-  return options.find((t) => t.id === id)?.label || id;
+  return options.find((t) => t.id === id)?.label
+    || PLAN_LEVELS.find((t) => t.id === id)?.label
+    || planLevelLabelFromId(id)
+    || id;
 }
 
-function planSubjectLabel(id) {
-  return planSubjectLabelFromId(id) || id;
+function sessionDisplayTitle(session, index) {
+  return String(session?.title || "").trim()
+    || String(session?.subtopic || "").trim()
+    || `Урок ${index + 1}`;
 }
 
-function calculateProgress({ title, sessions }) {
-  let score = 0;
-  if (title.trim()) score += 25;
-  score += 15;
-  if (sessions.length > 0) score += 20;
-  if (sessions.length > 0) {
-    const withTopic = sessions.filter((s) => s.topic.trim()).length;
-    score += Math.round(40 * (withTopic / sessions.length));
-  }
-  return Math.min(100, score);
-}
-
-function PlanEditorSessionCard({
-  session,
-  index,
-  total,
-  expanded,
-  onToggle,
-  onChange,
-  onDateChange,
-  onMove,
-  onDuplicate,
-  onOpenPicker,
-  onRemoveAttachment,
-  onSaveSession,
-  onDeleteSession,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
-  isDragging,
-  attaching,
-  savingSession,
-  sessionError,
-}) {
-  const summary = sessionResourceSummary(session);
-  const displayTitle = session.title.trim() || `Занятие ${index + 1}`;
-  const topicLine = session.topic.trim() ? `Тема: «${session.topic.trim()}»` : "Тема не указана";
-  const dateLabel = formatPlanDateLabel(session.scheduledDate);
-
-  return (
-    <article
-      className={`cb-pe-session${expanded ? " is-expanded" : ""}${isDragging ? " is-dragging" : ""}`}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-    >
-      <div className="cb-pe-session__head">
-        <button
-          type="button"
-          className="cb-pe-session__drag"
-          draggable
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-          aria-label="Перетащить"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <CabinetIcon name="order" />
-        </button>
-
-        <button type="button" className="cb-pe-session__summary" onClick={onToggle}>
-          <span className="cb-pe-session__num">Занятие {index + 1}{dateLabel ? ` · ${dateLabel}` : ""}</span>
-          <strong className="cb-pe-session__title">{displayTitle}</strong>
-          <span className="cb-pe-session__topic">{topicLine}</span>
-          <span className="cb-pe-session__meta">
-            Материалы: {summary.materials} · ДЗ: {summary.homework}
-          </span>
-        </button>
-
-        <div className="cb-pe-session__tools">
-          <button
-            type="button"
-            className="cb-pe-session__tool"
-            onClick={onToggle}
-            aria-expanded={expanded}
-            aria-label={expanded ? "Свернуть" : "Развернуть"}
-          >
-            <span className={`cb-pe-session__chevron${expanded ? " is-open" : ""}`} aria-hidden="true" />
-          </button>
-          <button type="button" className="cb-pe-session__tool" onClick={() => onDuplicate(index)} aria-label="Дублировать">
-            ⧉
-          </button>
-        </div>
-      </div>
-
-      {expanded ? (
-        <div className="cb-pe-session__body">
-          <div className="cb-pe-session__grid cb-pe-session__grid--2">
-            <label className="cb-pe-field">
-              <span>Название</span>
-              <input value={session.title} onChange={(e) => onChange(index, "title", e.target.value)} />
-            </label>
-            <label className="cb-pe-field">
-              <span>Дата занятия</span>
-              <input
-                type="date"
-                value={session.scheduledDate || ""}
-                onChange={(e) => {
-                  if (onDateChange) onDateChange(index, e.target.value);
-                  else onChange(index, "scheduledDate", e.target.value);
-                }}
-              />
-              {index === 0 ? (
-                <small className="cb-pe-field__hint">От этой даты автоматически проставятся остальные</small>
-              ) : (
-                <small className="cb-pe-field__hint">Можно поправить вручную</small>
-              )}
-            </label>
-            <label className="cb-pe-field">
-              <span>Тема</span>
-              <input value={session.topic} onChange={(e) => onChange(index, "topic", e.target.value)} />
-            </label>
-            <label className="cb-pe-field">
-              <span>Подтема</span>
-              <input value={session.subtopic} onChange={(e) => onChange(index, "subtopic", e.target.value)} />
-            </label>
-            <label className="cb-pe-field">
-              <span>№ задания</span>
-              <input value={session.examTask} onChange={(e) => onChange(index, "examTask", e.target.value)} />
-            </label>
-          </div>
-
-          <label className="cb-pe-field cb-pe-field--wide">
-            <span>Цель</span>
-            <textarea
-              className="cb-pe-field__compact"
-              rows={2}
-              value={session.goal}
-              onChange={(e) => onChange(index, "goal", e.target.value)}
-              placeholder="Цель занятия"
-            />
-          </label>
-
-          <label className="cb-pe-field cb-pe-field--wide">
-            <span>План</span>
-            <textarea
-              className="cb-pe-field__compact"
-              rows={2}
-              value={session.brief}
-              onChange={(e) => onChange(index, "brief", e.target.value)}
-              placeholder="Краткий план"
-            />
-          </label>
-
-          <div className="cb-pe-session__resources">
-            <PlanEditorResourceBlock
-              label="Материалы"
-              emptyLabel="Нет материалов"
-              actionLabel="Прикрепить"
-              rows={sessionLessonAttachmentRows(session)}
-              notes={session.materialsNotes}
-              notesPlaceholder="Заметки к материалам"
-              showNotes={sessionLessonAttachmentRows(session).length > 0 || Boolean(session.materialsNotes?.trim())}
-              onNotesChange={(e) => onChange(index, "materialsNotes", e.target.value)}
-              onAttach={() => onOpenPicker(index, "lesson")}
-              onRemove={(row) => onRemoveAttachment(index, "lesson", row)}
-            />
-            <PlanEditorResourceBlock
-              label="ДЗ"
-              emptyLabel="ДЗ не задано"
-              actionLabel="Настроить"
-              rows={sessionHomeworkAttachmentRows(session)}
-              notes={session.homeworkDescription}
-              notesPlaceholder="Описание ДЗ"
-              alwaysShowNotes
-              onNotesChange={(e) => onChange(index, "homeworkDescription", e.target.value)}
-              onAttach={() => onOpenPicker(index, "homework")}
-              onRemove={(row) => onRemoveAttachment(index, "homework", row)}
-            />
-          </div>
-
-          {attaching ? (
-            <p className="cb-pe-session__sync">Сохранение вложений…</p>
-          ) : null}
-
-          <label className="cb-pe-field cb-pe-field--wide">
-            <span>Комментарий</span>
-            <input value={session.comment} onChange={(e) => onChange(index, "comment", e.target.value)} placeholder="Заметка учителя" />
-          </label>
-
-          <div className="cb-pe-session__actions">
-            {sessionError ? (
-              <p className="cb-pe-session__sync cb-pe-session__sync--error" role="alert">{sessionError}</p>
-            ) : null}
-            <button
-              type="button"
-              className="cb-btn cb-btn--primary"
-              onClick={() => onSaveSession(index)}
-              disabled={savingSession || attaching}
-            >
-              {savingSession ? "Сохранение…" : "Сохранить"}
-            </button>
-            <button
-              type="button"
-              className="cb-btn cb-btn--ghost cb-btn--danger"
-              onClick={() => onDeleteSession(index)}
-              disabled={savingSession || attaching}
-            >
-              Удалить
-            </button>
-          </div>
-
-          <div className="cb-pe-session__reorder">
-            <button type="button" className="cb-btn cb-btn--ghost cb-btn--xs" disabled={index === 0} onClick={() => onMove(index, -1)}>
-              ↑ Вверх
-            </button>
-            <button type="button" className="cb-btn cb-btn--ghost cb-btn--xs" disabled={index === total - 1} onClick={() => onMove(index, 1)}>
-              ↓ Вниз
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </article>
-  );
-}
-
-function PlanEditorSummary({
-  progress,
-  stats,
-  directionLabel,
-  subjectLabel,
-  grade,
-  saving,
-  isNew,
-  planId,
-  onSave,
-  onAddSession,
-  onPreview,
-  onScheduleFirst,
-  schedulingFirst,
-}) {
-  return (
-    <aside className="cb-pe-sidebar">
-      <div className="cb-pe-sidebar__card">
-        <h2 className="cb-pe-sidebar__title">Сводка</h2>
-
-        <div className="cb-pe-progress">
-          <div className="cb-pe-progress__head">
-            <span>План заполнен на {progress}%</span>
-          </div>
-          <div className="cb-pe-progress__track">
-            <div className="cb-pe-progress__fill" style={{ width: `${progress}%` }} />
-          </div>
-        </div>
-
-        <dl className="cb-pe-stats">
-          <div><dt>Занятий</dt><dd>{stats.sessions}</dd></div>
-          <div><dt>Материалов</dt><dd>{stats.materials}</dd></div>
-          <div><dt>ДЗ</dt><dd>{stats.homework}</dd></div>
-          <div><dt>Предмет</dt><dd>{subjectLabel}</dd></div>
-          <div><dt>Направление</dt><dd>{directionLabel}</dd></div>
-          {grade ? <div><dt>Класс</dt><dd>{grade}</dd></div> : null}
-        </dl>
-
-        <div className="cb-pe-sidebar__section">
-          <h3 className="cb-pe-sidebar__subtitle">Быстрые действия</h3>
-          <div className="cb-pe-sidebar__actions">
-            <button type="button" className="cb-btn cb-btn--secondary cb-btn--block" onClick={onAddSession}>
-              <CabinetIcon name="plus" /> Добавить занятие
-            </button>
-            <button type="button" className="cb-btn cb-btn--primary cb-btn--block" onClick={onSave} disabled={saving}>
-              {saving ? "Сохранение…" : "Сохранить"}
-            </button>
-            <button type="button" className="cb-btn cb-btn--ghost cb-btn--block" onClick={onPreview}>
-              Предпросмотр
-            </button>
-            <button
-              type="button"
-              className="cb-btn cb-btn--ghost cb-btn--block"
-              onClick={onScheduleFirst}
-              disabled={schedulingFirst || stats.sessions === 0}
-            >
-              {schedulingFirst ? "Подготовка…" : "Запланировать первое"}
-            </button>
-          </div>
-        </div>
-
-        {!isNew ? (
-          <p className="cb-pe-sidebar__hint">
-            <Link to={`/cabinet/plans/${planId}`}>Открыть карточку плана</Link>
-          </p>
-        ) : null}
-      </div>
-    </aside>
-  );
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(() => (
+    typeof window !== "undefined" ? window.matchMedia(query).matches : false
+  ));
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const handler = (event) => setMatches(event.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [query]);
+  return matches;
 }
 
 export default function CabinetLessonPlanEditorPage() {
   const { planId } = useParams();
   const navigate = useNavigate();
   const isNew = !planId || planId === "new";
+  const isPhone = useMediaQuery("(max-width: 640px)");
   const { toast, showToast } = useSoonToast();
-  usePageTitle(isNew ? "Новый план" : "Редактирование плана");
+  usePageTitle(isNew ? "Новый план" : "План уроков");
 
   const [loadingExisting, setLoadingExisting] = useState(!isNew);
   const [notFound, setNotFound] = useState(false);
@@ -371,8 +125,12 @@ export default function CabinetLessonPlanEditorPage() {
   const [sessions, setSessions] = useState(() => (isNew ? [clonePlanSession(EMPTY_PLAN_SESSION)] : []));
   const [expandedIndex, setExpandedIndex] = useState(isNew ? 0 : null);
   const [extraOpen, setExtraOpen] = useState(false);
-  const [dragIndex, setDragIndex] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [orderStatus, setOrderStatus] = useState("idle");
+  const [orderRetry, setOrderRetry] = useState(null);
+  const [renamingTopicId, setRenamingTopicId] = useState(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [moreAnchor, setMoreAnchor] = useState(null);
   const [savingSessionIndex, setSavingSessionIndex] = useState(null);
   const [sessionErrors, setSessionErrors] = useState({});
   const [activePlanId, setActivePlanId] = useState(isNew ? null : planId);
@@ -395,6 +153,8 @@ export default function CabinetLessonPlanEditorPage() {
   const createdPlanIdRef = useRef(null);
   const [deleteForce, setDeleteForce] = useState(false);
   const [deleteHint, setDeleteHint] = useState("");
+  const [deleteTopicGroup, setDeleteTopicGroup] = useState(null);
+  const [dateConfirm, setDateConfirm] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -433,34 +193,16 @@ export default function CabinetLessonPlanEditorPage() {
 
   const normalizeSubjectSelection = useCallback((value, direction, options) => {
     const list = Array.isArray(options) && options.length ? options : PLAN_SUBJECTS;
-    const ids = new Set(list.map((item) => String(item.id)));
     const current = String(value || "").trim();
-    const normalized = current.toLowerCase();
-
-    if (!normalized) {
-      return defaultSubjectFromOptions(direction, list);
-    }
-    if (ids.has(current)) return current;
-    if (ids.has(normalized)) return normalized;
-    if (normalized === "informatics" && ids.has("inf")) return "inf";
-    if (normalized === "inf" && ids.has("informatics")) return "informatics";
-    if (normalized === "math" && ids.has("math_base") && !ids.has("math")) return "math_base";
-
-    return defaultSubjectFromOptions(direction, list);
+    if (!current) return defaultSubjectFromOptions(direction, list);
+    return resolvePlanSubjectSelection(current, list);
   }, [defaultSubjectFromOptions]);
 
   const normalizeLevelSelection = useCallback((value, options) => {
     const list = Array.isArray(options) && options.length ? options : PLAN_LEVELS;
-    const ids = new Set(list.map((item) => String(item.id)));
-    const current = String(value || "").trim().toLowerCase();
-
-    if (!current) {
-      if (ids.has("oge")) return "oge";
-      return list[0]?.id || "oge";
-    }
-    if (ids.has(current)) return current;
-    // Старое значение (python/other и т.п.) не перетираем — покажем его в select отдельно.
-    return current;
+    const current = String(value || "").trim();
+    if (!current) return current;
+    return resolvePlanLevelSelection(current, list);
   }, []);
 
   useEffect(() => {
@@ -514,10 +256,10 @@ export default function CabinetLessonPlanEditorPage() {
   useEffect(() => {
     if (!subjectOptions.length) return;
     setSubject((prev) => {
-      const next = normalizeSubjectSelection(prev, type, subjectOptions);
+      const next = resolvePlanSubjectSelection(prev, subjectOptions);
       return next === prev ? prev : next;
     });
-  }, [normalizeSubjectSelection, subjectOptions, type]);
+  }, [subject, subjectOptions]);
 
   useEffect(() => {
     if (!levelOptions.length) return;
@@ -525,7 +267,7 @@ export default function CabinetLessonPlanEditorPage() {
       const next = normalizeLevelSelection(prev, levelOptions);
       return next === prev ? prev : next;
     });
-  }, [levelOptions, normalizeLevelSelection]);
+  }, [levelOptions, normalizeLevelSelection, type]);
 
   useEffect(() => {
     if (!sessionReady || isNew) {
@@ -539,8 +281,8 @@ export default function CabinetLessonPlanEditorPage() {
           return;
         }
         setTitle(data.title || "");
-        setType(data.direction || "oge");
-        setSubject(data.subject || defaultSubjectForDirection(data.direction || "oge"));
+        setType(data.direction || "");
+        setSubject(resolvePlanSubjectSelection(data.subject, PLAN_SUBJECTS) || data.subject || "");
         setGoal(data.goal || "");
         setDescription(data.description || "");
         setGrade(data.grade || "");
@@ -561,28 +303,43 @@ export default function CabinetLessonPlanEditorPage() {
       .finally(() => setLoadingExisting(false));
   }, [canPublishCatalog, isNew, navigate, planId, sessionReady]);
 
-  const progress = useMemo(
-    () => calculateProgress({ title, sessions }),
-    [title, sessions],
-  );
-
-  const stats = useMemo(() => planEditorStats(sessions), [sessions]);
+  const topicGroups = useMemo(() => groupSessionsByTopic(sessions), [sessions]);
+  const showTopics = shouldShowTopicChrome(topicGroups);
+  const namedTopicCount = topicGroups.filter((group) => group.topicKey).length;
+  const statsLine = namedTopicCount > 0
+    ? `${namedTopicCount} ${topicsWord(namedTopicCount)} · ${sessions.length} ${lessonsWord(sessions.length)}`
+    : `${sessions.length} ${lessonsWord(sessions.length)}`;
 
   const previewPlan = useMemo(() => ({
     id: activePlanId || planId,
     title: title.trim() || "Без названия",
     direction: type,
+    directionLabel: planTypeLabel(type, levelOptions),
     subject,
+    subjectLabel: planSubjectLabelFromId(subject) || subjectOptions.find((item) => item.id === subject)?.label || "",
     grade,
     goal,
     description,
     items: sessions.map((session, index) => editorSessionToPlanItem(session, index + 1)),
-  }), [activePlanId, description, goal, grade, planId, sessions, subject, title, type]);
+  }), [activePlanId, description, goal, grade, levelOptions, planId, sessions, subject, subjectOptions, title, type]);
 
   const levelSelectOptions = useMemo(() => {
     if (!type || levelOptions.some((item) => item.id === type)) return levelOptions;
     return [...levelOptions, { id: type, label: planTypeLabel(type, levelOptions) }];
   }, [levelOptions, type]);
+
+  const subjectSelectOptions = useMemo(() => {
+    if (!subject || subjectOptions.some((item) => item.id === subject)) return subjectOptions;
+    const extraLabel = planSubjectLabelFromId(subject)
+      || subjectOptions.find((item) => item.id === subject)?.label
+      || subject;
+    return [...subjectOptions, { id: subject, label: extraLabel }];
+  }, [subject, subjectOptions]);
+
+  const plannedDates = useMemo(
+    () => sessions.map((_, index) => plannedDateAtIndex(sessions, index, dateInterval)),
+    [dateInterval, sessions],
+  );
 
   const replaceSession = useCallback((index, nextSession) => {
     skipDirtyRef.current = true;
@@ -606,6 +363,38 @@ export default function CabinetLessonPlanEditorPage() {
     return key;
   }, [activePlanId, planId]);
 
+  const persistDateShifts = useCallback(async (previous, next) => {
+    const prevById = new Map((previous || []).filter((session) => session.id).map((session) => [session.id, session]));
+    for (let index = 0; index < next.length; index += 1) {
+      const session = next[index];
+      if (!session?.id) continue;
+      const before = prevById.get(session.id);
+      if (calendarDateKey(before?.scheduledDate) === calendarDateKey(session.scheduledDate)) continue;
+      try {
+        await updateLessonPlanItem(session.id, buildPlanItemApiPayload(session, index + 1));
+      } catch (err) {
+        showToast(err?.message || "Не все даты удалось сохранить. Нажмите «Сохранить план».");
+        return false;
+      }
+    }
+    return true;
+  }, [showToast]);
+
+  const applyRemovedSessions = useCallback(async (removedIndices) => {
+    const previous = sessions;
+    const compressed = compressPlanDatesAfterRemove(previous, removedIndices);
+    skipDirtyRef.current = true;
+    setSessions(compressed);
+    setSessionErrors({});
+    setExpandedIndex((prev) => {
+      if (prev == null) return prev;
+      const removed = [...removedIndices].sort((a, b) => a - b);
+      if (removed.includes(prev)) return Math.max(0, removed[0] - 1);
+      return prev - removed.filter((index) => index < prev).length;
+    });
+    await persistDateShifts(previous, compressed);
+  }, [persistDateShifts, sessions]);
+
   const persistFilledPlanDates = useCallback(async (startDate, interval) => {
     const planKey = savedPlanKey();
     if (!planKey || !startDate) return;
@@ -624,18 +413,13 @@ export default function CabinetLessonPlanEditorPage() {
   }, [savedPlanKey]);
 
   const updateSession = useCallback((index, field, value) => {
-    setSessions((prev) => {
-      if (field === "scheduledDate" && index === 0 && value) {
-        return applyPlanDates(prev, value, dateInterval, 0);
-      }
-      return prev.map((s, i) => (i === index ? { ...s, [field]: value } : s));
-    });
-  }, [dateInterval]);
+    setSessions((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)));
+  }, []);
 
   const handleFirstDateChange = useCallback((value) => {
-    updateSession(0, "scheduledDate", value);
+    setSessions((prev) => applyPlanDates(prev, value, dateInterval, 0));
     void persistFilledPlanDates(value, dateInterval);
-  }, [dateInterval, persistFilledPlanDates, updateSession]);
+  }, [dateInterval, persistFilledPlanDates]);
 
   const handleDateIntervalChange = useCallback((nextInterval) => {
     setDateInterval(nextInterval);
@@ -645,20 +429,62 @@ export default function CabinetLessonPlanEditorPage() {
     void persistFilledPlanDates(first, nextInterval);
   }, [persistFilledPlanDates, sessions]);
 
-  const handleSessionDateChange = useCallback((index, value) => {
-    if (index === 0) {
-      handleFirstDateChange(value);
+  const applySessionDate = useCallback(async (index, value, { shiftFollowing = false } = {}) => {
+    const previous = sessions;
+    const withDate = previous.map((session, i) => (
+      i === index ? { ...session, scheduledDate: value } : session
+    ));
+    const next = shiftFollowing && value
+      ? applyPlanDates(withDate, value, dateInterval, index)
+      : withDate;
+    skipDirtyRef.current = true;
+    setSessions(next);
+    setDateConfirm(null);
+    if (shiftFollowing) {
+      await persistDateShifts(previous, next);
       return;
     }
-    let nextSession;
-    setSessions((prev) => {
-      nextSession = { ...prev[index], scheduledDate: value };
-      return prev.map((s, i) => (i === index ? nextSession : s));
-    });
-    if (nextSession?.id) {
-      void persistSessionIfSaved(index, nextSession);
+    const session = next[index];
+    if (session?.id) {
+      try {
+        await updateLessonPlanItem(session.id, buildPlanItemApiPayload(session, index + 1));
+      } catch (err) {
+        showToast(err?.message || "Не удалось сохранить дату. Нажмите «Сохранить план».");
+      }
     }
-  }, [handleFirstDateChange, persistSessionIfSaved]);
+  }, [dateInterval, persistDateShifts, sessions, showToast]);
+
+  const handleSessionDateChange = useCallback((index, value) => {
+    const current = calendarDateKey(sessions[index]?.scheduledDate);
+    const nextValue = calendarDateKey(value);
+    if (nextValue === current) return;
+
+    const planned = plannedDateAtIndex(sessions, index, dateInterval);
+    const deviation = planned && nextValue ? describeDateDeviation(planned, nextValue, dateInterval) : null;
+    const conflictCount = nextValue ? countSessionsOnDate(sessions, nextValue, index) : 0;
+    const needsDeviationConfirm = Boolean(deviation && !deviation.sameDay);
+    const needsConflictNotice = conflictCount > 0;
+
+    if (!nextValue || (!needsDeviationConfirm && !needsConflictNotice)) {
+      void applySessionDate(index, nextValue);
+      return;
+    }
+
+    setDateConfirm({
+      index,
+      nextValue,
+      plannedIso: planned,
+      conflictCount,
+      canShiftFollowing: Boolean(nextValue && index < sessions.length - 1 && needsDeviationConfirm),
+      deviation,
+    });
+  }, [applySessionDate, dateInterval, sessions]);
+
+  const handleRestorePlannedDate = useCallback((index) => {
+    const planned = plannedDateAtIndex(sessions, index, dateInterval);
+    if (!planned) return;
+    void applySessionDate(index, planned);
+  }, [applySessionDate, dateInterval, sessions]);
 
   const applySessionUpdate = useCallback(async (index, updater) => {
     let nextSession;
@@ -755,35 +581,154 @@ export default function CabinetLessonPlanEditorPage() {
     });
   }, [applySessionUpdate]);
 
+  const persistOrderWithRollback = useCallback(async (nextSessions, previousSessions, move = null) => {
+    const items = nextSessions
+      .map((session, order) => (session.id ? { id: session.id, order: order + 1 } : null))
+      .filter(Boolean);
+    setOrderStatus("saving");
+    setOrderRetry(null);
+    try {
+      if (items.length > 1) {
+        await reorderLessonPlanItems(items);
+      }
+      for (let index = 0; index < nextSessions.length; index += 1) {
+        const session = nextSessions[index];
+        if (!session?.id) continue;
+        const previous = previousSessions.find((item) => item.id && item.id === session.id);
+        if (previous && topicKeyOf(previous) !== topicKeyOf(session)) {
+          await updateLessonPlanItem(session.id, buildPlanItemApiPayload(session, index + 1));
+        }
+      }
+      setOrderStatus("saved");
+    } catch {
+      setSessions(previousSessions);
+      if (move) {
+        setExpandedIndex((index) => mapIndexAfterMove(index, move.toIndex, move.fromIndex));
+      }
+      setOrderRetry({ next: nextSessions, previous: previousSessions, move });
+      setOrderStatus("error");
+    }
+  }, []);
+
   const moveSession = useCallback((index, dir) => {
+    const target = index + dir;
     setSessions((prev) => {
-      const next = [...prev];
-      const target = index + dir;
-      if (target < 0 || target >= next.length) return prev;
-      [next[index], next[target]] = [next[target], next[index]];
+      if (target < 0 || target >= prev.length) return prev;
+      const next = applyReorderWithTopic(prev, index, target);
+      void persistOrderWithRollback(next, prev, { fromIndex: index, toIndex: target });
       return next;
     });
-    setExpandedIndex((prev) => {
-      if (prev === index) return index + dir;
-      if (prev === index + dir) return index;
-      return prev;
+    setExpandedIndex((prev) => mapIndexAfterMove(prev, index, target));
+  }, [persistOrderWithRollback]);
+
+  const handlePointerReorder = useCallback((fromIndex, toIndex) => {
+    if (fromIndex === toIndex) return;
+    setSessions((prev) => {
+      const next = applyReorderWithTopic(prev, fromIndex, toIndex);
+      void persistOrderWithRollback(next, prev, { fromIndex, toIndex });
+      return next;
+    });
+    setExpandedIndex((prev) => mapIndexAfterMove(prev, fromIndex, toIndex));
+  }, [persistOrderWithRollback]);
+
+  const handleMoveToTopic = useCallback((index, topic) => {
+    setSessions((prev) => {
+      const next = moveSessionToTopic(prev, index, topic);
+      void persistOrderWithRollback(next, prev);
+      return next;
+    });
+  }, [persistOrderWithRollback]);
+
+  const handleRenameTopic = useCallback((group, nextTopic) => {
+    const topic = String(nextTopic || "").trim();
+    setRenamingTopicId(null);
+    if (!group || topic === group.topicKey) return;
+    setSessions((prev) => {
+      const next = renameTopicInRange(prev, group.indices, topic);
+      const changed = group.indices.filter((index) => topicKeyOf(prev[index]) !== topic);
+      void (async () => {
+        try {
+          for (const index of changed) {
+            const session = next[index];
+            if (!session?.id) continue;
+            await updateLessonPlanItem(session.id, buildPlanItemApiPayload(session, index + 1));
+          }
+        } catch {
+          setSessions(prev);
+          setOrderStatus("error");
+        }
+      })();
+      return next;
     });
   }, []);
 
-  const removeSession = useCallback((index) => {
-    setSessions((prev) => prev.filter((_, i) => i !== index));
-    setSessionErrors((prev) => {
-      const next = { ...prev };
-      delete next[index];
-      return next;
-    });
-    setExpandedIndex((prev) => {
-      if (prev === null) return null;
-      if (prev === index) return Math.max(0, index - 1);
-      if (prev > index) return prev - 1;
-      return prev;
-    });
+  const deleteSession = useCallback((index) => {
+    const session = sessions[index];
+    if (!session) return;
+    setDeleteForce(false);
+    setDeleteHint("");
+    setDeleteTopicGroup(null);
+    setDeleteSessionIndex(index);
+  }, [sessions]);
+
+  const deleteTopic = useCallback((group) => {
+    if (!group?.indices?.length) return;
+    setDeleteForce(false);
+    setDeleteHint("");
+    setDeleteSessionIndex(null);
+    setDeleteTopicGroup(group);
   }, []);
+
+  const confirmDeleteItems = useCallback(async (indices) => {
+    const unique = [...new Set(indices)].sort((a, b) => a - b);
+    if (!unique.length) return true;
+    const toDelete = unique.map((index) => sessions[index]).filter(Boolean);
+    try {
+      for (const session of [...toDelete].reverse()) {
+        if (!session.id) continue;
+        try {
+          await deleteLessonPlanItem(session.id, { force: deleteForce });
+        } catch (err) {
+          if (err?.status === 404) continue;
+          throw err;
+        }
+      }
+      await applyRemovedSessions(unique);
+      setDeleteSessionIndex(null);
+      setDeleteTopicGroup(null);
+      setDeleteForce(false);
+      setDeleteHint("");
+      return true;
+    } catch (err) {
+      if (err?.status === 409 && (err?.code === "item_in_use" || err?.data?.code === "item_in_use")) {
+        setDeleteForce(true);
+        setDeleteHint(err.message || "Эта тема уже назначена на занятие.");
+        return false;
+      }
+      showToast(err?.message || "Не удалось удалить.");
+      return false;
+    }
+  }, [applyRemovedSessions, deleteForce, sessions, showToast]);
+
+  const confirmDeleteSession = useCallback(async () => {
+    if (deleteSessionIndex == null) return;
+    setSavingSessionIndex(deleteSessionIndex);
+    try {
+      await confirmDeleteItems([deleteSessionIndex]);
+    } finally {
+      setSavingSessionIndex(null);
+    }
+  }, [confirmDeleteItems, deleteSessionIndex]);
+
+  const confirmDeleteTopic = useCallback(async () => {
+    if (!deleteTopicGroup?.indices?.length) return;
+    setSavingSessionIndex(deleteTopicGroup.indices[0]);
+    try {
+      await confirmDeleteItems(deleteTopicGroup.indices);
+    } finally {
+      setSavingSessionIndex(null);
+    }
+  }, [confirmDeleteItems, deleteTopicGroup]);
 
   const ensurePlanId = useCallback(async () => {
     const existingId = createdPlanIdRef.current || activePlanId || planId;
@@ -852,53 +797,6 @@ export default function CabinetLessonPlanEditorPage() {
     }
   }, [ensurePlanId, replaceSession, sessions]);
 
-  const deleteSession = useCallback((index) => {
-    const session = sessions[index];
-    if (!session) return;
-    setDeleteForce(false);
-    setDeleteHint("");
-    setDeleteSessionIndex(index);
-  }, [sessions]);
-
-  const confirmDeleteSession = useCallback(async () => {
-    if (deleteSessionIndex == null) return;
-    const index = deleteSessionIndex;
-    const session = sessions[index];
-    if (!session) {
-      setDeleteSessionIndex(null);
-      return;
-    }
-
-    setSavingSessionIndex(index);
-    setSessionErrors((prev) => {
-      const next = { ...prev };
-      delete next[index];
-      return next;
-    });
-
-    try {
-      if (session.id) {
-        await deleteLessonPlanItem(session.id, { force: deleteForce });
-      }
-      removeSession(index);
-      setDeleteSessionIndex(null);
-      setDeleteForce(false);
-      setDeleteHint("");
-    } catch (err) {
-      if (err?.status === 409 && (err?.code === "item_in_use" || err?.data?.code === "item_in_use")) {
-        setDeleteForce(true);
-        setDeleteHint(err.message || "Эта тема уже назначена на занятие.");
-        return;
-      }
-      setSessionErrors((prev) => ({
-        ...prev,
-        [index]: err?.message || "Не удалось удалить занятие",
-      }));
-    } finally {
-      setSavingSessionIndex(null);
-    }
-  }, [deleteForce, deleteSessionIndex, removeSession, sessions]);
-
   const duplicateSession = useCallback((index) => {
     setSessions((prev) => {
       const next = [...prev];
@@ -962,43 +860,37 @@ export default function CabinetLessonPlanEditorPage() {
     showToast("Урок добавлен в расписание.");
   }, [showToast]);
 
-  const addSession = useCallback(() => {
+  const addSession = useCallback((afterIndex, topic = "") => {
+    const insertAfter = typeof afterIndex === "number" ? afterIndex : null;
     setSessions((prev) => {
-      const last = prev[prev.length - 1];
+      const insertAt = insertAfter == null ? prev.length : insertAfter + 1;
       const nextSession = clonePlanSession(EMPTY_PLAN_SESSION);
-      if (last?.scheduledDate) {
-        nextSession.scheduledDate = nextPlanDateAfter(last.scheduledDate, prev.length - 1, dateInterval);
+      if (topic) nextSession.topic = topic;
+      const neighbor = prev[insertAt - 1] || prev[prev.length - 1];
+      if (neighbor?.scheduledDate) {
+        nextSession.scheduledDate = nextPlanDateAfter(neighbor.scheduledDate, Math.max(0, insertAt - 1), dateInterval);
       }
-      const next = [...prev, nextSession];
-      setExpandedIndex(next.length - 1);
+      const next = [...prev];
+      next.splice(insertAt, 0, nextSession);
+      setExpandedIndex(insertAt);
       return next;
     });
   }, [dateInterval]);
 
-  const handleDragStart = useCallback((index) => {
-    setDragIndex(index);
-  }, []);
+  const {
+    listRef,
+    overlayRef,
+    draggingIndex,
+    dropIndex,
+    isDragging,
+    onHandlePointerDown,
+  } = usePlanListPointerReorder({
+    enabled: true,
+    itemCount: sessions.length,
+    onReorder: handlePointerReorder,
+  });
 
-  const handleDragOver = useCallback((e) => {
-    e.preventDefault();
-  }, []);
-
-  const handleDrop = useCallback((targetIndex) => {
-    if (dragIndex === null || dragIndex === targetIndex) return;
-    setSessions((prev) => {
-      const next = [...prev];
-      const [moved] = next.splice(dragIndex, 1);
-      next.splice(targetIndex, 0, moved);
-      return next;
-    });
-    setExpandedIndex((prev) => {
-      if (prev === dragIndex) return targetIndex;
-      if (dragIndex < targetIndex && prev > dragIndex && prev <= targetIndex) return prev - 1;
-      if (dragIndex > targetIndex && prev >= targetIndex && prev < dragIndex) return prev + 1;
-      return prev;
-    });
-    setDragIndex(null);
-  }, [dragIndex]);
+  const dropLineIndex = visualDropLineIndex(draggingIndex, dropIndex, sessions.length);
 
   useEffect(() => {
     if (loadingExisting) return;
@@ -1077,7 +969,7 @@ export default function CabinetLessonPlanEditorPage() {
   useAutoSave({
     enabled: !loadingExisting && Boolean(title.trim()),
     isDirty: true,
-    isSaving: saving || autoSaving || schedulingFirst,
+    isSaving: saving || autoSaving || schedulingFirst || orderStatus === "saving",
     onSave: persistPlanDraft,
   });
 
@@ -1131,7 +1023,7 @@ export default function CabinetLessonPlanEditorPage() {
   if (loadingExisting) {
     return (
       <CabinetPageShell className="cb-section--plan-editor">
-        <p className="cb-loading">Загрузка…</p>
+        <PlanEditorSkeleton />
       </CabinetPageShell>
     );
   }
@@ -1139,6 +1031,12 @@ export default function CabinetLessonPlanEditorPage() {
 
   const statusLabel = PLAN_STATUS_LABELS[planStatus] || "Черновик";
   const backHref = isNew ? "/cabinet/plans" : `/cabinet/plans/${planId}`;
+  const saveLabel = orderStatus === "saving" || autoSaving
+    ? "Сохраняем…"
+    : orderStatus === "saved" || autoSavedAt
+      ? "Сохранено"
+      : null;
+  const dragged = draggingIndex != null ? sessions[draggingIndex] : null;
 
   return (
     <CabinetPageShell className="cb-section--plan-editor">
@@ -1150,238 +1048,311 @@ export default function CabinetLessonPlanEditorPage() {
             <CabinetIcon name="arrowLeft" /> Назад
           </Link>
           <div className="cb-pe-header__title-wrap">
-            <h1 className="cb-pe-header__title">
-              {isNew ? "Новый план" : "Редактирование плана"}
-            </h1>
-            <span className="cb-pe-header__badge">{statusLabel}</span>
+            <h1 className="cb-pe-header__title">План уроков</h1>
+            <p className="cb-pe-header__subtitle">
+              Соберите последовательность тем и уроков. Порядок можно менять в любой момент.
+            </p>
           </div>
         </div>
         <div className="cb-pe-header__actions">
-          {autoSaving ? (
-            <span className="cb-pe-header__autosave" role="status">Сохранение…</span>
-          ) : autoSavedAt ? (
-            <span className="cb-pe-header__autosave" role="status">Сохранено автоматически</span>
+          {saveLabel ? (
+            <span className="cb-pe-header__autosave" role="status">{saveLabel}</span>
           ) : null}
-          <button type="button" className="cb-btn cb-btn--ghost" onClick={() => navigate(-1)}>
-            Отмена
-          </button>
           <button
             type="button"
-            className="cb-btn cb-btn--primary"
+            className="cb-btn cb-btn--ghost cb-pe-header__more"
+            aria-label="Дополнительные действия"
+            aria-expanded={moreOpen}
+            onClick={(event) => {
+              setMoreAnchor(event.currentTarget);
+              setMoreOpen((open) => !open);
+            }}
+          >
+            <CabinetIcon name="more" />
+          </button>
+          <CabinetFloatingMenu
+            open={moreOpen}
+            anchorEl={moreAnchor}
+            onClose={() => setMoreOpen(false)}
+            className={`cb-pe-menu${isPhone ? " cb-pe-menu--sheet" : ""}`}
+            placement={isPhone ? "sheet" : "anchor"}
+            width={240}
+          >
+            {isPhone ? <p className="cb-pe-menu__title">Действия с планом</p> : null}
+            <button type="button" className="cb-pe-menu__item" onClick={() => { setMoreOpen(false); handlePreview(); }}>
+              Предпросмотр
+            </button>
+            <button
+              type="button"
+              className="cb-pe-menu__item"
+              disabled={schedulingFirst || sessions.length === 0}
+              onClick={() => { setMoreOpen(false); handleScheduleFirst(); }}
+            >
+              {schedulingFirst ? "Подготовка…" : "Запланировать первое"}
+            </button>
+            {!isNew ? (
+              <Link to={`/cabinet/plans/${planId}`} className="cb-pe-menu__item" onClick={() => setMoreOpen(false)}>
+                Открыть карточку плана
+              </Link>
+            ) : null}
+            <button type="button" className="cb-pe-menu__item" onClick={() => { setMoreOpen(false); navigate(-1); }}>
+              Отмена
+            </button>
+          </CabinetFloatingMenu>
+          <button
+            type="button"
+            className="cb-btn cb-btn--ghost cb-pe-header__save"
             onClick={handleSave}
             disabled={saving || !title.trim()}
           >
             {saving ? "Сохранение…" : "Сохранить план"}
           </button>
+          <button type="button" className="cb-btn cb-btn--primary" onClick={() => addSession()}>
+            <CabinetIcon name="plus" /> Добавить урок
+          </button>
         </div>
       </header>
 
-      <div className="cb-pe-layout">
-        <div className="cb-pe-main">
-          <section className="cb-pe-card">
-            <h2 className="cb-pe-card__title">Параметры плана</h2>
-            <div className="cb-pe-params">
-              <label className="cb-pe-field cb-pe-field--wide">
-                <span>Название</span>
-                <input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="ОГЭ-2026 · полный курс"
-                />
-              </label>
-              <div className="cb-pe-params__row">
-                <label className="cb-pe-field">
-                  <span>Предмет</span>
-                  <select
-                    value={subject}
-                    onChange={(e) => setSubject(e.target.value)}
-                    disabled={subjectsLoading && !subjectOptions.length}
-                  >
-                    {subjectOptions.map((item) => (
-                      <option key={item.id} value={item.id}>{item.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="cb-pe-field">
-                  <span>Уровень</span>
-                  <select
-                    value={type}
-                    disabled={levelsLoading && !levelOptions.length}
-                    onChange={(e) => {
-                      const nextType = e.target.value;
-                      const prevDefault = defaultSubjectFromOptions(type, subjectOptions);
-                      const nextDefault = defaultSubjectFromOptions(nextType, subjectOptions);
-                      setType(nextType);
-                      setSubject((prev) => (
-                        prev === prevDefault
-                          ? nextDefault
-                          : normalizeSubjectSelection(prev, nextType, subjectOptions)
-                      ));
-                    }}
-                  >
-                    {levelSelectOptions.map((t) => (
-                      <option key={t.id} value={t.id}>{t.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="cb-pe-field">
-                  <span>Класс</span>
-                  <input value={grade} onChange={(e) => setGrade(e.target.value)} placeholder="9" />
-                </label>
-              </div>
-
-              {canPublishCatalog ? (
-                <label className="cb-pe-field cb-pe-field--wide cb-pe-field--checkbox">
-                  <input
-                    type="checkbox"
-                    checked={makePublic}
-                    onChange={(e) => setMakePublic(e.target.checked)}
-                  />
-                  <span>
-                    <strong>Сделать публичным шаблоном</strong>
-                    <small>План появится в разделе «Готовые» у всех учителей</small>
-                  </span>
-                </label>
-              ) : null}
-
-              <div className="cb-pe-accordion">
-                <button
-                  type="button"
-                  className="cb-pe-accordion__toggle"
-                  aria-expanded={extraOpen}
-                  onClick={() => setExtraOpen((v) => !v)}
-                >
-                  Дополнительно
-                  <span className={`cb-pe-session__chevron${extraOpen ? " is-open" : ""}`} aria-hidden="true" />
-                </button>
-                {extraOpen ? (
-                  <div className="cb-pe-accordion__body">
-                    <label className="cb-pe-field cb-pe-field--wide">
-                      <span>Цель</span>
-                      <textarea
-                        className="cb-pe-field__compact"
-                        rows={2}
-                        value={goal}
-                        onChange={(e) => setGoal(e.target.value)}
-                        placeholder="Цель курса"
-                      />
-                    </label>
-                    <label className="cb-pe-field cb-pe-field--wide">
-                      <span>Описание</span>
-                      <textarea
-                        className="cb-pe-field__compact"
-                        rows={2}
-                        value={description}
-                        onChange={(e) => setDescription(e.target.value)}
-                        placeholder="Краткое описание"
-                      />
-                    </label>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </section>
-
-          <section className="cb-pe-card">
-            <div className="cb-pe-card__head">
-              <h2 className="cb-pe-card__title">Занятия плана</h2>
-              <button type="button" className="cb-btn cb-btn--secondary cb-btn--sm" onClick={addSession}>
-                <CabinetIcon name="plus" /> Добавить занятие
-              </button>
-            </div>
-
-            {sessions.length > 0 ? (
-              <div className="cb-pe-dates">
-                <label className="cb-pe-field">
-                  <span>Дата первого занятия</span>
-                  <input
-                    type="date"
-                    value={sessions[0]?.scheduledDate || ""}
-                    onChange={(e) => handleFirstDateChange(e.target.value)}
-                  />
-                </label>
-                <label className="cb-pe-field">
-                  <span>Как часто</span>
-                  <select
-                    value={dateInterval}
-                    onChange={(e) => handleDateIntervalChange(e.target.value)}
-                  >
-                    {PLAN_DATE_INTERVALS.map((item) => (
-                      <option key={item.id} value={item.id}>{item.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <p className="cb-pe-dates__hint">
-                  Остальные даты проставятся автоматически. Любую дату занятия можно поправить вручную.
-                </p>
-              </div>
-            ) : null}
-
-            {sessions.length === 0 ? (
-              <div className="cb-pe-empty">
-                <p className="cb-pe-empty__title">Занятий пока нет</p>
-                <p className="cb-pe-empty__text">Добавьте первое занятие в план.</p>
-                <button type="button" className="cb-btn cb-btn--primary" onClick={addSession}>
-                  Добавить занятие
-                </button>
-              </div>
-            ) : (
-              <div className="cb-pe-sessions">
-                {sessions.map((session, index) => (
-                  <PlanEditorSessionCard
-                    key={session.id ? `item-${session.id}` : `draft-${index}`}
-                    session={session}
-                    index={index}
-                    total={sessions.length}
-                    expanded={expandedIndex === index}
-                    onToggle={() => setExpandedIndex((prev) => (prev === index ? null : index))}
-                    onChange={updateSession}
-                    onDateChange={handleSessionDateChange}
-                    onMove={moveSession}
-                    onDuplicate={duplicateSession}
-                    onOpenPicker={openResourcesPicker}
-                    onRemoveAttachment={handleRemoveAttachment}
-                    onSaveSession={saveSession}
-                    onDeleteSession={deleteSession}
-                    savingSession={savingSessionIndex === index}
-                    sessionError={sessionErrors[index]}
-                    attaching={attachingIndex === index}
-                    isDragging={dragIndex === index}
-                    onDragStart={() => handleDragStart(index)}
-                    onDragOver={handleDragOver}
-                    onDrop={() => handleDrop(index)}
-                    onDragEnd={() => setDragIndex(null)}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
-
-        <PlanEditorSummary
-          progress={progress}
-          stats={stats}
-          directionLabel={planTypeLabel(type, levelOptions)}
-          subjectLabel={planSubjectLabel(subject)}
-          grade={grade}
-          saving={saving}
-          isNew={isNew}
-          planId={planId}
-          onSave={handleSave}
-          onAddSession={addSession}
-          onPreview={handlePreview}
-          onScheduleFirst={handleScheduleFirst}
-          schedulingFirst={schedulingFirst}
-        />
+      <div className="cb-pe-toolbar" role="group" aria-label="Параметры плана">
+        <label className="cb-pe-control">
+          <span>План</span>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Название плана"
+            aria-label="Название плана"
+          />
+        </label>
+        <label className="cb-pe-control">
+          <span>Предмет</span>
+          <select
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            disabled={subjectsLoading && !subjectOptions.length}
+            aria-label="Предмет"
+          >
+            {!subject ? <option value="">Предмет</option> : null}
+            {subjectSelectOptions.map((item) => (
+              <option key={item.id} value={item.id}>{item.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="cb-pe-control">
+          <span>Уровень</span>
+          <select
+            value={type}
+            disabled={levelsLoading && !levelOptions.length}
+            aria-label="Уровень"
+            onChange={(e) => {
+              const nextType = e.target.value;
+              const prevDefault = defaultSubjectFromOptions(type, subjectOptions);
+              const nextDefault = defaultSubjectFromOptions(nextType, subjectOptions);
+              setType(nextType);
+              setSubject((prev) => (
+                prev === prevDefault
+                  ? nextDefault
+                  : normalizeSubjectSelection(prev, nextType, subjectOptions)
+              ));
+            }}
+          >
+            {!type ? <option value="">Уровень</option> : null}
+            {levelSelectOptions.map((item) => (
+              <option key={item.id} value={item.id}>{item.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="cb-pe-control cb-pe-control--grade">
+          <span>Класс</span>
+          <input
+            value={grade}
+            onChange={(e) => setGrade(e.target.value)}
+            placeholder="9"
+            aria-label="Класс"
+            inputMode="numeric"
+          />
+        </label>
+        <span className="cb-pe-toolbar__status">{statusLabel}</span>
       </div>
 
-      <div className="cb-pe-mobile-bar" aria-hidden={false}>
-        <button type="button" className="cb-btn cb-btn--secondary" onClick={addSession}>
-          <CabinetIcon name="plus" /> Занятие
+      {canPublishCatalog ? (
+        <label className="cb-pe-field cb-pe-field--wide cb-pe-field--checkbox cb-pe-public">
+          <input
+            type="checkbox"
+            checked={makePublic}
+            onChange={(e) => setMakePublic(e.target.checked)}
+          />
+          <span>
+            <strong>Сделать публичным шаблоном</strong>
+            <small>План появится в разделе «Готовые» у всех учителей</small>
+          </span>
+        </label>
+      ) : null}
+
+      <div className="cb-pe-accordion">
+        <button
+          type="button"
+          className="cb-pe-accordion__toggle"
+          aria-expanded={extraOpen}
+          onClick={() => setExtraOpen((v) => !v)}
+        >
+          Дополнительно
+          <span className={`cb-pe-session__chevron${extraOpen ? " is-open" : ""}`} aria-hidden="true" />
+        </button>
+        {extraOpen ? (
+          <div className="cb-pe-accordion__body">
+            <label className="cb-pe-field cb-pe-field--wide">
+              <span>Цель</span>
+              <textarea
+                className="cb-pe-field__compact"
+                rows={2}
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+                placeholder="Цель курса"
+              />
+            </label>
+            <label className="cb-pe-field cb-pe-field--wide">
+              <span>Описание</span>
+              <textarea
+                className="cb-pe-field__compact"
+                rows={2}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Краткое описание"
+              />
+            </label>
+          </div>
+        ) : null}
+      </div>
+
+      {sessions.length > 0 ? (
+        <div className="cb-pe-dates">
+          <label className="cb-pe-field">
+            <span>Дата первого занятия</span>
+            <input
+              type="date"
+              value={sessions[0]?.scheduledDate || ""}
+              onChange={(e) => handleFirstDateChange(e.target.value)}
+            />
+            <small className="cb-pe-field__hint">Пересчитает даты всех занятий по выбранному интервалу</small>
+          </label>
+          <label className="cb-pe-field">
+            <span>Как часто</span>
+            <select
+              value={dateInterval}
+              onChange={(e) => handleDateIntervalChange(e.target.value)}
+            >
+              {PLAN_DATE_INTERVALS.map((item) => (
+                <option key={item.id} value={item.id}>{item.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ) : null}
+
+      <div className="cb-pe-listhead">
+        <p className="cb-pe-statline">{sessions.length ? statsLine : null}</p>
+        {orderStatus === "error" ? (
+          <p className="cb-pe-order-error" role="alert">
+            Не удалось сохранить порядок
+            <button
+              type="button"
+              className="cb-btn cb-btn--ghost cb-btn--xs"
+              onClick={() => {
+                if (!orderRetry) return;
+                setSessions(orderRetry.next);
+                if (orderRetry.move) {
+                  setExpandedIndex((index) => mapIndexAfterMove(
+                    index,
+                    orderRetry.move.fromIndex,
+                    orderRetry.move.toIndex,
+                  ));
+                }
+                persistOrderWithRollback(orderRetry.next, orderRetry.previous, orderRetry.move);
+              }}
+            >
+              Повторить
+            </button>
+          </p>
+        ) : saveLabel ? (
+          <span className="cb-pe-header__autosave cb-pe-listhead__save" role="status">{saveLabel}</span>
+        ) : null}
+      </div>
+
+      {sessions.length > 0 ? (
+        <p className="cb-pe-dnd-hint">
+          <span className="cb-pe-grip cb-pe-grip--inline" aria-hidden="true">
+            <span /><span /><span /><span /><span /><span />
+          </span>
+          Порядок уроков можно менять перетаскиванием
+          <span className="cb-pe-dnd-hint__extra"> или через меню урока</span>
+        </p>
+      ) : null}
+
+      {sessions.length === 0 ? (
+        <div className="cb-pe-empty">
+          <p className="cb-pe-empty__title">План пока пуст</p>
+          <p className="cb-pe-empty__text">Добавьте первый урок и начните собирать последовательность занятий.</p>
+          <button type="button" className="cb-btn cb-btn--primary" onClick={() => addSession()}>
+            <CabinetIcon name="plus" /> Добавить первый урок
+          </button>
+        </div>
+      ) : (
+        <PlanSessionsList
+          sessions={sessions}
+          groups={topicGroups}
+          showTopics={showTopics}
+          expandedIndex={expandedIndex}
+          draggingIndex={draggingIndex}
+          dropLineIndex={dropLineIndex}
+          attachingIndex={attachingIndex}
+          savingSessionIndex={savingSessionIndex}
+          sessionErrors={sessionErrors}
+          renamingTopicId={renamingTopicId}
+          listRef={listRef}
+          onToggle={(index) => setExpandedIndex((prev) => (prev === index ? null : index))}
+          onChange={updateSession}
+          onDateChange={handleSessionDateChange}
+          onRestorePlannedDate={handleRestorePlannedDate}
+          onMove={moveSession}
+          onMoveToTopic={handleMoveToTopic}
+          onDuplicate={duplicateSession}
+          onOpenPicker={openResourcesPicker}
+          onRemoveAttachment={handleRemoveAttachment}
+          onSaveSession={saveSession}
+          onDeleteSession={deleteSession}
+          onDeleteTopic={deleteTopic}
+          onHandlePointerDown={onHandlePointerDown}
+          onStartRenameTopic={setRenamingTopicId}
+          onCommitRenameTopic={handleRenameTopic}
+          onCancelRenameTopic={() => setRenamingTopicId(null)}
+          onAddInTopic={(index, topic) => addSession(index, topic)}
+          dateDraftIndex={dateConfirm?.index}
+          dateDraftValue={dateConfirm?.nextValue}
+          plannedDates={plannedDates}
+        />
+      )}
+
+      <div
+        ref={overlayRef}
+        className="cb-pe-drag-overlay"
+        hidden={!isDragging || !dragged}
+        role="presentation"
+      >
+        {dragged ? (
+          <>
+            <span className="cb-pe-session__num">{draggingIndex + 1}</span>
+            <strong>{dragged.title.trim() || dragged.subtopic.trim() || `Урок ${draggingIndex + 1}`}</strong>
+          </>
+        ) : null}
+      </div>
+
+      <div className="cb-pe-mobile-bar">
+        <button type="button" className="cb-btn cb-btn--primary" onClick={() => addSession()}>
+          <CabinetIcon name="plus" /> Добавить урок
         </button>
         <button
           type="button"
-          className="cb-btn cb-btn--primary"
+          className="cb-btn cb-btn--ghost"
           onClick={handleSave}
           disabled={saving || !title.trim()}
         >
@@ -1438,11 +1409,19 @@ export default function CabinetLessonPlanEditorPage() {
 
       <ConfirmActionModal
         open={deleteSessionIndex != null}
-        title={deleteForce ? "Тема уже назначена на занятие" : "Удалить занятие?"}
+        title={
+          deleteForce
+            ? "Тема уже назначена на занятие"
+            : deleteSessionIndex == null
+              ? "Удалить занятие?"
+              : `Удалить занятие «${sessionDisplayTitle(sessions[deleteSessionIndex], deleteSessionIndex)}»?`
+        }
         text={
           deleteForce
             ? `${deleteHint || "Эта тема уже назначена на занятие."} Удалить тему из плана и оставить занятие без темы?`
-            : "Удалить это занятие из плана?"
+            : willCompressDatesAfterRemove(sessions, [deleteSessionIndex])
+              ? "Следующие занятия автоматически займут освободившиеся даты в плане."
+              : "Занятие будет удалено из плана."
         }
         confirmLabel={deleteForce ? "Удалить тему" : "Удалить"}
         danger
@@ -1455,6 +1434,74 @@ export default function CabinetLessonPlanEditorPage() {
           }
         }}
         onConfirm={confirmDeleteSession}
+      />
+
+      <ConfirmActionModal
+        open={deleteTopicGroup != null}
+        title={
+          deleteForce
+            ? "Тема уже назначена на занятие"
+            : `Удалить тему «${deleteTopicGroup?.topic || "Без темы"}»?`
+        }
+        text={
+          deleteForce
+            ? `${deleteHint || "Эта тема уже назначена на занятие."} Удалить тему из плана и оставить занятие без темы?`
+            : (
+              <>
+                <p className="cb-confirm-text">
+                  {willCompressDatesAfterRemove(sessions, deleteTopicGroup?.indices || [])
+                    ? "Следующие темы автоматически займут освободившиеся даты в плане."
+                    : "Тема будет удалена из плана."}
+                </p>
+                {(deleteTopicGroup?.indices?.length || 0) > 1 ? (
+                  <p className="cb-confirm-text">
+                    В теме {deleteTopicGroup.indices.length} {lessonsWord(deleteTopicGroup.indices.length)} — они будут удалены.
+                  </p>
+                ) : null}
+              </>
+            )
+        }
+        confirmLabel="Удалить"
+        danger
+        loading={Boolean(deleteTopicGroup) && savingSessionIndex === deleteTopicGroup?.indices?.[0]}
+        onClose={() => {
+          if (savingSessionIndex !== deleteTopicGroup?.indices?.[0]) {
+            setDeleteTopicGroup(null);
+            setDeleteForce(false);
+            setDeleteHint("");
+          }
+        }}
+        onConfirm={confirmDeleteTopic}
+      />
+
+      <ConfirmActionModal
+        open={dateConfirm != null}
+        title="Сохранить изменение даты?"
+        text={dateConfirm ? (
+          <>
+            {dateConfirm.deviation?.message ? (
+              <p className="cb-confirm-text">{dateConfirm.deviation.message}</p>
+            ) : null}
+            {dateConfirm.deviation?.extra ? (
+              <p className="cb-confirm-text">{dateConfirm.deviation.extra}</p>
+            ) : null}
+            {dateConfirm.conflictCount > 0 ? (
+              <p className="cb-confirm-text">На эту дату уже запланировано другое занятие.</p>
+            ) : null}
+            <p className="cb-confirm-text">Сохранить изменение?</p>
+          </>
+        ) : null}
+        confirmLabel={dateConfirm?.conflictCount > 0 ? "Всё равно сохранить" : "Изменить только эту дату"}
+        secondaryConfirmLabel={dateConfirm?.canShiftFollowing ? "Сдвинуть эту и следующие" : undefined}
+        loading={false}
+        onClose={() => setDateConfirm(null)}
+        onConfirm={() => {
+          if (!dateConfirm) return;
+          void applySessionDate(dateConfirm.index, dateConfirm.nextValue);
+        }}
+        onSecondaryConfirm={dateConfirm?.canShiftFollowing ? () => {
+          void applySessionDate(dateConfirm.index, dateConfirm.nextValue, { shiftFollowing: true });
+        } : undefined}
       />
     </CabinetPageShell>
   );

@@ -4538,8 +4538,35 @@ def api_lessons(request):
     return JsonResponse({"lessons": serializer.data, "total": len(serializer.data)})
 
 
+_NON_DOCUMENT_FETCH_DEST = frozenset({
+    "audio",
+    "audioworklet",
+    "embed",
+    "font",
+    "image",
+    "manifest",
+    "object",
+    "paintworklet",
+    "prefetch",
+    "report",
+    "script",
+    "serviceworker",
+    "sharedworker",
+    "style",
+    "track",
+    "video",
+    "worker",
+    "xslt",
+})
+
+
 def _is_browser_document_request(request) -> bool:
-    """Top-level browser/iframe navigation, not fetch()/XHR/API clients or assets."""
+    """Top-level browser/iframe navigation, not fetch()/XHR/API clients or assets.
+
+    Service workers that re-fetch a navigation with ``fetch(request, {cache})``
+    often send ``Sec-Fetch-Dest: empty``; treat that as a document when the
+    request still looks like HTML navigation, not a JSON API call.
+    """
     if request.method != "GET":
         return False
     if (request.GET.get("format") or "").lower() == "json":
@@ -4549,11 +4576,13 @@ def _is_browser_document_request(request) -> bool:
     accept = (request.headers.get("Accept") or "").lower()
     mode = (request.headers.get("Sec-Fetch-Mode") or "").lower()
     dest = (request.headers.get("Sec-Fetch-Dest") or "").lower()
-    if dest and dest not in ("document", "iframe"):
+    if dest in _NON_DOCUMENT_FETCH_DEST:
         return False
     if mode == "navigate" or dest in ("document", "iframe"):
         return True
-    return "text/html" in accept and "application/json" not in accept
+    if "application/json" in accept and "text/html" not in accept:
+        return False
+    return "text/html" in accept
 
 
 def _catalog_preview_redirect(preview_url: str):
@@ -4574,8 +4603,10 @@ def _lesson_content_access(request, lesson):
 
 
 def _lesson_content_access_denied(request, lesson):
-    """None если доступ есть; иначе JsonResponse 403."""
+    """None если доступ есть; иначе редирект в предпросмотр или JsonResponse 403."""
     _, denied = _lesson_content_access(request, lesson)
+    if denied and _is_browser_document_request(request):
+        return _catalog_preview_redirect(f"/lessons?preview={lesson.slug}")
     return denied
 
 
@@ -4704,7 +4735,7 @@ def api_lesson_start_demo(request, slug):
             "terms_accepted_at": demo.terms_accepted_at.isoformat() if demo.terms_accepted_at else None,
         },
         "access": access.to_dict(),
-        "view_url": f"/api/lessons/{lesson.slug}/view/",
+        "view_url": f"/lessons/{lesson.slug}/view",
     })
 
 
@@ -4747,9 +4778,7 @@ def api_lesson_archive_view(request, slug):
     lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
     access, denied = _lesson_content_access(request, lesson)
     if denied:
-        if _is_browser_document_request(request):
-            return _catalog_preview_redirect(f"/lessons?preview={slug}")
-        return denied
+        return _lesson_content_access_denied(request, lesson)
 
     from .lesson_archive import (
         archive_base_dir,
@@ -5046,14 +5075,9 @@ def api_interesting_archive_asset(request, slug, asset_path):
     if not item.archive:
         raise Http404("Архив не найден")
 
-    if not _lesson_viewer_is_teacher_or_admin(request):
-        from Cabinet.subscription_access import AccessDenied, SubscriptionAccessService
-
-        user = request.user if getattr(request.user, "is_authenticated", False) else None
-        try:
-            SubscriptionAccessService.raise_if_cannot_access_content(user, item)
-        except AccessDenied as exc:
-            return JsonResponse({"error": exc.to_dict()}, status=403)
+    denied = _interesting_content_access_denied(request, item)
+    if denied:
+        return denied
 
     from .lesson_archive import (
         archive_asset_response,

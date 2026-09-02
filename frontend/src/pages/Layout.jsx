@@ -17,6 +17,7 @@ function Layout() {
   const pathNorm = (pathname || "").replace(/\/+$/, "") || "/";
   const isTasksPrepPicker = /^\/(oge|ege|vpr)\/[^/]+$/.test(pathNorm);
   const isLessonViewerPage = /^\/lessons\/[^/]+\/view$/.test(pathNorm);
+  const isInterestingViewerPage = /^\/interesting\/[^/]+\/view$/.test(pathNorm);
   const isInteractivePlayPage =
     /^\/cabinet\/interactives\/[^/]+\/play$/.test(pathNorm)
     || /^\/cabinet\/student\/interactives\/\d+\/play$/.test(pathNorm);
@@ -26,7 +27,8 @@ function Layout() {
   const isBoardEditorPage =
     /^\/cabinet\/boards\/[^/]+$/.test(pathNorm)
     || /^\/teacher\/boards\/[^/]+$/.test(pathNorm);
-  const isChromelessPage = isLessonViewerPage || isInteractivePlayPage || isBoardEditorPage;
+  const isChromelessPage =
+    isLessonViewerPage || isInterestingViewerPage || isInteractivePlayPage || isBoardEditorPage;
   /** Экзамен/вариант: своя залипающая панель действий снизу — нижнюю навигацию там не показываем. */
   const isExamVariantPage = /^\/(oge|ege|vpr)\/[^/]+\/variant\//.test(pathNorm);
   const isMarketingHome =

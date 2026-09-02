@@ -199,6 +199,38 @@ class StudentMaterialsLibraryTests(TestCase):
         self.assertEqual(row["interactive_url"], f"/cabinet/student/interactives/{assignment.id}/play")
         self.assertEqual(row["teacher_id"], self.teacher.id)
 
+    def test_student_interactive_detail_accepts_interactive_id(self):
+        from Cabinet.models import Interactive, InteractiveAssignment
+
+        dummy = Interactive.objects.create(
+            teacher=self.teacher,
+            title="Черновик",
+            interactive_type="flashcards",
+            status="published",
+        )
+        InteractiveAssignment.objects.create(
+            teacher=self.teacher,
+            interactive=dummy,
+            student=self.student,
+        )
+        interactive = Interactive.objects.create(
+            teacher=self.teacher,
+            title="Карточки: квадраты",
+            interactive_type="flashcards",
+            status="published",
+        )
+        assignment = InteractiveAssignment.objects.create(
+            teacher=self.teacher,
+            interactive=interactive,
+            student=self.student,
+        )
+        self.assertNotEqual(assignment.id, interactive.id)
+        by_assignment = self.client.get(f"/api/cabinet/student/interactives/{assignment.id}/")
+        self.assertEqual(by_assignment.status_code, 200, by_assignment.content)
+        by_interactive = self.client.get(f"/api/cabinet/student/interactives/{interactive.id}/")
+        self.assertEqual(by_interactive.status_code, 200, by_interactive.content)
+        self.assertEqual(by_interactive.json()["assignment"]["id"], assignment.id)
+
     def test_plan_material_removed_later_stays_in_student_library(self):
         from Cabinet.student_release import _sync_lesson_content
 

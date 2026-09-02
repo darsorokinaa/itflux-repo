@@ -38,7 +38,7 @@ function isDueToday(iso) {
 
 export function getStudentAssignmentPath(item) {
   if (item.kind === "interactive") {
-    return `/cabinet/student/interactives/${item.interactive_id || item.id}/play`;
+    return `/cabinet/student/interactives/${item.interactive_assignment_id || item.id}/play`;
   }
   const base = `/cabinet/student/assignments/${item.id}`;
   if (item.status === "checked" || item.status === "completed") {

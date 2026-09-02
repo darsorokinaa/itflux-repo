@@ -232,7 +232,7 @@ export default function PlanItemDetailModal({
     return () => window.clearTimeout(timer);
   }, [item, loading, initialFocusSection]);
 
-  const subject = planSubjectLabel(plan?.direction);
+  const subject = planSubjectLabel(plan);
   const exam = planExamLabel(plan);
   const primaryAction = useMemo(() => (item ? getPrimaryAction(item) : null), [item]);
 

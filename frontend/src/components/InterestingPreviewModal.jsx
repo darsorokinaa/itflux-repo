@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { rememberReturnPath, safeReturnPath } from "../accessGate/accessGate";
 import { useCabinetAuthed } from "../hooks/useAccessGate";
 import { fetchInterestingItem } from "../utils/cabinetAuth";
@@ -24,8 +24,8 @@ function registerHref(returnUrl) {
   };
 }
 
-function contentUrl(slug) {
-  return `/api/interesting/${encodeURIComponent(slug)}/view/`;
+function viewerUrl(slug) {
+  return `/interesting/${encodeURIComponent(slug)}/view`;
 }
 
 function previewUrl(slug) {
@@ -38,6 +38,7 @@ function planName(slug) {
 }
 
 export default function InterestingPreviewModal({ open, slug, onClose }) {
+  const navigate = useNavigate();
   const authed = useCabinetAuthed();
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -172,7 +173,10 @@ export default function InterestingPreviewModal({ open, slug, onClose }) {
                   <button
                     type="button"
                     className="material-access-btn material-access-btn--primary"
-                    onClick={() => { window.location.href = contentUrl(slug); }}
+                    onClick={() => {
+                      onClose?.();
+                      navigate(viewerUrl(slug));
+                    }}
                   >
                     Открыть
                   </button>

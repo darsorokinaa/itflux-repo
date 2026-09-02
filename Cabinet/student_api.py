@@ -124,6 +124,15 @@ def _interactive_assignments_qs(students):
     ).select_related("interactive", "teacher", "teacher__profile", "lesson")
 
 
+def _student_interactive_assignment(students, assignment_id):
+    """Карточки/ДЗ иногда передают Interactive.id вместо InteractiveAssignment.id."""
+    qs = _interactive_assignments_qs(students)
+    assignment = qs.filter(pk=assignment_id).first()
+    if assignment:
+        return assignment
+    return qs.filter(interactive_id=assignment_id).order_by("-id").first()
+
+
 def _schedule_qs(students):
     student_ids, groups = _student_ids_and_groups(students)
     return ScheduleEvent.objects.filter(
@@ -1060,6 +1069,7 @@ def _serialize_interactive_card(assignment, students):
     return {
         "id": assignment.id,
         "interactive_id": interactive.id,
+        "interactive_assignment_id": assignment.id,
         "title": interactive.get_display_title(),
         "type": itype,
         "type_label": type_labels.get(interactive.interactive_type, "Интерактив"),
@@ -1671,7 +1681,7 @@ class StudentInteractiveDetailView(StudentScopedView):
         students, err = self.student_response_or_error()
         if err:
             return err
-        assignment = _interactive_assignments_qs(students).filter(pk=assignment_id).first()
+        assignment = _student_interactive_assignment(students, assignment_id)
         if not assignment:
             return Response({"error": "Интерактив не найден."}, status=status.HTTP_404_NOT_FOUND)
         interactive = assignment.interactive
@@ -1688,7 +1698,7 @@ class StudentInteractiveDetailView(StudentScopedView):
         students, err = self.student_response_or_error()
         if err:
             return err
-        assignment = _interactive_assignments_qs(students).filter(pk=assignment_id).first()
+        assignment = _student_interactive_assignment(students, assignment_id)
         if not assignment:
             return Response({"error": "Интерактив не найден."}, status=status.HTTP_404_NOT_FOUND)
         roster = _pick_student(students, assignment.teacher)

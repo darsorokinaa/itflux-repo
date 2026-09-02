@@ -1,0 +1,761 @@
+/* Lesson plan editor — scoped to the plan editor page. */
+
+.cb-section--plan-editor {
+  --pe-radius: 16px;
+  --pe-border: #e2e8f0;
+  --pe-text: #0f172a;
+  --pe-muted: #64748b;
+  --pe-soft: #475569;
+  --pe-accent: #2563eb;
+  max-width: 920px;
+}
+
+.cb-section--plan-editor .cb-pe-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 16px;
+  padding: 0 0 16px;
+  background: transparent;
+  backdrop-filter: none;
+  border-bottom: 1px solid var(--pe-border);
+}
+
+.cb-section--plan-editor .cb-pe-header__left {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cb-section--plan-editor .cb-pe-header__title-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.cb-section--plan-editor .cb-pe-header__title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  color: var(--pe-text);
+}
+
+.cb-section--plan-editor .cb-pe-header__subtitle {
+  margin: 0;
+  max-width: 36rem;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  font-weight: 500;
+  color: var(--pe-muted);
+}
+
+.cb-section--plan-editor .cb-pe-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.cb-section--plan-editor .cb-pe-header__autosave {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pe-muted);
+  white-space: nowrap;
+}
+
+.cb-section--plan-editor .cb-pe-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+  margin: 0 0 14px;
+  padding: 10px;
+  border: 1px solid var(--pe-border);
+  border-radius: var(--pe-radius);
+  background: #fff;
+}
+
+.cb-section--plan-editor .cb-pe-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 140px;
+}
+
+.cb-section--plan-editor .cb-pe-control--grade {
+  flex: 0 1 88px;
+}
+
+.cb-section--plan-editor .cb-pe-control span,
+.cb-section--plan-editor .cb-pe-toolbar__status {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pe-muted);
+}
+
+.cb-section--plan-editor .cb-pe-toolbar__status {
+  margin: 0 6px 10px auto;
+  align-self: end;
+}
+
+.cb-section--plan-editor .cb-pe-control input,
+.cb-section--plan-editor .cb-pe-control select {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  color: var(--pe-text);
+  box-sizing: border-box;
+}
+
+.cb-section--plan-editor .cb-pe-control input:focus-visible,
+.cb-section--plan-editor .cb-pe-control select:focus-visible,
+.cb-section--plan-editor .cb-pe-field input:focus-visible,
+.cb-section--plan-editor .cb-pe-field select:focus-visible,
+.cb-section--plan-editor .cb-pe-field textarea:focus-visible {
+  outline: 2px solid var(--pe-accent);
+  outline-offset: 2px;
+}
+
+.cb-section--plan-editor .cb-pe-public {
+  margin-bottom: 12px;
+}
+
+.cb-section--plan-editor .cb-pe-accordion {
+  margin-bottom: 14px;
+}
+
+.cb-section--plan-editor .cb-pe-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--pe-border);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.cb-section--plan-editor .cb-pe-dates .cb-pe-field {
+  flex: 1 1 180px;
+}
+
+.cb-section--plan-editor .cb-pe-listhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+  margin: 0 0 8px;
+}
+
+.cb-section--plan-editor .cb-pe-listhead__save {
+  display: none;
+}
+
+.cb-section--plan-editor .cb-pe-statline {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--pe-soft);
+}
+
+.cb-section--plan-editor .cb-pe-order-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: #dc2626;
+}
+
+.cb-section--plan-editor .cb-pe-dnd-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--pe-muted);
+}
+
+.cb-section--plan-editor .cb-pe-dnd-hint__extra {
+  color: #94a3b8;
+}
+
+.cb-section--plan-editor .cb-pe-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cb-section--plan-editor .cb-pe-topic {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 0 6px;
+  border-top: 1px solid var(--pe-border);
+}
+
+.cb-section--plan-editor .cb-pe-topic:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.cb-section--plan-editor .cb-pe-topic__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cb-section--plan-editor .cb-pe-topic__left {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cb-section--plan-editor .cb-pe-topic__num {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pe-muted);
+}
+
+.cb-section--plan-editor .cb-pe-topic__title {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 750;
+  line-height: 1.3;
+  color: var(--pe-text);
+  overflow-wrap: anywhere;
+}
+
+.cb-section--plan-editor .cb-pe-topic__input {
+  width: min(100%, 420px);
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 16px;
+}
+
+.cb-section--plan-editor .cb-pe-topic__right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.cb-section--plan-editor .cb-pe-topic__count {
+  font-size: 13px;
+  color: var(--pe-muted);
+  white-space: nowrap;
+}
+
+.cb-section--plan-editor .cb-pe-topic__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cb-section--plan-editor .cb-pe-topic__add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--pe-accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.cb-section--plan-editor .cb-pe-topic__add svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cb-section--plan-editor .cb-pe-topic__add:focus-visible {
+  outline: 2px solid var(--pe-accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.cb-section--plan-editor .cb-pe-session-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.cb-section--plan-editor .cb-pe-session {
+  border: 1px solid #dbe3ee;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: none;
+  overflow: hidden;
+  touch-action: pan-y;
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.cb-section--plan-editor .cb-pe-session:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+}
+
+.cb-section--plan-editor .cb-pe-session:hover .cb-pe-session__drag {
+  color: #475569;
+  background: #f1f5f9;
+}
+
+.cb-section--plan-editor .cb-pe-session.is-expanded {
+  border-color: #bfdbfe;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
+}
+
+.cb-section--plan-editor .cb-pe-session.is-origin {
+  opacity: 0.45;
+}
+
+.cb-section--plan-editor .cb-pe-session.is-dragging {
+  opacity: 1;
+  transform: scale(1.015);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.14);
+  border-color: #93c5fd;
+}
+
+.cb-section--plan-editor .cb-pe-session__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 10px 10px 6px;
+}
+
+.cb-section--plan-editor .cb-pe-session__drag {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  border: 0;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+}
+
+.cb-section--plan-editor .cb-pe-session__drag:active,
+.cb-pe-dragging .cb-section--plan-editor .cb-pe-session__drag {
+  cursor: grabbing;
+}
+
+.cb-section--plan-editor .cb-pe-session__drag:focus-visible,
+.cb-section--plan-editor .cb-pe-session__menu-btn:focus-visible,
+.cb-section--plan-editor .cb-pe-header__more:focus-visible {
+  outline: 2px solid var(--pe-accent);
+  outline-offset: 2px;
+}
+
+.cb-section--plan-editor .cb-pe-session__num {
+  flex-shrink: 0;
+  min-width: 1.5rem;
+  margin-top: 12px;
+  font-size: 13px;
+  font-weight: 750;
+  color: var(--pe-muted);
+  text-align: center;
+}
+
+.cb-section--plan-editor .cb-pe-session__summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 4px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.cb-section--plan-editor .cb-pe-session__title {
+  display: block;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 750;
+  line-height: 1.35;
+  color: var(--pe-text);
+  overflow-wrap: anywhere;
+}
+
+.cb-section--plan-editor .cb-pe-session__topic,
+.cb-section--plan-editor .cb-pe-session__meta {
+  display: block;
+  margin-top: 3px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--pe-muted);
+  overflow-wrap: anywhere;
+}
+
+.cb-section--plan-editor .cb-pe-session__tools {
+  flex-shrink: 0;
+}
+
+.cb-section--plan-editor .cb-pe-session__menu-btn,
+.cb-section--plan-editor .cb-pe-header__more {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #64748b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.cb-section--plan-editor .cb-pe-session__menu-btn svg,
+.cb-section--plan-editor .cb-pe-header__more svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cb-section--plan-editor .cb-pe-session__menu-btn:hover,
+.cb-section--plan-editor .cb-pe-header__more:hover {
+  background: #f1f5f9;
+  color: var(--pe-text);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .cb-section--plan-editor .cb-pe-session__menu-btn {
+    opacity: 0;
+  }
+
+  .cb-section--plan-editor .cb-pe-session:hover .cb-pe-session__menu-btn,
+  .cb-section--plan-editor .cb-pe-session:focus-within .cb-pe-session__menu-btn,
+  .cb-section--plan-editor .cb-pe-session__menu-btn[aria-expanded="true"] {
+    opacity: 1;
+  }
+}
+
+.cb-section--plan-editor .cb-pe-session__body {
+  padding: 0 14px 14px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.cb-section--plan-editor .cb-pe-session__reorder {
+  display: none;
+}
+
+.cb-section--plan-editor .cb-pe-drop-line {
+  height: 3px;
+  margin: 4px 8px;
+  border-radius: 999px;
+  background: var(--pe-accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.cb-section--plan-editor .cb-pe-empty {
+  padding: 40px 20px;
+  border-radius: 16px;
+  border: 1px dashed #cbd5e1;
+  background: #f8fafc;
+  text-align: center;
+}
+
+.cb-pe-grip {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  width: 12px;
+  height: 16px;
+}
+
+.cb-pe-grip span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.cb-pe-grip--inline {
+  color: #94a3b8;
+}
+
+.cb-pe-drag-overlay {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 14000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(420px, calc(100vw - 24px));
+  padding: 12px 14px;
+  border: 1px solid #93c5fd;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.16);
+  pointer-events: none;
+  transform: scale(1.015);
+}
+
+.cb-pe-drag-overlay[hidden] {
+  display: none !important;
+}
+
+.cb-pe-drag-overlay strong {
+  min-width: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+body.cb-pe-dragging {
+  cursor: grabbing;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body.cb-pe-dragging * {
+  cursor: grabbing !important;
+}
+
+.cb-pe-menu {
+  min-width: 220px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+}
+
+.cb-pe-menu__title {
+  margin: 4px 8px 8px;
+  font-size: 13px;
+  font-weight: 750;
+  color: var(--pe-muted, #64748b);
+}
+
+.cb-pe-menu__item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #0f172a;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.cb-pe-menu__item:hover,
+.cb-pe-menu__item:focus-visible {
+  background: #f1f5f9;
+  outline: none;
+}
+
+.cb-pe-menu__item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.cb-pe-menu__item--danger {
+  color: #dc2626;
+}
+
+.cb-pe-menu__item--danger:hover,
+.cb-pe-menu__item--danger:focus-visible {
+  background: #fef2f2;
+}
+
+.cb-pe-menu__item--cancel {
+  margin-top: 4px;
+  color: #64748b;
+}
+
+.cb-pe-menu__divider {
+  height: 1px;
+  margin: 4px 8px;
+  background: #e2e8f0;
+}
+
+.cb-pe-menu.cb-float-menu--sheet {
+  padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+  border-radius: 20px;
+}
+
+.cb-section--plan-editor .cb-pe-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cb-section--plan-editor .cb-pe-skeleton__header,
+.cb-section--plan-editor .cb-pe-skeleton__toolbar,
+.cb-section--plan-editor .cb-pe-skeleton__topic,
+.cb-section--plan-editor .cb-pe-skeleton__card {
+  border-radius: 14px;
+  background: linear-gradient(90deg, #eef2f7 25%, #f8fafc 37%, #eef2f7 63%);
+  background-size: 400px 100%;
+  animation: cb-pe-skel 1.2s ease infinite;
+}
+
+.cb-section--plan-editor .cb-pe-skeleton__header { height: 72px; }
+.cb-section--plan-editor .cb-pe-skeleton__toolbar { height: 58px; }
+.cb-section--plan-editor .cb-pe-skeleton__topic { height: 28px; width: 40%; }
+.cb-section--plan-editor .cb-pe-skeleton__card { height: 72px; }
+
+@keyframes cb-pe-skel {
+  0% { background-position: -200px 0; }
+  100% { background-position: 200px 0; }
+}
+
+@media (max-width: 1024px) {
+  .cb-section--plan-editor .cb-pe-toolbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cb-section--plan-editor .cb-pe-control--grade {
+    flex: 1 1 auto;
+  }
+
+  .cb-section--plan-editor .cb-pe-toolbar__status {
+    margin: 0;
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 960px) {
+  .cb-section--plan-editor .cb-pe-header__actions {
+    display: flex;
+  }
+
+  .cb-section--plan-editor .cb-pe-session__drag {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 768px) {
+  .cb-section--plan-editor .cb-pe-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .cb-section--plan-editor .cb-pe-header__actions {
+    width: 100%;
+  }
+
+  .cb-section--plan-editor .cb-pe-header__actions .cb-btn--primary {
+    flex: 1 1 auto;
+  }
+
+  .cb-section--plan-editor .cb-pe-header__save,
+  .cb-section--plan-editor .cb-pe-header__autosave,
+  .cb-section--plan-editor .cb-pe-dnd-hint__extra {
+    display: none;
+  }
+
+  .cb-section--plan-editor .cb-pe-listhead__save {
+    display: inline;
+  }
+
+  .cb-section--plan-editor .cb-pe-toolbar {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .cb-section--plan-editor .cb-pe-control:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .cb-section--plan-editor input:not([type="checkbox"]):not([type="radio"]),
+  .cb-section--plan-editor select,
+  .cb-section--plan-editor textarea {
+    font-size: 16px;
+  }
+
+  .cb-section--plan-editor .cb-pe-session__title {
+    font-size: 15px;
+  }
+}
+
+@media (max-width: 430px) {
+  .cb-section--plan-editor .cb-pe-header__title {
+    font-size: 1.2rem;
+  }
+
+  .cb-section--plan-editor .cb-pe-session__head {
+    gap: 4px;
+  }
+
+  .cb-section--plan-editor .cb-pe-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cb-section--plan-editor .cb-pe-control:first-child {
+    grid-column: auto;
+  }
+}
+
+.cb-section--plan-editor .cb-pe-date-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 6px;
+  color: var(--pe-muted);
+}
+
+.cb-section--plan-editor .cb-pe-date-note__restore {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--pe-soft);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.cb-section--plan-editor .cb-pe-date-note__restore:hover,
+.cb-section--plan-editor .cb-pe-date-note__restore:focus-visible {
+  color: var(--pe-text);
+}
+
+@media (max-width: 320px) {
+  .cb-section--plan-editor {
+    overflow-x: hidden;
+  }
+}

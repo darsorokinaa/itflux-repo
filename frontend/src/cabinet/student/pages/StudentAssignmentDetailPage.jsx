@@ -80,9 +80,9 @@ function getTaskAction(task, isChecked, hasResultsBlock) {
       variant: task.is_variant || isInternalVariantHref(href),
     };
   }
-  if (task.task_type === "interactive" && task.interactive_id) {
+  if (task.task_type === "interactive" && (task.interactive_assignment_id || task.interactive_id)) {
     return {
-      href: `/cabinet/student/interactives/${task.interactive_id}/play`,
+      href: `/cabinet/student/interactives/${task.interactive_assignment_id || task.interactive_id}/play`,
       label: "Открыть",
       external: false,
     };

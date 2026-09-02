@@ -218,3 +218,14 @@ class StudentContentAccessTests(TestCase):
         )
         self.assertEqual(res.status_code, 403)
         self.assertIn("application/json", res["Content-Type"])
+
+    def test_service_worker_interesting_navigation_redirects_to_preview(self):
+        self.client.force_login(self.teacher)
+        res = self.client.get(
+            f"/api/interesting/{self.interesting.slug}/view/",
+            HTTP_ACCEPT="text/html,application/xhtml+xml,*/*;q=0.8",
+            HTTP_SEC_FETCH_MODE="navigate",
+            HTTP_SEC_FETCH_DEST="empty",
+        )
+        self.assertEqual(res.status_code, 302)
+        self.assertEqual(res.url, f"/interesting?preview={self.interesting.slug}")
