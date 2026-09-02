@@ -35,12 +35,6 @@ export default function CatalogMaterialViewer({
 
   return (
     <div className="lesson-viewer-page lesson-viewer-page--doc">
-      <header className="lesson-viewer-page__toolbar">
-        {backHref ? (
-          <Link className="lesson-viewer-page__back" to={backHref}>{backLabel}</Link>
-        ) : null}
-        {title ? <h1 className="lesson-viewer-page__title">{title}</h1> : null}
-      </header>
       <div className="lesson-viewer-page__doc-main">
         <iframe
           className="lesson-viewer-page__pdf-frame"
