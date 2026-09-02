@@ -23,6 +23,51 @@ function useMediaQuery(query) {
   return matches;
 }
 
+function CommitOnBlurInput({ value = "", onCommit, onCancel, ...props }) {
+  const [draft, setDraft] = useState(null);
+  const committedRef = useRef(false);
+  const shown = draft == null ? value : draft;
+
+  const commit = () => {
+    if (committedRef.current) return;
+    committedRef.current = true;
+    const next = shown;
+    setDraft(null);
+    if (next !== value) onCommit?.(next);
+  };
+
+  return (
+    <input
+      {...props}
+      value={shown}
+      onFocus={(event) => {
+        committedRef.current = false;
+        setDraft(value);
+        props.onFocus?.(event);
+      }}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={(event) => {
+        commit();
+        props.onBlur?.(event);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          committedRef.current = true;
+          setDraft(null);
+          onCancel?.();
+          event.currentTarget.blur();
+        }
+        props.onKeyDown?.(event);
+      }}
+    />
+  );
+}
+
 function DragGrip() {
   return (
     <span className="cb-pe-grip" aria-hidden="true">
@@ -307,7 +352,10 @@ export function PlanEditorSessionCard({
             </label>
             <label className="cb-pe-field">
               <span>Тема</span>
-              <input value={session.topic} onChange={(e) => onChange(index, "topic", e.target.value)} />
+              <CommitOnBlurInput
+                value={session.topic}
+                onCommit={(next) => onChange(index, "topic", next)}
+              />
             </label>
             <label className="cb-pe-field">
               <span>Подтема</span>
@@ -416,14 +464,24 @@ export function PlanTopicSection({
 }) {
   const [draft, setDraft] = useState(group.topic);
   const inputRef = useRef(null);
+  const committedRef = useRef(false);
   const count = group.indices.length;
   const isMobile = useMediaQuery("(max-width: 640px)");
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState(null);
 
   useEffect(() => {
-    if (renaming) inputRef.current?.focus();
+    if (!renaming) return undefined;
+    committedRef.current = false;
+    const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
   }, [renaming]);
+
+  const commitRename = (nextValue) => {
+    if (committedRef.current) return;
+    committedRef.current = true;
+    onCommitRename(nextValue);
+  };
 
   const title = group.topic || "Без темы";
 
@@ -441,13 +499,17 @@ export function PlanTopicSection({
               value={draft}
               aria-label="Название темы"
               onChange={(e) => setDraft(e.target.value)}
-              onBlur={() => onCommitRename(draft)}
+              onBlur={() => commitRename(draft)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
-                  onCommitRename(draft);
+                  commitRename(draft);
                 }
-                if (e.key === "Escape") onCancelRename();
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  committedRef.current = true;
+                  onCancelRename();
+                }
               }}
             />
           ) : (

@@ -37,6 +37,12 @@ describe("groupSessionsByTopic", () => {
     expect(groups[0].topicKey).toBe("");
     expect(groups[0].indices).toEqual([0, 1]);
   });
+
+  it("keeps group ids stable when only the topic text changes", () => {
+    expect(groupSessionsByTopic([session("A")])[0].id).toBe(
+      groupSessionsByTopic([session("Алгебра")])[0].id,
+    );
+  });
 });
 
 describe("shouldShowTopicChrome", () => {

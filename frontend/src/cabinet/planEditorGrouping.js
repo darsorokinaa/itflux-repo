@@ -31,7 +31,7 @@ export function groupSessionsByTopic(sessions) {
       return;
     }
     groups.push({
-      id: `topic-${groups.length}-${topicKey || "empty"}`,
+      id: `topic-${index}`,
       topicKey,
       topic: topicKey,
       indices: [index],
