@@ -531,6 +531,56 @@ class InteractiveBoardApiTests(TestCase):
         )
         self.assertEqual(denied.status_code, 404)
 
+    def test_pdf_upload_and_protected_asset(self):
+        board = InteractiveBoard.objects.create(owner=self.teacher, title="PdfOk")
+        self._auth(self.teacher)
+        pdf = SimpleUploadedFile(
+            "konspekt.pdf",
+            b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n",
+            content_type="application/pdf",
+        )
+        res = self.client.post(
+            f"/api/cabinet/interactive-boards/{board.id}/upload-file/",
+            {"file": pdf},
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+        data = res.json()
+        self.assertEqual(data["mimeType"], "application/pdf")
+        self.assertTrue(data["dataURL"].startswith("/api/cabinet/interactive-boards/"))
+        self.assertEqual(data["originalName"], "konspekt.pdf")
+
+        asset = InteractiveBoardAsset.objects.get(pk=data["asset_id"])
+        self.assertEqual(asset.mime_type, "application/pdf")
+        dl = self.client.get(
+            f"/api/cabinet/interactive-boards/{board.id}/assets/{asset.id}/"
+        )
+        self.assertEqual(dl.status_code, 200)
+        self.assertEqual(dl["Content-Type"], "application/pdf")
+
+    def test_pdf_upload_rejects_non_pdf(self):
+        board = InteractiveBoard.objects.create(owner=self.teacher, title="PdfBad")
+        self._auth(self.teacher)
+        png = SimpleUploadedFile("dot.png", MINI_PNG, content_type="image/png")
+        res = self.client.post(
+            f"/api/cabinet/interactive-boards/{board.id}/upload-file/",
+            {"file": png},
+            format="multipart",
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json().get("code"), "FILE_TYPE_NOT_ALLOWED")
+
+    def test_pdf_upload_requires_edit(self):
+        board = InteractiveBoard.objects.create(owner=self.teacher, title="PdfDeny")
+        self._auth(self.other_teacher)
+        pdf = SimpleUploadedFile("x.pdf", b"%PDF-1.4\n%%EOF\n", content_type="application/pdf")
+        res = self.client.post(
+            f"/api/cabinet/interactive-boards/{board.id}/upload-file/",
+            {"file": pdf},
+            format="multipart",
+        )
+        self.assertIn(res.status_code, (403, 404))
+
     def test_svg_dataurl_in_scene_rejected(self):
         board = InteractiveBoard.objects.create(owner=self.teacher, title="SvgScene")
         self._auth(self.teacher)

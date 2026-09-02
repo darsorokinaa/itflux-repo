@@ -59,6 +59,7 @@ def _parse_optional_pk(value):
 
 MAX_SCENE_JSON_BYTES = 15 * 1024 * 1024
 MAX_BOARD_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_BOARD_PDF_BYTES = 20 * 1024 * 1024
 MAX_THUMBNAIL_CHARS = 200_000
 DEFAULT_BOARD_TITLE = "Новая доска"
 
@@ -435,6 +436,46 @@ def validate_board_image_upload(uploaded) -> None:
         )
 
 
+def detect_pdf_mime(content: bytes) -> str | None:
+    if content.startswith(b"%PDF"):
+        return "application/pdf"
+    return None
+
+
+def validate_board_pdf_bytes(content: bytes) -> str:
+    if len(content) > MAX_BOARD_PDF_BYTES:
+        raise UploadValidationError("PDF слишком большой (макс. 20 МБ)", "FILE_TOO_LARGE")
+    if not detect_pdf_mime(content):
+        raise UploadValidationError("Нужен файл в формате PDF", "FILE_TYPE_NOT_ALLOWED")
+    return "application/pdf"
+
+
+def validate_board_pdf_upload(uploaded) -> None:
+    if not uploaded:
+        raise UploadValidationError("Файл не передан", "FILE_REQUIRED")
+
+    size = getattr(uploaded, "size", None)
+    if size is not None and size > MAX_BOARD_PDF_BYTES:
+        raise UploadValidationError("PDF слишком большой (макс. 20 МБ)", "FILE_TOO_LARGE")
+
+    name = getattr(uploaded, "name", "") or "file"
+    ext = os.path.splitext(name)[1].lower()
+    if ext and ext != ".pdf":
+        raise UploadValidationError("Нужен файл в формате PDF", "FILE_TYPE_NOT_ALLOWED")
+
+    content_type = (getattr(uploaded, "content_type", "") or "").split(";", 1)[0].strip().lower()
+    if content_type and content_type not in ("application/pdf", "application/octet-stream", "binary/octet-stream"):
+        raise UploadValidationError("Нужен файл в формате PDF", "FILE_TYPE_NOT_ALLOWED")
+
+    pos = uploaded.tell() if hasattr(uploaded, "tell") else None
+    raw = uploaded.read(MAX_BOARD_PDF_BYTES + 1)
+    if hasattr(uploaded, "seek") and pos is not None:
+        uploaded.seek(pos)
+    elif hasattr(uploaded, "seek"):
+        uploaded.seek(0)
+    validate_board_pdf_bytes(raw)
+
+
 def board_asset_api_path(board_id, asset_id) -> str:
     return f"/api/cabinet/interactive-boards/{board_id}/assets/{asset_id}/"
 
@@ -461,7 +502,12 @@ def get_or_create_board_asset(
     if existing is not None:
         return existing, False
 
-    ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}.get(mime, ".bin")
+    ext = {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/webp": ".webp",
+        "application/pdf": ".pdf",
+    }.get(mime, ".bin")
     original_name = f"{file_id}{ext}"
     legacy = (
         InteractiveBoardAsset.objects.filter(
@@ -1495,6 +1541,58 @@ class InteractiveBoardViewSet(viewsets.ModelViewSet):
             "mimeType": mime,
             "dataURL": path,
             "url": path,
+            "created": int(asset.created_at.timestamp() * 1000),
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="upload-file")
+    def upload_file(self, request, id=None):
+        board = self.get_object()
+        perm = board.get_permission_for(request.user)
+        if perm not in ("owner", InteractiveBoardAccess.EDIT):
+            return Response(
+                {"detail": "Недостаточно прав для загрузки файлов."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        uploaded = request.FILES.get("file") or request.FILES.get("pdf")
+        try:
+            validate_board_pdf_upload(uploaded)
+        except UploadValidationError as exc:
+            return Response(
+                {"detail": exc.message, "code": exc.code},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        file_id = request.data.get("id") or str(uuid.uuid4())
+        raw = uploaded.read()
+        try:
+            mime = validate_board_pdf_bytes(raw)
+        except UploadValidationError as exc:
+            return Response(
+                {"detail": exc.message, "code": exc.code},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        original_name = getattr(uploaded, "name", "") or f"{file_id}.pdf"
+        asset, _created = get_or_create_board_asset(
+            board,
+            content=raw,
+            mime=mime,
+            file_id=str(file_id),
+            user=request.user,
+        )
+        if original_name and asset.original_name != original_name:
+            asset.original_name = original_name[:255]
+            asset.save(update_fields=["original_name"])
+        path = board_asset_api_path(board.id, asset.id)
+
+        return Response({
+            "id": file_id,
+            "asset_id": str(asset.id),
+            "mimeType": mime,
+            "dataURL": path,
+            "url": path,
+            "originalName": asset.original_name,
             "created": int(asset.created_at.timestamp() * 1000),
         }, status=status.HTTP_201_CREATED)
 

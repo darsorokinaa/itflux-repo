@@ -14,6 +14,7 @@ import {
   duplicateInteractiveBoard,
   fetchInteractiveBoard,
   updateInteractiveBoard,
+  uploadInteractiveBoardFile,
   uploadInteractiveBoardImage,
 } from "../../utils/cabinetAuth";
 import CabinetIcon from "../CabinetIcons";
@@ -109,6 +110,27 @@ import {
   prepareBoardImageFile,
   readCanvasAppState,
 } from "../boards/boardImageInsert";
+import { restoreImagesErasedByEraser } from "../boards/boardImageErase";
+import {
+  BOARD_PDF_INSERT_ERROR,
+  BOARD_PDF_UNPACK_ERROR,
+  ITFLUX_PDF_KEY,
+  MAX_BOARD_PDF_PAGES,
+  buildItfluxPdfMeta,
+  createBoardFrameElement,
+  dataTransferHasPdf,
+  fileLooksLikePdf,
+  fetchBoardPdfBlob,
+  filesFromDataTransfer,
+  findPackedPdfSelection,
+  frameRectAroundImage,
+  layoutUnpackedPages,
+  packedPdfFrameName,
+  pdfPageLabel,
+  withPackedPdfMeta,
+  type PackedPdfSelection,
+} from "../boards/boardPdf";
+import { closeBoardPdf, openBoardPdf, renderBoardPdfPage } from "../boards/boardPdfRender";
 import {
   createBoardLoadMetrics,
   logBoardMetrics,
@@ -361,6 +383,10 @@ export default function CabinetBoardEditorPage() {
   const [gridStyle, setGridStyle] = useState<BoardGridStyle>("none");
   const [boardTheme, setBoardTheme] = useState<"light" | "dark">("light");
   const [hasSelection, setHasSelection] = useState(false);
+  const [packedPdf, setPackedPdf] = useState<PackedPdfSelection | null>(null);
+  const packedPdfKeyRef = useRef("");
+  const pdfInputRef = useRef<HTMLInputElement | null>(null);
+  const [pdfBusy, setPdfBusy] = useState<"idle" | "adding" | "unpacking">("idle");
   const [collabPeers, setCollabPeers] = useState<CollabPeer[]>([]);
   const collabPeersRef = useRef<CollabPeer[]>([]);
   const [collabStatus, setCollabStatus] = useState<"off" | "connecting" | "open" | "closed" | "error" | "failed">("off");
@@ -440,6 +466,9 @@ export default function CabinetBoardEditorPage() {
   const imageUploadStatusRef = useRef<"idle" | "uploading" | "error">("idle");
   const insertingImageRef = useRef(false);
   const repairingImageRef = useRef(false);
+  /** updateScene после отката ластика — не крутим persist повторно. */
+  const restoringEraseRef = useRef(false);
+  const pendingEraseSceneRef = useRef<unknown[] | null>(null);
   const repairNewLocalImagesRef = useRef<
     ((
       images: Record<string, unknown>[],
@@ -1104,6 +1133,20 @@ export default function CabinetBoardEditorPage() {
       hadSelectionRef.current = selected;
     }
 
+    const elements = (
+      apiRef.current?.getSceneElements?.()
+      || latestSceneRef.current?.elements
+      || []
+    ) as unknown[];
+    const nextPdf = canEditRef.current
+      ? findPackedPdfSelection(elements, appState.selectedElementIds)
+      : null;
+    const pdfKey = nextPdf ? `${nextPdf.elementId}:${nextPdf.pdfAssetId}:${nextPdf.unpacked}` : "";
+    if (pdfKey !== packedPdfKeyRef.current) {
+      packedPdfKeyRef.current = pdfKey;
+      setPackedPdf(nextPdf);
+    }
+
     const nextTheme = appState.theme === "dark" ? "dark" : "light";
     if (nextTheme !== boardThemeRef.current) {
       setBoardTheme(nextTheme);
@@ -1363,12 +1406,37 @@ export default function CabinetBoardEditorPage() {
     slot.current = coalescePendingRemoteScene(slot.current, scene, meta);
   }, []);
 
+  const pushLocalEraseScene = useCallback((els: unknown[]) => {
+    if (isDrawingGestureRef.current) {
+      pendingEraseSceneRef.current = els;
+      return;
+    }
+    if (!apiRef.current) return;
+    restoringEraseRef.current = true;
+    try {
+      apiRef.current.updateScene?.({
+        elements: els,
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+    } finally {
+      restoringEraseRef.current = false;
+    }
+  }, []);
+
+  const flushPendingEraseScene = useCallback(() => {
+    const els = pendingEraseSceneRef.current;
+    if (!els) return;
+    pendingEraseSceneRef.current = null;
+    pushLocalEraseScene(els);
+  }, [pushLocalEraseScene]);
+
   const handleChange = useCallback(
     (elements: readonly unknown[], appState: Record<string, unknown>, files: Record<string, unknown>) => {
       syncPaperOverlay(appState);
       syncLeftPanels(appState);
       if (applyingCollaboratorsRef.current) return;
       if (applyingRemoteRef.current) return;
+      if (restoringEraseRef.current) return;
       if (!canEditRef.current || conflictRef.current) return;
 
       const toolType = String((appState.activeTool as { type?: string } | undefined)?.type || "");
@@ -1423,6 +1491,26 @@ export default function CabinetBoardEditorPage() {
         actorRole: viewerRoleRef.current,
         canManage: canManageRefLocal.current,
       });
+      const eraseFix = restoreImagesErasedByEraser(prevElements, nextElements, appState);
+      nextElements = eraseFix.elements;
+      const shouldPersist = !eraseFix.restored || isBoardPersistableChange({
+        prevVersionSum: lastElementsVersionSumRef.current,
+        nextVersionSum: boardElementsVersionSum(nextElements),
+        prevElementCount: lastElementsRef.current?.length || 0,
+        nextElementCount: nextElements.length,
+        prevRawFiles: files,
+        nextRawFiles: files,
+        prevBackground: latestSceneRef.current?.appState?.viewBackgroundColor,
+        nextBackground: nextBg,
+        prevGrid: latestSceneRef.current?.appState?.[GRID_STYLE_KEY],
+        nextGrid: gridStyleRef.current,
+        prevTheme: latestSceneRef.current?.appState?.theme,
+        nextTheme,
+      });
+      if (!shouldPersist) {
+        if (eraseFix.restored) pushLocalEraseScene(nextElements);
+        return;
+      }
       const incomingNewImages: Record<string, unknown>[] = [];
       for (const raw of nextElements) {
         const el = raw && typeof raw === "object" ? raw as { id?: string; type?: string; isDeleted?: boolean } : null;
@@ -1482,8 +1570,9 @@ export default function CabinetBoardEditorPage() {
       publishLiveScene(
         liveElements.length === nextElements.length ? scene : { ...scene, elements: liveElements },
       );
+      if (eraseFix.restored) pushLocalEraseScene(nextElements);
     },
-    [debouncedSaver, externalizeAndSyncFiles, markLocalSceneChange, publishLiveScene, safeSetSaveStatus, syncPaperOverlay, syncLeftPanels],
+    [debouncedSaver, externalizeAndSyncFiles, markLocalSceneChange, publishLiveScene, pushLocalEraseScene, safeSetSaveStatus, syncPaperOverlay, syncLeftPanels],
   );
 
   // Совместное редактирование с привязанным учеником (WebSocket live + REST persist).
@@ -2613,12 +2702,13 @@ export default function CabinetBoardEditorPage() {
       if (!isDrawingGestureRef.current) return;
       isDrawingGestureRef.current = false;
       flushPendingRemoteAppliesRef.current();
+      flushPendingEraseScene();
       collabRef.current?.flushLiveNow();
     };
     gestureEndBoundRef.current = endGesture;
     window.addEventListener("pointerup", endGesture);
     window.addEventListener("pointercancel", endGesture);
-  }, []);
+  }, [flushPendingEraseScene]);
 
   const handlePointerSceneUp = useCallback(() => {
     if (gestureEndBoundRef.current) {
@@ -2633,9 +2723,10 @@ export default function CabinetBoardEditorPage() {
     }
     isDrawingGestureRef.current = false;
     flushPendingRemoteAppliesRef.current();
+    flushPendingEraseScene();
     if (!collaborative && !canEdit) return;
     collabRef.current?.flushLiveNow();
-  }, [canEdit, collaborative]);
+  }, [canEdit, collaborative, flushPendingEraseScene]);
 
   const generateIdForFile = useCallback(async (_file: File) => {
     if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -2717,14 +2808,229 @@ export default function CabinetBoardEditorPage() {
     return true;
   }, [boardHostEl]);
 
+  const insertPackedPdfDocument = useCallback(async (
+    prepared: {
+      fileName: string;
+      fileType: string;
+      fileSize: number;
+      mimeType: string;
+      dataURL: string;
+      naturalWidth: number;
+      naturalHeight: number;
+      generatedFileId: string;
+    },
+    meta: ReturnType<typeof buildItfluxPdfMeta>,
+    offsetX = 0,
+  ): Promise<number> => {
+    const api = apiRef.current;
+    if (!api) return 0;
+    const host = boardHostEl();
+    const appState = await readCanvasAppState(api, host);
+    const place = placementForPreparedImage(prepared, appState, host);
+    place.x += offsetX;
+    if (!(place.width > 0) || !(place.height > 0) || !Number.isFinite(place.x) || !Number.isFinite(place.y)) {
+      return 0;
+    }
+    const frameId = crypto.randomUUID ? crypto.randomUUID() : `frame-${Date.now()}`;
+    const frameBox = frameRectAroundImage(place);
+    const frame = createBoardFrameElement({
+      id: frameId,
+      name: packedPdfFrameName(meta.fileName, meta.pageCount),
+      ...frameBox,
+    });
+    const element = createBoardImageElement({
+      fileId: prepared.generatedFileId,
+      x: place.x,
+      y: place.y,
+      width: place.width,
+      height: place.height,
+      frameId,
+      customData: { [ITFLUX_PDF_KEY]: meta },
+    });
+    api.addFiles?.([binaryFileDataOf(prepared)]);
+    const current = getLocalElementsForMerge(api, latestSceneRef.current?.elements);
+    api.updateScene?.({
+      elements: [...current, frame, element],
+      appState: {
+        selectedElementIds: { [frameId]: true, [String(element.id)]: true },
+      },
+    });
+    return frameBox.width + 40;
+  }, [boardHostEl]);
+
+  const insertPdfsFromFileList = useCallback(async (list: File[]) => {
+    if (!canEditRef.current || viewModeEnabled || !boardId || !list.length) return;
+    if (insertingImageRef.current) return;
+    insertingImageRef.current = true;
+    setPdfBusy("adding");
+    try {
+      let offsetX = 0;
+      for (const file of list) {
+        const opened = await openBoardPdf(file);
+        if (!opened.ok) {
+          showNotice(opened.message);
+          continue;
+        }
+        try {
+          const preview = await renderBoardPdfPage(opened.opened.doc, 1);
+          const prepared = await prepareBoardImageFile(preview.blob, { generateId: generateIdForFile });
+          if (!prepared.ok) {
+            showNotice(prepared.message);
+            continue;
+          }
+          const form = new FormData();
+          form.append("file", file, file.name || "document.pdf");
+          const uploaded = await uploadInteractiveBoardFile(boardId, form) as {
+            asset_id?: string;
+            url?: string;
+            dataURL?: string;
+          };
+          const pdfUrl = String(uploaded?.url || uploaded?.dataURL || "");
+          const pdfAssetId = String(uploaded?.asset_id || "");
+          if (!pdfUrl || !pdfAssetId) {
+            URL.revokeObjectURL(prepared.prepared.dataURL);
+            showNotice(BOARD_PDF_INSERT_ERROR);
+            continue;
+          }
+          const meta = buildItfluxPdfMeta({
+            fileName: file.name || "документ.pdf",
+            pageCount: opened.opened.pageCount,
+            pdfAssetId,
+            pdfUrl,
+          });
+          const step = await insertPackedPdfDocument(prepared.prepared, meta, offsetX);
+          if (!step) {
+            URL.revokeObjectURL(prepared.prepared.dataURL);
+            showNotice(BOARD_PDF_INSERT_ERROR);
+            continue;
+          }
+          offsetX += step;
+          if (opened.opened.truncated) {
+            showNotice(`Добавлены первые ${MAX_BOARD_PDF_PAGES} страниц`);
+          }
+        } finally {
+          await closeBoardPdf(opened.opened.doc);
+        }
+      }
+    } catch {
+      showNotice(BOARD_PDF_INSERT_ERROR);
+    } finally {
+      insertingImageRef.current = false;
+      setPdfBusy("idle");
+    }
+  }, [boardId, generateIdForFile, insertPackedPdfDocument, showNotice, viewModeEnabled]);
+
+  const unpackPackedPdf = useCallback(async (target?: PackedPdfSelection | null) => {
+    const packed = target || packedPdf;
+    if (!packed || !canEditRef.current || viewModeEnabled || insertingImageRef.current) return;
+    if (packed.pageCount <= 1) {
+      showNotice("В этом PDF одна страница");
+      return;
+    }
+    insertingImageRef.current = true;
+    setPdfBusy("unpacking");
+    let doc: Awaited<ReturnType<typeof openBoardPdf>> | null = null;
+    try {
+      const blob = await fetchBoardPdfBlob(packed.pdfUrl);
+      const opened = await openBoardPdf(blob);
+      doc = opened;
+      if (!opened.ok) {
+        showNotice(opened.message);
+        return;
+      }
+      const api = apiRef.current;
+      if (!api) return;
+      const host = boardHostEl();
+      const appState = await readCanvasAppState(api, host);
+      const current = getLocalElementsForMerge(api, latestSceneRef.current?.elements);
+      const packedEl = current.find((raw) => {
+        const el = raw && typeof raw === "object" ? raw as { id?: string } : null;
+        return el && String(el.id) === packed.elementId;
+      }) as Record<string, unknown> | undefined;
+      const targetH = Math.max(80, Number(packedEl?.height) || packed.origin.height);
+      const pages: Array<{ prepared: Parameters<typeof binaryFileDataOf>[0]; width: number; height: number }> = [];
+      for (let page = 1; page <= opened.opened.pageCount; page += 1) {
+        const rendered = await renderBoardPdfPage(opened.opened.doc, page);
+        const prepared = await prepareBoardImageFile(rendered.blob, { generateId: generateIdForFile });
+        if (!prepared.ok) {
+          showNotice(prepared.message);
+          continue;
+        }
+        const scale = targetH / Math.max(1, prepared.prepared.naturalHeight);
+        pages.push({
+          prepared: prepared.prepared,
+          width: Math.max(1, prepared.prepared.naturalWidth * scale),
+          height: Math.max(1, prepared.prepared.naturalHeight * scale),
+        });
+      }
+      if (!pages.length) {
+        showNotice(BOARD_PDF_UNPACK_ERROR);
+        return;
+      }
+      const rects = layoutUnpackedPages(
+        pages.map((page) => ({ width: page.width, height: page.height })),
+        packed.origin,
+        { columns: Math.min(4, pages.length) },
+      );
+      const files = pages.map((page) => binaryFileDataOf(page.prepared));
+      const elements = pages.map((page, index) => createBoardImageElement({
+        fileId: page.prepared.generatedFileId,
+        x: rects[index].x,
+        y: rects[index].y,
+        width: rects[index].width,
+        height: rects[index].height,
+        customData: {
+          [ITFLUX_PDF_KEY]: {
+            fileName: packed.fileName,
+            pageCount: packed.pageCount,
+            pdfAssetId: packed.pdfAssetId,
+            pdfUrl: packed.pdfUrl,
+            unpacked: true,
+            page: index + 1,
+          },
+        },
+      }));
+      const selected: Record<string, true> = {};
+      for (const el of elements) selected[String(el.id)] = true;
+      const nextElements = current.map((raw) => {
+        const el = raw && typeof raw === "object" ? raw as Record<string, unknown> : null;
+        if (!el || String(el.id) !== packed.elementId) return raw;
+        return withPackedPdfMeta(el, buildItfluxPdfMeta({
+          fileName: packed.fileName,
+          pageCount: packed.pageCount,
+          pdfAssetId: packed.pdfAssetId,
+          pdfUrl: packed.pdfUrl,
+          unpacked: true,
+        }));
+      });
+      api.addFiles?.(files);
+      api.updateScene?.({
+        elements: [...nextElements, ...elements],
+        appState: { selectedElementIds: selected },
+      });
+      packedPdfKeyRef.current = `${packed.elementId}:${packed.pdfAssetId}:true`;
+      setPackedPdf({ ...packed, unpacked: true });
+    } catch {
+      showNotice(BOARD_PDF_UNPACK_ERROR);
+    } finally {
+      if (doc && doc.ok) await closeBoardPdf(doc.opened.doc);
+      insertingImageRef.current = false;
+      setPdfBusy("idle");
+    }
+  }, [boardHostEl, generateIdForFile, packedPdf, showNotice, viewModeEnabled]);
+
   const insertImagesFromFileList = useCallback(async (list: File[]) => {
     if (!canEditRef.current || viewModeEnabled || !list.length) return;
     if (insertingImageRef.current) return;
+    const pdfs = list.filter((file) => fileLooksLikePdf(file));
+    const images = list.filter((file) => !fileLooksLikePdf(file));
+    if (pdfs.length) await insertPdfsFromFileList(pdfs);
+    if (!images.length) return;
     insertingImageRef.current = true;
     try {
       const cloned: File[] = [];
       try {
-        for (const file of list) {
+        for (const file of images) {
           const buf = await file.arrayBuffer();
           cloned.push(new File([buf], file.name || "image", {
             type: file.type,
@@ -2758,7 +3064,7 @@ export default function CabinetBoardEditorPage() {
     } finally {
       insertingImageRef.current = false;
     }
-  }, [generateIdForFile, insertPreparedImage, showNotice, viewModeEnabled]);
+  }, [generateIdForFile, insertPdfsFromFileList, insertPreparedImage, showNotice, viewModeEnabled]);
 
   const repairNewLocalImages = useCallback(async (
     images: Record<string, unknown>[],
@@ -2850,6 +3156,52 @@ export default function CabinetBoardEditorPage() {
     document.addEventListener("change", onFileChange, true);
     return () => document.removeEventListener("change", onFileChange, true);
   }, [insertImagesFromFileList, viewModeEnabled]);
+
+  useEffect(() => {
+    if (viewModeEnabled) return undefined;
+
+    const onBoardCanvas = (event: Event) => {
+      const target = event.target as HTMLElement | null;
+      return Boolean(target?.closest?.(".cb-board-editor__canvas"));
+    };
+    const onDragOver = (event: DragEvent) => {
+      if (!onBoardCanvas(event) || !dataTransferHasPdf(event.dataTransfer)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    };
+    const onDrop = (event: DragEvent) => {
+      if (!onBoardCanvas(event)) return;
+      const files = filesFromDataTransfer(event.dataTransfer);
+      const pdfs = files.filter((file) => fileLooksLikePdf(file));
+      if (!pdfs.length) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const images = files.filter((file) => !fileLooksLikePdf(file));
+      void insertImagesFromFileList([...pdfs, ...images]);
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      const files = event.clipboardData?.files ? Array.from(event.clipboardData.files) : [];
+      const pdfs = files.filter((file) => fileLooksLikePdf(file));
+      if (!pdfs.length) return;
+      if (!onBoardCanvas(event) && document.activeElement !== document.body) {
+        const active = document.activeElement as HTMLElement | null;
+        if (active && !active.closest?.(".cb-board-editor")) return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      void insertPdfsFromFileList(pdfs);
+    };
+
+    document.addEventListener("dragover", onDragOver, true);
+    document.addEventListener("drop", onDrop, true);
+    document.addEventListener("paste", onPaste, true);
+    return () => {
+      document.removeEventListener("dragover", onDragOver, true);
+      document.removeEventListener("drop", onDrop, true);
+      document.removeEventListener("paste", onPaste, true);
+    };
+  }, [insertImagesFromFileList, insertPdfsFromFileList, viewModeEnabled]);
 
   const handleApiReady = useCallback((api: ExcalidrawAPI) => {
     apiRef.current = api;
@@ -3071,7 +3423,21 @@ export default function CabinetBoardEditorPage() {
     apiRef.current?.updateScene?.({ appState: { selectedElementIds: {} } });
     hadSelectionRef.current = false;
     setHasSelection(false);
+    packedPdfKeyRef.current = "";
+    setPackedPdf(null);
     setBurgerOpen(true);
+  };
+
+  const openPdfPicker = () => {
+    setMoreOpen(false);
+    const input = pdfInputRef.current;
+    if (!input) return;
+    try {
+      input.value = "";
+    } catch {
+      /* ignore */
+    }
+    input.click();
   };
 
   const handleTitleChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -3418,6 +3784,11 @@ export default function CabinetBoardEditorPage() {
                   </button>
                 ) : null}
                 {canEdit ? (
+                  <button type="button" onClick={openPdfPicker}>
+                    Добавить PDF
+                  </button>
+                ) : null}
+                {canEdit ? (
                   <button type="button" onClick={() => { setMoreOpen(false); requestClear(); }}>
                     Очистить доску
                   </button>
@@ -3552,6 +3923,24 @@ export default function CabinetBoardEditorPage() {
           ) : null}
         </div>
 
+        {canEdit && packedPdf && packedPdf.pageCount > 1 && !packedPdf.unpacked ? (
+          <div className="cb-board-pdf-action" role="region" aria-label="PDF на доске">
+            <span className="cb-board-pdf-action__meta">
+              {packedPdf.fileName}
+              {" · "}
+              {pdfPageLabel(packedPdf.pageCount)}
+            </span>
+            <button
+              type="button"
+              className="cb-board-pdf-action__btn"
+              disabled={pdfBusy !== "idle"}
+              onClick={() => { void unpackPackedPdf(packedPdf); }}
+            >
+              {pdfBusy === "unpacking" ? "Распаковываем…" : "Распаковать по страницам"}
+            </button>
+          </div>
+        ) : null}
+
         {collaborative && collabPeople.length > 0 ? (
           <BoardCollabControls
             people={collabPeople}
@@ -3580,6 +3969,7 @@ export default function CabinetBoardEditorPage() {
           onPointerSceneUp={handlePointerSceneUp}
           onScrollChange={handleScrollChange}
           generateIdForFile={generateIdForFile}
+          onInsertPdf={canEdit ? openPdfPicker : undefined}
         />
       </div>
 
@@ -3601,6 +3991,12 @@ export default function CabinetBoardEditorPage() {
           </button>
         </div>
       ) : null}
+      {pdfBusy === "adding" ? (
+        <div className="cb-soon-toast" role="status">Добавляем PDF…</div>
+      ) : null}
+      {pdfBusy === "unpacking" ? (
+        <div className="cb-soon-toast" role="status">Распаковываем страницы…</div>
+      ) : null}
       {imageUploadStatus === "uploading" ? (
         <div className="cb-soon-toast" role="status">Загрузка изображения…</div>
       ) : null}
@@ -3611,10 +4007,19 @@ export default function CabinetBoardEditorPage() {
       {/* Скрытый input: e2e/setInputFiles и наш capture-listener на document. */}
       <input
         type="file"
-        accept="image/png,image/jpeg,image/jpg,image/webp,image/heic,image/heif,.png,.jpg,.jpeg,.webp,.heic,.heif"
+        accept="image/png,image/jpeg,image/jpg,image/webp,image/heic,image/heif,.png,.jpg,.jpeg,.webp,.heic,.heif,.pdf,application/pdf"
         data-testid="board-image-input"
         style={{ display: "none" }}
         aria-hidden="true"
+      />
+      <input
+        ref={pdfInputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        data-testid="board-pdf-input"
+        style={{ display: "none" }}
+        aria-hidden="true"
+        multiple
       />
 
       {accessOpen ? (

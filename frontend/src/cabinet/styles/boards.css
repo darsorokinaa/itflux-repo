@@ -1021,6 +1021,37 @@ html.cb-board-editor-open body {
   }
 }
 
+.cb-board-editor .cb-board-pdf-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-on-surface, inherit);
+  cursor: pointer;
+}
+
+.cb-board-editor .cb-board-pdf-tool .ToolIcon__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--default-button-size, 2.25rem);
+  height: var(--default-button-size, 2.25rem);
+}
+
+.cb-board-editor .cb-board-pdf-tool svg {
+  width: var(--default-icon-size, 1.25rem);
+  height: var(--default-icon-size, 1.25rem);
+}
+
+.cb-board-editor .cb-board-pdf-tool:hover .ToolIcon__icon,
+.cb-board-editor .cb-board-pdf-tool:focus-visible .ToolIcon__icon {
+  background: var(--button-hover-bg, rgba(0, 0, 0, 0.06));
+  border-radius: 0.45rem;
+}
+
 /* Библиотека Excalidraw (кнопка справа сверху) */
 .cb-board-editor .default-sidebar-trigger {
   display: inline-flex !important;
@@ -1636,6 +1667,16 @@ html.cb-board-editor-open body {
   .cb-board-editor .layer-ui__wrapper {
     overflow: visible;
   }
+
+  .cb-board-pdf-action {
+    bottom: 72px;
+    max-width: calc(100vw - 16px);
+    padding: 0.4rem 0.45rem 0.4rem 0.7rem;
+  }
+
+  .cb-board-pdf-action__btn {
+    padding: 0.45rem 0.65rem;
+  }
 }
 
 @media (min-width: 769px) {
@@ -1742,16 +1783,74 @@ html.cb-board-editor-open body {
   top: calc(48px + env(safe-area-inset-top, 0px) + 6px);
 }
 
+.cb-board-pdf-action {
+  position: absolute;
+  left: 50%;
+  bottom: 58px;
+  transform: translateX(-50%);
+  z-index: 14;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  max-width: min(92vw, 520px);
+  padding: 0.45rem 0.5rem 0.45rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--cb-board-text) 12%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--cb-board-surface) 94%, transparent);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
+  pointer-events: auto;
+}
+
+.cb-board-pdf-action__meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cb-board-text);
+  font-size: 0.82rem;
+}
+
+.cb-board-pdf-action__btn {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.7rem;
+  border: 0;
+  border-radius: 9px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.cb-board-pdf-action__btn:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.cb-board-pdf-action__btn:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.cb-board-editor--dark .cb-board-pdf-action {
+  background: color-mix(in srgb, #1e293b 92%, transparent);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
 .cb-board-collab-ui {
   position: absolute;
   top: 10px;
-  right: 10px;
+  /* Кнопка библиотеки Excalidraw — правый верх (~36–44px + отступ). */
+  right: 58px;
   z-index: 12;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
   pointer-events: none;
+}
+
+/* Открытая библиотека — не перекрывать панель, иначе клик по аватару закрывает её. */
+.cb-board-editor:has(.excalidraw .sidebar) .cb-board-collab-ui {
+  right: min(318px, calc(100% - 56px));
 }
 
 .cb-board-collab-ui > * {
@@ -1905,8 +2004,14 @@ html.cb-board-editor-open body {
 @media (max-width: 768px), (max-height: 600px) and (orientation: landscape) {
   .cb-board-collab-ui {
     top: 6px;
-    right: 6px;
+    right: 54px;
     gap: 6px;
+  }
+
+  .cb-board-editor:has(.excalidraw .sidebar) .cb-board-collab-ui {
+    right: auto;
+    left: 52px;
+    align-items: flex-start;
   }
 
   .cb-board-follow-chip {

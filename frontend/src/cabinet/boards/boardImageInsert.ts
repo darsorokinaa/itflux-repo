@@ -58,7 +58,15 @@ export function isBoardImageFileInput(input: EventTarget | null): input is HTMLI
   if (accept.includes(".excalidraw") || accept.includes("application/json")) {
     if (!accept.includes("image")) return false;
   }
-  if (accept.includes("image") || accept.includes(".png") || accept.includes(".jp") || accept.includes(".webp") || accept.includes(".heic")) {
+  if (
+    accept.includes("image")
+    || accept.includes(".png")
+    || accept.includes(".jp")
+    || accept.includes(".webp")
+    || accept.includes(".heic")
+    || accept.includes(".pdf")
+    || accept.includes("application/pdf")
+  ) {
     return true;
   }
   const files = input.files;
@@ -236,6 +244,8 @@ export function createBoardImageElement(opts: {
   y: number;
   width: number;
   height: number;
+  frameId?: string | null;
+  customData?: Record<string, unknown>;
 }): Record<string, unknown> {
   const now = Date.now();
   return {
@@ -254,7 +264,7 @@ export function createBoardImageElement(opts: {
     roughness: 0,
     opacity: 100,
     groupIds: [],
-    frameId: null,
+    frameId: opts.frameId ?? null,
     roundness: null,
     seed: Math.floor(Math.random() * 2 ** 31),
     version: 1,
@@ -267,6 +277,7 @@ export function createBoardImageElement(opts: {
     status: "saved",
     fileId: opts.fileId,
     scale: [1, 1],
+    ...(opts.customData ? { customData: opts.customData } : {}),
   };
 }
 

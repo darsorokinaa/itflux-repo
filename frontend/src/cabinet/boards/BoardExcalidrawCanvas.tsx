@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Excalidraw, useHandleLibrary } from "@excalidraw/excalidraw";
 import { boardLibraryAdapter } from "./boardLibrary";
+import { mountBoardPdfToolbar } from "./boardPdfToolbar";
 
 type SceneFiles = Record<string, unknown>;
 
@@ -45,6 +46,8 @@ type Props = {
   generateIdForFile?: (file: File) => string | Promise<string>;
   /** Вызывается, когда контейнер имеет ненулевой размер и API готов. */
   onHostReady?: () => void;
+  /** Кнопка PDF в тулбаре. */
+  onInsertPdf?: () => void;
 };
 
 const UI_OPTIONS = {
@@ -77,6 +80,7 @@ function BoardExcalidrawInner({
   onScrollChangeRef,
   generateIdForFileRef,
   onHostReadyRef,
+  onInsertPdfRef,
 }: {
   boot: {
     initialElements: unknown[];
@@ -92,6 +96,7 @@ function BoardExcalidrawInner({
   onScrollChangeRef: MutableRefObject<Props["onScrollChange"]>;
   generateIdForFileRef: MutableRefObject<Props["generateIdForFile"]>;
   onHostReadyRef: MutableRefObject<Props["onHostReady"]>;
+  onInsertPdfRef: MutableRefObject<Props["onInsertPdf"]>;
 }) {
   const [api, setApi] = useState<ExcalidrawAPI | null>(null);
   const apiRef = useRef<ExcalidrawAPI | null>(null);
@@ -164,6 +169,15 @@ function BoardExcalidrawInner({
       timers.forEach((id) => window.clearTimeout(id));
     };
   }, [api, onHostReadyRef]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || boot.viewModeEnabled) return undefined;
+    return mountBoardPdfToolbar(host, {
+      enabled: true,
+      onClick: () => onInsertPdfRef.current?.(),
+    });
+  }, [api, boot.viewModeEnabled, onInsertPdfRef]);
 
   const libraryReturnUrl =
     typeof window !== "undefined"
@@ -312,6 +326,7 @@ const ExcalidrawHost = memo(
     onScrollChangeRef: MutableRefObject<Props["onScrollChange"]>;
     generateIdForFileRef: MutableRefObject<Props["generateIdForFile"]>;
     onHostReadyRef: MutableRefObject<Props["onHostReady"]>;
+    onInsertPdfRef: MutableRefObject<Props["onInsertPdf"]>;
   }) {
     return <BoardExcalidrawInner {...props} />;
   },
@@ -331,6 +346,7 @@ function BoardExcalidrawCanvas({
   onScrollChange,
   generateIdForFile,
   onHostReady,
+  onInsertPdf,
 }: Props) {
   const onChangeRef = useRef(onChange);
   const onApiReadyRef = useRef(onApiReady);
@@ -340,6 +356,7 @@ function BoardExcalidrawCanvas({
   const onScrollChangeRef = useRef(onScrollChange);
   const generateIdForFileRef = useRef(generateIdForFile);
   const onHostReadyRef = useRef(onHostReady);
+  const onInsertPdfRef = useRef(onInsertPdf);
   onChangeRef.current = onChange;
   onApiReadyRef.current = onApiReady;
   onPointerSceneMoveRef.current = onPointerSceneMove;
@@ -348,6 +365,7 @@ function BoardExcalidrawCanvas({
   onScrollChangeRef.current = onScrollChange;
   generateIdForFileRef.current = generateIdForFile;
   onHostReadyRef.current = onHostReady;
+  onInsertPdfRef.current = onInsertPdf;
 
   const boot = useRef({
     initialElements,
@@ -367,6 +385,7 @@ function BoardExcalidrawCanvas({
       onScrollChangeRef={onScrollChangeRef}
       generateIdForFileRef={generateIdForFileRef}
       onHostReadyRef={onHostReadyRef}
+      onInsertPdfRef={onInsertPdfRef}
     />
   );
 }

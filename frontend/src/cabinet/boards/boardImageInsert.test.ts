@@ -3,6 +3,7 @@ import {
   BOARD_IMAGE_FORMAT_ERROR,
   createBoardImageElement,
   imageElementNeedsViewportFix,
+  isBoardImageFileInput,
   patchedImageInViewport,
   prepareBoardImageFile,
 } from "./boardImageInsert";
@@ -21,6 +22,21 @@ describe("boardImageInsert", () => {
     expect(el.width).toBe(100);
     expect(el.height).toBe(50);
     expect(el.status).toBe("saved");
+    expect(el.frameId).toBeNull();
+  });
+
+  it("createBoardImageElement сохраняет frameId и customData", () => {
+    const el = createBoardImageElement({
+      fileId: "f2",
+      x: 0,
+      y: 0,
+      width: 10,
+      height: 10,
+      frameId: "fr1",
+      customData: { itfluxPdf: { fileName: "a.pdf" } },
+    });
+    expect(el.frameId).toBe("fr1");
+    expect(el.customData).toEqual({ itfluxPdf: { fileName: "a.pdf" } });
   });
 
   it("imageElementNeedsViewportFix ловит 0×0 и координаты вне viewport", () => {
@@ -63,6 +79,13 @@ describe("boardImageInsert", () => {
     expect(next.y).toBe(-50 + (100 - 20) / 2);
     expect(next.width).toBe(40);
     expect(next.height).toBe(20);
+  });
+
+  it("isBoardImageFileInput принимает скрытый input с PDF", () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/png,.pdf,application/pdf";
+    expect(isBoardImageFileInput(input)).toBe(true);
   });
 
   it("prepareBoardImageFile отклоняет пустой файл и неизвестный формат", async () => {

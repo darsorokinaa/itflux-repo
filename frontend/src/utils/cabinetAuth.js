@@ -1297,6 +1297,10 @@ export function uploadInteractiveBoardImage(id, formData) {
   return cabinetFetchMultipart(`/interactive-boards/${id}/upload-image/`, formData);
 }
 
+export function uploadInteractiveBoardFile(id, formData) {
+  return cabinetFetchMultipart(`/interactive-boards/${id}/upload-file/`, formData);
+}
+
 export function fetchStudentInteractiveBoards() {
   return cabinetFetch("/student/interactive-boards/", { method: "GET" });
 }
