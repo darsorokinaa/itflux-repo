@@ -281,6 +281,48 @@ def check_conflicts(
         if group_events.exists():
             conflicts.append({"type": "group", "events": list(group_events.values("id", "title", "starts_at"))})
 
+    # Permanent self-booked weekday slots must block teacher create/move as well.
+    try:
+        from .availability_models import TeacherBooking
+        from .availability_service import booking_occupies_weekday_time, teacher_timezone
+
+        tz = teacher_timezone(teacher)
+        local_start = starts_at.astimezone(tz) if timezone.is_aware(starts_at) else starts_at
+        local_end = ends_at.astimezone(tz) if timezone.is_aware(ends_at) else ends_at
+        exclude_series_ids = set()
+        if excluded_ids:
+            exclude_series_ids = set(
+                ScheduleEvent.objects.filter(pk__in=excluded_ids)
+                .exclude(series_id=None)
+                .values_list("series_id", flat=True)
+            )
+        bookings = TeacherBooking.objects.filter(
+            teacher=teacher,
+            weekday=local_start.weekday(),
+            status=TeacherBooking.Status.ACTIVE,
+        )
+        if exclude_series_ids:
+            bookings = bookings.exclude(series_id__in=exclude_series_ids)
+        for booking in bookings:
+            if booking_occupies_weekday_time(
+                booking,
+                local_start.weekday(),
+                local_start.time().replace(second=0, microsecond=0),
+                local_end.time().replace(second=0, microsecond=0),
+            ):
+                conflicts.append({
+                    "type": "booking",
+                    "events": [{
+                        "id": booking.pk,
+                        "title": "Постоянная запись ученика",
+                        "starts_at": starts_at.isoformat() if hasattr(starts_at, "isoformat") else starts_at,
+                    }],
+                })
+                break
+    except Exception:
+        # Conflict checks must never crash create/move; booking path has its own guards.
+        pass
+
     return conflicts
 
 
@@ -474,7 +516,7 @@ def create_series(
 
     date_to = timezone.localdate() + timedelta(days=DEFAULT_HORIZON_DAYS)
     if series.recurrence_until:
-        date_to = min(date_to, series.recurrence_until)
+        date_to = max(date_to, series.recurrence_until)
 
     events = generate_events_for_series(series, series.start_date, date_to)
 
@@ -782,6 +824,17 @@ def cancel_series(series, *, changed_by, from_date=None, notify=True, plan_cance
         )
     series.status = SeriesStatus.CANCELLED
     series.save(update_fields=["status", "updated_at"])
+    # Free permanent self-booking lock so the weekday slot can be taken again.
+    from .availability_models import TeacherBooking
+
+    TeacherBooking.objects.filter(
+        series=series,
+        status=TeacherBooking.Status.ACTIVE,
+    ).update(
+        status=TeacherBooking.Status.CANCELLED,
+        cancelled_at=timezone.now(),
+        cancelled_by=changed_by if getattr(changed_by, "pk", None) else None,
+    )
     if notify and events:
         skip_user_id = changed_by.pk if changed_by else None
         NotificationService.notify_event_cancelled(

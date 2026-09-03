@@ -62,7 +62,8 @@
     grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-areas:
       "today period nav"
-      "views views views";
+      "views views views"
+      "tools tools tools";
     gap: 8px 8px;
     padding: 0;
     margin: 0;
@@ -73,12 +74,14 @@
   }
 
   .cb-sch-toolbar__left,
-  .cb-sch-toolbar__right {
+  .cb-sch-toolbar__right,
+  .cb-sch-toolbar__row {
     display: contents;
   }
 
   .cb-sch-toolbar__title,
   .cb-sch-toolbar__account,
+  .cb-sch-toolbar__sep,
   .cb-btn.cb-sch-btn--add,
   .cb-btn--primary.cb-sch-btn--add {
     display: none !important;
@@ -169,6 +172,34 @@
 
   .cb-sch-view-btn:hover:not(.cb-sch-view-btn--active) {
     background: rgba(255, 255, 255, 0.55);
+  }
+
+  .cb-sch-toolbar__tools {
+    grid-area: tools;
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .cb-sch-tool-btn {
+    min-height: 36px;
+    padding: 0 10px;
+    border-radius: 10px;
+  }
+
+  .cb-sch-booking-tools {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .cb-sch-booking-tools__status {
+    width: 100%;
+    font-size: 0.8125rem;
   }
 
   /* —— List —— */
@@ -344,7 +375,8 @@
     grid-template-areas:
       "today nav nav"
       "period period period"
-      "views views views";
+      "views views views"
+      "tools tools tools";
   }
 
   .cb-sch-toolbar__period {

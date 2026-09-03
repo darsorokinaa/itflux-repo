@@ -42,6 +42,11 @@ function formatDayHeading(iso) {
   return `${capitalize(weekday)}, ${rest}`;
 }
 
+function formatLongDate(iso) {
+  if (!iso) return "";
+  return parseDay(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+}
+
 function formatMonthLabel(year, month) {
   const raw = new Date(year, month, 1).toLocaleDateString("ru-RU", {
     month: "long",
@@ -218,12 +223,25 @@ export default function TeacherBookingPage() {
   }
 
   if (!page) {
+    const unavailableLead =
+      !error || /не найдена|не действует|не удалось загрузить/i.test(error)
+        ? "Похоже, эта ссылка больше не действует. Попросите актуальную ссылку у преподавателя."
+        : error;
+
     return (
-      <div className="cb-booking-page">
-        <header className="cb-booking-header">
-          <h1>Запись недоступна</h1>
-          <p>{error || "Ссылка не найдена или больше не действует."}</p>
-        </header>
+      <div className="cb-booking-page cb-booking-page--state">
+        <div className="cb-booking-state" role="status">
+          <div className="cb-booking-state__icon" aria-hidden="true">
+            <CabinetIcon name="link" />
+          </div>
+          <h1 className="cb-booking-state__title">Запись недоступна</h1>
+          <p className="cb-booking-state__text">{unavailableLead}</p>
+          <div className="cb-booking-state__actions">
+            <Link className="cb-booking-state__cta" to="/">
+              На главную
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
@@ -255,7 +273,7 @@ export default function TeacherBookingPage() {
         <div className="cb-booking-teacher__info">
           <h2>{teacherName}</h2>
           {page.date_from && page.date_to ? (
-            <p>Запись доступна с {new Date(page.date_from).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })} по {new Date(page.date_to).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}</p>
+            <p>Запись доступна с {formatLongDate(page.date_from)} по {formatLongDate(page.date_to)}</p>
           ) : null}
         </div>
       </div>

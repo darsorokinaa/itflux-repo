@@ -105,6 +105,7 @@ from .serializers import (
     LessonWriteSerializer,
     MaterialDetailSerializer,
     MaterialListSerializer,
+    MaterialTitleUpdateSerializer,
     MaterialWriteSerializer,
     ReviewItemSerializer,
     ScheduleEventSerializer,
@@ -2619,8 +2620,11 @@ class MaterialViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
+    mixins.UpdateModelMixin,
     viewsets.GenericViewSet,
 ):
+    http_method_names = ["get", "post", "patch", "head", "options"]
+
     def get_queryset(self):
         teacher = self.get_teacher()
         qs = Material.objects.filter(
@@ -2641,6 +2645,8 @@ class MaterialViewSet(
     def get_serializer_class(self):
         if self.action == "create":
             return MaterialWriteSerializer
+        if self.action in ("update", "partial_update"):
+            return MaterialTitleUpdateSerializer
         if self.action == "retrieve":
             return MaterialDetailSerializer
         return MaterialListSerializer
@@ -2649,6 +2655,15 @@ class MaterialViewSet(
         ctx = super().get_serializer_context()
         ctx["teacher"] = self.get_teacher()
         return ctx
+
+    def get_object(self):
+        obj = super().get_object()
+        if self.action in ("update", "partial_update"):
+            teacher = self.get_teacher()
+            if obj.teacher_id != teacher.id and getattr(obj, "owner_id", None) != teacher.id:
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied("Можно переименовывать только свои материалы.")
+        return obj
 
     def retrieve(self, request, *args, **kwargs):
         from .subscription_access import AccessDenied, SubscriptionAccessService
@@ -2663,6 +2678,10 @@ class MaterialViewSet(
 
     def perform_create(self, serializer):
         serializer.save(teacher=self.get_teacher())
+
+    def update(self, request, *args, **kwargs):
+        kwargs["partial"] = True
+        return super().update(request, *args, **kwargs)
 
     def _serve_material_file(self, request, *, inline: bool):
         import mimetypes

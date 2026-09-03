@@ -1379,6 +1379,13 @@ export function fetchMaterial(id) {
   return cabinetFetch(`/materials/${encodeURIComponent(id)}/`, { method: "GET" });
 }
 
+export function updateMaterial(id, payload) {
+  return cabinetFetch(`/materials/${encodeURIComponent(id)}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function fetchReadyLesson(slug) {
   const res = await fetch(`/api/lessons/${encodeURIComponent(slug)}/`, {
     credentials: "same-origin",

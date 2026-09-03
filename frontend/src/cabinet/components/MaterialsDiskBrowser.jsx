@@ -128,6 +128,7 @@ export default function MaterialsDiskBrowser({
   onOpenFile,
   onCreateFolder,
   onRenameFolder,
+  onRenameFile,
   onDeleteFolder,
   onMove,
   fileMenuItems,
@@ -229,6 +230,8 @@ export default function MaterialsDiskBrowser({
       await onCreateFolder?.({ name, parentId: folderId });
     } else if (folderModal?.mode === "rename" && folderModal.folder) {
       await onRenameFolder?.(folderModal.folder, { name });
+    } else if (folderModal?.mode === "rename-file" && folderModal.file) {
+      await onRenameFile?.(folderModal.file, { name });
     }
     setFolderModal(null);
     setFolderName("");
@@ -376,7 +379,7 @@ export default function MaterialsDiskBrowser({
                   <div className="cb-files__name">{item.name || item.title}</div>
                   <div className="cb-files__sub">{itemSubtitle(item)}</div>
                 </div>
-                {canOrganize || menuItems.length ? (
+                {canOrganize || menuItems.length || onRenameFile ? (
                   <div className="cb-files__row-actions">
                     <button
                       type="button"
@@ -445,10 +448,24 @@ export default function MaterialsDiskBrowser({
           </div>
         ) : (
           <>
-            {menu?.menuItems?.length ? (
-              <div className="cb-files__menu-group">
-                <p className="cb-files__menu-title">Материал</p>
-                {menu.menuItems.map((action) => (
+            <div className="cb-files__menu-group">
+              <p className="cb-files__menu-title">Материал</p>
+              {onRenameFile
+                && !["interactive", "board", "homework"].includes(String(menu?.item?.type || ""))
+                ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFolderModal({ mode: "rename-file", file: menu.item });
+                    setFolderName(menu.item.name || menu.item.title || "");
+                    setMenu(null);
+                  }}
+                >
+                  Переименовать
+                </button>
+              ) : null}
+              {menu?.menuItems?.length ? (
+                menu.menuItems.map((action) => (
                   <button
                     key={action.label}
                     type="button"
@@ -459,11 +476,8 @@ export default function MaterialsDiskBrowser({
                   >
                     {action.label}
                   </button>
-                ))}
-              </div>
-            ) : (
-              <div className="cb-files__menu-group">
-                <p className="cb-files__menu-title">Материал</p>
+                ))
+              ) : (
                 <button
                   type="button"
                   onClick={() => {
@@ -473,8 +487,8 @@ export default function MaterialsDiskBrowser({
                 >
                   Открыть
                 </button>
-              </div>
-            )}
+              )}
+            </div>
             {canOrganize && menu?.item?.folder_id ? (
               <div className="cb-files__menu-group">
                 <p className="cb-files__menu-title">Папка</p>
@@ -495,7 +509,13 @@ export default function MaterialsDiskBrowser({
 
       {folderModal ? (
         <CabinetModal
-          title={folderModal.mode === "rename" ? "Переименовать папку" : "Новая папка"}
+          title={
+            folderModal.mode === "rename"
+              ? "Переименовать папку"
+              : folderModal.mode === "rename-file"
+                ? "Переименовать"
+                : "Новая папка"
+          }
           onClose={() => setFolderModal(null)}
           footer={(
             <>

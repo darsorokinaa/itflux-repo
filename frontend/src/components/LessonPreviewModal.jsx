@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
+import { CalendarPlus, Check, ChevronRight, UserPlus } from "lucide-react";
 import { rememberReturnPath, safeReturnPath } from "../accessGate/accessGate";
 import MaterialDemoWarningModal from "./MaterialDemoWarningModal";
 import { useCabinetAuthed } from "../hooks/useAccessGate";
@@ -578,6 +579,7 @@ export default function LessonPreviewModal({
 
                 {materialSaved ? (
                   <p className="material-preview__saved" role="status">
+                    <Check size={16} strokeWidth={2.4} aria-hidden="true" />
                     Материал сохранён. Вы сможете открыть его с любого устройства.
                   </p>
                 ) : null}
@@ -647,22 +649,22 @@ export default function LessonPreviewModal({
 
                 {authed && (canOpenContent || demoActive || access.demo_used) ? (
                   <div className="material-preview__next-step">
-                    <p>Что сделать дальше</p>
+                    <h2>Что сделать дальше</h2>
                     <div className="material-preview__next-actions">
-                      {forEventId ? (
-                        <Link
-                          className="material-access-btn material-access-btn--primary"
-                          to={`/cabinet/schedule?event=${encodeURIComponent(forEventId)}`}
-                        >
-                          Добавить к занятию
-                        </Link>
-                      ) : (
-                        <Link className="material-access-btn material-access-btn--ghost" to="/cabinet/schedule">
-                          Добавить к занятию
-                        </Link>
-                      )}
                       <Link
-                        className="material-access-btn material-access-btn--ghost"
+                        className="material-preview__next-card"
+                        to={forEventId ? `/cabinet/schedule?event=${encodeURIComponent(forEventId)}` : "/cabinet/schedule"}
+                      >
+                        <span className="material-preview__next-card-icon" aria-hidden="true">
+                          <CalendarPlus size={18} strokeWidth={2.1} />
+                        </span>
+                        <span className="material-preview__next-card-copy">
+                          <span className="material-preview__next-card-title">Добавить к занятию</span>
+                          <span className="material-preview__next-card-lead">Поставить материал в расписание</span>
+                        </span>
+                      </Link>
+                      <Link
+                        className="material-preview__next-card"
                         to="/cabinet/students?invite=1"
                         onClick={() => {
                           rememberValueReached("lesson");
@@ -670,22 +672,41 @@ export default function LessonPreviewModal({
                           trackActivationIntent("add_student_clicked", { source: "after_lesson_value" });
                         }}
                       >
-                        Назначить ученику
+                        <span className="material-preview__next-card-icon" aria-hidden="true">
+                          <UserPlus size={18} strokeWidth={2.1} />
+                        </span>
+                        <span className="material-preview__next-card-copy">
+                          <span className="material-preview__next-card-title">Назначить ученику</span>
+                          <span className="material-preview__next-card-lead">Выдать урок или домашнее задание</span>
+                        </span>
                       </Link>
                     </div>
                   </div>
                 ) : null}
 
                 {relatedLessons.length ? (
-                  <div className="material-preview__section">
+                  <div className="material-preview__section material-preview__related-wrap">
                     <h2>Продолжить тему</h2>
-                    <ul className="material-preview__related">
-                      {relatedLessons.map((item) => (
-                        <li key={item.slug}>
-                          <Link to={lessonPreviewUrl(item.slug)}>{item.title}</Link>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="material-preview__related">
+                      {relatedLessons.map((item) => {
+                        const meta = [item.subject, item.grade ? `${item.grade} класс` : null]
+                          .filter(Boolean)
+                          .join(" · ");
+                        return (
+                          <Link
+                            key={item.slug}
+                            className="material-preview__related-card"
+                            to={lessonPreviewUrl(item.slug)}
+                          >
+                            <span className="material-preview__related-copy">
+                              {meta ? <span className="material-preview__related-meta">{meta}</span> : null}
+                              <span className="material-preview__related-title">{item.title}</span>
+                            </span>
+                            <ChevronRight className="material-preview__related-chevron" size={16} strokeWidth={2.2} aria-hidden="true" />
+                          </Link>
+                        );
+                      })}
+                    </div>
                   </div>
                 ) : null}
 

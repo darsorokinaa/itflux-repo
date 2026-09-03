@@ -18,7 +18,7 @@ export default function HeroDashboardPreview({
   ];
 
   return (
-    <div className="home-hero-dashboard" aria-label="Превью кабинета учителя">
+    <div className="home-hero-dashboard" aria-label="Предпросмотр кабинета учителя">
       <article className="home-hero-dashboard__today">
         <div className="home-hero-dashboard__today-head">
           <span className="home-hero-dashboard__today-icon" aria-hidden>

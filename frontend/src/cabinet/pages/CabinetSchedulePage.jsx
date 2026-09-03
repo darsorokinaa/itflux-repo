@@ -48,6 +48,8 @@ import { skipOnboardingMaterials } from "../onboardingStorage";
 import CabinetIcon from "../CabinetIcons";
 import { CabinetPageShell, useSoonToast } from "../CabinetSectionUi";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { useSubscription } from "../hooks/useSubscription";
+import { useAccessGate } from "../../hooks/useAccessGate";
 import {
   applySeriesTimeUpdate,
   combineLocalDateAndTime,
@@ -115,14 +117,14 @@ function availabilitySlotsToEvents(slots = []) {
     id: `avail-${slot.availability_id}-${slot.date}-${slot.start_time}`,
     availabilityId: slot.availability_id,
     kind: "availability",
-    title: "Свободно",
-    audience: "Свободно",
+    title: "Для записи",
+    audience: "Для записи",
     startsAt: `${slot.date}T${slot.start_time}:00`,
     endsAt: `${slot.date}T${slot.end_time}:00`,
     startTime: slot.start_time,
     endTime: slot.end_time,
     status: "available",
-    statusLabel: "Свободно",
+    statusLabel: "Для записи",
     type: "availability",
     source: "availability",
     readOnly: false,
@@ -759,6 +761,49 @@ function formatPeriodLabel(view, focusDate) {
   return `${ws.getDate()} ${MONTHS[ws.getMonth()]} – ${we.getDate()} ${MONTHS[we.getMonth()]} ${we.getFullYear()}`;
 }
 
+const AVAIL_PAINT_HINT_KEY = "cabinet-avail-paint-hint-dismissed";
+
+function formatAvailDayLabel(dayOrKey) {
+  const day = typeof dayOrKey === "string" ? dateFromSchDayKey(dayOrKey) : dayOrKey;
+  if (!day || Number.isNaN(day.getTime())) return "";
+  const wd = WEEKDAYS_FULL[(day.getDay() + 6) % 7];
+  return `${wd.charAt(0).toUpperCase()}${wd.slice(1)}, ${day.getDate()} ${MONTHS[day.getMonth()]}`;
+}
+
+function formatHumanPeriod(from, to) {
+  if (!from || !to) return "";
+  const a = dateFromSchDayKey(from);
+  const b = dateFromSchDayKey(to);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return "";
+  if (a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear()) {
+    return `${a.getDate()}–${b.getDate()} ${MONTHS[a.getMonth()]}`;
+  }
+  return `${a.getDate()} ${MONTHS[a.getMonth()]} — ${b.getDate()} ${MONTHS[b.getMonth()]}`;
+}
+
+function isBookingLinkOpen(link) {
+  if (!link || link.is_active === false) return false;
+  if (!link.date_to) return Boolean(link.url);
+  const until = dateFromSchDayKey(link.date_to);
+  return !Number.isNaN(until.getTime()) && until >= startOfDay(new Date());
+}
+
+function hasDismissedAvailPaintHint() {
+  try {
+    return window.localStorage.getItem(AVAIL_PAINT_HINT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function dismissAvailPaintHint() {
+  try {
+    window.localStorage.setItem(AVAIL_PAINT_HINT_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+}
+
 function matchesFilters(event, calendars) {
   if (event.source === "yandex_calendar") {
     if (!calendars.all && !calendars.yandex) return false;
@@ -803,6 +848,105 @@ function YandexCalendarEmbed({ view, layerIds, tzId }) {
   );
 }
 
+function bookingUntilLabel(link) {
+  if (!link?.date_to) return "";
+  const until = dateFromSchDayKey(link.date_to);
+  if (!until || Number.isNaN(until.getTime())) return "";
+  return `${until.getDate()} ${MONTHS[until.getMonth()]}`;
+}
+
+function BookingTools({ link, bookingAllowed, onOpenBooking, onShare, onCloseBooking }) {
+  const [closing, setClosing] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const open = isBookingLinkOpen(link);
+  const until = bookingUntilLabel(link);
+  const statusText = open
+    ? (until ? `Запись открыта · до ${until}` : "Запись открыта")
+    : "Запись закрыта";
+  const lockTip = !bookingAllowed
+    ? "Открыть запись — доступно с тарифа «Учитель»"
+    : open
+      ? "Закрыть запись"
+      : "Открыть запись";
+  const lockLabel = open ? "Закрыть" : "Открыть";
+  const shareTip = !bookingAllowed
+    ? "Поделиться — доступно с тарифа «Учитель»"
+    : "Поделиться с учениками";
+
+  const handleLock = async () => {
+    if (!bookingAllowed) {
+      onOpenBooking?.();
+      return;
+    }
+    if (open) {
+      if (!onCloseBooking || closing) return;
+      setClosing(true);
+      try {
+        await onCloseBooking();
+      } finally {
+        setClosing(false);
+      }
+      return;
+    }
+    onOpenBooking?.();
+  };
+
+  const handleShare = async () => {
+    if (!bookingAllowed) {
+      onShare?.();
+      return;
+    }
+    if (!onShare || sharing) return;
+    setSharing(true);
+    try {
+      await onShare();
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  return (
+    <div className="cb-sch-booking-tools" aria-label="Запись учеников">
+      <span className={`cb-sch-booking-tools__status${open ? " is-open" : ""}`}>
+        <span className="cb-sch-booking-tools__dot" aria-hidden="true" />
+        {statusText}
+      </span>
+      <button
+        type="button"
+        className={`cb-sch-tool-btn cb-sch-tip${!bookingAllowed ? " is-gated" : ""}`}
+        data-tip={lockTip}
+        aria-label={lockTip}
+        onClick={handleLock}
+        disabled={closing}
+      >
+        <CabinetIcon name={open ? "lock" : "lockOpen"} />
+        <span>{closing ? "…" : lockLabel}</span>
+        {!bookingAllowed ? (
+          <span className="cb-sch-tool-btn__plan-lock" aria-hidden="true">
+            <CabinetIcon name="lock" />
+          </span>
+        ) : null}
+      </button>
+      <button
+        type="button"
+        className={`cb-sch-tool-btn cb-sch-tip${!bookingAllowed ? " is-gated" : ""}`}
+        data-tip={shareTip}
+        aria-label={shareTip}
+        onClick={handleShare}
+        disabled={sharing}
+      >
+        <CabinetIcon name="share" />
+        <span>Поделиться</span>
+        {!bookingAllowed ? (
+          <span className="cb-sch-tool-btn__plan-lock" aria-hidden="true">
+            <CabinetIcon name="lock" />
+          </span>
+        ) : null}
+      </button>
+    </div>
+  );
+}
+
 function ScheduleToolbar({
   view,
   onViewChange,
@@ -811,35 +955,46 @@ function ScheduleToolbar({
   onPrev,
   onNext,
   onAddLesson,
-  onAddAvailability,
-  onShareSchedule,
+  paintMode,
+  onTogglePaintMode,
+  bookingAllowed,
   isMobile,
   accountEmail,
+  showBookingTools,
+  bookingLink,
+  onOpenBooking,
+  onShare,
+  onCloseBooking,
 }) {
   const views = isMobile ? VIEWS.filter((v) => v.id !== "week") : VIEWS;
+  const paintTip = !bookingAllowed
+    ? "Отметить свободное время — доступно с тарифа «Учитель»"
+    : paintMode
+      ? "Режим свободного времени включён"
+      : "Отметить свободное время";
 
   return (
     <div className="cb-sch-toolbar">
-      <div className="cb-sch-toolbar__left">
-        <h1 className="cb-sch-toolbar__title">Календарь</h1>
-        <button type="button" className="cb-btn cb-btn--outline cb-sch-btn--today" onClick={onToday}>
-          Сегодня
-        </button>
-        <div className="cb-sch-toolbar__nav">
-          <button type="button" className="cb-sch-icon-btn" onClick={onPrev} aria-label="Назад">
-            <NavChevron direction="left" />
+      <div className="cb-sch-toolbar__row cb-sch-toolbar__row--nav">
+        <div className="cb-sch-toolbar__left">
+          <h1 className="cb-sch-toolbar__title">Календарь</h1>
+          <button type="button" className="cb-btn cb-btn--outline cb-sch-btn--today" onClick={onToday}>
+            Сегодня
           </button>
-          <button type="button" className="cb-sch-icon-btn" onClick={onNext} aria-label="Вперёд">
-            <NavChevron direction="right" />
-          </button>
+          <div className="cb-sch-toolbar__nav">
+            <button type="button" className="cb-sch-icon-btn" onClick={onPrev} aria-label="Назад">
+              <NavChevron direction="left" />
+            </button>
+            <button type="button" className="cb-sch-icon-btn" onClick={onNext} aria-label="Вперёд">
+              <NavChevron direction="right" />
+            </button>
+          </div>
+          <span className="cb-sch-toolbar__period">{formatPeriodLabel(view, focusDate)}</span>
+          {accountEmail ? (
+            <span className="cb-sch-toolbar__account">{accountEmail}</span>
+          ) : null}
         </div>
-        <span className="cb-sch-toolbar__period">{formatPeriodLabel(view, focusDate)}</span>
-        {accountEmail ? (
-          <span className="cb-sch-toolbar__account">{accountEmail}</span>
-        ) : null}
-      </div>
-      <div className="cb-sch-toolbar__right">
-        <div className="cb-sch-view-switch" role="tablist">
+        <div className="cb-sch-view-switch" role="tablist" aria-label="Вид календаря">
           {views.map((v) => (
             <button
               key={v.id}
@@ -853,12 +1008,40 @@ function ScheduleToolbar({
             </button>
           ))}
         </div>
-        <button type="button" className="cb-btn cb-btn--outline cb-sch-btn--add" onClick={onAddAvailability}>
-          Свободное время
-        </button>
-        <button type="button" className="cb-btn cb-btn--outline cb-sch-btn--add" onClick={onShareSchedule}>
-          Открыть запись
-        </button>
+      </div>
+
+      <div className="cb-sch-toolbar__row cb-sch-toolbar__row--actions">
+        <div className="cb-sch-toolbar__tools">
+          <button
+            type="button"
+            className={`cb-sch-tool-btn cb-sch-tip${paintMode ? " is-active" : ""}${!bookingAllowed ? " is-gated" : ""}`}
+            aria-pressed={paintMode}
+            data-tip={paintTip}
+            onClick={onTogglePaintMode}
+          >
+            <CabinetIcon name="clock" />
+            <span>{paintMode ? "Разметка" : "Свободное время"}</span>
+            {!bookingAllowed ? (
+              <span className="cb-sch-tool-btn__plan-lock" aria-hidden="true">
+                <CabinetIcon name="lock" />
+              </span>
+            ) : null}
+          </button>
+
+          {showBookingTools ? (
+            <>
+              <span className="cb-sch-toolbar__sep" aria-hidden="true" />
+              <BookingTools
+                link={bookingLink}
+                bookingAllowed={bookingAllowed}
+                onOpenBooking={onOpenBooking}
+                onShare={onShare}
+                onCloseBooking={onCloseBooking}
+              />
+            </>
+          ) : null}
+        </div>
+
         <button type="button" className="cb-btn cb-btn--primary cb-sch-btn--add" onClick={onAddLesson}>
           <CabinetIcon name="plus" />
           Добавить урок
@@ -939,7 +1122,10 @@ function MiniCalendar({ focusDate, selectedDate, onSelectDate, events = [] }) {
 }
 
 function UpcomingLessons({ events, onEventClick, compact }) {
-  const upcoming = useMemo(() => getUpcomingEvents(events, 3), [events]);
+  const upcoming = useMemo(
+    () => getUpcomingEvents(events.filter((ev) => ev.kind !== "availability"), 3),
+    [events],
+  );
 
   return (
     <div className={`cb-sch-upcoming${compact ? " cb-sch-upcoming--compact" : ""}`}>
@@ -988,7 +1174,6 @@ function ScheduleSidebar({
   onSelectDate,
   calendars,
   onCalendarToggle,
-  onCreate,
   upcomingEvents,
   onEventClick,
   yandexCalendarEnabled,
@@ -1008,11 +1193,6 @@ function ScheduleSidebar({
         <CabinetIcon name="calendar" />
       </button>
       <aside className={`cb-sch-sidebar${open ? "" : " cb-sch-sidebar--collapsed"}`}>
-        <button type="button" className="cb-btn cb-btn--outline cb-sch-btn--create" onClick={onCreate}>
-          <CabinetIcon name="plus" />
-          Новый урок
-        </button>
-
         <MiniCalendar
           focusDate={focusDate}
           selectedDate={selectedDate}
@@ -1060,12 +1240,23 @@ function CalendarEventBlock({
   const isOnline = event.format === "Онлайн" || Boolean(event.link);
   const cancelled = event.status === "cancelled";
   const recurring = isRecurring(event);
-  const displayTitle = event.kind === "availability" ? "Свободно" : eventDisplayTitle(event);
-  const displaySubtitle = event.kind === "availability"
+  const isAvailability = event.kind === "availability";
+  const subjectLabel = String(event.studentSubjectLabel || "").trim();
+  const displayTitle = isAvailability
+    ? "Свободно"
+    : (subjectLabel || eventDisplayTitle(event));
+  const studentLabel = isAvailability ? "" : eventDisplayTitle(event);
+  const displaySubtitle = isAvailability
     ? ""
-    : [eventDisplaySubtitle(event), event.selfBooked ? "Постоянное занятие" : ""].filter(Boolean).join(" · ");
+    : (studentLabel && studentLabel !== displayTitle ? studentLabel : "");
   const planTopic = resolveLessonTopic(event);
   const cardSubtitle = displaySubtitle || (planTopic && planTopic !== displayTitle ? planTopic : "");
+  const eventTip = [
+    eventLocalTimeRange(event),
+    displayTitle,
+    cardSubtitle,
+    event.selfBooked && !cancelled ? "Записался самостоятельно" : "",
+  ].filter(Boolean).join(" · ");
 
   const cardStyle = {
     ...style,
@@ -1078,6 +1269,11 @@ function CalendarEventBlock({
       <div className="cb-sch-event__head">
         <span className="cb-sch-event__time">{eventLocalTimeRange(event)}</span>
         <span className="cb-sch-event__badges">
+          {event.selfBooked && !cancelled ? (
+            <span className="cb-sch-event__badge cb-sch-event__badge--self-booked" title="Записался самостоятельно">
+              <CabinetIcon name="alert" />
+            </span>
+          ) : null}
           {recurring ? (
             <span className="cb-sch-event__badge cb-sch-event__badge--repeat" title="Повторяется">
               <CabinetIcon name="calendar" />
@@ -1101,9 +1297,6 @@ function CalendarEventBlock({
         <span className="cb-sch-event__audience">онлайн</span>
       ) : null}
       {cancelled ? <span className="cb-sch-event__status">Отменено</span> : null}
-      {event.selfBooked && !cancelled ? (
-        <span className="cb-sch-event__status">Записался самостоятельно</span>
-      ) : null}
     </>
   ) : (
     <>
@@ -1115,6 +1308,11 @@ function CalendarEventBlock({
           <span className="cb-sch-event__pill-audience">{cardSubtitle}</span>
         ) : null}
       </span>
+      {event.selfBooked && !cancelled ? (
+        <span className="cb-sch-event__badge cb-sch-event__badge--self-booked" title="Записался самостоятельно" aria-label="Записался самостоятельно">
+          <CabinetIcon name="alert" />
+        </span>
+      ) : null}
     </>
   );
 
@@ -1122,6 +1320,7 @@ function CalendarEventBlock({
     "cb-sch-event",
     compact ? "cb-sch-event--compact" : "",
     cancelled ? "cb-sch-event--cancelled" : "",
+    event.selfBooked && !cancelled ? "cb-sch-event--self-booked" : "",
     event.kind === "availability" ? "cb-sch-event--availability" : "",
     canDrag ? "cb-sch-event--draggable" : "",
   ].filter(Boolean).join(" ");
@@ -1175,6 +1374,7 @@ function CalendarEventBlock({
         onKeyDown={handleKeyDown}
         role="button"
         tabIndex={0}
+        title={eventTip}
       >
         <div className={cardClass} style={{ borderLeftColor: accent }} aria-hidden="true">
           {content}
@@ -1192,6 +1392,7 @@ function CalendarEventBlock({
       style={cardStyle}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
+      title={eventTip}
     >
       {content}
       {resizeHandle}
@@ -1210,6 +1411,7 @@ function TimeGridColumn({
   draggingEvent,
   nowTop,
   selection,
+  paintMode,
   onEventClick,
   onPointerDown,
   onResizeStart,
@@ -1236,7 +1438,7 @@ function TimeGridColumn({
         weekend ? "cb-sch-week__col--weekend" : "",
       ].filter(Boolean).join(" ")}
       data-sch-day={dayKey}
-      style={{ touchAction: "none" }}
+      style={paintMode ? { touchAction: "none" } : undefined}
     >
       {hours.map((h) => {
         const slotTime = `${String(h).padStart(2, "0")}:00`;
@@ -1246,8 +1448,15 @@ function TimeGridColumn({
             type="button"
             className="cb-sch-week__slot"
             style={{ height: HOUR_HEIGHT }}
-            onPointerDown={(e) => onSlotPointerDown?.(e, dayKey, slotTime)}
-            aria-label={`Выделить время ${dayKey} ${slotTime}`}
+            onClick={() => {
+              if (!paintMode) onSlotClick?.(day, slotTime);
+            }}
+            onPointerDown={(e) => {
+              if (paintMode) onSlotPointerDown?.(e, dayKey, slotTime);
+            }}
+            aria-label={paintMode
+              ? `Отметить свободное время ${dayKey} ${slotTime}`
+              : `Создать урок ${dayKey} ${slotTime}`}
           />
         );
       })}
@@ -1257,47 +1466,54 @@ function TimeGridColumn({
         </div>
       ) : null}
       {selection && selection.dayKey === dayKey ? (
-        <div
-          className="cb-sch-selection-preview"
-          style={{
-            position: "absolute",
-            left: 4,
-            right: 4,
-            backgroundColor: "rgba(26, 115, 232, 0.2)",
-            border: "1px solid #1A73E8",
-            borderRadius: 4,
-            zIndex: 10,
-            top: timeToTop(selection.startTime),
-            height: eventHeight(selection.startTime, selection.endTime),
-          }}
-        >
-          <div style={{ padding: "4px 8px", fontSize: 12, color: "#1A73E8", fontWeight: 500 }}>
-            {selection.startTime}–{selection.endTime}
+        <>
+          <div
+            className="cb-sch-selection-preview"
+            style={{
+              top: timeToTop(selection.startTime),
+              height: eventHeight(selection.startTime, selection.endTime),
+            }}
+          >
+            <div className="cb-sch-selection-preview__label">
+              {selection.startTime}–{selection.endTime}
+            </div>
           </div>
           {selection.isFinished ? (
             <div
               className="cb-sch-selection-popover"
-              style={{
-                position: "absolute",
-                ...(day.getDay() === 0 || day.getDay() === 6 ? { right: "100%", marginRight: 8 } : { left: "100%", marginLeft: 8 }),
-                top: 0,
-                backgroundColor: "var(--cb-surface)",
-                boxShadow: "var(--cb-shadow-lg)",
-                borderRadius: "var(--cb-radius-lg)",
-                padding: 16,
-                width: 240,
-                zIndex: 20,
-              }}
+              style={{ top: timeToTop(selection.startTime) }}
+              role="dialog"
+              aria-label="Свободное время"
             >
-              <h4 style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 600 }}>Свободное время</h4>
-              <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--cb-text-secondary)" }}>
-                {dayKey} · {selection.startTime} — {selection.endTime}
+              <h4>Свободное время</h4>
+              <p>
+                {formatAvailDayLabel(day)} · {selection.startTime}–{selection.endTime}
               </p>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div className="cb-sch-selection-popover__actions">
                 <button
                   type="button"
-                  className="cb-btn cb-btn--outline cb-btn--sm"
-                  style={{ flex: 1 }}
+                  className="cb-sch-selection-popover__btn cb-sch-selection-popover__btn--primary"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    selection.onConfirm?.();
+                  }}
+                >
+                  Сделать доступным
+                </button>
+                <button
+                  type="button"
+                  className="cb-sch-selection-popover__btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    selection.onCancel?.();
+                    onSlotClick?.(day, selection.startTime);
+                  }}
+                >
+                  Создать урок
+                </button>
+                <button
+                  type="button"
+                  className="cb-sch-selection-popover__btn cb-sch-selection-popover__btn--ghost"
                   onClick={(e) => {
                     e.stopPropagation();
                     selection.onCancel?.();
@@ -1305,33 +1521,10 @@ function TimeGridColumn({
                 >
                   Отмена
                 </button>
-                <button
-                  type="button"
-                  className="cb-btn cb-btn--outline cb-btn--sm"
-                  style={{ flex: 1 }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    selection.onCancel?.();
-                    onSlotClick?.(day, selection.startTime);
-                  }}
-                >
-                  Урок
-                </button>
-                <button
-                  type="button"
-                  className="cb-btn cb-btn--primary cb-btn--sm"
-                  style={{ flex: 1 }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    selection.onConfirm?.();
-                  }}
-                >
-                  Добавить
-                </button>
               </div>
             </div>
           ) : null}
-        </div>
+        </>
       ) : null}
       {isDropTarget && dropPreview?.time ? (
         <div
@@ -1390,6 +1583,7 @@ function WeekGrid({
   resizingId,
   resizePreview,
   selection,
+  paintMode,
   onEventClick,
   onPointerDown,
   onResizeStart,
@@ -1425,7 +1619,7 @@ function WeekGrid({
   const isEmpty = events.length === 0;
 
   return (
-    <div className="cb-sch-week">
+    <div className={`cb-sch-week${paintMode ? " cb-sch-week--paint" : ""}`}>
       <div className="cb-sch-week__head">
         <div className="cb-sch-week__head-gutter" />
         {weekDays.map((day) => (
@@ -1468,6 +1662,7 @@ function WeekGrid({
                 draggingEvent={draggingEvent}
                 nowTop={nowTop}
                 selection={selection}
+                paintMode={paintMode}
                 onEventClick={onEventClick}
                 onPointerDown={onPointerDown}
                 onResizeStart={onResizeStart}
@@ -1492,6 +1687,7 @@ function DayGrid({
   resizingId,
   resizePreview,
   selection,
+  paintMode,
   onEventClick,
   onPointerDown,
   onResizeStart,
@@ -1510,7 +1706,7 @@ function DayGrid({
   );
 
   return (
-    <div className="cb-sch-day">
+    <div className={`cb-sch-day${paintMode ? " cb-sch-day--paint" : ""}`}>
       <div className="cb-sch-day__head">{formatDayHeading(focusDate)}</div>
       <div className="cb-sch-week__body cb-sch-day__body">
         <div className="cb-sch-week__times">
@@ -1531,6 +1727,7 @@ function DayGrid({
           draggingEvent={draggingEvent}
           nowTop={nowTop}
           selection={selection}
+          paintMode={paintMode}
           onEventClick={onEventClick}
           onPointerDown={onPointerDown}
           onResizeStart={onResizeStart}
@@ -2069,6 +2266,12 @@ function useMobileDefaultView() {
 
 export default function CabinetSchedulePage() {
   usePageTitle("Календарь");
+  const subscription = useSubscription();
+  const { modal: accessGateModal, openGate, openFromError } = useAccessGate({
+    authenticated: true,
+    currentPlan: subscription.currentPlan?.slug,
+    sourcePage: "/cabinet/schedule",
+  });
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useMobileDefaultView();
@@ -2099,8 +2302,23 @@ export default function CabinetSchedulePage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [availabilityOpen, setAvailabilityOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [paintMode, setPaintMode] = useState(false);
+  const [showPaintHint, setShowPaintHint] = useState(() => !hasDismissedAvailPaintHint());
   const [bookingLink, setBookingLink] = useState(null);
   const [availabilityDuration, setAvailabilityDuration] = useState(60);
+  const bookingAllowed = Boolean(
+    subscription.features?.student_booking ?? bookingLink?.feature_allowed,
+  );
+
+  const openBookingPaywall = useCallback(() => {
+    openGate({
+      reason: "feature_not_in_plan",
+      resourceType: "student_booking",
+      requiredPlan: "teacher",
+      currentPlan: subscription.currentPlan?.slug,
+      sourcePage: "/cabinet/schedule",
+    });
+  }, [openGate, subscription.currentPlan?.slug]);
   const [selectedAvailability, setSelectedAvailability] = useState(null);
   const [createDraft, setCreateDraft] = useState(null);
   const [editEvent, setEditEvent] = useState(null);
@@ -2997,15 +3215,39 @@ export default function CabinetSchedulePage() {
   });
 
   const { selection, onSlotPointerDown, clearSelection } = useScheduleSelection({
-    enabled: true,
+    enabled: paintMode,
     events,
-    onSelectionEnd: (dayKey, startTime, endTime) => {
-      // Nothing needed here, the popover will render because selection.isFinished is true
-    },
+    onSelectionEnd: () => {},
   });
+
+  const handleTogglePaintMode = useCallback(() => {
+    setPaintMode((prev) => {
+      if (!prev && !bookingAllowed) {
+        openBookingPaywall();
+        return prev;
+      }
+      if (!prev && !isBookingLinkOpen(bookingLink)) {
+        setShareOpen(true);
+        showStatus("Сначала откройте запись.");
+        return prev;
+      }
+      const next = !prev;
+      if (!next) clearSelection();
+      return next;
+    });
+  }, [bookingAllowed, bookingLink, clearSelection, openBookingPaywall, showStatus]);
 
   const handleConfirmSelection = useCallback(async () => {
     if (!selection) return;
+    if (!bookingAllowed) {
+      openBookingPaywall();
+      return;
+    }
+    if (!isBookingLinkOpen(bookingLink)) {
+      setShareOpen(true);
+      showStatus("Сначала откройте запись.");
+      return;
+    }
     try {
       const blockDuration = eventDurationMinutes(selection.startTime, selection.endTime);
       await createTeacherAvailability({
@@ -3015,12 +3257,25 @@ export default function CabinetSchedulePage() {
         dates: [selection.dayKey],
       });
       clearSelection();
+      dismissAvailPaintHint();
+      setShowPaintHint(false);
       await refreshAvailability();
-      showStatus("Свободное время добавлено.");
+      showStatus("Время открыто для записи.");
     } catch (err) {
-      showStatus(err.message || "Не удалось сохранить свободное время.");
+      if (openFromError(err)) return;
+      showStatus(err.message || "Не удалось открыть время для записи.");
     }
-  }, [selection, clearSelection, availabilityDuration, refreshAvailability, showStatus]);
+  }, [
+    selection,
+    bookingAllowed,
+    bookingLink,
+    clearSelection,
+    availabilityDuration,
+    refreshAvailability,
+    showStatus,
+    openBookingPaywall,
+    openFromError,
+  ]);
 
   const handleCancelSelection = useCallback(() => {
     clearSelection();
@@ -3050,6 +3305,7 @@ export default function CabinetSchedulePage() {
         await refreshAvailability();
         showStatus("Время изменено.");
       } catch (err) {
+        if (openFromError(err)) return;
         showStatus(err.message || "Не удалось изменить время.");
       }
     }
@@ -3077,13 +3333,21 @@ export default function CabinetSchedulePage() {
           const newEnd = minutesToTime(parseTime(newStart) + duration);
           const newDate = formatApiDate(targetDate);
           
-          await updateTeacherAvailability(event.availabilityId, {
-            start_time: newStart,
-            end_time: newEnd,
-            dates: [newDate],
-          });
-          await refreshAvailability();
-          showStatus("Свободное время перенесено.");
+          try {
+            await updateTeacherAvailability(event.availabilityId, {
+              start_time: newStart,
+              end_time: newEnd,
+              dates: [newDate],
+            });
+            await refreshAvailability();
+            showStatus("Свободное время перенесено.");
+          } catch (err) {
+            if (openFromError(err)) {
+              setPendingAction(null);
+              return;
+            }
+            throw err;
+          }
           setPendingAction(null);
           return;
         }
@@ -3142,15 +3406,20 @@ export default function CabinetSchedulePage() {
       if (type === "move") {
         setEvents(snapshotEvents);
       }
-      showStatus(err.message || "Не удалось выполнить действие.");
+      if (openFromError(err)) {
+        setPendingAction(null);
+      } else {
+        showStatus(err.message || "Не удалось выполнить действие.");
+      }
     } finally {
       actionSavingRef.current = false;
       setActionSaving(false);
     }
-  }, [pendingAction, events, showStatus, view, focusDate, openBillingPrompt, refreshAvailability]);
+  }, [pendingAction, events, showStatus, view, focusDate, openBillingPrompt, refreshAvailability, openFromError]);
 
   return (
     <CabinetPageShell className="cb-section--schedule cb-section--schedule-cal">
+      {accessGateModal}
       {toast}
       {statusMessage ? (
         <div className="cb-soon-toast" role="status">{statusMessage}</div>
@@ -3164,22 +3433,48 @@ export default function CabinetSchedulePage() {
         onPrev={handlePrev}
         onNext={handleNext}
         onAddLesson={() => openCreateLesson()}
-        onAddAvailability={() => setAvailabilityOpen(true)}
-        onShareSchedule={() => setShareOpen(true)}
+        paintMode={paintMode}
+        onTogglePaintMode={handleTogglePaintMode}
+        bookingAllowed={bookingAllowed}
         isMobile={isMobile}
         accountEmail={calendarAccountEmail}
+        showBookingTools={!yandexEmbedEnabled}
+        bookingLink={bookingLink}
+        onOpenBooking={() => {
+          if (!bookingAllowed) {
+            openBookingPaywall();
+            return;
+          }
+          setShareOpen(true);
+        }}
+        onShare={async () => {
+          if (!bookingAllowed) {
+            openBookingPaywall();
+            return;
+          }
+          if (bookingLink?.url) {
+            try {
+              await navigator.clipboard.writeText(bookingLink.url);
+              showStatus("Ссылка скопирована");
+              return;
+            } catch {
+              /* open panel if copy is unavailable */
+            }
+          }
+          setShareOpen(true);
+        }}
+        onCloseBooking={async () => {
+          const data = await publishTeacherBookingLink({ is_active: false });
+          setBookingLink({
+            ...(bookingLink || {}),
+            ...data,
+            url: data.url || bookingLink?.url,
+          });
+          setPaintMode(false);
+          clearSelection();
+          showStatus("Запись закрыта.");
+        }}
       />
-
-      {isMobile ? (
-        <div className="cb-sch-avail-actions">
-          <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={() => setAvailabilityOpen(true)}>
-            Свободное время
-          </button>
-          <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={() => setShareOpen(true)}>
-            Поделиться расписанием
-          </button>
-        </div>
-      ) : null}
 
       <div className={`cb-sch-layout${yandexEmbedEnabled ? " cb-sch-layout--embed" : ""}`}>
         {!yandexEmbedEnabled ? (
@@ -3191,7 +3486,6 @@ export default function CabinetSchedulePage() {
             onSelectDate={handleSelectDate}
             calendars={calendars}
             onCalendarToggle={handleCalendarToggle}
-            onCreate={() => openCreateLesson()}
             upcomingEvents={filteredEvents}
             onEventClick={handleEventClick}
             yandexCalendarEnabled={yandexCalendarEnabled}
@@ -3199,26 +3493,6 @@ export default function CabinetSchedulePage() {
         ) : null}
 
         <div className="cb-sch-main">
-          {bookingLink && !yandexEmbedEnabled ? (
-            <div className="cb-sch-booking-link-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', backgroundColor: 'var(--cb-surface)', border: '1px solid var(--cb-border)', borderRadius: 'var(--cb-radius-lg)', marginBottom: 16 }}>
-              <div>
-                <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 600 }}>Открыть запись</h3>
-                <p style={{ margin: 0, fontSize: 13, color: 'var(--cb-text-secondary)' }}>
-                  Ученики видят свободное время с {bookingLink.date_from} по {bookingLink.date_to}
-                </p>
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={() => setShareOpen(true)}>Настроить период</button>
-                <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={() => {
-                  navigator.clipboard.writeText(bookingLink.url);
-                  showStatus("Ссылка скопирована");
-                }}>
-                  Скопировать ссылку
-                </button>
-              </div>
-            </div>
-          ) : null}
-
           {!yandexEmbedEnabled && calendarSource === "yandex" && yandexCalendarEnabled && !yandexLayerIds ? (
             <div className="cb-sch-calendar-hint">
               <p>
@@ -3259,6 +3533,7 @@ export default function CabinetSchedulePage() {
               resizingId={resizingId}
               resizePreview={resizePreview}
               selection={selectionWithActions}
+              paintMode={paintMode}
               onEventClick={handleEventClick}
               onPointerDown={onEventPointerDown}
               onResizeStart={onResizeStart}
@@ -3277,6 +3552,7 @@ export default function CabinetSchedulePage() {
               resizingId={resizingId}
               resizePreview={resizePreview}
               selection={selectionWithActions}
+              paintMode={paintMode}
               onEventClick={handleEventClick}
               onPointerDown={onEventPointerDown}
               onResizeStart={onResizeStart}
@@ -3523,10 +3799,15 @@ export default function CabinetSchedulePage() {
           defaultDate={formatApiDate(selectedDate)}
           defaultDuration={availabilityDuration}
           onSave={async (payload) => {
-            await createTeacherAvailability(payload);
-            setAvailabilityOpen(false);
-            await refreshAvailability();
-            showStatus("Свободное время добавлено.");
+            try {
+              await createTeacherAvailability(payload);
+              setAvailabilityOpen(false);
+              await refreshAvailability();
+              showStatus("Свободное время добавлено.");
+            } catch (err) {
+              if (openFromError(err)) return;
+              throw err;
+            }
           }}
         />
       ) : null}
@@ -3536,13 +3817,21 @@ export default function CabinetSchedulePage() {
           onClose={() => setShareOpen(false)}
           link={bookingLink}
           onPublish={async (payload) => {
-            const data = await publishTeacherBookingLink(payload);
-            setBookingLink({
-              ...(bookingLink || {}),
-              ...data,
-              url: data.url || bookingLink?.url,
-            });
-            showStatus("Ссылка обновлена.");
+            try {
+              const data = await publishTeacherBookingLink(payload);
+              setBookingLink({
+                ...(bookingLink || {}),
+                ...data,
+                url: data.url || bookingLink?.url,
+              });
+              showStatus("Запись открыта.");
+            } catch (err) {
+              if (openFromError(err)) {
+                setShareOpen(false);
+                return;
+              }
+              throw err;
+            }
           }}
         />
       ) : null}
@@ -3551,6 +3840,15 @@ export default function CabinetSchedulePage() {
         <AvailabilityDetailPopover
           event={selectedAvailability}
           onClose={() => setSelectedAvailability(null)}
+          onCreateLesson={() => {
+            const day = eventDate(selectedAvailability);
+            openCreateLesson({
+              date: formatApiDate(day),
+              startTime: eventLocalStartTime(selectedAvailability),
+              endTime: eventLocalEndTime(selectedAvailability),
+            });
+            setSelectedAvailability(null);
+          }}
           onDelete={async (event) => {
             if (!event.availabilityId) return;
             await deleteTeacherAvailability(event.availabilityId);

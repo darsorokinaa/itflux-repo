@@ -127,7 +127,7 @@ function PreviewBody({ file, student }) {
   return (
     <div className="cb-files-viewer__fallback">
       <FileThumb item={file} student={student} size="lg" />
-      <p>Превью для этого формата недоступно.</p>
+      <p>Предпросмотр для этого формата недоступен.</p>
       <dl>
         <div><dt>Тип</dt><dd>{extLabel(file)}</dd></div>
         <div><dt>Размер</dt><dd>{formatBytes(file.size)}</dd></div>

@@ -9,6 +9,7 @@ import {
   fetchStudents,
   fetchTeacherStudentMaterials,
   placeStudentMaterials,
+  updateMaterial,
   updateStudentMaterialFolder,
 } from "../../utils/cabinetAuth";
 import ConfirmActionModal from "./ConfirmActionModal";
@@ -355,6 +356,20 @@ export default function StudentFilesWorkspace({
           await updateStudentMaterialFolder(studentId, folder.id, { name });
           onNotice?.("Папка переименована");
           await loadMaterials();
+        }}
+        onRenameFile={async (file, { name }) => {
+          const kind = String(file?.type || "");
+          if (["interactive", "board", "homework"].includes(kind)) {
+            setError("Этот тип материала нельзя переименовать здесь.");
+            return;
+          }
+          try {
+            await updateMaterial(file.id, { title: name });
+            onNotice?.("Файл переименован");
+            await loadMaterials();
+          } catch (err) {
+            setError(err?.message || "Не удалось переименовать файл.");
+          }
         }}
         onDeleteFolder={(folder) => setDeleteFolder(folder)}
         onMove={handleMove}

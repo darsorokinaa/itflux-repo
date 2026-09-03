@@ -110,6 +110,7 @@ _SPA_KNOWN_PATH_PATTERNS = (
     re.compile(r"^/subject/(oge|ege|vpr)/?$"),
     re.compile(r"^/search/tasks/?$"),
     re.compile(r"^/search-variant/?$"),
+    re.compile(r"^/book/[^/]+/?$"),
     re.compile(r"^/lesson/join/?$"),
     re.compile(r"^/lesson/join/variant/\d+/?$"),
     re.compile(r"^/vpr/?$"),

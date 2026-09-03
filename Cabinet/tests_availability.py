@@ -4,14 +4,19 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from Cabinet.availability_models import TeacherBooking
-from Cabinet.availability_service import SLOT_TAKEN_MESSAGE
+from Cabinet.availability_service import (
+    SLOT_TAKEN_MESSAGE,
+    book_slot,
+    create_availability_windows,
+    publish_booking_link,
+)
 from Cabinet.choices import SeriesStatus
-from Cabinet.models import Profile, ScheduleEvent, Student
+from Cabinet.models import Profile, ScheduleEvent, Student, TariffPlan, TeacherSubscription
 from Cabinet.schedule_service import cancel_event, create_series, create_single_event
 
 
@@ -26,6 +31,29 @@ def _future_weekday(weekday, weeks=1):
     return today + timedelta(days=delta + 7 * (weeks - 1))
 
 
+def _grant_teacher_plan(user):
+    plan, _ = TariffPlan.objects.get_or_create(
+        slug="teacher",
+        defaults={
+            "name": "Учитель",
+            "price_month": 1990,
+            "content_access_rank": 1,
+            "is_free": False,
+            "is_active": True,
+            "sort_order": 1,
+        },
+    )
+    TeacherSubscription.objects.update_or_create(
+        teacher=user,
+        defaults={
+            "plan": plan,
+            "status": TeacherSubscription.Status.ACTIVE,
+            "source": TeacherSubscription.Source.ADMIN,
+        },
+    )
+    return plan
+
+
 class TeacherAvailabilityBookingTests(TestCase):
     def setUp(self):
         self.teacher = User.objects.create_user(username="avail_teacher", password="pass")
@@ -34,6 +62,7 @@ class TeacherAvailabilityBookingTests(TestCase):
         self.teacher.profile.surname = "Витальевна"
         self.teacher.profile.timezone = "Europe/Moscow"
         self.teacher.profile.save(update_fields=["role", "name", "surname", "timezone"])
+        _grant_teacher_plan(self.teacher)
 
         self.student_user = User.objects.create_user(
             username="avail_student", password="pass", email="anna@test.ru",
@@ -289,3 +318,285 @@ class TeacherAvailabilityBookingTests(TestCase):
         )
         self.assertEqual(listing.status_code, 200)
         self.assertGreaterEqual(len(listing.json()["slots"]), 4)
+
+    def test_public_page_expands_period_to_cover_painted_days(self):
+        """Free days outside a narrower publish window must still become bookable."""
+        from Cabinet.availability_models import TeacherAvailability, TeacherBookingLink
+
+        painted = self.wed - timedelta(days=3)
+        self.assertLess(painted, self.wed)
+
+        self.client.force_login(self.teacher)
+        created = self.client.post(
+            "/api/cabinet/availability/",
+            {
+                "dates": [painted.isoformat()],
+                "start_time": "10:00",
+                "end_time": "12:00",
+                "slot_duration_minutes": 60,
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        self.assertTrue(
+            TeacherAvailability.objects.filter(
+                teacher=self.teacher, date=painted, is_active=True
+            ).exists()
+        )
+
+        # Simulate a publish window that starts after the painted free day.
+        link = TeacherBookingLink.objects.get(teacher=self.teacher)
+        link.date_from = self.wed
+        link.date_to = self.period_to
+        link.is_active = True
+        link.save(update_fields=["date_from", "date_to", "is_active", "updated_at"])
+
+        self.client.force_login(self.student_user)
+        data = self.client.get(f"/api/cabinet/booking/{self.token}/").json()
+        available_dates = {day["date"] for day in data["dates"]}
+        self.assertIn(painted.isoformat(), available_dates)
+        self.assertEqual(data["date_from"], painted.isoformat())
+        painted_times = {
+            slot["start_time"]
+            for day in data["dates"]
+            if day["date"] == painted.isoformat()
+            for slot in day["slots"]
+        }
+        self.assertEqual(painted_times, {"10:00", "11:00"})
+
+    def test_teacher_cancel_series_frees_permanent_booking_slot(self):
+        """Cancelling the series must release the ACTIVE TeacherBooking lock."""
+        self.client.force_login(self.student_user)
+        booked = self.client.post(
+            f"/api/cabinet/booking/{self.token}/book/",
+            {"date": self.wed.isoformat(), "start_time": "15:00"},
+            format="json",
+        )
+        self.assertEqual(booked.status_code, 201, booked.content)
+        booking = TeacherBooking.objects.get()
+        series_id = booking.series_id
+        self.assertEqual(booking.status, TeacherBooking.Status.ACTIVE)
+
+        self.client.force_login(self.teacher)
+        cancelled = self.client.post(
+            f"/api/cabinet/schedule-series/{series_id}/cancel/",
+            {},
+            format="json",
+        )
+        self.assertEqual(cancelled.status_code, 200, cancelled.content)
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, TeacherBooking.Status.CANCELLED)
+
+        self.client.force_login(self.other_user)
+        rebook = self.client.post(
+            f"/api/cabinet/booking/{self.token}/book/",
+            {"date": self.wed.isoformat(), "start_time": "15:00"},
+            format="json",
+        )
+        self.assertEqual(rebook.status_code, 201, rebook.content)
+        self.assertEqual(TeacherBooking.objects.filter(status="active").count(), 1)
+
+    def test_partial_overlap_booking_is_rejected(self):
+        """15:00–16:00 booking must block overlapping 15:30 start if offered."""
+        self.client.force_login(self.student_user)
+        first = self.client.post(
+            f"/api/cabinet/booking/{self.token}/book/",
+            {"date": self.wed.isoformat(), "start_time": "15:00"},
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201, first.content)
+
+        # Paint a 30-minute window that overlaps the booked hour.
+        self.client.force_login(self.teacher)
+        painted = self.client.post(
+            "/api/cabinet/availability/",
+            {
+                "dates": [self.wed.isoformat()],
+                "start_time": "15:30",
+                "end_time": "16:30",
+                "slot_duration_minutes": 60,
+            },
+            format="json",
+        )
+        self.assertEqual(painted.status_code, 201, painted.content)
+
+        page = self.client.get(f"/api/cabinet/booking/{self.token}/").json()
+        wed_times = {
+            slot["start_time"]
+            for day in page["dates"]
+            if day["date"] == self.wed.isoformat()
+            for slot in day["slots"]
+        }
+        self.assertNotIn("15:30", wed_times)
+
+        self.client.force_login(self.other_user)
+        second = self.client.post(
+            f"/api/cabinet/booking/{self.token}/book/",
+            {"date": self.wed.isoformat(), "start_time": "15:30"},
+            format="json",
+        )
+        self.assertEqual(second.status_code, 409)
+
+    def test_public_booking_page_hides_other_students(self):
+        self.client.force_login(self.student_user)
+        booked = self.client.post(
+            f"/api/cabinet/booking/{self.token}/book/",
+            {"date": self.wed.isoformat(), "start_time": "18:00"},
+            format="json",
+        )
+        self.assertEqual(booked.status_code, 201, booked.content)
+
+        self.client.force_login(self.other_user)
+        data = self.client.get(f"/api/cabinet/booking/{self.token}/").json()
+        payload = str(data)
+        self.assertNotIn("Анна", payload)
+        self.assertNotIn("Иванова", payload)
+        self.assertNotIn("@test.ru", payload)
+        for day in data["dates"]:
+            for slot in day["slots"]:
+                self.assertNotIn("student", slot)
+                self.assertNotIn("student_name", slot)
+
+    def test_one_off_series_event_blocks_slot_on_that_date(self):
+        """Series with recurrence none must still hide its concrete occurrence."""
+        from Cabinet.choices import RecurrenceType, SeriesStatus
+        from Cabinet.models import ScheduleEventSeries
+        from Cabinet.schedule_service import create_single_event
+
+        # Create a one-off event attached to a NONE series (edge path).
+        start = datetime(self.wed.year, self.wed.month, self.wed.day, 12, 0, tzinfo=MOSCOW)
+        event = create_single_event(
+            teacher=self.teacher,
+            data={
+                "title": "Разовое через серию",
+                "starts_at": start,
+                "ends_at": start + timedelta(hours=1),
+                "event_type": "individual_lesson",
+                "timezone": "Europe/Moscow",
+                "notify_participants": False,
+            },
+            student_ids=[self.student.pk],
+            notify=False,
+        )
+        series = ScheduleEventSeries.objects.create(
+            teacher=self.teacher,
+            created_by=self.teacher,
+            title="none-series",
+            event_type="individual_lesson",
+            timezone="Europe/Moscow",
+            start_date=self.wed,
+            start_time=start.time(),
+            end_time=(start + timedelta(hours=1)).time(),
+            recurrence_type=RecurrenceType.NONE,
+            status=SeriesStatus.ACTIVE,
+            format="online",
+        )
+        event.series = series
+        event.save(update_fields=["series"])
+
+        self.client.force_login(self.teacher)
+        self.client.post(
+            "/api/cabinet/availability/",
+            {
+                "dates": [self.wed.isoformat()],
+                "start_time": "12:00",
+                "end_time": "13:00",
+                "slot_duration_minutes": 60,
+            },
+            format="json",
+        )
+        page = self.client.get(f"/api/cabinet/booking/{self.token}/").json()
+        wed_times = {
+            slot["start_time"]
+            for day in page["dates"]
+            if day["date"] == self.wed.isoformat()
+            for slot in day["slots"]
+        }
+        self.assertNotIn("12:00", wed_times)
+
+
+class TeacherAvailabilityConcurrencyTests(TransactionTestCase):
+    """Real DB concurrency — must not use TestCase's outer transaction."""
+
+    def setUp(self):
+        self.teacher = User.objects.create_user(username="avail_conc_teacher", password="pass")
+        self.teacher.profile.role = Profile.Role.TEACHER
+        self.teacher.profile.timezone = "Europe/Moscow"
+        self.teacher.profile.save(update_fields=["role", "timezone"])
+        _grant_teacher_plan(self.teacher)
+
+        self.student_user = User.objects.create_user(username="avail_conc_student", password="pass")
+        self.student_user.profile.role = Profile.Role.STUDENT
+        self.student_user.profile.save(update_fields=["role"])
+        self.student = Student.objects.create(
+            teacher=self.teacher,
+            user=self.student_user,
+            first_name="Анна",
+            last_name="Иванова",
+            status="active",
+        )
+
+        self.other_user = User.objects.create_user(username="avail_conc_other", password="pass")
+        self.other_user.profile.role = Profile.Role.STUDENT
+        self.other_user.profile.save(update_fields=["role"])
+        self.other_student = Student.objects.create(
+            teacher=self.teacher,
+            user=self.other_user,
+            first_name="Пётр",
+            last_name="Другой",
+            status="active",
+        )
+
+        self.wed = _future_weekday(2)
+        self.period_to = self.wed + timedelta(days=14)
+        create_availability_windows(
+            self.teacher,
+            {
+                "date_from": self.wed.isoformat(),
+                "date_to": self.period_to.isoformat(),
+                "weekdays": [2],
+                "start_time": "15:00",
+                "end_time": "19:00",
+                "slot_duration_minutes": 60,
+            },
+        )
+        link = publish_booking_link(
+            self.teacher,
+            {"date_from": self.wed.isoformat(), "date_to": self.period_to.isoformat(), "is_active": True},
+        )
+        self.token = link["token"]
+
+    def test_concurrent_double_booking_only_one_wins(self):
+        import threading
+
+        barrier = threading.Barrier(2)
+        results = []
+        lock = threading.Lock()
+
+        def attempt(user):
+            barrier.wait(timeout=5)
+            try:
+                booking, _ = book_slot(
+                    token=self.token,
+                    user=user,
+                    date_value=self.wed.isoformat(),
+                    start_time_value="16:00",
+                )
+                with lock:
+                    results.append(("ok", booking.pk))
+            except Exception as exc:
+                with lock:
+                    results.append(("err", getattr(exc, "code", type(exc).__name__)))
+
+        t1 = threading.Thread(target=attempt, args=(self.student_user,))
+        t2 = threading.Thread(target=attempt, args=(self.other_user,))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        oks = [item for item in results if item[0] == "ok"]
+        errs = [item for item in results if item[0] == "err"]
+        self.assertEqual(len(oks), 1, results)
+        self.assertEqual(len(errs), 1, results)
+        self.assertEqual(TeacherBooking.objects.filter(status="active").count(), 1)

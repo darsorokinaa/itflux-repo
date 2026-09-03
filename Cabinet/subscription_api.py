@@ -26,7 +26,7 @@ from rest_framework.views import APIView
 
 from .models import Interactive, Lesson, Material, Payment, ReferralLink, TariffPlan, TeacherSubscription
 from .permissions import IsCabinetTeacher
-from .subscription_access import AccessDenied, SubscriptionAccessService
+from .subscription_access import AccessDenied, PLAN_SLUG_TO_RANK, SubscriptionAccessService
 from .subscription_service import SubscriptionLimitService
 
 logger = logging.getLogger(__name__)
@@ -105,6 +105,8 @@ def _plan_public(plan, *, promotion=None) -> dict:
             "priority_support": getattr(plan, "has_priority_support", False),
             "analytics": getattr(plan, "has_analytics", False),
             "simulators": getattr(plan, "has_simulators", False),
+            "student_booking": SubscriptionAccessService.plan_content_rank(plan)
+            >= PLAN_SLUG_TO_RANK.get("teacher", 1),
         },
         "promotion": promotion,
     }
@@ -394,6 +396,7 @@ class SubscriptionUsageView(APIView):
                 "mass_actions": getattr(plan, "has_mass_actions", False),
                 "analytics": getattr(plan, "has_analytics", False),
                 "simulators": getattr(plan, "has_simulators", False),
+                "student_booking": SubscriptionAccessService.can_use_student_booking(request.user),
             },
         })
 

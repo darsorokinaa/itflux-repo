@@ -74,6 +74,12 @@ describe("classifyAccessError", () => {
     expect(classifyAccessError({ code: "ANON_VARIANT_LIMIT_REACHED", feature: "variants" })?.reason).toBe("anonymous");
     expect(classifyAccessError({ code: "CONTENT_ACCESS_DENIED", min_plan: "pro" })?.reason).toBe("insufficient_plan");
     expect(classifyAccessError({ code: "SCHEDULE_REQUIRES_PAID_PLAN", min_plan: "teacher" })?.reason).toBe("feature_not_in_plan");
+    expect(classifyAccessError({
+      code: "BOOKING_REQUIRES_TEACHER_PLAN",
+      feature: "student_booking",
+      min_plan: "teacher",
+      upgrade_required: true,
+    })?.resourceType).toBe("student_booking");
     expect(classifyAccessError({ code: "STUDENT_LIMIT_REACHED" })?.reason).toBe("limit_reached");
     expect(classifyAccessError({ code: "VARIANT_LIMIT_REACHED" })?.reason).toBe("limit_reached");
     expect(classifyAccessError({ status: 500, message: "boom" })).toBeNull();
@@ -101,6 +107,15 @@ describe("accessGateCopy and safeReturnPath", () => {
 
     const studentsLimit = accessGateCopy({ reason: "limit_reached", resourceType: "students" });
     expect(studentsLimit.text).toContain("большего количества учеников");
+
+    const booking = accessGateCopy(
+      { reason: "feature_not_in_plan", resourceType: "student_booking", requiredPlan: "teacher" },
+      { requiredPlanName: "Учитель" },
+    );
+    expect(booking.title).toBe("Запись учеников по ссылке");
+    expect(booking.primary).toBe("Перейти на тариф «Учитель»");
+    expect(booking.secondary).toBe("Не сейчас");
+    expect(booking.text).toContain("сами выберут удобный слот");
   });
 
   it("rejects open redirects", () => {

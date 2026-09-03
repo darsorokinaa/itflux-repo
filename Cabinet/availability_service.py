@@ -146,18 +146,81 @@ def ensure_booking_link(teacher):
     return link
 
 
-def serialize_booking_link(link, *, request=None):
+def deactivate_teacher_booking_link(teacher):
+    """Close public booking after downgrade / lost entitlement. Keeps history."""
+    return TeacherBookingLink.objects.filter(teacher=teacher, is_active=True).update(
+        is_active=False,
+        updated_at=timezone.now(),
+    )
+
+
+def teacher_booking_entitled(teacher) -> bool:
+    from .subscription_access import SubscriptionAccessService
+
+    return SubscriptionAccessService.can_use_student_booking(teacher)
+
+
+def expand_active_booking_link_for_dates(teacher, dates):
+    """Widen an open booking period so painted free days stay visible to students."""
+    days = [day for day in dates if day is not None]
+    if not days:
+        return None
+    link = TeacherBookingLink.objects.filter(teacher=teacher, is_active=True).first()
+    if link is None:
+        return None
+    min_day = min(days)
+    max_day = max(days)
+    fields = []
+    if link.date_from is None or min_day < link.date_from:
+        link.date_from = min_day
+        fields.append("date_from")
+    if link.date_to is None or max_day > link.date_to:
+        link.date_to = max_day
+        fields.append("date_to")
+    if fields:
+        fields.append("updated_at")
+        link.save(update_fields=fields)
+    return link
+
+
+def sync_booking_link_with_availability(link):
+    """Heal open booking period to cover all active free windows from today onward."""
+    if link is None or not link.is_active:
+        return link
+    today = timezone.now().astimezone(teacher_timezone(link.teacher)).date()
+    windows = list(
+        TeacherAvailability.objects.filter(
+            teacher=link.teacher,
+            is_active=True,
+            valid_until__gte=today,
+        ).only("valid_from", "valid_until")
+    )
+    if not windows:
+        return link
+    expand_active_booking_link_for_dates(
+        link.teacher,
+        [window.valid_from for window in windows] + [window.valid_until for window in windows],
+    )
+    link.refresh_from_db(fields=["date_from", "date_to", "updated_at"])
+    return link
+
+
+def serialize_booking_link(link, *, request=None, teacher=None):
     path = f"/book/{link.token}"
     url = path
     if request is not None:
         url = request.build_absolute_uri(path)
+    owner = teacher or getattr(link, "teacher", None)
+    entitled = teacher_booking_entitled(owner) if owner is not None else False
     return {
         "token": link.token,
         "url": url,
         "path": path,
         "date_from": link.date_from.isoformat() if link.date_from else None,
         "date_to": link.date_to.isoformat() if link.date_to else None,
-        "is_active": link.is_active,
+        "is_active": bool(link.is_active) and entitled,
+        "feature_allowed": entitled,
+        "min_plan": "teacher",
     }
 
 
@@ -230,6 +293,14 @@ def series_occupies_weekday_time(series, weekday, start_time, end_time):
     return times_overlap(series.start_time, series.end_time, start_time, end_time)
 
 
+def booking_occupies_weekday_time(booking, weekday, start_time, end_time):
+    if booking.status != TeacherBooking.Status.ACTIVE:
+        return False
+    if booking.weekday != weekday:
+        return False
+    return times_overlap(booking.start_time, booking.end_time, start_time, end_time)
+
+
 def blocking_events_for_range(teacher, date_from, date_to, tz):
     start_dt = datetime.combine(date_from, time.min, tzinfo=tz)
     end_dt = datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=tz)
@@ -248,8 +319,11 @@ def event_blocks_slot(event, slot_start, slot_end):
     if event.status == ScheduleEvent.Status.CANCELLED:
         return False
     if event.series_id:
-        # Recurring occupancy is decided by the series, not a single occurrence.
-        return False
+        series = getattr(event, "series", None)
+        # Recurring occupancy is decided by the series rule.
+        # One-off series-linked events still block their concrete occurrence.
+        if series is not None and series.recurrence_type != RecurrenceType.NONE:
+            return False
     return event.starts_at < slot_end and event.ends_at > slot_start
 
 
@@ -316,7 +390,7 @@ def compute_available_slots(
                 slot_end = combine_local(day, end, tz)
                 if any(event_blocks_slot(event, slot_start, slot_end) for event in events):
                     continue
-                if any(b.weekday == day.weekday() and b.start_time == start for b in active_bookings):
+                if any(booking_occupies_weekday_time(b, day.weekday(), start, end) for b in active_bookings):
                     continue
                 seen.add(key)
                 slots.append({
@@ -333,6 +407,9 @@ def compute_available_slots(
 
 
 def create_availability_windows(teacher, payload):
+    from .subscription_access import SubscriptionAccessService
+
+    SubscriptionAccessService.raise_if_cannot_use_student_booking(teacher)
     start_time = parse_time_value(payload.get("start_time"))
     end_time = parse_time_value(payload.get("end_time"))
     if time_to_minutes(end_time) <= time_to_minutes(start_time):
@@ -390,6 +467,10 @@ def create_availability_windows(teacher, payload):
                         is_active=True,
                     )
                 )
+        expand_active_booking_link_for_dates(
+            teacher,
+            [item.valid_from for item in created] + [item.valid_until for item in created],
+        )
         return created
 
     if not date_from or not date_to:
@@ -414,6 +495,7 @@ def create_availability_windows(teacher, payload):
                         is_active=True,
                     )
                 )
+        expand_active_booking_link_for_dates(teacher, [period_from, period_to])
         return created
 
     for day in _iter_days(period_from, period_to):
@@ -431,10 +513,14 @@ def create_availability_windows(teacher, payload):
                     is_active=True,
                 )
             )
+    expand_active_booking_link_for_dates(teacher, [period_from, period_to])
     return created
 
 
 def update_availability_window(item, payload):
+    from .subscription_access import SubscriptionAccessService
+
+    SubscriptionAccessService.raise_if_cannot_use_student_booking(item.teacher)
     fields = []
     if "start_time" in payload:
         item.start_time = parse_time_value(payload.get("start_time"))
@@ -474,7 +560,13 @@ def deactivate_availability(item):
 
 
 def publish_booking_link(teacher, payload, *, request=None):
+    from .subscription_access import SubscriptionAccessService
+
     link = ensure_booking_link(teacher)
+    wants_active = bool(payload.get("is_active", True)) if "is_active" in payload else True
+    # Closing is always allowed. Opening / changing publish window requires entitlement.
+    if wants_active:
+        SubscriptionAccessService.raise_if_cannot_use_student_booking(teacher)
     date_from = payload.get("date_from")
     date_to = payload.get("date_to")
     if date_from:
@@ -486,7 +578,7 @@ def publish_booking_link(teacher, payload, *, request=None):
     if "is_active" in payload:
         link.is_active = bool(payload.get("is_active"))
     link.save()
-    return serialize_booking_link(link, request=request)
+    return serialize_booking_link(link, request=request, teacher=teacher)
 
 
 def resolve_linked_student(user, teacher):
@@ -540,6 +632,9 @@ def public_booking_page(token, *, user=None, request=None):
     if link is None:
         raise AvailabilityError("Ссылка на запись не найдена или больше не действует.", code="not_found", status=404)
     teacher = link.teacher
+    if not teacher_booking_entitled(teacher):
+        raise AvailabilityError("Ссылка на запись не найдена или больше не действует.", code="not_found", status=404)
+    link = sync_booking_link_with_availability(link)
     today = timezone.now().astimezone(teacher_timezone(teacher)).date()
     date_from, date_to = published_range(link, today)
     windows = TeacherAvailability.objects.filter(
@@ -692,6 +787,8 @@ def book_slot(*, token, user, date_value, start_time_value):
             if link is None:
                 raise AvailabilityError("Ссылка на запись не найдена или больше не действует.", code="not_found", status=404)
             teacher = link.teacher
+            if not teacher_booking_entitled(teacher):
+                raise AvailabilityError("Ссылка на запись не найдена или больше не действует.", code="not_found", status=404)
             student = Student.objects.select_for_update().filter(
                 user=user, teacher=teacher,
             ).exclude(status=StudentStatus.ARCHIVED).first()
@@ -750,13 +847,13 @@ def book_slot(*, token, user, date_value, start_time_value):
             if check_conflicts(teacher=teacher, starts_at=slot_start, ends_at=slot_end, student_id=student.pk):
                 raise SlotTakenError()
 
-            if TeacherBooking.objects.filter(
+            for existing in TeacherBooking.objects.filter(
                 teacher=teacher,
                 weekday=weekday,
-                start_time=start_time,
                 status=TeacherBooking.Status.ACTIVE,
-            ).exists():
-                raise SlotTakenError()
+            ):
+                if booking_occupies_weekday_time(existing, weekday, start_time, end_time):
+                    raise SlotTakenError()
 
             subjects = list(active_subjects_for_student(student)[:1])
             series_data = {
@@ -768,6 +865,7 @@ def book_slot(*, token, user, date_value, start_time_value):
                 "end_time": end_time,
                 "recurrence_type": RecurrenceType.WEEKLY,
                 "recurrence_weekdays": [weekday],
+                "recurrence_until": date(slot_date.year, 12, 31),
                 "format": "online",
                 "topic": "Постоянное занятие",
                 "notify_participants": False,

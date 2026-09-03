@@ -36,6 +36,7 @@ export default function ShareScheduleModal({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const url = link?.url || "";
+  const isOpen = link?.is_active !== false && Boolean(url);
 
   const copyLink = async () => {
     if (!url) return;
@@ -55,7 +56,7 @@ export default function ShareScheduleModal({
     try {
       await onPublish({ date_from: dateFrom, date_to: dateTo, is_active: true });
     } catch (err) {
-      setError(err.message || "Не удалось обновить ссылку.");
+      setError(err.message || "Не удалось открыть запись.");
     } finally {
       setSaving(false);
     }
@@ -72,36 +73,36 @@ export default function ShareScheduleModal({
         aria-labelledby="avail-share-title"
       >
         <div className="cb-sch-modal__head">
-          <h2 id="avail-share-title">Открыть запись</h2>
+          <h2 id="avail-share-title">Запись для учеников</h2>
           <button type="button" className="cb-sch-popover__close" onClick={onClose} aria-label="Закрыть">
             <CabinetIcon name="close" />
           </button>
         </div>
+        <p className="cb-sch-modal__lead">
+          Ученики смогут видеть свободное время и записываться на занятия
+        </p>
         <form className="cb-sch-form cb-sch-form--sections" onSubmit={handleSubmit}>
           {error ? <p className="cb-sch-form__error" role="alert">{error}</p> : null}
           <div className="cb-sch-form__section">
-            <h3>Период для учеников</h3>
-            <p className="cb-sch-form__hint">
-              Ученик увидит только свободные интервалы в выбранных датах. Ссылка одна — меняется только период.
-            </p>
+            <h3>Период</h3>
             <div className="cb-sch-form__row cb-sch-form__row--2">
               <label className="cb-sch-field">
-                <span>Показать с</span>
+                <span>С</span>
                 <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} required />
               </label>
               <label className="cb-sch-field">
-                <span>Показать по</span>
+                <span>По</span>
                 <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} required />
               </label>
             </div>
           </div>
           {url ? (
             <div className="cb-sch-form__section">
-              <h3>Ссылка для записи</h3>
+              <h3>Ссылка для учеников</h3>
               <div className="cb-sch-link-row">
                 <input value={url} readOnly aria-label="Ссылка для учеников" />
                 <button type="button" className="cb-btn cb-btn--outline" onClick={copyLink}>
-                  {copied ? "Скопировано" : "Копировать"}
+                  {copied ? "Ссылка скопирована" : "Скопировать ссылку"}
                 </button>
               </div>
             </div>
@@ -111,7 +112,7 @@ export default function ShareScheduleModal({
               Закрыть
             </button>
             <button type="submit" className="cb-btn cb-btn--primary" disabled={saving}>
-              {saving ? "Сохранение…" : "Обновить период"}
+              {saving ? "Сохранение…" : isOpen ? "Изменить период" : "Открыть запись"}
             </button>
           </div>
         </form>

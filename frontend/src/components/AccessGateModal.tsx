@@ -169,7 +169,11 @@ export default function AccessGateModal({
         <h2 id="access-gate-title" className="access-gate-title">
           {copy.title}
         </h2>
-        <p className="access-gate-text">{copy.text}</p>
+        {copy.text.split(/\n\n+/).map((paragraph) => (
+          <p key={paragraph.slice(0, 48)} className="access-gate-text">
+            {paragraph}
+          </p>
+        ))}
         {promoText ? (
           <p className="access-gate-offer" role="status">
             {promoText}

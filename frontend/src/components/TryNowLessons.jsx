@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Eye } from "lucide-react";
 import { lessonPreviewUrl, getLessonViewerUrl } from "../cabinet/lessonCardUtils";
 import { trackValueGoal } from "../utils/valuePath";
@@ -39,15 +39,20 @@ export default function TryNowLessons({
   onOpen,
   title = "Можно провести уже сегодня",
   lead = "Подобрано по вашим ученикам и темам ближайших занятий. Готовые уроки без подготовки.",
+  compact = false,
+  source = "try_now",
 }) {
-  const navigate = useNavigate();
+  const headingId = compact ? "lessons-recent-heading" : "try-now-heading";
 
   if (!lessons.length) return null;
   return (
-    <section className="try-now-lessons" aria-labelledby="try-now-heading">
+    <section
+      className={`try-now-lessons${compact ? " try-now-lessons--compact" : ""}`}
+      aria-labelledby={headingId}
+    >
       <header className="try-now-lessons__head">
-        <h2 id="try-now-heading">{title}</h2>
-        <p>{lead}</p>
+        <h2 id={headingId}>{title}</h2>
+        {lead ? <p>{lead}</p> : null}
       </header>
       <div className="try-now-lessons__grid">
         {lessons.map((lesson) => {
@@ -77,24 +82,28 @@ export default function TryNowLessons({
                   <Link
                     className="try-now-lessons__btn try-now-lessons__btn--preview"
                     to={lessonPreviewUrl(lesson.slug)}
+                    aria-label={compact ? "Просмотр" : "Предпросмотр"}
+                    title={compact ? "Просмотр" : "Предпросмотр"}
                     onClick={(event) => {
                       event.preventDefault();
-                      trackValueGoal("lesson_card_previewed", { source: "try_now", lesson_id: String(lesson.id || lesson.slug) });
+                      trackValueGoal("lesson_card_previewed", { source, lesson_id: String(lesson.id || lesson.slug) });
                       onOpen?.(lesson);
                     }}
                   >
-                    <Eye size={16} strokeWidth={2} style={{ marginRight: 6 }} aria-hidden="true" />
-                    Превью
+                    <Eye size={compact ? 14 : 16} strokeWidth={2} aria-hidden="true" />
+                    {compact ? "Просмотр" : null}
                   </Link>
-                  <Link
-                    className="try-now-lessons__btn try-now-lessons__btn--open"
-                    to={getLessonViewerUrl(lesson.slug)}
-                    onClick={() => {
-                      trackValueGoal("lesson_card_opened", { source: "try_now", lesson_id: String(lesson.id || lesson.slug) });
-                    }}
-                  >
-                    Открыть
-                  </Link>
+                  {compact ? null : (
+                    <Link
+                      className="try-now-lessons__btn try-now-lessons__btn--open"
+                      to={getLessonViewerUrl(lesson.slug)}
+                      onClick={() => {
+                        trackValueGoal("lesson_card_opened", { source, lesson_id: String(lesson.id || lesson.slug) });
+                      }}
+                    >
+                      Открыть
+                    </Link>
+                  )}
                 </div>
               </div>
             </article>

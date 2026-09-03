@@ -8,7 +8,6 @@ import {
   Users,
 } from "lucide-react";
 import HeroSection from "../components/HeroSection";
-import HomeUpdatesBlock from "../components/HomeUpdatesBlock";
 import { type LevelId } from "../data/levels";
 import { formatTasksCount } from "../utils/formatTasksCount";
 import { formatIntRu } from "../utils/formatIntRu";
@@ -126,8 +125,8 @@ export default function HomePage() {
 
       <div className="digital-flow-page__wrap">
         <main className="home-page__main">
-          <HomeUpdatesBlock />
           <HomeValuePathsBlock />
+          <div className="home-section-divider" role="separator" aria-hidden />
           <HeroSection
             tasksCountLabel={heroTasksCountLabel}
             subjectsCountLabel={heroSubjectsCountLabel}
@@ -240,16 +239,18 @@ type HomeValuePath = {
   lead: string;
   cta: string;
   to: string;
+  styleVariant: "blue" | "burgundy" | "orange";
   Icon: React.ComponentType<{ size?: number; strokeWidth?: number; color?: string }>;
 };
 
 const HOME_VALUE_PATHS: ReadonlyArray<HomeValuePath> = [
   {
     id: "lesson",
-    title: "Мне нужен урок",
+    title: "Мне нужен готовый урок",
     lead: "Выберите предмет, класс и тему — готовый урок уже собран.",
     cta: "Найти готовый урок",
     to: "/gotovye-uroki",
+    styleVariant: "blue",
     Icon: BookOpenCheck,
   },
   {
@@ -258,6 +259,7 @@ const HOME_VALUE_PATHS: ReadonlyArray<HomeValuePath> = [
     lead: "Выберите экзамен, тему или номера заданий — соберите вариант за несколько минут.",
     cta: "Создать задания",
     to: "/generator",
+    styleVariant: "burgundy",
     Icon: CompassIcon,
   },
   {
@@ -266,6 +268,7 @@ const HOME_VALUE_PATHS: ReadonlyArray<HomeValuePath> = [
     lead: "Расписание, занятия, домашние задания, журнал и работа с учениками в одном кабинете.",
     cta: "Настроить работу",
     to: "/repetitor",
+    styleVariant: "orange",
     Icon: Users,
   },
 ];
@@ -273,30 +276,33 @@ const HOME_VALUE_PATHS: ReadonlyArray<HomeValuePath> = [
 function HomeValuePathsBlock() {
   return (
     <section className="home-value-paths" aria-labelledby="home-value-paths-heading">
-      <header className="section-head">
-        <h2 id="home-value-paths-heading" className="section-head__title">
-          Что вам нужно сейчас?
-        </h2>
-        <p className="section-head__lead">
-          Выберите задачу — откроется готовое решение, без настройки кабинета.
-        </p>
-      </header>
+      <h2 id="home-value-paths-heading" className="home-value-paths__heading">
+        Что вам нужно сейчас?
+      </h2>
       <div className="home-value-paths__grid">
         {HOME_VALUE_PATHS.map((item) => (
-          <article key={item.id} className="home-value-path">
-            <div className="home-value-path__icon" aria-hidden>
+          <Link
+            key={item.id}
+            to={item.to}
+            className={`home-value-path home-value-path--${item.styleVariant}`}
+            aria-label={`${item.title}. ${item.cta}`}
+            onClick={() => trackValueGoal("value_path_selected", { path: item.id })}
+          >
+            <span className="home-value-path__icon" aria-hidden>
               <item.Icon size={22} strokeWidth={2.1} color="currentColor" />
-            </div>
-            <h3 className="home-value-path__title">{item.title}</h3>
-            <p className="home-value-path__lead">{item.lead}</p>
-            <Link
-              to={item.to}
-              className="home-value-path__cta"
-              onClick={() => trackValueGoal("value_path_selected", { path: item.id })}
-            >
-              {item.cta}
-            </Link>
-          </article>
+            </span>
+            <span className="home-value-path__body">
+              <h3 className="home-value-path__title">{item.title}</h3>
+              <p className="home-value-path__lead">{item.lead}</p>
+            </span>
+            <span className="home-value-path__cta" aria-hidden>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2.4"
+                strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
+            </span>
+          </Link>
         ))}
       </div>
     </section>

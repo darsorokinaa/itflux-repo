@@ -588,6 +588,18 @@ class MaterialWriteSerializer(serializers.ModelSerializer):
         return Material.objects.create(teacher=teacher, **validated_data)
 
 
+class MaterialTitleUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Material
+        fields = ["title"]
+
+    def validate_title(self, value):
+        name = (value or "").strip()
+        if not name:
+            raise serializers.ValidationError("Укажите название.")
+        return name[:255]
+
+
 def _interactive_attachment_json(interactive):
     return {
         "id": interactive.id,

@@ -209,6 +209,9 @@ def process_expired_subscriptions(*, limit: int = 500) -> dict:
                     "updated_at",
                 ]
             )
+            from .availability_service import deactivate_teacher_booking_link
+
+            deactivate_teacher_booking_link(locked.teacher)
             moved += 1
             logger.info(
                 "subscription_expired teacher=%s subscription=%s → start",

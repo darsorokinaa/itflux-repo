@@ -179,6 +179,25 @@ class SubscriptionAccessService:
             min_plan="teacher",
         )
 
+    @staticmethod
+    def can_use_student_booking(user) -> bool:
+        """Самостоятельная запись учеников по ссылке — с тарифа «Учитель» и выше."""
+        plan = SubscriptionAccessService.get_effective_plan(user)
+        if not plan:
+            return False
+        return SubscriptionAccessService.plan_content_rank(plan) >= PLAN_SLUG_TO_RANK["teacher"]
+
+    @staticmethod
+    def raise_if_cannot_use_student_booking(user):
+        if SubscriptionAccessService.can_use_student_booking(user):
+            return
+        raise AccessDenied(
+            code="BOOKING_REQUIRES_TEACHER_PLAN",
+            message="Запись учеников по ссылке доступна начиная с тарифа «Учитель».",
+            feature="student_booking",
+            min_plan="teacher",
+        )
+
     # ── Content access ───────────────────────────────────────────────────────
 
     @staticmethod

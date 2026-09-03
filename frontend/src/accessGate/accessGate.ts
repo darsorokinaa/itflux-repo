@@ -17,6 +17,7 @@ export type AccessResourceType =
   | "lessons"
   | "ai"
   | "schedule"
+  | "student_booking"
   | "content";
 
 export type AccessDeniedPayload = {
@@ -75,6 +76,7 @@ const LIMIT_CODES: Record<string, AccessResourceType> = {
 
 const FEATURE_CODES: Record<string, AccessResourceType> = {
   SCHEDULE_REQUIRES_PAID_PLAN: "schedule",
+  BOOKING_REQUIRES_TEACHER_PLAN: "student_booking",
 };
 
 const AUTH_CODES = new Set(["AUTH_REQUIRED", "auth_required"]);
@@ -187,6 +189,7 @@ function resourceFromFeature(feature?: string): AccessResourceType {
   if (feature === "content") return "material";
   if (
     feature === "schedule" ||
+    feature === "student_booking" ||
     feature === "interactive" ||
     feature === "ai" ||
     feature === "students" ||
@@ -282,6 +285,8 @@ function resourceNoun(type: AccessResourceType) {
       return "рабочие тетради";
     case "schedule":
       return "расписание";
+    case "student_booking":
+      return "запись учеников по ссылке";
     case "ai":
       return "эта возможность";
     case "students":
@@ -347,6 +352,18 @@ export function accessGateCopy(
       text: "Вы можете продолжить в следующем расчётном периоде или выбрать тариф с большим лимитом.",
       primary: "Сравнить тарифы",
       secondary: "Закрыть",
+    };
+  }
+
+  if (ctx.resourceType === "student_booking") {
+    const teacherName = planName || "Учитель";
+    return {
+      title: "Запись учеников по ссылке",
+      text:
+        "Отметьте свободное время в календаре и отправьте ученикам ссылку — они сами выберут удобный слот.\n\n" +
+        `Доступно на тарифе «${teacherName}».`,
+      primary: `Перейти на тариф «${teacherName}»`,
+      secondary: "Не сейчас",
     };
   }
 

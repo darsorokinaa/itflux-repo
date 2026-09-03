@@ -19,6 +19,8 @@ const TYPE_TO_RESOURCE = {
   interactives: "interactive",
   ai: "ai",
   feature: "feature",
+  schedule: "schedule",
+  student_booking: "student_booking",
 };
 
 export default function UpgradeLimitModal({

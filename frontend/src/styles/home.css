@@ -2281,68 +2281,156 @@ a.home-updates__card {
 /* ── Уровни ── */
 
 .home-value-paths {
-  margin: 8px 0 28px;
+  margin: 8px 0 12px;
+}
+
+.home-value-paths__heading {
+  margin: 0 0 12px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(15px, 1.8vw, 17px);
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
 }
 
 .home-value-paths__grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
+  gap: 10px;
 }
 
 .home-value-path {
+  position: relative;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
   min-width: 0;
-  padding: 20px 18px 18px;
-  border-radius: 20px;
-  border: 1.5px solid var(--border-card);
-  background: #fff;
+  min-height: 72px;
+  padding: 14px 16px 14px 14px;
+  border-radius: var(--r-lg, 24px);
+  border: none;
+  color: #fff;
+  text-decoration: none;
   box-shadow: var(--shadow-card);
+  overflow: hidden;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+}
+
+.home-value-path--blue {
+  background:
+    radial-gradient(120% 140% at 100% 0%, rgba(111, 145, 232, 0.45) 0%, transparent 55%),
+    var(--blue-main, #1550D8);
+}
+
+.home-value-path--blue .home-value-path__cta {
+  color: var(--blue-main, #1550D8);
+}
+
+.home-value-path--burgundy {
+  background:
+    radial-gradient(120% 140% at 100% 0%, rgba(224, 90, 110, 0.35) 0%, transparent 55%),
+    var(--teal, #C0284A);
+}
+
+.home-value-path--burgundy .home-value-path__cta {
+  color: var(--teal, #C0284A);
+}
+
+.home-value-path--orange {
+  background:
+    radial-gradient(120% 140% at 100% 0%, rgba(255, 140, 56, 0.4) 0%, transparent 55%),
+    var(--card-vpr-from, #E05A00);
+}
+
+.home-value-path--orange .home-value-path__cta {
+  color: var(--card-vpr-from, #E05A00);
+}
+
+.home-value-path::after {
+  content: "";
+  position: absolute;
+  right: -48px;
+  top: 50%;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.home-value-path:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+  box-shadow: var(--shadow-hover);
+}
+
+.home-value-path:focus-visible {
+  outline: 2px solid var(--blue-dark, #0B2F9F);
+  outline-offset: 3px;
 }
 
 .home-value-path__icon {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  margin-bottom: 12px;
-  border-radius: 12px;
-  background: #eef3ff;
-  color: var(--blue, #2b52f5);
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.92);
 }
 
-.home-value-path__title {
-  margin: 0 0 8px;
-  font-size: 20px;
-  line-height: 1.25;
-}
-
-.home-value-path__lead {
-  margin: 0 0 16px;
-  color: var(--text-sub);
-  font-size: 14px;
-  line-height: 1.45;
+.home-value-path__body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
   flex: 1 1 auto;
 }
 
+.home-value-path__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+
+.home-value-path__lead {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .home-value-path__cta {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 44px;
-  padding: 0 16px;
-  border-radius: var(--r-pill, 999px);
-  background: var(--blue, #2b52f5);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  text-decoration: none;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(11, 47, 159, 0.16);
+  transition: transform 0.18s ease;
 }
 
-.home-value-path__cta:hover {
-  filter: brightness(1.06);
+.home-value-path:hover .home-value-path__cta {
+  transform: translateX(2px);
 }
 
 @media (max-width: 860px) {
@@ -2350,9 +2438,39 @@ a.home-updates__card {
     grid-template-columns: 1fr;
   }
 
+  .home-value-path {
+    gap: 12px;
+    padding: 12px 12px 12px 12px;
+    min-height: 68px;
+  }
+
+  .home-value-path__title {
+    font-size: 16px;
+  }
+
+  .home-value-path__lead {
+    font-size: 12px;
+  }
+
   .home-hero__actions {
     flex-wrap: wrap;
   }
+}
+
+.home-section-divider {
+  height: 2px;
+  margin: 16px 0 32px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--blue-soft, #E8EFFE) 18%,
+    var(--blue-light, #6F91E8) 50%,
+    var(--blue-soft, #E8EFFE) 82%,
+    transparent 100%
+  );
+  opacity: 0.7;
 }
 
 .home-levels {
@@ -6322,23 +6440,10 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   box-shadow: 0 0 0 3px rgba(43, 82, 245, 0.11);
 }
 
-.lessons-filters-disclosure {
-  margin-top: 12px;
-}
-
-.lessons-filters-disclosure__summary {
-  display: none;
-}
-
-@media (min-width: 721px) {
-  .lessons-filters-disclosure .lessons-filters-grid {
-    display: grid !important;
-  }
-}
-
 .lessons-filters-grid {
   display: grid;
   gap: 10px;
+  margin-top: 12px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
@@ -6709,19 +6814,6 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
 @media (max-width: 720px) {
 .lessons-page {
     padding-top: 8px;
-  }
-
-.lessons-filters-disclosure__summary {
-    display: list-item;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--blue-dark);
-    padding: 8px 0;
-  }
-
-.lessons-filters-disclosure:not([open]) .lessons-filters-grid {
-    display: none;
   }
 
 .lessons-filters-grid {
@@ -8435,6 +8527,13 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   display: flex;
   flex-direction: column;
   gap: 4px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  position: static;
+  z-index: auto;
+  width: auto;
+  font-family: inherit;
 }
 
 .try-now-lessons__head h2 {
@@ -8559,7 +8658,8 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
 
 .try-now-lessons__btn--preview {
   flex: 0 0 auto;
-  padding: 0 12px;
+  width: 32px;
+  padding: 0;
   color: #475569;
   background: #f1f5f9;
 }
@@ -8580,29 +8680,64 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   background: var(--blue-hover, #1d40db);
 }
 
-.lessons-recent {
-  margin: 0 0 16px;
+.try-now-lessons--compact {
+  margin: 0 0 24px;
 }
 
-.lessons-recent__title {
-  margin: 0 0 8px;
-  font-size: 1rem;
+.try-now-lessons--compact .try-now-lessons__head h2 {
+  font-size: 1.15rem;
 }
 
-.lessons-recent__list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.try-now-lessons--compact .try-now-lessons__grid {
+  margin-top: 12px;
+  gap: 12px;
+  padding-bottom: 12px;
 }
 
-.lessons-recent__item {
-  border: 1px solid var(--border-card);
-  background: #fff;
-  border-radius: 999px;
-  padding: 8px 12px;
-  font: inherit;
+.try-now-lessons--compact .try-now-lessons__card {
+  flex-basis: 176px;
+  border-radius: 12px;
+}
+
+.try-now-lessons--compact .try-now-lessons__cover {
+  border-radius: 12px 12px 0 0;
+}
+
+.try-now-lessons--compact .try-now-lessons__cover--pattern {
+  background-size: 110px auto;
+}
+
+.try-now-lessons--compact .try-now-lessons__body {
+  padding: 10px;
+}
+
+.try-now-lessons--compact .try-now-lessons__meta {
+  margin: 0 0 4px;
+  font-size: 11px;
+}
+
+.try-now-lessons--compact .try-now-lessons__title {
+  margin: 0 0 10px;
   font-size: 13px;
-  cursor: pointer;
+  -webkit-line-clamp: 2;
+}
+
+.try-now-lessons--compact .try-now-lessons__btn {
+  height: 28px;
+  font-size: 12px;
+}
+
+.try-now-lessons--compact .try-now-lessons__btn--preview {
+  width: auto;
+  flex: 1;
+  gap: 4px;
+  padding: 0 10px;
+}
+
+@media (min-width: 1024px) {
+  .try-now-lessons--compact .try-now-lessons__card:hover {
+    transform: translateY(-2px);
+  }
 }
 
 .lessons-situations {

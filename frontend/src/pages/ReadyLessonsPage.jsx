@@ -502,8 +502,11 @@ export default function ReadyLessonsPage() {
   );
 
   const recentLessons = useMemo(() => {
-    const slugs = new Set(readRecentLessons().map((row) => row.slug));
-    return lessons.filter((lesson) => slugs.has(lesson.slug)).slice(0, 4);
+    const bySlug = new Map(lessons.map((lesson) => [lesson.slug, lesson]));
+    return readRecentLessons()
+      .map((row) => bySlug.get(row.slug))
+      .filter(Boolean)
+      .slice(0, 4);
   }, [lessons]);
 
   const tryNowLessons = useMemo(() => {
@@ -515,8 +518,10 @@ export default function ReadyLessonsPage() {
   useEffect(() => {
     const duration = searchParams.get("duration") || "";
     const exam = searchParams.get("exam") || "";
+    const subjectParam = searchParams.get("subject") || "";
     if (duration) setDurationFilter(duration);
     if (exam) setLevel(exam);
+    if (subjectParam) setSubject(subjectParam);
   }, [searchParams]);
 
   const applySituation = (chip) => {
@@ -524,9 +529,29 @@ export default function ReadyLessonsPage() {
       navigate(chip.to);
       return;
     }
-    if (chip.duration) setDurationFilter(chip.duration);
-    if (chip.exam) setLevel(chip.exam);
+    if (chip.subject) {
+      setSubject((prev) => (prev === chip.subject ? "" : chip.subject));
+      return;
+    }
+    if (chip.duration) {
+      setDurationFilter((prev) => (prev === chip.duration ? "" : chip.duration));
+    }
+    if (chip.exam) {
+      setLevel((prev) => (prev === chip.exam ? "" : chip.exam));
+    }
   };
+
+  const situationChips = useMemo(() => [
+    { id: "60", label: "Урок на 45–60 минут", duration: "long" },
+    { id: "interesting", label: "Интересное", to: "/interesting" },
+    { id: "oge", label: "ОГЭ", exam: "ОГЭ" },
+    { id: "ege", label: "ЕГЭ", exam: "ЕГЭ" },
+    ...subjectOptions.map((value) => ({
+      id: `subject-${value}`,
+      label: value,
+      subject: value,
+    })),
+  ], [subjectOptions]);
 
   return (
     <div className="digital-flow-page">
@@ -540,21 +565,14 @@ export default function ReadyLessonsPage() {
           </section>
 
           {authed && recentLessons.length ? (
-            <section className="lessons-recent" aria-label="Недавно смотрели">
-              <h2 className="lessons-recent__title">Недавно смотрели</h2>
-              <div className="lessons-recent__list">
-                {recentLessons.map((lesson) => (
-                  <button
-                    key={lesson.slug}
-                    type="button"
-                    className="lessons-recent__item"
-                    onClick={() => handleLockedOpen(lesson)}
-                  >
-                    {lesson.title}
-                  </button>
-                ))}
-              </div>
-            </section>
+            <TryNowLessons
+              lessons={recentLessons}
+              onOpen={handleLockedOpen}
+              title="Недавно смотрели"
+              lead=""
+              compact
+              source="recent"
+            />
           ) : null}
 
           {tryNowLessons.length ? (
@@ -562,21 +580,24 @@ export default function ReadyLessonsPage() {
           ) : null}
 
           <div className="lessons-situations" aria-label="Быстрый выбор">
-            {[
-              { id: "60", label: "Урок на 45–60 минут", duration: "long" },
-              { id: "interesting", label: "Интересное", to: "/interesting" },
-              { id: "oge", label: "ОГЭ", exam: "ОГЭ" },
-              { id: "ege", label: "ЕГЭ", exam: "ЕГЭ" },
-            ].map((chip) => (
-              <button
-                key={chip.id}
-                type="button"
-                className="lessons-situation"
-                onClick={() => applySituation(chip)}
-              >
-                {chip.label}
-              </button>
-            ))}
+            {situationChips.map((chip) => {
+              const active = Boolean(
+                (chip.duration && durationFilter === chip.duration)
+                || (chip.exam && level === chip.exam)
+                || (chip.subject && subject === chip.subject),
+              );
+              return (
+                <button
+                  key={chip.id}
+                  type="button"
+                  className={`lessons-situation${active ? " lessons-situation--active" : ""}`}
+                  aria-pressed={chip.to ? undefined : active}
+                  onClick={() => applySituation(chip)}
+                >
+                  {chip.label}
+                </button>
+              );
+            })}
           </div>
 
           <section className="lessons-toolbar" aria-label="Поиск и фильтры каталога">
@@ -591,8 +612,6 @@ export default function ReadyLessonsPage() {
               />
             </label>
 
-            <details className="lessons-filters-disclosure">
-              <summary className="lessons-filters-disclosure__summary">Фильтры</summary>
             <div className="lessons-filters-grid">
               <label className="lessons-filter">
                 <span className="lessons-filter__label">Предмет</span>
@@ -719,7 +738,6 @@ export default function ReadyLessonsPage() {
                 </select>
               </label>
             </div>
-            </details>
 
             {hasActiveFilters ? (
               <div className="lessons-toolbar__footer">

@@ -33,6 +33,7 @@ describe("buildPlanHighlights", () => {
     expect(lines).toContain("до 5 групп");
     expect(lines).toContain("10 интерактивов в месяц");
     expect(lines).toContain("уведомления");
+    expect(lines).toContain("Запись учеников по ссылке");
   });
 
   it("adds AI only when requested", () => {

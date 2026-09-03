@@ -613,9 +613,13 @@ class DowngradeService:
         """Архивирует лишних учеников/групп без удаления данных."""
         from .choices import GroupStatus, StudentStatus
         from .models import Student, StudentGroup
+        from .availability_service import deactivate_teacher_booking_link
+        from .subscription_access import SubscriptionAccessService
 
         plan = sub.plan
         teacher = sub.teacher
+        if not SubscriptionAccessService.can_use_student_booking(teacher):
+            deactivate_teacher_booking_link(teacher)
         keep_students = set(int(x) for x in (change.selected_student_ids or []))
         keep_groups = set(int(x) for x in (change.selected_group_ids or []))
 
