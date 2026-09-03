@@ -4,12 +4,25 @@ import { ClipboardList, PenLine, Presentation, Search, StickyNote } from "lucide
 import AccessGateBadge from "../components/AccessGateBadge";
 import CatalogEngagementBar from "../components/CatalogEngagementBar";
 import LessonPreviewModal from "../components/LessonPreviewModal";
+import TryNowLessons from "../components/TryNowLessons";
 import StateView from "../components/StateView";
 import { isCatalogLocked } from "../accessGate/accessGate";
 import { useAccessGate, useCabinetAuthed } from "../hooks/useAccessGate";
-import { getLessonCardActionLabel, lessonCanPurchase, lessonHasActiveDemo, lessonPreviewUrl, lessonPurchaseLabel } from "../cabinet/lessonCardUtils";
+import {
+  getLessonCardActionLabel,
+  inferLessonIncludes,
+  lessonCanPurchase,
+  lessonExamLabel,
+  lessonFormatLabel,
+  lessonHasActiveDemo,
+  lessonIsReadyToRun,
+  lessonPreviewUrl,
+  lessonPurchaseLabel,
+} from "../cabinet/lessonCardUtils";
 import { CATALOG_ORDERING_OPTIONS } from "../utils/catalogEngagement";
 import { purchaseReadyLesson } from "../utils/cabinetAuth";
+import { pickTryNowLessons, readRecentLessons } from "../utils/recentLessons";
+import { trackValueGoal } from "../utils/valuePath";
 import "../styles/material-access.css";
 
 const patternInf = new URL("../assets/subject-patterns/inf.svg", import.meta.url).href;
@@ -74,12 +87,13 @@ function mediaUrl(url) {
   return url;
 }
 
-const INCLUDES = [
-  { id: "presentation", label: "Презентация", Icon: Presentation },
-  { id: "practice", label: "Практика", Icon: PenLine },
-  { id: "homework", label: "ДЗ", Icon: ClipboardList },
-  { id: "notes", label: "Заметки", Icon: StickyNote },
-];
+const INCLUDE_ICONS = {
+  theory: Presentation,
+  practice: PenLine,
+  interactive: Presentation,
+  homework: ClipboardList,
+  notes: StickyNote,
+};
 
 function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson }) {
   const subjectTheme = getSubjectTheme(lesson.subject);
@@ -87,20 +101,25 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
   const statusLabel = STATUS_LABELS[status];
   const durationLabel = formatDuration(lesson.duration_minutes);
   const difficultyLabel = DIFFICULTY_LABELS[lesson.difficulty];
+  const examLabel = lessonExamLabel(lesson);
   const locked = isCatalogLocked(lesson);
   const demoActive = lessonHasActiveDemo(lesson);
   const purchaseAvailable = lessonCanPurchase(lesson);
+  const includes = inferLessonIncludes(lesson);
+  const readyNow = lessonIsReadyToRun(lesson);
   const canOpenLesson = Boolean(
     lesson.slug && (lesson.archive_url || lesson.file_url || demoActive || locked),
   );
   const actionLabel = locked
-    ? "Подробнее"
+    ? "Открыть урок"
     : demoActive
-      ? "Продолжить демо"
+      ? "Продолжить урок"
       : canOpenLesson
         ? "Открыть урок"
         : "Скоро";
   const lessonUrl = lessonPreviewUrl(lesson.slug);
+  const priceLabel = purchaseAvailable ? lessonPurchaseLabel(lesson) : "";
+  const planName = lesson.access?.required_plan_name || "";
 
   const coverUrl = mediaUrl(lesson.cover_image_url);
 
@@ -111,7 +130,9 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
 
   const tags = [
     lesson.grade ? `${lesson.grade} класс` : null,
-    lesson.level || null,
+    examLabel || lesson.level || null,
+    lesson.topic || null,
+    lessonFormatLabel(lesson) || null,
     lesson.task_number ? `Задание ${lesson.task_number}` : null,
     durationLabel,
     difficultyLabel,
@@ -169,17 +190,31 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
           <p className="lesson-card-v3__desc">{lesson.short_description}</p>
         ) : null}
 
-        <div className="lesson-card-v3__includes">
-          {INCLUDES.map((item) => {
-            const Icon = item.Icon;
-            return (
-              <span key={item.id} className="lesson-card-v3__include">
-                <Icon strokeWidth={2} aria-hidden="true" />
-                {item.label}
-              </span>
-            );
-          })}
-        </div>
+        {includes.length > 0 ? (
+          <div className="lesson-card-v3__includes" aria-label="Что входит в урок">
+            {includes.map((item) => {
+              const Icon = INCLUDE_ICONS[item.id] || Presentation;
+              return (
+                <span key={item.id} className="lesson-card-v3__include">
+                  <Icon strokeWidth={2} aria-hidden="true" />
+                  {item.label}
+                </span>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {readyNow ? (
+          <p className="lesson-card-v3__ready">Можно проводить сразу</p>
+        ) : null}
+
+        {priceLabel || planName ? (
+          <p className="lesson-card-v3__access">
+            {priceLabel || null}
+            {priceLabel && planName ? " · " : null}
+            {planName ? `По тарифу «${planName}»` : null}
+          </p>
+        ) : null}
 
         <CatalogEngagementBar
           kind="lessons"
@@ -192,7 +227,7 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
 
         {locked ? (
           <a href={lessonUrl} className="lesson-card-v3__btn" onClick={handleOpen}>
-            Подробнее
+            Открыть урок
           </a>
         ) : demoActive && purchaseAvailable ? (
           <div className="lesson-card-v3__actions">
@@ -201,7 +236,7 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
               className="lesson-card-v3__btn lesson-card-v3__btn--ghost"
               onClick={handleOpen}
             >
-              Продолжить демо
+              Продолжить урок
             </a>
             <button
               type="button"
@@ -235,6 +270,7 @@ export default function ReadyLessonsPage() {
   const demoExpired = searchParams.get("demo_expired") === "1";
   const paymentId = searchParams.get("payment_id") || "";
   const paymentStatus = searchParams.get("status") || "";
+  const forEvent = searchParams.get("for_event") || searchParams.get("event") || "";
   const [lessons, setLessons] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -245,6 +281,7 @@ export default function ReadyLessonsPage() {
   const [taskNumber, setTaskNumber] = useState("");
   const [durationFilter, setDurationFilter] = useState("");
   const [difficulty, setDifficulty] = useState("");
+  const [topic, setTopic] = useState("");
   const [ordering, setOrdering] = useState("newest");
   const authed = useCabinetAuthed();
   const { modal: accessGateModal, openGate } = useAccessGate({ authenticated: authed, sourcePage: "/lessons" });
@@ -269,8 +306,11 @@ export default function ReadyLessonsPage() {
 
   const handleLockedOpen = useCallback((lesson) => {
     if (!lesson?.slug) return;
-    setSearchParams({ preview: lesson.slug }, { replace: false });
-  }, [setSearchParams]);
+    trackValueGoal("lesson_card_opened", { lesson_id: String(lesson.id || lesson.slug) });
+    const next = new URLSearchParams(searchParams);
+    next.set("preview", lesson.slug);
+    setSearchParams(next, { replace: false });
+  }, [searchParams, setSearchParams]);
 
   const handlePurchaseLesson = useCallback(async (lesson) => {
     if (!lesson?.slug) return;
@@ -331,6 +371,10 @@ export default function ReadyLessonsPage() {
     };
   }, [reloadKey, ordering]);
 
+  useEffect(() => {
+    trackValueGoal("lesson_catalog_opened");
+  }, []);
+
   const subjectOptions = useMemo(() => {
     const values = new Set();
     for (const lesson of lessons) {
@@ -342,6 +386,8 @@ export default function ReadyLessonsPage() {
   const levelOptions = useMemo(() => {
     const values = new Set();
     for (const lesson of lessons) {
+      const exam = lessonExamLabel(lesson);
+      if (exam) values.add(exam);
       if (lesson.level) values.add(lesson.level);
     }
     return Array.from(values).sort((a, b) => a.localeCompare(b, "ru"));
@@ -363,11 +409,23 @@ export default function ReadyLessonsPage() {
     return Array.from(values).sort((a, b) => Number(a) - Number(b));
   }, [lessons]);
 
+  const topicOptions = useMemo(() => {
+    const values = new Set();
+    for (const lesson of lessons) {
+      if (lesson.topic) values.add(lesson.topic);
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [lessons]);
+
   const filteredLessons = useMemo(() => {
     const q = search.trim().toLowerCase();
     return lessons.filter((lesson) => {
       if (subject && lesson.subject !== subject) return false;
-      if (level && lesson.level !== level) return false;
+      if (level) {
+        const exam = lessonExamLabel(lesson);
+        if (lesson.level !== level && exam !== level) return false;
+      }
+      if (topic && lesson.topic !== topic) return false;
       if (grade && String(lesson.grade) !== grade) return false;
       if (taskNumber && String(lesson.task_number) !== taskNumber) return false;
       if (durationFilter && durationBucketId(lesson.duration_minutes) !== durationFilter) return false;
@@ -385,12 +443,13 @@ export default function ReadyLessonsPage() {
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [lessons, search, subject, level, grade, taskNumber, durationFilter, difficulty]);
+  }, [lessons, search, subject, level, topic, grade, taskNumber, durationFilter, difficulty]);
 
   const resetFilters = () => {
     setSearch("");
     setSubject("");
     setLevel("");
+    setTopic("");
     setGrade("");
     setTaskNumber("");
     setDurationFilter("");
@@ -398,19 +457,74 @@ export default function ReadyLessonsPage() {
   };
 
   const hasActiveFilters = Boolean(
-    search || subject || level || grade || taskNumber || durationFilter || difficulty
+    search || subject || level || topic || grade || taskNumber || durationFilter || difficulty
   );
+
+  const recentLessons = useMemo(() => {
+    const slugs = new Set(readRecentLessons().map((row) => row.slug));
+    return lessons.filter((lesson) => slugs.has(lesson.slug)).slice(0, 4);
+  }, [lessons]);
+
+  const tryNowLessons = useMemo(() => {
+    const preferredSubject = subject || readRecentLessons()[0]?.subject || "";
+    return pickTryNowLessons(lessons, { subject: preferredSubject, limit: 6 });
+  }, [lessons, subject]);
+
+  const applySituation = (chip) => {
+    if (chip.duration) setDurationFilter(chip.duration);
+    if (chip.exam) setLevel(chip.exam);
+  };
 
   return (
     <div className="digital-flow-page">
       <div className="digital-flow-page__wrap">
         <main className="lessons-page">
           <section className="lessons-hero-v3">
-            <h1 className="lessons-hero-v3__title">Готовые уроки</h1>
+            <h1 className="lessons-hero-v3__title">Не тратить вечер на подготовку к уроку</h1>
             <p className="lessons-hero-v3__lead">
-              Готовые материалы для занятия: теория, практика, домашнее задание и заметки для учителя.
+              Урок уже собран: теория, практика и ДЗ в одном материале. Откройте и используйте на ближайшем занятии.
             </p>
           </section>
+
+          {authed && recentLessons.length ? (
+            <section className="lessons-recent" aria-label="Недавно смотрели">
+              <h2 className="lessons-recent__title">Недавно смотрели</h2>
+              <div className="lessons-recent__list">
+                {recentLessons.map((lesson) => (
+                  <button
+                    key={lesson.slug}
+                    type="button"
+                    className="lessons-recent__item"
+                    onClick={() => handleLockedOpen(lesson)}
+                  >
+                    {lesson.title}
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {tryNowLessons.length ? (
+            <TryNowLessons lessons={tryNowLessons} onOpen={handleLockedOpen} />
+          ) : null}
+
+          <div className="lessons-situations" aria-label="Быстрый выбор">
+            {[
+              { id: "60", label: "Урок на 45–60 минут", duration: "long" },
+              { id: "short", label: "Интерактив до 30 минут", duration: "short" },
+              { id: "oge", label: "ОГЭ", exam: "ОГЭ" },
+              { id: "ege", label: "ЕГЭ", exam: "ЕГЭ" },
+            ].map((chip) => (
+              <button
+                key={chip.id}
+                type="button"
+                className="lessons-situation"
+                onClick={() => applySituation(chip)}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
 
           <section className="lessons-toolbar" aria-label="Поиск и фильтры каталога">
             <label className="lessons-search">
@@ -424,6 +538,8 @@ export default function ReadyLessonsPage() {
               />
             </label>
 
+            <details className="lessons-filters-disclosure">
+              <summary className="lessons-filters-disclosure__summary">Фильтры</summary>
             <div className="lessons-filters-grid">
               <label className="lessons-filter">
                 <span className="lessons-filter__label">Предмет</span>
@@ -466,6 +582,22 @@ export default function ReadyLessonsPage() {
                 >
                   <option value="">Все</option>
                   {levelOptions.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="lessons-filter">
+                <span className="lessons-filter__label">Тема</span>
+                <select
+                  className="lessons-filter__control"
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                >
+                  <option value="">Все</option>
+                  {topicOptions.map((value) => (
                     <option key={value} value={value}>
                       {value}
                     </option>
@@ -534,6 +666,7 @@ export default function ReadyLessonsPage() {
                 </select>
               </label>
             </div>
+            </details>
 
             {hasActiveFilters ? (
               <div className="lessons-toolbar__footer">
@@ -610,6 +743,8 @@ export default function ReadyLessonsPage() {
         demoExpired={demoExpired}
         paymentId={paymentId}
         paymentStatus={paymentStatus}
+        catalogLessons={lessons}
+        forEventId={forEvent}
       />
     </div>
   );

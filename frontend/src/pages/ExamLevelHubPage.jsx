@@ -125,11 +125,13 @@ function ExamLevelHubPage() {
         <div className="sc-subject-root">
           <header className="sc-top">
             <div className="sc-top-text">
-              <h1 className="sc-top-title">Выберите предмет</h1>
+              <h1 className="sc-top-title">
+                {level === "ege" ? "Материалы для подготовки к ЕГЭ" : "Материалы для подготовки к ОГЭ"}
+              </h1>
               <p className="sc-top-lead">
-                Готовые задания и варианты для уроков,
+                Готовые задания и варианты по предметам экзамена.
                 <br />
-                контрольных и экзаменов
+                Соберите нужный комплект за несколько минут.
               </p>
             </div>
             <div className="sc-top-searches">
@@ -182,7 +184,7 @@ function ExamLevelHubPage() {
                     <br />
                     с реальными экзаменационными форматами
                   </p>
-                  <span className="sc-body-cta">Перейти →</span>
+                  <span className="sc-body-cta">Открыть задания →</span>
                 </div>
               </Link>
 
@@ -196,7 +198,7 @@ function ExamLevelHubPage() {
                     Алгоритмы, программирование
                     <br />и практические задания по логике решений
                   </p>
-                  <span className="sc-body-cta">Перейти →</span>
+                  <span className="sc-body-cta">Открыть задания →</span>
                 </div>
               </Link>
 
@@ -215,7 +217,7 @@ function ExamLevelHubPage() {
                     Механика, электродинамика
                     <br />и расчётные задачи с пояснением шагов
                   </p>
-                  <span className="sc-body-cta">Перейти →</span>
+                  <span className="sc-body-cta">Открыть задания →</span>
                 </div>
               </Link>
             </div>

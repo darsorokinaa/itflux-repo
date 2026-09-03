@@ -74,6 +74,8 @@ export function useAccessGate(options: UseAccessGateOptions = {}) {
       currentPlan={ctx?.currentPlan || options.currentPlan}
       sourcePage={ctx?.sourcePage || options.sourcePage}
       returnUrl={ctx?.returnUrl}
+      limit={ctx?.limit}
+      current={ctx?.current}
       authenticated={Boolean(options.authenticated) && ctx?.reason !== "anonymous"}
     />
   );

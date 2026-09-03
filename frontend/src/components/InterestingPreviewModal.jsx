@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { rememberReturnPath, safeReturnPath } from "../accessGate/accessGate";
 import { useCabinetAuthed } from "../hooks/useAccessGate";
 import { fetchInterestingItem } from "../utils/cabinetAuth";
+import CatalogEngagementBar from "./CatalogEngagementBar";
 
 const PLAN_NAMES = {
   start: "Старт",
@@ -156,6 +157,15 @@ export default function InterestingPreviewModal({ open, slug, onClose }) {
               </div>
               <h1 id="interesting-preview-title" className="material-preview__title">{item.title}</h1>
               {item.tag ? <p className="material-preview__meta">{item.tag}</p> : null}
+              {item.slug ? (
+                <CatalogEngagementBar
+                  kind="interesting"
+                  slug={item.slug}
+                  viewsCount={item.views_count}
+                  likesCount={item.likes_count}
+                  isLiked={item.is_liked}
+                />
+              ) : null}
               {item.short_description ? (
                 <p className="material-preview__desc">{item.short_description}</p>
               ) : null}

@@ -403,11 +403,11 @@ class LessonAccessService:
                 )
             if cls._demo_enabled(lesson):
                 return (
-                    "Создайте бесплатный аккаунт, чтобы ознакомиться с демоверсией.",
+                    "Создайте аккаунт, чтобы открыть этот урок. Он сохранится в вашем кабинете.",
                     "REGISTRATION_REQUIRED",
                 )
             return (
-                "Создайте бесплатный аккаунт, чтобы получить доступ к уроку.",
+                "Создайте аккаунт, чтобы открыть этот урок. Он сохранится в вашем кабинете.",
                 "REGISTRATION_REQUIRED",
             )
         if result.demo_used and not result.demo_active:
@@ -438,23 +438,22 @@ class LessonAccessService:
     def _locked_cta(cls, user, lesson, result: LessonAccessResult, *, demo_active: bool = False) -> list[dict]:
         actions: list[dict] = []
         if not cls.is_authenticated(user):
-            label = (
-                "Зарегистрироваться бесплатно"
-                if cls.is_free_lesson(lesson)
-                else "Зарегистрироваться"
-            )
-            actions.append({"type": "register", "label": label, "primary": True})
+            actions.append({
+                "type": "register",
+                "label": "Создать аккаунт и открыть урок",
+                "primary": True,
+            })
             if cls._demo_enabled(lesson):
                 actions.append({
                     "type": "demo",
-                    "label": "Открыть демоверсию",
+                    "label": "Открыть урок",
                     "primary": False,
                 })
             return actions
         if demo_active:
             return cls._demo_active_cta(result)
         if result.demo_available:
-            actions.append({"type": "demo", "label": "Открыть демоверсию", "primary": True})
+            actions.append({"type": "demo", "label": "Открыть урок", "primary": True})
         if result.can_purchase and result.standalone_price is not None:
             price = cls.format_price(result.standalone_price, result.standalone_currency)
             actions.append({
@@ -473,7 +472,7 @@ class LessonAccessService:
     @classmethod
     def _demo_active_cta(cls, result: LessonAccessResult) -> list[dict]:
         actions: list[dict] = [
-            {"type": "demo", "label": "Продолжить демо", "primary": False},
+            {"type": "demo", "label": "Продолжить урок", "primary": False},
         ]
         if result.can_purchase and result.standalone_price is not None:
             price = cls.format_price(result.standalone_price, result.standalone_currency)
@@ -610,7 +609,7 @@ class LessonAccessService:
         if not cls.is_authenticated(user):
             raise AccessDenied(
                 code="REGISTRATION_REQUIRED",
-                message="Создайте бесплатный аккаунт, чтобы один раз посмотреть демоверсию.",
+                message="Создайте аккаунт, чтобы открыть этот урок. Он сохранится в вашем кабинете.",
                 feature="content",
                 min_plan="start",
             )

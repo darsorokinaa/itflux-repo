@@ -567,7 +567,7 @@ class LessonAccessStateTests(LessonAccessBase):
         self.assertGreater(access.demo_remaining_seconds, 0)
         self.assertEqual(access.to_dict()["content_mode"], "demo")
         self.assertTrue(access.to_dict()["can_continue_demo"])
-        self.assertEqual(access.cta[0]["label"], "Продолжить демо")
+        self.assertEqual(access.cta[0]["label"], "Продолжить урок")
         self.assertFalse(access.cta[0]["primary"])
         self.assertEqual(access.cta[1]["type"], "purchase")
         self.assertIn("790", access.cta[1]["label"])

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { trackActivationIntent } from "../activationAnalytics";
+import { readValueReached } from "../../utils/valuePath";
 
 function progressLabel(done, total) {
   return `${done} из ${total} шагов выполнено`;
@@ -13,8 +14,11 @@ export default function TeacherOnboardingCard({ onboarding }) {
   const total = onboarding?.total_steps || activationSteps.length || 3;
   const percent = total ? Math.round((completed / total) * 100) : 0;
   const cta = onboarding?.cta;
-  const title = cta?.title || "Добавьте первого ученика";
   const nextStep = onboarding?.next_step;
+  const afterValue = Boolean(readValueReached()) && nextStep === "student";
+  const title = afterValue
+    ? "Урок уже есть. Подключите ученика, чтобы провести его здесь"
+    : (cta?.title || "Добавьте первого ученика");
 
   useEffect(() => {
     if (!onboarding?.visible) return;
@@ -79,6 +83,9 @@ export default function TeacherOnboardingCard({ onboarding }) {
         })}
       </ol>
       {cta?.hint ? <p className="td-onboarding__hint">{cta.hint}</p> : null}
+      <p className="td-onboarding__alt">
+        <Link to="/lessons">Или сначала откройте готовый урок</Link>
+      </p>
     </article>
   );
 }

@@ -65,6 +65,13 @@ export default function InterestingViewerPage() {
       frameSrc={item && slug ? contentUrl(slug) : ""}
       loading={loading}
       error={error}
+      engagement={item?.slug ? {
+        kind: "interesting",
+        slug: item.slug,
+        viewsCount: item.views_count,
+        likesCount: item.likes_count,
+        isLiked: item.is_liked,
+      } : null}
     />
   );
 }

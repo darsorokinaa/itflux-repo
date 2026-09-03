@@ -83,6 +83,8 @@ class LessonCatalogSerializer(CatalogAccessMixin, serializers.ModelSerializer):
             "topic",
             "subtopic",
             "short_description",
+            "teacher_goal",
+            "student_result",
             "duration_minutes",
             "difficulty",
             "access_level",

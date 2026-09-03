@@ -8,6 +8,8 @@ import {
 } from "react-router-dom";
 import { FileText, Target, CircleHelp } from "lucide-react";
 import { useAnonLimitModal } from "../hooks/useAnonLimitModal";
+import { rememberValueReached, trackValueGoal } from "../utils/valuePath";
+import { rememberLastVariant } from "../utils/recentLessons";
 
 const SUBJECT_NAMES = {
   inf: "Информатика",
@@ -399,6 +401,12 @@ function TasksPage() {
         return data;
       })
       .then((data) => {
+        trackValueGoal("generator_result_created", {
+          level: String(level || ""),
+          subject: String(subject || ""),
+        });
+        rememberValueReached("tasks");
+        rememberLastVariant({ level, subject, variantId: data.variant_id });
         navigate(`/${level}/${subject}/variant/${data.variant_id}`, {
           state: { mode, subjectName: subjectNameFromApi, ...extra },
         });

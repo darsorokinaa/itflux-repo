@@ -2,6 +2,14 @@
 
 Intent events may originate from the authenticated frontend.
 Confirmed events are written only after a successful backend transaction.
+
+Time to first value (authenticated): compare occurred_at of teacher_registered
+or first_cabinet_opened with the earliest of lesson_preview_viewed,
+lesson_demo_started, lesson_opened_demo, lesson_opened_free,
+lesson_opened_purchase, lesson_opened_subscription.
+Public funnel events (value_path_selected, lesson_catalog_opened,
+generator_opened, generator_result_created) stay in Metrika trackGoal —
+ActivationEvent requires a user and is not duplicated here.
 """
 
 from __future__ import annotations

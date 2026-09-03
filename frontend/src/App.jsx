@@ -19,6 +19,7 @@ import LessonViewerPage from "./pages/LessonViewerPage";
 import InterestingPage from "./pages/InterestingPage";
 import InterestingViewerPage from "./pages/InterestingViewerPage";
 import ForTeachersPage from "./pages/ForTeachersPage";
+import TutorLandingPage from "./pages/TutorLandingPage";
 import CabinetAuthPage from "./pages/CabinetAuthPage";
 import CabinetJoinPage from "./cabinet/pages/CabinetJoinPage";
 import CabinetNotificationsSettingsPage from "./cabinet/pages/CabinetNotificationsSettingsPage";
@@ -282,6 +283,10 @@ function App() {
           <Route path="/pricing/" element={<PricingPage />} />
           <Route path="/tasks" element={<AllTasksPage />} />
           <Route path="/generator" element={<Navigate to="/subject" replace />} />
+          <Route path="/gotovye-uroki" element={<ReadyLessonsPage />} />
+          <Route path="/gotovye-uroki/" element={<ReadyLessonsPage />} />
+          <Route path="/repetitor" element={<TutorLandingPage />} />
+          <Route path="/repetitor/" element={<TutorLandingPage />} />
           <Route path="/lessons" element={<ReadyLessonsPage />} />
           <Route path="/lessons/:slug/view" element={<LessonViewerPage />} />
           <Route path="/interesting" element={<InterestingPage />} />

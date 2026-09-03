@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import CatalogMaterialViewer from "../components/CatalogMaterialViewer";
 import { getLessonContentUrl, lessonPreviewUrl } from "../cabinet/lessonCardUtils";
 import { fetchReadyLesson } from "../utils/cabinetAuth";
+import { rememberRecentLesson } from "../utils/recentLessons";
 
 function previewExtras(searchParams) {
   const extra = {};
@@ -46,6 +47,7 @@ export default function LessonViewerPage() {
           navigate(lessonPreviewUrl(slug, extra), { replace: true });
           return;
         }
+        rememberRecentLesson(data);
         setLesson(data);
       })
       .catch((err) => {
@@ -70,6 +72,13 @@ export default function LessonViewerPage() {
       frameSrc={lesson && slug ? getLessonContentUrl(slug) : ""}
       loading={loading}
       error={error}
+      engagement={lesson?.slug ? {
+        kind: "lessons",
+        slug: lesson.slug,
+        viewsCount: lesson.views_count,
+        likesCount: lesson.likes_count,
+        isLiked: lesson.is_liked,
+      } : null}
     />
   );
 }

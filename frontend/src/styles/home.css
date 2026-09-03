@@ -2075,6 +2075,17 @@ a.home-updates__card {
   background: #d7ff2f;
 }
 
+.home-hero__button--ghost {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.92);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.home-hero__button--ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
 .home-hero__button--secondary:hover {
   transform: translateY(-1px);
   border-color: rgba(255, 255, 255, 0.44);
@@ -2268,6 +2279,81 @@ a.home-updates__card {
 }
 
 /* ── Уровни ── */
+
+.home-value-paths {
+  margin: 8px 0 28px;
+}
+
+.home-value-paths__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.home-value-path {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 20px 18px 18px;
+  border-radius: 20px;
+  border: 1.5px solid var(--border-card);
+  background: #fff;
+  box-shadow: var(--shadow-card);
+}
+
+.home-value-path__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  background: #eef3ff;
+  color: var(--blue, #2b52f5);
+}
+
+.home-value-path__title {
+  margin: 0 0 8px;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.home-value-path__lead {
+  margin: 0 0 16px;
+  color: var(--text-sub);
+  font-size: 14px;
+  line-height: 1.45;
+  flex: 1 1 auto;
+}
+
+.home-value-path__cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: var(--r-pill, 999px);
+  background: var(--blue, #2b52f5);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.home-value-path__cta:hover {
+  filter: brightness(1.06);
+}
+
+@media (max-width: 860px) {
+  .home-value-paths__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .home-hero__actions {
+    flex-wrap: wrap;
+  }
+}
 
 .home-levels {
   margin-top: 28px;
@@ -6236,10 +6322,40 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   box-shadow: 0 0 0 3px rgba(43, 82, 245, 0.11);
 }
 
+.lessons-filters-disclosure {
+  margin-top: 12px;
+}
+
+.lessons-filters-disclosure__summary {
+  display: none;
+}
+
+@media (min-width: 721px) {
+  .lessons-filters-disclosure .lessons-filters-grid {
+    display: grid !important;
+  }
+}
+
 .lessons-filters-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.lesson-card-v3__ready,
+.lesson-card-v3__access {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.lesson-card-v3__ready {
+  color: #0f766e;
+}
+
+.lesson-card-v3__access {
+  color: var(--text-sub);
 }
 
 .lessons-filter {
@@ -6345,6 +6461,7 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-width: 0;
   border-radius: 24px;
   border: 1px solid var(--border-card, #e4e8ff);
   background: #fff;
@@ -6466,6 +6583,7 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   line-height: 1.22;
   letter-spacing: -0.01em;
   color: var(--text-main);
+  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -6591,6 +6709,19 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
 @media (max-width: 720px) {
 .lessons-page {
     padding-top: 8px;
+  }
+
+.lessons-filters-disclosure__summary {
+    display: list-item;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--blue-dark);
+    padding: 8px 0;
+  }
+
+.lessons-filters-disclosure:not([open]) .lessons-filters-grid {
+    display: none;
   }
 
 .lessons-filters-grid {
@@ -7995,20 +8126,23 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
 /* —— Просмотры и лайки каталога —— */
 .catalog-engagement {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 0.35rem 0.65rem;
   margin: 0.35rem 0 0.75rem;
   color: var(--text-sub, #5a657a);
   font-size: 0.86rem;
   line-height: 1.2;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .catalog-engagement__stat {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 0.3rem;
-  min-height: 40px;
+  min-height: 32px;
   padding: 0 0.15rem;
   color: inherit;
 }
@@ -8017,6 +8151,7 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   gap: 0.3rem;
   min-width: 40px;
   min-height: 40px;
@@ -8064,6 +8199,12 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   flex: 1 1 100%;
   font-size: 0.78rem;
   color: var(--text-hint, #8a93a8);
+  white-space: normal;
+}
+
+.material-preview .catalog-engagement,
+.lesson-preview-modal .catalog-engagement {
+  margin: 0.15rem 0 1rem;
 }
 
 .interesting-toolbar {
@@ -8087,16 +8228,25 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
   background: #fff;
 }
 
+.lesson-viewer-page__toolbar .lesson-viewer-page__back {
+  flex: 0 0 auto;
+}
+
 .lesson-viewer-page__toolbar .lesson-viewer-page__title {
   flex: 1 1 12rem;
   margin: 0;
   font-size: 1.05rem;
   font-weight: 650;
   color: var(--text-main, #1a2236);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lesson-viewer-page__toolbar .catalog-engagement {
   margin: 0;
+  flex: 0 0 auto;
 }
 
 /* ── Access gate: регистрация / тариф / лимит ── */
@@ -8266,6 +8416,166 @@ body.exam-variant-view #main-wrapper.exam-page--edu .exam-page-container.exam-ed
 .access-gate-later:hover,
 .anon-limit-later:hover {
   color: var(--text-main, #1a2236);
+}
+
+.access-gate-compare {
+  display: inline-flex;
+  margin: 4px auto 0;
+  color: var(--text-muted, #475569);
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.try-now-lessons {
+  margin: 0 0 18px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1.5px solid var(--border-card);
+  background: #fff;
+  box-shadow: var(--shadow-card);
+}
+
+.try-now-lessons__head h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+.try-now-lessons__head p {
+  margin: 6px 0 0;
+  color: var(--text-sub);
+  font-size: 14px;
+}
+
+.try-now-lessons__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.try-now-lessons__card {
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border-card);
+  background: var(--bg-page, #f6f8ff);
+}
+
+.try-now-lessons__card h3 {
+  margin: 6px 0 10px;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.try-now-lessons__meta {
+  margin: 0;
+  color: var(--text-hint, #8a93a8);
+  font-size: 12px;
+}
+
+.try-now-lessons__cta {
+  font-weight: 700;
+  color: var(--blue, #2b52f5);
+}
+
+.lessons-recent {
+  margin: 0 0 16px;
+}
+
+.lessons-recent__title {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.lessons-recent__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lessons-recent__item {
+  border: 1px solid var(--border-card);
+  background: #fff;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.lessons-situations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.lessons-situation {
+  border: 1px solid var(--border-card);
+  background: #fff;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.pain-landing {
+  max-width: 720px;
+  padding: 28px 0 56px;
+}
+
+.pain-landing__eyebrow {
+  margin: 0 0 8px;
+  color: var(--text-hint, #8a93a8);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pain-landing__title {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 40px);
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+
+.pain-landing__lead {
+  margin: 12px 0 0;
+  color: var(--text-sub);
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+.pain-landing__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.pain-landing__cta,
+.pain-landing__secondary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 12px;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.pain-landing__cta {
+  background: var(--blue, #2b52f5);
+  color: #fff;
+}
+
+.pain-landing__secondary {
+  border: 1px solid var(--border-card);
+  color: var(--text-main);
+  background: #fff;
 }
 
 .access-gate-badge {

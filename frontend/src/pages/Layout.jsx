@@ -10,6 +10,7 @@ import {
   setCookieConsentAccepted,
   trackPageView,
 } from "../utils/analytics";
+import { markFirstVisit, trackValueGoal } from "../utils/valuePath";
 
 function Layout() {
   const { pathname, search } = useLocation();
@@ -35,6 +36,8 @@ function Layout() {
     pathname === "/" ||
     pathname === "/tasks" ||
     pathname === "/generator" ||
+    pathname === "/gotovye-uroki" ||
+    pathname === "/repetitor" ||
     pathname === "/lessons" ||
     pathname === "/interesting" ||
     pathname === "/teachers" ||
@@ -75,6 +78,22 @@ function Layout() {
     setCookieAccepted(true);
     initYandexMetrika();
   }
+
+  useEffect(() => {
+    markFirstVisit();
+  }, []);
+
+  useEffect(() => {
+    const landing =
+      pathNorm === "/" ? "home"
+      : pathNorm === "/gotovye-uroki" || pathNorm === "/lessons" ? "lessons"
+      : pathNorm === "/repetitor" ? "tutor"
+      : pathNorm === "/generator" || pathNorm === "/subject" || pathNorm.startsWith("/subject/") ? "generator"
+      : pathNorm === "/oge" ? "oge"
+      : pathNorm === "/ege" ? "ege"
+      : "";
+    if (landing) trackValueGoal("landing_view", { landing });
+  }, [pathNorm]);
 
   useEffect(() => {
     if (cookieAccepted) {

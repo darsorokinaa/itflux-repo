@@ -10,6 +10,7 @@ import {
 } from "../data/subjects";
 import { fetchExamCatalog, type CatalogLevel } from "../utils/examCatalog";
 import "../styles/tool-workspace.css";
+import { trackValueGoal } from "../utils/valuePath";
 
 type AvailabilityMap = Partial<Record<string, boolean>>;
 
@@ -53,6 +54,10 @@ export default function SubjectPage() {
   const [availability, setAvailability] = useState<AvailabilityMap>({});
   const [catalogOverlay, setCatalogOverlay] = useState<SubjectCatalogOverlay>({});
   const [catalogSubjectIds, setCatalogSubjectIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    trackValueGoal("generator_opened", { level: levelStr || "subject" });
+  }, [levelStr]);
 
   useEffect(() => {
     let cancelled = false;
@@ -216,10 +221,10 @@ export default function SubjectPage() {
   } as CSSProperties;
 
   const leadText = singleGrade
-    ? `Выберите предмет для ${grades[0]} класса и переходите к настройке варианта.`
+    ? `Выберите предмет для ${grades[0]} класса — сразу откроются темы и номера заданий.`
     : grades.length > 0
-      ? "Сначала выберите класс, затем предмет и переходите к заданиям."
-      : "Выберите предмет и переходите к заданиям.";
+      ? "Выберите класс и предмет — дальше темы, номера заданий и количество."
+      : "Выберите предмет — дальше темы, номера заданий и количество.";
   const promoSteps = [
     "Выберите уровень в переключателе над карточками — список берётся из базы.",
     "Для ВПР можно выбрать класс и включить «Углублённый уровень».",
@@ -231,17 +236,17 @@ export default function SubjectPage() {
       <div className="digital-flow-page__wrap">
         <main className="subject-dashboard-page">
           <header className="subject-dashboard-page__header">
-            <h1 className="subject-dashboard-page__title">Выбор предмета</h1>
+            <h1 className="subject-dashboard-page__title">Соберите вариант за несколько минут</h1>
             <p className="subject-dashboard-page__lead">{leadText}</p>
           </header>
 
           <div className="subject-dashboard-page__content">
             <aside className="subject-dashboard-page__promo" aria-label="Подсказка по работе с генератором">
               <span className="subject-dashboard-page__promo-tag">Подготовка к экзамену</span>
-              <h2 className="subject-dashboard-page__promo-title">Как выбрать уровень и предмет</h2>
+              <h2 className="subject-dashboard-page__promo-title">Как собрать вариант</h2>
               <p className="subject-dashboard-page__promo-lead">
-                Сначала переключите уровень подготовки, затем выберите предмет.
-                После клика откроется экран с заданиями по выбранному направлению.
+                Выберите экзамен и предмет — откроются темы и номера заданий.
+                Дальше можно собрать вариант из нужных заданий за несколько минут.
               </p>
               <ol className="subject-dashboard-page__promo-list">
                 {promoSteps.map((item) => (

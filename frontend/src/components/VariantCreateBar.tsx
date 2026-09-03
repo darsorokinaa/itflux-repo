@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAnonLimitModal } from "../hooks/useAnonLimitModal";
+import { rememberValueReached, trackValueGoal } from "../utils/valuePath";
+import { rememberLastVariant } from "../utils/recentLessons";
 import type { WorkbookTask } from "../utils/buildWorkbookHtml";
 
 type VariantCreateBarProps = {
@@ -92,6 +94,12 @@ export default function VariantCreateBar({
       if (!data?.variant_id) {
         throw new Error("Сервер не вернул номер варианта");
       }
+      trackValueGoal("generator_result_created", {
+        level: String(level || ""),
+        subject: String(subject || ""),
+      });
+      rememberValueReached("tasks");
+      rememberLastVariant({ level, subject, variantId: data.variant_id });
       navigate(`/${level}/${subject}/variant/${data.variant_id}`, {
         state: { mode: "variant", subjectName },
       });

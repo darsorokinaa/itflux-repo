@@ -255,6 +255,60 @@
   font-size: 0.85rem;
 }
 
+.td-onboarding__alt {
+  margin: 10px 0 0;
+  font-size: 0.88rem;
+}
+
+.td-onboarding__alt a {
+  color: var(--td-blue);
+  font-weight: 650;
+}
+
+.td-continue {
+  grid-column: 1 / -1;
+  padding: 20px 24px;
+}
+
+.td-continue__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.td-continue__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(224, 230, 241, 0.92);
+  background: #fff;
+  color: inherit;
+  text-decoration: none;
+}
+
+.td-continue__item span {
+  color: var(--td-muted);
+  font-size: 0.78rem;
+}
+
+.td-continue__item strong {
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
+}
+
+.td-lesson-material {
+  margin: 6px 0 0;
+  color: var(--td-muted);
+  font-size: 0.85rem;
+}
+
+.td-lesson-material a {
+  color: var(--td-blue);
+  font-weight: 650;
+}
+
 .td-section-head {
   display: flex;
   align-items: center;

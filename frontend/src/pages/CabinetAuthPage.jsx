@@ -17,6 +17,7 @@ import {
   rememberInviteToken,
 } from "../cabinet/inviteAuth";
 import { captureAcquisition, readAcquisition } from "../cabinet/activationAnalytics";
+import { authLeadForIntent, inferValueIntent, trackValueGoal } from "../utils/valuePath";
 
 const ROLE_OPTIONS = [
   { value: "student", label: "Ученик" },
@@ -59,6 +60,7 @@ export default function CabinetAuthPage() {
   const [loginForm, setLoginForm] = useState({ login: "", password: "" });
   const [forgotLogin, setForgotLogin] = useState("");
   const [resetForm, setResetForm] = useState({ password: "", password_confirm: "" });
+  const valueIntent = inferValueIntent(redirectTo);
   const [registerForm, setRegisterForm] = useState({
     email: "",
     username: "",
@@ -66,7 +68,9 @@ export default function CabinetAuthPage() {
     password_confirm: "",
     name: "",
     surname: "",
-    role: "student",
+    role: inferValueIntent(
+      safeReturnPath(location.state?.from) || safeReturnPath(new URLSearchParams(location.search).get("next")),
+    ) ? "teacher" : "student",
   });
 
   useEffect(() => {
@@ -227,8 +231,10 @@ export default function CabinetAuthPage() {
           ? "parent"
           : inviteToken
             ? "student"
-            : (hasReferralSignup || referralPreview ? "teacher" : registerForm.role),
+            : (hasReferralSignup || referralPreview || valueIntent ? "teacher" : registerForm.role),
       });
+      if (valueIntent === "lesson") trackValueGoal("signup_from_lesson");
+      if (valueIntent === "tasks") trackValueGoal("signup_from_generator");
       const result = await registerCabinet(payload);
       if (result?.redirect) {
         navigate(result.redirect, { replace: true });
@@ -342,7 +348,8 @@ export default function CabinetAuthPage() {
                     ? "Создайте аккаунт ученика или войдите, чтобы принять приглашение от учителя."
                     : referralPreview
                       ? `Зарегистрируйтесь как учитель — получите ${referralPreview.message} бесплатно.`
-                      : "Войдите или создайте аккаунт, чтобы сохранять прогресс и пользоваться материалами платформы."}
+                      : authLeadForIntent(valueIntent, mode)
+                      || "Войдите или создайте аккаунт, чтобы сохранять прогресс и пользоваться материалами платформы."}
           </p>
         </div>
 
@@ -526,13 +533,14 @@ export default function CabinetAuthPage() {
                     ? "parent"
                     : inviteToken
                       ? "student"
-                      : (hasReferralSignup || referralPreview ? "teacher" : registerForm.role)
+                      : (hasReferralSignup || referralPreview || valueIntent ? "teacher" : registerForm.role)
                 }
                 disabled={
                   Boolean(parentInviteToken)
                   || Boolean(inviteToken)
                   || Boolean(referralPreview)
                   || hasReferralSignup
+                  || Boolean(valueIntent)
                 }
                 onChange={(e) => setRegisterForm((prev) => ({ ...prev, role: e.target.value }))}
               >

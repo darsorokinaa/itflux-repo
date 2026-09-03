@@ -31,12 +31,15 @@ export default function HeroSection({
           </p>
 
           <div className="home-hero__actions">
-            <Link to="/cabinet" className="home-hero__button home-hero__button--primary">
-              Попробовать кабинет
+            <Link to="/lessons" className="home-hero__button home-hero__button--primary">
+              Найти готовый урок
             </Link>
             <Link to="/generator" className="home-hero__button home-hero__button--secondary">
               Собрать вариант
               <ArrowRight size={14} strokeWidth={2.5} aria-hidden="true" />
+            </Link>
+            <Link to="/repetitor" className="home-hero__button home-hero__button--ghost">
+              Настроить работу с учениками
             </Link>
           </div>
 

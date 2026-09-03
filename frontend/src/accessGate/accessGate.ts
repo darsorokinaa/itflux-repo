@@ -39,6 +39,8 @@ export type AccessGateContext = {
   currentPlan?: string;
   sourcePage?: string;
   returnUrl?: string;
+  limit?: number;
+  current?: number;
 };
 
 /** Display names from seeded tariffs — fallback if pricing API is unavailable. */
@@ -211,6 +213,8 @@ export function classifyAccessError(
     currentPlan: extras.currentPlan,
     sourcePage: extras.sourcePage,
     returnUrl: extras.returnUrl,
+    limit: payload.limit,
+    current: payload.current,
   };
 
   if (AUTH_CODES.has(payload.code)) {
@@ -304,7 +308,7 @@ export function accessGateCopy(
       return {
         eyebrow: "Бесплатный доступ",
         title: "Нужна регистрация",
-        text: `Лимит без регистрации исчерпан. Создайте бесплатный аккаунт, чтобы продолжить работу с платформой.`,
+        text: `Лимит без регистрации исчерпан. Создайте аккаунт, чтобы сохранить этот вариант и продолжить работу с заданиями.`,
         primary: "Зарегистрироваться бесплатно",
         secondary: "Уже есть аккаунт? Войти",
       };
@@ -321,6 +325,23 @@ export function accessGateCopy(
   }
 
   if (ctx.reason === "limit_reached") {
+    if (ctx.resourceType === "students" || ctx.resourceType === "groups") {
+      return {
+        title: "Чтобы вести больше учеников",
+        text: "Чтобы использовать эту возможность для большего количества учеников, нужен соответствующий тариф.",
+        primary: "Сравнить тарифы",
+        secondary: "Закрыть",
+      };
+    }
+    if (ctx.resourceType === "variant" || ctx.resourceType === "workbook") {
+      const limitLabel = ctx.limit != null ? ` На вашем тарифе доступно ${ctx.limit}.` : "";
+      return {
+        title: "Продолжить работу с вариантами",
+        text: `Вы создали вариант.${limitLabel} Чтобы собирать больше, нужен тариф с большим лимитом.`,
+        primary: "Сравнить тарифы",
+        secondary: "Закрыть",
+      };
+    }
     return {
       title: "Лимит на этот месяц использован",
       text: "Вы можете продолжить в следующем расчётном периоде или выбрать тариф с большим лимитом.",

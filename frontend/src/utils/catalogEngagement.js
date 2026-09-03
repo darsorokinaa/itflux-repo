@@ -49,18 +49,25 @@ export function toggleCatalogLike(kind, slug) {
   return catalogPost(`/api/${base}/${encodeURIComponent(slug)}/stats/like/`);
 }
 
+/** Целое ≥ 0; мусор / null / NaN → 0. */
+export function asCount(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.floor(n);
+}
+
 /** 125 → «125», 1200 → «1,2 тыс.», 1_100_000 → «1,1 млн» */
 export function formatCompactCount(value) {
-  const n = Number(value) || 0;
+  const n = asCount(value);
   if (n < 1000) return String(n);
   if (n < 1_000_000) {
     const k = n / 1000;
     const text = k >= 100 ? String(Math.round(k)) : k.toFixed(1).replace(".", ",");
-    return `${text.replace(/,0$/, "")} тыс.`;
+    return `${text.replace(/,0$/, "")}\u00a0тыс.`;
   }
   const m = n / 1_000_000;
   const text = m >= 100 ? String(Math.round(m)) : m.toFixed(1).replace(".", ",");
-  return `${text.replace(/,0$/, "")} млн`;
+  return `${text.replace(/,0$/, "")}\u00a0млн`;
 }
 
 export const CATALOG_ORDERING_OPTIONS = [

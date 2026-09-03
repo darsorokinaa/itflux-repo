@@ -159,8 +159,74 @@ export function getLessonOpenUrl(lesson) {
 }
 
 export function getLessonCardActionLabel(lesson) {
-  if (lessonHasActiveDemo(lesson)) return "Продолжить демо";
-  if (lesson?.access?.can_view === false || lesson?.access?.allowed === false) return "Подробнее";
+  if (lessonHasActiveDemo(lesson)) return "Продолжить урок";
+  if (lesson?.access?.can_view === false || lesson?.access?.allowed === false) return "Открыть урок";
   if (lesson?.status === "draft") return "Редактировать";
-  return "Открыть";
+  return "Открыть урок";
+}
+
+const INCLUDE_DEFS = [
+  { id: "theory", label: "Теория", test: /теор|объяснен|презентац/i },
+  { id: "practice", label: "Практика", test: /практик|пример|упражнен|тренир/i },
+  { id: "interactive", label: "Интерактив", test: /интерактив/i },
+  { id: "homework", label: "Домашнее задание", test: /домашн|\bдз\b|рабоч(?:ий|его)\s+лист/i },
+  { id: "notes", label: "Материалы для преподавателя", test: /заметк|преподавател|учитель/i },
+];
+
+export function inferLessonIncludes(lesson) {
+  const text = [
+    lesson?.short_description,
+    lesson?.teacher_goal,
+    lesson?.student_result,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const items = INCLUDE_DEFS.filter((item) => item.test.test(text)).map((item) => ({
+    id: item.id,
+    label: item.label,
+  }));
+  const hasInteractiveFile = Boolean(lesson?.archive_url || lesson?.file_url);
+  if (hasInteractiveFile && !items.some((item) => item.id === "interactive")) {
+    items.splice(Math.min(2, items.length), 0, { id: "interactive", label: "Интерактив" });
+  }
+  return items;
+}
+
+export function lessonExamLabel(lesson) {
+  if (lesson?.exam_type === "oge") return "ОГЭ";
+  if (lesson?.exam_type === "ege") return "ЕГЭ";
+  return "";
+}
+
+export function lessonIsReadyToRun(lesson) {
+  const access = lesson?.access || {};
+  return Boolean(
+    lesson?.archive_url
+    || lesson?.file_url
+    || access.can_view
+    || access.demo_available
+    || access.can_start_demo
+    || access.demo_active
+    || access.can_continue_demo,
+  );
+}
+
+export function userFacingAccessCtaLabel(cta, { demoActive = false } = {}) {
+  if (!cta) return "Открыть урок";
+  if (cta.type === "demo") return demoActive ? "Продолжить урок" : "Открыть урок";
+  if (cta.type === "register") return "Создать аккаунт и открыть урок";
+  if (cta.type === "open") return cta.label && cta.label !== "Открыть" ? cta.label : "Открыть урок";
+  if (cta.type === "purchase") {
+    const price = String(cta.label || "").replace(/^Купить за\s+/i, "").trim();
+    return price ? `Открыть этот урок отдельно · ${price}` : "Открыть этот урок отдельно";
+  }
+  if (cta.type === "upgrade") return "Получить доступ ко всем материалам";
+  return cta.label;
+}
+
+export function lessonFormatLabel(lesson) {
+  if (lesson?.archive_url || lesson?.file_url) return "Интерактивный урок";
+  const access = lesson?.access || {};
+  if (access.demo_available || access.can_start_demo || access.demo_active) return "Интерактивный урок";
+  return "";
 }

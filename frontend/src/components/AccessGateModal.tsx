@@ -10,6 +10,7 @@ import {
   type AccessGateContext,
 } from "../accessGate/accessGate";
 import { trackGoal } from "../utils/analytics";
+import { authSearchWithNext, trackValueGoal } from "../utils/valuePath";
 
 type AccessGateModalProps = AccessGateContext & {
   open: boolean;
@@ -39,6 +40,8 @@ export default function AccessGateModal({
   currentPlan,
   sourcePage,
   returnUrl,
+  limit,
+  current,
   authenticated = false,
 }: AccessGateModalProps) {
   const location = useLocation();
@@ -111,7 +114,7 @@ export default function AccessGateModal({
   }, [pricing, reason]);
 
   const copy = accessGateCopy(
-    { reason, resourceType, resourceName, requiredPlan },
+    { reason, resourceType, resourceName, requiredPlan, limit, current },
     { requiredPlanName, authenticated },
   );
 
@@ -120,9 +123,12 @@ export default function AccessGateModal({
   const isAnonymous = reason === "anonymous";
   const registerTo = {
     pathname: "/cabinet/login",
-    search: "?mode=register",
+    search: authSearchWithNext(from),
   };
-  const loginTo = { pathname: "/cabinet/login" };
+  const loginTo = {
+    pathname: "/cabinet/login",
+    search: authSearchWithNext(from, { mode: "" }),
+  };
   const upgradeTo = authenticated ? "/cabinet/upgrade" : "/pricing";
 
   const remember = () => rememberReturnPath(from);
@@ -182,6 +188,9 @@ export default function AccessGateModal({
                     access_reason: reason,
                     resource_type: resourceType,
                   });
+                  if (resourceType === "variant" || resourceType === "workbook") {
+                    trackValueGoal("signup_from_generator", { resource_type: resourceType });
+                  }
                   onClose();
                 }}
               >
@@ -232,6 +241,11 @@ export default function AccessGateModal({
             </>
           )}
         </div>
+        {!isAnonymous ? (
+          <Link className="access-gate-compare" to="/pricing" onClick={onClose}>
+            Сравнить все тарифы
+          </Link>
+        ) : null}
       </div>
     </div>,
     document.body,

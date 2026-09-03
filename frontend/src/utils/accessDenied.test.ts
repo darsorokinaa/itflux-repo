@@ -98,6 +98,9 @@ describe("accessGateCopy and safeReturnPath", () => {
     );
     expect(plan.primary).toBe("Посмотреть тарифы");
     expect(plan.text).toContain("Профи");
+
+    const studentsLimit = accessGateCopy({ reason: "limit_reached", resourceType: "students" });
+    expect(studentsLimit.text).toContain("большего количества учеников");
   });
 
   it("rejects open redirects", () => {

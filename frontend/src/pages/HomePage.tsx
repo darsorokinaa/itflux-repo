@@ -1,16 +1,18 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   BookOpenCheck,
   Target,
   ClipboardList,
   CompassIcon,
+  Users,
 } from "lucide-react";
 import HeroSection from "../components/HeroSection";
 import HomeUpdatesBlock from "../components/HomeUpdatesBlock";
 import { type LevelId } from "../data/levels";
 import { formatTasksCount } from "../utils/formatTasksCount";
 import { formatIntRu } from "../utils/formatIntRu";
+import { trackValueGoal } from "../utils/valuePath";
 
 type PlatformStats = {
   total_tasks: number;
@@ -125,6 +127,7 @@ export default function HomePage() {
       <div className="digital-flow-page__wrap">
         <main className="home-page__main">
           <HomeUpdatesBlock />
+          <HomeValuePathsBlock />
           <HeroSection
             tasksCountLabel={heroTasksCountLabel}
             subjectsCountLabel={heroSubjectsCountLabel}
@@ -228,6 +231,75 @@ function LevelCardHome({
         </span>
       </span>
     </button>
+  );
+}
+
+type HomeValuePath = {
+  id: "lesson" | "tasks" | "students";
+  title: string;
+  lead: string;
+  cta: string;
+  to: string;
+  Icon: React.ComponentType<{ size?: number; strokeWidth?: number; color?: string }>;
+};
+
+const HOME_VALUE_PATHS: ReadonlyArray<HomeValuePath> = [
+  {
+    id: "lesson",
+    title: "Мне нужен урок",
+    lead: "Выберите предмет, класс и тему — готовый урок уже собран.",
+    cta: "Найти готовый урок",
+    to: "/gotovye-uroki",
+    Icon: BookOpenCheck,
+  },
+  {
+    id: "tasks",
+    title: "Мне нужны задания",
+    lead: "Выберите экзамен, тему или номера заданий — соберите вариант за несколько минут.",
+    cta: "Создать задания",
+    to: "/generator",
+    Icon: CompassIcon,
+  },
+  {
+    id: "students",
+    title: "Хочу вести учеников",
+    lead: "Расписание, занятия, домашние задания, журнал и работа с учениками в одном кабинете.",
+    cta: "Настроить работу",
+    to: "/repetitor",
+    Icon: Users,
+  },
+];
+
+function HomeValuePathsBlock() {
+  return (
+    <section className="home-value-paths" aria-labelledby="home-value-paths-heading">
+      <header className="section-head">
+        <h2 id="home-value-paths-heading" className="section-head__title">
+          Что вам нужно сейчас?
+        </h2>
+        <p className="section-head__lead">
+          Выберите задачу — откроется готовое решение, без настройки кабинета.
+        </p>
+      </header>
+      <div className="home-value-paths__grid">
+        {HOME_VALUE_PATHS.map((item) => (
+          <article key={item.id} className="home-value-path">
+            <div className="home-value-path__icon" aria-hidden>
+              <item.Icon size={22} strokeWidth={2.1} color="currentColor" />
+            </div>
+            <h3 className="home-value-path__title">{item.title}</h3>
+            <p className="home-value-path__lead">{item.lead}</p>
+            <Link
+              to={item.to}
+              className="home-value-path__cta"
+              onClick={() => trackValueGoal("value_path_selected", { path: item.id })}
+            >
+              {item.cta}
+            </Link>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 

@@ -19,6 +19,7 @@ import {
   fetchStudents,
   normalizeCabinetList,
 } from "../utils/cabinetAuth";
+import { readLastVariant, readRecentLessons } from "../utils/recentLessons";
 import { formatMoney } from "./billing/billingFormat";
 import { PAYMENTS_ENABLED } from "./featureFlags";
 import "./styles/teacher-dashboard.css";
@@ -131,6 +132,11 @@ function mapTodayLesson(ev, now) {
       || ev.plan_item_id || ev.lesson_plan_item,
   );
   const isOnline = ev.format === "online" || ev.format === "Онлайн";
+  const hasAttachedMaterial = Boolean(
+    String(ev.materials || "").trim()
+    || ev.lesson
+    || ev.lesson_plan_item,
+  );
   return {
     id: ev.id,
     time,
@@ -141,6 +147,7 @@ function mapTodayLesson(ev, now) {
     ready,
     isDone,
     isOnline,
+    hasAttachedMaterial,
     isCurrent: isCurrent || isSoon,
     countdown: isDone && !isCurrent
       ? "пройден"
@@ -316,7 +323,7 @@ export default function CabinetDashboard() {
         action: "Открыть журнал →",
       });
     }
-    if (progressItems.length === 0 && !items.length) {
+    if (progressItems.length === 0 && !items.length && !onboardingVisible) {
       items.push({
         important: false,
         title: "Добавьте учеников",
@@ -326,7 +333,7 @@ export default function CabinetDashboard() {
       });
     }
     return items.slice(0, 4);
-  }, [reviewsCount, todayLessons, progressItems.length, journalDash]);
+  }, [reviewsCount, todayLessons, progressItems.length, journalDash, onboardingVisible]);
 
   const notes = useMemo(() => {
     const list = [];
@@ -346,6 +353,16 @@ export default function CabinetDashboard() {
     });
     return list;
   }, [todayLessons, pendingReviews]);
+
+  const continueItems = useMemo(() => {
+    const recentLesson = readRecentLessons()[0] || null;
+    const lastVariant = readLastVariant();
+    const nearestLesson = todayLessons.find((lesson) => !lesson.isDone) || todayLessons[0] || null;
+    return { recentLesson, lastVariant, nearestLesson };
+  }, [todayLessons]);
+  const hasContinue = Boolean(
+    continueItems.recentLesson || continueItems.lastVariant || continueItems.nearestLesson,
+  );
 
   if (loading) {
     return <p className="cb-loading">Загрузка главной…</p>;
@@ -393,6 +410,18 @@ export default function CabinetDashboard() {
             >
               {onboardingCta.label}
             </Link>
+          ) : onboarding?.flags?.has_schedule_event && homeworkToday === 0 && reviewsCount === 0 ? (
+            <>
+              <button
+                type="button"
+                className="td-button td-button-primary"
+                onClick={openHomeworkAssign}
+                disabled={assignLoading}
+              >
+                {assignLoading ? "Загрузка…" : "Выдать задание"}
+              </button>
+              <Link to="/cabinet/schedule" className="td-button td-button-glass">＋ Создать урок</Link>
+            </>
           ) : (
             <>
               <Link to="/cabinet/schedule" className="td-button td-button-primary">＋ Создать урок</Link>
@@ -451,6 +480,51 @@ export default function CabinetDashboard() {
         </div>
         {onboardingVisible ? (
           <TeacherOnboardingCard onboarding={onboarding} />
+        ) : null}
+        {hasContinue ? (
+          <section className="td-card td-continue" aria-label="Продолжить">
+            <div className="td-section-head">
+              <div>
+                <h2>Продолжить</h2>
+                <p>Вернитесь к материалу, варианту или ближайшему занятию.</p>
+              </div>
+            </div>
+            <div className="td-continue__list">
+              {continueItems.recentLesson ? (
+                <Link
+                  className="td-continue__item"
+                  to={`/lessons?preview=${encodeURIComponent(continueItems.recentLesson.slug)}`}
+                >
+                  <span>Последний материал</span>
+                  <strong>{continueItems.recentLesson.title || continueItems.recentLesson.slug}</strong>
+                </Link>
+              ) : null}
+              {continueItems.lastVariant ? (
+                <Link
+                  className="td-continue__item"
+                  to={`/${encodeURIComponent(continueItems.lastVariant.level)}/${encodeURIComponent(continueItems.lastVariant.subject)}/variant/${encodeURIComponent(continueItems.lastVariant.variantId)}`}
+                >
+                  <span>Незавершённый вариант</span>
+                  <strong>Открыть собранный вариант</strong>
+                </Link>
+              ) : null}
+              {continueItems.nearestLesson ? (
+                <Link
+                  className="td-continue__item"
+                  to={continueItems.nearestLesson.id
+                    ? `/cabinet/schedule?event=${encodeURIComponent(continueItems.nearestLesson.id)}`
+                    : "/cabinet/schedule"}
+                >
+                  <span>Ближайшее занятие</span>
+                  <strong>
+                    {continueItems.nearestLesson.time}
+                    {" · "}
+                    {continueItems.nearestLesson.audience || continueItems.nearestLesson.title}
+                  </strong>
+                </Link>
+              ) : null}
+            </div>
+          </section>
         ) : null}
         <section className="td-main-column">
           <article className="td-card td-today-board">
@@ -527,6 +601,14 @@ export default function CabinetDashboard() {
                               ? `${lesson.topic} · ${lesson.countdown}`
                               : `Тема пока не указана · ${lesson.countdown}`}
                           </p>
+                          {!lesson.hasAttachedMaterial && !lesson.isDone ? (
+                            <p className="td-lesson-material">
+                              К занятию пока не выбран материал.{" "}
+                              <Link to={`/lessons?for_event=${encodeURIComponent(lesson.id || "")}`}>
+                                Найти готовый урок
+                              </Link>
+                            </p>
+                          ) : null}
                           {lesson.isOnline && !lesson.isDone && shouldRemindBeforeLesson(lesson.startsAt) ? (
                             <p className="td-lesson-remind">До урока меньше 10 минут. Рекомендуем проверить камеру и микрофон.</p>
                           ) : null}

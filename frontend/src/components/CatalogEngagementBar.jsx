@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Eye, Heart } from "lucide-react";
 import {
+  asCount,
   formatCompactCount,
   registerCatalogView,
   toggleCatalogLike,
@@ -21,15 +22,15 @@ export default function CatalogEngagementBar({
   className = "",
 }) {
   const navigate = useNavigate();
-  const [views, setViews] = useState(viewsCount);
-  const [likes, setLikes] = useState(likesCount);
+  const [views, setViews] = useState(() => asCount(viewsCount));
+  const [likes, setLikes] = useState(() => asCount(likesCount));
   const [liked, setLiked] = useState(Boolean(isLiked));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
-    setViews(viewsCount);
-    setLikes(likesCount);
+    setViews(asCount(viewsCount));
+    setLikes(asCount(likesCount));
     setLiked(Boolean(isLiked));
   }, [viewsCount, likesCount, isLiked, slug]);
 
@@ -127,8 +128,8 @@ export function useRegisterCatalogView(kind, slug, enabled = true) {
     let cancelled = false;
     registerCatalogView(kind, slug)
       .then((data) => {
-        if (!cancelled && typeof data?.views_count === "number") {
-          setViewsCount(data.views_count);
+        if (!cancelled && data && data.views_count != null) {
+          setViewsCount(asCount(data.views_count));
         }
       })
       .catch(() => {

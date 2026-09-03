@@ -4712,7 +4712,7 @@ def api_lesson_start_demo(request, slug):
 
     if not getattr(request.user, "is_authenticated", False):
         return JsonResponse(
-            {"code": "REGISTRATION_REQUIRED", "message": "Создайте бесплатный аккаунт, чтобы ознакомиться с демоверсией."},
+            {"code": "REGISTRATION_REQUIRED", "message": "Создайте аккаунт, чтобы открыть этот урок. Он сохранится в вашем кабинете."},
             status=401,
         )
     lesson = get_object_or_404(_visible_lessons_queryset(request), slug=slug)
