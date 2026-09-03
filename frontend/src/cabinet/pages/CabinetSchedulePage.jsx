@@ -13,6 +13,11 @@ import {
   fetchGroup,
   fetchScheduleEvents,
   fetchStudents,
+  fetchTeacherAvailability,
+  createTeacherAvailability,
+  updateTeacherAvailability,
+  deleteTeacherAvailability,
+  publishTeacherBookingLink,
   normalizeCabinetList,
   startTelemostLesson,
   updateLessonPlanItem,
@@ -29,6 +34,9 @@ import { cabinetMeetingPathFromHref, isCabinetMeetingHref } from "../meetingNavi
 import CreateScheduleLessonModal from "../components/CreateScheduleLessonModal";
 import EditScheduleLessonModal from "../components/EditScheduleLessonModal";
 import EventDetailCard from "../components/EventDetailCard";
+import AddAvailabilityModal from "../components/AddAvailabilityModal";
+import ShareScheduleModal from "../components/ShareScheduleModal";
+import AvailabilityDetailPopover from "../components/AvailabilityDetailPopover";
 import ConnectionCheckButton from "../connectionCheck/ConnectionCheckButton";
 import { closeConnectionCheck } from "../connectionCheck/openConnectionCheck";
 import HomeworkAssignModal from "../components/HomeworkAssignModal";
@@ -99,9 +107,31 @@ const EVENT_TYPES = {
   individual_lesson: { label: "Индивидуальное занятие", color: "#F59E0B" },
   homework: { label: "Домашнее задание", color: "#D97706" },
   review: { label: "Проверка работ", color: "#DC2626" },
+  availability: { label: "Свободное время", color: "#1A73E8" },
 };
 
+function availabilitySlotsToEvents(slots = []) {
+  return slots.map((slot) => ({
+    id: `avail-${slot.availability_id}-${slot.date}-${slot.start_time}`,
+    availabilityId: slot.availability_id,
+    kind: "availability",
+    title: "Свободно",
+    audience: "Свободно",
+    startsAt: `${slot.date}T${slot.start_time}:00`,
+    endsAt: `${slot.date}T${slot.end_time}:00`,
+    startTime: slot.start_time,
+    endTime: slot.end_time,
+    status: "available",
+    statusLabel: "Свободно",
+    type: "availability",
+    source: "availability",
+    readOnly: false,
+    format: "",
+  }));
+}
+
 function eventAccentColor(event) {
+  if (event.kind === "availability" || event.type === "availability") return "#1A73E8";
   if (event.status === "cancelled") return "#EF4444";
   if (event.status === "done" || event.status === "completed") return "#10B981";
   const tags = event.tags || [];
@@ -416,6 +446,99 @@ function resolveScheduleDropTarget(clientX, clientY, mode) {
   return { dayKey, targetDate, time };
 }
 
+function useScheduleEventResize({ enabled, events, onResize }) {
+  const sessionRef = useRef(null);
+  const [resizingId, setResizingId] = useState(null);
+  const [resizePreview, setResizePreview] = useState(null);
+
+  const onResizeStart = useCallback((eventId, e) => {
+    if (!enabled) return;
+    if (e.button !== 0) return;
+    
+    const event = events.find(ev => String(ev.id) === String(eventId));
+    if (!event) return;
+
+    sessionRef.current = {
+      eventId,
+      startY: e.clientY,
+      initialEndTime: eventLocalEndTime(event),
+      dayKey: formatApiDate(eventDate(event)),
+      active: false,
+    };
+  }, [enabled, events]);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+
+    const finish = (e, wasActive) => {
+      if (wasActive && sessionRef.current) {
+        onResize(sessionRef.current.eventId, sessionRef.current.newEndTime);
+      }
+      sessionRef.current = null;
+      setResizingId(null);
+      setResizePreview(null);
+      document.body.classList.remove("cb-sch-resizing");
+    };
+
+    const onMove = (e) => {
+      const session = sessionRef.current;
+      if (!session) return;
+      
+      if (!session.active) {
+        const dist = Math.abs(e.clientY - session.startY);
+        if (dist < 5) return;
+        session.active = true;
+        setResizingId(session.eventId);
+        document.body.classList.add("cb-sch-resizing");
+      }
+      
+      const target = resolveScheduleDropTarget(e.clientX, e.clientY, "time");
+      if (!target) return;
+      
+      const event = events.find(ev => String(ev.id) === String(session.eventId));
+      if (!event) return;
+
+      const startMinutes = parseTime(eventLocalStartTime(event));
+      const currentMinutes = parseTime(target.time);
+      
+      // End time must be at least 15 mins after start time
+      let newEndMinutes = Math.max(startMinutes + 15, currentMinutes + 15);
+      
+      // Check overlap
+      const hasOverlap = events.some(ev => {
+        if (String(ev.id) === String(session.eventId)) return false;
+        if (formatApiDate(eventDate(ev)) !== session.dayKey) return false;
+        const evStart = parseTime(eventLocalStartTime(ev));
+        const evEnd = parseTime(eventLocalEndTime(ev));
+        return startMinutes < evEnd && newEndMinutes > evStart;
+      });
+
+      if (!hasOverlap) {
+        session.newEndTime = minutesToTime(newEndMinutes);
+        setResizePreview({ eventId: session.eventId, endTime: session.newEndTime });
+      }
+    };
+
+    const onUp = (e) => {
+      const session = sessionRef.current;
+      if (!session) return;
+      finish(e, session.active);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      document.body.classList.remove("cb-sch-resizing");
+    };
+  }, [enabled, events, onResize]);
+
+  return { resizingId, resizePreview, onResizeStart };
+}
+
 function useSchedulePointerDrag({ enabled, events, onDragOver, onDrop, onDragEnd }) {
   const sessionRef = useRef(null);
   const [draggingId, setDraggingId] = useState(null);
@@ -486,6 +609,125 @@ function useSchedulePointerDrag({ enabled, events, onDragOver, onDrop, onDragEnd
   }, [enabled, events, onDragOver, onDrop, onDragEnd]);
 
   return { draggingId, onEventPointerDown };
+}
+
+function useScheduleSelection({ enabled, events, onSelectionEnd }) {
+  const sessionRef = useRef(null);
+  const [selection, setSelection] = useState(null);
+
+  const onSlotPointerDown = useCallback((e, dayKey, initialTime) => {
+    if (!enabled) return;
+    if (e.button !== 0) return;
+    
+    const initialStart = parseTime(initialTime);
+    const initialEnd = initialStart + 60;
+    const hasOverlap = events.some(ev => {
+      if (formatApiDate(eventDate(ev)) !== dayKey) return false;
+      const evStart = parseTime(eventLocalStartTime(ev));
+      const evEnd = parseTime(eventLocalEndTime(ev));
+      return initialStart < evEnd && initialEnd > evStart;
+    });
+
+    if (hasOverlap) return;
+
+    const isTouch = e.pointerType === "touch";
+
+    sessionRef.current = {
+      dayKey,
+      startTime: initialTime,
+      endTime: addMinutesToTime(initialTime, 60),
+      active: false,
+      startX: e.clientX,
+      startY: e.clientY,
+      isTouch,
+      longPressTimer: isTouch ? setTimeout(() => {
+        if (sessionRef.current) {
+          sessionRef.current.active = true;
+          document.body.classList.add("cb-sch-selecting");
+          setSelection({ dayKey, startTime: initialTime, endTime: addMinutesToTime(initialTime, 60) });
+        }
+      }, 400) : null,
+    };
+  }, [enabled, events]);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+
+    const finish = (e, wasActive) => {
+      if (sessionRef.current) {
+        if (sessionRef.current.longPressTimer) clearTimeout(sessionRef.current.longPressTimer);
+        if (wasActive || !sessionRef.current.isTouch) {
+          setSelection((prev) => prev ? { ...prev, isFinished: true } : null);
+          onSelectionEnd(sessionRef.current.dayKey, sessionRef.current.startTime, sessionRef.current.endTime);
+        }
+      }
+      sessionRef.current = null;
+      document.body.classList.remove("cb-sch-selecting");
+    };
+
+    const onMove = (e) => {
+      const session = sessionRef.current;
+      if (!session) return;
+      
+      if (!session.active) {
+        const dist = Math.hypot(e.clientX - session.startX, e.clientY - session.startY);
+        if (dist > 10) {
+          // If moved too much before long press, cancel it (likely scrolling)
+          if (session.longPressTimer) {
+            clearTimeout(session.longPressTimer);
+            sessionRef.current = null;
+          }
+        }
+        if (!session.isTouch && dist > 5) {
+          session.active = true;
+          document.body.classList.add("cb-sch-selecting");
+        }
+        if (!session.active) return;
+      }
+      
+      const target = resolveScheduleDropTarget(e.clientX, e.clientY, "time");
+      if (!target || target.dayKey !== session.dayKey) return;
+      
+      const currentMinutes = parseTime(target.time);
+      const startMinutes = parseTime(session.startTime);
+      
+      let endMinutes = currentMinutes < startMinutes ? startMinutes + 15 : currentMinutes + 15;
+      
+      const hasOverlap = events.some(ev => {
+        if (formatApiDate(eventDate(ev)) !== session.dayKey) return false;
+        const evStart = parseTime(eventLocalStartTime(ev));
+        const evEnd = parseTime(eventLocalEndTime(ev));
+        return startMinutes < evEnd && endMinutes > evStart;
+      });
+
+      if (!hasOverlap) {
+        session.endTime = minutesToTime(endMinutes);
+        setSelection({ dayKey: session.dayKey, startTime: session.startTime, endTime: session.endTime });
+      }
+    };
+
+    const onUp = (e) => {
+      const session = sessionRef.current;
+      if (!session) return;
+      finish(e, session.active);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      document.body.classList.remove("cb-sch-selecting");
+    };
+  }, [enabled, events, onSelectionEnd]);
+
+  const clearSelection = useCallback(() => {
+    setSelection(null);
+  }, []);
+
+  return { selection, onSlotPointerDown, clearSelection };
 }
 
 function formatDayHeading(date) {
@@ -569,6 +811,8 @@ function ScheduleToolbar({
   onPrev,
   onNext,
   onAddLesson,
+  onAddAvailability,
+  onShareSchedule,
   isMobile,
   accountEmail,
 }) {
@@ -609,6 +853,12 @@ function ScheduleToolbar({
             </button>
           ))}
         </div>
+        <button type="button" className="cb-btn cb-btn--outline cb-sch-btn--add" onClick={onAddAvailability}>
+          Свободное время
+        </button>
+        <button type="button" className="cb-btn cb-btn--outline cb-sch-btn--add" onClick={onShareSchedule}>
+          Открыть запись
+        </button>
         <button type="button" className="cb-btn cb-btn--primary cb-sch-btn--add" onClick={onAddLesson}>
           <CabinetIcon name="plus" />
           Добавить урок
@@ -800,16 +1050,20 @@ function CalendarEventBlock({
   compact,
   canDrag,
   dragging,
+  resizing,
   onClick,
   onPointerDown,
+  onResizeStart,
 }) {
   const accent = eventAccentColor(event);
   const shortBlock = !compact && eventDurationMinutes(eventLocalStartTime(event), eventLocalEndTime(event)) < 35;
   const isOnline = event.format === "Онлайн" || Boolean(event.link);
   const cancelled = event.status === "cancelled";
   const recurring = isRecurring(event);
-  const displayTitle = eventDisplayTitle(event);
-  const displaySubtitle = eventDisplaySubtitle(event);
+  const displayTitle = event.kind === "availability" ? "Свободно" : eventDisplayTitle(event);
+  const displaySubtitle = event.kind === "availability"
+    ? ""
+    : [eventDisplaySubtitle(event), event.selfBooked ? "Постоянное занятие" : ""].filter(Boolean).join(" · ");
   const planTopic = resolveLessonTopic(event);
   const cardSubtitle = displaySubtitle || (planTopic && planTopic !== displayTitle ? planTopic : "");
 
@@ -847,6 +1101,9 @@ function CalendarEventBlock({
         <span className="cb-sch-event__audience">онлайн</span>
       ) : null}
       {cancelled ? <span className="cb-sch-event__status">Отменено</span> : null}
+      {event.selfBooked && !cancelled ? (
+        <span className="cb-sch-event__status">Записался самостоятельно</span>
+      ) : null}
     </>
   ) : (
     <>
@@ -865,6 +1122,7 @@ function CalendarEventBlock({
     "cb-sch-event",
     compact ? "cb-sch-event--compact" : "",
     cancelled ? "cb-sch-event--cancelled" : "",
+    event.kind === "availability" ? "cb-sch-event--availability" : "",
     canDrag ? "cb-sch-event--draggable" : "",
   ].filter(Boolean).join(" ");
 
@@ -880,11 +1138,31 @@ function CalendarEventBlock({
     }
   };
 
+  const resizeHandle = event.kind === "availability" && !compact ? (
+    <div
+      className="cb-sch-event__resize-handle"
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        onResizeStart?.(event.id, e);
+      }}
+      style={{
+        position: "absolute",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: 8,
+        cursor: "ns-resize",
+        zIndex: 10,
+      }}
+    />
+  ) : null;
+
   if (canDrag) {
     const wrapClass = [
       compact ? "cb-sch-event-wrap cb-sch-event-wrap--compact" : "cb-sch-event-wrap",
       shortBlock ? "cb-sch-event-wrap--short" : "",
       dragging ? "cb-sch-event-wrap--dragging" : "",
+      resizing ? "cb-sch-event-wrap--resizing" : "",
       "cb-sch-event-wrap--draggable",
     ].filter(Boolean).join(" ");
 
@@ -900,6 +1178,7 @@ function CalendarEventBlock({
       >
         <div className={cardClass} style={{ borderLeftColor: accent }} aria-hidden="true">
           {content}
+          {resizeHandle}
         </div>
       </div>
     );
@@ -909,12 +1188,13 @@ function CalendarEventBlock({
     <div
       role="button"
       tabIndex={0}
-      className={`${cardClass}${dragging ? " cb-sch-event--dragging" : ""}`}
+      className={`${cardClass}${dragging ? " cb-sch-event--dragging" : ""}${resizing ? " cb-sch-event--resizing" : ""}`}
       style={cardStyle}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
     >
       {content}
+      {resizeHandle}
     </div>
   );
 }
@@ -925,11 +1205,16 @@ function TimeGridColumn({
   dndEnabled,
   draggingId,
   dropPreview,
+  resizingId,
+  resizePreview,
   draggingEvent,
   nowTop,
+  selection,
   onEventClick,
   onPointerDown,
+  onResizeStart,
   onSlotClick,
+  onSlotPointerDown,
 }) {
   const hours = useMemo(
     () => Array.from({ length: HOUR_END - HOUR_START + 1 }, (_, i) => HOUR_START + i),
@@ -951,6 +1236,7 @@ function TimeGridColumn({
         weekend ? "cb-sch-week__col--weekend" : "",
       ].filter(Boolean).join(" ")}
       data-sch-day={dayKey}
+      style={{ touchAction: "none" }}
     >
       {hours.map((h) => {
         const slotTime = `${String(h).padStart(2, "0")}:00`;
@@ -960,14 +1246,91 @@ function TimeGridColumn({
             type="button"
             className="cb-sch-week__slot"
             style={{ height: HOUR_HEIGHT }}
-            onClick={() => onSlotClick?.(day, slotTime)}
-            aria-label={`Создать урок ${dayKey} ${slotTime}`}
+            onPointerDown={(e) => onSlotPointerDown?.(e, dayKey, slotTime)}
+            aria-label={`Выделить время ${dayKey} ${slotTime}`}
           />
         );
       })}
       {showNow ? (
         <div className="cb-sch-now-line" style={{ top: nowTop }} aria-hidden="true">
           <span className="cb-sch-now-line__dot" />
+        </div>
+      ) : null}
+      {selection && selection.dayKey === dayKey ? (
+        <div
+          className="cb-sch-selection-preview"
+          style={{
+            position: "absolute",
+            left: 4,
+            right: 4,
+            backgroundColor: "rgba(26, 115, 232, 0.2)",
+            border: "1px solid #1A73E8",
+            borderRadius: 4,
+            zIndex: 10,
+            top: timeToTop(selection.startTime),
+            height: eventHeight(selection.startTime, selection.endTime),
+          }}
+        >
+          <div style={{ padding: "4px 8px", fontSize: 12, color: "#1A73E8", fontWeight: 500 }}>
+            {selection.startTime}–{selection.endTime}
+          </div>
+          {selection.isFinished ? (
+            <div
+              className="cb-sch-selection-popover"
+              style={{
+                position: "absolute",
+                ...(day.getDay() === 0 || day.getDay() === 6 ? { right: "100%", marginRight: 8 } : { left: "100%", marginLeft: 8 }),
+                top: 0,
+                backgroundColor: "var(--cb-surface)",
+                boxShadow: "var(--cb-shadow-lg)",
+                borderRadius: "var(--cb-radius-lg)",
+                padding: 16,
+                width: 240,
+                zIndex: 20,
+              }}
+            >
+              <h4 style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 600 }}>Свободное время</h4>
+              <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--cb-text-secondary)" }}>
+                {dayKey} · {selection.startTime} — {selection.endTime}
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--outline cb-btn--sm"
+                  style={{ flex: 1 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    selection.onCancel?.();
+                  }}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--outline cb-btn--sm"
+                  style={{ flex: 1 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    selection.onCancel?.();
+                    onSlotClick?.(day, selection.startTime);
+                  }}
+                >
+                  Урок
+                </button>
+                <button
+                  type="button"
+                  className="cb-btn cb-btn--primary cb-btn--sm"
+                  style={{ flex: 1 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    selection.onConfirm?.();
+                  }}
+                >
+                  Добавить
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
       {isDropTarget && dropPreview?.time ? (
@@ -982,20 +1345,26 @@ function TimeGridColumn({
           aria-hidden="true"
         />
       ) : null}
-      {events.map((ev) => (
-        <CalendarEventBlock
-          key={ev.id}
-          event={ev}
-          canDrag={dndEnabled && !ev.readOnly}
-          dragging={String(draggingId) === String(ev.id)}
-          onClick={onEventClick}
-          onPointerDown={onPointerDown}
-          style={{
-            top: timeToTop(eventLocalStartTime(ev)),
-            height: eventHeight(eventLocalStartTime(ev), eventLocalEndTime(ev)),
-          }}
-        />
-      ))}
+      {events.map((ev) => {
+        const isResizing = String(resizingId) === String(ev.id);
+        const endTime = isResizing && resizePreview ? resizePreview.endTime : eventLocalEndTime(ev);
+        return (
+          <CalendarEventBlock
+            key={ev.id}
+            event={ev}
+            canDrag={dndEnabled && !ev.readOnly}
+            dragging={String(draggingId) === String(ev.id)}
+            resizing={isResizing}
+            onClick={onEventClick}
+            onPointerDown={onPointerDown}
+            onResizeStart={onResizeStart}
+            style={{
+              top: timeToTop(eventLocalStartTime(ev)),
+              height: eventHeight(eventLocalStartTime(ev), endTime),
+            }}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -1018,9 +1387,14 @@ function WeekGrid({
   dndEnabled,
   draggingId,
   dropPreview,
+  resizingId,
+  resizePreview,
+  selection,
   onEventClick,
   onPointerDown,
+  onResizeStart,
   onSlotClick,
+  onSlotPointerDown,
   onAddLesson,
 }) {
   const nowTop = useCurrentTimeTop();
@@ -1089,11 +1463,16 @@ function WeekGrid({
                 dndEnabled={dndEnabled}
                 draggingId={draggingId}
                 dropPreview={dropPreview}
+                resizingId={resizingId}
+                resizePreview={resizePreview}
                 draggingEvent={draggingEvent}
                 nowTop={nowTop}
+                selection={selection}
                 onEventClick={onEventClick}
                 onPointerDown={onPointerDown}
+                onResizeStart={onResizeStart}
                 onSlotClick={onSlotClick}
+                onSlotPointerDown={onSlotPointerDown}
               />
             );
           })}
@@ -1110,9 +1489,14 @@ function DayGrid({
   dndEnabled,
   draggingId,
   dropPreview,
+  resizingId,
+  resizePreview,
+  selection,
   onEventClick,
   onPointerDown,
+  onResizeStart,
   onSlotClick,
+  onSlotPointerDown,
   onAddLesson,
 }) {
   const nowTop = useCurrentTimeTop();
@@ -1142,11 +1526,16 @@ function DayGrid({
           dndEnabled={dndEnabled}
           draggingId={draggingId}
           dropPreview={dropPreview}
+          resizingId={resizingId}
+          resizePreview={resizePreview}
           draggingEvent={draggingEvent}
           nowTop={nowTop}
+          selection={selection}
           onEventClick={onEventClick}
           onPointerDown={onPointerDown}
+          onResizeStart={onResizeStart}
           onSlotClick={onSlotClick}
+          onSlotPointerDown={onSlotPointerDown}
         />
         {dayEvents.length === 0 ? (
           <div className="cb-sch-week-empty cb-sch-week-empty--day" role="status">
@@ -1685,6 +2074,7 @@ export default function CabinetSchedulePage() {
   const isMobile = useMobileDefaultView();
   const justDraggedRef = useRef(false);
   const [events, setEvents] = useState([]);
+  const [availabilitySlots, setAvailabilitySlots] = useState([]);
   const [calendarLoading, setCalendarLoading] = useState(true);
   const [calendarError, setCalendarError] = useState("");
   const [calendarAuthorizeUrl, setCalendarAuthorizeUrl] = useState("");
@@ -1707,6 +2097,11 @@ export default function CabinetSchedulePage() {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [prepareMaterialsPrompt, setPrepareMaterialsPrompt] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [availabilityOpen, setAvailabilityOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [bookingLink, setBookingLink] = useState(null);
+  const [availabilityDuration, setAvailabilityDuration] = useState(60);
+  const [selectedAvailability, setSelectedAvailability] = useState(null);
   const [createDraft, setCreateDraft] = useState(null);
   const [editEvent, setEditEvent] = useState(null);
   const [lessonDetail, setLessonDetail] = useState(null);
@@ -2058,9 +2453,24 @@ export default function CabinetSchedulePage() {
     setCalendarError("");
 
     fetchEvents(range)
-      .then((data) => {
+      .then(async (data) => {
         if (cancelled) return;
         setEvents(Array.isArray(data?.events) ? data.events : []);
+        if (!useYandex) {
+          try {
+            const availability = await fetchTeacherAvailability(range);
+            if (cancelled) return;
+            setAvailabilitySlots(availability?.slots || []);
+            if (availability?.link) setBookingLink(availability.link);
+            if (availability?.default_slot_duration_minutes) {
+              setAvailabilityDuration(availability.default_slot_duration_minutes);
+            }
+          } catch {
+            if (!cancelled) setAvailabilitySlots([]);
+          }
+        } else {
+          setAvailabilitySlots([]);
+        }
       })
       .catch((err) => {
         if (cancelled) return;
@@ -2367,6 +2777,20 @@ export default function CabinetSchedulePage() {
     );
   }, [editEvent, showStatus, focusDate]);
 
+  const refreshAvailability = useCallback(() => {
+    const range = getCalendarFetchRange(view, focusDate);
+    return fetchTeacherAvailability(range)
+      .then((availability) => {
+        setAvailabilitySlots(availability?.slots || []);
+        if (availability?.link) setBookingLink(availability.link);
+        if (availability?.default_slot_duration_minutes) {
+          setAvailabilityDuration(availability.default_slot_duration_minutes);
+        }
+        return availability;
+      })
+      .catch(() => null);
+  }, [view, focusDate]);
+
   const handleCreateLesson = useCallback(async (payload) => {
     const data = await createScheduleEvent(payload);
     if (data?.events_created && data.events_created > 1) {
@@ -2382,6 +2806,7 @@ export default function CabinetSchedulePage() {
     }
     setCreateOpen(false);
     setCreateDraft(null);
+    refreshAvailability();
     if (data?.event) {
       setSelectedEvent(data.event);
       setPrepareMaterialsPrompt(true);
@@ -2406,11 +2831,16 @@ export default function CabinetSchedulePage() {
         ? `Создано занятий: ${data.events_created}`
         : "Урок добавлен в расписание.");
     }
-  }, [showStatus, view, focusDate]);
+  }, [showStatus, view, focusDate, refreshAvailability]);
+
+  const calendarEvents = useMemo(
+    () => [...events, ...availabilitySlotsToEvents(availabilitySlots)],
+    [events, availabilitySlots],
+  );
 
   const filteredEvents = useMemo(
-    () => events.filter((ev) => ev.status !== "cancelled" && matchesFilters(ev, calendars)),
-    [events, calendars],
+    () => calendarEvents.filter((ev) => ev.status !== "cancelled" && matchesFilters(ev, calendars)),
+    [calendarEvents, calendars],
   );
 
   const openCreateLesson = useCallback((draft = {}) => {
@@ -2521,6 +2951,10 @@ export default function CabinetSchedulePage() {
 
   const handleEventClick = useCallback((event) => {
     if (justDraggedRef.current) return;
+    if (event?.kind === "availability") {
+      setSelectedAvailability(event);
+      return;
+    }
     setSelectedEvent(event);
   }, []);
 
@@ -2539,7 +2973,7 @@ export default function CabinetSchedulePage() {
   const handleDrop = useCallback((eventId, targetDate, targetStartTime) => {
     const event = events.find((ev) => String(ev.id) === String(eventId));
     if (!event) return;
-    if (event.readOnly) {
+    if (event.readOnly && event.kind !== "availability") {
       showStatus("События из Яндекс Календаря редактируются в calendar.yandex.ru.");
       return;
     }
@@ -2562,6 +2996,65 @@ export default function CabinetSchedulePage() {
     onDragEnd: handleDragEnd,
   });
 
+  const { selection, onSlotPointerDown, clearSelection } = useScheduleSelection({
+    enabled: true,
+    events,
+    onSelectionEnd: (dayKey, startTime, endTime) => {
+      // Nothing needed here, the popover will render because selection.isFinished is true
+    },
+  });
+
+  const handleConfirmSelection = useCallback(async () => {
+    if (!selection) return;
+    try {
+      const blockDuration = eventDurationMinutes(selection.startTime, selection.endTime);
+      await createTeacherAvailability({
+        start_time: selection.startTime,
+        end_time: selection.endTime,
+        slot_duration_minutes: Math.min(availabilityDuration, blockDuration),
+        dates: [selection.dayKey],
+      });
+      clearSelection();
+      await refreshAvailability();
+      showStatus("Свободное время добавлено.");
+    } catch (err) {
+      showStatus(err.message || "Не удалось сохранить свободное время.");
+    }
+  }, [selection, clearSelection, availabilityDuration, refreshAvailability, showStatus]);
+
+  const handleCancelSelection = useCallback(() => {
+    clearSelection();
+  }, [clearSelection]);
+
+  const selectionWithActions = useMemo(() => {
+    if (!selection) return null;
+    return {
+      ...selection,
+      onConfirm: handleConfirmSelection,
+      onCancel: handleCancelSelection,
+    };
+  }, [selection, handleConfirmSelection, handleCancelSelection]);
+
+  const { resizingId, resizePreview, onResizeStart } = useScheduleEventResize({
+    enabled: dndEnabled,
+    events,
+    onResize: async (eventId, newEndTime) => {
+      const event = events.find((ev) => String(ev.id) === String(eventId));
+      if (!event || event.kind !== "availability") return;
+      try {
+        await updateTeacherAvailability(event.availabilityId, {
+          start_time: eventLocalStartTime(event),
+          end_time: newEndTime,
+          dates: [formatApiDate(eventDate(event))],
+        });
+        await refreshAvailability();
+        showStatus("Время изменено.");
+      } catch (err) {
+        showStatus(err.message || "Не удалось изменить время.");
+      }
+    }
+  });
+
   const mapApiScope = (scope) => parseScheduleScope(scope === "single" ? "single" : scope);
 
   const handleConfirmAction = useCallback(async (scope, options = {}) => {
@@ -2578,6 +3071,23 @@ export default function CabinetSchedulePage() {
 
     try {
       if (type === "move") {
+        if (event.kind === "availability") {
+          const newStart = targetStartTime;
+          const duration = eventDurationMinutes(eventLocalStartTime(event), eventLocalEndTime(event));
+          const newEnd = minutesToTime(parseTime(newStart) + duration);
+          const newDate = formatApiDate(targetDate);
+          
+          await updateTeacherAvailability(event.availabilityId, {
+            start_time: newStart,
+            end_time: newEnd,
+            dates: [newDate],
+          });
+          await refreshAvailability();
+          showStatus("Свободное время перенесено.");
+          setPendingAction(null);
+          return;
+        }
+
         const nextEvents = applyMoveEvents(snapshotEvents, event, targetDate, targetStartTime, scope);
         const updated = nextEvents.find((ev) => ev.id === event.id);
         setEvents(nextEvents);
@@ -2627,6 +3137,7 @@ export default function CabinetSchedulePage() {
         openBillingPrompt(event, "cancelled");
       }
       setPendingAction(null);
+      refreshAvailability();
     } catch (err) {
       if (type === "move") {
         setEvents(snapshotEvents);
@@ -2636,7 +3147,7 @@ export default function CabinetSchedulePage() {
       actionSavingRef.current = false;
       setActionSaving(false);
     }
-  }, [pendingAction, events, showStatus, view, focusDate, openBillingPrompt]);
+  }, [pendingAction, events, showStatus, view, focusDate, openBillingPrompt, refreshAvailability]);
 
   return (
     <CabinetPageShell className="cb-section--schedule cb-section--schedule-cal">
@@ -2653,9 +3164,22 @@ export default function CabinetSchedulePage() {
         onPrev={handlePrev}
         onNext={handleNext}
         onAddLesson={() => openCreateLesson()}
+        onAddAvailability={() => setAvailabilityOpen(true)}
+        onShareSchedule={() => setShareOpen(true)}
         isMobile={isMobile}
         accountEmail={calendarAccountEmail}
       />
+
+      {isMobile ? (
+        <div className="cb-sch-avail-actions">
+          <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={() => setAvailabilityOpen(true)}>
+            Свободное время
+          </button>
+          <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={() => setShareOpen(true)}>
+            Поделиться расписанием
+          </button>
+        </div>
+      ) : null}
 
       <div className={`cb-sch-layout${yandexEmbedEnabled ? " cb-sch-layout--embed" : ""}`}>
         {!yandexEmbedEnabled ? (
@@ -2675,6 +3199,26 @@ export default function CabinetSchedulePage() {
         ) : null}
 
         <div className="cb-sch-main">
+          {bookingLink && !yandexEmbedEnabled ? (
+            <div className="cb-sch-booking-link-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', backgroundColor: 'var(--cb-surface)', border: '1px solid var(--cb-border)', borderRadius: 'var(--cb-radius-lg)', marginBottom: 16 }}>
+              <div>
+                <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 600 }}>Открыть запись</h3>
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--cb-text-secondary)' }}>
+                  Ученики видят свободное время с {bookingLink.date_from} по {bookingLink.date_to}
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" className="cb-btn cb-btn--outline cb-btn--sm" onClick={() => setShareOpen(true)}>Настроить период</button>
+                <button type="button" className="cb-btn cb-btn--primary cb-btn--sm" onClick={() => {
+                  navigator.clipboard.writeText(bookingLink.url);
+                  showStatus("Ссылка скопирована");
+                }}>
+                  Скопировать ссылку
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           {!yandexEmbedEnabled && calendarSource === "yandex" && yandexCalendarEnabled && !yandexLayerIds ? (
             <div className="cb-sch-calendar-hint">
               <p>
@@ -2712,9 +3256,14 @@ export default function CabinetSchedulePage() {
               dndEnabled={dndEnabled}
               draggingId={draggingId}
               dropPreview={dropPreview}
+              resizingId={resizingId}
+              resizePreview={resizePreview}
+              selection={selectionWithActions}
               onEventClick={handleEventClick}
               onPointerDown={onEventPointerDown}
+              onResizeStart={onResizeStart}
               onSlotClick={handleSlotClick}
+              onSlotPointerDown={onSlotPointerDown}
               onAddLesson={() => openCreateLesson()}
             />
           )}
@@ -2725,9 +3274,14 @@ export default function CabinetSchedulePage() {
               dndEnabled={dndEnabled}
               draggingId={draggingId}
               dropPreview={dropPreview}
+              resizingId={resizingId}
+              resizePreview={resizePreview}
+              selection={selectionWithActions}
               onEventClick={handleEventClick}
               onPointerDown={onEventPointerDown}
+              onResizeStart={onResizeStart}
               onSlotClick={handleSlotClick}
+              onSlotPointerDown={onSlotPointerDown}
               onAddLesson={() => openCreateLesson({ date: formatApiDate(focusDate) })}
             />
           )}
@@ -2960,6 +3514,50 @@ export default function CabinetSchedulePage() {
           defaultGroupId={createDraft?.groupId}
           defaultStudentId={createDraft?.studentId}
           defaultStudentIds={createDraft?.studentIds}
+        />
+      ) : null}
+
+      {availabilityOpen ? (
+        <AddAvailabilityModal
+          onClose={() => setAvailabilityOpen(false)}
+          defaultDate={formatApiDate(selectedDate)}
+          defaultDuration={availabilityDuration}
+          onSave={async (payload) => {
+            await createTeacherAvailability(payload);
+            setAvailabilityOpen(false);
+            await refreshAvailability();
+            showStatus("Свободное время добавлено.");
+          }}
+        />
+      ) : null}
+
+      {shareOpen ? (
+        <ShareScheduleModal
+          onClose={() => setShareOpen(false)}
+          link={bookingLink}
+          onPublish={async (payload) => {
+            const data = await publishTeacherBookingLink(payload);
+            setBookingLink({
+              ...(bookingLink || {}),
+              ...data,
+              url: data.url || bookingLink?.url,
+            });
+            showStatus("Ссылка обновлена.");
+          }}
+        />
+      ) : null}
+
+      {selectedAvailability ? (
+        <AvailabilityDetailPopover
+          event={selectedAvailability}
+          onClose={() => setSelectedAvailability(null)}
+          onDelete={async (event) => {
+            if (!event.availabilityId) return;
+            await deleteTeacherAvailability(event.availabilityId);
+            setSelectedAvailability(null);
+            await refreshAvailability();
+            showStatus("Интервал закрыт.");
+          }}
         />
       ) : null}
     </CabinetPageShell>

@@ -5677,9 +5677,25 @@ button.cb-sch-event {
   border-color: #CBD5E1;
   border-left-color: #D97706;
 }
-.cb-sch-event--review {
-  border-color: #CBD5E1;
-  border-left-color: #DC2626;
+.cb-sch-event--availability {
+  border-style: solid;
+  border-color: #D2E3FC;
+  border-left-color: #1A73E8;
+  background: #E8F0FE;
+  box-shadow: none;
+  border-radius: 6px;
+}
+.cb-sch-event--availability:hover {
+  box-shadow: none;
+  border-color: #AECBFA;
+  border-left-color: #1A73E8;
+}
+.cb-sch-event--availability .cb-sch-event__title {
+  color: #174EA6;
+  font-weight: 600;
+}
+.cb-sch-event--availability .cb-sch-event__time {
+  color: #1967D2;
 }
 
 .cb-sch-event__head {
@@ -5781,6 +5797,12 @@ button.cb-sch-event {
 .cb-sch-event--compact.cb-sch-event--individual { color: #7C3AED; }
 .cb-sch-event--compact.cb-sch-event--homework { color: #D97706; }
 .cb-sch-event--compact.cb-sch-event--review { color: #DC2626; }
+.cb-sch-event--compact.cb-sch-event--availability {
+  color: #1967D2;
+  background: #E8F0FE;
+  border-color: #D2E3FC;
+  box-shadow: none;
+}
 .cb-sch-event__pill-text {
   display: flex;
   flex-direction: column;
@@ -14665,6 +14687,66 @@ select.cb-lesson-card__about-input.is-empty {
   font-size: 0.9rem;
   font-weight: 600;
   color: #0F172A;
+}
+
+.cb-sch-modal--appt {
+  width: min(480px, 100%);
+  border-radius: 8px;
+  box-shadow:
+    0 1px 3px 0 rgba(60, 64, 67, 0.3),
+    0 4px 8px 3px rgba(60, 64, 67, 0.15);
+}
+
+.cb-sch-modal--appt-sm {
+  width: min(400px, 100%);
+}
+
+.cb-sch-modal__lead {
+  margin: -4px 0 16px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: #5f6368;
+  font-weight: 400;
+}
+
+.cb-sch-form__row.cb-sch-form__row--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cb-sch-chip-input {
+  width: 88px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid #CBD5E1;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.cb-sch-link-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.cb-sch-link-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  background: #f8f9fa;
+  font: inherit;
+  font-size: 0.82rem;
+  color: #3c4043;
+}
+
+.cb-sch-appt-time {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: #3c4043;
 }
 
 .cb-sch-weekdays {

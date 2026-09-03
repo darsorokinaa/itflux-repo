@@ -169,7 +169,7 @@ export default function InterestingPreviewModal({ open, slug, onClose }) {
               {item.short_description ? (
                 <p className="material-preview__desc">{item.short_description}</p>
               ) : null}
-              {requiredPlan ? (
+              {requiredPlan && locked ? (
                 <div className="material-preview__facts">
                   <div className="material-preview__fact">
                     <span className="material-preview__fact-label">По тарифу</span>

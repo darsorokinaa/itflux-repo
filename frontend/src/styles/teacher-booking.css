@@ -1,0 +1,352 @@
+.cb-booking-page {
+  padding: 32px 16px 64px;
+  max-width: 960px;
+  margin: 0 auto;
+  font-family: var(--font-body, system-ui, sans-serif);
+  color: #0F172A;
+}
+
+.cb-booking-header {
+  margin-bottom: 24px;
+}
+
+.cb-booking-header h1 {
+  margin: 0 0 8px;
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #0F172A;
+  font-family: var(--font-display, inherit);
+}
+
+.cb-booking-header p {
+  margin: 0;
+  font-size: 1rem;
+  color: #64748B;
+}
+
+.cb-booking-teacher {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 32px;
+  padding: 16px 20px;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 20px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+}
+
+.cb-booking-teacher__avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--cb-primary, #2563EB);
+  color: #FFFFFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.cb-booking-teacher__info h2 {
+  margin: 0 0 4px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #0F172A;
+}
+
+.cb-booking-teacher__info p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #64748B;
+}
+
+.cb-booking-grid {
+  display: grid;
+  grid-template-columns: 55% minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 768px) {
+  .cb-booking-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cb-booking-calendar {
+  padding: 24px;
+}
+
+.cb-booking-slots {
+  padding: 24px;
+}
+
+.cb-booking-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.cb-booking-cal-head h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #0F172A;
+}
+
+.cb-booking-cal-nav {
+  display: flex;
+  gap: 8px;
+}
+
+.cb-booking-cal-nav button {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid #CBD5E1;
+  background: #FFFFFF;
+  color: #475569;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.cb-booking-cal-nav button:hover:not(:disabled) {
+  background: #F8FAFC;
+  border-color: #94A3B8;
+}
+
+.cb-booking-cal-nav button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cb-booking-cal-nav svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cb-booking-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  text-align: center;
+}
+
+.cb-booking-cal-wd {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #64748B;
+  text-transform: uppercase;
+  padding: 8px 0;
+}
+
+.cb-booking-cal-day {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border: 2px solid transparent;
+  background: transparent;
+  color: #0F172A;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+
+.cb-booking-cal-day.is-outside {
+  color: #CBD5E1;
+}
+
+.cb-booking-cal-day:disabled {
+  color: #94A3B8;
+  cursor: not-allowed;
+}
+
+.cb-booking-cal-day.is-available {
+  background: #F8FAFC;
+  border-color: #E2E8F0;
+  color: #0F172A;
+}
+
+.cb-booking-cal-day.is-available:hover {
+  border-color: var(--cb-primary, #2563EB);
+  color: var(--cb-primary, #2563EB);
+}
+
+.cb-booking-cal-day.is-today:not(.is-selected) {
+  color: var(--cb-primary, #2563EB);
+}
+
+.cb-booking-cal-day.is-selected {
+  background: var(--cb-primary, #2563EB);
+  border-color: var(--cb-primary, #2563EB);
+  color: #FFFFFF;
+}
+
+.cb-booking-slots-head {
+  margin-bottom: 20px;
+}
+
+.cb-booking-slots-head h3 {
+  margin: 0 0 6px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #0F172A;
+}
+
+.cb-booking-slots-head p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #64748B;
+}
+
+.cb-booking-slot-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.cb-booking-slot {
+  flex: 1 1 calc(33.333% - 10px);
+  min-width: 80px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid #CBD5E1;
+  background: #FFFFFF;
+  color: #0F172A;
+  font-size: 0.95rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+}
+
+@media (max-width: 480px) {
+  .cb-booking-slot {
+    flex: 1 1 calc(50% - 10px);
+  }
+}
+
+.cb-booking-slot:hover {
+  border-color: var(--cb-primary, #2563EB);
+  background: #EFF6FF;
+  color: var(--cb-primary, #2563EB);
+}
+
+.cb-booking-slot.is-selected {
+  background: var(--cb-primary, #2563EB);
+  border-color: var(--cb-primary, #2563EB);
+  color: #FFFFFF;
+}
+
+.cb-booking-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 32px 16px;
+  color: #64748B;
+}
+
+.cb-booking-empty svg {
+  width: 48px;
+  height: 48px;
+  color: #CBD5E1;
+  margin-bottom: 16px;
+}
+
+.cb-booking-empty p {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.cb-booking-notice {
+  padding: 16px 20px;
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  border-radius: 16px;
+  color: #991B1B;
+  margin-bottom: 24px;
+  font-size: 0.9rem;
+}
+
+.cb-booking-notice p {
+  margin: 0 0 8px;
+}
+.cb-booking-notice p:last-child {
+  margin: 0;
+}
+
+.cb-booking-success {
+  padding: 48px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.cb-booking-success svg {
+  width: 64px;
+  height: 64px;
+  color: #10B981;
+  margin-bottom: 24px;
+}
+
+.cb-booking-success h2 {
+  margin: 0 0 12px;
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #0F172A;
+}
+
+.cb-booking-success p {
+  margin: 0 0 32px;
+  font-size: 1.05rem;
+  color: #475569;
+}
+
+.cb-booking-dialog-facts {
+  margin: 0 0 20px;
+  padding: 16px;
+  background: #F8FAFC;
+  border-radius: 12px;
+  border: 1px solid #E2E8F0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cb-booking-dialog-facts li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.95rem;
+  color: #0F172A;
+  font-weight: 600;
+}
+
+.cb-booking-dialog-facts svg {
+  width: 20px;
+  height: 20px;
+  color: #64748B;
+}
+
+.cb-booking-dialog-warning {
+  font-size: 0.85rem;
+  color: #64748B;
+  line-height: 1.5;
+  margin: 0 0 24px;
+}

@@ -20,6 +20,7 @@ import InterestingPage from "./pages/InterestingPage";
 import InterestingViewerPage from "./pages/InterestingViewerPage";
 import ForTeachersPage from "./pages/ForTeachersPage";
 import TutorLandingPage from "./pages/TutorLandingPage";
+import TeacherBookingPage from "./pages/TeacherBookingPage";
 import CabinetAuthPage from "./pages/CabinetAuthPage";
 import CabinetJoinPage from "./cabinet/pages/CabinetJoinPage";
 import CabinetNotificationsSettingsPage from "./cabinet/pages/CabinetNotificationsSettingsPage";
@@ -121,6 +122,9 @@ function getMetaDescriptionForPath(pathname) {
   }
   if (path === "/pricing" || path.startsWith("/pricing/")) {
     return "Тарифы «Цифровой поток»: Старт, Учитель, Профи, Премиум и Школа — кабинет, библиотека и лимиты для преподавателей.";
+  }
+  if (path.startsWith("/book/")) {
+    return "Запись на постоянное время занятий к преподавателю на платформе «Цифровой поток».";
   }
   if (path.startsWith("/cabinet/student")) {
     return "Личный кабинет ученика: уроки, домашние задания, интерактивы и результаты обучения.";
@@ -294,6 +298,8 @@ function App() {
           <Route path="/teachers" element={<ForTeachersPage />} />
           <Route path="/for-teachers" element={<Navigate to="/teachers" replace />} />
           <Route path="/cabinet/login" element={<CabinetAuthPage />} />
+          <Route path="/book/:token" element={<TeacherBookingPage />} />
+          <Route path="/book/:token/" element={<TeacherBookingPage />} />
           <Route path="/invite/:token" element={<CabinetJoinPage />} />
           <Route path="/invite/:token/" element={<CabinetJoinPage />} />
           <Route path="/parent/invite/accept/:token" element={<ParentInviteAcceptPage />} />

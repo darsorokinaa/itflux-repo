@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ClipboardList, PenLine, Presentation, Search, StickyNote } from "lucide-react";
 import AccessGateBadge from "../components/AccessGateBadge";
 import CatalogEngagementBar from "../components/CatalogEngagementBar";
@@ -20,8 +20,9 @@ import {
   lessonPurchaseLabel,
 } from "../cabinet/lessonCardUtils";
 import { CATALOG_ORDERING_OPTIONS } from "../utils/catalogEngagement";
-import { purchaseReadyLesson } from "../utils/cabinetAuth";
+import { purchaseReadyLesson, fetchStudents, fetchScheduleEvents } from "../utils/cabinetAuth";
 import { pickTryNowLessons, readRecentLessons } from "../utils/recentLessons";
+import { mapApiStudent } from "../cabinet/cabinetMappers";
 import { trackValueGoal } from "../utils/valuePath";
 import "../styles/material-access.css";
 
@@ -208,11 +209,11 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
           <p className="lesson-card-v3__ready">Можно проводить сразу</p>
         ) : null}
 
-        {priceLabel || planName ? (
+        {priceLabel || (planName && locked) ? (
           <p className="lesson-card-v3__access">
             {priceLabel || null}
-            {priceLabel && planName ? " · " : null}
-            {planName ? `По тарифу «${planName}»` : null}
+            {priceLabel && planName && locked ? " · " : null}
+            {planName && locked ? `По тарифу «${planName}»` : null}
           </p>
         ) : null}
 
@@ -265,6 +266,7 @@ function LessonCard({ lesson, onEngagementChange, onLockedOpen, onPurchaseLesson
 }
 
 export default function ReadyLessonsPage() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const previewSlug = searchParams.get("preview") || "";
   const demoExpired = searchParams.get("demo_expired") === "1";
@@ -285,6 +287,45 @@ export default function ReadyLessonsPage() {
   const [ordering, setOrdering] = useState("newest");
   const authed = useCabinetAuthed();
   const { modal: accessGateModal, openGate } = useAccessGate({ authenticated: authed, sourcePage: "/lessons" });
+  const [students, setStudents] = useState([]);
+  const [recentTopics, setRecentTopics] = useState([]);
+
+  useEffect(() => {
+    if (!authed) return;
+    let cancelled = false;
+    
+    // 1) Fetch active students
+    fetchStudents({ status: "active" })
+      .then((res) => {
+        if (cancelled) return;
+        const list = (Array.isArray(res) ? res : res?.results || []).map(mapApiStudent);
+        setStudents(list);
+      })
+      .catch(() => {});
+      
+    // 2) Fetch upcoming schedule to find relevant topics
+    // Getting events from today to +14 days
+    const fromStr = new Date().toISOString().split("T")[0];
+    const toDate = new Date();
+    toDate.setDate(toDate.getDate() + 14);
+    const toStr = toDate.toISOString().split("T")[0];
+    
+    fetchScheduleEvents({ from: fromStr, to: toStr })
+      .then((res) => {
+        if (cancelled) return;
+        const events = Array.isArray(res?.events) ? res.events : [];
+        const topics = events
+          .map(e => e.topic || e.title) // grab event topic or title
+          .filter(Boolean)
+          .map(t => t.trim().toLowerCase());
+        setRecentTopics(topics);
+      })
+      .catch(() => {});
+      
+    return () => {
+      cancelled = true;
+    };
+  }, [authed]);
 
   const [reloadKey, setReloadKey] = useState(0);
   const reloadLessons = useCallback(() => setReloadKey((k) => k + 1), []);
@@ -466,11 +507,23 @@ export default function ReadyLessonsPage() {
   }, [lessons]);
 
   const tryNowLessons = useMemo(() => {
+    // If we have students, pickTryNowLessons will use them. Otherwise fallback to preferredSubject
     const preferredSubject = subject || readRecentLessons()[0]?.subject || "";
-    return pickTryNowLessons(lessons, { subject: preferredSubject, limit: 6 });
-  }, [lessons, subject]);
+    return pickTryNowLessons(lessons, { subject: preferredSubject, students, recentTopics, limit: 6 });
+  }, [lessons, subject, students, recentTopics]);
+
+  useEffect(() => {
+    const duration = searchParams.get("duration") || "";
+    const exam = searchParams.get("exam") || "";
+    if (duration) setDurationFilter(duration);
+    if (exam) setLevel(exam);
+  }, [searchParams]);
 
   const applySituation = (chip) => {
+    if (chip.to) {
+      navigate(chip.to);
+      return;
+    }
     if (chip.duration) setDurationFilter(chip.duration);
     if (chip.exam) setLevel(chip.exam);
   };
@@ -511,7 +564,7 @@ export default function ReadyLessonsPage() {
           <div className="lessons-situations" aria-label="Быстрый выбор">
             {[
               { id: "60", label: "Урок на 45–60 минут", duration: "long" },
-              { id: "short", label: "Интерактив до 30 минут", duration: "short" },
+              { id: "interesting", label: "Интересное", to: "/interesting" },
               { id: "oge", label: "ОГЭ", exam: "ОГЭ" },
               { id: "ege", label: "ЕГЭ", exam: "ЕГЭ" },
             ].map((chip) => (

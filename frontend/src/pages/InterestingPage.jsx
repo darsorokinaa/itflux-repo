@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Map, Search } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import AccessGateBadge from "../components/AccessGateBadge";
 import CatalogEngagementBar from "../components/CatalogEngagementBar";
 import InterestingPreviewModal from "../components/InterestingPreviewModal";
@@ -84,13 +84,22 @@ function InterestingCard({ item, onEngagementChange, onLockedOpen }) {
   );
 }
 
+const INTERESTING_SITUATIONS = [
+  { id: "interactive", label: "Интерактив", tag: "Интерактив" },
+  { id: "fact", label: "Факт", tag: "Факт" },
+  { id: "lessons-60", label: "Урок на 45–60 минут", to: "/gotovye-uroki?duration=long" },
+  { id: "oge", label: "ОГЭ", to: "/gotovye-uroki?exam=ОГЭ" },
+];
+
 export default function InterestingPage() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const previewSlug = searchParams.get("preview") || "";
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
   const [ordering, setOrdering] = useState("newest");
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
@@ -153,7 +162,16 @@ export default function InterestingPage() {
     };
   }, [reloadKey, ordering]);
 
+  const applySituation = (chip) => {
+    if (chip.to) {
+      navigate(chip.to);
+      return;
+    }
+    setTagFilter(chip.tag || "");
+  };
+
   const filtered = items.filter((item) => {
+    if (tagFilter && item.tag !== tagFilter) return false;
     const q = search.trim().toLowerCase();
     if (!q) return true;
     const haystack = [item.title, item.short_description, item.tag]
@@ -168,11 +186,25 @@ export default function InterestingPage() {
       <div className="digital-flow-page__wrap">
         <main className="interesting-page">
           <section className="lessons-hero-v3">
-            <h1 className="lessons-hero-v3__title">Интересное</h1>
+            <h1 className="lessons-hero-v3__title">Короткий интерактив на урок</h1>
             <p className="lessons-hero-v3__lead">
-              Факты, интерактивы и материалы, которые делают информатику живой и наглядной.
+              Интерактивы и факты до 30 минут — откройте на занятии без подготовки.
             </p>
           </section>
+
+          <div className="lessons-situations" aria-label="Быстрый выбор">
+            {INTERESTING_SITUATIONS.map((chip) => (
+              <button
+                key={chip.id}
+                type="button"
+                className={`lessons-situation${tagFilter && chip.tag === tagFilter ? " lessons-situation--active" : ""}`}
+                aria-pressed={Boolean(tagFilter && chip.tag === tagFilter)}
+                onClick={() => applySituation(chip)}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
 
           <section className="lessons-toolbar interesting-toolbar" aria-label="Поиск и сортировка">
             <label className="lessons-search">

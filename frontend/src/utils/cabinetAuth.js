@@ -515,6 +515,65 @@ export function fetchScheduleEvents({ from, to }) {
   return cabinetFetch(`/schedule/events/?${params.toString()}`, { method: "GET" });
 }
 
+export function fetchTeacherAvailability({ from, to } = {}) {
+  const params = new URLSearchParams();
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  const qs = params.toString();
+  return cabinetFetch(`/availability/${qs ? `?${qs}` : ""}`, { method: "GET" });
+}
+
+export function createTeacherAvailability(payload) {
+  return cabinetFetch("/availability/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateTeacherAvailability(id, payload) {
+  return cabinetFetch(`/availability/${encodeURIComponent(id)}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteTeacherAvailability(id) {
+  return cabinetFetch(`/availability/${encodeURIComponent(id)}/`, { method: "DELETE" });
+}
+
+export function fetchTeacherBookingLink() {
+  return cabinetFetch("/availability/link/", { method: "GET" });
+}
+
+export function publishTeacherBookingLink(payload) {
+  return cabinetFetch("/availability/link/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchPublicBookingPage(token) {
+  return cabinetFetch(`/booking/${encodeURIComponent(token)}/`, { method: "GET" });
+}
+
+export function bookPublicSlot(token, payload) {
+  return cabinetFetch(`/booking/${encodeURIComponent(token)}/book/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchStudentPermanentSchedule() {
+  return cabinetFetch("/student/permanent-schedule/", { method: "GET" });
+}
+
+export function cancelStudentPermanentSchedule(bookingId) {
+  return cabinetFetch(`/student/permanent-schedule/${encodeURIComponent(bookingId)}/cancel/`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
 export function createScheduleEvent(payload) {
   return cabinetFetch("/schedule/events/create/", {
     method: "POST",

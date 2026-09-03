@@ -501,7 +501,7 @@ export default function LessonPreviewModal({
                       <strong>{priceLabel}</strong>
                     </div>
                   ) : null}
-                  {isPaidLesson && access.required_plan_name ? (
+                  {isPaidLesson && access.required_plan_name && !canOpenContent && !demoActive ? (
                     <div className="material-preview__fact">
                       <span className="material-preview__fact-label">По тарифу</span>
                       <strong>{access.required_plan_name}</strong>

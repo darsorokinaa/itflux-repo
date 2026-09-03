@@ -4695,3 +4695,9 @@ from .student_library_folder_models import (  # noqa: E402
 # ── Аннотации поверх демонстрации экрана ──────────────────────────────────────
 from .meeting_screenshare_models import MeetingScreenShareSession  # noqa: E402, F401
 from .activation_models import ActivationEvent  # noqa: E402, F401
+
+from .availability_models import (  # noqa: E402
+    TeacherAvailability,
+    TeacherBooking,
+    TeacherBookingLink,
+)

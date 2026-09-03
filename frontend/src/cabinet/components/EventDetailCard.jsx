@@ -1290,12 +1290,15 @@ export default function EventDetailCard({
             <div className="cb-lesson-card__header-text">
               <h2 id="sch-lesson-title" className="cb-lesson-card__title">{headerTitle}</h2>
               {subtitle ? <p className="cb-lesson-card__subtitle">{subtitle}</p> : null}
-              {(showStatusBadge || (!studentMode && (recurring || isOnline))) ? (
+              {(showStatusBadge || (!studentMode && (recurring || isOnline || event.selfBooked))) ? (
                 <div className="cb-lesson-card__badges">
                   {showStatusBadge ? (
                     <StatusBadge label={statusMeta.label} mod={statusMeta.mod} />
                   ) : null}
                   {!studentMode && recurring ? <StatusBadge label="Повторяется" mod="recurring" /> : null}
+                  {!studentMode && event.selfBooked ? (
+                    <StatusBadge label="Записался самостоятельно" mod="self-booked" />
+                  ) : null}
                   {!studentMode && isOnline ? <StatusBadge label="Онлайн" mod="online" /> : null}
                   {!studentMode && (billingBadges || []).slice(0, 2).map((b) => (
                     <span

@@ -72,6 +72,9 @@ from .models import (
     ScheduleEventMaterial,
     ScheduleEventParticipant,
     ScheduleEventSeries,
+    TeacherAvailability,
+    TeacherBooking,
+    TeacherBookingLink,
     VideoMeeting,
     Student,
     StudentGroup,
@@ -643,6 +646,26 @@ class ScheduleEventSeriesAdmin(admin.ModelAdmin):
     list_filter = ("recurrence_type", "status", "event_type")
     search_fields = ("title", "topic")
     ordering = ("-created_at",)
+
+
+@admin.register(TeacherAvailability)
+class TeacherAvailabilityAdmin(admin.ModelAdmin):
+    list_display = ("teacher", "date", "weekday", "start_time", "end_time", "is_active", "valid_from", "valid_until")
+    list_filter = ("is_active",)
+    search_fields = ("teacher__username",)
+
+
+@admin.register(TeacherBookingLink)
+class TeacherBookingLinkAdmin(admin.ModelAdmin):
+    list_display = ("teacher", "token", "date_from", "date_to", "is_active")
+    search_fields = ("teacher__username", "token")
+
+
+@admin.register(TeacherBooking)
+class TeacherBookingAdmin(admin.ModelAdmin):
+    list_display = ("teacher", "student", "weekday", "start_time", "status", "booked_at")
+    list_filter = ("status", "source")
+    search_fields = ("student__first_name", "student__last_name")
 
 
 @admin.register(ScheduleEventParticipant)

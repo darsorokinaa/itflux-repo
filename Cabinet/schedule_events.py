@@ -215,7 +215,7 @@ def _student_subject_label(event):
         return getattr(ss, "subject", "") or ""
 
 
-def schedule_event_to_json(event):
+def schedule_event_to_json(event, *, self_booked=None):
     from .schedule_service import resolve_schedule_timezone
 
     event_tz = resolve_schedule_timezone(event=event)
@@ -334,6 +334,9 @@ def schedule_event_to_json(event):
         else None
     )
 
+    if self_booked is None:
+        self_booked = _event_is_self_booked(event)
+
     return {
         "id": local_event_id(event.pk),
         "dayOffset": (local_start.date() - today).days,
@@ -401,7 +404,32 @@ def schedule_event_to_json(event):
         "planItemsTotal": (plan_progress or {}).get("total"),
         "planWarningLevel": (plan_progress or {}).get("warning_level") or "",
         "planWarningMessage": (plan_progress or {}).get("warning_message") or "",
+        "selfBooked": bool(self_booked),
+        "selfBookedLabel": "Записался самостоятельно" if self_booked else "",
     }
+
+
+def _event_is_self_booked(event):
+    if not event.series_id:
+        return False
+    try:
+        return getattr(event.series, "availability_booking", None) is not None
+    except Exception:
+        return False
+
+
+def _self_booked_series_ids(series_ids):
+    ids = [pk for pk in series_ids if pk]
+    if not ids:
+        return set()
+    try:
+        from .availability_models import TeacherBooking
+
+        return set(
+            TeacherBooking.objects.filter(series_id__in=ids).values_list("series_id", flat=True)
+        )
+    except Exception:
+        return set()
 
 
 def list_schedule_events(*, user, date_from, date_to, include_cancelled=False):
@@ -426,10 +454,12 @@ def list_schedule_events(*, user, date_from, date_to, include_cancelled=False):
         logging.getLogger("cabinet.plan_sync").exception(
             "plan realign on schedule list failed teacher=%s", user.pk,
         )
+    event_rows = list(qs.order_by("starts_at"))
+    booked_series = _self_booked_series_ids(ev.series_id for ev in event_rows)
     events = []
-    for ev in qs.order_by("starts_at"):
+    for ev in event_rows:
         try:
-            events.append(schedule_event_to_json(ev))
+            events.append(schedule_event_to_json(ev, self_booked=ev.series_id in booked_series))
         except Exception:
             # Один битый урок не должен обнулять весь календарь.
             continue

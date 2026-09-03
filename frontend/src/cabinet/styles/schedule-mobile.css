@@ -359,6 +359,13 @@
   .cb-sch-list-card__actions .cb-btn {
     flex: 1 1 100%;
   }
+
+  .cb-sch-avail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 8px;
+  }
 }
 
 @media (max-width: 320px) {
@@ -366,4 +373,10 @@
     font-size: 0.8125rem;
     padding: 0 4px;
   }
+}
+
+body.cb-sch-selecting,
+body.cb-sch-resizing {
+  touch-action: none;
+  overflow: hidden;
 }

@@ -72,18 +72,62 @@ export function readPaywallViews(scope = "lesson") {
   return Number(all[String(scope || "lesson")] || 0);
 }
 
-export function pickTryNowLessons(lessons, { subject = "", limit = 6 } = {}) {
+export function pickTryNowLessons(lessons, { subject = "", students = [], recentTopics = [], limit = 6 } = {}) {
   const list = Array.isArray(lessons) ? lessons : [];
   const ready = list.filter((lesson) => (
     lesson?.slug
     && (lesson.archive_url || lesson.file_url || lesson.access?.demo_available || lesson.access?.can_view)
   ));
-  const pool = subject
-    ? ready.filter((lesson) => String(lesson.subject || "") === subject)
-    : ready;
-  const source = pool.length >= 3 ? pool : ready;
+  
+  // Collect subjects and grades from students
+  const studentSubjects = new Set();
+  const studentGrades = new Set();
+  
+  students.forEach(student => {
+    if (student.subject && student.subject !== "Без предмета") {
+      studentSubjects.add(student.subject);
+    }
+    if (Array.isArray(student.subjects)) {
+      student.subjects.forEach(s => {
+        if (s && s !== "Без предмета") studentSubjects.add(s);
+      });
+    }
+    if (student.grade) {
+      studentGrades.add(String(student.grade));
+    }
+  });
+  
   const score = (lesson) => {
     let value = 0;
+    
+    // Personalization score
+    const lessonSubj = String(lesson.subject || "");
+    const lessonGrade = String(lesson.grade || "");
+    
+    if (students.length > 0) {
+      if (lessonSubj && studentSubjects.has(lessonSubj)) value += 15;
+      if (lessonGrade && studentGrades.has(lessonGrade)) value += 10;
+    } else if (subject && lessonSubj === subject) {
+      value += 15; // Fallback to current subject
+    }
+    
+    // Recent topics from schedule score
+    if (recentTopics.length > 0) {
+      const titleLower = String(lesson.title || "").toLowerCase();
+      const topicLower = String(lesson.topic || "").toLowerCase();
+      const subtopicLower = String(lesson.subtopic || "").toLowerCase();
+      
+      const hasTopicMatch = recentTopics.some(rt => {
+        if (!rt || rt.length < 4) return false; // avoid matching very short words
+        return titleLower.includes(rt) || topicLower.includes(rt) || subtopicLower.includes(rt) || rt.includes(titleLower) || rt.includes(topicLower);
+      });
+      
+      if (hasTopicMatch) {
+        value += 25; // High boost for lessons that directly match upcoming schedule topics
+      }
+    }
+    
+    // General quality/relevance score
     if (lesson.is_new) value += 8;
     if (lesson.access?.demo_available || lesson.access?.can_start_demo) value += 4;
     if (lesson.archive_url || lesson.file_url) value += 3;
@@ -91,6 +135,14 @@ export function pickTryNowLessons(lessons, { subject = "", limit = 6 } = {}) {
     value += Math.min(Number(lesson.likes_count) || 0, 50) / 10;
     return value;
   };
+  
+  // If we have strict subject filter and no students, we can optionally strictly filter
+  const pool = (subject && students.length === 0)
+    ? ready.filter((lesson) => String(lesson.subject || "") === subject)
+    : ready;
+    
+  const source = pool.length >= 3 ? pool : ready;
+  
   return [...source].sort((a, b) => score(b) - score(a)).slice(0, limit);
 }
 

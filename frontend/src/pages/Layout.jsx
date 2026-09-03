@@ -28,6 +28,7 @@ function Layout() {
   const isBoardEditorPage =
     /^\/cabinet\/boards\/[^/]+$/.test(pathNorm)
     || /^\/teacher\/boards\/[^/]+$/.test(pathNorm);
+  const isBookingPage = pathname.startsWith("/book/");
   const isChromelessPage =
     isLessonViewerPage || isInterestingViewerPage || isInteractivePlayPage || isBoardEditorPage;
   /** Экзамен/вариант: своя залипающая панель действий снизу — нижнюю навигацию там не показываем. */
@@ -123,11 +124,12 @@ function Layout() {
   }, [pathname]);
 
   const showMobileTabBar =
-    !isLessonOrHomeworkContext && !isChromelessPage && !isExamVariantPage && !isCabinetArea;
+    !isLessonOrHomeworkContext && !isChromelessPage && !isExamVariantPage && !isCabinetArea && !isBookingPage;
 
   const showSiteFooter =
     !isChromelessPage &&
     !isLessonOrHomeworkContext &&
+    !isBookingPage &&
     (!isCabinetArea || pathname === "/cabinet/login");
 
   /** Скрываем на полноэкранных сценариях, где кнопка мешает работе. */
@@ -136,7 +138,8 @@ function Layout() {
     !isLessonOrHomeworkContext &&
     !isHomeworkEmbedContext &&
     !isVideoMeetingPage &&
-    !isBoardEditorPage;
+    !isBoardEditorPage &&
+    !isBookingPage;
 
   return (
     <div
@@ -145,13 +148,13 @@ function Layout() {
       {/* Фон-паттерн: по умолчанию скрыт (home.css). Сезонная тема включает через CSS-переменные. */}
       <div className="app-shell-pattern" aria-hidden="true" />
       <div className="app-shell-content">
-      {!isLessonOrHomeworkContext && !isChromelessPage && (!isCabinetArea || pathname === '/cabinet/login') && <Nav />}
+      {!isLessonOrHomeworkContext && !isChromelessPage && !isBookingPage && (!isCabinetArea || pathname === '/cabinet/login') && <Nav />}
 
       <aside>
         {/* боковое меню */}
       </aside>
 
-      <main className={isMarketingHome || isChromelessPage ? "w-full" : "container mt-4"}>
+      <main className={isMarketingHome || isChromelessPage || isBookingPage ? "w-full" : "container mt-4"}>
         <Outlet />
       </main>
 

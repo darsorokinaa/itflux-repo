@@ -5,6 +5,7 @@ from . import (
     activation_api,
     ai_api,
     api_views,
+    availability_api,
     billing_api,
     boards_api,
     client_telemetry,
@@ -125,6 +126,41 @@ urlpatterns = [
     path("student/interactives/<int:assignment_id>/", student_api.StudentInteractiveDetailView.as_view(), name="student_interactive_detail"),
     path("student/schedule/", student_api.StudentScheduleView.as_view(), name="student_schedule"),
     path("student/schedule/<int:event_id>/", student_api.StudentScheduleEventDetailView.as_view(), name="student_schedule_detail"),
+    path(
+        "student/permanent-schedule/",
+        availability_api.StudentPermanentScheduleView.as_view(),
+        name="student_permanent_schedule",
+    ),
+    path(
+        "student/permanent-schedule/<int:booking_id>/cancel/",
+        availability_api.StudentPermanentScheduleCancelView.as_view(),
+        name="student_permanent_schedule_cancel",
+    ),
+    path(
+        "availability/",
+        availability_api.TeacherAvailabilityListView.as_view(),
+        name="teacher_availability",
+    ),
+    path(
+        "availability/link/",
+        availability_api.TeacherBookingLinkView.as_view(),
+        name="teacher_availability_link",
+    ),
+    path(
+        "availability/<int:pk>/",
+        availability_api.TeacherAvailabilityDetailView.as_view(),
+        name="teacher_availability_detail",
+    ),
+    path(
+        "booking/<str:token>/",
+        availability_api.PublicBookingPageView.as_view(),
+        name="public_booking_page",
+    ),
+    path(
+        "booking/<str:token>/book/",
+        availability_api.PublicBookingCreateView.as_view(),
+        name="public_booking_create",
+    ),
     path("student/progress/", student_api.StudentProgressView.as_view(), name="student_progress"),
     path("student/materials/", student_api.StudentMaterialsView.as_view(), name="student_materials"),
     path(

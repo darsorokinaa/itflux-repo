@@ -3,7 +3,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { fetchStudentSchedule } from "../../../utils/cabinetAuth";
+import { fetchStudentPermanentSchedule, fetchStudentSchedule, cancelStudentPermanentSchedule } from "../../../utils/cabinetAuth";
 import { loadStudentData } from "../studentData";
 import StudentEventDetailPopover from "../StudentEventDetailPopover";
 import {
@@ -228,6 +228,10 @@ export default function StudentLessonsPage() {
   usePageTitle("Расписание");
   const location = useLocation();
   const navigate = useNavigate();
+  const [permanent, setPermanent] = useState([]);
+  const [cancelId, setCancelId] = useState(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelError, setCancelError] = useState("");
   const [schedule, setSchedule] = useState([]);
   const [filter, setFilter] = useState("upcoming");
   const [loading, setLoading] = useState(true);
@@ -241,9 +245,13 @@ export default function StudentLessonsPage() {
   });
 
   useEffect(() => {
-    loadStudentData(fetchStudentSchedule, "schedule")
-      .then((scheduleData) => {
+    Promise.all([
+      loadStudentData(fetchStudentSchedule, "schedule"),
+      fetchStudentPermanentSchedule().catch(() => ({ items: [] })),
+    ])
+      .then(([scheduleData, permanentData]) => {
         setSchedule(scheduleData?.items || []);
+        setPermanent(permanentData?.items || []);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -291,6 +299,73 @@ export default function StudentLessonsPage() {
       </header>
 
       <StudentFilterPills filters={FILTERS} active={filter} onChange={setFilter} />
+
+      {!loading && permanent.length ? (
+        <section className="st-permanent">
+          <h2 className="st-permanent__title">Ваше постоянное время</h2>
+          <ul className="st-permanent__list">
+            {permanent.map((item) => (
+              <li key={item.id} className="st-permanent__item">
+                <div>
+                  <strong>{item.weekday_label}</strong>
+                  <span>{item.start_time}–{item.end_time}</span>
+                  {item.teacher_name ? <span>Преподаватель: {item.teacher_name}</span> : null}
+                </div>
+                <button
+                  type="button"
+                  className="st-permanent__cancel"
+                  onClick={() => {
+                    setCancelError("");
+                    setCancelId(item.id);
+                  }}
+                >
+                  Отменить запись
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {cancelId ? (
+        <div className="st-permanent-overlay" role="presentation" onClick={() => !cancelBusy && setCancelId(null)}>
+          <div className="st-permanent-dialog" role="dialog" onClick={(e) => e.stopPropagation()}>
+            <h2>Отменить запись</h2>
+            <p>
+              Вы действительно хотите отказаться от этого времени? После отмены слот снова может стать доступен другим ученикам.
+              Если вам нужно просто изменить расписание, согласуйте новое время с преподавателем.
+            </p>
+            {cancelError ? <p className="st-permanent-error">{cancelError}</p> : null}
+            <div className="st-permanent-dialog__actions">
+              <button type="button" className="cb-btn cb-btn--outline" disabled={cancelBusy} onClick={() => setCancelId(null)}>
+                Назад
+              </button>
+              <button
+                type="button"
+                className="cb-btn cb-btn--primary"
+                disabled={cancelBusy}
+                onClick={async () => {
+                  setCancelBusy(true);
+                  setCancelError("");
+                  try {
+                    await cancelStudentPermanentSchedule(cancelId);
+                    setPermanent((prev) => prev.filter((item) => item.id !== cancelId));
+                    const scheduleData = await loadStudentData(fetchStudentSchedule, "schedule");
+                    setSchedule(scheduleData?.items || []);
+                    setCancelId(null);
+                  } catch (err) {
+                    setCancelError(err.message || "Не удалось отменить запись.");
+                  } finally {
+                    setCancelBusy(false);
+                  }
+                }}
+              >
+                {cancelBusy ? "Отмена…" : "Отменить запись"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {loading && <StudentLoadingState />}
 
