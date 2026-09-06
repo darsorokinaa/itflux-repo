@@ -3674,6 +3674,19 @@ body.tasks-prep-v2-active main.container.mt-4 {
     color: var(--text-primary);
 }
 
+.search-task-condition img,
+.search-task-answer-content img {
+    height: auto;
+    max-width: 100%;
+}
+
+.search-task-owner-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
 .search-task-condition p {
     margin: 0 0 0.75rem 0;
 }
@@ -8757,10 +8770,10 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     max-width: 100% !important;
     display: block !important;
 }
-.exam-page .task:not(.task-geom):not(.task-alg) .task-text img,
-.all-tasks-item__html:not(.task-geom):not(.task-alg) img,
-.all-tasks-item__html :not(.task-geom):not(.task-alg) img,
-.all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html img {
+.exam-page .task:not(.task-geom):not(.task-alg) .task-text img:not(.teacher-task-img),
+.all-tasks-item__html:not(.task-geom):not(.task-alg) img:not(.teacher-task-img),
+.all-tasks-item__html :not(.task-geom):not(.task-alg) img:not(.teacher-task-img),
+.all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html img:not(.teacher-task-img) {
     display: block !important;
     width: calc(100% / 1.5) !important;
     max-width: calc(100% / 1.5) !important;
@@ -8779,8 +8792,8 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
 .all-tasks-item:not(.all-tasks-item--geom):not(.all-tasks-item--alg) .all-tasks-item__html figure.image img {
     margin: 0 auto !important;
 }
-.exam-page .task:not(.task-geom):not(.task-alg) .correct-answer-content img,
-.exam-page .task:not(.task-geom):not(.task-alg) .part2-answer-content img {
+.exam-page .task:not(.task-geom):not(.task-alg) .correct-answer-content img:not(.teacher-task-img),
+.exam-page .task:not(.task-geom):not(.task-alg) .part2-answer-content img:not(.teacher-task-img) {
     display: block !important;
     width: calc(100% / 1.5) !important;
     max-width: calc(100% / 1.5) !important;
@@ -8788,6 +8801,20 @@ body.subject-page .subject-page-main .exam-grid.exam-choice-pair .exam-card .exa
     margin: 0.75rem auto 0.5rem !important;
     object-fit: contain !important;
     cursor: pointer;
+}
+
+.task-text img.teacher-task-img,
+.exam-page .task-text img.teacher-task-img,
+.correct-answer-content img.teacher-task-img,
+.part2-answer-content img.teacher-task-img,
+.all-tasks-item__html img.teacher-task-img,
+.saas-render-box img.teacher-task-img,
+.mtb-rte__surface img.teacher-task-img {
+    max-width: 100% !important;
+    height: auto !important;
+    display: inline-block !important;
+    margin: 0.45rem 0 !important;
+    object-fit: contain !important;
 }
 
 /* Физика и химия: иллюстрации как в геометрии (300px) */
@@ -10662,15 +10689,6 @@ header.header--themed .theme-toggle > span {
 .site-footer-link:hover {
     color: #4c51bf;
     text-decoration: underline;
-}
-
-.site-footer-link--summer-club {
-    font-weight: 700;
-    color: #b97f47;
-}
-
-.site-footer-link--summer-club:hover {
-    color: #8a541b;
 }
 
 .site-footer-sep {

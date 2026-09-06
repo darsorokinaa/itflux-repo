@@ -64,6 +64,9 @@ export function useLimitModal(currentPlan) {
       LESSON_LIMIT_REACHED: "lessons",
       INTERACTIVE_LIMIT_REACHED: "interactives",
       AI_LIMIT_REACHED: "ai",
+      TEACHER_TASK_LIMIT_REACHED: "teacher_tasks",
+      TEACHER_TASK_COPY_LIMIT_REACHED: "teacher_task_copies",
+      TEACHER_TASK_ATTACHMENTS_REQUIRED: "teacher_task_attachments",
     };
     const type = LIMIT_MAP[code];
     if (type) {

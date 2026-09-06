@@ -146,7 +146,7 @@ const RIGHT_TABS: ReadonlyArray<TabDef> = [
 function getActiveTab(pathname: string): TabKey | null {
   const p = (pathname || "").replace(/\/+$/, "") || "/";
   if (p === "/lessons" || p.startsWith("/lessons/")) return "lessons";
-  if (p === "/tasks") return "tasks";
+  if (p === "/tasks" || p.startsWith("/tasks/my")) return "tasks";
   if (p === "/generator" || p === "/subject" || p.startsWith("/subject/")) return "generator";
   if (p === "/cabinet" || p.startsWith("/cabinet/")) return "cabinet";
   if (p === "/") return "home";

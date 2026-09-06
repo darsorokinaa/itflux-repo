@@ -268,7 +268,7 @@ def get_failed_generator_tasks(
     return failed
 
 
-def _create_variant_from_task_ids(*, level: str, subject: str, task_ids: list[int]) -> int:
+def _create_variant_from_task_ids(*, level: str, subject: str, task_ids: list[int], teacher=None) -> int:
     try:
         from Generator.models import Level, Subject, Task, Variant, VariantContent
     except Exception:
@@ -295,19 +295,27 @@ def _create_variant_from_task_ids(*, level: str, subject: str, task_ids: list[in
     if not ids:
         raise HomeworkFromReviewError("Не выбраны задания для варианта.", "NO_TASKS")
 
-    task_map = {
-        t.id: t
-        for t in Task.active_objects.filter(
-            id__in=ids,
-            task__subject=subject_instance,
-            task__level=level_instance,
-        )
-    }
-    variant = Variant.objects.create(
-        var_subject=subject_instance,
+    from Generator.teacher_task_bank import allocate_variant_number, create_variant_for_request, tasks_allowed_in_variant
+
+    allowed, foreign = tasks_allowed_in_variant(ids, teacher)
+    if foreign:
+        raise HomeworkFromReviewError("Нет доступа к выбранным заданиям.", "FORBIDDEN", 403)
+    task_map = {}
+    for tid, task in allowed.items():
+        tl = task.task
+        if tl and tl.subject_id == subject_instance.id and tl.level_id == level_instance.id:
+            task_map[tid] = task
+    variant = create_variant_for_request(
+        subject=subject_instance,
         level=level_instance,
+        request=None,
         created_by="lk_from_review",
     )
+    if teacher is not None and variant.owner_teacher_id is None:
+        local_number, _bank = allocate_variant_number(teacher)
+        variant.owner_teacher = teacher
+        variant.local_number = local_number
+        variant.save(update_fields=["owner_teacher", "local_number"])
     vc_objects = []
     for order, tid in enumerate(ids, start=1):
         task = task_map.get(tid)
@@ -613,7 +621,7 @@ def create_homework_from_review(
     order = 0
     if selected_gen_ids and level and subject:
         new_variant_id = _create_variant_from_task_ids(
-            level=level, subject=subject, task_ids=selected_gen_ids
+            level=level, subject=subject, task_ids=selected_gen_ids, teacher=teacher
         )
         variant_url = f"/{level}/{subject}/variant/{new_variant_id}"
         HomeworkTask.objects.create(

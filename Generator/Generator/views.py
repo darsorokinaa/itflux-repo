@@ -73,6 +73,20 @@ from .models import (
     VariantContent,
     username_for_created_by,
 )
+from .teacher_task_bank import (
+    create_variant_for_request,
+    find_task_for_public_search,
+    format_task_public_code,
+    format_variant_public_code,
+    generator_bank_queryset,
+    generator_source_q,
+    get_or_create_teacher_bank,
+    public_bank_q,
+    request_teacher,
+    tasks_allowed_in_variant,
+    teacher_owned_notice,
+    TEACHER_OWNED_TASK_NOTICE,
+)
 from .serializers import (
     InterestingCatalogSerializer,
     LessonAdminSerializer,
@@ -672,7 +686,7 @@ def _subtopics_for_groups(subject_instance, level_instance, task_numbers, vpr_vf
         for row in (
             TaskGroupMember.objects.filter(
                 task_group_id__in=group_ids,
-                task__is_active=True,
+                task__is_active=True, task__scope="global",
                 task__subtopic_id__isnull=False,
                 **_tm_kwargs,
             )
@@ -702,7 +716,7 @@ def _subtopics_for_groups(subject_instance, level_instance, task_numbers, vpr_vf
         if st.id not in by_sid:
             cnt = TaskGroupMember.objects.filter(
                 task_group_id__in=group_ids,
-                task__is_active=True,
+                task__is_active=True, task__scope="global",
                 task__subtopic_id=st.id,
                 **_tm_kwargs,
             ).values("task_group_id").distinct().count()
@@ -724,7 +738,7 @@ def _subtopics_for_groups(subject_instance, level_instance, task_numbers, vpr_vf
         for st in SubTopic.objects.filter(task_list_id__in=all_tls).order_by("order", "title")[:20]:
             cnt = TaskGroupMember.objects.filter(
                 task_group_id__in=group_ids,
-                task__is_active=True,
+                task__is_active=True, task__scope="global",
                 task__subtopic_id=st.id,
                 **_tm_kwargs,
             ).values("task_group_id").distinct().count()
@@ -1101,6 +1115,15 @@ def _get_fipi_task_filter_q():
     )
 
 
+def _fipi_or_owned_teacher_q(request):
+    """«Только ФИПИ» не выкидывает личные задачи текущего учителя."""
+    q = _get_fipi_task_filter_q()
+    teacher = request_teacher(request)
+    if teacher is not None:
+        q = q | Q(scope=Task.Scope.TEACHER, owner_teacher=teacher)
+    return q
+
+
 def _vpr_task_filters_from_request(request, level_str):
     """GET: класс (grade) и углублённость (advanced=1) для заданий ВПР. None — не ВПР."""
     if (level_str or "").lower() != "vpr":
@@ -1130,7 +1153,7 @@ def _vpr_task_filters_from_payload(data, level_str):
 
 def _taskmember_q_for_vpr(vf):
     """Фильтр TaskGroupMember по полям связанной Task (vf — словарь с ключами модели Task)."""
-    q = Q(task__is_active=True)
+    q = public_bank_q(prefix="task__")
     if vf:
         for k, v in vf.items():
             q &= Q(**{f"task__{k}": v})
@@ -1171,6 +1194,10 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
     level_instance = get_object_or_404(Level, level=level_str)
     data = json.loads(body_bytes)
     vpr_vf = _vpr_task_filters_from_payload(data, level_str) if isinstance(data, dict) else None
+    source = ""
+    if isinstance(data, dict):
+        source = str(data.get("source") or data.get("task_source") or "").strip().lower()
+    bank_task_qs = generator_bank_queryset(request, source)
 
     # Глобальный флаг "только ФИПИ" (для варианта/теста)
     only_fipi = False
@@ -1291,8 +1318,8 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
     if not content:
         raise ValueError("Не выбрано ни одного задания")
 
-    # Тот же фильтр ФИПИ, что и в тренажёре (без учёта подтем)
-    fipi_q = _get_fipi_q() if only_fipi else Q()
+    # Тот же фильтр ФИПИ, что и в тренажёре (личные задачи текущего учителя не отбрасываются)
+    fipi_q = _fipi_or_owned_teacher_q(request) if only_fipi else Q()
 
     tasklist_ids = [int(k) for k in content.keys()]
 
@@ -1333,7 +1360,7 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
         st_counts = cfg.get("subtopic_counts") or {}
         st_ids = cfg.get("subtopic_ids") or []
 
-        member_qs = TaskGroupMember.objects.select_related("task").filter(task__is_active=True)
+        member_qs = TaskGroupMember.objects.select_related("task").filter(task__is_active=True, task__scope="global")
         if vpr_vf:
             for _k, _v in vpr_vf.items():
                 member_qs = member_qs.filter(**{f"task__{_k}": _v})
@@ -1438,7 +1465,7 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
                 if only_fipi and fipi_q:
                     tids = [t.id for t in tasks_row]
                     if (
-                        Task.active_objects.filter(id__in=tids)
+                        bank_task_qs.filter(id__in=tids)
                         .filter(fipi_q)
                         .count()
                         != len(tids)
@@ -1614,7 +1641,7 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
                         break
                 n_per_group = len(task_numbers) if task_numbers else len(group_ids)
                 fipi_ids = set(
-                    Task.active_objects.filter(id__in=[t.id for t in group_tasks])
+                    bank_task_qs.filter(id__in=[t.id for t in group_tasks])
                     .filter(fipi_q)
                     .values_list("id", flat=True)
                 )
@@ -1627,7 +1654,7 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
             handled_tasklist_ids.update(group_ids)
             continue
         # Одиночные задания: берём случайные задачи (с фильтром по подтемам при выборе)
-        qs = Task.active_objects.filter(task_id=tasklist_id)
+        qs = bank_task_qs.filter(task_id=tasklist_id)
         if vpr_vf:
             qs = qs.filter(**vpr_vf)
         if only_fipi and fipi_q:
@@ -1716,7 +1743,7 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
                 capped_ids = pooled[: int(count)]
                 id_to_task = {
                     t.id: t
-                    for t in Task.active_objects.filter(id__in=capped_ids)
+                    for t in bank_task_qs.filter(id__in=capped_ids)
                 }
                 tasks_for_slot = [
                     id_to_task[i] for i in capped_ids if i in id_to_task
@@ -1756,9 +1783,10 @@ def _create_variant(subject_short, level_str, body_bytes, create=True, request=N
             from Cabinet.subscription_access import SubscriptionAccessService
 
             SubscriptionAccessService.enforce_variant_creation(request)
-        new_variant = Variant.objects.create(
-            var_subject=subject_instance,
+        new_variant = create_variant_for_request(
+            subject=subject_instance,
             level=level_instance,
+            request=request,
             created_by=username_for_created_by(request),
             share_token=secrets.token_urlsafe(12),
             content=content or {},
@@ -2044,7 +2072,7 @@ def api_tasks(request, level, subject):
         if not subtopic_ids:
             subtopic_ids = None
 
-    count_task_filter = Q(task__is_active=True)
+    count_task_filter = generator_source_q(request, request.GET.get("source"), prefix="task__")
     if vpr_vf:
         for _vk, _vv in vpr_vf.items():
             count_task_filter &= Q(**{f"task__{_vk}": _vv})
@@ -2058,7 +2086,7 @@ def api_tasks(request, level, subject):
         .order_by('task_number')
     )
     if subtopic_ids:
-        _tq = Task.active_objects.filter(
+        _tq = generator_bank_queryset(request, request.GET.get("source")).filter(
             task__subject=subject_instance,
             task__level=level_instance,
             subtopic_id__in=subtopic_ids,
@@ -2152,7 +2180,7 @@ def api_tasks(request, level, subject):
             _gm_extra[f"task__{_gk}"] = _gv
     group_members = TaskGroupMember.objects.filter(
         task_group__in=groups,
-        task__is_active=True,
+        task__is_active=True, task__scope="global",
         **_gm_extra,
     ).select_related("task_group", "task", "task__task", "task__task__part")
 
@@ -2160,7 +2188,7 @@ def api_tasks(request, level, subject):
     grouped_tasklist_ids = set(linked_tasklist_ids)
 
     group_tasklist_ids = [m.task.task_id for m in group_members if m.task.task_id]
-    _tcl_f = Q(task__is_active=True)
+    _tcl_f = public_bank_q(prefix="task__")
     if vpr_vf:
         for _ck, _cv in vpr_vf.items():
             _tcl_f &= Q(**{f"task__{_ck}": _cv})
@@ -2329,7 +2357,7 @@ def api_subtopics(request, level, subject):
         )
         
         # Виртуальные подтемы
-        base_tl_qs = Task.active_objects.filter(task_id=tl.id)
+        base_tl_qs = generator_bank_queryset(request, request.GET.get("source")).filter(task_id=tl.id)
         if vpr_vf:
             base_tl_qs = base_tl_qs.filter(**vpr_vf)
             
@@ -2363,7 +2391,7 @@ def api_subtopics(request, level, subject):
             if str(st.get("id")) in ("none", "no-answer"):
                 continue
             title = st["title"]
-            base_qs = Task.active_objects.filter(task_id=tl.id, subtopic__title=title)
+            base_qs = generator_bank_queryset(request, request.GET.get("source")).filter(task_id=tl.id, subtopic__title=title)
             if vpr_vf:
                 base_qs = base_qs.filter(**vpr_vf)
             st["task_count"] = base_qs.count()
@@ -2537,6 +2565,7 @@ def api_task_bank_filters(request, level, subject):
     subject_instance = get_subject_for_api(subject)
     level_instance = get_object_or_404(Level, level=level)
     vpr_vf = _vpr_task_filters_from_request(request, level)
+    bank_qs = generator_bank_queryset(request, request.GET.get("source"))
 
     task_list_qs = TaskList.objects.filter(
         subject=subject_instance,
@@ -2548,7 +2577,7 @@ def api_task_bank_filters(request, level, subject):
 
     task_numbers = []
     for tl in task_list_qs:
-        task_count = Task.active_objects.filter(task_id=tl.id, **(vpr_vf or {})).count()
+        task_count = bank_qs.filter(task_id=tl.id, **(vpr_vf or {})).count()
         task_numbers.append({
             "task_list_id": tl.id,
             "task_number": tl.task_number,
@@ -2561,7 +2590,7 @@ def api_task_bank_filters(request, level, subject):
         task_list_qs.filter(id=tl_id_filter) if tl_id_filter is not None else task_list_qs
     )
     if tl_id_filter is None:
-        base_all_qs = Task.active_objects.filter(
+        base_all_qs = bank_qs.filter(
             task__subject=subject_instance,
             task__level=level_instance,
         )
@@ -2589,7 +2618,7 @@ def api_task_bank_filters(request, level, subject):
             })
 
     for tl in subtopic_tl_qs:
-        base_tl_qs = Task.active_objects.filter(task_id=tl.id)
+        base_tl_qs = bank_qs.filter(task_id=tl.id)
         if vpr_vf:
             base_tl_qs = base_tl_qs.filter(**vpr_vf)
 
@@ -2614,7 +2643,7 @@ def api_task_bank_filters(request, level, subject):
             })
 
         for st in SubTopic.objects.filter(task_list=tl).order_by("order", "title"):
-            st_qs = Task.active_objects.filter(task_id=tl.id, subtopic_id=st.id)
+            st_qs = bank_qs.filter(task_id=tl.id, subtopic_id=st.id)
             if vpr_vf:
                 st_qs = st_qs.filter(**vpr_vf)
             subtopics.append({
@@ -2625,7 +2654,7 @@ def api_task_bank_filters(request, level, subject):
                 "task_count": st_qs.count(),
             })
 
-    authors_qs = Task.active_objects.filter(
+    authors_qs = bank_qs.filter(
         task__subject=subject_instance,
         task__level=level_instance,
     )
@@ -2661,7 +2690,7 @@ def api_task_bank(request, level, subject):
     subject_instance = get_subject_for_api(subject)
     level_instance = get_object_or_404(Level, level=level)
 
-    qs = Task.active_objects.filter(
+    qs = generator_bank_queryset(request, request.GET.get("source")).filter(
         task__subject=subject_instance,
         task__level=level_instance,
     ).select_related('task', 'task__part', 'subtopic').prefetch_related(
@@ -2676,7 +2705,7 @@ def api_task_bank(request, level, subject):
         qs = qs.filter(**vpr_vf)
 
     if (request.GET.get("only_fipi") or "").strip() in ("1", "true", "yes"):
-        qs = qs.filter(_get_fipi_task_filter_q())
+        qs = qs.filter(_fipi_or_owned_teacher_q(request))
 
     author_filter = (request.GET.get("author") or "").strip()
     if author_filter:
@@ -2718,6 +2747,11 @@ def api_task_bank(request, level, subject):
     # Дефолтный порядок в банке задач: сначала недавно добавленные.
     tasks_list = list(qs.order_by('-added_at', '-id')[offset:offset + per_page])
     group_by_task = _group_ids_for_tasks([t.id for t in tasks_list])
+    teacher_bank_code = None
+    if any(getattr(t, "scope", None) == Task.Scope.TEACHER for t in tasks_list):
+        teacher = request_teacher(request)
+        if teacher is not None:
+            teacher_bank_code = get_or_create_teacher_bank(teacher).public_code
 
     result = []
     for task in tasks_list:
@@ -2780,6 +2814,15 @@ def api_task_bank(request, level, subject):
             'added_at': task.added_at.strftime('%d.%m.%Y') if task.added_at else None,
             'tags': _serialize_task_tags(task),
             'group_id': group_by_task.get(task.id),
+            'scope': getattr(task, 'scope', None) or Task.Scope.GLOBAL,
+            'local_number': task.local_number,
+            'source_label': 'teacher' if task.scope == Task.Scope.TEACHER else 'global',
+            'public_code': (
+                format_task_public_code(teacher_bank_code, task.local_number)
+                if task.scope == Task.Scope.TEACHER
+                else None
+            ),
+            'bank_code': teacher_bank_code if task.scope == Task.Scope.TEACHER else None,
         })
 
     return JsonResponse({
@@ -2819,19 +2862,29 @@ def api_variant_from_ids(request, level, subject):
     subject_instance = get_subject_for_api(subject)
     level_instance = get_object_or_404(Level, level=level)
 
-    # Verify tasks exist and belong to this subject+level
-    task_map = {
-        t.id: t
-        for t in Task.active_objects.filter(
-            id__in=[int(tid) for tid in task_ids],
-            task__subject=subject_instance,
-            task__level=level_instance,
+    teacher = request_teacher(request)
+    allowed, foreign = tasks_allowed_in_variant(task_ids, teacher)
+    if foreign:
+        return JsonResponse(
+            {
+                "error": TEACHER_OWNED_TASK_NOTICE,
+                "code": "teacher_owned",
+                "notice": teacher_owned_notice(kind="task", viewer_is_teacher=teacher is not None),
+            },
+            status=403,
         )
-    }
 
-    variant = Variant.objects.create(
-        var_subject=subject_instance,
+    task_map = {}
+    for tid, task in allowed.items():
+        tl = task.task
+        if not tl or tl.subject_id != subject_instance.id or tl.level_id != level_instance.id:
+            continue
+        task_map[tid] = task
+
+    variant = create_variant_for_request(
+        subject=subject_instance,
         level=level_instance,
+        request=request,
         created_by='lk_teacher',
     )
 
@@ -2847,6 +2900,24 @@ def api_variant_from_ids(request, level, subject):
         return JsonResponse({'error': 'No valid tasks found for this subject/level'}, status=400)
 
     VariantContent.objects.bulk_create(vc_objects)
+    teacher_tasks = [row.task for row in vc_objects if getattr(row.task, "scope", None) == Task.Scope.TEACHER]
+    if teacher and teacher_tasks:
+        try:
+            from Cabinet.activation_events import TEACHER_TASK_ADDED_TO_VARIANT, record_event
+
+            for task in teacher_tasks:
+                record_event(
+                    TEACHER_TASK_ADDED_TO_VARIANT,
+                    teacher,
+                    kind="confirmed",
+                    object_type="task",
+                    object_id=task.id,
+                    source="variant_from_ids",
+                    request=request,
+                    extra_idempotency=f"{variant.id}:{task.id}",
+                )
+        except Exception:
+            logger.exception("teacher_task_added_to_variant failed variant=%s", variant.id)
     response = JsonResponse({'variant_id': variant.id})
     try:
         anon = SubscriptionAccessService.get_or_create_anonymous_usage(request)
@@ -3082,7 +3153,7 @@ def api_group_instances(request, level, subject):
                 queryset=TagOption.objects.filter(is_active=True).select_related('tag_type'),
             )
         )
-        .filter(task__is_active=True)
+        .filter(task__is_active=True, task__scope="global")
         .order_by('task_number')
     )
     if vpr_vf:
@@ -3154,7 +3225,7 @@ def api_group_instances(request, level, subject):
         if only_fipi or author_filter:
             raw_members = TaskGroupMember.objects.filter(
                 task_group_id=grp.id,
-                task__is_active=True,
+                task__is_active=True, task__scope="global",
             ).select_related('task')
             if any(
                 not _task_matches_bank_filters(
@@ -3925,6 +3996,20 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
     )
 
     tasks_data = []
+    teacher = request_teacher(request)
+    user = getattr(request, "user", None)
+    show_teacher_meta = bool(include_answers) and (
+        teacher is not None
+        or (user is not None and (getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)))
+    )
+    owner_bank_code = None
+    if show_teacher_meta and getattr(variant, "owner_teacher_id", None):
+        from .models import TeacherTaskBank
+        bank = TeacherTaskBank.objects.filter(teacher_id=variant.owner_teacher_id).first()
+        owner_bank_code = bank.public_code if bank else None
+    elif show_teacher_meta and teacher is not None:
+        owner_bank_code = get_or_create_teacher_bank(teacher).public_code
+
     for item in contents:
         task_list = item.task.task
         file_url = None
@@ -3977,15 +4062,29 @@ def _variant_detail_payload(request, variant, *, include_answers=True):
             row["answer"] = processed if str(processed).strip() else raw_answer
         else:
             row["answer"] = ""
+        if include_answers and show_teacher_meta:
+            row["scope"] = getattr(item.task, "scope", None) or Task.Scope.GLOBAL
+            row["local_number"] = item.task.local_number
+            row["public_code"] = (
+                format_task_public_code(owner_bank_code, item.task.local_number)
+                if item.task.scope == Task.Scope.TEACHER
+                else None
+            )
+            row["source_label"] = "teacher" if item.task.scope == Task.Scope.TEACHER else "global"
         tasks_data.append(row)
 
-    return {
+    payload = {
         "id": variant.id,
         "level": variant.level.level,
         "subject": variant.var_subject.subject_short,
         "tasks": tasks_data,
         **_subject_background_payload(variant.var_subject, request),
     }
+    if show_teacher_meta:
+        payload["owner_public_code"] = owner_bank_code
+        payload["local_number"] = variant.local_number
+        payload["public_code"] = format_variant_public_code(owner_bank_code, variant.local_number)
+    return payload
 
 
 def _request_should_see_variant_answers(request) -> bool:
@@ -4413,7 +4512,7 @@ def _serialize_lesson_blocks(request, steps, viewer_is_teacher):
     }
     tasks_map = {
         t.id: t
-        for t in Task.active_objects.filter(id__in=task_ids).select_related(
+        for t in Task.objects.filter(id__in=task_ids).select_related(
             "task",
             "task__subject",
             "task__level",
@@ -5124,7 +5223,7 @@ def api_lesson_block_launch(request, slug, block_id):
         return JsonResponse({"error": "В блоке нет task_ids"}, status=400)
 
     tasks = list(
-        Task.active_objects.filter(id__in=task_ids).select_related("task", "task__subject", "task__level")
+        Task.objects.filter(id__in=task_ids).select_related("task", "task__subject", "task__level")
     )
     task_map = {task.id: task for task in tasks}
     ordered_tasks = [task_map[task_id] for task_id in task_ids if task_id in task_map]
@@ -5139,9 +5238,10 @@ def api_lesson_block_launch(request, slug, block_id):
             status=400,
         )
 
-    variant = Variant.objects.create(
-        var_subject=ordered_tasks[0].task.subject,
+    variant = create_variant_for_request(
+        subject=ordered_tasks[0].task.subject,
         level=ordered_tasks[0].task.level,
+        request=request,
         created_by=username_for_created_by(request),
     )
     VariantContent.objects.bulk_create(
@@ -5660,11 +5760,24 @@ def variant_pdfCosmos(request, level, subject, variant_id):
 
 def search_task(request):
     q = (request.GET.get("q") or "").strip()
-    if not q or not q.isdigit():
+    if not q:
         return JsonResponse({"tasks": []})
 
-    task = Task.active_objects.filter(id=int(q)).select_related("task").first()
+    task = find_task_for_public_search(q)
     if not task or not task.task:
+        return JsonResponse({"tasks": []})
+
+    teacher = request_teacher(request)
+    is_teacher_task = getattr(task, "scope", None) == Task.Scope.TEACHER
+    is_owner = bool(is_teacher_task and teacher is not None and task.owner_teacher_id == teacher.id)
+    if is_teacher_task and not is_owner:
+        if not task.is_active:
+            return JsonResponse({"tasks": []})
+        return JsonResponse({
+            "tasks": [],
+            "notice": teacher_owned_notice(kind="task", viewer_is_teacher=teacher is not None),
+        })
+    if not is_teacher_task and not task.is_active:
         return JsonResponse({"tasks": []})
 
     return JsonResponse({
@@ -5674,6 +5787,8 @@ def search_task(request):
             "task_number": task.task.task_number,
             "task_text": process_latex(str(task.task_template or ""), for_browser=True),
             "answer": task.answer,
+            "mine": is_owner,
+            "level": task.task.level.level if task.task and task.task.level else None,
         }]
     })
 
@@ -5687,21 +5802,36 @@ def search_variant(request):
     if not variant:
         return JsonResponse({"variant": None, "tasks": []})
 
+    teacher = request_teacher(request)
+    if variant.owner_teacher_id and (teacher is None or variant.owner_teacher_id != teacher.id):
+        return JsonResponse(
+            {
+                "variant": None,
+                "tasks": [],
+                "notice": teacher_owned_notice(kind="variant", viewer_is_teacher=teacher is not None),
+            }
+        )
+
     contents = (
         VariantContent.objects
         .filter(variant=variant)
         .select_related("task")
         .order_by("order")
     )
-    tasks = [
-        {
-            "number": item.order,
-            "id": item.task.id,
-            "answer": item.task.answer,
-            "task_text": process_latex(str(item.task.task_template or ""), for_browser=True),
-        }
-        for item in contents
-    ]
+    tasks = []
+    for item in contents:
+        task = item.task
+        if getattr(task, "scope", None) == Task.Scope.TEACHER:
+            if teacher is None or task.owner_teacher_id != teacher.id:
+                continue
+        tasks.append(
+            {
+                "number": item.order,
+                "id": task.id,
+                "answer": task.answer,
+                "task_text": process_latex(str(task.task_template or ""), for_browser=True),
+            }
+        )
     return JsonResponse({
         "variant": {
             "id": variant.id,

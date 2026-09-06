@@ -88,9 +88,9 @@ function normalizeMediaUrl(url) {
  * Карточка-ссылка на материалы к заданию (архив / файл).
  * Автор задания (в т.ч. «ФИПИ») выводится отдельно в разметке страницы — `.task-author`.
  */
-export default function TaskFileAttachment({ href }) {
+export default function TaskFileAttachment({ href, name }) {
   if (!href) return null;
-  const displayName = fileDisplayName(href);
+  const displayName = String(name || "").trim() || fileDisplayName(href);
   const ext = fileExtensionUpper(displayName);
   const isAudio = AUDIO_EXTENSIONS.includes(ext);
   const normalizedHref = normalizeMediaUrl(href);

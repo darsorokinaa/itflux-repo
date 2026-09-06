@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { User } from "lucide-react";
 import { getActiveNavTab, NAV_TABS } from "../config/navTabs";
 import TaskSearchPanel from "./TaskSearchPanel";
 import { displayName } from "../pages/CabinetAuthPage";
@@ -178,10 +179,26 @@ export default function Nav() {
   const { pathname, search, hash } = useLocation();
   const active = getActiveNavTab(pathname);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isTeacher, setIsTeacher] = useState(false);
 
   useEffect(() => {
     setMenuOpen(false);
   }, [pathname, search, hash]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCabinetSession()
+      .then((data) => {
+        if (cancelled) return;
+        setIsTeacher(!!data?.authenticated && data?.user?.role === "teacher");
+      })
+      .catch(() => {
+        if (!cancelled) setIsTeacher(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <header className="site-header">
@@ -215,12 +232,13 @@ export default function Nav() {
             className={`site-nav__panel${menuOpen ? " is-open" : ""}`}
           >
             <div className="site-nav__tabs" role="tablist" aria-label="Разделы платформы">
-              {NAV_TABS.map((tab) => {
+              {NAV_TABS.filter((tab) => !tab.teacherOnly || isTeacher).map((tab) => {
                 const isActive = active === tab.key;
                 const className = [
                   "site-nav__tab",
                   isActive ? "site-nav__tab--active" : "",
                   tab.key === "teachers" ? "site-nav__tab--teachers" : "",
+                  tab.key === "my-tasks" ? "site-nav__tab--personal" : "",
                   tab.disabled ? "site-nav__tab--disabled" : "",
                 ]
                   .filter(Boolean)
@@ -256,7 +274,15 @@ export default function Nav() {
                     onClick={() => setMenuOpen(false)}
                   >
                     <span className="site-nav__tab-label">{tab.label}</span>
-                    {tab.badge ? (
+                    {tab.key === "my-tasks" ? (
+                      <span
+                        className="site-nav__tab-badge site-nav__tab-badge--personal"
+                        title="Личный банк"
+                        aria-label="Личный банк"
+                      >
+                        <User size={12} strokeWidth={2.2} aria-hidden="true" />
+                      </span>
+                    ) : tab.badge ? (
                       <span className="site-nav__tab-badge site-nav__tab-badge--beta">{tab.badge}</span>
                     ) : tab.soon ? (
                       <span className="site-nav__tab-badge">скоро</span>

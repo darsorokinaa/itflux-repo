@@ -21,6 +21,10 @@ const TYPE_TO_RESOURCE = {
   feature: "feature",
   schedule: "schedule",
   student_booking: "student_booking",
+  teacher_tasks: "teacher_tasks",
+  teacher_task_copies: "teacher_task_copies",
+  teacher_task_attachments: "teacher_task_attachments",
+  storage: "storage",
 };
 
 export default function UpgradeLimitModal({

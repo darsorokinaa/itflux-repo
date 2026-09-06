@@ -233,6 +233,9 @@ class SubscriptionAccessTests(TestCase):
             self.assertNotIn("ai_requests", plan.get("limits", {}))
             self.assertIn("storage_mb", plan.get("limits", {}))
             self.assertIn("interactives", plan.get("limits", {}))
+            self.assertIn("teacher_tasks", plan.get("limits", {}))
+            self.assertIn("teacher_task_copies_monthly", plan.get("limits", {}))
+            self.assertIn("teacher_task_attachments", plan.get("features", {}))
         self.assertIn("anonymous", data)
 
     def test_cabinet_plans_include_ai_and_storage(self):

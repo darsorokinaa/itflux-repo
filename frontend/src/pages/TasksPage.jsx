@@ -10,6 +10,8 @@ import { FileText, Target, CircleHelp } from "lucide-react";
 import { useAnonLimitModal } from "../hooks/useAnonLimitModal";
 import { rememberValueReached, trackValueGoal } from "../utils/valuePath";
 import { rememberLastVariant } from "../utils/recentLessons";
+import { fetchCabinetSession } from "../utils/cabinetAuth";
+import "../styles/my-task-bank.css";
 
 const SUBJECT_NAMES = {
   inf: "Информатика",
@@ -150,6 +152,12 @@ function TasksPage() {
   /** Фильтры «Только задачи ФИПИ» */
   const [onlyFipiVariant, setOnlyFipiVariant] = useState(false);
   const [onlyFipiTrainer, setOnlyFipiTrainer] = useState(false);
+  const [isTeacher, setIsTeacher] = useState(false);
+  const [includeMyTasks, setIncludeMyTasks] = useState(() => {
+    const src = searchParams.get("source");
+    return searchParams.get("from") === "my-bank" || src === "all" || src === "mine";
+  });
+  const taskSource = includeMyTasks ? "all" : "global";
   /** ОГЭ инф. №13: одна подтема (радио) — id выбранной SubTopic */
   const [ogeInf13SubtopicId, setOgeInf13SubtopicId] = useState(null);
   /** Макет v2: выбранная структура варианта перед «Сгенерировать» */
@@ -165,6 +173,22 @@ function TasksPage() {
   const trainerSectionRef = useRef(null);
 
   const vprQs = vprApiQueryString(level, searchParams);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCabinetSession()
+      .then((session) => {
+        if (!cancelled) {
+          setIsTeacher(!!session?.authenticated && session?.user?.role === "teacher");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setIsTeacher(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const appendVprOptions = (payload) => {
     if (String(level || "").toLowerCase() !== "vpr") return payload;
@@ -211,7 +235,10 @@ function TasksPage() {
   useEffect(() => {
     if (isLessonJoinPath) return undefined;
     let cancelled = false;
-    fetch(`/api/${level}/${subject}/subtopics/${vprQs}`)
+    const sourceQs = isTeacher && taskSource !== "global"
+      ? `${vprQs ? "&" : "?"}source=${encodeURIComponent(taskSource)}`
+      : "";
+    fetch(`/api/${level}/${subject}/subtopics/${vprQs}${sourceQs}`)
       .then((res) => (res.ok ? res.json() : { subtopics_by_task: [] }))
       .then((data) => {
         if (!cancelled) {
@@ -224,7 +251,7 @@ function TasksPage() {
         }
       });
     return () => { cancelled = true; };
-  }, [level, subject, isLessonJoinPath, vprQs]);
+  }, [level, subject, isLessonJoinPath, vprQs, isTeacher, taskSource]);
 
   useEffect(() => {
     if (isLessonJoinPath) return;
@@ -250,7 +277,10 @@ function TasksPage() {
     setSubjectNameFromApi(
       formatSubjectDisplayName(level, subject, SUBJECT_NAMES[subject] || subject)
     );
-    fetch(`/api/${level}/${subject}/tasks/${vprQs}`)
+    const sourceQs = isTeacher && taskSource !== "global"
+      ? `${vprQs ? "&" : "?"}source=${encodeURIComponent(taskSource)}`
+      : "";
+    fetch(`/api/${level}/${subject}/tasks/${vprQs}${sourceQs}`)
       .then((res) => {
         if (res.status === 404) {
           throw new Error(
@@ -279,7 +309,7 @@ function TasksPage() {
         }
       });
     return () => { cancelled = true; };
-  }, [level, subject, isLessonJoinPath, vprQs]);
+  }, [level, subject, isLessonJoinPath, vprQs, isTeacher, taskSource]);
 
   // На мобильных прокрутить к блоку подтем при открытии
   useEffect(() => {
@@ -330,13 +360,16 @@ function TasksPage() {
     return hasFipiForTaskList(item.id);
   };
 
+  const applyFipiGridFilter = (onlyFipi) =>
+    onlyFipi && !includeMyTasks && subtopicsByTask.length > 0;
+
   // Для генерации варианта: при включённом фильтре берём только ФИПИ-элементы
   const tasksForVariant =
-    onlyFipiVariant && subtopicsByTask.length > 0 ? tasks.filter(isFipiItem) : tasks;
+    applyFipiGridFilter(onlyFipiVariant) ? tasks.filter(isFipiItem) : tasks;
 
   // Для тренажёра: фильтр ФИПИ + поиск по номеру/названию
   const tasksForTrainer =
-    (onlyFipiTrainer && subtopicsByTask.length > 0 ? tasks.filter(isFipiItem) : tasks).filter(matchesSearch);
+    (applyFipiGridFilter(onlyFipiTrainer) ? tasks.filter(isFipiItem) : tasks).filter(matchesSearch);
 
   const ogeInf13Block =
     level === "oge" && subject === "inf"
@@ -463,6 +496,7 @@ function TasksPage() {
   const buildVariantPayload = (items) => {
     const content = payloadFromTasks(items);
     const payload = { content, ...(onlyFipiVariant ? { only_fipi: true } : {}) };
+    if (isTeacher && taskSource !== "global") payload.source = taskSource;
 
     if (selectedSubtopicIds.length > 0) {
       payload.subtopic_ids = selectedSubtopicIds;
@@ -506,7 +540,7 @@ function TasksPage() {
   };
 
   const onPart = (partNum) => {
-    const items = onlyFipiVariant
+    const items = applyFipiGridFilter(onlyFipiVariant)
       ? tasks.filter((item) => getItemPart(item) === partNum).filter(isFipiItem)
       : tasksForVariant.filter((item) => getItemPart(item) === partNum && matchesSearch(item));
     const err13 = ogeInf13SelectionError(items);
@@ -564,7 +598,7 @@ function TasksPage() {
       tasks.map((item) => [getIdentifier(item), item])
     );
     const allowedIds = new Set(
-      (onlyFipiTrainer && subtopicsByTask.length > 0 ? tasks.filter(isFipiItem) : tasks).map(getIdentifier)
+      (applyFipiGridFilter(onlyFipiTrainer) ? tasks.filter(isFipiItem) : tasks).map(getIdentifier)
     );
     const useSubtopicCounts = selectedSubtopicIds.length > 0;
     const idsWithCount = tasks
@@ -840,7 +874,7 @@ function TasksPage() {
   /** При «Только ФИПИ» — не больше fipi_task_count по подтеме */
   const getCappedSubtopicCount = (st) => {
     const raw = subtopicCounts[st.id] ?? 0;
-    if (!onlyFipiTrainer || typeof st.fipi_task_count !== "number") return raw;
+    if (!onlyFipiTrainer || includeMyTasks || typeof st.fipi_task_count !== "number") return raw;
     return Math.min(raw, st.fipi_task_count);
   };
 
@@ -1130,32 +1164,49 @@ function TasksPage() {
                     </span>
                   </span>
                 </div>
-                <label className="tasks-prep-checkbox">
-                  <input
-                    type="checkbox"
-                    className="tasks-page-subtopic-checkbox-input"
-                    checked={
-                      prepModeFocus === "variant" ? onlyFipiVariant : onlyFipiTrainer
-                    }
-                    onChange={(e) => {
-                      const on = e.target.checked;
-                      if (prepModeFocus === "variant") {
-                        setOnlyFipiVariant(on);
-                      } else {
-                        setOnlyFipiTrainer(on);
+                <div className="tasks-prep-fipi-column">
+                  {isTeacher ? (
+                    <label className="tasks-prep-checkbox">
+                      <input
+                        type="checkbox"
+                        className="tasks-page-subtopic-checkbox-input"
+                        checked={includeMyTasks}
+                        onChange={(e) => setIncludeMyTasks(e.target.checked)}
+                      />
+                      <span
+                        className={`tasks-page-subtopic-checkbox-visual ${includeMyTasks ? "selected" : ""}`}
+                        aria-hidden
+                      />
+                      <span className="tasks-prep-checkbox-text">Мои задачи</span>
+                    </label>
+                  ) : null}
+                  <label className="tasks-prep-checkbox">
+                    <input
+                      type="checkbox"
+                      className="tasks-page-subtopic-checkbox-input"
+                      checked={
+                        prepModeFocus === "variant" ? onlyFipiVariant : onlyFipiTrainer
                       }
-                    }}
-                  />
-                  <span
-                    className={`tasks-page-subtopic-checkbox-visual ${
-                      (prepModeFocus === "variant" ? onlyFipiVariant : onlyFipiTrainer)
-                        ? "selected"
-                        : ""
-                    }`}
-                    aria-hidden
-                  />
-                  <span className="tasks-prep-checkbox-text">Только ФИПИ</span>
-                </label>
+                      onChange={(e) => {
+                        const on = e.target.checked;
+                        if (prepModeFocus === "variant") {
+                          setOnlyFipiVariant(on);
+                        } else {
+                          setOnlyFipiTrainer(on);
+                        }
+                      }}
+                    />
+                    <span
+                      className={`tasks-page-subtopic-checkbox-visual ${
+                        (prepModeFocus === "variant" ? onlyFipiVariant : onlyFipiTrainer)
+                          ? "selected"
+                          : ""
+                      }`}
+                      aria-hidden
+                    />
+                    <span className="tasks-prep-checkbox-text">Только ФИПИ</span>
+                  </label>
+                </div>
               </div>
             </div>
 
@@ -1538,7 +1589,7 @@ function TasksPage() {
                   });
                 };
                 return allSubtopics.map(({ title, ids, stById, taskCount, fipiCount }) => {
-                  const maxCount = onlyFipiTrainer && typeof fipiCount === "number" ? fipiCount : taskCount;
+                  const maxCount = onlyFipiTrainer && !includeMyTasks && typeof fipiCount === "number" ? fipiCount : taskCount;
                   const rawCount = ids.reduce((s, id) => s + (subtopicCounts[id] ?? 0), 0);
                   const isChecked = ids.every((id) => selectedSubtopicIds.includes(id));
                   return (

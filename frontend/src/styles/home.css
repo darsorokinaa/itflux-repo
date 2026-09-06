@@ -480,6 +480,25 @@ a.home-updates__card {
   background: rgba(43, 82, 245, 0.12);
 }
 
+.site-nav__tab--personal {
+  font-weight: 600;
+}
+
+.site-nav__tab-badge--personal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  color: #475569;
+  background: #e8ecf4;
+}
+
+.site-nav__tab-badge--personal svg {
+  display: block;
+}
+
 .site-nav__tab-label {
   display: inline-block;
 }
@@ -828,6 +847,13 @@ a.home-updates__card {
   padding: 11px 16px;
   background: linear-gradient(180deg, #f8faff 0%, #f3f6ff 100%);
   border-bottom: 1px solid var(--border-card, #e4e8ff);
+  /* Global `header` is sticky site chrome — task card heads must stay in flow. */
+  position: static;
+  top: auto;
+  z-index: auto;
+  width: auto;
+  overflow: visible;
+  font-family: inherit;
 }
 
 .all-tasks-item__meta {
@@ -3840,6 +3866,10 @@ a.home-updates__card {
   background: var(--blue);
   color: #fff;
   box-shadow: 0 4px 10px rgba(43, 82, 245, 0.22);
+}
+
+.digital-flow-page .tasks-prep-source-block .tasks-prep-fipi-column {
+  align-items: flex-end;
 }
 
 .digital-flow-page .tasks-prep-checkbox {

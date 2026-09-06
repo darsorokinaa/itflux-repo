@@ -3,7 +3,6 @@ import { Outlet, Link, useLocation } from "react-router-dom";
 import Nav from "../components/Nav";
 import MobileTabBar from "../components/MobileTabBar";
 import SupportFab from "../components/SupportFab";
-import { SUMMER_CLUB_NAV_LABEL, SUMMER_CLUB_URL } from "../config/summerClub";
 import {
   hasCookieConsent,
   initYandexMetrika,
@@ -36,6 +35,7 @@ function Layout() {
   const isMarketingHome =
     pathname === "/" ||
     pathname === "/tasks" ||
+    pathname.startsWith("/tasks/my") ||
     pathname === "/generator" ||
     pathname === "/gotovye-uroki" ||
     pathname === "/repetitor" ||
@@ -164,15 +164,6 @@ function Layout() {
           <span className="site-footer-copy">© 2026 Цифровой поток</span>
           {!isLessonOrHomeworkContext && (
           <div className="site-footer-links">
-            <a
-              href={SUMMER_CLUB_URL}
-              className="site-footer-link site-footer-link--summer-club"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {SUMMER_CLUB_NAV_LABEL}
-            </a>
-            <span className="site-footer-sep" aria-hidden="true">·</span>
             <Link to="/privacy" className="site-footer-link">Политика конфиденциальности</Link>
             <span className="site-footer-sep" aria-hidden="true">·</span>
             <Link to="/privacy#pd" className="site-footer-link">Согласие на обработку ПД</Link>

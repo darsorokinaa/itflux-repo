@@ -1,0 +1,773 @@
+.digital-flow-page:has(.mtb-saas) .digital-flow-page__wrap {
+  max-width: 1480px;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.mtb-page.mtb-saas {
+  max-width: none;
+  padding: 0 0 48px;
+  overflow: visible;
+}
+
+.mtb-saas {
+  --saas-bg: #f6f7fb;
+  --saas-panel: #ffffff;
+  --saas-text: #151922;
+  --saas-muted: #6f7788;
+  --saas-line: #e6e9f1;
+  --saas-line-strong: #d9deea;
+  --saas-primary: #5b5ff2;
+  --saas-primary-hover: #4c50df;
+  --saas-primary-soft: #eef0ff;
+  --saas-success: #1a9b61;
+  --saas-shadow: 0 10px 30px rgba(22, 27, 45, 0.06), 0 2px 8px rgba(22, 27, 45, 0.03);
+  --saas-radius: 18px;
+  color: var(--saas-text);
+}
+
+.mtb-saas header.saas-topbar,
+.mtb-saas .saas-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  height: 72px;
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 28px;
+  margin: 0;
+  width: 100%;
+  box-sizing: border-box;
+  background: color-mix(in srgb, var(--bg-page, #f2f4ff) 86%, transparent);
+  backdrop-filter: blur(16px);
+  border: 0;
+  border-bottom: 1px solid rgba(217, 222, 234, 0.85);
+  box-shadow: none;
+  font-family: inherit;
+}
+
+.mtb-saas .saas-brandline {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.mtb-saas .saas-back {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  border: 1px solid var(--saas-line);
+  background: #fff;
+  display: grid;
+  place-items: center;
+  color: #596173;
+  text-decoration: none;
+  flex: 0 0 auto;
+}
+
+.mtb-saas .saas-back:hover {
+  border-color: #cdd3df;
+}
+
+.mtb-saas .saas-eyebrow {
+  font-size: 12px;
+  color: #8a92a3;
+  margin-bottom: 3px;
+  white-space: nowrap;
+}
+
+.mtb-saas .saas-page-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  font-weight: 750;
+}
+
+.mtb-saas .saas-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+  color: #626a7b;
+  background: #eef1f6;
+}
+
+.mtb-saas .saas-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #98a0af;
+}
+
+.mtb-saas .saas-status.is-ready {
+  color: var(--saas-success);
+  background: #edf9f3;
+}
+
+.mtb-saas .saas-status.is-ready::before {
+  background: var(--saas-success);
+}
+
+.mtb-saas .saas-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.mtb-saas .saas-btn {
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 11px;
+  border: 1px solid var(--saas-line);
+  background: #fff;
+  color: #303746;
+  font: inherit;
+  font-weight: 650;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.01);
+  cursor: pointer;
+}
+
+.mtb-saas .saas-btn:hover {
+  border-color: #cfd5e1;
+  background: #fcfcfe;
+}
+
+.mtb-saas .saas-btn.primary {
+  border-color: var(--saas-primary);
+  background: var(--saas-primary);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(91, 95, 242, 0.22);
+}
+
+.mtb-saas .saas-btn.primary:hover {
+  background: var(--saas-primary-hover);
+}
+
+.mtb-saas .saas-btn.ghost {
+  background: transparent;
+  box-shadow: none;
+}
+
+.mtb-saas a.saas-btn {
+  color: inherit;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+.mtb-saas .saas-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.mtb-saas .saas-workspace {
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 28px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.72fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.mtb-saas .saas-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.mtb-saas .saas-card {
+  background: var(--saas-panel);
+  border: 1px solid var(--saas-line);
+  border-radius: var(--saas-radius);
+  box-shadow: var(--saas-shadow);
+}
+
+.mtb-saas .saas-section {
+  padding: 22px;
+}
+
+.mtb-saas .saas-section-head {
+  margin-bottom: 18px;
+}
+
+.mtb-saas .saas-section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.2;
+  font-weight: 760;
+  letter-spacing: -0.01em;
+}
+
+.mtb-saas .saas-section-sub {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--saas-muted);
+}
+
+.mtb-saas .saas-iconbox {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--saas-primary);
+  background: var(--saas-primary-soft);
+  flex: 0 0 auto;
+}
+
+.mtb-saas .saas-error {
+  margin: 0 28px 0;
+  color: #b91c1c;
+}
+
+.mtb-saas .mtb-rte,
+.mtb-saas .mtb-answer-edit {
+  border: 1px solid var(--saas-line-strong);
+  border-radius: 14px;
+  overflow: visible;
+  background: #fff;
+  position: relative;
+}
+
+.mtb-saas .mtb-rte__bar,
+.mtb-saas .mtb-rte__bar--compact {
+  height: 46px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-bottom: 1px solid var(--saas-line);
+  border-radius: 14px 14px 0 0;
+  background: #fbfcfe;
+  overflow: hidden;
+}
+
+.mtb-saas .mtb-rte__btn {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  color: #70788a;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+}
+
+.mtb-saas .mtb-rte__btn:hover,
+.mtb-saas .mtb-rte__btn.is-active {
+  background: #eef1f6;
+  color: #3a4353;
+}
+
+.mtb-saas .mtb-rte__sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--saas-line);
+  align-self: center;
+}
+
+.mtb-saas .mtb-rte__latex {
+  margin-left: auto;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid var(--saas-line);
+  color: #7a8292;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.mtb-saas .mtb-rte__surface:empty::before {
+  content: attr(data-placeholder);
+  color: #94a3b8;
+}
+
+.mtb-saas .saas-render-box p {
+  margin: 0 0 0.55em;
+}
+
+.mtb-saas .saas-render-box p:last-child {
+  margin: 0;
+}
+
+.mtb-saas .saas-render-box .all-tasks-item__html {
+  margin: 0;
+}
+
+.mtb-saas .saas-render-box .task-files {
+  margin: 12px 0 0;
+}
+
+.mtb-saas .saas-render-box .task-files:first-child {
+  margin-top: 0;
+}
+
+.mtb-saas .saas-render-box .task-files + .task-files {
+  margin-top: 8px;
+}
+
+.mtb-saas .saas-render-box .file-attachment {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.mtb-saas .mtb-rte__surface {
+  min-height: 190px;
+  padding: 16px;
+  border: 0;
+  line-height: 1.55;
+  overflow: visible;
+}
+
+.mtb-saas .mtb-rte__surface img {
+  cursor: pointer;
+  border-radius: 8px;
+  max-width: 100%;
+  height: auto;
+}
+
+.mtb-saas .mtb-img-resize {
+  position: absolute;
+  pointer-events: none;
+  border: 2px solid var(--saas-primary);
+  border-radius: 8px;
+  box-sizing: border-box;
+  z-index: 6;
+}
+
+.mtb-saas .mtb-img-resize__handle {
+  pointer-events: auto;
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border-radius: 4px;
+  background: var(--saas-primary);
+  border: 2px solid #fff;
+  cursor: nwse-resize;
+  box-shadow: 0 1px 4px rgba(22, 27, 45, 0.25);
+}
+
+.mtb-saas .mtb-img-resize__tools {
+  pointer-events: auto;
+  position: absolute;
+  left: 0;
+  top: -38px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 9px;
+  background: #fff;
+  border: 1px solid var(--saas-line);
+  box-shadow: var(--saas-shadow);
+  color: #3a4353;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mtb-saas .mtb-img-resize__tools span {
+  min-width: 48px;
+  text-align: center;
+  color: #6f7788;
+  font-variant-numeric: tabular-nums;
+}
+
+.mtb-saas .mtb-img-resize__tools button {
+  width: 28px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #303746;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mtb-saas .mtb-img-resize__tools button:hover {
+  background: var(--saas-primary-soft);
+  color: var(--saas-primary);
+}
+
+.mtb-saas .mtb-answer-edit .mtb-textarea--answer {
+  min-height: 110px;
+  border: 0;
+  border-radius: 0;
+  padding: 16px;
+  resize: vertical;
+}
+
+.mtb-saas .saas-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.mtb-saas .saas-field-label {
+  display: block;
+  margin-bottom: 7px;
+  color: #5d6678;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.mtb-saas .saas-grid select,
+.mtb-saas .saas-grid input,
+.mtb-saas .saas-field {
+  width: 100%;
+  height: 44px;
+  padding: 0 13px;
+  border: 1px solid var(--saas-line-strong);
+  border-radius: 11px;
+  background: #fff;
+  outline: none;
+  color: #252b37;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.mtb-saas .saas-grid select:focus,
+.mtb-saas .saas-grid input:focus,
+.mtb-saas .saas-field:focus {
+  border-color: #9ea2ff;
+  box-shadow: 0 0 0 4px rgba(91, 95, 242, 0.1);
+}
+
+.mtb-saas .saas-grid select:disabled {
+  color: #94a3b8;
+  background: #f8fafc;
+}
+
+.mtb-saas .saas-divider {
+  height: 1px;
+  background: var(--saas-line);
+  margin: 18px 0;
+}
+
+.mtb-saas .saas-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mtb-saas .saas-chip {
+  border: 1px solid var(--saas-line-strong);
+  background: #fff;
+  color: #555f70;
+  border-radius: 999px;
+  padding: 8px 11px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.mtb-saas .saas-chip:hover {
+  border-color: #b9bfcd;
+}
+
+.mtb-saas .saas-chip.is-active {
+  background: var(--saas-primary-soft);
+  color: var(--saas-primary);
+  border-color: #ccd0ff;
+}
+
+.mtb-saas .saas-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+}
+
+.mtb-saas .saas-switch-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #4a5364;
+  font-size: 13px;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mtb-saas .saas-switch {
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: #dfe3ea;
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.mtb-saas .saas-switch::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  top: 3px;
+  left: 3px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  transition: left 0.18s ease;
+}
+
+.mtb-saas .saas-switch.is-on {
+  background: var(--saas-primary);
+}
+
+.mtb-saas .saas-switch.is-on::after {
+  left: 19px;
+}
+
+.mtb-saas .saas-meta-fields {
+  display: flex;
+  gap: 10px;
+  min-width: 310px;
+}
+
+.mtb-saas .saas-meta-fields label {
+  flex: 1;
+  min-width: 0;
+}
+
+.mtb-saas .saas-right {
+  position: sticky;
+  top: 94px;
+  min-width: 0;
+}
+
+.mtb-saas .saas-preview-card {
+  overflow: hidden;
+}
+
+.mtb-saas .saas-preview-head {
+  padding: 17px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--saas-line);
+  background: #fcfcfe;
+}
+
+.mtb-saas .saas-preview-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 760;
+}
+
+.mtb-saas .saas-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--saas-success);
+  font-size: 11px;
+  font-weight: 700;
+  background: #edf9f3;
+  padding: 5px 8px;
+  border-radius: 999px;
+}
+
+.mtb-saas .saas-live::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--saas-success);
+  box-shadow: 0 0 0 3px rgba(26, 155, 97, 0.1);
+}
+
+.mtb-saas .saas-preview-body {
+  padding: 18px;
+}
+
+.mtb-saas .saas-preview-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #9299a8;
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+
+.mtb-saas .saas-render-box {
+  padding: 16px;
+  border: 1px solid var(--saas-line);
+  border-radius: 13px;
+  background: #fff;
+  color: #262c37;
+  line-height: 1.6;
+  min-height: 82px;
+}
+
+.mtb-saas .saas-render-box + .saas-preview-label {
+  margin-top: 18px;
+}
+
+.mtb-saas .saas-muted {
+  color: #939baa;
+  font-size: 13px;
+  margin: 0;
+}
+
+.mtb-saas .saas-preview-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-top: 1px solid var(--saas-line);
+  background: #fcfcfe;
+  font-size: 12px;
+  color: #81899a;
+}
+
+.mtb-saas .saas-mini-card {
+  margin-top: 14px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mtb-saas .saas-mini-card strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 3px;
+}
+
+.mtb-saas .saas-mini-card span {
+  font-size: 12px;
+  color: var(--saas-muted);
+}
+
+.mtb-saas .saas-kbd {
+  margin-left: auto;
+  padding: 5px 8px;
+  border: 1px solid var(--saas-line);
+  border-radius: 7px;
+  background: #f8f9fc;
+  color: #7e8798;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mtb-saas .saas-bottom-bar {
+  display: none;
+}
+
+.mtb-saas .mtb-attach-list {
+  margin-top: 12px;
+}
+
+@media (max-width: 1020px) {
+  .mtb-saas .saas-workspace {
+    grid-template-columns: 1fr;
+    padding: 20px;
+  }
+
+  .mtb-saas .saas-right {
+    position: static;
+  }
+
+  .mtb-saas header.saas-topbar,
+  .mtb-saas .saas-topbar {
+    padding: 0 20px;
+  }
+}
+
+@media (max-width: 720px) {
+  .mtb-saas header.saas-topbar,
+  .mtb-saas .saas-topbar {
+    height: auto;
+    min-height: 70px;
+    padding: 12px 16px;
+    align-items: flex-start;
+  }
+
+  .mtb-saas .saas-actions .saas-btn:not(.primary) {
+    display: none;
+  }
+
+  .mtb-saas .saas-workspace {
+    padding: 14px;
+    gap: 14px;
+  }
+
+  .mtb-saas .saas-section {
+    padding: 17px;
+  }
+
+  .mtb-saas .saas-grid,
+  .mtb-saas .saas-meta-row,
+  .mtb-saas .saas-meta-fields {
+    grid-template-columns: 1fr;
+    display: grid;
+    min-width: 0;
+  }
+
+  .mtb-saas .saas-page-title {
+    font-size: 18px;
+  }
+
+  .mtb-saas .saas-eyebrow {
+    display: none;
+  }
+
+  .mtb-saas .saas-bottom-bar {
+    display: flex;
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    padding: 10px 14px;
+    background: color-mix(in srgb, var(--bg-page, #f2f4ff) 92%, transparent);
+    backdrop-filter: blur(16px);
+    border-top: 1px solid var(--saas-line);
+    gap: 8px;
+  }
+
+  .mtb-saas .saas-bottom-bar .saas-btn {
+    flex: 1;
+  }
+}

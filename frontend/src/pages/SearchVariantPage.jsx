@@ -4,7 +4,6 @@ import SearchByIdForm from "../components/SearchByIdForm";
 import MathContent from "../components/MathContent";
 import StateView from "../components/StateView";
 import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
-import { devApiBase } from "../utils/devApiBase";
 
 function formatLevel(level) {
   const x = String(level || "").toLowerCase();
@@ -30,31 +29,30 @@ function SearchVariantPage() {
   const location = useLocation();
   const q = new URLSearchParams(location.search).get("q")?.trim() ?? "";
 
-  const [data, setData] = useState({ variant: null, tasks: [] });
+  const [data, setData] = useState({ variant: null, tasks: [], notice: null });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!q) {
-      setData({ variant: null, tasks: [] });
+      setData({ variant: null, tasks: [], notice: null });
       return;
     }
     setLoading(true);
     setError(null);
-    const apiBase = devApiBase();
-    fetch(`${apiBase}/api/search_variant/?q=${encodeURIComponent(q)}`, {
-      credentials: apiBase ? "omit" : "same-origin",
+    fetch(`/api/search_variant/?q=${encodeURIComponent(q)}`, {
+      credentials: "same-origin",
     })
       .then((res) => {
         if (!res.ok) throw new Error(res.statusText);
         return res.json();
       })
       .then((d) => {
-        setData({ variant: d.variant || null, tasks: d.tasks || [] });
+        setData({ variant: d.variant || null, tasks: d.tasks || [], notice: d.notice || null });
       })
       .catch((err) => {
         setError(err.message);
-        setData({ variant: null, tasks: [] });
+        setData({ variant: null, tasks: [], notice: null });
       })
       .finally(() => setLoading(false));
   }, [q]);
@@ -101,7 +99,22 @@ function SearchVariantPage() {
         />
       )}
 
-      {!loading && !error && (!data.variant || data.tasks.length === 0) && (
+      {!loading && !error && data.notice ? (
+        <StateView
+          variant="locked"
+          title="Вариант недоступен"
+          description={data.notice.message}
+          action={
+            data.notice.bank_url ? (
+              <Link to={data.notice.bank_url} className="state-view__btn">Открыть мой банк</Link>
+            ) : (
+              <Link to={data.notice.login_url || "/cabinet/login"} className="state-view__btn">Войти в аккаунт</Link>
+            )
+          }
+        />
+      ) : null}
+
+      {!loading && !error && !data.notice && (!data.variant || data.tasks.length === 0) && (
         <StateView
           variant="search"
           title="Ничего не найдено"
@@ -110,7 +123,7 @@ function SearchVariantPage() {
         />
       )}
 
-      {!loading && !error && data.variant && data.tasks.length > 0 && (
+      {!loading && !error && !data.notice && data.variant && data.tasks.length > 0 && (
         <>
           <header className="sv-header">
             <div className="sv-header-text">

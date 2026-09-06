@@ -116,6 +116,53 @@ describe("accessGateCopy and safeReturnPath", () => {
     expect(booking.primary).toBe("Перейти на тариф «Учитель»");
     expect(booking.secondary).toBe("Не сейчас");
     expect(booking.text).toContain("сами выберут удобный слот");
+
+    const bankAnon = accessGateCopy({ reason: "anonymous", resourceType: "teacher_tasks" });
+    expect(bankAnon.primary).toBe("Зарегистрироваться бесплатно");
+    expect(bankAnon.text).toContain("тариф");
+  });
+
+  it("maps teacher task bank paywalls without plan-name hardcode in callers", () => {
+    const tasks = classifyAccessError({
+      code: "TEACHER_TASK_LIMIT_REACHED",
+      feature: "teacher_tasks",
+      current: 20,
+      limit: 20,
+      upgrade_required: true,
+    });
+    expect(tasks?.reason).toBe("limit_reached");
+    expect(tasks?.resourceType).toBe("teacher_tasks");
+    const copy = accessGateCopy(tasks, { requiredPlanName: "Учитель" });
+    expect(copy.title).toContain("банк задач");
+    expect(copy.primary).toBe("Посмотреть тарифы");
+
+    const copies = classifyAccessError({
+      code: "TEACHER_TASK_COPY_LIMIT_REACHED",
+      feature: "teacher_task_copies",
+      limit: 5,
+      current: 5,
+    });
+    expect(copies?.resourceType).toBe("teacher_task_copies");
+    expect(accessGateCopy(copies).title).toContain("копирования");
+
+    const files = classifyAccessError({
+      code: "TEACHER_TASK_ATTACHMENTS_REQUIRED",
+      feature: "teacher_task_attachments",
+      min_plan: "teacher",
+    });
+    expect(files?.reason).toBe("feature_not_in_plan");
+    expect(accessGateCopy(files, { requiredPlanName: "Учитель" }).text).toContain("Учитель");
+
+    const storage = classifyAccessError({
+      code: "QUOTA_EXCEEDED",
+      feature: "storage",
+      upgrade_required: true,
+      used_bytes: 498 * 1024 * 1024,
+      limit_bytes: 512 * 1024 * 1024,
+    });
+    expect(storage?.resourceType).toBe("storage");
+    expect(accessGateCopy(storage).text).toContain("498 МБ");
+    expect(accessGateCopy(storage).text).toContain("512 МБ");
   });
 
   it("rejects open redirects", () => {

@@ -3005,6 +3005,35 @@ class TariffPlan(models.Model):
     )
     ai_requests_monthly_limit = models.PositiveIntegerField("ИИ-запросы в месяц", default=10)
     max_storage_mb = models.PositiveIntegerField("Хранилище МБ", default=512)
+    max_teacher_tasks = models.PositiveIntegerField(
+        "Лимит задач банка учителя",
+        null=True,
+        blank=True,
+        default=20,
+        help_text="Все неудалённые задачи банка, включая черновики и архив. Пусто — без лимита.",
+    )
+    max_teacher_task_copies_monthly = models.PositiveIntegerField(
+        "Копий из общего банка / мес",
+        null=True,
+        blank=True,
+        default=5,
+        help_text="Пусто — без месячного лимита копирования.",
+    )
+    max_teacher_task_collections = models.PositiveIntegerField(
+        "Лимит коллекций банка учителя",
+        null=True,
+        blank=True,
+        default=2,
+        help_text="Зарезервировано. Пусто — без лимита.",
+    )
+    has_teacher_task_attachments = models.BooleanField(
+        "Вложения в задачах банка",
+        default=False,
+    )
+    has_teacher_task_bulk_import = models.BooleanField(
+        "Массовый импорт задач банка",
+        default=False,
+    )
     has_homework = models.BooleanField("Домашние задания", default=True)
     has_review = models.BooleanField("Проверка работ", default=True)
     has_basic_notifications = models.BooleanField("Базовые уведомления", default=False)

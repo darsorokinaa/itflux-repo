@@ -30,7 +30,7 @@ export function sanitizeTaskHtml(html) {
       "onsubmit",
     ],
     ALLOW_DATA_ATTR: false,
-    ADD_ATTR: ["target", "rel", "class", "style", "colspan", "rowspan"],
+    ADD_ATTR: ["target", "rel", "class", "style", "colspan", "rowspan", "width", "height"],
     ALLOWED_URI_REGEXP:
       /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
   });

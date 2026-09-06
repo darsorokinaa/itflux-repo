@@ -652,7 +652,7 @@ def create_homework_from_student_errors(
         )
 
         new_variant_id = _create_variant_from_task_ids(
-            level=level, subject=subject, task_ids=task_ids
+            level=level, subject=subject, task_ids=task_ids, teacher=teacher
         )
         variant_url = f"/{level}/{subject}/variant/{new_variant_id}"
         HomeworkTask.objects.create(

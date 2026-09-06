@@ -4,6 +4,9 @@ import { BrowserRouter, Routes, Route, useLocation, Navigate, useNavigate, usePa
 import Layout from "./pages/Layout";
 import HomePage from "./pages/HomePage";
 import AllTasksPage from "./pages/AllTasksPage";
+import MyTaskBankPage from "./pages/MyTaskBankPage";
+import MyTaskEditorPage from "./pages/MyTaskEditorPage";
+import MyTaskDetailPage from "./pages/MyTaskDetailPage";
 import ExamLevelHubPage from "./pages/ExamLevelHubPage";
 import SubjectPage from "./pages/SubjectPage";
 import TasksPage from "./pages/TasksPage";
@@ -286,6 +289,10 @@ function App() {
           <Route path="/pricing" element={<PricingPage />} />
           <Route path="/pricing/" element={<PricingPage />} />
           <Route path="/tasks" element={<AllTasksPage />} />
+          <Route path="/tasks/my" element={<MyTaskBankPage />} />
+          <Route path="/tasks/my/new" element={<MyTaskEditorPage />} />
+          <Route path="/tasks/my/:taskId/edit" element={<MyTaskEditorPage />} />
+          <Route path="/tasks/my/:taskId" element={<MyTaskDetailPage />} />
           <Route path="/generator" element={<Navigate to="/subject" replace />} />
           <Route path="/gotovye-uroki" element={<ReadyLessonsPage />} />
           <Route path="/gotovye-uroki/" element={<ReadyLessonsPage />} />

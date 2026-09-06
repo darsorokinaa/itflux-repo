@@ -43,6 +43,11 @@ function PlanCard({ plan, isCurrent, isSelected, onSelect, onActivate, promoDisc
   const summary = [
     l.students != null ? `${l.students} учеников` : null,
     l.groups != null ? `${l.groups} групп` : l.groups === null ? "группы без лимита" : null,
+    l.teacher_tasks != null
+      ? `${l.teacher_tasks} задач в банке`
+      : l.teacher_tasks === null
+        ? "банк без лимита"
+        : null,
     storage ? `${storage} хранилища` : null,
   ].filter(Boolean).join(" · ");
 

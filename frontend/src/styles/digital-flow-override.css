@@ -356,6 +356,28 @@ button,
   color: var(--blue-main) !important;
 }
 
+.site-nav__tab--personal {
+  font-weight: 600 !important;
+}
+
+.site-nav__tab-badge--personal {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0 !important;
+  background: #e8ecf4 !important;
+  color: #475569 !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-size: 0 !important;
+}
+
+.site-nav__tab-badge--personal svg {
+  display: block;
+}
+
 .site-nav__search-input {
   border: 1.5px solid #E5E8F0 !important;
   background: #fff !important;

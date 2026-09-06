@@ -18,7 +18,11 @@ export type AccessResourceType =
   | "ai"
   | "schedule"
   | "student_booking"
-  | "content";
+  | "content"
+  | "teacher_tasks"
+  | "teacher_task_copies"
+  | "teacher_task_attachments"
+  | "storage";
 
 export type AccessDeniedPayload = {
   code: string;
@@ -29,6 +33,8 @@ export type AccessDeniedPayload = {
   upgrade_required?: boolean;
   limit?: number;
   current?: number;
+  used_bytes?: number;
+  limit_bytes?: number;
 };
 
 export type AccessGateContext = {
@@ -72,11 +78,15 @@ const LIMIT_CODES: Record<string, AccessResourceType> = {
   LESSON_LIMIT_REACHED: "lessons",
   INTERACTIVE_LIMIT_REACHED: "interactive",
   AI_LIMIT_REACHED: "ai",
+  TEACHER_TASK_LIMIT_REACHED: "teacher_tasks",
+  TEACHER_TASK_COPY_LIMIT_REACHED: "teacher_task_copies",
+  QUOTA_EXCEEDED: "storage",
 };
 
 const FEATURE_CODES: Record<string, AccessResourceType> = {
   SCHEDULE_REQUIRES_PAID_PLAN: "schedule",
   BOOKING_REQUIRES_TEACHER_PLAN: "student_booking",
+  TEACHER_TASK_ATTACHMENTS_REQUIRED: "teacher_task_attachments",
 };
 
 const AUTH_CODES = new Set(["AUTH_REQUIRED", "auth_required"]);
@@ -85,6 +95,16 @@ export function planDisplayName(slug?: string, fallbackName?: string) {
   if (fallbackName) return fallbackName;
   if (!slug) return "";
   return PLAN_DISPLAY_NAMES[slug] || slug;
+}
+
+function formatStorageBytes(bytes?: number) {
+  if (bytes == null || Number.isNaN(bytes)) return "";
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1024) {
+    const gb = mb / 1024;
+    return `${gb % 1 === 0 ? gb.toFixed(0) : gb.toFixed(1)} ГБ`;
+  }
+  return `${Math.round(mb)} МБ`;
 }
 
 export function safeReturnPath(path: unknown): string {
@@ -146,6 +166,18 @@ function payloadFromRecord(record: Record<string, unknown> | null): AccessDenied
     upgrade_required: Boolean(source.upgrade_required),
     limit: typeof source.limit === "number" ? source.limit : undefined,
     current: typeof source.current === "number" ? source.current : undefined,
+    used_bytes:
+      typeof source.used_bytes === "number"
+        ? source.used_bytes
+        : typeof record.used_bytes === "number"
+          ? record.used_bytes
+          : undefined,
+    limit_bytes:
+      typeof source.limit_bytes === "number"
+        ? source.limit_bytes
+        : typeof record.limit_bytes === "number"
+          ? record.limit_bytes
+          : undefined,
   };
 }
 
@@ -193,7 +225,11 @@ function resourceFromFeature(feature?: string): AccessResourceType {
     feature === "interactive" ||
     feature === "ai" ||
     feature === "students" ||
-    feature === "groups"
+    feature === "groups" ||
+    feature === "teacher_tasks" ||
+    feature === "teacher_task_copies" ||
+    feature === "teacher_task_attachments" ||
+    feature === "storage"
   ) {
     return feature;
   }
@@ -219,6 +255,10 @@ export function classifyAccessError(
     limit: payload.limit,
     current: payload.current,
   };
+  if (payload.code === "QUOTA_EXCEEDED") {
+    base.current = payload.used_bytes ?? payload.current;
+    base.limit = payload.limit_bytes ?? payload.limit;
+  }
 
   if (AUTH_CODES.has(payload.code)) {
     return { ...base, reason: "anonymous", resourceType: extras.resourceType || fromFeature };
@@ -295,6 +335,14 @@ function resourceNoun(type: AccessResourceType) {
       return "группы";
     case "feature":
       return "эта возможность";
+    case "teacher_tasks":
+      return "личный банк задач";
+    case "teacher_task_copies":
+      return "копирование из общего банка";
+    case "teacher_task_attachments":
+      return "файлы к задачам";
+    case "storage":
+      return "хранилище";
     default:
       return "этот материал";
   }
@@ -308,6 +356,15 @@ export function accessGateCopy(
   const planName = options.requiredPlanName;
 
   if (ctx.reason === "anonymous") {
+    if (ctx.resourceType === "teacher_tasks" || ctx.resourceType === "teacher_task_copies") {
+      return {
+        eyebrow: "Личный банк задач",
+        title: "Нужна регистрация",
+        text: "Создавайте свои задания, копируйте из общего банка и собирайте варианты.\n\nЗарегистрируйтесь бесплатно — после входа банк сразу доступен, а лимиты зависят от тарифа.",
+        primary: "Зарегистрироваться бесплатно",
+        secondary: "Уже есть аккаунт? Войти",
+      };
+    }
     const paid = Boolean(ctx.requiredPlan && ctx.requiredPlan !== "start");
     if (ctx.resourceType === "variant" || ctx.resourceType === "workbook") {
       return {
@@ -330,6 +387,40 @@ export function accessGateCopy(
   }
 
   if (ctx.reason === "limit_reached") {
+    if (ctx.resourceType === "teacher_tasks") {
+      const used = ctx.current;
+      const cap = ctx.limit;
+      const over = used != null && cap != null && used > cap;
+      return {
+        title: over ? "Создание новых задач недоступно" : "Ваш банк задач заполнен",
+        text: over
+          ? `В вашем банке ${used} задач. Текущий тариф позволяет хранить до ${cap} новых задач. Существующие материалы сохранены.`
+          : `Вы использовали все ${cap ?? ""} мест в личном банке задач.\n\nНа тарифе «${planName || "Учитель"}» можно хранить больше задач, добавлять файлы и без ограничений копировать задания из общего банка.`,
+        primary: "Посмотреть тарифы",
+        secondary: "Не сейчас",
+      };
+    }
+    if (ctx.resourceType === "teacher_task_copies") {
+      return {
+        title: "Лимит копирования исчерпан",
+        text: `В этом месяце вы уже скопировали ${ctx.limit ?? 5} задач из общего банка.\n\nСоздавать собственные задачи вручную можно, пока не достигнут общий лимит банка.`,
+        primary: planName ? `Перейти на тариф «${planName}»` : "Посмотреть тарифы",
+        secondary: "Закрыть",
+      };
+    }
+    if (ctx.resourceType === "storage") {
+      const usedLabel = formatStorageBytes(ctx.current);
+      const limitLabel = formatStorageBytes(ctx.limit);
+      return {
+        title: "Недостаточно места в хранилище",
+        text:
+          usedLabel && limitLabel
+            ? `Использовано:\n${usedLabel} из ${limitLabel}`
+            : "Удалите ненужные файлы или выберите тариф с большим хранилищем.",
+        primary: "Посмотреть тарифы",
+        secondary: "Закрыть",
+      };
+    }
     if (ctx.resourceType === "students" || ctx.resourceType === "groups") {
       return {
         title: "Чтобы вести больше учеников",
@@ -368,6 +459,15 @@ export function accessGateCopy(
   }
 
   if (ctx.reason === "feature_not_in_plan") {
+    if (ctx.resourceType === "teacher_task_attachments") {
+      const teacherName = planName || "Учитель";
+      return {
+        title: "Файлы к задачам",
+        text: `Прикрепляйте PDF, документы и дополнительные материалы к своим заданиям на тарифе «${teacherName}».`,
+        primary: "Посмотреть тарифы",
+        secondary: "Закрыть",
+      };
+    }
     return {
       title: "Эта функция недоступна на вашем тарифе",
       text: planName

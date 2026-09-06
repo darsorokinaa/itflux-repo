@@ -52,4 +52,36 @@ describe("buildPlanHighlights", () => {
     expect(lines).toContain("группы без лимита");
     expect(lines).toContain("10 ГБ хранилища");
   });
+
+  it("adds personal task bank limits from plan payload", () => {
+    const start = buildPlanHighlights({
+      slug: "start",
+      limits: {
+        students: 5,
+        groups: 2,
+        storage_mb: 512,
+        teacher_tasks: 20,
+        teacher_task_copies_monthly: 5,
+      },
+      features: { teacher_task_attachments: false },
+    });
+    expect(start).toContain("до 20 задач в личном банке");
+    expect(start).toContain("5 копий из общего банка в месяц");
+    expect(start.join(" ")).not.toContain("файлы к задачам");
+
+    const teacherLines = buildPlanHighlights({
+      slug: "teacher",
+      limits: {
+        students: 10,
+        groups: 5,
+        storage_mb: 1024,
+        teacher_tasks: 500,
+        teacher_task_copies_monthly: null,
+      },
+      features: { teacher_task_attachments: true, basic_notifications: true },
+    }).map((item) => (typeof item === "string" ? item : item.text));
+    expect(teacherLines).toContain("до 500 задач в личном банке");
+    expect(teacherLines).toContain("копирование из общего банка без лимита");
+    expect(teacherLines).toContain("файлы к задачам");
+  });
 });

@@ -29,6 +29,9 @@ export async function fetchVariantByNumber(variantNumber) {
     throw new Error("Не удалось найти вариант");
   }
   const data = await res.json();
+  if (data?.notice?.message) {
+    throw new Error(data.notice.message);
+  }
   if (!data?.variant?.id) {
     throw new Error(`Вариант №${raw} не найден`);
   }

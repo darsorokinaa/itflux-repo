@@ -1,4 +1,4 @@
-export type NavTabKey = "tasks" | "generator" | "lessons" | "interesting" | "teachers";
+export type NavTabKey = "tasks" | "my-tasks" | "generator" | "lessons" | "interesting" | "teachers";
 
 export type NavTabDef = {
   key: NavTabKey;
@@ -7,10 +7,12 @@ export type NavTabDef = {
   soon?: boolean;
   badge?: string;
   disabled?: boolean;
+  teacherOnly?: boolean;
 };
 
 export const NAV_TABS: ReadonlyArray<NavTabDef> = [
   { key: "tasks", label: "Все задачи", to: "/tasks" },
+  { key: "my-tasks", label: "Мой банк задач", to: "/tasks/my" },
   { key: "generator", label: "Генератор вариантов", to: "/generator" },
   { key: "lessons", label: "Готовые уроки", to: "/lessons" },
   { key: "interesting", label: "Интересное", to: "/interesting" },
@@ -22,6 +24,9 @@ export function getActiveNavTab(
   pathname: string
 ): NavTabKey | null {
   const p = (pathname || "").replace(/\/+$/, "") || "/";
+  if (p === "/tasks/my" || p.startsWith("/tasks/my/")) {
+    return "my-tasks";
+  }
   if (p === "/tasks") {
     return "tasks";
   }

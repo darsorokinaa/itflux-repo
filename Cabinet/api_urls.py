@@ -17,6 +17,7 @@ from . import (
     schedule_api,
     student_api,
     subscription_api,
+    teacher_tasks_api,
     telegram_api,
 )
 
@@ -502,6 +503,51 @@ urlpatterns = [
     ),
     path("subscription/apply-promo/", subscription_api.PromoCodeValidateView.as_view(), name="subscription_apply_promo"),
     path("subscription/referral-link/", subscription_api.SubscriptionReferralLinkView.as_view(), name="subscription_referral_link"),
+
+    path("my-tasks/", teacher_tasks_api.TeacherTaskListView.as_view(), name="teacher_my_tasks"),
+    path("my-tasks/meta/", teacher_tasks_api.TeacherTaskBankMetaView.as_view(), name="teacher_my_tasks_meta"),
+    path("my-tasks/catalog/", teacher_tasks_api.TeacherTaskCatalogView.as_view(), name="teacher_my_tasks_catalog"),
+    path(
+        "my-tasks/upload-image/",
+        teacher_tasks_api.TeacherTaskImageUploadView.as_view(),
+        name="teacher_my_tasks_upload_image",
+    ),
+    path(
+        "my-tasks/copy-from-global/",
+        teacher_tasks_api.TeacherTaskCopyFromGlobalView.as_view(),
+        name="teacher_my_tasks_copy_from_global",
+    ),
+    path("my-tasks/<int:task_id>/", teacher_tasks_api.TeacherTaskDetailView.as_view(), name="teacher_my_task_detail"),
+    path(
+        "my-tasks/<int:task_id>/duplicate/",
+        teacher_tasks_api.TeacherTaskDuplicateView.as_view(),
+        name="teacher_my_task_duplicate",
+    ),
+    path(
+        "my-tasks/<int:task_id>/archive/",
+        teacher_tasks_api.TeacherTaskArchiveView.as_view(),
+        name="teacher_my_task_archive",
+    ),
+    path(
+        "my-tasks/<int:task_id>/restore/",
+        teacher_tasks_api.TeacherTaskRestoreView.as_view(),
+        name="teacher_my_task_restore",
+    ),
+    path(
+        "my-tasks/<int:task_id>/attachments/",
+        teacher_tasks_api.TeacherTaskAttachmentsView.as_view(),
+        name="teacher_my_task_attachments",
+    ),
+    path(
+        "my-tasks/<int:task_id>/attachments/legacy/",
+        teacher_tasks_api.TeacherTaskLegacyAttachmentView.as_view(),
+        name="teacher_my_task_attachment_legacy",
+    ),
+    path(
+        "my-tasks/<int:task_id>/attachments/<int:attachment_id>/",
+        teacher_tasks_api.TeacherTaskAttachmentDetailView.as_view(),
+        name="teacher_my_task_attachment_detail",
+    ),
 
     # ИИ-помощник
     path("ai/usage/", ai_api.AIUsageView.as_view(), name="ai_usage"),

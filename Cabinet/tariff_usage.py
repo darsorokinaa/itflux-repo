@@ -100,6 +100,18 @@ def count_storage_bytes(teacher: User) -> int:
         return 0
 
 
+def count_teacher_tasks(teacher: User) -> int:
+    from .teacher_task_entitlements import count_teacher_tasks as _count
+
+    return _count(teacher)
+
+
+def count_teacher_task_copies(teacher: User) -> int:
+    from .teacher_task_entitlements import count_teacher_task_copies_this_period
+
+    return count_teacher_task_copies_this_period(teacher)
+
+
 class TariffUsageService:
     """Структурированное использование ресурсов текущего тарифа."""
 
@@ -116,6 +128,8 @@ class TariffUsageService:
             "workbooks": int(monthly.workbooks_created or 0),
             "ai_requests": count_ai_requests(teacher),
             "storage_bytes": count_storage_bytes(teacher),
+            "teacher_tasks": count_teacher_tasks(teacher),
+            "teacher_task_copies": count_teacher_task_copies(teacher),
         }
 
     @staticmethod
@@ -195,6 +209,20 @@ class TariffUsageService:
                 period="month",
             ),
             TariffUsageService._storage_item(teacher, counts),
+            _item(
+                key="teacher_tasks",
+                label="Банк задач",
+                used=counts["teacher_tasks"],
+                limit=getattr(plan, "max_teacher_tasks", 20),
+                period="current",
+            ),
+            _item(
+                key="teacher_task_copies",
+                label="Копии из общего банка",
+                used=counts["teacher_task_copies"],
+                limit=getattr(plan, "max_teacher_task_copies_monthly", 5),
+                period="month",
+            ),
         ]
         return {
             "tariff": {
@@ -239,6 +267,8 @@ class TariffUsageService:
             "workbooks": counts["workbooks"],
             "ai_requests": counts["ai_requests"],
             "storage_mb": storage["used"] if storage else 0,
+            "teacher_tasks": counts.get("teacher_tasks", 0),
+            "teacher_task_copies": counts.get("teacher_task_copies", 0),
         }
 
     @staticmethod
@@ -252,6 +282,9 @@ class TariffUsageService:
             "workbooks_monthly": plan.max_workbooks_monthly,
             "storage_mb": plan.max_storage_mb,
             "ai_requests": plan.ai_requests_monthly_limit,
+            "teacher_tasks": getattr(plan, "max_teacher_tasks", 20),
+            "teacher_task_copies_monthly": getattr(plan, "max_teacher_task_copies_monthly", 5),
+            "teacher_task_collections": getattr(plan, "max_teacher_task_collections", 2),
         }
 
 

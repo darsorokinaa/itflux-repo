@@ -910,6 +910,8 @@ class TariffPlanAdmin(admin.ModelAdmin):
                 "max_students", "max_groups", "max_lessons", "max_interactives",
                 "max_variants_monthly", "max_workbooks_monthly",
                 "content_access_rank", "max_storage_mb",
+                "max_teacher_tasks", "max_teacher_task_copies_monthly",
+                "max_teacher_task_collections",
             ),
         }),
         ("Функции", {
@@ -918,6 +920,7 @@ class TariffPlanAdmin(admin.ModelAdmin):
                 "has_advanced_notifications", "has_extended_library",
                 "has_simulators", "has_analytics", "has_mass_actions",
                 "has_priority_support", "has_multi_teacher", "has_team_roles",
+                "has_teacher_task_attachments", "has_teacher_task_bulk_import",
                 "monthly_library_promise",
             ),
         }),

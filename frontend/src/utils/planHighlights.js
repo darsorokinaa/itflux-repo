@@ -35,6 +35,36 @@ function monthlyLine(value, { one, few, many, unlimited }) {
   return `${n} ${ruCount(n, one, few, many)} в месяц`;
 }
 
+function teacherBankLines(limits, features) {
+  const l = limits || {};
+  const f = features || {};
+  const lines = [];
+  if (l.teacher_tasks !== undefined) {
+    lines.push(
+      limitLine(l.teacher_tasks, {
+        one: "задача в личном банке",
+        few: "задачи в личном банке",
+        many: "задач в личном банке",
+        unlimited: "личный банк задач без лимита",
+      }),
+    );
+  }
+  if (l.teacher_task_copies_monthly !== undefined) {
+    lines.push(
+      monthlyLine(l.teacher_task_copies_monthly, {
+        one: "копия из общего банка",
+        few: "копии из общего банка",
+        many: "копий из общего банка",
+        unlimited: "копирование из общего банка без лимита",
+      }),
+    );
+  }
+  if (f.teacher_task_attachments) {
+    lines.push("файлы к задачам");
+  }
+  return lines.filter(Boolean);
+}
+
 /**
  * @param {object} plan
  * @param {{ includeAi?: boolean }} [opts]
@@ -87,6 +117,7 @@ export function buildPlanHighlights(plan, opts = {}) {
     : f.basic_notifications
       ? "уведомления"
       : null;
+  const bank = teacherBankLines(l, f);
 
   if (plan.slug === "start") {
     return [
@@ -97,6 +128,7 @@ export function buildPlanHighlights(plan, opts = {}) {
       }),
       groups,
       storageLine,
+      ...bank,
       "домашние задания и проверка",
       variants,
       workbooks,
@@ -111,6 +143,7 @@ export function buildPlanHighlights(plan, opts = {}) {
       students,
       groups,
       storageLine,
+      ...bank,
       "расписание и журнал",
       "Запись учеников по ссылке",
       "видеозанятия прямо на платформе",
@@ -129,6 +162,7 @@ export function buildPlanHighlights(plan, opts = {}) {
       students,
       groups,
       storageLine,
+      ...bank,
       "расписание, журнал и видеозанятия",
       "Запись учеников по ссылке",
       variants,
@@ -148,6 +182,7 @@ export function buildPlanHighlights(plan, opts = {}) {
       students,
       groups,
       storageLine,
+      ...bank,
       { text: "полная библиотека и Premium-материалы", accent: true },
       "Запись учеников по ссылке",
       "симуляторы и межпредметные проекты",
@@ -166,6 +201,7 @@ export function buildPlanHighlights(plan, opts = {}) {
       f.multi_teacher && "Несколько преподавателей",
       f.team_roles && "Роли в команде",
       storageLine,
+      ...bank,
       "Единый кабинет организации",
       "Управление лицензиями",
       f.analytics && "Общая аналитика",
@@ -180,6 +216,7 @@ export function buildPlanHighlights(plan, opts = {}) {
     students,
     groups,
     storageLine,
+    ...bank,
     f.homework && "Домашние задания",
     f.review && "Проверка работ",
     variants,

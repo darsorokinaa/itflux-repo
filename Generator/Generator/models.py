@@ -1,5 +1,5 @@
 from django.db import models
-from django.db.models import DO_NOTHING, CASCADE
+from django.db.models import CASCADE, DO_NOTHING, Q
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
@@ -162,14 +162,23 @@ class TaskList(models.Model):
 
 
 class ActiveTaskManager(models.Manager):
-    """Только задания с is_active=True (для банка, тренажёра и генерации вариантов)."""
+    """Активные задания общего банка (для публичного банка, тренажёра и генерации)."""
 
     def get_queryset(self):
-        return super().get_queryset().filter(is_active=True)
+        return super().get_queryset().filter(is_active=True, scope="global")
 
 
 # Банк задач
 class Task(models.Model):
+    class Scope(models.TextChoices):
+        GLOBAL = "global", "Общий банк"
+        TEACHER = "teacher", "Банк учителя"
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Черновик"
+        READY = "ready", "Готово"
+        ARCHIVED = "archived", "Архив"
+
     task = models.ForeignKey(
         TaskList,
         on_delete=CASCADE,
@@ -243,11 +252,111 @@ class Task(models.Model):
         help_text="Теги задания из справочника (сложность и др.).",
     )
 
+    scope = models.CharField(
+        "Область",
+        max_length=16,
+        choices=Scope.choices,
+        default=Scope.GLOBAL,
+        db_index=True,
+        help_text="global — общий банк; teacher — личный банк учителя. Расширяемо (school/shared).",
+    )
+    owner_teacher = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="owned_bank_tasks",
+        verbose_name="Владелец (учитель)",
+    )
+    local_number = models.PositiveIntegerField(
+        "Номер в банке учителя",
+        null=True,
+        blank=True,
+        help_text="Последовательный номер внутри банка конкретного учителя. Не переиспользуется.",
+    )
+    source_task = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="derived_tasks",
+        verbose_name="Исходная задача",
+        help_text="Откуда скопирована задача (общий банк или дубликат).",
+    )
+    status = models.CharField(
+        "Статус",
+        max_length=16,
+        choices=Status.choices,
+        default=Status.READY,
+        db_index=True,
+    )
+    exam_part = models.PositiveSmallIntegerField(
+        "Часть экзамена",
+        null=True,
+        blank=True,
+        choices=[(1, "Первая часть"), (2, "Вторая часть")],
+        db_index=True,
+        help_text="1 — первая часть, 2 — вторая. Пусто, если не экзамен или не указано.",
+    )
+    updated_at = models.DateTimeField("Изменено", auto_now=True)
+
     objects = models.Manager()
     active_objects = ActiveTaskManager()
 
+    class Meta:
+        indexes = [
+            models.Index(fields=["scope", "is_active"], name="task_scope_active_idx"),
+            models.Index(fields=["owner_teacher", "status"], name="task_owner_status_idx"),
+            models.Index(fields=["owner_teacher", "local_number"], name="task_owner_local_num_idx"),
+            models.Index(fields=["scope", "owner_teacher", "is_active"], name="task_scope_owner_act_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(scope="global", owner_teacher__isnull=True, local_number__isnull=True)
+                    | Q(scope="teacher", owner_teacher__isnull=False, local_number__isnull=False)
+                ),
+                name="task_scope_owner_local_number_consistent",
+            ),
+            models.UniqueConstraint(
+                fields=["owner_teacher", "local_number"],
+                condition=Q(scope="teacher"),
+                name="task_owner_local_number_uniq",
+            ),
+        ]
+
     def __str__(self):
         return f'{self.id}: {self.task_template[:100]}'
+
+    def sync_active_from_status(self):
+        """Черновики и архив не попадают в генератор; готовые — активны."""
+        if self.scope == self.Scope.TEACHER:
+            self.is_active = self.status == self.Status.READY
+
+
+def teacher_task_attachment_upload_to(instance, filename):
+    ext = os.path.splitext(filename or "")[1].lower() or ".bin"
+    teacher_id = getattr(getattr(instance, "task", None), "owner_teacher_id", None) or "shared"
+    return f"task_files/teacher_{teacher_id}/{uuid4().hex}{ext}"
+
+
+class TaskAttachment(models.Model):
+    """Дополнительный файл к задаче (не изображение внутри условия)."""
+
+    task = models.ForeignKey(Task, on_delete=CASCADE, related_name="attachments")
+    file = models.FileField(upload_to=teacher_task_attachment_upload_to)
+    original_name = models.CharField(max_length=255, blank=True)
+    size = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+        verbose_name = "Вложение задачи"
+        verbose_name_plural = "Вложения задач"
+
+    def __str__(self):
+        return self.original_name or (self.file.name if self.file else "file")
+
 
 class Tags(models.Model):
     tag = models.CharField(max_length=20, null=True, blank=True, default="Экзамен")
@@ -311,8 +420,62 @@ class Variant(models.Model):
     created_by = models.CharField(max_length=100, default='ADMIN')
     share_token = models.CharField(max_length=20, blank=True, null=True)
     content = models.JSONField(default=dict, blank=True, null=True)  # {tasklist_id: count}
+    owner_teacher = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="owned_variants",
+        verbose_name="Владелец (учитель)",
+    )
+    local_number = models.PositiveIntegerField(
+        "Номер варианта в банке учителя",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["owner_teacher", "local_number"], name="variant_owner_local_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["owner_teacher", "local_number"],
+                condition=Q(owner_teacher__isnull=False, local_number__isnull=False),
+                name="variant_owner_local_number_uniq",
+            ),
+        ]
+
     def __str__(self):
         return f'Вариант {self.id} -  {self.var_subject}: {self.level}'
+
+
+class TeacherTaskBank(models.Model):
+    """Персональный банк задач учителя: публичный код и атомарные счётчики номеров."""
+
+    teacher = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="task_bank",
+        verbose_name="Учитель",
+    )
+    public_code = models.CharField(
+        "Код банка",
+        max_length=8,
+        unique=True,
+        db_index=True,
+        help_text="Короткий уникальный код, например K7M4P. Не меняется после создания.",
+    )
+    next_task_number = models.PositiveIntegerField("Следующий номер задачи", default=1)
+    next_variant_number = models.PositiveIntegerField("Следующий номер варианта", default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Банк задач учителя"
+        verbose_name_plural = "Банки задач учителей"
+
+    def __str__(self):
+        return f"{self.public_code} (teacher={self.teacher_id})"
 
 
 class VariantContent(models.Model):

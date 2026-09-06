@@ -66,6 +66,27 @@ export default function AccessGateModal({
       required_plan: requiredPlan || "",
       source_page: sourcePage || location.pathname,
     });
+    if (reason === "limit_reached" && resourceType === "teacher_tasks") {
+      const reached = limit != null && current != null && Number(current) >= Number(limit);
+      trackGoal(reached ? "teacher_task_limit_reached" : "teacher_task_limit_approached", {
+        plan: currentPlan || "",
+        usage: current ?? "",
+        limit: limit ?? "",
+        trigger: sourcePage || "create",
+      });
+    } else if (reason === "limit_reached" && resourceType === "teacher_task_copies") {
+      trackGoal("teacher_task_copy_limit_reached", {
+        plan: currentPlan || "",
+        usage: current ?? "",
+        limit: limit ?? "",
+        trigger: "copy",
+      });
+    } else if (resourceType === "teacher_task_attachments") {
+      trackGoal("teacher_task_attachment_paywall_viewed", {
+        plan: currentPlan || "",
+        trigger: "file",
+      });
+    }
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
@@ -80,6 +101,8 @@ export default function AccessGateModal({
     requiredPlan,
     sourcePage,
     location.pathname,
+    current,
+    limit,
   ]);
 
   useEffect(() => {
@@ -227,6 +250,18 @@ export default function AccessGateModal({
                     resource_type: resourceType,
                     required_plan: requiredPlan || "",
                   });
+                  if (
+                    resourceType === "teacher_tasks"
+                    || resourceType === "teacher_task_copies"
+                    || resourceType === "teacher_task_attachments"
+                  ) {
+                    trackGoal("teacher_task_upgrade_clicked", {
+                      plan: currentPlan || "",
+                      usage: current ?? "",
+                      limit: limit ?? "",
+                      trigger: resourceType,
+                    });
+                  }
                   onClose();
                 }}
               >

@@ -192,6 +192,8 @@ class SubscriptionLimitService:
             "workbooks": counts["workbooks"],
             "ai_requests": counts["ai_requests"],
             "storage_bytes": counts["storage_bytes"],
+            "teacher_tasks": counts.get("teacher_tasks", 0),
+            "teacher_task_copies": counts.get("teacher_task_copies", 0),
         }
 
     # ── can_* методы ─────────────────────────────────────────────────────────

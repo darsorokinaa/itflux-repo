@@ -92,6 +92,8 @@ def _plan_public(plan, *, promotion=None) -> dict:
             "variants_monthly": plan.max_variants_monthly,
             "workbooks_monthly": plan.max_workbooks_monthly,
             "storage_mb": plan.max_storage_mb,
+            "teacher_tasks": getattr(plan, "max_teacher_tasks", 20),
+            "teacher_task_copies_monthly": getattr(plan, "max_teacher_task_copies_monthly", 5),
         },
         "features": {
             "homework": plan.has_homework,
@@ -105,6 +107,9 @@ def _plan_public(plan, *, promotion=None) -> dict:
             "priority_support": getattr(plan, "has_priority_support", False),
             "analytics": getattr(plan, "has_analytics", False),
             "simulators": getattr(plan, "has_simulators", False),
+            "teacher_task_attachments": getattr(plan, "has_teacher_task_attachments", False),
+            "teacher_task_bulk_import": getattr(plan, "has_teacher_task_bulk_import", False),
+            "teacher_task_advanced_analytics": getattr(plan, "has_analytics", False),
             "student_booking": SubscriptionAccessService.plan_content_rank(plan)
             >= PLAN_SLUG_TO_RANK.get("teacher", 1),
         },
@@ -397,6 +402,9 @@ class SubscriptionUsageView(APIView):
                 "analytics": getattr(plan, "has_analytics", False),
                 "simulators": getattr(plan, "has_simulators", False),
                 "student_booking": SubscriptionAccessService.can_use_student_booking(request.user),
+                "teacher_task_attachments": getattr(plan, "has_teacher_task_attachments", False),
+                "teacher_task_bulk_import": getattr(plan, "has_teacher_task_bulk_import", False),
+                "teacher_task_advanced_analytics": getattr(plan, "has_analytics", False),
             },
         })
 

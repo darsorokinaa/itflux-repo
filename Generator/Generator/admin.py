@@ -43,6 +43,7 @@ from .models import (
     Update,
     Variant,
     VariantContent,
+    TeacherTaskBank,
     username_for_created_by,
 )
 
@@ -264,6 +265,10 @@ class TaskAdmin(SearchByIdMixin, admin.ModelAdmin):
 
     list_display = (
         "id",
+        "scope",
+        "owner_teacher",
+        "local_number",
+        "status",
         "quick_level",
         "task",
         "vpr_class",
@@ -278,6 +283,8 @@ class TaskAdmin(SearchByIdMixin, admin.ModelAdmin):
         "added_at",
     )
     list_filter = (
+        "scope",
+        "status",
         ("task", admin.RelatedOnlyFieldListFilter),
         "is_active",
         "quick_level",
@@ -298,11 +305,12 @@ class TaskAdmin(SearchByIdMixin, admin.ModelAdmin):
     list_display_links = ("id",)
     list_per_page = 25
     show_full_result_count = False
-    raw_id_fields = ("task",)
+    raw_id_fields = ("task", "owner_teacher", "source_task")
     autocomplete_fields = ("subtopic",)
     readonly_fields = ("created_by",)
     fieldsets = (
         (None, {"fields": ("task", "subtopic", "is_active", "task_template", "answer", "max_score", "files", "author", "added_at", "created_by")}),
+        ("Банк учителя", {"fields": ("scope", "owner_teacher", "local_number", "status", "source_task")}),
         ("ВПР", {"fields": ("vpr_class", "vpr_basic", "vpr_advanced", "truth_table_enabled")}),
     )
 
@@ -357,11 +365,12 @@ class SubTopicAdmin(admin.ModelAdmin):
 
 @admin.register(Variant)
 class VariantAdmin(SearchByIdMixin, admin.ModelAdmin):
-    list_display = ("id", "var_subject", "level", "created_by", "created_at")
+    list_display = ("id", "var_subject", "level", "owner_teacher", "local_number", "created_by", "created_at")
     list_filter = ("var_subject", "level", "created_by")
     search_fields = ("created_by",)
     date_hierarchy = "created_at"
-    list_select_related = ("var_subject", "level")
+    list_select_related = ("var_subject", "level", "owner_teacher")
+    raw_id_fields = ("owner_teacher",)
     list_per_page = 25
     show_full_result_count = False
 
@@ -394,6 +403,14 @@ class VariantContentAdmin(admin.ModelAdmin):
             q = Q(id=val) | Q(variant_id=val) | Q(task_id=val)
             return self.model.objects.filter(q).distinct(), True
         return super().get_search_results(request, queryset, search_term)
+
+
+@admin.register(TeacherTaskBank)
+class TeacherTaskBankAdmin(admin.ModelAdmin):
+    list_display = ("id", "public_code", "teacher", "next_task_number", "next_variant_number", "created_at")
+    search_fields = ("public_code", "teacher__username", "teacher__email")
+    readonly_fields = ("public_code", "created_at")
+    raw_id_fields = ("teacher",)
 
 
 @admin.register(Criteria)

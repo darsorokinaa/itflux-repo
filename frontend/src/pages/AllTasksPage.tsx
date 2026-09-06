@@ -23,6 +23,10 @@ import { formatGroupsCount, formatTasksCount } from "../utils/formatTasksCount";
 import VariantCreateBar from "../components/VariantCreateBar";
 import WorkbookCreateBar from "../components/WorkbookCreateBar";
 import type { WorkbookTask } from "../utils/buildWorkbookHtml";
+import { fetchCabinetSession } from "../utils/cabinetAuth";
+import { copyGlobalTaskToMyBank, fetchMyTask, fetchMyTasksMeta } from "../utils/teacherTaskBankApi";
+import { useAccessGate } from "../hooks/useAccessGate";
+import "../styles/my-task-bank.css";
 // TEMP: кнопка «Код» временно скрыта
 // import { isInformaticsCodeEditorContext } from "../utils/isOgeInformaticsTask";
 // import type { TaskFileSource } from "../components/InformaticsCodeEditor/types";
@@ -74,6 +78,11 @@ type BankTask = {
   author?: string | null;
   tags?: TaskTag[];
   group_id?: number | null;
+  scope?: string | null;
+  source_label?: string | null;
+  local_number?: number | null;
+  public_code?: string | null;
+  bank_code?: string | null;
 };
 
 type BankResponse = {
@@ -272,6 +281,7 @@ type AllTasksFilters = {
   subtopicId: string;
   onlyFipi: boolean;
   author: string;
+  source: "all" | "global" | "mine";
   page: number;
 };
 
@@ -291,6 +301,7 @@ const ALL_TASKS_FILTER_PARAM_KEYS = [
   "subtopic",
   "fipi",
   "author",
+  "source",
   "page",
 ] as const;
 
@@ -328,10 +339,13 @@ function readFiltersFromSearchParams(
   const subtopicId = subtopicRaw;
   const usesFipiFilter = FIPI_FILTER_LEVELS.has(level);
   const onlyFipi = usesFipiFilter && sp.get("fipi") === "1";
-  const author = usesFipiFilter ? "" : (sp.get("author")?.trim() ?? "");
+  const author = sp.get("author")?.trim() ?? "";
+  const src = (sp.get("source") || "").trim();
+  const source: AllTasksFilters["source"] =
+    src === "mine" || src === "global" || src === "all" ? src : "all";
   const page = Math.max(1, Number(sp.get("page")) || 1);
 
-  return { level, subject, vprGrade, vprAdvanced, taskListId, subtopicId, onlyFipi, author, page };
+  return { level, subject, vprGrade, vprAdvanced, taskListId, subtopicId, onlyFipi, author, source, page };
 }
 
 function writeFiltersToSearchParams(f: AllTasksFilters): URLSearchParams {
@@ -346,8 +360,12 @@ function writeFiltersToSearchParams(f: AllTasksFilters): URLSearchParams {
   if (f.subtopicId) p.set("subtopic", f.subtopicId);
   if (FIPI_FILTER_LEVELS.has(f.level)) {
     if (f.onlyFipi) p.set("fipi", "1");
-  } else if (f.author) {
+  }
+  if (f.author) {
     p.set("author", f.author);
+  }
+  if (f.source && f.source !== "all") {
+    p.set("source", f.source);
   }
   if (f.page > 1) p.set("page", String(f.page));
   return p;
@@ -368,6 +386,10 @@ function loadStoredFilterParams(): URLSearchParams | null {
       subtopicId: String(parsed.subtopicId || ""),
       onlyFipi: Boolean(parsed.onlyFipi),
       author: String(parsed.author || ""),
+      source:
+        parsed.source === "mine" || parsed.source === "global" || parsed.source === "all"
+          ? parsed.source
+          : "all",
       page: Math.max(1, Number(parsed.page) || 1),
     });
   } catch {
@@ -431,6 +453,49 @@ export default function AllTasksPage() {
   const [taskListId, setTaskListId] = useState(initialFilters.taskListId);
   const [subtopicId, setSubtopicId] = useState(initialFilters.subtopicId);
   const [page, setPage] = useState(initialFilters.page);
+  const [isTeacher, setIsTeacher] = useState(false);
+  const [taskSource, setTaskSource] = useState<"all" | "global" | "mine">(initialFilters.source);
+  const [copyBusyId, setCopyBusyId] = useState<number | null>(null);
+  const [copyMessage, setCopyMessage] = useState<string>("");
+  const [copyMeta, setCopyMeta] = useState<{
+    copies_this_period?: number;
+    copy_limit?: number | null;
+    tasks?: number;
+    task_limit?: number | null;
+  } | null>(null);
+  const { modal: accessModal, openFromError, openGate } = useAccessGate({
+    authenticated: isTeacher,
+    sourcePage: "/tasks",
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCabinetSession()
+      .then((session) => {
+        if (!cancelled) {
+          setIsTeacher(!!session?.authenticated && session?.user?.role === "teacher");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setIsTeacher(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTeacher) return undefined;
+    let cancelled = false;
+    fetchMyTasksMeta()
+      .then((meta) => {
+        if (!cancelled) setCopyMeta(meta?.usage || null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isTeacher]);
 
   const usesFipiFilter = FIPI_FILTER_LEVELS.has(level);
 
@@ -471,6 +536,44 @@ export default function AllTasksPage() {
   const [openAnswers, setOpenAnswers] = useState<Record<number, boolean>>({});
   const [pickDraft, setPickDraft] = useState<WorkbookTask[]>([]);
   const [pickMode, setPickMode] = useState<"workbook" | "variant" | null>(null);
+
+  useEffect(() => {
+    const pick = searchParams.get("pick");
+    const addId = Number(searchParams.get("add") || "");
+    if (pick === "variant") {
+      setPickMode("variant");
+    }
+    if (!addId) return undefined;
+    let cancelled = false;
+    fetchMyTask(addId)
+      .then((task) => {
+        if (cancelled || !task?.id) return;
+        setPickMode("variant");
+        if (task.level) setLevel(String(task.level));
+        if (task.subject) setSubject(task.subject as SubjectId);
+        if (task.task_list_id) setTaskListId(String(task.task_list_id));
+        setPickDraft((prev) => {
+          if (prev.some((item) => item.id === task.id)) return prev;
+          return [
+            ...prev,
+            {
+              id: task.id,
+              task_number: task.exam_task_number ?? null,
+              text: task.text || task.text_preview || "",
+              answer: task.answer,
+              subtopic: task.subtopic,
+              task_title: task.task_title,
+              file_url: task.file_url,
+            },
+          ];
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- consume deep-link once
+  }, []);
   const canEditTaskTags = useCanEditTaskTags();
   const canEditBankTasks = useCanEditBankTasks();
   const [tagCatalog, setTagCatalog] = useState<TaskTag[]>([]);
@@ -696,7 +799,8 @@ export default function AllTasksPage() {
       taskListId,
       subtopicId,
       onlyFipi: usesFipiFilter ? onlyFipi : false,
-      author: usesFipiFilter ? "" : author,
+      author,
+      source: taskSource,
       page,
     };
     persistAllTasksFilters(payload);
@@ -704,7 +808,7 @@ export default function AllTasksPage() {
     setSearchParams((prev) => (prev.toString() === next.toString() ? prev : next), {
       replace: true,
     });
-  }, [catalogReady, level, subject, vprGrade, vprAdvanced, taskListId, subtopicId, onlyFipi, author, page, usesFipiFilter, setSearchParams]);
+  }, [catalogReady, level, subject, vprGrade, vprAdvanced, taskListId, subtopicId, onlyFipi, author, taskSource, page, usesFipiFilter, setSearchParams]);
 
   useEffect(() => {
     if (!catalogReady || !catalog.length) return;
@@ -749,7 +853,9 @@ export default function AllTasksPage() {
 
   useEffect(() => {
     let cancelled = false;
-    const url = `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/tasks/${buildQuery(level, vprGrade, vprAdvanced)}`;
+    const url = `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/tasks/${buildQuery(level, vprGrade, vprAdvanced, {
+      source: isTeacher && taskSource !== "global" ? taskSource : undefined,
+    })}`;
 
     fetch(url, { credentials: "same-origin" })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
@@ -765,13 +871,14 @@ export default function AllTasksPage() {
     return () => {
       cancelled = true;
     };
-  }, [level, subject, vprGrade, vprAdvanced]);
+  }, [level, subject, vprGrade, vprAdvanced, isTeacher, taskSource]);
 
   useEffect(() => {
     let cancelled = false;
     setFiltersLoading(true);
     const qs = buildQuery(level, vprGrade, vprAdvanced, {
       task_list_id: taskListId || undefined,
+      source: isTeacher && taskSource !== "global" ? taskSource : undefined,
     });
     const url = `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/task-bank-filters/${qs}`;
 
@@ -790,7 +897,7 @@ export default function AllTasksPage() {
     return () => {
       cancelled = true;
     };
-  }, [level, subject, vprGrade, vprAdvanced, taskListId, filtersTick]);
+  }, [level, subject, vprGrade, vprAdvanced, taskListId, filtersTick, isTeacher, taskSource]);
 
   useEffect(() => {
     if (!subtopicId) return;
@@ -800,12 +907,12 @@ export default function AllTasksPage() {
   }, [staffSubtopics, subtopicsForTask, subtopicId]);
 
   useEffect(() => {
-    if (!author || usesFipiFilter) return;
+    if (!author) return;
     const authors = filterOptions?.authors ?? [];
     if (authors.length && !authors.includes(author)) {
       setAuthor("");
     }
-  }, [filterOptions, author, usesFipiFilter]);
+  }, [filterOptions, author]);
 
   const fetchTasks = useCallback(async () => {
     if (!staffGroupId && !taskListId && !subtopicId) {
@@ -822,7 +929,7 @@ export default function AllTasksPage() {
 
     const groupDescriptor = taskListId ? groupByTaskListId.get(taskListId) ?? null : null;
     const onlyFipiParam = usesFipiFilter && onlyFipi ? "1" : undefined;
-    const authorParam = !usesFipiFilter && author ? author : undefined;
+    const authorParam = author ? author : undefined;
 
     try {
       if (staffGroupId) {
@@ -879,6 +986,7 @@ export default function AllTasksPage() {
           author: authorParam,
           task_list_id: taskListId || undefined,
           subtopic_id: subtopicId || undefined,
+          source: isTeacher && taskSource !== "global" ? taskSource : undefined,
         });
         const res = await fetch(
           `/api/${encodeURIComponent(level)}/${encodeURIComponent(subject)}/task-bank/${qs}`,
@@ -915,6 +1023,8 @@ export default function AllTasksPage() {
     subtopicId,
     staffGroupId,
     groupByTaskListId,
+    isTeacher,
+    taskSource,
   ]);
 
   useEffect(() => {
@@ -1143,6 +1253,7 @@ export default function AllTasksPage() {
           data-level={level}
           data-subject={subject}
         >
+          {accessModal}
           <button
             type="button"
             className="all-tasks-filters-toggle"
@@ -1155,7 +1266,7 @@ export default function AllTasksPage() {
               {levelTitle}
               {level === "vpr" && vprAdvanced ? " · углублённый" : ""}
               {usesFipiFilter && onlyFipi ? " · ФИПИ" : ""}
-              {!usesFipiFilter && author ? ` · ${author}` : ""}
+              {author ? ` · ${author}` : ""}
             </span>
           </button>
 
@@ -1164,6 +1275,35 @@ export default function AllTasksPage() {
             className={`all-tasks-filters${filtersOpen ? " is-open" : ""}`}
             style={{ "--filter-accent": levelDef?.bg ?? "#2b52f5" } as CSSProperties}
           >
+            {isTeacher ? (
+              <div className="all-tasks-filter" style={{ minWidth: "100%", maxWidth: "100%" }}>
+                <span className="all-tasks-filter__label">Источник задач</span>
+                <div className="mtb-chips" style={{ marginBottom: 0 }}>
+                  {([
+                    ["all", "Все", ""],
+                    ["global", "Общий банк", "mtb-chip--platform"],
+                    ["mine", "Мои задачи", "mtb-chip--mine"],
+                  ] as const).map(([id, label, tone]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        className={`mtb-chip ${tone}${taskSource === id ? " is-active" : ""}`.trim()}
+                        onClick={() => {
+                          setTaskSource(id);
+                          resetPage();
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                </div>
+                {copyMessage ? <p className="all-tasks-meta">{copyMessage}</p> : null}
+                {copyMeta?.copy_limit != null
+                  && copyMeta.copy_limit - (copyMeta.copies_this_period || 0) === 1 ? (
+                  <p className="all-tasks-meta">Осталось 1 копирование в этом месяце</p>
+                ) : null}
+              </div>
+            ) : null}
             <label className="all-tasks-filter">
               <span className="all-tasks-filter__label">Уровень</span>
               <select
@@ -1315,7 +1455,8 @@ export default function AllTasksPage() {
                   <span>Только ФИПИ</span>
                 </span>
               </label>
-            ) : (
+            ) : null}
+            {isTeacher || !usesFipiFilter ? (
               <label className="all-tasks-filter">
                 <span className="all-tasks-filter__label">Автор</span>
                 <select
@@ -1335,7 +1476,7 @@ export default function AllTasksPage() {
                   ))}
                 </select>
               </label>
-            )}
+            ) : null}
           </div>
 
           <div className="all-tasks-meta" aria-live="polite">
@@ -1361,7 +1502,7 @@ export default function AllTasksPage() {
                     <span className="all-tasks-meta__count">
                       {bankUsesGroups ? formatGroupsCount(visibleTotal) : formatTasksCount(visibleTotal)}
                       {usesFipiFilter && onlyFipi ? " · только ФИПИ" : ""}
-                      {!usesFipiFilter && author ? ` · ${author}` : ""}
+                      {author ? ` · ${author}` : ""}
                     </span>
                     {bankUsesGroups && activeGroupDescriptor ? (
                       <span className="all-tasks-meta__badge">
@@ -1723,6 +1864,7 @@ export default function AllTasksPage() {
                       t.subdivision === "alg" ? "all-tasks-item--alg" : "",
                       isFunctionGraphTask(t) ? "all-tasks-item--function-graphs" : "",
                       pickMode && inPick ? "all-tasks-item--in-workbook" : "",
+                      isTeacher && t.source_label === "teacher" ? "all-tasks-item--mine" : "",
                     ]
                       .filter(Boolean)
                       .join(" ")}
@@ -1732,7 +1874,26 @@ export default function AllTasksPage() {
                     <div className="all-tasks-item__card">
                       <header className="all-tasks-item__head">
                         <p className="all-tasks-item__meta">
-                          <span className="all-tasks-item__num">№{taskNumber}</span>
+                          <span className="all-tasks-item__num">
+                            {t.source_label === "teacher" && t.local_number != null
+                              ? `№${t.local_number}`
+                              : `№${taskNumber}`}
+                          </span>
+                          {isTeacher ? (
+                            <span
+                              className={`mtb-badge ${
+                                t.source_label === "teacher" ? "mtb-badge--mine" : "mtb-badge--platform"
+                              }`}
+                            >
+                              {t.source_label === "teacher" ? "Моя задача" : "Общий банк"}
+                            </span>
+                          ) : null}
+                          {t.public_code ? (
+                            <>
+                              <span className="all-tasks-item__meta-sep" aria-hidden>·</span>
+                              <span>{t.public_code}</span>
+                            </>
+                          ) : null}
                           <span className="all-tasks-item__meta-sep" aria-hidden>
                             ·
                           </span>
@@ -1772,6 +1933,47 @@ export default function AllTasksPage() {
                             onClick={() => setOpenBoardForTaskId(t.id)}
                             hasDraft={hasTaskBoardDraft}
                           />
+                          {t.source_label !== "teacher" ? (
+                            <button
+                              type="button"
+                              className="all-tasks-item__answer-btn"
+                              disabled={copyBusyId === t.id}
+                              onClick={async () => {
+                                if (!isTeacher) {
+                                  openGate({
+                                    reason: "anonymous",
+                                    resourceType: "teacher_tasks",
+                                    requiredPlan: "start",
+                                    sourcePage: "copy",
+                                    returnUrl: "/tasks/my",
+                                  });
+                                  return;
+                                }
+                                setCopyBusyId(t.id);
+                                setCopyMessage("");
+                                try {
+                                  const copy = await copyGlobalTaskToMyBank(t.id);
+                                  setCopyMessage(`Скопировано в мой банк: ${copy.public_code || `№${copy.local_number}`}`);
+                                  setCopyMeta((prev) => {
+                                    if (!prev) return prev;
+                                    return {
+                                      ...prev,
+                                      copies_this_period: (prev.copies_this_period || 0) + 1,
+                                      tasks: (prev.tasks || 0) + 1,
+                                    };
+                                  });
+                                } catch (err) {
+                                  if (!openFromError(err, { sourcePage: "copy" })) {
+                                    setCopyMessage(err instanceof Error ? err.message : "Не удалось скопировать");
+                                  }
+                                } finally {
+                                  setCopyBusyId(null);
+                                }
+                              }}
+                            >
+                              Скопировать в мой банк
+                            </button>
+                          ) : null}
                         </div>
                       </header>
                       {canEditTaskTags ? (

@@ -29,10 +29,9 @@ export default function SearchByIdForm({ kind, initialQuery = "", className = ""
         name="query"
         type="search"
         className="nav-hub-page__search-input"
-        placeholder={kind === "task" ? "ID задачи…" : "ID варианта…"}
+        placeholder={kind === "task" ? "ID или код задачи…" : "ID варианта…"}
         defaultValue={initialQuery}
         autoComplete="off"
-        inputMode="numeric"
       />
       <button type="submit" className="nav-hub-page__search-btn">
         Найти

@@ -40,6 +40,7 @@ export const CABINET_NAV_GROUPS = [
       // TEMP: ИИ-помощник скрыт
       // { id: "ai", label: "ИИ-помощник", path: "/cabinet/ai", icon: "spark" },
       { id: "task-bank", label: "Банк задач", path: "/tasks", icon: "tasks", accent: true, newTab: true },
+      { id: "my-task-bank", label: "Мой банк задач", path: "/tasks/my", icon: "cards" },
     ],
   },
 ];
@@ -71,6 +72,7 @@ export const CABINET_MORE_GROUPS = [
     items: [
       { id: "plans", label: "Планы уроков", path: "/cabinet/plans", icon: "plan" },
       { id: "library", label: "Библиотека", path: "/cabinet/library", icon: "lessons" },
+      { id: "my-task-bank", label: "Мой банк задач", path: "/tasks/my", icon: "cards" },
       { id: "interactives", label: "Интерактивы", path: "/cabinet/interactives", icon: "interactives" },
       { id: "boards", label: "Интерактивные доски", path: "/cabinet/boards", icon: "board" },
       { id: "files", label: "Мои файлы", path: "/cabinet/files", icon: "folder" },

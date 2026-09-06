@@ -87,7 +87,14 @@ def get_quota_bytes(user) -> int:
 def calc_usage_bytes(user) -> int:
     # Учитываем active и trashed; после purge запись исчезает.
     total = CabinetFile.objects.filter(owner=user).aggregate(total=Sum("size")).get("total")
-    return int(total or 0)
+    used = int(total or 0)
+    try:
+        from .teacher_task_entitlements import teacher_task_bank_bytes
+
+        used += int(teacher_task_bank_bytes(user) or 0)
+    except Exception:
+        pass
+    return used
 
 
 def get_quota_info(user) -> dict:

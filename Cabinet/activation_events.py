@@ -73,6 +73,16 @@ LESSON_OPENED_PURCHASE = "lesson_opened_purchase"
 LESSON_OPENED_FREE = "lesson_opened_free"
 LESSON_OPENED_DEMO = "lesson_opened_demo"
 
+TEACHER_TASK_CREATED = "teacher_task_created"
+TEACHER_TASK_EDITED = "teacher_task_edited"
+TEACHER_TASK_DUPLICATED = "teacher_task_duplicated"
+TEACHER_TASK_COPIED_FROM_GLOBAL = "teacher_task_copied_from_global"
+TEACHER_TASK_ADDED_TO_VARIANT = "teacher_task_added_to_variant"
+TEACHER_TASK_ARCHIVED = "teacher_task_archived"
+TEACHER_TASK_LIMIT_REACHED = "teacher_task_limit_reached"
+TEACHER_TASK_COPY_LIMIT_REACHED = "teacher_task_copy_limit_reached"
+TEACHER_TASK_ATTACHMENT_PAYWALL = "teacher_task_attachment_paywall_viewed"
+
 INTENT_EVENTS = frozenset(
     {
         ADD_STUDENT_CTA_VIEWED,
@@ -120,6 +130,15 @@ CONFIRMED_EVENTS = frozenset(
         LESSON_OPENED_PURCHASE,
         LESSON_OPENED_FREE,
         LESSON_OPENED_DEMO,
+        TEACHER_TASK_CREATED,
+        TEACHER_TASK_EDITED,
+        TEACHER_TASK_DUPLICATED,
+        TEACHER_TASK_COPIED_FROM_GLOBAL,
+        TEACHER_TASK_ADDED_TO_VARIANT,
+        TEACHER_TASK_ARCHIVED,
+        TEACHER_TASK_LIMIT_REACHED,
+        TEACHER_TASK_COPY_LIMIT_REACHED,
+        TEACHER_TASK_ATTACHMENT_PAYWALL,
     }
 )
 

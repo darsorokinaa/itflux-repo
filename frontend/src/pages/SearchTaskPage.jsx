@@ -5,26 +5,43 @@ import MathContent from "../components/MathContent";
 import { isOgeInformaticsTask, isOgeRusTask13 } from "../utils/isOgeInformaticsTask";
 import StateView from "../components/StateView";
 import TaskNoAnswerBadge from "../components/TaskNoAnswerBadge";
-import { devApiBase } from "../utils/devApiBase";
+
+function noticeAction(notice) {
+  if (notice?.bank_url) {
+    return (
+      <Link to={notice.bank_url} className="state-view__btn">
+        Открыть мой банк
+      </Link>
+    );
+  }
+  return (
+    <Link to={notice?.login_url || "/cabinet/login"} className="state-view__btn">
+      Войти в аккаунт
+    </Link>
+  );
+}
 
 function SearchTaskPage() {
   const location = useLocation();
   const q = new URLSearchParams(location.search).get("q")?.trim() ?? "";
 
   const [tasks, setTasks] = useState([]);
+  const [notice, setNotice] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!q) {
       setTasks([]);
+      setNotice(null);
       return;
     }
     setLoading(true);
     setError(null);
-    const apiBase = devApiBase();
-    fetch(`${apiBase}/api/search_task/?q=${encodeURIComponent(q)}`, {
-      credentials: apiBase ? "omit" : "same-origin",
+    setNotice(null);
+    // Same-origin /api, не devApiBase(): иначе в Vite сессия localhost не уходит на 127.0.0.1:8000.
+    fetch(`/api/search_task/?q=${encodeURIComponent(q)}`, {
+      credentials: "same-origin",
     })
       .then((res) => {
         if (!res.ok) throw new Error(res.statusText);
@@ -32,10 +49,12 @@ function SearchTaskPage() {
       })
       .then((data) => {
         setTasks(data.tasks || []);
+        setNotice(data.notice || null);
       })
       .catch((err) => {
         setError(err.message);
         setTasks([]);
+        setNotice(null);
       })
       .finally(() => setLoading(false));
   }, [q]);
@@ -48,10 +67,11 @@ function SearchTaskPage() {
           <div className="container search-task-page">
             <div className="search-task-hero">
               <h1>Поиск задачи</h1>
-              <p>Введите числовой ID задачи из банка.</p>
+              <p>Введите ID или код задачи из банка (например D2BQN-001).</p>
               <SearchByIdForm kind="task" className="search-page__form" />
               <p className="search-page__hint">
-                Или откройте <Link to="/tasks">все задачи</Link> с фильтрами по предмету и уровню.
+                Свои задачи — в <Link to="/tasks/my">моём банке</Link>. Или откройте{" "}
+                <Link to="/tasks">все задачи</Link> с фильтрами по предмету и уровню.
               </p>
             </div>
           </div>
@@ -65,12 +85,12 @@ function SearchTaskPage() {
       <div className="digital-flow-page__wrap">
         <div className="container search-task-page">
           <div className="search-task-hero">
-            <h1>Поиск: ID {q}</h1>
+            <h1>Поиск: {q}</h1>
             <SearchByIdForm kind="task" initialQuery={q} className="search-page__form" />
           </div>
 
           {loading && (
-        <StateView variant="loading" title="Ищем задачу" description={`Загружаем задачу с ID ${q}…`} />
+        <StateView variant="loading" title="Ищем задачу" description={`Загружаем задачу ${q}…`} />
       )}
 
       {!loading && error && (
@@ -81,12 +101,21 @@ function SearchTaskPage() {
         />
       )}
 
-      {!loading && !error && tasks.length === 0 && (
+      {!loading && !error && notice ? (
+        <StateView
+          variant="locked"
+          title="Задача недоступна"
+          description={notice.message}
+          action={noticeAction(notice)}
+        />
+      ) : null}
+
+      {!loading && !error && !notice && tasks.length === 0 && (
         <StateView
           variant="search"
           title="Ничего не найдено"
-          description={`Задача с ID ${q} не найдена. Проверьте правильность введённого номера.`}
-          action={<Link to="/tasks" className="state-view__btn state-view__btn--ghost">Открыть все задачи</Link>}
+          description={`Задача ${q} не найдена. Проверьте правильность введённого номера.`}
+          action={<Link to="/tasks/my" className="state-view__btn state-view__btn--ghost">Мой банк задач</Link>}
         />
       )}
 
@@ -99,6 +128,11 @@ function SearchTaskPage() {
                 <span className="search-task-id">ID: {t.id}</span>
                 {!t.answer ? (
                   <TaskNoAnswerBadge />
+                ) : null}
+                {t.mine ? (
+                  <Link to={`/tasks/my/${t.id}`} className="search-task-id">
+                    Открыть в моём банке
+                  </Link>
                 ) : null}
               </div>
               <div className="search-task-card-body">

@@ -86,6 +86,9 @@ export function useSubscription() {
     canCreateLesson: true,
     canCreateInteractive: limits.interactives == null || (usage.interactives || 0) < limits.interactives,
     canUseAI: limits.ai_requests == null || (usage.ai_requests || 0) < limits.ai_requests,
+    canCreateTeacherTask: limits.teacher_tasks == null || (usage.teacher_tasks || 0) < limits.teacher_tasks,
+    canCopyTeacherTask: limits.teacher_task_copies_monthly == null
+      || (usage.teacher_task_copies || 0) < limits.teacher_task_copies_monthly,
   };
 }
 
@@ -105,6 +108,9 @@ export function handleLimitError(error, openModal) {
     LESSON_LIMIT_REACHED: "lessons",
     INTERACTIVE_LIMIT_REACHED: "interactives",
     AI_LIMIT_REACHED: "ai",
+    TEACHER_TASK_LIMIT_REACHED: "teacher_tasks",
+    TEACHER_TASK_COPY_LIMIT_REACHED: "teacher_task_copies",
+    TEACHER_TASK_ATTACHMENTS_REQUIRED: "teacher_task_attachments",
   };
 
   const type = LIMIT_MAP[code];

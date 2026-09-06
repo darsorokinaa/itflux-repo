@@ -13,9 +13,12 @@ describe("sanitizeTaskHtml", () => {
     expect(out.toLowerCase()).not.toContain("onerror");
   });
 
-  it("keeps safe educational markup", () => {
-    const out = sanitizeTaskHtml('<table><tr><td>1</td></tr></table><span class="math">x</span>');
-    expect(out).toContain("<table");
-    expect(out).toContain("math");
+  it("keeps image size from the teacher editor", () => {
+    const out = sanitizeTaskHtml(
+      '<img class="teacher-task-img" src="/media/x.png" width="240" style="width: 240px; height: auto;">',
+    );
+    expect(out).toContain("teacher-task-img");
+    expect(out).toContain("240");
+    expect(out.toLowerCase()).toContain("width");
   });
 });
