@@ -35,6 +35,11 @@ export const PALETTE = [
 ];
 
 export const WIDTHS = [2, 3, 5, 8];
+export const WIDTH_PRESETS = [
+  { value: 2, label: "Тонкая" },
+  { value: 4, label: "Средняя" },
+  { value: 8, label: "Толстая" },
+];
 export const MAX_TEXT_LEN = 280;
 export const MAX_POINTS_PER_STROKE = 800;
 export const MAX_POINTS_PER_BATCH = 40;
@@ -54,4 +59,12 @@ export function newAnnotationId() {
     return crypto.randomUUID();
   }
   return `ann-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Teacher always draws. Student only after an explicit teacher grant. */
+export function canDrawScreenShareAnnotations({
+  canManage = false,
+  participantsCanAnnotate = false,
+} = {}) {
+  return Boolean(canManage || participantsCanAnnotate === true);
 }

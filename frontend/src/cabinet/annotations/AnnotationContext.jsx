@@ -37,7 +37,7 @@ export function AnnotationProvider({
   currentUserId = null,
 }) {
   const [enabled, setEnabled] = useState(false);
-  const [tool, setTool] = useState(TOOLS.PEN);
+  const [tool, setTool] = useState(TOOLS.POINTER);
   const [color, setColor] = useState(() => participantColor(currentUserId));
   const [width, setWidth] = useState(3);
 
@@ -64,12 +64,13 @@ export function AnnotationProvider({
   const setEnabledSafe = useCallback((next) => {
     setEnabled((prev) => {
       const value = typeof next === "function" ? next(prev) : Boolean(next);
-      if (value) {
-        setTool((current) => (current === TOOLS.POINTER ? TOOLS.PEN : current));
-      }
       return value;
     });
   }, []);
+
+  useEffect(() => {
+    if (screenshareActive) setTool(TOOLS.POINTER);
+  }, [screenshareActive]);
 
   const toggle = useCallback(() => {
     setEnabledSafe((prev) => !prev);

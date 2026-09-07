@@ -4,6 +4,12 @@ import { createPortal } from "react-dom";
 import AnnotationToolbar from "../annotations/AnnotationToolbar";
 import { useAnnotationSession } from "../annotations/AnnotationContext";
 import { useElementClientRect } from "../annotations/useElementClientRect";
+import CabinetIcon from "../CabinetIcons";
+import {
+  collapsedAnnotationUi,
+  openedAnnotationUi,
+  shouldShowAnnotationTrigger,
+} from "../annotations/v2/zoomSession";
 import {
   appendStrokePoint,
   createStroke,
@@ -151,7 +157,7 @@ export default function ScreenShareAnnotationOverlay({
   compact = false,
   canManage = false,
   canAnnotate = false,
-  participantsCanAnnotate = true,
+  participantsCanAnnotate = false,
   currentUserId = null,
   displayName = "",
   sessionId = "",
@@ -190,6 +196,7 @@ export default function ScreenShareAnnotationOverlay({
   const [localStroke, setLocalStroke] = useState(null);
   const [textDraft, setTextDraft] = useState(null);
   const [redoStack, setRedoStack] = useState([]);
+  const [toolbarOpen, setToolbarOpen] = useState(false);
   const drawingRef = useRef(null);
   const activePointerRef = useRef(null);
   const pendingPointsRef = useRef([]);
@@ -204,7 +211,20 @@ export default function ScreenShareAnnotationOverlay({
   const setTool = session?.setTool ?? setLocalTool;
   const setColor = session?.setColor ?? setLocalColor;
   const setWidth = session?.setWidth ?? setLocalWidth;
-  const panelOpen = session ? session.enabled && session.target === "screenshare" : tool !== TOOLS.POINTER;
+  const panelOpen = toolbarOpen;
+
+  useEffect(() => {
+    const next = collapsedAnnotationUi();
+    setToolbarOpen(next.toolbarOpen);
+    setTool(next.tool);
+  }, [active, sessionId]); // eslint-disable-line react-hooks/exhaustive-deps -- reset per share session
+
+  useEffect(() => {
+    if (canAnnotate) return;
+    const next = collapsedAnnotationUi();
+    setToolbarOpen(next.toolbarOpen);
+    setTool(next.tool);
+  }, [canAnnotate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!session) {
@@ -567,7 +587,13 @@ export default function ScreenShareAnnotationOverlay({
     </svg>
   ) : null;
 
-  const toolbar = showToolbar && panelOpen ? (
+  const showTrigger = shouldShowAnnotationTrigger({ active, canAnnotate });
+  const collapseToolbar = () => {
+    const next = collapsedAnnotationUi();
+    setTool(next.tool);
+    setToolbarOpen(next.toolbarOpen);
+  };
+  const toolbar = showToolbar && showTrigger && panelOpen ? (
     <div className={`ann-toolbar-slot${compact ? " is-compact" : ""}`}>
       <AnnotationToolbar
         tool={tool}
@@ -588,7 +614,30 @@ export default function ScreenShareAnnotationOverlay({
         onClearMine={onClearMine}
         onClearAll={onClearAll}
         onSetParticipantsCanAnnotate={onSetParticipantsCanAnnotate}
+        extra={(
+          <button type="button" onClick={collapseToolbar} title="Свернуть" aria-label="Свернуть">
+            <CabinetIcon name="close" />
+          </button>
+        )}
       />
+    </div>
+  ) : showToolbar && showTrigger ? (
+    <div className={`ann-toolbar-slot${compact ? " is-compact" : ""}`}>
+      <button
+        type="button"
+        className="ss-ann-v2-reopen"
+        onClick={() => {
+          const next = openedAnnotationUi();
+          setTool(next.tool);
+          setToolbarOpen(next.toolbarOpen);
+        }}
+        title="Аннотации"
+        aria-expanded="false"
+        aria-label="Аннотации"
+      >
+        <CabinetIcon name="pencil" />
+        <span>Аннотации</span>
+      </button>
     </div>
   ) : null;
 

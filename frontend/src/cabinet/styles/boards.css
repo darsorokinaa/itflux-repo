@@ -2130,3 +2130,31 @@ html.cb-board-editor-open body {
     padding: 8px 12px;
   }
 }
+
+/* Толщина штриха: прячем три кнопки Excalidraw, свой slider в сайдбаре (как непрозрачность). */
+.cb-board-editor [data-testid="toolbar-stroke-width"],
+.cb-board-editor .cb-board-stroke-tool {
+  display: none !important;
+}
+
+.cb-board-editor fieldset:has([data-testid="strokeWidth-thin"]) > :not(legend):not(.cb-board-stroke-panel) {
+  display: none !important;
+}
+
+.cb-board-stroke-panel {
+  display: block;
+  width: 100%;
+}
+
+.cb-board-stroke-panel .range-wrapper {
+  padding-top: 8px;
+}
+
+.cb-board-stroke-panel__max {
+  position: absolute;
+  bottom: 0;
+  right: 4px;
+  font-size: 12px;
+  color: var(--text-primary-color, var(--cb-board-text-muted, #5c6570));
+}
+

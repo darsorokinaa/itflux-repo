@@ -7,9 +7,17 @@ import {
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { Excalidraw, useHandleLibrary } from "@excalidraw/excalidraw";
+import { CaptureUpdateAction, Excalidraw, useHandleLibrary } from "@excalidraw/excalidraw";
 import { boardLibraryAdapter } from "./boardLibrary";
+import { mountCoalescedPointerReplay } from "./boardPointerInput";
 import { mountBoardPdfToolbar } from "./boardPdfToolbar";
+import {
+  applyStrokeWidthToScene,
+  clampBoardStrokeWidth,
+  selectedStrokeWidthIds,
+  withBoardStrokeWidthDefault,
+} from "./boardStrokeWidth";
+import { mountBoardStrokeWidthControl } from "./boardStrokeWidthToolbar";
 
 type SceneFiles = Record<string, unknown>;
 
@@ -102,6 +110,7 @@ function BoardExcalidrawInner({
   const apiRef = useRef<ExcalidrawAPI | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const hostReadySentRef = useRef(false);
+  const strokeControlRef = useRef<ReturnType<typeof mountBoardStrokeWidthControl> | null>(null);
 
   useHandleLibrary({
     excalidrawAPI: api as never,
@@ -178,6 +187,57 @@ function BoardExcalidrawInner({
       onClick: () => onInsertPdfRef.current?.(),
     });
   }, [api, boot.viewModeEnabled, onInsertPdfRef]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || boot.viewModeEnabled) return undefined;
+    return mountCoalescedPointerReplay(host);
+  }, [boot.viewModeEnabled]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || boot.viewModeEnabled) return undefined;
+    const control = mountBoardStrokeWidthControl(host, {
+      enabled: true,
+      getWidth: () => apiRef.current?.getAppState?.()?.currentItemStrokeWidth,
+      setWidth: (width, commit) => {
+        const current = apiRef.current;
+        if (!current) return;
+        const nextWidth = clampBoardStrokeWidth(width);
+        const appState = current.getAppState?.() || {};
+        const selectedIds = selectedStrokeWidthIds(appState.selectedElementIds);
+        const elements = (
+          current.getSceneElementsIncludingDeleted?.()
+          || current.getSceneElements?.()
+          || []
+        ) as unknown[];
+        const nextElements = applyStrokeWidthToScene({
+          elements,
+          selectedIds,
+          width: nextWidth,
+        });
+        try {
+          current.updateScene?.({
+            ...(nextElements ? { elements: nextElements } : {}),
+            appState: { currentItemStrokeWidth: nextWidth },
+            captureUpdate: commit
+              ? CaptureUpdateAction.IMMEDIATELY
+              : CaptureUpdateAction.EVENTUALLY,
+          });
+        } catch {
+          /* ignore */
+        }
+      },
+    });
+    strokeControlRef.current = control;
+    if (api) {
+      control.sync(api.getAppState?.()?.currentItemStrokeWidth);
+    }
+    return () => {
+      control.unmount();
+      if (strokeControlRef.current === control) strokeControlRef.current = null;
+    };
+  }, [api, boot.viewModeEnabled]);
 
   const libraryReturnUrl =
     typeof window !== "undefined"
@@ -270,6 +330,9 @@ function BoardExcalidrawInner({
             ...boot.initialAppState,
             theme: boot.initialAppState.theme === "dark" ? "dark" : "light",
             viewModeEnabled: boot.viewModeEnabled,
+            currentItemStrokeWidth: withBoardStrokeWidthDefault(
+              boot.initialAppState.currentItemStrokeWidth,
+            ),
           },
           files: boot.initialFiles as never,
           // НЕ scrollToContent: иначе ученик «прыгает» к началу/центру сцены
@@ -284,6 +347,9 @@ function BoardExcalidrawInner({
           return `file-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         }}
         onChange={(elements, appState, files) => {
+          strokeControlRef.current?.sync(
+            (appState as { currentItemStrokeWidth?: unknown }).currentItemStrokeWidth,
+          );
           onChangeRef.current(
             elements as readonly unknown[],
             appState as unknown as Record<string, unknown>,

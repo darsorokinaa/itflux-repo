@@ -328,7 +328,7 @@ def report_screenshare_state(
         meeting=meeting,
         presenter_user=user if local_sharing else None,
         presenter_jitsi_id=jitsi_id,
-        participants_can_annotate=True,
+        participants_can_annotate=False,
         content_width=width,
         content_height=height,
         annotations=[],

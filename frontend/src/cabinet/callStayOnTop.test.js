@@ -4,6 +4,7 @@ import {
   callStayOnTopAvailable,
   closeCallStayOnTop,
   findSameOriginCallVideo,
+  liveCallVideoPipAvailable,
   requestCallStayOnTop,
   videoPipAvailable,
 } from "./callStayOnTop";
@@ -57,5 +58,24 @@ describe("callStayOnTop", () => {
       },
     };
     expect(findSameOriginCallVideo(iframe)).toBe(video);
+  });
+
+  it("does not open a document window when there is no call video", async () => {
+    const requestWindow = vi.fn();
+    vi.stubGlobal("document", {
+      pictureInPictureEnabled: true,
+      pictureInPictureElement: null,
+      querySelectorAll: () => [],
+    });
+    vi.stubGlobal("HTMLVideoElement", function HTMLVideoElement() {});
+    HTMLVideoElement.prototype.requestPictureInPicture = vi.fn();
+    vi.stubGlobal("window", {
+      documentPictureInPicture: { requestWindow },
+    });
+    const result = await requestCallStayOnTop({ iframe: null });
+    expect(result.ok).toBe(false);
+    expect(result.mode).toBe("no-video");
+    expect(requestWindow).not.toHaveBeenCalled();
+    expect(liveCallVideoPipAvailable(null)).toBe(false);
   });
 });

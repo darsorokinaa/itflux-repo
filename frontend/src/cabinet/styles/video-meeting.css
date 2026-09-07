@@ -3154,32 +3154,54 @@ body.vl-room-fullscreen .student-cabinet-nav {
   left: 50%;
   transform: translateX(-50%);
   z-index: 12000;
-  max-width: calc(100vw - 16px);
+  max-width: calc(100vw - 24px);
   pointer-events: none;
 }
 
 .ss-ann-v2-toolbar-slot.is-compact {
-  top: auto;
-  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-  left: 12px;
-  transform: none;
+  top: calc(var(--vl-header-height, 56px) + 10px);
+  bottom: auto;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .ss-ann-v2-toolbar-slot .ss-ann-v2-toolbar,
-.ss-ann-v2-toolbar-slot .ss-ann-v2-reopen {
+.ss-ann-v2-toolbar-slot .ss-ann-v2-reopen,
+.ann-toolbar-slot .ss-ann-v2-reopen {
   pointer-events: auto;
 }
 
 .ss-ann-v2-toolbar {
+  position: relative;
   flex-wrap: nowrap;
   max-width: 100%;
-  overflow-x: auto;
+  overflow: visible;
+  height: 40px;
+  padding: 4px 6px;
+  gap: 2px;
+  animation: ss-ann-v2-in 0.16s ease-out;
+}
+
+.ss-ann-v2-toolbar.ann-toolbar button {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+.ss-ann-v2-toolbar.ann-toolbar button.is-active {
+  background: rgba(148, 163, 184, 0.28);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(226, 232, 240, 0.45);
+}
+
+.ss-ann-v2-toolbar.ann-toolbar button.is-open {
+  background: rgba(148, 163, 184, 0.22);
 }
 
 .ss-ann-v2-toolbar__grip {
   width: 10px;
   height: 22px;
-  margin-right: 2px;
+  margin-right: 4px;
   border-radius: 4px;
   background: repeating-linear-gradient(
     to bottom,
@@ -3190,13 +3212,6 @@ body.vl-room-fullscreen .student-cabinet-nav {
   flex: 0 0 auto;
 }
 
-.ss-ann-v2-toolbar__title {
-  padding: 0 6px 0 2px;
-  font: 650 12px/1 Inter, system-ui, sans-serif;
-  color: #e2e8f0;
-  white-space: nowrap;
-}
-
 .ss-ann-v2-toolbar__sep {
   width: 1px;
   height: 18px;
@@ -3205,21 +3220,258 @@ body.vl-room-fullscreen .student-cabinet-nav {
   flex: 0 0 auto;
 }
 
+.ss-ann-v2-toolbar__status {
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  border-radius: 999px;
+  background: #b45309;
+  color: #fff;
+  font: 700 11px/18px Inter, system-ui, sans-serif;
+  text-align: center;
+}
+
+.ss-ann-v2-popwrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.ss-ann-v2-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 132px;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.96);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.38);
+  animation: ss-ann-v2-in 0.14s ease-out;
+}
+
+.ss-ann-v2-pop--confirm {
+  left: auto;
+  right: 0;
+  transform: none;
+  min-width: 168px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ss-ann-v2-pop--confirm p {
+  margin: 0;
+  font: 600 12px/1.35 Inter, system-ui, sans-serif;
+  color: #e2e8f0;
+}
+
+.ss-ann-v2-pop__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.ss-ann-v2-pop--confirm button {
+  width: auto !important;
+  height: 28px !important;
+  padding: 0 10px !important;
+  font: 650 12px/1 Inter, system-ui, sans-serif;
+}
+
+.ss-ann-v2-pop--confirm button.is-danger {
+  background: #b91c1c;
+  color: #fff;
+}
+
+.ss-ann-v2-colorbtn__chip {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+}
+
+.ss-ann-v2-widthbtn__mark,
+.ss-ann-v2-widthopt {
+  display: block;
+  width: 16px;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
 .ss-ann-v2-reopen {
   appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 0;
   border-radius: 999px;
-  padding: 8px 14px;
+  height: 36px;
+  padding: 0 12px 0 10px;
   background: rgba(15, 23, 42, 0.92);
   color: #e2e8f0;
   font: 650 13px/1 Inter, system-ui, sans-serif;
   cursor: pointer;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28);
+  animation: ss-ann-v2-in 0.16s ease-out;
+}
+
+.ss-ann-v2-reopen svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ss-ann-v2-reopen:hover {
+  background: rgba(30, 41, 59, 0.96);
+}
+
+.ss-ann-v2-allow {
+  width: auto !important;
+  padding: 0 8px !important;
+  gap: 6px !important;
+  font: 650 11px/1 Inter, system-ui, sans-serif;
+  color: #e2e8f0;
+}
+
+.ss-ann-v2-allow span {
+  white-space: nowrap;
+}
+
+.ss-ann-v2-allow.is-on {
+  background: #2563eb;
+  color: #fff;
+}
+
+.ss-ann-v2-more {
+  display: none;
+}
+
+.ss-ann-v2-pop--more {
+  min-width: 148px;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.ss-ann-v2-pop--more button {
+  width: 100% !important;
+  height: 36px !important;
+  justify-content: flex-start !important;
+  padding: 0 10px !important;
+  gap: 8px;
+}
+
+.ss-ann-v2-pop--width {
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.ss-ann-v2-pop--width button {
+  width: auto !important;
+  min-width: 112px;
+  height: 32px !important;
+  padding: 0 10px !important;
+  justify-content: flex-start !important;
+  gap: 8px;
+}
+
+.ss-ann-v2-widthopt__label {
+  font: 650 11px/1 Inter, system-ui, sans-serif;
+  color: #e2e8f0;
+}
+
+@media (pointer: coarse) {
+  .ss-ann-v2-toolbar.ann-toolbar button,
+  .ss-ann-v2-reopen {
+    min-width: 36px;
+    min-height: 36px;
+  }
+}
+
+@keyframes ss-ann-v2-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.video-lesson-page--share-mini .ss-ann-v2-toolbar-slot,
+.video-lesson-page--share-mini .ss-ann-v2-toolbar-slot.is-compact {
+  top: calc(var(--vl-header-height, 56px) + 10px);
+  bottom: auto;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .ss-ann-v2-pip-body .ss-ann-v2-toolbar {
   width: 100%;
   border-radius: 0;
+}
+
+@media (max-width: 720px) {
+  .ss-ann-v2-toolbar-slot,
+  .ss-ann-v2-toolbar-slot.is-compact,
+  .video-lesson-page--share-mini .ss-ann-v2-toolbar-slot,
+  .video-lesson-page--share-mini .ss-ann-v2-toolbar-slot.is-compact {
+    top: calc(var(--vl-header-height, 56px) + 8px);
+    bottom: auto;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    max-width: calc(100vw - 16px);
+  }
+
+  .ss-ann-v2-toolbar {
+    max-width: calc(100vw - 16px);
+    padding: 3px 4px;
+    gap: 1px;
+  }
+
+  .ss-ann-v2-toolbar.ann-toolbar button {
+    width: 28px;
+    height: 28px;
+  }
+
+  .ss-ann-v2-toolbar__grip {
+    display: none;
+  }
+
+  .ss-ann-v2-reopen span {
+    display: none;
+  }
+
+  .ss-ann-v2-reopen {
+    width: 36px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .ss-ann-v2-tool--optional,
+  .ss-ann-v2-allow span {
+    display: none;
+  }
+
+  .ss-ann-v2-more {
+    display: inline-flex;
+  }
+
+  .ss-ann-v2-allow {
+    padding: 0 !important;
+    width: 28px !important;
+  }
+
+  .ss-ann-v2-pop--confirm {
+    right: auto;
+    left: 50%;
+    transform: translateX(-50%);
+  }
 }
 
 .itflux-recovery-banner {

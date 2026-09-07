@@ -16,8 +16,16 @@ function distToSegment(px, py, x1, y1, x2, y2) {
 
 function hitTest(stroke, x, y, threshold = 0.02) {
   const pts = stroke?.points || [];
-  if (stroke.tool === "text" && pts[0]) {
+  const tool = String(stroke?.tool || "pen");
+  if (tool === "text" && pts[0]) {
     return Math.abs(pts[0].x - x) < 0.08 && Math.abs(pts[0].y - y) < 0.05;
+  }
+  if ((tool === "rect" || tool === "ellipse") && pts.length >= 2) {
+    const x1 = Math.min(pts[0].x, pts[pts.length - 1].x);
+    const y1 = Math.min(pts[0].y, pts[pts.length - 1].y);
+    const x2 = Math.max(pts[0].x, pts[pts.length - 1].x);
+    const y2 = Math.max(pts[0].y, pts[pts.length - 1].y);
+    return x >= x1 - threshold && x <= x2 + threshold && y >= y1 - threshold && y <= y2 + threshold;
   }
   if (pts.length < 2) {
     return pts[0] ? Math.hypot(pts[0].x - x, pts[0].y - y) <= threshold * 2 : false;

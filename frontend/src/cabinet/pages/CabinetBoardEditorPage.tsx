@@ -316,6 +316,9 @@ function applyRemoteSceneToApi(
       ...(local.activeTool != null ? { activeTool: local.activeTool } : {}),
       ...(typeof local.penMode === "boolean" ? { penMode: local.penMode } : {}),
       ...(typeof local.penDetected === "boolean" ? { penDetected: local.penDetected } : {}),
+      ...(typeof local.currentItemStrokeWidth === "number"
+        ? { currentItemStrokeWidth: local.currentItemStrokeWidth }
+        : {}),
     },
     files: scene.files || {},
     // Remote updates must not enter local undo stack (Excalidraw 0.18+).

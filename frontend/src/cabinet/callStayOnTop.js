@@ -16,7 +16,12 @@ export function documentPipAvailable() {
 }
 
 export function callStayOnTopAvailable() {
-  return videoPipAvailable() || documentPipAvailable();
+  return videoPipAvailable();
+}
+
+/** True only when the live Jitsi video can actually enter Picture-in-Picture. */
+export function liveCallVideoPipAvailable(iframe) {
+  return videoPipAvailable() && Boolean(findSameOriginCallVideo(iframe));
 }
 
 /**
@@ -56,42 +61,27 @@ function diag(event, extra = {}) {
  */
 export async function requestCallStayOnTop({ iframe = null } = {}) {
   diag("pip_requested", { video: videoPipAvailable() ? 1 : 0, doc: documentPipAvailable() ? 1 : 0 });
-  if (videoPipAvailable()) {
-    const video = findSameOriginCallVideo(iframe);
-    if (video) {
-      try {
-        if (typeof document !== "undefined" && document.pictureInPictureElement === video) {
-          diag("pip_opened", { mode: "video-pip", already: 1 });
-          return { ok: true, mode: "video-pip", video };
-        }
-        await video.requestPictureInPicture();
-        diag("pip_opened", { mode: "video-pip" });
-        return { ok: true, mode: "video-pip", video };
-      } catch {
-        diag("pip_failed", { mode: "video-pip" });
-      }
-    } else {
-      diag("pip_failed", { mode: "video-pip", reason: "no-video" });
-    }
+  if (!videoPipAvailable()) {
+    diag("pip_failed", { mode: "unsupported" });
+    return { ok: false, mode: "unsupported" };
   }
-
-  if (documentPipAvailable()) {
-    try {
-      const pipWindow = await window.documentPictureInPicture.requestWindow({
-        width: 320,
-        height: 72,
-        disallowReturnToOpener: false,
-      });
-      pipWindow.document.body.style.cssText = "margin:0;font:600 13px/1.3 Inter,system-ui,sans-serif;padding:12px 14px;background:#0f172a;color:#f8fafc;";
-      pipWindow.document.body.textContent = "Звонок продолжается. Вернитесь в окно урока, чтобы увидеть участника.";
-      diag("pip_opened", { mode: "document-pip" });
-      return { ok: true, mode: "document-pip", pipWindow };
-    } catch {
-      diag("pip_failed", { mode: "document-pip" });
-    }
+  const video = findSameOriginCallVideo(iframe);
+  if (!video) {
+    diag("pip_failed", { mode: "video-pip", reason: "no-video" });
+    return { ok: false, mode: "no-video" };
   }
-
-  return { ok: false, mode: "unsupported" };
+  try {
+    if (typeof document !== "undefined" && document.pictureInPictureElement === video) {
+      diag("pip_opened", { mode: "video-pip", already: 1 });
+      return { ok: true, mode: "video-pip", video };
+    }
+    await video.requestPictureInPicture();
+    diag("pip_opened", { mode: "video-pip" });
+    return { ok: true, mode: "video-pip", video };
+  } catch {
+    diag("pip_failed", { mode: "video-pip" });
+    return { ok: false, mode: "video-pip" };
+  }
 }
 
 export async function closeCallStayOnTop({ pipWindow = null } = {}) {

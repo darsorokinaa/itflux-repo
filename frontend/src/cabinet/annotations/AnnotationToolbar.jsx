@@ -46,7 +46,7 @@ export default function AnnotationToolbar({
   canManage = false,
   canUndo = false,
   canRedo = false,
-  participantsCanAnnotate = true,
+  participantsCanAnnotate = false,
   compact = false,
   hint = "",
   onToolChange,
@@ -147,8 +147,8 @@ export default function AnnotationToolbar({
             type="button"
             className={participantsCanAnnotate ? "is-active" : ""}
             onClick={() => onSetParticipantsCanAnnotate?.(!participantsCanAnnotate)}
-            title={participantsCanAnnotate ? "Запретить участникам рисовать" : "Разрешить участникам рисовать"}
-            aria-label={participantsCanAnnotate ? "Запретить участникам" : "Разрешить участникам"}
+            title={participantsCanAnnotate ? "Запретить пометки ученику" : "Разрешить пометки ученику"}
+            aria-label={participantsCanAnnotate ? "Запретить пометки ученику" : "Разрешить пометки ученику"}
           >
             <CabinetIcon name={participantsCanAnnotate ? "users" : "user"} />
           </button>

@@ -17,6 +17,7 @@ import {
   findAnnotationAt,
   lastOwnAnnotationId,
 } from "./annotationModel";
+import { canDrawScreenShareAnnotations } from "./constants";
 
 describe("screen-share content rect", () => {
   it("letterboxes 16:9 content inside a 4:3 host after chrome insets", () => {
@@ -168,5 +169,17 @@ describe("annotation operations", () => {
     ]);
     map = applyScreenshareOperation(map, { action: "clear_mine", author_id: 2 });
     expect([...map.keys()]).toEqual(["t1"]);
+  });
+});
+
+describe("screen-share annotation permissions", () => {
+  it("lets the teacher draw even when student annotations are off", () => {
+    expect(canDrawScreenShareAnnotations({ canManage: true, participantsCanAnnotate: false })).toBe(true);
+  });
+
+  it("blocks the student until the teacher grants drawing", () => {
+    expect(canDrawScreenShareAnnotations({ canManage: false, participantsCanAnnotate: false })).toBe(false);
+    expect(canDrawScreenShareAnnotations({ canManage: false, participantsCanAnnotate: undefined })).toBe(false);
+    expect(canDrawScreenShareAnnotations({ canManage: false, participantsCanAnnotate: true })).toBe(true);
   });
 });

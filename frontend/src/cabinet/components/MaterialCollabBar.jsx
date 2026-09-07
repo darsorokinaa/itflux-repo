@@ -61,6 +61,11 @@ export default function MaterialCollabBar({
       : reconnectElapsedMs,
   });
   const statusKind = connection.kind;
+  const showSyncStatus =
+    statusKind === COLLAB_UI.CONNECTING
+    || statusKind === COLLAB_UI.RECONNECTING
+    || statusKind === COLLAB_UI.ERROR
+    || statusKind === COLLAB_UI.OFFLINE;
   const statusLabel = connection.label;
   const peopleLabel = presenceCountLabel((Number(presenceCount) || 0) + 1);
   const independent = followPolicy === "independent";
@@ -84,8 +89,12 @@ export default function MaterialCollabBar({
             <span className={`vl-collab-bar__mode${isCollab ? " is-collab" : " is-follow"}`}>
               {modeLabel}
             </span>
-            {" · "}
-            <span className={`vl-collab-bar__sync is-${statusKind}`}>{statusLabel}</span>
+            {showSyncStatus ? (
+              <>
+                {" · "}
+                <span className={`vl-collab-bar__sync is-${statusKind}`}>{statusLabel}</span>
+              </>
+            ) : null}
             {peopleLabel ? ` · ${peopleLabel}` : ""}
             {presenceLabel ? ` · ${presenceLabel}` : ""}
             {controllerLabel ? ` · Ведёт: ${controllerLabel}` : ""}

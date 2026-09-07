@@ -5,12 +5,18 @@ import { useElementClientRect } from "../useElementClientRect";
 import { useFloatingDrag } from "../../useFloatingDrag";
 import { TOOLS, participantColor } from "../../screenshare/constants";
 import { computeScreenShareContentRect } from "../../screenshare/contentRect";
+import CabinetIcon from "../../CabinetIcons";
 import { dimensionsChanged } from "./coordinateMapper";
 import { createAnnotationEngine } from "./engine";
 import { annDebug } from "./debug";
 import PresenterToolbar from "./PresenterToolbar";
 import { resolvePresenterOverlayPlan } from "./overlays/presenterAdapter";
-import { closeDocumentPipWindow, documentPipAvailable, openDocumentPipWindow } from "./overlays/documentPip";
+import { closeDocumentPipWindow } from "./overlays/documentPip";
+import {
+  collapsedAnnotationUi,
+  openedAnnotationUi,
+  shouldShowAnnotationTrigger,
+} from "./zoomSession";
 
 function portalRoot() {
   if (typeof document === "undefined") return null;
@@ -28,7 +34,7 @@ export default function ScreenShareAnnotationV2({
   compact = false,
   canManage = false,
   canAnnotate = false,
-  participantsCanAnnotate = true,
+  participantsCanAnnotate = false,
   currentUserId = null,
   displayName = "",
   sessionId = "",
@@ -39,6 +45,7 @@ export default function ScreenShareAnnotationV2({
   tileView = false,
   targetRef = null,
   remoteLasers = {},
+  syncUnavailable = false,
   onEngineReady,
   onSend,
   onPointer,
@@ -55,10 +62,10 @@ export default function ScreenShareAnnotationV2({
   onSendRef.current = onSend;
   onPointerRef.current = onPointer;
   const [pipWindow, setPipWindow] = useState(null);
-  const [toolbarDismissed, setToolbarDismissed] = useState(false);
+  const [toolbarOpen, setToolbarOpen] = useState(false);
   const [tool, setTool] = useState(TOOLS.POINTER);
   const [color, setColor] = useState(() => participantColor(currentUserId));
-  const [width, setWidth] = useState(3);
+  const [width, setWidth] = useState(4);
   const [fsTick, setFsTick] = useState(0);
 
   const hostBox = useElementClientRect(targetRef, {
@@ -86,7 +93,7 @@ export default function ScreenShareAnnotationV2({
   const drag = useFloatingDrag({
     enabled: active && !pipWindow,
     storageKey: "itflux.ssAnn.toolbar",
-    handleSelector: ".ss-ann-v2-toolbar, .ss-ann-v2-toolbar__grip",
+    handleSelector: ".ss-ann-v2-toolbar__grip",
   });
 
   useEffect(() => {
@@ -202,12 +209,24 @@ export default function ScreenShareAnnotationV2({
   }, [remoteLasers]);
 
   useEffect(() => {
-    if (active) setToolbarDismissed(false);
-    else setTool(TOOLS.POINTER);
-  }, [active]);
+    const next = collapsedAnnotationUi();
+    setToolbarOpen(next.toolbarOpen);
+    setTool(next.tool);
+  }, [active, sessionId]);
 
   useEffect(() => {
-    const open = () => setToolbarDismissed(false);
+    if (canAnnotate) return;
+    const next = collapsedAnnotationUi();
+    setToolbarOpen(next.toolbarOpen);
+    setTool(next.tool);
+  }, [canAnnotate]);
+
+  useEffect(() => {
+    const open = () => {
+      const next = openedAnnotationUi();
+      setToolbarOpen(next.toolbarOpen);
+      setTool(next.tool);
+    };
     window.addEventListener("itflux-ss-ann-open", open);
     const onFs = () => setFsTick((n) => n + 1);
     document.addEventListener("fullscreenchange", onFs);
@@ -231,85 +250,73 @@ export default function ScreenShareAnnotationV2({
     pipWindowRef.current = null;
   }, []);
 
-  const openPip = async () => {
-    if (!documentPipAvailable()) return;
-    const win = await openDocumentPipWindow();
-    if (!win) return;
-    pipWindowRef.current = win;
-    setPipWindow(win);
-    const onClose = () => {
-      if (pipWindowRef.current === win) {
-        pipWindowRef.current = null;
-        setPipWindow(null);
-      }
-    };
-    win.addEventListener("pagehide", onClose);
-    win.addEventListener("unload", onClose);
-  };
-
   if (!active) return null;
 
   const content = layout?.content;
-  const toolbar = toolbarDismissed ? (
-    <button
-      type="button"
-      className="ss-ann-v2-reopen"
-      onClick={() => setToolbarDismissed(false)}
-      title="Аннотации демонстрации"
-    >
-      Аннотации
-    </button>
-  ) : (
+  const collapseToolbar = () => {
+    const next = collapsedAnnotationUi();
+    setTool(next.tool);
+    engineRef.current?.setDrawingEnabled(false);
+    setToolbarOpen(next.toolbarOpen);
+  };
+  const openToolbar = () => {
+    const next = openedAnnotationUi();
+    setTool(next.tool);
+    setToolbarOpen(next.toolbarOpen);
+  };
+  const showTrigger = shouldShowAnnotationTrigger({ active, canAnnotate });
+  const toolbar = toolbarOpen && showTrigger ? (
     <PresenterToolbar
       tool={tool}
       color={color}
       width={width}
       canAnnotate={canAnnotate}
       canManage={canManage}
-      canUndo={canAnnotate}
       participantsCanAnnotate={participantsCanAnnotate}
-      pipAvailable={plan.pipAvailable && !pipWindow}
-      pipOpen={Boolean(pipWindow)}
-      hint={localSharing && !plan.platformTab && !pipWindow && plan.pipAvailable
-        ? "Открепите панель, чтобы она осталась поверх других окон"
-        : ""}
-      onToolChange={(next) => {
-        setToolbarDismissed(false);
-        setTool(next);
-      }}
+      syncUnavailable={syncUnavailable}
+      onToolChange={setTool}
       onColorChange={setColor}
       onWidthChange={setWidth}
       onUndo={() => engineRef.current?.undo()}
       onClearMine={() => engineRef.current?.clearMine()}
       onClearAll={() => engineRef.current?.clearAll()}
       onSetParticipantsCanAnnotate={onSetParticipantsCanAnnotate}
-      onClose={() => {
-        setTool(TOOLS.POINTER);
-        engineRef.current?.setDrawingEnabled(false);
-        setToolbarDismissed(true);
-      }}
-      onOpenPip={() => void openPip()}
+      onClose={collapseToolbar}
       onPointerDownDrag={pipWindow ? undefined : drag.onPointerDown}
     />
-  );
+  ) : showTrigger ? (
+    <button
+      type="button"
+      className="ss-ann-v2-reopen"
+      onClick={openToolbar}
+      title="Аннотации"
+      aria-expanded="false"
+      aria-label="Аннотации"
+    >
+      <CabinetIcon name="pencil" />
+      <span>Аннотации</span>
+    </button>
+  ) : null;
 
   const host = portalRoot() || document.body;
   void fsTick;
-  const toolbarPortal = pipWindow?.document?.body
-    ? createPortal(toolbar, pipWindow.document.body)
-    : createPortal(
-      <div
-        ref={drag.nodeRef}
-        className={`ss-ann-v2-toolbar-slot${compact ? " is-compact" : ""}`}
-        style={{
-          ...drag.style,
-          transform: drag.positioned ? "none" : undefined,
-        }}
-      >
-        {toolbar}
-      </div>,
-      host,
-    );
+  const toolbarPortal = !toolbar
+    ? null
+    : pipWindow?.document?.body
+      ? createPortal(toolbar, pipWindow.document.body)
+      : createPortal(
+        <div
+          ref={drag.nodeRef}
+          className={`ss-ann-v2-toolbar-slot${compact ? " is-compact" : ""}`}
+          style={{
+            ...drag.style,
+            transform: drag.positioned ? "none" : undefined,
+          }}
+        >
+          {toolbar}
+        </div>,
+        host,
+      );
 
   return (
     <>

@@ -137,6 +137,45 @@ class ScreenShareAnnotationServiceTests(TestCase):
         self.assertEqual(first.uuid, again.uuid)
         self.assertEqual(again.content_width, 1280)
 
+    def test_student_cannot_draw_by_default(self):
+        session = report_screenshare_state(
+            meeting=self.meeting,
+            user=self.teacher,
+            active=True,
+            local_sharing=True,
+            presenter_jitsi_id="abc",
+        )
+        self.assertFalse(session.participants_can_annotate)
+        with self.assertRaises(VideoMeetingError) as ctx:
+            apply_screenshare_operation(
+                meeting=self.meeting,
+                user=self.student_user,
+                action="stroke_start",
+                payload={"annotation": {
+                    "id": "s1",
+                    "tool": "pen",
+                    "points": [{"x": 0.4, "y": 0.4}],
+                }},
+                operation_id="op-student-default",
+                session_id=str(session.uuid),
+            )
+        self.assertEqual(ctx.exception.code, "forbidden")
+        apply_screenshare_operation(
+            meeting=self.meeting,
+            user=self.teacher,
+            action="stroke_start",
+            payload={"annotation": {
+                "id": "t1",
+                "tool": "pen",
+                "points": [{"x": 0.5, "y": 0.5}],
+            }},
+            operation_id="op-teacher-default",
+            session_id=str(session.uuid),
+        )
+        session.refresh_from_db()
+        self.assertEqual(len(session.annotations), 1)
+        self.assertEqual(session.annotations[0]["authorId"], self.teacher.pk)
+
     def test_student_cannot_draw_when_permission_off(self):
         session = report_screenshare_state(
             meeting=self.meeting,
@@ -181,6 +220,57 @@ class ScreenShareAnnotationServiceTests(TestCase):
         self.assertEqual(len(session.annotations), 1)
         self.assertEqual(session.annotations[0]["authorId"], self.teacher.pk)
 
+    def test_student_can_draw_after_teacher_grants_permission(self):
+        session = report_screenshare_state(
+            meeting=self.meeting,
+            user=self.teacher,
+            active=True,
+            local_sharing=True,
+            presenter_jitsi_id="abc",
+        )
+        granted = set_screenshare_permission(
+            meeting=self.meeting,
+            user=self.teacher,
+            participants_can_annotate=True,
+            session_id=str(session.uuid),
+        )
+        self.assertTrue(granted.participants_can_annotate)
+        apply_screenshare_operation(
+            meeting=self.meeting,
+            user=self.student_user,
+            action="object_upsert",
+            payload={"annotation": {
+                "id": "s-ok",
+                "tool": "arrow",
+                "points": [{"x": 0.2, "y": 0.2}, {"x": 0.4, "y": 0.3}],
+            }},
+            operation_id="op-student-ok",
+            session_id=str(session.uuid),
+        )
+        session.refresh_from_db()
+        self.assertEqual(session.annotations[0]["id"], "s-ok")
+        self.assertEqual(session.annotations[0]["authorId"], self.student_user.pk)
+        set_screenshare_permission(
+            meeting=self.meeting,
+            user=self.teacher,
+            participants_can_annotate=False,
+            session_id=str(session.uuid),
+        )
+        with self.assertRaises(VideoMeetingError) as ctx:
+            apply_screenshare_operation(
+                meeting=self.meeting,
+                user=self.student_user,
+                action="stroke_start",
+                payload={"annotation": {
+                    "id": "s-denied",
+                    "tool": "pen",
+                    "points": [{"x": 0.5, "y": 0.5}],
+                }},
+                operation_id="op-student-denied",
+                session_id=str(session.uuid),
+            )
+        self.assertEqual(ctx.exception.code, "forbidden")
+
     def test_student_cannot_toggle_permission(self):
         session = report_screenshare_state(
             meeting=self.meeting,
@@ -204,6 +294,12 @@ class ScreenShareAnnotationServiceTests(TestCase):
             active=True,
             local_sharing=True,
             presenter_jitsi_id="stu",
+        )
+        set_screenshare_permission(
+            meeting=self.meeting,
+            user=self.teacher,
+            participants_can_annotate=True,
+            session_id=str(session.uuid),
         )
         apply_screenshare_operation(
             meeting=self.meeting,
@@ -241,6 +337,12 @@ class ScreenShareAnnotationServiceTests(TestCase):
                 "points": [{"x": 0.1, "y": 0.1}, {"x": 0.2, "y": 0.2}],
             }},
             operation_id="t1",
+            session_id=str(session.uuid),
+        )
+        set_screenshare_permission(
+            meeting=self.meeting,
+            user=self.teacher,
+            participants_can_annotate=True,
             session_id=str(session.uuid),
         )
         apply_screenshare_operation(
@@ -499,6 +601,13 @@ class ScreenShareAnnotationWsTests(TransactionTestCase):
             })
             started = await self._drain_until(student_ws, "screenshare.started")
             session_id = started["screenshareSession"]["sessionId"]
+            self.assertFalse(started["screenshareSession"]["participantsCanAnnotate"])
+            await teacher_ws.send_json_to({
+                "type": "screenshare.set_permission",
+                "participantsCanAnnotate": True,
+                "sessionId": session_id,
+            })
+            await self._drain_until(student_ws, "screenshare.permission")
             await student_ws.send_json_to({
                 "type": "screenshare.operation",
                 "action": "object_upsert",
