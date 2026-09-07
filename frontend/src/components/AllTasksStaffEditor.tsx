@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 // @ts-ignore JS module without d.ts
-import { ensureCsrfCookie, fetchCabinetSession } from "../utils/cabinetAuth";
+import { ensureCsrfCookie } from "../utils/cabinetAuth";
 
 export type StaffTaskListOption = {
   task_list_id: number;
@@ -161,39 +161,8 @@ export async function updateStaffTaskList(
 }
 
 export function useCanEditBankTasks() {
-  const [canEdit, setCanEdit] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchCabinetSession()
-      .then(
-        (data: {
-          authenticated?: boolean;
-          user?: {
-            is_staff?: boolean;
-            is_superuser?: boolean;
-            can_edit_bank_tasks?: boolean;
-          };
-        }) => {
-          if (cancelled) return;
-          const u = data?.user;
-          setCanEdit(
-            Boolean(
-              data?.authenticated &&
-                (u?.can_edit_bank_tasks || u?.is_staff || u?.is_superuser)
-            )
-          );
-        }
-      )
-      .catch(() => {
-        if (!cancelled) setCanEdit(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return canEdit;
+  // Админ-панель в «Все задачи» скрыта у всех пользователей.
+  return false;
 }
 
 type CatalogSidebarProps = {

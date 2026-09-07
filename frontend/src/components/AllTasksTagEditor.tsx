@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 // @ts-ignore JS module without d.ts
-import { ensureCsrfCookie, fetchCabinetSession } from "../utils/cabinetAuth";
+import { ensureCsrfCookie } from "../utils/cabinetAuth";
 
 export type TaskTag = {
   id: number;
@@ -254,22 +254,6 @@ export function AllTasksTaskTagsEditor({
 }
 
 export function useCanEditTaskTags() {
-  const [canEdit, setCanEdit] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchCabinetSession()
-      .then((data: { authenticated?: boolean; user?: { can_edit_task_tags?: boolean } }) => {
-        if (cancelled) return;
-        setCanEdit(Boolean(data?.authenticated && data?.user?.can_edit_task_tags));
-      })
-      .catch(() => {
-        if (!cancelled) setCanEdit(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return canEdit;
+  // Редактор тегов в «Все задачи» скрыт у всех пользователей.
+  return false;
 }
